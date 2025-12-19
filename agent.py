@@ -21,22 +21,35 @@ from typing import Optional, List
 from langchain_openai import ChatOpenAI
 from langchain.agents import initialize_agent, AgentType, Tool
 from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.utilities import BingSearchAPIWrapper
 
 
-def build_llm(temperature: float = 0.0) -> ChatOpenAI:
+def build_llm(temperature: float = 0.0, model: str = "gpt-3.5-turbo", **kwargs) -> ChatOpenAI:
     """构建基础对话模型（ChatOpenAI）。"""
-    return ChatOpenAI(temperature=temperature)
+    return ChatOpenAI(temperature=temperature, model=model, **kwargs)
 
 
 def build_vectorstore(
     persist_directory: str = "db",
     collection_name: Optional[str] = None,
+    **kwargs
 ):
     """构建持久化的 Chroma 向量库。"""
-    embeddings = OpenAIEmbeddings()
+    # 提取可能传入的 openai_api_key 和 openai_api_base，用于 Embeddings
+    embedding_kwargs = {}
+    if "openai_api_key" in kwargs:
+        embedding_kwargs["openai_api_key"] = kwargs["openai_api_key"]
+    if "openai_api_base" in kwargs:
+        embedding_kwargs["openai_api_base"] = kwargs["openai_api_base"]
+        
+    embeddings = OpenAIEmbeddings(**embedding_kwargs)
+
+    # 修复 collection_name 为 None 导致的 TypeError
+    if collection_name is None:
+        collection_name = "langchain"
+
     return Chroma(
         persist_directory=persist_directory,
         collection_name=collection_name,
@@ -48,6 +61,7 @@ def build_tools(
     llm: ChatOpenAI,
     vectordb: Chroma,
     enable_search: bool = True,
+    **kwargs,
 ) -> List[Tool]:
     """为 Agent 创建工具列表。
 
@@ -72,7 +86,12 @@ def build_tools(
     )
 
     if enable_search:
-        search = BingSearchAPIWrapper()
+        bing_params = {}
+        if "bing_subscription_key" in kwargs:
+            bing_params["bing_subscription_key"] = kwargs["bing_subscription_key"]
+        if "bing_search_url" in kwargs:
+            bing_params["bing_search_url"] = kwargs["bing_search_url"]
+        search = BingSearchAPIWrapper(**bing_params)
         tools.insert(
             0,
             Tool(
@@ -92,16 +111,22 @@ def create_agent(
     enable_search: bool = True,
     verbose: bool = False,
     collection_name: Optional[str] = None,
+    model: str = "gpt-3.5-turbo",
+    **llm_kwargs
 ):
     """工厂函数：根据配置创建带工具的 AgentExecutor。
 
     返回的 AgentExecutor 支持 .run(str) 或 .invoke({"input": str})。
     """
-    llm = build_llm(temperature=temperature)
+    llm = build_llm(temperature=temperature, model=model, **llm_kwargs)
+    
+    # 将 llm_kwargs 中的 api key 信息也传递给 vectorstore，因为 embeddings 也需要 key
     vectordb = build_vectorstore(
-        persist_directory=persist_directory, collection_name=collection_name
+        persist_directory=persist_directory, 
+        collection_name=collection_name,
+        **llm_kwargs
     )
-    tools = build_tools(llm=llm, vectordb=vectordb, enable_search=enable_search)
+    tools = build_tools(llm=llm, vectordb=vectordb, enable_search=enable_search, **llm_kwargs)
 
     agent = initialize_agent(
         tools=tools,
@@ -129,6 +154,8 @@ class SimpleAgent:
         enable_search: bool = True,
         verbose: bool = False,
         collection_name: Optional[str] = None,
+        model: str = "gpt-3.5-turbo",
+        **llm_kwargs
     ) -> None:
         self._agent = create_agent(
             temperature=temperature,
@@ -136,21 +163,13 @@ class SimpleAgent:
             enable_search=enable_search,
             verbose=verbose,
             collection_name=collection_name,
+            model=model,
+            **llm_kwargs
         )
 
     def run(self, question: str) -> str:
-        return self._agent.run(question)
+        return self._agent.invoke({"input": question})["output"]
+
 
 
 __all__ = ["create_agent", "SimpleAgent", "build_llm", "build_vectorstore", "build_tools"]
-
-
-if __name__ == "__main__":
-    # 直接运行本文件时的最小示例（包含初始化阶段的异常捕获）
-    q = "纳斯达克是否适合长期定投？"
-    try:
-        sa = SimpleAgent(persist_directory="db", enable_search=True, temperature=0)
-        print(sa.run(q))
-    except Exception as e:
-        # 在无密钥或无网络环境下避免硬错误
-        print(f"示例运行失败：{e}")
