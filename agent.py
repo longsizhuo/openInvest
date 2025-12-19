@@ -1,56 +1,117 @@
-"""
-可复用的 LangChain Agent 构建模块。
+from __future__ import annotations
 
-功能特性：
-- 使用 OpenAI LLM（温度可配置）
-- 可选的 Bing 网页搜索工具
-- 基于 Chroma 的本地知识库检索工具
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Callable
 
-环境变量（常见）：
-- OPENAI_API_KEY
-- BING_SUBSCRIPTION_KEY 与 BING_SEARCH_URL（或与 Bing 包装器兼容的变量）
-
-用法示例：
-  from agent import create_agent, SimpleAgent
-  agent = create_agent(persist_directory='db', enable_search=True, temperature=0)
-  print(agent.run("纳斯达克是否适合长期定投？"))
-"""
-
-from typing import Optional, List
-
-from langchain_classic.agents import initialize_agent, AgentType
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.utilities import BingSearchAPIWrapper
-from langchain_classic.chains import RetrievalQA
-from langchain_classic.tools import Tool
+
+from langchain.tools import tool
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_tool_call
+
+# Optional
+try:
+    from langchain_community.utilities import BingSearchAPIWrapper
+except Exception:  # pragma: no cover
+    BingSearchAPIWrapper = None  # type: ignore
+
+from news import get_real_finance_news
 
 
+# -----------------------------
+# Tool: Finance News Deep Search
+# -----------------------------
+def _format_news_items(items: List[Dict[str, Any]], max_items: int = 4) -> str:
+    lines: List[str] = []
+    for i, item in enumerate(items[:max_items], 1):
+        title = item.get("title", "No Title")
+        domain = item.get("domain", "Unknown")
+        date = item.get("date", "")
+        url = item.get("url", "")
+        summary = item.get("summary", "") or ""
 
-def build_llm(temperature: float = 0.0, model: str = "gpt-3.5-turbo", **kwargs) -> ChatOpenAI:
-    """构建基础对话模型（ChatOpenAI）。"""
-    return ChatOpenAI(temperature=temperature, model=model, **kwargs)
+        lines.append(
+            f"{i}. {title}\n"
+            f"   source: {domain} {date}\n"
+            f"   summary: {summary}\n"
+            f"   url: {url}"
+        )
+    return "\n\n".join(lines).strip()
+
+
+def search_finance_news_impl(query: str) -> str:
+    """
+    深度金融新闻搜索：DDGS 找 URL -> 你自己的抓取器抽正文 -> 质量评分分桶
+    """
+    try:
+        results = get_real_finance_news(
+            query,
+            max_results=5,
+            extract_fulltext=True,
+        )
+
+        trusted = results.get("trusted", []) or []
+        review = results.get("review", []) or []
+
+        # 优先 trusted，不足则补 review
+        merged = trusted[:]
+        if len(merged) < 3:
+            merged.extend(review)
+
+        # 去重
+        uniq: List[Dict[str, Any]] = []
+        seen = set()
+        for it in merged:
+            u = it.get("url", "")
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            uniq.append(it)
+
+        if not uniq:
+            return f"No detailed articles found for query: {query}"
+
+        return _format_news_items(uniq, max_items=4)
+
+    except Exception as e:
+        return f"finance_news tool error: {e}"
+
+
+# -----------------------------
+# Build LLM / Vectorstore
+# -----------------------------
+def build_llm(
+    *,
+    temperature: float = 0.0,
+    model: str = "gpt-4o-mini",
+    timeout: int = 30,
+    **kwargs,
+) -> ChatOpenAI:
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        timeout=timeout,
+        **kwargs,
+    )
 
 
 def build_vectorstore(
+    *,
     persist_directory: str = "db",
-    collection_name: Optional[str] = None,
-    **kwargs
-):
-    """构建持久化的 Chroma 向量库。"""
-    # 提取可能传入的 openai_api_key 和 openai_api_base，用于 Embeddings
-    embedding_kwargs = {}
+    collection_name: str = "langchain",
+    **kwargs,
+) -> Chroma:
+    # embeddings 的 key/base_url 走 kwargs 透传（兼容你现有参数习惯）
+    embedding_kwargs: Dict[str, Any] = {}
     if "openai_api_key" in kwargs:
         embedding_kwargs["openai_api_key"] = kwargs["openai_api_key"]
     if "openai_api_base" in kwargs:
         embedding_kwargs["openai_api_base"] = kwargs["openai_api_base"]
-        
-    embeddings = OpenAIEmbeddings(**embedding_kwargs)
 
-    # 修复 collection_name 为 None 导致的 TypeError
-    if collection_name is None:
-        collection_name = "langchain"
+    embeddings = OpenAIEmbeddings(**embedding_kwargs)
 
     return Chroma(
         persist_directory=persist_directory,
@@ -59,93 +120,126 @@ def build_vectorstore(
     )
 
 
+# -----------------------------
+# Middleware: Tool error handling
+# -----------------------------
+@wrap_tool_call
+def tool_error_guard(request, handler):
+    try:
+        return handler(request)
+    except Exception as e:
+        # 给模型一个可读的 ToolMessage，而不是直接把异常炸穿整个执行
+        return ToolMessage(
+            content=f"Tool execution failed: {type(e).__name__}: {e}",
+            tool_call_id=request.tool_call["id"],
+        )
+
+
+# -----------------------------
+# Build Tools (LangChain v1 style)
+# -----------------------------
 def build_tools(
-    llm: ChatOpenAI,
+    *,
     vectordb: Chroma,
     enable_search: bool = True,
-    **kwargs,
-) -> List[Tool]:
-    """为 Agent 创建工具列表。
+    bing_subscription_key: Optional[str] = None,
+    bing_search_url: Optional[str] = None,
+) -> List[Callable]:
+    retriever = vectordb.as_retriever(search_kwargs={"k": 6})
 
-    - web_search：使用 Bing 的网页搜索（可选）
-    - kb_qa：基于本地 Chroma 知识库的问答（RetrievalQA）
-    """
-    tools: List[Tool] = []
+    @tool("kb_search")
+    def kb_search(query: str) -> str:
+        """Search local Chroma knowledge base and return the most relevant passages with metadata."""
+        docs = retriever.get_relevant_documents(query)
+        if not docs:
+            return "No relevant documents found in local KB."
 
-    # 本地知识库问答工具：基于 RetrievalQA，输入/输出均为字符串
-    qa = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectordb.as_retriever(),
-        return_source_documents=False,
-    )
-    tools.append(
-        Tool(
-            name="kb_qa",
-            func=qa.run,
-            description="利用本地 Chroma 知识库回答问题。",
-        )
-    )
+        parts: List[str] = []
+        for i, d in enumerate(docs[:6], 1):
+            meta = d.metadata or {}
+            src = meta.get("source") or meta.get("url") or meta.get("file_path") or "unknown"
+            parts.append(f"[{i}] source={src}\n{d.page_content}")
+
+        return "\n\n".join(parts)
+
+    tools: List[Callable] = [kb_search]
 
     if enable_search:
-        bing_params = {}
-        if "bing_subscription_key" in kwargs:
-            bing_params["bing_subscription_key"] = kwargs["bing_subscription_key"]
-        if "bing_search_url" in kwargs:
-            bing_params["bing_search_url"] = kwargs["bing_search_url"]
-        search = BingSearchAPIWrapper(**bing_params)
-        tools.insert(
-            0,
-            Tool(
-                name="web_search",
-                func=search.run,
-                description="进行网页搜索，获取最新信息与新闻。",
-            ),
-        )
+
+        @tool("finance_news")
+        def finance_news(query: str) -> str:
+            """Deep finance news search (DDG news + fetch + article extraction). Use specific keywords."""
+            return search_finance_news_impl(query)
+
+        tools.append(finance_news)
+
+        if bing_subscription_key and BingSearchAPIWrapper is not None:
+            wrapper = BingSearchAPIWrapper(
+                bing_subscription_key=bing_subscription_key,
+                bing_search_url=bing_search_url,
+            )
+
+            @tool("web_search")
+            def web_search(query: str) -> str:
+                """General web search for broader context."""
+                return wrapper.run(query)
+
+            tools.append(web_search)
 
     return tools
 
 
-def create_agent(
+# -----------------------------
+# Factory: create graph agent
+# -----------------------------
+DEFAULT_SYSTEM_PROMPT = """You are a finance-focused research assistant.
+When the user asks about markets, macro, companies, or "latest" information:
+- Prefer using finance_news to fetch recent articles.
+- If KB may contain relevant internal notes, use kb_search.
+- Use web_search only when finance_news is insufficient.
+- Do not fabricate sources. If evidence is weak, explicitly say so.
+Output should be concise, actionable, and cite which tool results you relied on (by describing source domains/titles)."""
+
+
+def create_agent_graph(
     *,
     temperature: float = 0.0,
     persist_directory: str = "db",
+    collection_name: str = "langchain",
     enable_search: bool = True,
-    verbose: bool = False,
-    collection_name: Optional[str] = None,
-    model: str = "gpt-3.5-turbo",
-    **llm_kwargs
+    debug: bool = False,
+    model: str = "gpt-4o-mini",
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    bing_subscription_key: Optional[str] = None,
+    bing_search_url: Optional[str] = None,
+    **llm_kwargs,
 ):
-    """工厂函数：根据配置创建带工具的 AgentExecutor。
-
-    返回的 AgentExecutor 支持 .run(str) 或 .invoke({"input": str})。
-    """
     llm = build_llm(temperature=temperature, model=model, **llm_kwargs)
-    
-    # 将 llm_kwargs 中的 api key 信息也传递给 vectorstore，因为 embeddings 也需要 key
     vectordb = build_vectorstore(
-        persist_directory=persist_directory, 
+        persist_directory=persist_directory,
         collection_name=collection_name,
-        **llm_kwargs
+        **llm_kwargs,
     )
-    tools = build_tools(llm=llm, vectordb=vectordb, enable_search=enable_search, **llm_kwargs)
+    tools = build_tools(
+        vectordb=vectordb,
+        enable_search=enable_search,
+        bing_subscription_key=bing_subscription_key,
+        bing_search_url=bing_search_url,
+    )
 
-    agent = initialize_agent(
+    agent = create_agent(
+        model=llm,
         tools=tools,
-        llm=llm,
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        verbose=verbose,
-        handle_parsing_errors=True,
+        system_prompt=system_prompt,
+        middleware=[tool_error_guard],
+        debug=debug,
     )
     return agent
 
 
 class SimpleAgent:
-    """一个轻量的 Agent 封装，便于复用。
-
-    示例：
-        sa = SimpleAgent(persist_directory='db', enable_search=True)
-        answer = sa.run("纳斯达克是否适合长期定投？")
+    """
+    轻量封装：保持你原来的 .run("...") 体验，但底层已是 LangChain v1 graph agent。
     """
 
     def __init__(
@@ -153,25 +247,38 @@ class SimpleAgent:
         *,
         temperature: float = 0.0,
         persist_directory: str = "db",
+        collection_name: str = "langchain",
         enable_search: bool = True,
-        verbose: bool = False,
-        collection_name: Optional[str] = None,
-        model: str = "gpt-3.5-turbo",
-        **llm_kwargs
+        debug: bool = False,
+        model: str = "gpt-4o-mini",
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        bing_subscription_key: Optional[str] = None,
+        bing_search_url: Optional[str] = None,
+        **llm_kwargs,
     ) -> None:
-        self._agent = create_agent(
+        self._agent = create_agent_graph(
             temperature=temperature,
             persist_directory=persist_directory,
-            enable_search=enable_search,
-            verbose=verbose,
             collection_name=collection_name,
+            enable_search=enable_search,
+            debug=debug,
             model=model,
-            **llm_kwargs
+            system_prompt=system_prompt,
+            bing_subscription_key=bing_subscription_key,
+            bing_search_url=bing_search_url,
+            **llm_kwargs,
         )
 
     def run(self, question: str) -> str:
-        return self._agent.invoke({"input": question})["output"]
+        state = self._agent.invoke(
+            {"messages": [HumanMessage(content=question)]}
+        )
+        # create_agent 的 graph 输出是一个 state dict，messages 在里面
+        msgs = state.get("messages", [])
+        if not msgs:
+            return ""
+        last = msgs[-1]
+        return getattr(last, "content", "") or ""
 
 
-
-__all__ = ["create_agent", "SimpleAgent", "build_llm", "build_vectorstore", "build_tools"]
+__all__ = ["create_agent_graph", "SimpleAgent", "build_llm", "build_vectorstore", "build_tools"]

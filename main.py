@@ -8,7 +8,7 @@ from news import get_real_finance_news
 # 加载 .env 文件中的环境变量
 load_dotenv()
 
-def LLM(query) -> Optional[SimpleAgent]:
+def LLM() -> Optional[SimpleAgent]:
     # 1. 获取 DeepSeek 配置
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
     deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -21,10 +21,10 @@ def LLM(query) -> Optional[SimpleAgent]:
 
     # 2. 创建 Agent
     # DeepSeek 兼容 OpenAI 接口，我们使用 openai_api_key 和 openai_api_base 参数
-    # 建议先关闭 enable_search (设置为 False)，除非你已经配置了 Bing 搜索相关的环境变量
+    # 启用 enable_search 才能让 Agent 使用我们新添加的 finance_news 工具
     return SimpleAgent(
         temperature=0.1,
-        enable_search=False,
+        enable_search=True, # 修正此处，启用搜索功能
         model="deepseek-chat",
         openai_api_key=deepseek_api_key,
         openai_api_base=deepseek_base_url,
@@ -37,28 +37,11 @@ def main():
     # if rate == 0 or not stock:
     #     print('')
     #     return
+    agent = LLM() # 修正此处，LLM 函数不接受参数
+    if agent:
+        response = agent.run("请帮我分析一下最近纳斯达克市场有哪些重要的金融新闻，以及它们可能对市场产生的影响。")
+        print(response)
 
-    news = get_real_finance_news(
-        topic_query="Nasdaq outlook Australia",
-        max_results=25,
-        whitelist_domains=None,   # 你后续可加：["reuters.com", "ft.com", ...]
-        blacklist_domains=None,   # 你后续可加：明确低质量站点
-        extract_fulltext=True,    # 强烈建议装 trafilatura
-        sleep_sec=0.0
-    )
-
-    # 先简单看看结果
-    print("=== TRUSTED ===")
-    for x in news["trusted"][:5]:
-        print(x["score"], x["title"], x["domain"])
-
-    print("\n=== REVIEW ===")
-    for x in news["review"][:5]:
-        print(x["score"], x["title"], x["flags"])
-
-    print("\n=== FILTERED ===")
-    for x in news["filtered"][:5]:
-        print(x["score"], x["flags"], x["title"])
 
 if __name__ == "__main__":
     main()

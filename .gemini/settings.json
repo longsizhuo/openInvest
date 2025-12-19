@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "langchain-docs": {
+      "command": "",
+      "args": [
+        "https://docs.langchain.com/mcp"
+      ]
+    }
+  }
+}
