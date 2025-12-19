@@ -1,7 +1,5 @@
 import os
-import json
-import re
-from typing import Optional, Dict
+from typing import Optional
 from dotenv import load_dotenv
 from agent import SimpleAgent
 from exchange_fee import get_history_data, analyze_multi_timeframe
@@ -10,59 +8,58 @@ from portfolio_manager import PortfolioManager
 load_dotenv()
 
 PROMPT_FOREX_AGENT = """
-你是一名【外汇交易专家】。你的任务是专注于分析 AUD/CNY 汇率走势。
-你只能看到汇率相关的数据。
+You are a foreign exchange trading expert. Your task is to focus on analyzing the trend of AUD/CNY exchange rate.
+You can only see data related to exchange rates.
 
-**核心约束：T+7 规则**
-人民币兑换澳元需要 7 个自然日才能到账。
-这意味着你今天的建议是为了**下周**（7天后）的资金储备服务。
-你**不需要**考虑股票市场的情况，只关注什么时候换汇最划算。
+**Core constraint: T+7 rule**
+It takes 7 natural days for the exchange of Chinese yuan to Australian dollar to arrive.
+This means that your suggestion today is for the fund reserve service next week (7 days later).
+You don't need to consider the stock market situation, just focus on when it's most cost-effective to exchange currency.
 
-**工具使用策略**
-1. **搜索新闻时，必须将关键词翻译成英文**（例如搜索 "AUD CNY forecast" 而不是 "澳元走势"），因为英文搜索结果更丰富且准确。
-2. 优先关注 RBA（澳洲联储）政策、中国经济数据、大宗商品价格等宏观因素。
+**Tool usage strategy**
+1. When searching for news, translate keywords into English. **CRITICAL: Do NOT search for opinions or forecasts (e.g., avoid "AUD CNY forecast", "prediction", "outlook").** Instead, search for *factual drivers* such as "RBA interest rate minutes", "China manufacturing PMI", "Iron ore prices", or "Australia inflation data".
+2. You must form your own prediction based on these facts, rather than relying on search results for the conclusion.
 
-请分析：
-1. 当前汇率是高还是低？（参考历史分位）
-2. 未来一周的走势预期（结合新闻和技术面）？
-3. 结论：现在是否应该用人民币换澳元？
+Please analyze:
+Is the current exchange rate high or low? (Reference historical percentile)
+2. What is the expected trend for the next week (combined with news and technical aspects)?
+Conclusion: Should we exchange Chinese yuan for Australian dollars now?
 
-请输出简短、犀利的分析，并明确给出“建议换汇”或“建议等待”的倾向。
-**最后，请列出你参考的 1-2 条关键新闻标题。**
+Please provide a brief and sharp analysis, and clearly indicate the tendency towards "suggested exchange" or "suggested waiting".
+**Finally, please list 1-2 key news headlines that you have referenced. **
 """
 
 PROMPT_STOCK_AGENT = """
-你是一名【美股/澳股交易员】。你的任务是专注于分析 NDQ.AX (纳斯达克100澳洲ETF) 的走势。
-你只能看到股票相关的数据。
+You are a trader in the US/Australian stock market. Your task is to focus on analyzing the trend of NDQ.AX (NASDAQ 100 Australian ETF).
+You can only see data related to stocks.
 
-**核心背景**
-用户账户里已经有一些澳元（AUD）现金，可以随时买入。
-你**不需要**关心汇率，也不需要关心资金来源，只关注现在的股价是否值得买入。
+**Core Background**
+The user's account already has some Australian dollars (AUD) in cash that can be bought at any time.
+You don't need to care about exchange rates or funding sources, just focus on whether the current stock price is worth buying.
 
-**工具使用策略**
-1. **搜索新闻时，必须将关键词翻译成英文**（例如搜索 "NASDAQ 100 outlook" 或 "NDQ.AX analysis"），因为英文搜索结果更丰富且准确。
-2. 关注纳斯达克指数的宏观情绪和澳洲市场的特定动态。
+**Tool usage strategy**
+1. When searching for news, translate keywords into English. **CRITICAL: Do NOT search for opinions or forecasts (e.g., avoid "NASDAQ outlook", "NDQ forecast").** Instead, search for *factual drivers* such as "US tech sector earnings", "Federal Reserve interest rate decision", "US CPI data", or "NASDAQ volatility".
+2. Pay attention to the macro sentiment of the NASDAQ index and specific developments in the Australian market.
 
-请分析：
-1. 当前股价位置（历史高位/低位）？
-2. 技术指标（RSI, 均线）发出了什么信号？
-3. 结论：现在是否应该买入？
+Please analyze:
+1. Current stock price position (historical high/low)?
+What signals do technical indicators (RSI, moving averages) send out?
+Conclusion: Should we buy now?
 
-请输出简短、犀利的分析，并明确给出“建议买入”、“建议持有”或“建议卖出”的倾向。
-**最后，请列出你参考的 1-2 条关键新闻标题。**
+Please provide a brief and sharp analysis, and clearly indicate the tendency of 'recommended buy', 'recommended hold', or 'recommended sell'.
+**Finally, please list 1-2 key news headlines that you have referenced. **
 """
 PROMPT_MANAGER_AGENT = """
-你是一名【首席投资顾问 (Portfolio Manager)】。
-你拥有上帝视角，负责综合多方信息，做出最终的资产配置决策。
+You are a Chief Investment Advisor (Portfolio Manager).
+You have a God's perspective and are responsible for synthesizing multiple information to make the final asset allocation decision.
 
-**决策逻辑**
-1. **换汇决策 (CNY -> AUD)**：参考外汇专家的意见。如果专家说换，且用户CNY充足，则建议换汇。注意T+7延迟。
-2. **交易决策 (AUD -> NDQ.AX)**：参考股票交易员的意见。如果专家说买，且用户AUD充足，则建议买入。
+**Decision logic**
+1. * * Exchange Decision (CNY ->AUD) * *: Refer to the opinions of foreign exchange experts.
+2. * * Trading Decision (AUD ->NDQ. AX) * *: Refer to the opinions of stock traders.
 
-**输出要求**
-1. 简要总结两位专家的核心冲突或共识。
-2. 结合用户资金，给出具体操作建议。
-3. 在回复的**最后一行**，必须严格输出 JSON 代码块，包含两个独立决策。
+**Output requirements**
+1. Briefly summarize the core conflicts or consensus between the two experts.
+2. Provide specific operational recommendations based on user funds.
 """
 
 
@@ -93,22 +90,6 @@ def create_agent(system_prompt: str, model_name="deepseek-chat") -> Optional[Sim
         system_prompt=system_prompt,  # 这里的参数名根据你的 SimpleAgent 实现可能需要调整
         debug=False
     )
-
-
-def extract_json_block(text: str) -> Optional[Dict]:
-    """辅助函数：从 LLM 回复中提取 JSON"""
-    try:
-        # 尝试找 ```json ... ```
-        match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(1))
-        # 尝试找纯 {}
-        match = re.search(r"(\{.*\})", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(1))
-    except Exception as e:
-        print(f"⚠️ JSON 解析失败: {e}")
-    return None
 
 
 # ==========================================
@@ -151,10 +132,10 @@ def main():
     if not agent_fx: return
 
     fx_query = f"""
-【市场数据】
+# market data: 
 {fx_report}
 
-请分析 AUD/CNY 汇率走势，并给出换汇建议。
+Please analyze the trend of AUD/CNY exchange rate and provide exchange recommendations.
 """
     fx_analysis = agent_fx.run(fx_query)
     print(f"外汇专家观点:\n{fx_analysis[:150]}...")  # 只打印前150字，保持清爽
@@ -164,10 +145,10 @@ def main():
     agent_stock = create_agent(PROMPT_STOCK_AGENT)
 
     stock_query = f"""
-【市场数据】
+# market data: 
 {stock_report}
 
-请分析 NDQ.AX 走势，并给出买卖建议。
+Please analyze the trend of NDQ.AX and provide buying and selling recommendations.
 """
     stock_analysis = agent_stock.run(stock_query)
     print(f"✅ 股票交易员观点:\n{stock_analysis[:150]}...")
@@ -217,18 +198,7 @@ def main():
     final_decision = agent_manager.run(final_prompt)
     print(final_decision)
 
-    # --- 6. 闭环操作 (可选) ---
-    # 尝试自动提取 JSON 并更新账本
-    decision_json = extract_json_block(final_decision)
-    if decision_json:
-        print("\n" + "-" * 30)
-        print("🛠️ 系统自动提取指令:")
-        print(json.dumps(decision_json, indent=2, ensure_ascii=False))
-
-        # 这里可以加代码：如果 forex_decision.action == "CONVERT_NOW"，自动扣 CNY 加 AUD
-        # if decision_json['forex_decision']['action'] == 'CONVERT_NOW': ...
-    else:
-        print("\n⚠️ 未能自动提取 JSON 指令，请手动查阅报告。")
+    # TODO: SMTP
 
 
 if __name__ == "__main__": main()
