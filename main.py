@@ -33,13 +33,13 @@ def LLM() -> Optional[SimpleAgent]:
 
 def main():
     # 1. 查询汇率，获得汇率系数 rate=10-rate , 纳指系数
-    # rate, stock = get_rate(), get_stock()
-    # if rate == 0 or not stock:
-    #     print('')
-    #     return
+    rate, stock = get_rate(), get_stock()
+    if rate == 0 or not stock:
+        print('')
+        return
     agent = LLM() # 修正此处，LLM 函数不接受参数
     if agent:
-        response = agent.run("请帮我分析一下最近纳斯达克市场有哪些重要的金融新闻，以及它们可能对市场产生的影响。")
+        response = agent.run("Please help me analyze the recent important financial news on the NASDAQ market and their potential impact on the market.")
         print(response)
 
 

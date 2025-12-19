@@ -1,60 +1,38 @@
-import logging
-import os
-from datetime import datetime
-import yfinance as yf
 import pandas as pd
+import numpy as np
+import os
+import yfinance as yf
+from datetime import datetime
 
-# 缓存目录，避免频繁请求 API
+# 缓存目录
 CACHE_DIR = "cache_data"
 
-# get_rate() 返回一个系数
-# 逻辑：汇率(AUDCNY)越低，返回值(10-rate)越高，代表投资性价比越高
-def get_rate() -> float :
-    try:
-        rate_ticker = yf.Ticker("AUDCNY=X")
-        rate = rate_ticker.history(period="1d")['Close'].iloc[-1]
-        return round(rate, 4)
-    except Exception as e:
-        print(f"⚠️ 汇率接口异常: {e}")
-        return 0.0
 
-# --- 获取股价 (yfinance) ---
-def get_stock() -> float:
-    price = None
-    try:
-        # yfinance 内部其实处理得不错，但我们要包一层防崩
-        ticker = yf.Ticker("NDQ.AX")
-        # 获取当天数据
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            price = hist['Close'].iloc[-1]
-            print(f"✅ 股价获取成功: ${price:.2f}")
-        else:
-            print("⚠️ 股市休市或数据延迟")
-    except Exception as e:
-        print(f"⚠️ 股价接口异常: {e}")
-    return price
-
-# --- 获取历史数据 (带缓存) ---
+# -----------------------------
+# 1. 基础数据获取 (Master Cache)
+# -----------------------------
 def get_stock_history(symbol: str = "NDQ.AX", period: str = "2y") -> pd.DataFrame:
     """
-    获取历史数据。建议 period 至少为 "1y" 甚至 "2y"，
-    这样才能计算出稳定的 MA250 (年线)。
+    获取“主数据”。
+    策略：总是获取最长周期(2y)的数据并缓存。
+    其他短周期(1w, 1m, 6m, 1y)直接从这份数据中切片，无需单独请求/存储。
+    这样保证了所有时间维度的数据一致性。
     """
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR)
 
+    # 缓存文件名包含周期，例如 NDQ.AX_2y.csv
     csv_path = os.path.join(CACHE_DIR, f"{symbol}_{period}.csv")
 
-    # 缓存命中逻辑 (Hit)
+    # [Hit] 检查缓存：如果是今天的文件，直接读取
     if os.path.exists(csv_path):
         file_time = datetime.fromtimestamp(os.path.getmtime(csv_path))
         if file_time.date() == datetime.now().date():
-            # print(f"✅ [Cache] 命中本地数据: {symbol}")
+            # print(f"✅ [Cache Hit] 读取本地数据: {symbol}")
             return pd.read_csv(csv_path, index_col=0, parse_dates=True)
 
-    # 缓存未命中 (Miss) -> 请求 API
-    print(f"🔄 [API] 正在更新数据: {symbol}...")
+    # [Miss] 请求 API 并写入缓存
+    print(f"🔄 [API Update] 正在更新数据: {symbol}...")
     try:
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period=period)
@@ -66,48 +44,123 @@ def get_stock_history(symbol: str = "NDQ.AX", period: str = "2y") -> pd.DataFram
 
     return pd.DataFrame()
 
-# --- 3. 增强：加入均线分析 ---
-def analyze_history(hist: pd.DataFrame) -> str:
+
+# -----------------------------
+# 2. 核心计算逻辑 (数学工具)
+# -----------------------------
+def _calc_change(start: float, end: float) -> float:
+    """计算涨跌幅"""
+    if start == 0: return 0.0
+    return (end - start) / start
+
+
+def _calc_max_drawdown(series: pd.Series) -> float:
+    """计算期间最大回撤"""
+    if series.empty: return 0.0
+    roll_max = series.cummax()
+    drawdown = (series - roll_max) / roll_max
+    return drawdown.min()
+
+
+def _calc_volatility(series: pd.Series) -> float:
+    """计算年化波动率 (需数据量 > 2)"""
+    if len(series) < 2: return 0.0
+    # 年化系数: sqrt(252)
+    return series.pct_change().std() * np.sqrt(252)
+
+
+def _calc_rsi(series: pd.Series, period: int = 14) -> float:
+    """计算 RSI 指标"""
+    if len(series) < period + 1: return 50.0  # 数据不足时返回中性
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    if loss.iloc[-1] == 0: return 100.0
+    rs = gain.iloc[-1] / loss.iloc[-1]
+    return 100 - (100 / (1 + rs))
+
+
+# -----------------------------
+# 3. 切片分析逻辑 (通用化)
+# -----------------------------
+def _analyze_slice(df_slice: pd.DataFrame, label: str, current_price: float) -> str:
     """
-    计算技术指标，生成 Prompt 素材。
-    核心增加了：MA120(半年线) 和 MA250(年线) 的对比。
+    通用函数：分析任意一个时间切片的数据，返回格式化字符串。
+    """
+    if df_slice.empty:
+        return f"- **{label}**: No Data"
+
+    start_price = df_slice['Close'].iloc[0]
+    change = _calc_change(start_price, current_price)
+    mdd = _calc_max_drawdown(df_slice['Close'])
+
+    # 波动率只在数据量足够时计算 (大于20天)
+    vol_str = ""
+    if len(df_slice) > 20:
+        vol = _calc_volatility(df_slice['Close'])
+        vol_str = f", Volatility: {vol:.2%}"
+
+    return (
+        f"- **{label}** ({len(df_slice)} days): "
+        f"Return: {change:.2%}, Max Drawdown: {mdd:.2%}{vol_str}"
+    )
+
+
+# -----------------------------
+# 4. 主入口：多维度分析
+# -----------------------------
+def analyze_multi_timeframe(hist: pd.DataFrame) -> str:
+    """
+    [LLM Prompt Generator]
+    将2年数据切分为: 1周, 1月, 6月, 1年, 2年。
     """
     if hist.empty:
-        return "暂无历史数据。"
+        return "数据缺失: 无法获取历史数据"
 
-    # 基础数据
+    # 获取最新价格
     current_price = hist['Close'].iloc[-1]
-    start_price = hist['Close'].iloc[0]
-    change_pct = ((current_price - start_price) / start_price) * 100
 
-    high_year = hist['High'].max()
-    low_year = hist['Low'].min()
-
-    # --- 关键技术指标计算 (Pandas Rolling) ---
-    # 半年线 (约120个交易日)
+    # --- 关键均线 ---
+    # 20日(月线), 120日(半年线), 250日(年线)
+    ma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
     ma_120 = hist['Close'].rolling(window=120).mean().iloc[-1]
-    # 年线 (约250个交易日)
     ma_250 = hist['Close'].rolling(window=250).mean().iloc[-1]
+    rsi_14 = _calc_rsi(hist['Close'])
 
-    # 乖离率 (当前价格偏离年线的幅度)
-    bias_250 = ((current_price - ma_250) / ma_250) * 100 if pd.notna(ma_250) else 0
+    # --- 数据切片 (基于交易日近似值) ---
+    # 1周=5, 1月=21, 6月=126, 1年=252
+    slices = {
+        "1-Week (Short-term)": hist.tail(5),
+        "1-Month (Medium-term)": hist.tail(21),
+        "6-Months (Trend)": hist.tail(126),
+        "1-Year (Annual)": hist.tail(252),
+        "2-Years (Macro)": hist  # 全部数据
+    }
 
-    return f"""
-    【技术面分析数据】
-    1. 价格表现:
-       - 最新收盘: ${current_price:.2f}
-       - 过去{len(hist)}天涨幅: {change_pct:.2f}%
-       - 价格区间: ${low_year:.2f} - ${high_year:.2f}
-    
-    2. 均线估值 (核心指标):
-       - 半年线(MA120): ${ma_120:.2f}
-       - 年线(MA250): ${ma_250:.2f} (长期成本线)
-       - 当前偏离度: {bias_250:.2f}% 
-         (注: 正值代表高于年线，负值代表低于年线/被低估)
-    """
+    # --- 生成报告文本 ---
+    report_lines = [f"[MULTI-DIMENSIONAL QUANT DATA]",
+                    f"Symbol: NDQ.AX | Current Price: ${current_price:.2f} | RSI(14): {rsi_14:.2f}", "",
+                    "**Performance by Timeframe:**"]
 
+    for label, df_slice in slices.items():
+        report_lines.append(_analyze_slice(df_slice, label, current_price))
+
+    report_lines.append("")
+    report_lines.append("**Moving Average (Support/Resistance):**")
+    report_lines.append(f"- MA20 (Short-term): ${ma_20:.2f}")
+    report_lines.append(f"- MA120 (Half-Year): ${ma_120:.2f}")
+    report_lines.append(f"- MA250 (Yearly Baseline): ${ma_250:.2f}")
+
+    # 计算偏离度
+    if pd.notna(ma_250):
+        bias = (current_price / ma_250 - 1)
+        report_lines.append(f"- Deviation from MA250: {bias:.2%}")
+
+    return "\n".join(report_lines)
+
+
+# --- 测试运行 ---
 if __name__ == "__main__":
-    # 获取2年数据，确保能算出年线
-    df = get_stock_history(period="2y")
-    summary = analyze_history(df)
-    print(summary)
+    # 只需要调用一次，内部自动切片
+    df = get_stock_history("NDQ.AX", "2y")
+    print(analyze_multi_timeframe(df))

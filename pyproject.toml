@@ -15,4 +15,5 @@ dependencies = [
     "readability-lxml>=0.8.1",
     "langgraph>=0.2.53",
     "python-dotenv>=1.0.1",
+    "pandas-stubs~=2.3.3",
 ]
