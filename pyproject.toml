@@ -2,10 +2,15 @@
 name = "invest"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 dependencies = [
+    "ddgs>=9.10.0",
     "duckduckgo-search>=8.1.1",
     "langchain>=0.3.27",
+    "langchain-chroma>=1.1.0",
     "langchain-community>=0.3.31",
     "langchain-openai>=0.3.35",
+    "trafilatura>=2.0.0",
+    "yfinance>=0.2.66",
+    "readability-lxml>=0.8.1",
 ]

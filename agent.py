@@ -18,12 +18,14 @@
 
 from typing import Optional, List
 
+from langchain_classic.agents import initialize_agent, AgentType
 from langchain_openai import ChatOpenAI
-from langchain.agents import initialize_agent, AgentType, Tool
-from langchain.chains import RetrievalQA
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.utilities import BingSearchAPIWrapper
+from langchain_classic.chains import RetrievalQA
+from langchain_classic.tools import Tool
+
 
 
 def build_llm(temperature: float = 0.0, model: str = "gpt-3.5-turbo", **kwargs) -> ChatOpenAI:

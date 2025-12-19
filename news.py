@@ -7,7 +7,10 @@ import re
 import time
 from ddgs import DDGS
 import trafilatura
-
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from readability import Document
 
 
 # -----------------------------
@@ -127,7 +130,8 @@ def _evidence_density(text: str) -> float:
         return 0.10
 
     numbers = len(re.findall(r"\b\d+(\.\d+)?%?\b", text))
-    org_words = len(re.findall(r"\b(Fed|Federal Reserve|SEC|Treasury|ECB|RBA|earnings|CPI|GDP|filing|guidance)\b", text, re.I))
+    org_words = len(
+        re.findall(r"\b(Fed|Federal Reserve|SEC|Treasury|ECB|RBA|earnings|CPI|GDP|filing|guidance)\b", text, re.I))
     date_words = len(re.findall(r"\b(202\d|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b", text, re.I))
 
     score = 0.0
@@ -148,21 +152,82 @@ def _source_quality(domain: str, whitelist: Optional[List[str]], blacklist: Opti
     return 0.60
 
 
+_SESSION = None
+
+
+def _get_session():
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+        # 完整的 Headers
+        _SESSION.headers.update({
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+        })
+        # 重试策略
+        retries = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS"]
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        _SESSION.mount('http://', adapter)
+        _SESSION.mount('https://', adapter)
+    return _SESSION
+
+
 def _extract_main_text(url: str, timeout: int = 15) -> str:
-    """
-    尽量抽取正文。没有 trafilatura 时会退化为返回空字符串。
-    """
     if not trafilatura:
         return ""
 
     try:
-        downloaded = trafilatura.fetch_url(url, timeout=timeout)
-        if not downloaded:
-            return ""
-        text = trafilatura.extract(downloaded, include_comments=False, include_tables=False) or ""
-        text = re.sub(r"\s+\n", "\n", text).strip()
-        return text
-    except Exception:
+        session = _get_session()
+        response = session.get(url, timeout=timeout)
+        response.raise_for_status()
+
+        # 确保编码正确
+        response.encoding = response.apparent_encoding
+        html = response.text
+
+        # 策略 1: Trafilatura (Precision)
+        text = trafilatura.extract(html, include_comments=False, include_tables=False, favor_precision=True)
+        if text:
+            print(f"  [Extraction] Success using: Trafilatura (Precision)")
+            return re.sub(r"\s+\n", "\n", text).strip()
+
+        # 策略 2: Trafilatura (Recall / Default)
+        text = trafilatura.extract(html, include_comments=False, include_tables=False, favor_recall=True)
+        if text:
+            print(f"  [Extraction] Success using: Trafilatura (Recall)")
+            return re.sub(r"\s+\n", "\n", text).strip()
+
+        # 策略 3: Readability 兜底
+        if Document:
+            try:
+                doc = Document(html)
+                # 使用 trafilatura 清洗 readability 提取的 summary HTML
+                summary_html = doc.summary()
+                text = trafilatura.extract(summary_html, include_comments=False, include_tables=False)
+                if text:
+                    print(f"  [Extraction] Success using: Readability + Trafilatura")
+                    return re.sub(r"\s+\n", "\n", text).strip()
+            except Exception:
+                pass
+
+        return ""
+    except Exception as e:
+        # 如果下载失败，返回空，保留标题供 Review
+        print(f"Error fetching {url}: {e}")
         return ""
 
 
@@ -214,9 +279,6 @@ def _dedup(items: List[NewsItem]) -> List[NewsItem]:
     return out
 
 
-# -----------------------------
-# 对外主函数：你只需要 import 调用它
-# -----------------------------
 def get_real_finance_news(
         topic_query: str,
         *,
@@ -229,30 +291,45 @@ def get_real_finance_news(
         sleep_sec: float = 0.0,
 ) -> Dict[str, Any]:
     """
-    返回结构：
-    {
-      "query": str,
-      "trusted": [ {title,url,domain,date,score,scores,flags,summary} ],
-      "review":  [...],
-      "filtered": [...]
-    }
+    优化策略：
+    1. 放弃 DDGS 不支持的复杂布尔查询（(A OR B)），避免 "No results found"。
+    2. 使用 topic_query 进行宽泛召回。
+    3. 依赖本地的 _evidence_density 进行关键词权重排序。
     """
     if DDGS is None:
         raise RuntimeError("duckduckgo_search 未安装或不可用：请先 pip install duckduckgo_search")
 
-    # 召回策略：中性主题 + 事实词，避免只搜 risk 造成偏差
-    recall_query = f'{topic_query} (earnings OR CPI OR GDP OR Fed OR RBA OR guidance OR filings OR statement)'
+    # -------------------------------------------------------
+    # 1. 构造查询：不再尝试复杂的括号语法
+    # -------------------------------------------------------
+    # 如果你想稍微增加一点金融相关性，可以在后面拼一个通用的词，比如 "news" 或 "finance"
+    # 但实际上直接搜 topic_query 效果往往最好，因为 DDG 的 news tab 本身就是新闻。
+    final_query = topic_query
+
+    print(f"DEBUG: Executing DDGS query: {final_query}")
 
     raw_items: List[NewsItem] = []
+
+    # -------------------------------------------------------
+    # 2. 执行搜索
+    # -------------------------------------------------------
     try:
         with DDGS() as ddgs:
-            results = ddgs.news(recall_query, region=region, safesearch=safesearch, max_results=max_results)
+            results = ddgs.news(
+                final_query,
+                region=region,
+                safesearch=safesearch,
+                max_results=max_results
+            )
+
+            # 处理结果
             if results:
                 for r in results:
                     url = (r.get("url") or "").strip()
                     title = (r.get("title") or "").strip()
                     if not url or not title:
                         continue
+
                     raw_items.append(
                         NewsItem(
                             title=title,
@@ -263,11 +340,15 @@ def get_real_finance_news(
                         )
                     )
     except Exception as e:
-        # 如果搜索失败（例如 No results found），我们捕获异常并返回空结果，而不是让程序崩溃
-        print(f"Warning: News search failed or returned no results: {e}")
+        print(f"Error: Search failed for query '{final_query}': {e}")
+        # 如果连基础查询都挂了，那就返回空结构
+        return {"query": final_query, "trusted": [], "review": [], "filtered": []}
 
     items = _dedup(raw_items)
 
+    # -------------------------------------------------------
+    # 3. 本地评分与分桶 (这是你的强项，依靠这里来区分质量)
+    # -------------------------------------------------------
     trusted: List[Dict[str, Any]] = []
     review: List[Dict[str, Any]] = []
     filtered: List[Dict[str, Any]] = []
@@ -292,11 +373,10 @@ def get_real_finance_news(
             "score": round(score, 3),
             "scores": {k: round(v, 3) for k, v in (scores or {}).items()},
             "flags": flags,
-            # summary 用 snippet 优先；没有正文抽取时也能看
             "summary": it.snippet or _safe_trim(it.text, 300),
         }
 
-        # 分桶阈值：你可以后续按效果改
+        # 这里的逻辑不变
         if score >= 0.78 and not any(f in flags for f in ["source_low", "clickbait_high", "fear_high_evidence_low"]):
             trusted.append(record)
         elif any(f in flags for f in ["source_low", "clickbait_high", "fear_high_evidence_low"]):
@@ -305,7 +385,7 @@ def get_real_finance_news(
             review.append(record)
 
     return {
-        "query": recall_query,
+        "query": final_query,
         "trusted": trusted,
         "review": review,
         "filtered": filtered,

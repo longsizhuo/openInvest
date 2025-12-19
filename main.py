@@ -33,10 +33,10 @@ def LLM(query) -> Optional[SimpleAgent]:
 
 def main():
     # 1. 查询汇率，获得汇率系数 rate=10-rate , 纳指系数
-    rate, stock = get_rate(), get_stock()
-    if rate == 0 or not stock:
-        print('')
-        return
+    # rate, stock = get_rate(), get_stock()
+    # if rate == 0 or not stock:
+    #     print('')
+    #     return
 
     news = get_real_finance_news(
         topic_query="Nasdaq outlook Australia",
