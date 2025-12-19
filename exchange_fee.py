@@ -4,34 +4,30 @@ import os
 import yfinance as yf
 from datetime import datetime
 
-# 缓存目录
 CACHE_DIR = "cache_data"
 
 
 # -----------------------------
-# 1. 基础数据获取 (Master Cache)
+# 1. 通用数据获取 (Generic Fetcher)
 # -----------------------------
-def get_stock_history(symbol: str = "NDQ.AX", period: str = "2y") -> pd.DataFrame:
+def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
     """
-    获取“主数据”。
-    策略：总是获取最长周期(2y)的数据并缓存。
-    其他短周期(1w, 1m, 6m, 1y)直接从这份数据中切片，无需单独请求/存储。
-    这样保证了所有时间维度的数据一致性。
+    通用获取函数：既可以抓股票(NDQ.AX)，也可以抓汇率(AUDCNY=X)。
     """
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR)
 
-    # 缓存文件名包含周期，例如 NDQ.AX_2y.csv
-    csv_path = os.path.join(CACHE_DIR, f"{symbol}_{period}.csv")
+    # 处理一下文件名，避免 symbol 里有特殊字符导致路径错误
+    safe_symbol = symbol.replace("=", "").replace(".", "_")
+    csv_path = os.path.join(CACHE_DIR, f"{safe_symbol}_{period}.csv")
 
-    # [Hit] 检查缓存：如果是今天的文件，直接读取
+    # [Hit]
     if os.path.exists(csv_path):
         file_time = datetime.fromtimestamp(os.path.getmtime(csv_path))
         if file_time.date() == datetime.now().date():
-            # print(f"✅ [Cache Hit] 读取本地数据: {symbol}")
             return pd.read_csv(csv_path, index_col=0, parse_dates=True)
 
-    # [Miss] 请求 API 并写入缓存
+    # [Miss]
     print(f"🔄 [API Update] 正在更新数据: {symbol}...")
     try:
         ticker = yf.Ticker(symbol)
@@ -40,22 +36,20 @@ def get_stock_history(symbol: str = "NDQ.AX", period: str = "2y") -> pd.DataFram
             hist.to_csv(csv_path)
             return hist
     except Exception as e:
-        print(f"⚠️ 获取历史数据失败: {e}")
+        print(f"⚠️ 获取数据失败 {symbol}: {e}")
 
     return pd.DataFrame()
 
 
 # -----------------------------
-# 2. 核心计算逻辑 (数学工具)
+# 2. 数学工具 (保持不变)
 # -----------------------------
 def _calc_change(start: float, end: float) -> float:
-    """计算涨跌幅"""
     if start == 0: return 0.0
     return (end - start) / start
 
 
 def _calc_max_drawdown(series: pd.Series) -> float:
-    """计算期间最大回撤"""
     if series.empty: return 0.0
     roll_max = series.cummax()
     drawdown = (series - roll_max) / roll_max
@@ -63,15 +57,12 @@ def _calc_max_drawdown(series: pd.Series) -> float:
 
 
 def _calc_volatility(series: pd.Series) -> float:
-    """计算年化波动率 (需数据量 > 2)"""
     if len(series) < 2: return 0.0
-    # 年化系数: sqrt(252)
     return series.pct_change().std() * np.sqrt(252)
 
 
 def _calc_rsi(series: pd.Series, period: int = 14) -> float:
-    """计算 RSI 指标"""
-    if len(series) < period + 1: return 50.0  # 数据不足时返回中性
+    if len(series) < period + 1: return 50.0
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -80,87 +71,88 @@ def _calc_rsi(series: pd.Series, period: int = 14) -> float:
     return 100 - (100 / (1 + rs))
 
 
-# -----------------------------
-# 3. 切片分析逻辑 (通用化)
-# -----------------------------
 def _analyze_slice(df_slice: pd.DataFrame, label: str, current_price: float) -> str:
-    """
-    通用函数：分析任意一个时间切片的数据，返回格式化字符串。
-    """
     if df_slice.empty:
         return f"- **{label}**: No Data"
-
     start_price = df_slice['Close'].iloc[0]
     change = _calc_change(start_price, current_price)
     mdd = _calc_max_drawdown(df_slice['Close'])
-
-    # 波动率只在数据量足够时计算 (大于20天)
     vol_str = ""
     if len(df_slice) > 20:
         vol = _calc_volatility(df_slice['Close'])
-        vol_str = f", Volatility: {vol:.2%}"
-
-    return (
-        f"- **{label}** ({len(df_slice)} days): "
-        f"Return: {change:.2%}, Max Drawdown: {mdd:.2%}{vol_str}"
-    )
+        vol_str = f", Vol: {vol:.2%}"
+    return f"- **{label}**: Ret: {change:.2%}, MaxDD: {mdd:.2%}{vol_str}"
 
 
 # -----------------------------
-# 4. 主入口：多维度分析
+# 3. 分析逻辑 (支持传入自定义标题)
 # -----------------------------
-def analyze_multi_timeframe(hist: pd.DataFrame) -> str:
+def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
     """
-    [LLM Prompt Generator]
-    将2年数据切分为: 1周, 1月, 6月, 1年, 2年。
+    通用分析器：传入 Dataframe 和 标题(如 'NDQ' 或 'AUD/CNY')
     """
     if hist.empty:
-        return "数据缺失: 无法获取历史数据"
+        return f"数据缺失: {title}"
 
-    # 获取最新价格
     current_price = hist['Close'].iloc[-1]
-
-    # --- 关键均线 ---
-    # 20日(月线), 120日(半年线), 250日(年线)
     ma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
     ma_120 = hist['Close'].rolling(window=120).mean().iloc[-1]
     ma_250 = hist['Close'].rolling(window=250).mean().iloc[-1]
     rsi_14 = _calc_rsi(hist['Close'])
 
-    # --- 数据切片 (基于交易日近似值) ---
-    # 1周=5, 1月=21, 6月=126, 1年=252
     slices = {
-        "1-Week (Short-term)": hist.tail(5),
-        "1-Month (Medium-term)": hist.tail(21),
-        "6-Months (Trend)": hist.tail(126),
-        "1-Year (Annual)": hist.tail(252),
-        "2-Years (Macro)": hist  # 全部数据
+        "1-Week": hist.tail(5),
+        "1-Month": hist.tail(21),
+        "6-Months": hist.tail(126),
+        "1-Year": hist.tail(252),
+        "2-Years": hist
     }
 
-    # --- 生成报告文本 ---
-    report_lines = [f"[MULTI-DIMENSIONAL QUANT DATA]",
-                    f"Symbol: NDQ.AX | Current Price: ${current_price:.2f} | RSI(14): {rsi_14:.2f}", "",
-                    "**Performance by Timeframe:**"]
+    report_lines = []
+    # 使用 Markdown 分隔线区分不同资产
+    report_lines.append(f"--- {title} ANALYSIS ---")
+    report_lines.append(f"Current Price: {current_price:.4f} | RSI(14): {rsi_14:.2f}")
 
+    # 判断当前价格位置 (Percentile)
+    high_2y = hist['Close'].max()
+    low_2y = hist['Close'].min()
+    pos = (current_price - low_2y) / (high_2y - low_2y)
+    report_lines.append(f"Price Rank (2y): {pos:.0%} (0%=Low, 100%=High)")
+
+    report_lines.append("**Timeframe Performance:**")
     for label, df_slice in slices.items():
         report_lines.append(_analyze_slice(df_slice, label, current_price))
 
-    report_lines.append("")
-    report_lines.append("**Moving Average (Support/Resistance):**")
-    report_lines.append(f"- MA20 (Short-term): ${ma_20:.2f}")
-    report_lines.append(f"- MA120 (Half-Year): ${ma_120:.2f}")
-    report_lines.append(f"- MA250 (Yearly Baseline): ${ma_250:.2f}")
-
-    # 计算偏离度
+    report_lines.append("**Key Levels:**")
+    report_lines.append(f"- MA120 (Trend): {ma_120:.4f}")
+    report_lines.append(f"- MA250 (Base): {ma_250:.4f}")
     if pd.notna(ma_250):
         bias = (current_price / ma_250 - 1)
-        report_lines.append(f"- Deviation from MA250: {bias:.2%}")
+        report_lines.append(f"- MA250 Deviation: {bias:.2%}")
 
     return "\n".join(report_lines)
 
 
-# --- 测试运行 ---
+# -----------------------------
+# 4. 对外接口：获取整合报告
+# -----------------------------
+def get_full_market_data() -> str:
+    # 1. 获取 纳指ETF (NDQ.AX) 数据
+    df_ndq = get_history_data("NDQ.AX", "2y")
+    report_ndq = analyze_multi_timeframe(df_ndq, "TARGET ASSET (NDQ.AX)")
+
+    # 2. 获取 澳元兑人民币 (AUDCNY=X) 数据
+    # Yahoo Finance 代码: AUDCNY=X
+    df_fx = get_history_data("AUDCNY=X", "2y")
+    report_fx = analyze_multi_timeframe(df_fx, "CURRENCY RATE (AUD/CNY)")
+
+    return f"""
+{report_ndq}
+
+{report_fx}
+"""
+
+
+# --- 测试 ---
 if __name__ == "__main__":
-    # 只需要调用一次，内部自动切片
-    df = get_stock_history("NDQ.AX", "2y")
-    print(analyze_multi_timeframe(df))
+    print(get_full_market_data())

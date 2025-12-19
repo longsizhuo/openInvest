@@ -1,0 +1,21 @@
+// 使用之前重命名为 user_profile.json，删除注释
+{
+  "user_name": "xxx",
+  "risk_tolerance": "high", // 投资激进
+  "monthly_income_cny": 2000, // 收入
+  "monthly_expenses_cny": 900, // 支出
+  "exchange_buffer_cny": 1000, // 这些钱不能花出去
+  "current_assets": { // 现有资产
+    "cash_cny": 5000,
+    "aud_cash": 0,
+    "ndq_shares": 3,
+    "ndq_avg_cost": 40
+  },
+  // 投资设置
+  "investment_strategy": {
+    "base_monthly_invest_ratio": 0.4, // 投资比例
+    "max_single_invest_cny": 4000, // 最大一笔投资数额
+    "target_asset": "NDQ.AX" // 股票看哪个
+  },
+  "last_run_date": "2025-12-20"
+}
