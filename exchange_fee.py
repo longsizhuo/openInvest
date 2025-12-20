@@ -136,6 +136,31 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
 # -----------------------------
 # 4. 对外接口：获取整合报告
 # -----------------------------
+def get_macro_data() -> str:
+    """
+    获取宏观关键指标：10年期美债收益率 (^TNX) 和 恐慌指数 (^VIX)
+    """
+    try:
+        tnx = get_history_data("^TNX", "1mo") # 10-Year Treasury Yield
+        vix = get_history_data("^VIX", "1mo") # CBOE Volatility Index
+        
+        tnx_last = tnx['Close'].iloc[-1] if not tnx.empty else 0.0
+        tnx_change = _calc_change(tnx['Close'].iloc[0], tnx_last)
+        
+        vix_last = vix['Close'].iloc[-1] if not vix.empty else 0.0
+        vix_change = _calc_change(vix['Close'].iloc[0], vix_last)
+        
+        return f"""
+--- MACRO INDICATORS (Reference) ---
+1. US 10Y Treasury Yield (^TNX): {tnx_last:.2f}% (MoM: {tnx_change:+.2%})
+   *Note: Rising yields often hurt tech stock valuations.*
+
+2. CBOE Volatility Index (^VIX): {vix_last:.2f} (MoM: {vix_change:+.2%})
+   *Note: VIX > 20 indicates fear; VIX < 15 indicates complacency.*
+"""
+    except Exception as e:
+        return f"Error fetching macro data: {e}"
+
 def get_full_market_data() -> str:
     # 1. 获取 纳指ETF (NDQ.AX) 数据
     df_ndq = get_history_data("NDQ.AX", "2y")

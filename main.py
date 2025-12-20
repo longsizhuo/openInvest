@@ -2,7 +2,7 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 from agent import SimpleAgent
-from exchange_fee import get_history_data, analyze_multi_timeframe
+from exchange_fee import get_history_data, analyze_multi_timeframe, get_macro_data
 from portfolio_manager import PortfolioManager
 
 from notifier import send_gmail_notification
@@ -31,6 +31,26 @@ Please provide a brief and sharp analysis, and clearly indicate the tendency tow
 **Finally, please list 1-2 key news headlines that you have referenced. **
 """
 
+PROMPT_MACRO_AGENT = """
+You are a Global Macro Strategy Researcher. Your goal is to assess the overall investment environment.
+You do NOT analyze specific stocks, but rather the "weather" of the global economy.
+
+**Core Focus Areas (The "Missing 4 Factors"):**
+1. **Interest Rates & Central Banks**: US Fed (Jerome Powell) and RBA decisions. Are yields (^TNX) rising (bad for tech) or falling?
+2. **Inflation Expectations**: Latest US CPI/PCE data. Is inflation sticky? (Erodes real returns).
+3. **Economic Cycle**: Recession fears? Soft landing? or AI-driven productivity boom?
+4. **Geopolitical Risks**: Wars, trade sanctions, or supply chain disruptions (Middle East, Russia-Ukraine, US-China relations).
+
+**Tool usage strategy**
+- Search for: "US Fed rate decision", "US CPI inflation report", "Geopolitical tensions latest", "Global recession risk", "US 10 year treasury yield trend".
+- Translate keywords to English for searching.
+
+Please provide:
+1. **Macro Sentiment Score**: Scale from -5 (Extreme Risk/Crash Imminent) to +5 (Goldilocks/Perfect Growth).
+2. **Key Headwinds (Negatives)** & **Key Tailwinds (Positives)**.
+3. **Conclusion**: Is the current environment "Risk-On" (safe to invest) or "Risk-Off" (defensive)?
+"""
+
 PROMPT_STOCK_AGENT = """
 You are a trader in the US/Australian stock market. Your task is to focus on analyzing the trend of NDQ.AX (NASDAQ 100 Australian ETF).
 You can only see data related to stocks.
@@ -40,28 +60,31 @@ The user's account already has some Australian dollars (AUD) in cash that can be
 You don't need to care about exchange rates or funding sources, just focus on whether the current stock price is worth buying.
 
 **Tool usage strategy**
-1. When searching for news, translate keywords into English. **CRITICAL: Do NOT search for opinions or forecasts (e.g., avoid "NASDAQ outlook", "NDQ forecast").** Instead, search for *factual drivers* such as "US tech sector earnings", "Federal Reserve interest rate decision", "US CPI data", or "NASDAQ volatility".
-2. Pay attention to the macro sentiment of the NASDAQ index and specific developments in the Australian market.
+1. When searching for news, translate keywords into English. 
+2. **CRITICAL SEARCH RULE**: Do NOT search for the ticker "NDQ.AX" or "NDQ" directly, as it limits results to local ETF news. 
+   - **ALWAYS search for the underlying index**: Use keywords like **"Nasdaq 100", "US Tech Sector", "QQQ ETF", "Magnificent Seven stocks"**.
+   - Search for *factual drivers*: "US tech earnings report", "AI sector trends".
+3. Pay attention to the macro sentiment of the NASDAQ index and specific developments in the Australian market only if relevant to the ETF structure.
 
 Please analyze:
 1. Current stock price position (historical high/low)?
 What signals do technical indicators (RSI, moving averages) send out?
 Conclusion: Should we buy now?
 
-Please provide a brief and sharp analysis, and clearly indicate the tendency of 'recommended buy', 'recommended hold', or 'recommended sell'.
+Please provide a brief and sharp analysis, and clearly indicate the tendency of 'recommended buy', 'recommended hold', 'recommended sell'.
 **Finally, please list 1-2 key news headlines that you have referenced. **
 """
-
 PROMPT_MANAGER_AGENT = """
 You are a Chief Investment Advisor (Portfolio Manager).
 You have a God's perspective and are responsible for synthesizing multiple information to make the final asset allocation decision.
 
 **Decision logic**
-1. * * Exchange Decision (CNY ->AUD) * *: Refer to the opinions of foreign exchange experts.
-2. * * Trading Decision (AUD ->NDQ. AX) * *: Refer to the opinions of stock traders.
+1. **Macro Environment (The "Weather")**: Refer to the Macro Strategist. If the Macro Score is negative (e.g., <-2), be very conservative even if stocks look cheap. High rates or War = CAUTION.
+2. **Exchange Decision (CNY -> AUD)**: Refer to the Forex Expert.
+3. **Trading Decision (AUD -> NDQ.AX)**: Refer to the Stock Trader.
 
 **Output requirements**
-1. Briefly summarize the core conflicts or consensus between the two experts.
+1. Briefly summarize the core conflicts or consensus between the experts.
 2. Provide specific operational recommendations based on user funds.
 """
 
@@ -123,13 +146,34 @@ def main():
 
     aud_cash = pm.profile['current_assets'].get('aud_cash', 0.0)
 
-    # --- 2. 准备数据报告 ---
-    print("📊 正在生成分项市场报告...")
-    # 这里需要传 2y 数据给分析函数
+    # --- 2. 准备历史行情分析报告 (供专家参考) ---
+    print("📊 正在生成分项市场历史数据报告...")
     fx_report = analyze_multi_timeframe(get_history_data("AUDCNY=X", "2y"), "CURRENCY RATE (AUD/CNY)")
     stock_report = analyze_multi_timeframe(get_history_data("NDQ.AX", "2y"), "TARGET ASSET (NDQ.AX)")
 
-    # --- 3. 运行 Agent 1: 外汇专家 ---
+    # [新增] 获取宏观数据
+    print("🌍 正在获取宏观经济数据 (Yields, VIX)...")
+    macro_data_report = get_macro_data()
+
+    # --- 3. [新增] 运行 Agent 0: 宏观策略师 ---
+    print("\n🤖 [Agent 0] 宏观策略师正在研判全球局势...")
+    macro_analysis = "⚠️ **Analysis Failed**: Macro agent encountered an error."
+    try:
+        agent_macro = create_agent(PROMPT_MACRO_AGENT)
+        if agent_macro:
+            macro_query = f"""
+# Macro Data Reference:
+{macro_data_report}
+
+Please analyze the global macro environment (Interest Rates, Inflation, Cycle, Geopolitics).
+"""
+            macro_analysis = agent_macro.run(macro_query)
+            print(f"宏观策略师观点:\n{macro_analysis[:150]}...")
+    except Exception as e:
+        print(f"❌ [Error] Agent Macro failed: {e}")
+        macro_analysis = f"⚠️ **Macro Analysis Unavailable**\n\nError details: {str(e)}"
+
+    # --- 4. 运行 Agent 1: 外汇专家 ---
     print("\n🤖 [Agent 1] 外汇专家正在分析汇率...")
     fx_analysis = "⚠️ **Analysis Failed**: Forex agent encountered an error."
     try:
@@ -165,7 +209,7 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
         print(f"❌ [Error] Agent 2 failed: {e}")
         stock_analysis = f"⚠️ **Stock Analysis Unavailable**\n\nError details: {str(e)}"
 
-    # --- 5. 运行 Agent 3: 首席投资顾问 ---
+    # --- 6. 运行 Agent 3: 首席投资顾问 ---
     print("\n🤖 [Agent 3] 首席顾问正在进行最终决策...")
     final_decision = "⚠️ **Decision Failed**: Chief Manager encountered an error."
     try:
@@ -176,27 +220,24 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
 你是一名专业的私人投资顾问。你拥有以下信息：
 
 1. **用户画像**：风险偏好【{user_status.risk_level}】，当前持有现金 ¥{user_status.cash_cny:.0f}，本期最大可投预算 ¥{user_status.disposable_for_invest:.0f}。
-2. **外汇专家观点**：{fx_analysis}
-3. **股票交易员观点**：{stock_analysis}
-4. **市场分析报告**：{stock_report} {fx_report}
+2. **宏观策略师观点**：{macro_analysis}
+3. **外汇专家观点**：{fx_analysis}
+4. **股票交易员观点**：{stock_analysis}
+5. **市场分析报告**：{stock_report} {fx_report} {macro_data_report}
 
 
 **你的任务**：
 
-你比其他两位专家要更为专业、顾全大局。你可以参考他们的意见，但是不能被他们左右你的决定，并且基于市场数据（特别是RSI、均线偏离度、回撤）和用户风险偏好，计算本期具体的【建议投资金额】。
+你比其他两位专家要更为专业、顾全大局。你可以参考他们的意见，但是不能被他们左右你的决定。
 
-**注意：如果某位专家的观点显示为“Error”或“Unavailable”，请基于现有的市场数据报告（Market Data Reference）自行判断，并在风险提示中说明数据来源的不完整性。**
+**核心：必须赋予宏观因素最高权重。** 如果宏观策略师提示高风险（如高通胀、战争、加息），即使技术指标 RSI 很低，也必须建议【观望】或【大幅减少投入】。不要在暴风雨来临时建议出海。
 
 
 **决策逻辑参考**：
 
-- 如果市场处于低位/超卖（RSI<30 或 价格<MA200）：建议加大投入，使用 80%-100% 的预算。
-
-- 如果市场处于中位/震荡：建议定投，使用 40%-60% 的预算。
-
-- 如果市场处于高位/超买（RSI>70 或 价格远超 MA200）：建议观望，投入 0% 或仅 10%。
-
-
+- **宏观环境极差 (Macro Score < 0)**: 无论技术面如何，强制降低仓位。建议观望或仅投入 10%-20%。
+- **宏观环境一般/震荡**: 参考技术指标定投，投入 40%-60%。
+- **宏观环境向好 (Macro Score > 0)**: 结合技术面，若低位可大胆投入 80%-100%。
 
 请分两部分回答：
 
@@ -215,25 +256,32 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
         print(f"❌ [Error] Agent 3 failed: {e}")
         final_decision = f"⚠️ **Final Decision Unavailable**\n\nSystem encountered a critical error during final synthesis.\nError: {str(e)}"
 
-    # --- 6. 发送邮件通知 ---
+    # --- 7. 发送邮件通知 ---
     full_report = f"""
 # 投资分析报告 / Invest Agent Report
 
-## 1. 外汇专家分析 (Forex Expert - AUD/CNY)
+## 1. 宏观策略环境 (Macro Strategy)
+{macro_analysis}
+
+---
+
+## 2. 外汇专家分析 (Forex Expert - AUD/CNY)
 {fx_analysis}
 
 ---
 
-## 2. 股票交易员分析 (Stock Trader - NDQ.AX)
+## 3. 股票交易员分析 (Stock Trader - NDQ.AX)
 {stock_analysis}
 
 ---
 
-## 3. 首席顾问最终决策 (Final Decision)
+## 4. 首席顾问最终决策 (Final Decision)
 {final_decision}
 
 ---
 *Market Data Reference:*
+{macro_data_report}
+
 {fx_report}
 
 {stock_report}
