@@ -87,13 +87,14 @@ def build_llm(
     *,
     temperature: float = 0.0,
     model: str = "gpt-4o-mini",
-    timeout: int = 30,
+    timeout: int = 120,
     **kwargs,
 ) -> ChatOpenAI:
     return ChatOpenAI(
         model=model,
         temperature=temperature,
         timeout=timeout,
+        max_retries=3,  # Auto-retry on server errors / timeouts
         **kwargs,
     )
 

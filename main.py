@@ -5,6 +5,8 @@ from agent import SimpleAgent
 from exchange_fee import get_history_data, analyze_multi_timeframe
 from portfolio_manager import PortfolioManager
 
+from notifier import send_gmail_notification
+
 load_dotenv()
 
 PROMPT_FOREX_AGENT = """
@@ -128,36 +130,47 @@ def main():
 
     # --- 3. 运行 Agent 1: 外汇专家 ---
     print("\n🤖 [Agent 1] 外汇专家正在分析汇率...")
-    agent_fx = create_agent(PROMPT_FOREX_AGENT)
-    if not agent_fx: return
-
-    fx_query = f"""
+    fx_analysis = "⚠️ **Analysis Failed**: Forex agent encountered an error."
+    try:
+        agent_fx = create_agent(PROMPT_FOREX_AGENT)
+        if agent_fx:
+            fx_query = f"""
 # market data: 
 {fx_report}
 
 Please analyze the trend of AUD/CNY exchange rate and provide exchange recommendations.
 """
-    fx_analysis = agent_fx.run(fx_query)
-    print(f"外汇专家观点:\n{fx_analysis[:150]}...")  # 只打印前150字，保持清爽
+            fx_analysis = agent_fx.run(fx_query)
+            print(f"外汇专家观点:\n{fx_analysis[:150]}...")
+    except Exception as e:
+        print(f"❌ [Error] Agent 1 failed: {e}")
+        fx_analysis = f"⚠️ **Forex Analysis Unavailable**\n\nError details: {str(e)}"
 
-        # --- 4. 运行 Agent 2: 股票交易员 ---
+    # --- 4. 运行 Agent 2: 股票交易员 ---
     print("\n🤖 [Agent 2] 股票交易员正在分析盘面...")
-    agent_stock = create_agent(PROMPT_STOCK_AGENT)
-
-    stock_query = f"""
+    stock_analysis = "⚠️ **Analysis Failed**: Stock agent encountered an error."
+    try:
+        agent_stock = create_agent(PROMPT_STOCK_AGENT)
+        if agent_stock:
+            stock_query = f"""
 # market data: 
 {stock_report}
 
 Please analyze the trend of NDQ.AX and provide buying and selling recommendations.
 """
-    stock_analysis = agent_stock.run(stock_query)
-    print(f"✅ 股票交易员观点:\n{stock_analysis[:150]}...")
+            stock_analysis = agent_stock.run(stock_query)
+            print(f"✅ 股票交易员观点:\n{stock_analysis[:150]}...")
+    except Exception as e:
+        print(f"❌ [Error] Agent 2 failed: {e}")
+        stock_analysis = f"⚠️ **Stock Analysis Unavailable**\n\nError details: {str(e)}"
 
     # --- 5. 运行 Agent 3: 首席投资顾问 ---
     print("\n🤖 [Agent 3] 首席顾问正在进行最终决策...")
-    agent_manager = create_agent(PROMPT_MANAGER_AGENT)
-
-    final_prompt =  f"""
+    final_decision = "⚠️ **Decision Failed**: Chief Manager encountered an error."
+    try:
+        agent_manager = create_agent(PROMPT_MANAGER_AGENT)
+        if agent_manager:
+            final_prompt =  f"""
 
 你是一名专业的私人投资顾问。你拥有以下信息：
 
@@ -171,7 +184,7 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
 
 你比其他两位专家要更为专业、顾全大局。你可以参考他们的意见，但是不能被他们左右你的决定，并且基于市场数据（特别是RSI、均线偏离度、回撤）和用户风险偏好，计算本期具体的【建议投资金额】。
 
-
+**注意：如果某位专家的观点显示为“Error”或“Unavailable”，请基于现有的市场数据报告（Market Data Reference）自行判断，并在风险提示中说明数据来源的不完整性。**
 
 
 **决策逻辑参考**：
@@ -195,10 +208,36 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
 - 给出**换汇建议**（是否立即换汇）。
 
 """
-    final_decision = agent_manager.run(final_prompt)
-    print(final_decision)
+            final_decision = agent_manager.run(final_prompt)
+            print(final_decision)
+    except Exception as e:
+        print(f"❌ [Error] Agent 3 failed: {e}")
+        final_decision = f"⚠️ **Final Decision Unavailable**\n\nSystem encountered a critical error during final synthesis.\nError: {str(e)}"
 
-    # TODO: SMTP
+    # --- 6. 发送邮件通知 ---
+    full_report = f"""
+# 投资分析报告 / Invest Agent Report
+
+## 1. 外汇专家分析 (Forex Expert - AUD/CNY)
+{fx_analysis}
+
+---
+
+## 2. 股票交易员分析 (Stock Trader - NDQ.AX)
+{stock_analysis}
+
+---
+
+## 3. 首席顾问最终决策 (Final Decision)
+{final_decision}
+
+---
+*Market Data Reference:*
+{fx_report}
+
+{stock_report}
+"""
+    send_gmail_notification(full_report)
 
 
 if __name__ == "__main__": main()

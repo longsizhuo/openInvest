@@ -16,4 +16,5 @@ dependencies = [
     "langgraph>=0.2.53",
     "python-dotenv>=1.0.1",
     "pandas-stubs~=2.3.3",
+    "markdown>=3.10",
 ]
