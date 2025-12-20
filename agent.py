@@ -43,6 +43,8 @@ def _format_news_items(items: List[Dict[str, Any]], max_items: int = 4) -> str:
 
 
 def search_finance_news_impl(query: str) -> str:
+    if ".AX" in query.upper():
+        query = query.upper().replace(".AX", " ETF")
     """
     深度金融新闻搜索：DDGS 找 URL -> 你自己的抓取器抽正文 -> 质量评分分桶
     """

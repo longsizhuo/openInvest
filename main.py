@@ -51,6 +51,7 @@ Conclusion: Should we buy now?
 Please provide a brief and sharp analysis, and clearly indicate the tendency of 'recommended buy', 'recommended hold', or 'recommended sell'.
 **Finally, please list 1-2 key news headlines that you have referenced. **
 """
+
 PROMPT_MANAGER_AGENT = """
 You are a Chief Investment Advisor (Portfolio Manager).
 You have a God's perspective and are responsible for synthesizing multiple information to make the final asset allocation decision.

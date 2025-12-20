@@ -1,0 +1,17 @@
+services:
+  invest-agent:
+    build: .
+    container_name: invest-agent
+    restart: always
+    # 挂载配置文件 (用户只需修改本地的 .env)
+    env_file:
+      - .env
+    # 数据持久化 (数据库和缓存映射到本地)
+    volumes:
+      - ./db:/app/db
+      - ./cache_data:/app/cache_data
+      # 可选：如果需要在容器外查看日志文件
+      # - ./logs:/app/logs
+    # 时区设置 (确保定时任务准确)
+    environment:
+      - TZ=Asia/Shanghai
