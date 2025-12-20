@@ -1,6 +1,7 @@
 import smtplib
 import os
 import socket
+import time  # 新增：用于重试间隔
 
 import ssl
 import markdown
@@ -12,25 +13,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def send_gmail_notification(content: str):
     """
-    Sends an email notification via Google SMTP.
+    Sends an email notification via Google SMTP with retry logic.
     Requires EMAIL_SENDER and EMAIL_PASSWORD (App Password) in .env.
     """
     sender = os.getenv("EMAIL_SENDER")
     password = os.getenv("EMAIL_PASSWORD")  # Use Gmail App Password
     receiver = "longsizhuo@gmail.com"
-    
+
     if not sender or not password:
         print("⚠️ Email credentials not found in .env. Skipping email notification.")
         return
 
     subject = f"Invest Agent Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
-    
+
     # Convert Markdown to HTML
     html_content = markdown.markdown(content, extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'])
-    
-    # Basic CSS for better email rendering
+
+    # Basic CSS for better email rendering (Keep your original CSS)
     email_body = f"""
     <html>
     <head>
@@ -75,21 +77,50 @@ def send_gmail_notification(content: str):
     msg.attach(part1)
     msg.attach(part2)
 
-    try:
-        # Connect to Gmail's SMTP server
+    # --- 重试逻辑开始 ---
+    max_retries = 5  # 最大重试次数
+    retry_interval = 5  # 初始重试间隔（秒）
 
-        socket.setdefaulttimeout(15)  # 全局 socket 超时（可选）
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"🔄 [Attempt {attempt}/{max_retries}] 正在连接 SMTP 服务器...")
 
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
-            server.set_debuglevel(1)  # 打印 SMTP 交互日志
-            server.ehlo()
-            server.starttls(context=ssl.create_default_context())
-            server.ehlo()
-            server.login(sender, password)
-            server.sendmail(sender, [receiver], msg.as_string())
-        print(f"✅ Email report successfully sent to {receiver}")
-    except Exception as e:
-        print(f"❌ Failed to send email: {e}")
+            # 显式设置超时，防止握手无限挂起
+            socket.setdefaulttimeout(30)
+
+            # 注意：context 创建放在循环里也是安全的，或者提出来也可以
+            context = ssl.create_default_context()
+
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+                # server.set_debuglevel(1) # 如果需要看详细握手日志可开启，生产环境建议关闭保持清爽
+                server.ehlo()
+                server.starttls(context=context)  # TLS 握手
+                server.ehlo()
+
+                print(f"🔑 [Attempt {attempt}/{max_retries}] 正在验证身份...")
+                server.login(sender, password)
+
+                print(f"📨 [Attempt {attempt}/{max_retries}] 正在发送数据...")
+                server.sendmail(sender, [receiver], msg.as_string())
+
+            # 如果执行到这里没有报错，说明成功了
+            print(f"✅ Email report successfully sent to {receiver}")
+            return  # 成功后直接退出函数
+
+        except (socket.timeout, smtplib.SMTPException, ConnectionError, OSError) as e:
+            # 捕获常见的网络和协议错误
+            print(f"❌ [Attempt {attempt}/{max_retries}] 发送失败: {e}")
+
+            if attempt < max_retries:
+                print(f"⏳ 等待 {retry_interval} 秒后进行下一次重试...")
+                time.sleep(retry_interval)
+                # 可选：指数退避，每次等待时间翻倍，避免拥塞
+                # retry_interval *= 2
+            else:
+                print("⛔️ 已达到最大重试次数，放弃发送。")
+                # 这里可以选择抛出异常，或者只是记录日志
+                # raise e
+
 
 if __name__ == "__main__":
     # Test call
