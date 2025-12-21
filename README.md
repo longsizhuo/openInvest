@@ -24,8 +24,25 @@ uv sync
 pip install -r requirements.txt
 ```
 
+**Install uv (if missing):**
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
 ### 2. Configure
 Set up your `.env` file as shown in the Docker section.
+
+Before running, set the **target stock/ETF ticker** in `user_profile.json`:
+1. Copy `user_profile_sample.txt` to `user_profile.json` and remove comments.
+2. Update `investment_strategy.target_asset` (e.g., `NDQ.AX`, `QQQ`, `AAPL`).
+3. Tickers can be searched on:
+   - Yahoo Finance (search by company name or code)
+   - ASX (for `.AX` tickers)
+   - NASDAQ (for US listings)
 
 ### 3. Run
 *   **One-time run:**
