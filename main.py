@@ -50,6 +50,21 @@ def create_agent(system_prompt: str, model_name="deepseek-chat") -> Optional[Sim
     )
 
 
+def _get_last_close(symbol: str, label: str) -> float:
+    df = get_history_data(symbol, "1d")
+    if df.empty:
+        df = get_history_data(symbol, "5d")
+    if df.empty:
+        print(f"⚠️ {label} 数据缺失: {symbol}")
+        return 0.0
+    return float(df["Close"].iloc[-1])
+
+
+def _is_china_market(symbol: str) -> bool:
+    suffix = symbol.upper().split(".")[-1]
+    return suffix in {"SZ", "SS", "BJ", "HK"}
+
+
 # ==========================================
 # 3. 主流程
 # ==========================================
@@ -60,19 +75,13 @@ def main():
     pm.process_income()
 
     target_asset = pm.profile.get("investment_strategy", {}).get("target_asset", "NDQ.AX")
+    is_china_asset = _is_china_market(target_asset)
 
     # 获取实时价格用于估值
-    try:
-        # 获取 1d 数据即可，不用拉 2y，加快速度
-        # 但 report 生成需要 2y
-        df_asset = get_history_data(target_asset, "1d")
-        current_price = df_asset['Close'].iloc[-1]
-
-        df_fx = get_history_data("AUDCNY=X", "1d")
-        current_rate = df_fx['Close'].iloc[-1]
-    except Exception as e:
-        print(f"❌ 初始化数据失败: {e}")
-        return
+    current_price = _get_last_close(target_asset, "目标资产")
+    current_rate = _get_last_close("AUDCNY=X", "汇率")
+    if current_price <= 0 or current_rate <= 0:
+        print("⚠️ 初始化价格数据不完整，估值可能不准确。")
 
     user_status = pm.get_user_status(current_price, current_rate)
     stock_prompt = build_stock_prompt(target_asset)
@@ -80,18 +89,21 @@ def main():
 
     aud_cash = pm.profile['current_assets'].get('aud_cash', 0.0)
 
-    friction_report = get_cost_report(
-        invest_cny=user_status.disposable_for_invest,
-        spot_rate=current_rate
-    )
-
     # --- 2. 准备历史行情分析报告 (供专家参考) ---
     print("📊 正在生成分项市场历史数据报告...")
-    fx_report = analyze_multi_timeframe(get_history_data("AUDCNY=X", "2y"), "CURRENCY RATE (AUD/CNY)")
     stock_report = analyze_multi_timeframe(
         get_history_data(target_asset, "2y"),
         f"TARGET ASSET ({target_asset})"
     )
+    if is_china_asset:
+        fx_report = "FX analysis skipped (China/HK target asset)."
+        friction_report = "N/A (China/HK target asset, no FX transfer required)."
+    else:
+        fx_report = analyze_multi_timeframe(get_history_data("AUDCNY=X", "2y"), "CURRENCY RATE (AUD/CNY)")
+        friction_report = get_cost_report(
+            invest_cny=user_status.disposable_for_invest,
+            spot_rate=current_rate
+        )
 
     # [新增] 获取宏观数据
     print("🌍 正在获取宏观经济数据 (Yields, VIX)...")
@@ -104,7 +116,9 @@ def main():
 
 Please analyze the global macro environment (Interest Rates, Inflation, Cycle, Geopolitics).
 """
-    fx_query = f"""
+    fx_query = ""
+    if not is_china_asset:
+        fx_query = f"""
 # market data: 
 {fx_report}
 
@@ -133,7 +147,8 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
         return analysis
 
     print("\n🤖 [Agent 0] 宏观策略师正在研判全球局势...")
-    print("\n🤖 [Agent 1] 外汇专家正在分析汇率...")
+    if not is_china_asset:
+        print("\n🤖 [Agent 1] 外汇专家正在分析汇率...")
     print("\n🤖 [Agent 2] 股票交易员正在分析盘面...")
 
     jobs = {
@@ -145,14 +160,6 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
             "failed_msg": "⚠️ **Analysis Failed**: Macro agent encountered an error.",
             "unavailable_title": "Macro Analysis",
         },
-        "fx": {
-            "prompt": PROMPT_FOREX_AGENT,
-            "query": fx_query,
-            "preview_label": "外汇专家观点",
-            "error_log_label": "Agent 1",
-            "failed_msg": "⚠️ **Analysis Failed**: Forex agent encountered an error.",
-            "unavailable_title": "Forex Analysis",
-        },
         "stock": {
             "prompt": stock_prompt,
             "query": stock_query,
@@ -162,15 +169,24 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
             "unavailable_title": "Stock Analysis",
         },
     }
+    if not is_china_asset:
+        jobs["fx"] = {
+            "prompt": PROMPT_FOREX_AGENT,
+            "query": fx_query,
+            "preview_label": "外汇专家观点",
+            "error_log_label": "Agent 1",
+            "failed_msg": "⚠️ **Analysis Failed**: Forex agent encountered an error.",
+            "unavailable_title": "Forex Analysis",
+        }
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
         futures = {executor.submit(run_agent_job, job): key for key, job in jobs.items()}
         for future in as_completed(futures):
             key = futures[future]
             results[key] = future.result()
 
     macro_analysis = results.get("macro", "")
-    fx_analysis = results.get("fx", "")
+    fx_analysis = results.get("fx", "⚠️ **Forex Analysis Skipped** (China/HK target asset).")
     stock_analysis = results.get("stock", "")
 
     # --- 6. 运行 Agent 3: 首席投资顾问 ---

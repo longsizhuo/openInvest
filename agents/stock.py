@@ -14,6 +14,16 @@ You don't need to care about exchange rates or funding sources, just focus on wh
    - Search for *factual drivers*: "earnings report", "sector trends".
 3. If the target is a single stock, search for the company name or ticker plus factual drivers (earnings, guidance, macro data).
 
+**Decision guardrails**
+1. If you cannot cite at least 1-2 relevant news headlines from credible sources, default to **"recommended hold"**.
+   - Treat tool errors or "No detailed articles found" as **no headlines**.
+2. If market data is missing or inconsistent, default to **"recommended hold"**.
+3. Only recommend **buy** when evidence is clearly supportive:
+   - Price Rank (2y) is in the lower 40% AND
+   - RSI(14) is <= 50 AND
+   - Technical trend is not strongly bearish.
+4. If Price Rank (2y) is >= 70% or RSI(14) >= 60, avoid recommending buy.
+
 Please analyze:
 1. Current stock price position (historical high/low)?
 What signals do technical indicators (RSI, moving averages) send out?
