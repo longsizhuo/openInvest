@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -89,31 +90,14 @@ def main():
     print("🌍 正在获取宏观经济数据 (Yields, VIX)...")
     macro_data_report = get_macro_data()
 
-    # --- 3. [新增] 运行 Agent 0: 宏观策略师 ---
-    print("\n🤖 [Agent 0] 宏观策略师正在研判全球局势...")
-    macro_analysis = "⚠️ **Analysis Failed**: Macro agent encountered an error."
-    try:
-        agent_macro = create_agent(PROMPT_MACRO_AGENT)
-        if agent_macro:
-            macro_query = f"""
+    # --- 3. 并行运行独立 Agent ---
+    macro_query = f"""
 # Macro Data Reference:
 {macro_data_report}
 
 Please analyze the global macro environment (Interest Rates, Inflation, Cycle, Geopolitics).
 """
-            macro_analysis = agent_macro.run(macro_query)
-            print(f"宏观策略师观点:\n{macro_analysis[:150]}...")
-    except Exception as e:
-        print(f"❌ [Error] Agent Macro failed: {e}")
-        macro_analysis = f"⚠️ **Macro Analysis Unavailable**\n\nError details: {str(e)}"
-
-    # --- 4. 运行 Agent 1: 外汇专家 ---
-    print("\n🤖 [Agent 1] 外汇专家正在分析汇率...")
-    fx_analysis = "⚠️ **Analysis Failed**: Forex agent encountered an error."
-    try:
-        agent_fx = create_agent(PROMPT_FOREX_AGENT)
-        if agent_fx:
-            fx_query = f"""
+    fx_query = f"""
 # market data: 
 {fx_report}
 
@@ -121,29 +105,65 @@ Please analyze the global macro environment (Interest Rates, Inflation, Cycle, G
 
 Please analyze the trend of AUD/CNY exchange rate and provide exchange recommendations.
 """
-            fx_analysis = agent_fx.run(fx_query)
-            print(f"外汇专家观点:\n{fx_analysis[:150]}...")
-    except Exception as e:
-        print(f"❌ [Error] Agent 1 failed: {e}")
-        fx_analysis = f"⚠️ **Forex Analysis Unavailable**\n\nError details: {str(e)}"
-
-    # --- 4. 运行 Agent 2: 股票交易员 ---
-    print("\n🤖 [Agent 2] 股票交易员正在分析盘面...")
-    stock_analysis = "⚠️ **Analysis Failed**: Stock agent encountered an error."
-    try:
-        agent_stock = create_agent(PROMPT_STOCK_AGENT)
-        if agent_stock:
-            stock_query = f"""
+    stock_query = f"""
 # market data: 
 {stock_report}
 
 Please analyze the trend of NDQ.AX and provide buying and selling recommendations.
 """
-            stock_analysis = agent_stock.run(stock_query)
-            print(f"✅ 股票交易员观点:\n{stock_analysis[:150]}...")
-    except Exception as e:
-        print(f"❌ [Error] Agent 2 failed: {e}")
-        stock_analysis = f"⚠️ **Stock Analysis Unavailable**\n\nError details: {str(e)}"
+
+    def run_agent_job(job: dict) -> str:
+        analysis = job["failed_msg"]
+        try:
+            agent = create_agent(job["prompt"])
+            if agent:
+                analysis = agent.run(job["query"])
+                print(f"{job['preview_label']}:\n{analysis[:150]}...")
+        except Exception as e:
+            print(f"❌ [Error] {job['error_log_label']} failed: {e}")
+            analysis = f"⚠️ **{job['unavailable_title']} Unavailable**\n\nError details: {str(e)}"
+        return analysis
+
+    print("\n🤖 [Agent 0] 宏观策略师正在研判全球局势...")
+    print("\n🤖 [Agent 1] 外汇专家正在分析汇率...")
+    print("\n🤖 [Agent 2] 股票交易员正在分析盘面...")
+
+    jobs = {
+        "macro": {
+            "prompt": PROMPT_MACRO_AGENT,
+            "query": macro_query,
+            "preview_label": "宏观策略师观点",
+            "error_log_label": "Agent Macro",
+            "failed_msg": "⚠️ **Analysis Failed**: Macro agent encountered an error.",
+            "unavailable_title": "Macro Analysis",
+        },
+        "fx": {
+            "prompt": PROMPT_FOREX_AGENT,
+            "query": fx_query,
+            "preview_label": "外汇专家观点",
+            "error_log_label": "Agent 1",
+            "failed_msg": "⚠️ **Analysis Failed**: Forex agent encountered an error.",
+            "unavailable_title": "Forex Analysis",
+        },
+        "stock": {
+            "prompt": PROMPT_STOCK_AGENT,
+            "query": stock_query,
+            "preview_label": "✅ 股票交易员观点",
+            "error_log_label": "Agent 2",
+            "failed_msg": "⚠️ **Analysis Failed**: Stock agent encountered an error.",
+            "unavailable_title": "Stock Analysis",
+        },
+    }
+    results = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(run_agent_job, job): key for key, job in jobs.items()}
+        for future in as_completed(futures):
+            key = futures[future]
+            results[key] = future.result()
+
+    macro_analysis = results.get("macro", "")
+    fx_analysis = results.get("fx", "")
+    stock_analysis = results.get("stock", "")
 
     # --- 6. 运行 Agent 3: 首席投资顾问 ---
     print("\n🤖 [Agent 3] 首席顾问正在进行最终决策...")
