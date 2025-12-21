@@ -1,92 +1,23 @@
 import os
 from typing import Optional
-from dotenv import load_dotenv
-from agent import SimpleAgent
-from exchange_fee import get_history_data, analyze_multi_timeframe, get_macro_data
-from portfolio_manager import PortfolioManager
 
-from notifier import send_gmail_notification
+from dotenv import load_dotenv
+
+from agents.agent import SimpleAgent
+from agents.forex import PROMPT_FOREX_AGENT
+from agents.macro import PROMPT_MACRO_AGENT
+from agents.manager import PROMPT_MANAGER_AGENT
+from agents.stock import PROMPT_STOCK_AGENT
+from core.portfolio_manager import PortfolioManager
+from services.notifier import send_gmail_notification
+from utils.exchange_fee import (
+    get_history_data,
+    analyze_multi_timeframe,
+    get_macro_data,
+    get_cost_report,
+)
 
 load_dotenv()
-
-PROMPT_FOREX_AGENT = """
-You are a foreign exchange trading expert. Your task is to focus on analyzing the trend of AUD/CNY exchange rate.
-You can only see data related to exchange rates.
-
-**Core constraint: T+7 rule**
-It takes 7 natural days for the exchange of Chinese yuan to Australian dollar to arrive.
-This means that your suggestion today is for the fund reserve service next week (7 days later).
-You don't need to consider the stock market situation, just focus on when it's most cost-effective to exchange currency.
-
-**Tool usage strategy**
-1. When searching for news, translate keywords into English. **CRITICAL: Do NOT search for opinions or forecasts (e.g., avoid "AUD CNY forecast", "prediction", "outlook").** Instead, search for *factual drivers* such as "RBA interest rate minutes", "China manufacturing PMI", "Iron ore prices", or "Australia inflation data".
-2. You must form your own prediction based on these facts, rather than relying on search results for the conclusion.
-
-Please analyze:
-Is the current exchange rate high or low? (Reference historical percentile)
-2. What is the expected trend for the next week (combined with news and technical aspects)?
-Conclusion: Should we exchange Chinese yuan for Australian dollars now?
-
-Please provide a brief and sharp analysis, and clearly indicate the tendency towards "suggested exchange" or "suggested waiting".
-**Finally, please list 1-2 key news headlines that you have referenced. **
-"""
-
-PROMPT_MACRO_AGENT = """
-You are a Global Macro Strategy Researcher. Your goal is to assess the overall investment environment.
-You do NOT analyze specific stocks, but rather the "weather" of the global economy.
-
-**Core Focus Areas (The "Missing 4 Factors"):**
-1. **Interest Rates & Central Banks**: US Fed (Jerome Powell) and RBA decisions. Are yields (^TNX) rising (bad for tech) or falling?
-2. **Inflation Expectations**: Latest US CPI/PCE data. Is inflation sticky? (Erodes real returns).
-3. **Economic Cycle**: Recession fears? Soft landing? or AI-driven productivity boom?
-4. **Geopolitical Risks**: Wars, trade sanctions, or supply chain disruptions (Middle East, Russia-Ukraine, US-China relations).
-
-**Tool usage strategy**
-- Search for: "US Fed rate decision", "US CPI inflation report", "Geopolitical tensions latest", "Global recession risk", "US 10 year treasury yield trend".
-- Translate keywords to English for searching.
-
-Please provide:
-1. **Macro Sentiment Score**: Scale from -5 (Extreme Risk/Crash Imminent) to +5 (Goldilocks/Perfect Growth).
-2. **Key Headwinds (Negatives)** & **Key Tailwinds (Positives)**.
-3. **Conclusion**: Is the current environment "Risk-On" (safe to invest) or "Risk-Off" (defensive)?
-"""
-
-PROMPT_STOCK_AGENT = """
-You are a trader in the US/Australian stock market. Your task is to focus on analyzing the trend of NDQ.AX (NASDAQ 100 Australian ETF).
-You can only see data related to stocks.
-
-**Core Background**
-The user's account already has some Australian dollars (AUD) in cash that can be bought at any time.
-You don't need to care about exchange rates or funding sources, just focus on whether the current stock price is worth buying.
-
-**Tool usage strategy**
-1. When searching for news, translate keywords into English. 
-2. **CRITICAL SEARCH RULE**: Do NOT search for the ticker "NDQ.AX" or "NDQ" directly, as it limits results to local ETF news. 
-   - **ALWAYS search for the underlying index**: Use keywords like **"Nasdaq 100", "US Tech Sector", "QQQ ETF", "Magnificent Seven stocks"**.
-   - Search for *factual drivers*: "US tech earnings report", "AI sector trends".
-3. Pay attention to the macro sentiment of the NASDAQ index and specific developments in the Australian market only if relevant to the ETF structure.
-
-Please analyze:
-1. Current stock price position (historical high/low)?
-What signals do technical indicators (RSI, moving averages) send out?
-Conclusion: Should we buy now?
-
-Please provide a brief and sharp analysis, and clearly indicate the tendency of 'recommended buy', 'recommended hold', 'recommended sell'.
-**Finally, please list 1-2 key news headlines that you have referenced. **
-"""
-PROMPT_MANAGER_AGENT = """
-You are a Chief Investment Advisor (Portfolio Manager).
-You have a God's perspective and are responsible for synthesizing multiple information to make the final asset allocation decision.
-
-**Decision logic**
-1. **Macro Environment (The "Weather")**: Refer to the Macro Strategist. If the Macro Score is negative (e.g., <-2), be very conservative even if stocks look cheap. High rates or War = CAUTION.
-2. **Exchange Decision (CNY -> AUD)**: Refer to the Forex Expert.
-3. **Trading Decision (AUD -> NDQ.AX)**: Refer to the Stock Trader.
-
-**Output requirements**
-1. Briefly summarize the core conflicts or consensus between the experts.
-2. Provide specific operational recommendations based on user funds.
-"""
 
 
 # ==========================================
@@ -123,8 +54,6 @@ def create_agent(system_prompt: str, model_name="deepseek-chat") -> Optional[Sim
 # ==========================================
 
 def main():
-    print("🚀 启动多智能体协作系统 (Multi-Agent System)...")
-
     # --- 1. 初始化用户状态 ---
     pm = PortfolioManager()
     pm.process_income()
@@ -145,6 +74,11 @@ def main():
     user_status = pm.get_user_status(current_price, current_rate)
 
     aud_cash = pm.profile['current_assets'].get('aud_cash', 0.0)
+
+    friction_report = get_cost_report(
+        invest_cny=user_status.disposable_for_invest,
+        spot_rate=current_rate
+    )
 
     # --- 2. 准备历史行情分析报告 (供专家参考) ---
     print("📊 正在生成分项市场历史数据报告...")
@@ -182,6 +116,8 @@ Please analyze the global macro environment (Interest Rates, Inflation, Cycle, G
             fx_query = f"""
 # market data: 
 {fx_report}
+
+{friction_report}
 
 Please analyze the trend of AUD/CNY exchange rate and provide exchange recommendations.
 """
@@ -224,6 +160,7 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
 3. **外汇专家观点**：{fx_analysis}
 4. **股票交易员观点**：{stock_analysis}
 5. **市场分析报告**：{stock_report} {fx_report} {macro_data_report}
+6. **交易摩擦成本 (预先计算)**：{friction_report}
 
 
 **你的任务**：
@@ -259,6 +196,11 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
     # --- 7. 发送邮件通知 ---
     full_report = f"""
 # 投资分析报告 / Invest Agent Report
+
+## 0. 交易摩擦成本 (Friction Cost)
+{friction_report}
+
+---
 
 ## 1. 宏观策略环境 (Macro Strategy)
 {macro_analysis}

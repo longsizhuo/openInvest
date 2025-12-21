@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional
 
-from langchain_openai import ChatOpenAI
-from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
-
-from langchain.tools import tool
-from langchain_core.messages import HumanMessage, ToolMessage
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_tool_call
+from langchain.tools import tool
+from langchain_chroma import Chroma
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langchain_openai import ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
 
 # Optional
 try:
@@ -18,7 +17,7 @@ try:
 except Exception:  # pragma: no cover
     BingSearchAPIWrapper = None  # type: ignore
 
-from news import get_real_finance_news
+from services.news import get_real_finance_news
 
 
 # -----------------------------
@@ -147,7 +146,7 @@ def build_tools(
     enable_search: bool = True,
     bing_subscription_key: Optional[str] = None,
     bing_search_url: Optional[str] = None,
-) -> List[Callable]:
+) -> list[BaseTool]:
     retriever = vectordb.as_retriever(search_kwargs={"k": 6})
 
     @tool("kb_search")
@@ -165,7 +164,7 @@ def build_tools(
 
         return "\n\n".join(parts)
 
-    tools: List[Callable] = [kb_search]
+    tools = [kb_search]
 
     if enable_search:
 

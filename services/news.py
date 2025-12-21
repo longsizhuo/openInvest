@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import re
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
-import re
-import time
-from ddgs import DDGS
-import trafilatura
+
 import requests
+import trafilatura
+from ddgs import DDGS
+from readability import Document
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from readability import Document
 
 
 # -----------------------------

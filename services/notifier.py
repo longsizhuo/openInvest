@@ -1,14 +1,14 @@
-import smtplib
 import os
+import smtplib
 import socket
-import time  # 新增：用于重试间隔
-
 import ssl
-import markdown
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import Header
+import time  # 新增：用于重试间隔
 from datetime import datetime
+from email.header import Header
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+import markdown
 from dotenv import load_dotenv
 
 load_dotenv()

@@ -1,7 +1,7 @@
 import json
 import os
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
 
 PROFILE_PATH = "user_profile.json"
 

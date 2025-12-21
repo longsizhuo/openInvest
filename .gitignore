@@ -1,3 +1,6 @@
 .env
 chroma.*
 .idea
+# 隐私数据
+cache_data
+user_profile.json
