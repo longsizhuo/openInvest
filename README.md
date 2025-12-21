@@ -25,6 +25,7 @@ pip install -r requirements.txt
 ```
 
 **安装 uv（如未安装）：**
+
 ```bash
 # macOS / Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
