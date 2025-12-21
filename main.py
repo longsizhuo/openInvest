@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 from agents.agent import SimpleAgent
 from agents.forex import PROMPT_FOREX_AGENT
 from agents.macro import PROMPT_MACRO_AGENT
-from agents.manager import PROMPT_MANAGER_AGENT
-from agents.stock import PROMPT_STOCK_AGENT
+from agents.manager import build_manager_prompt
+from agents.stock import build_stock_prompt
 from core.portfolio_manager import PortfolioManager
 from services.notifier import send_gmail_notification
 from utils.exchange_fee import (
@@ -59,12 +59,14 @@ def main():
     pm = PortfolioManager()
     pm.process_income()
 
+    target_asset = pm.profile.get("investment_strategy", {}).get("target_asset", "NDQ.AX")
+
     # 获取实时价格用于估值
     try:
         # 获取 1d 数据即可，不用拉 2y，加快速度
         # 但 report 生成需要 2y
-        df_ndq = get_history_data("NDQ.AX", "1d")
-        current_price = df_ndq['Close'].iloc[-1]
+        df_asset = get_history_data(target_asset, "1d")
+        current_price = df_asset['Close'].iloc[-1]
 
         df_fx = get_history_data("AUDCNY=X", "1d")
         current_rate = df_fx['Close'].iloc[-1]
@@ -73,6 +75,8 @@ def main():
         return
 
     user_status = pm.get_user_status(current_price, current_rate)
+    stock_prompt = build_stock_prompt(target_asset)
+    manager_prompt = build_manager_prompt(target_asset)
 
     aud_cash = pm.profile['current_assets'].get('aud_cash', 0.0)
 
@@ -84,7 +88,10 @@ def main():
     # --- 2. 准备历史行情分析报告 (供专家参考) ---
     print("📊 正在生成分项市场历史数据报告...")
     fx_report = analyze_multi_timeframe(get_history_data("AUDCNY=X", "2y"), "CURRENCY RATE (AUD/CNY)")
-    stock_report = analyze_multi_timeframe(get_history_data("NDQ.AX", "2y"), "TARGET ASSET (NDQ.AX)")
+    stock_report = analyze_multi_timeframe(
+        get_history_data(target_asset, "2y"),
+        f"TARGET ASSET ({target_asset})"
+    )
 
     # [新增] 获取宏观数据
     print("🌍 正在获取宏观经济数据 (Yields, VIX)...")
@@ -106,10 +113,11 @@ Please analyze the global macro environment (Interest Rates, Inflation, Cycle, G
 Please analyze the trend of AUD/CNY exchange rate and provide exchange recommendations.
 """
     stock_query = f"""
-# market data: 
+# target asset: {target_asset}
+# market data:
 {stock_report}
 
-Please analyze the trend of NDQ.AX and provide buying and selling recommendations.
+Please analyze the trend of {target_asset} and provide buying and selling recommendations.
 """
 
     def run_agent_job(job: dict) -> str:
@@ -146,7 +154,7 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
             "unavailable_title": "Forex Analysis",
         },
         "stock": {
-            "prompt": PROMPT_STOCK_AGENT,
+            "prompt": stock_prompt,
             "query": stock_query,
             "preview_label": "✅ 股票交易员观点",
             "error_log_label": "Agent 2",
@@ -169,7 +177,7 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
     print("\n🤖 [Agent 3] 首席顾问正在进行最终决策...")
     final_decision = "⚠️ **Decision Failed**: Chief Manager encountered an error."
     try:
-        agent_manager = create_agent(PROMPT_MANAGER_AGENT)
+        agent_manager = create_agent(manager_prompt)
         if agent_manager:
             final_prompt =  f"""
 
@@ -232,7 +240,7 @@ Please analyze the trend of NDQ.AX and provide buying and selling recommendation
 
 ---
 
-## 3. 股票交易员分析 (Stock Trader - NDQ.AX)
+## 3. 股票交易员分析 (Stock Trader - {target_asset})
 {stock_analysis}
 
 ---

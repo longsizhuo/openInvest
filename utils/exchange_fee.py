@@ -152,7 +152,7 @@ class TransactionCostCalculator:
 # -----------------------------
 def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
     """
-    通用获取函数：既可以抓股票(NDQ.AX)，也可以抓汇率(AUDCNY=X)。
+    通用获取函数：既可以抓股票(如 NDQ.AX)，也可以抓汇率(AUDCNY=X)。
     """
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR)
@@ -299,10 +299,10 @@ def get_macro_data() -> str:
         return f"Error fetching macro data: {e}"
 
 
-def get_full_market_data() -> str:
-    # 1. 获取 纳指ETF (NDQ.AX) 数据
-    df_ndq = get_history_data("NDQ.AX", "2y")
-    report_ndq = analyze_multi_timeframe(df_ndq, "TARGET ASSET (NDQ.AX)")
+def get_full_market_data(target_asset: str = "NDQ.AX") -> str:
+    # 1. 获取目标资产数据
+    df_asset = get_history_data(target_asset, "2y")
+    report_asset = analyze_multi_timeframe(df_asset, f"TARGET ASSET ({target_asset})")
 
     # 2. 获取 澳元兑人民币 (AUDCNY=X) 数据
     # Yahoo Finance 代码: AUDCNY=X
@@ -310,7 +310,7 @@ def get_full_market_data() -> str:
     report_fx = analyze_multi_timeframe(df_fx, "CURRENCY RATE (AUD/CNY)")
 
     return f"""
-{report_ndq}
+{report_asset}
 
 {report_fx}
 """
