@@ -153,41 +153,22 @@ def _source_quality(domain: str, whitelist: Optional[List[str]], blacklist: Opti
     return 0.60
 
 
+from curl_cffi import requests as cffi_requests
+
 _SESSION = None
 
 
 def _get_session():
     global _SESSION
     if _SESSION is None:
-        _SESSION = requests.Session()
-        # 完整的 Headers (模拟现代 Chrome)
+        # Use curl_cffi for browser impersonation (impersonate="chrome")
+        # This bypasses TLS fingerprinting and reduces 429 errors
+        _SESSION = cffi_requests.Session(impersonate="chrome")
         _SESSION.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
             "Referer": "https://www.google.com/",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "cross-site",
-            "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0",
         })
-        # 增强重试策略: backoff_factor=2 (等待 2s, 4s, 8s)
-        retries = Retry(
-            total=3,
-            backoff_factor=2,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "OPTIONS"]
-        )
-        adapter = HTTPAdapter(max_retries=retries)
-        _SESSION.mount('http://', adapter)
-        _SESSION.mount('https://', adapter)
     return _SESSION
 
 
@@ -197,11 +178,10 @@ def _extract_main_text(url: str, timeout: int = 15) -> str:
 
     try:
         session = _get_session()
+        # curl_cffi handles headers and TLS fingerprint automatically
         response = session.get(url, timeout=timeout)
         response.raise_for_status()
 
-        # 确保编码正确
-        response.encoding = response.apparent_encoding
         html = response.text
 
         # 策略 1: Trafilatura (Precision)
@@ -220,7 +200,6 @@ def _extract_main_text(url: str, timeout: int = 15) -> str:
         if Document:
             try:
                 doc = Document(html)
-                # 使用 trafilatura 清洗 readability 提取的 summary HTML
                 summary_html = doc.summary()
                 text = trafilatura.extract(summary_html, include_comments=False, include_tables=False)
                 if text:
@@ -231,7 +210,6 @@ def _extract_main_text(url: str, timeout: int = 15) -> str:
 
         return ""
     except Exception as e:
-        # 如果下载失败，返回空，保留标题供 Review
         print(f"Error fetching {url}: {e}")
         return ""
 
