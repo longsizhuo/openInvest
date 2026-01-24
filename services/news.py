@@ -160,25 +160,29 @@ def _get_session():
     global _SESSION
     if _SESSION is None:
         _SESSION = requests.Session()
-        # 完整的 Headers
+        # 完整的 Headers (模拟现代 Chrome)
         _SESSION.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.google.com/",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
+            "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-Site": "cross-site",
             "Sec-Fetch-User": "?1",
             "Cache-Control": "max-age=0",
         })
-        # 重试策略
+        # 增强重试策略: backoff_factor=2 (等待 2s, 4s, 8s)
         retries = Retry(
             total=3,
-            backoff_factor=1,
-            status_forcelist=[500, 502, 503, 504],
+            backoff_factor=2,
+            status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "OPTIONS"]
         )
         adapter = HTTPAdapter(max_retries=retries)

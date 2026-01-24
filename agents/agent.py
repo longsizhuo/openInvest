@@ -266,6 +266,7 @@ class SimpleAgent:
         bing_search_url: Optional[str] = None,
         **llm_kwargs,
     ) -> None:
+        self.collected_context: List[str] = []  # Store tool outputs here
         self._agent = create_agent_graph(
             temperature=temperature,
             persist_directory=persist_directory,
@@ -280,15 +281,26 @@ class SimpleAgent:
         )
 
     def run(self, question: str) -> str:
+        self.collected_context = []  # Clear previous context
         state = self._agent.invoke(
             {"messages": [HumanMessage(content=question)]}
         )
         # create_agent 的 graph 输出是一个 state dict，messages 在里面
         msgs = state.get("messages", [])
+        
+        # Capture tool outputs
+        for m in msgs:
+            if isinstance(m, ToolMessage):
+                tool_name = m.name if hasattr(m, "name") and m.name else "Tool"
+                self.collected_context.append(f"--- [Tool Output: {tool_name}] ---\n{m.content}\n")
+
         if not msgs:
             return ""
         last = msgs[-1]
         return getattr(last, "content", "") or ""
+
+    def get_context(self) -> str:
+        return "\n".join(self.collected_context)
 
 
 __all__ = ["create_agent_graph", "SimpleAgent", "build_llm", "build_vectorstore", "build_tools"]

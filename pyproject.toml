@@ -17,4 +17,6 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "pandas-stubs~=2.3.3",
     "markdown>=3.10",
+    "requests-cache>=1.2.1",
+    "requests>=2.32.5",
 ]

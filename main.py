@@ -1,4 +1,5 @@
 import os
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
@@ -20,6 +21,29 @@ from utils.exchange_fee import (
 )
 
 load_dotenv()
+
+
+def run_gemini_cli_review(prompt: str) -> str:
+    print("🤖 [Gemini CLI] 正在生成第二意见...")
+    
+    gemini_cmd = "/home/ubuntu/.nvm/versions/node/v24.13.0/bin/gemini"
+    if not os.path.exists(gemini_cmd):
+        gemini_cmd = "gemini"
+
+    try:
+        result = subprocess.run(
+            [gemini_cmd, prompt], 
+            capture_output=True, 
+            text=True, 
+            timeout=180
+        )
+        if result.returncode != 0:
+            return f"Error: {result.stderr.strip()}"
+            
+        return result.stdout.strip()
+        
+    except Exception as e:
+        return f"Skipped: {e}"
 
 
 # ==========================================
@@ -153,17 +177,19 @@ Please analyze the trend of AUD/CNY exchange rate and provide exchange recommend
 Please analyze the trend of {target_asset} and provide buying and selling recommendations.
 """
 
-    def run_agent_job(job: dict) -> str:
+    def run_agent_job(job: dict) -> tuple[str, str]:
         analysis = job["failed_msg"]
+        context = ""
         try:
             agent = create_agent(job["prompt"])
             if agent:
                 analysis = agent.run(job["query"])
+                context = agent.get_context()
                 print(f"{job['preview_label']}:\n{analysis[:150]}...")
         except Exception as e:
             print(f"❌ [Error] {job['error_log_label']} failed: {e}")
             analysis = f"⚠️ **{job['unavailable_title']} Unavailable**\n\nError details: {str(e)}"
-        return analysis
+        return analysis, context
 
     print("\n🤖 [Agent 0] 宏观策略师正在研判全球局势...")
     if not is_china_asset:
@@ -198,11 +224,14 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
             "unavailable_title": "Forex Analysis",
         }
     results = {}
+    contexts = {}
     with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
         futures = {executor.submit(run_agent_job, job): key for key, job in jobs.items()}
         for future in as_completed(futures):
             key = futures[future]
-            results[key] = future.result()
+            ans, ctx = future.result()
+            results[key] = ans
+            contexts[key] = ctx
 
     macro_analysis = results.get("macro", "")
     fx_analysis = results.get("fx", "⚠️ **Forex Analysis Skipped** (China/HK target asset).")
@@ -210,11 +239,11 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
 
     # --- 6. 运行 Agent 3: 首席投资顾问 ---
     print("\n🤖 [Agent 3] 首席顾问正在进行最终决策...")
-    final_decision = "⚠️ **Decision Failed**: Chief Manager encountered an error."
-    try:
-        agent_manager = create_agent(manager_prompt)
-        if agent_manager:
-            final_prompt =  f"""
+    final_decision_ds = "⚠️ **Decision Failed**: Chief Manager encountered an error."
+    final_decision_gemini = "⚠️ **Decision Failed**: Gemini CLI encountered an error."
+
+    # 1. 构造统一的决策 Prompt
+    final_prompt =  f"""
 
 你是一名专业的私人投资顾问。你拥有以下信息：
 
@@ -250,11 +279,24 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
 - 给出**换汇建议**（是否立即换汇）。
 
 """
-            final_decision = agent_manager.run(final_prompt)
-            print(final_decision)
+
+    # 2. DeepSeek 决策
+    try:
+        agent_manager = create_agent(manager_prompt)
+        if agent_manager:
+            final_decision_ds = agent_manager.run(final_prompt)
+            print(f"DeepSeek Decision:\n{final_decision_ds[:100]}...")
     except Exception as e:
-        print(f"❌ [Error] Agent 3 failed: {e}")
-        final_decision = f"⚠️ **Final Decision Unavailable**\n\nSystem encountered a critical error during final synthesis.\nError: {str(e)}"
+        print(f"❌ [Error] Agent 3 (DeepSeek) failed: {e}")
+        final_decision_ds = f"⚠️ **DeepSeek Decision Unavailable**\nError: {str(e)}"
+
+    # 3. Gemini CLI 决策 (接收相同的 prompt)
+    try:
+        final_decision_gemini = run_gemini_cli_review(final_prompt)
+        print(f"Gemini Decision:\n{final_decision_gemini[:100]}...")
+    except Exception as e:
+        print(f"❌ [Error] Gemini CLI failed: {e}")
+        final_decision_gemini = f"⚠️ **Gemini Decision Unavailable**\nError: {str(e)}"
 
     # --- 7. 发送邮件通知 ---
     full_report = f"""
@@ -280,8 +322,13 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
 
 ---
 
-## 4. 首席顾问最终决策 (Final Decision)
-{final_decision}
+## 4. 首席顾问最终决策 (DeepSeek)
+{final_decision_ds}
+
+---
+
+## 5. 首席顾问最终决策 (Gemini)
+{final_decision_gemini}
 
 ---
 *Market Data Reference:*
@@ -290,7 +337,34 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
 {fx_report}
 
 {stock_report}
+
+<detail>
+### RAW DATA & TOOL OUTPUTS ###
+
+#### 1. Macro Data Report (Raw)
+{macro_data_report}
+
+#### 2. Stock Data Report (Raw)
+{stock_report}
+
+#### 3. Friction/Cost Report (Raw)
+{friction_report}
+
+#### 4. Agent Tool Outputs (News & Search)
+**Macro Agent Context:**
+{contexts.get('macro', 'N/A')}
+
+**Forex Agent Context:**
+{contexts.get('fx', 'N/A')}
+
+**Stock Agent Context:**
+{contexts.get('stock', 'N/A')}
+
+### FINAL DECISION CONTEXT (Prompt) ###
+{final_prompt}
+</detail>
 """
+
     send_gmail_notification(full_report)
 
 

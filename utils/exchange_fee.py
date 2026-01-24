@@ -5,7 +5,8 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+import yfinance as yf # Keep import for typing or fallback
+import requests
 
 CACHE_DIR = "cache_data"
 
@@ -151,34 +152,100 @@ class TransactionCostCalculator:
 # 1. 通用数据获取 (Generic Fetcher)
 # -----------------------------
 def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
-    """
-    通用获取函数：既可以抓股票(如 NDQ.AX)，也可以抓汇率(AUDCNY=X)。
-    """
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR)
 
-    # 处理一下文件名，避免 symbol 里有特殊字符导致路径错误
-    safe_symbol = symbol.replace("=", "").replace(".", "_")
+    safe_symbol = symbol.replace("=", "").replace(".", "_").replace("/", "")
     csv_path = os.path.join(CACHE_DIR, f"{safe_symbol}_{period}.csv")
 
-    # [Hit]
+    # Hit Cache
     if os.path.exists(csv_path):
         file_time = datetime.fromtimestamp(os.path.getmtime(csv_path))
         if file_time.date() == datetime.now().date():
-            return pd.read_csv(csv_path, index_col=0, parse_dates=True)
+            try:
+                return pd.read_csv(csv_path, index_col=0, parse_dates=True)
+            except:
+                pass
 
-    # [Miss]
-    print(f"🔄 [API Update] 正在更新数据: {symbol}...")
+    # API Fetch
+    print(f"🔄 [TwelveData Update] Fetching: {symbol}...")
+    
+    api_key = os.getenv("TWELVE_DATA_API_KEY")
+    if not api_key:
+        print("❌ Error: TWELVE_DATA_API_KEY not found in env.")
+        return pd.DataFrame()
+
+    # Symbol Mapping
+    req_symbol = symbol
+    req_exchange = ""
+    
+    if symbol == "NDQ.AX":
+        req_symbol = "NDQ"
+        req_exchange = "ASX"
+    elif symbol == "AUDCNY=X":
+        req_symbol = "AUD/CNY"
+    elif symbol == "^TNX":
+        req_symbol = "TNX" # Try direct symbol
+    elif symbol == "^VIX":
+        req_symbol = "VIX"
+
+    # Interval Mapping
+    outputsize = 500 # Default for 2y
+    if period == "1mo":
+        outputsize = 30
+    
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": req_symbol,
+        "interval": "1day",
+        "outputsize": outputsize,
+        "apikey": api_key,
+        "order": "ASC" # Oldest first, matches yfinance history format
+    }
+    if req_exchange:
+        params["exchange"] = req_exchange
+
     try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period=period)
-        if not hist.empty:
-            hist.to_csv(csv_path)
-            return hist
-    except Exception as e:
-        print(f"⚠️ 获取数据失败 {symbol}: {e}")
+        resp = requests.get(url, params=params, timeout=15)
+        data = resp.json()
+        
+        if "values" not in data:
+            # Handle API errors gracefully
+            if "message" in data:
+                print(f"⚠️ TwelveData Error for {symbol}: {data['message']}")
+            elif "code" in data:
+                 print(f"⚠️ TwelveData Error code {data['code']} for {symbol}")
+            else:
+                 print(f"⚠️ TwelveData unknown response for {symbol}")
+            return pd.DataFrame()
+            
+        # Parse to DataFrame
+        df = pd.DataFrame(data["values"])
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df.set_index('datetime', inplace=True)
+        
+        # Rename columns to match yfinance format (Open, High, Low, Close, Volume)
+        # TwelveData returns lowercase: open, high, low, close, volume
+        df.rename(columns={
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume"
+        }, inplace=True)
+        
+        # Ensure numeric
+        cols = ["Open", "High", "Low", "Close"]
+        for c in cols:
+            df[c] = pd.to_numeric(df[c])
+            
+        # Save Cache
+        df.to_csv(csv_path)
+        return df
 
-    return pd.DataFrame()
+    except Exception as e:
+        print(f"❌ API Request Failed: {e}")
+        return pd.DataFrame()
 
 
 # -----------------------------
