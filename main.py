@@ -11,6 +11,7 @@ from agents.manager import build_manager_prompt
 from agents.stock import build_stock_prompt
 from core.portfolio_manager import PortfolioManager
 from services.notifier import send_gmail_notification
+from services.commsec_reader import CommSecReader
 from utils.exchange_fee import (
     get_history_data,
     analyze_multi_timeframe,
@@ -72,6 +73,24 @@ def _is_china_market(symbol: str) -> bool:
 def main():
     # --- 1. 初始化用户状态 ---
     pm = PortfolioManager()
+
+    # [新增] 检查 CommSec 邮件
+    email_user = os.getenv("EMAIL_SENDER")
+    email_pass = os.getenv("EMAIL_PASSWORD")
+    if email_user and email_pass:
+        print("📧 Checking for new CommSec trade emails...")
+        reader = CommSecReader(email_user, email_pass)
+        if reader.connect():
+            processed = pm.get_processed_emails()
+            # 默认检查最近 180 天 (6个月)，确保覆盖历史交易
+            new_trades = reader.fetch_trade_confirmations(lookback_days=180, processed_ids=processed)
+            reader.close()
+            
+            for trade in new_trades:
+                pm.record_external_trade(trade)
+        else:
+            print("⚠️ Email check skipped (connection failed).")
+
     pm.process_income()
 
     target_asset = pm.profile.get("investment_strategy", {}).get("target_asset", "NDQ.AX")

@@ -60,10 +60,10 @@ class PortfolioManager:
         strategy = self.profile["investment_strategy"]
 
         # 1. 计算当前持仓市值 (转为 CNY)
-        stock_val_aud = assets["ndq_shares"] * current_stock_price
+        stock_val_aud = assets.get("ndq_shares", 0) * current_stock_price
         stock_val_cny = stock_val_aud * exchange_rate  # 粗略估算
 
-        total_portfolio = stock_val_cny + assets["cash_cny"] + (assets["aud_cash"] * exchange_rate)
+        total_portfolio = stock_val_cny + assets["cash_cny"] + (assets.get("aud_cash", 0.0) * exchange_rate)
 
         # 2. 计算本期“可支配投资资金”
         # 逻辑：当前现金 - 必须留的周转金 (exchange_buffer)
@@ -87,3 +87,51 @@ class PortfolioManager:
     def update_after_invest(self, invest_cny: float):
         self.profile["current_assets"]["cash_cny"] -= invest_cny
         self._save_profile()
+
+    # --- 新增功能: 处理外部交易 ---
+
+    def get_processed_emails(self):
+        return self.profile.get("processed_emails", [])
+
+    def record_external_trade(self, trade_data: dict):
+        """
+        处理从邮件读取的外部交易
+        trade_data: {action, units, symbol, price_per_unit, total_amount, currency, email_id...}
+        """
+        assets = self.profile["current_assets"]
+        
+        # 简单映射 NDQ -> ndq_shares
+        is_ndq = "NDQ" in trade_data['symbol']
+        
+        if trade_data['action'] == 'bought':
+            if is_ndq:
+                assets["ndq_shares"] = assets.get("ndq_shares", 0) + trade_data['units']
+            else:
+                # 处理其他股票 (可选)
+                pass
+            
+            # 扣减澳元现金 (假设是用澳元买的)
+            if trade_data['currency'] == 'AUD':
+                assets["aud_cash"] = assets.get("aud_cash", 0) - trade_data['total_amount']
+                
+        elif trade_data['action'] == 'sold':
+            if is_ndq:
+                assets["ndq_shares"] = max(0, assets.get("ndq_shares", 0) - trade_data['units'])
+            
+            # 增加澳元现金
+            if trade_data['currency'] == 'AUD':
+                assets["aud_cash"] = assets.get("aud_cash", 0) + trade_data['total_amount']
+
+        # 2. 记录交易历史
+        if "transaction_history" not in self.profile:
+            self.profile["transaction_history"] = []
+        
+        self.profile["transaction_history"].append(trade_data)
+        
+        # 3. 记录 Email ID
+        if "processed_emails" not in self.profile:
+            self.profile["processed_emails"] = []
+        self.profile["processed_emails"].append(trade_data['email_id'])
+
+        self._save_profile()
+        print(f"💾 已记录外部交易: {trade_data['action']} {trade_data['units']} {trade_data['symbol']} (成本: ${trade_data['total_amount']})")
