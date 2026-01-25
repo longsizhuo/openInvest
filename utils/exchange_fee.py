@@ -6,16 +6,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from curl_cffi import requests as cffi_requests
-
-# [Fix] Force yfinance to use curl_cffi with browser impersonation
-# Even with yfinance 1.1.0, explicit session handling can help avoid 429s
-try:
-    import yfinance.data
-    # Initialize the singleton YfData with a custom session
-    yfinance.data.YfData(session=cffi_requests.Session(impersonate="chrome"))
-except Exception as e:
-    print(f"⚠️ Failed to apply yfinance session fix: {e}")
+from .stooq_helper import get_stooq_history, get_stooq_forex
+from .betashares_scraper import get_ndq_local_history
 
 CACHE_DIR = "cache_data"
 
@@ -120,11 +112,19 @@ class TransactionCostCalculator:
 # 1. 通用数据获取 (yfinance)
 # ==========================================
 def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR)
+    # --- 特殊处理: NDQ.AX 优先使用本地爬虫维护的数据库 ---
+    if symbol.upper() == "NDQ.AX":
+        print(f"📡 [Local Scraper] Fetching data for {symbol}...")
+        df_local = get_ndq_local_history()
+        if not df_local.empty:
+            return df_local
 
+    # --- 特殊处理: 如果是汇率且 API 都挂了，尝试读旧的缓存 CSV ---
     safe_symbol = symbol.replace("=", "").replace(".", "_").replace("/", "")
     csv_path = os.path.join(CACHE_DIR, f"{safe_symbol}_{period}.csv")
+
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
 
     # Hit Cache
     if os.path.exists(csv_path):
@@ -156,6 +156,23 @@ def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
 
     except Exception as e:
         print(f"❌ yfinance Request Failed for {symbol}: {e}")
+        
+        # --- Fallback 2: Stooq ---
+        print(f"🔄 [Stooq] Attempting fallback for {symbol}...")
+        df_st = get_stooq_history(symbol)
+        if not df_st.empty:
+            print(f"✅ [Stooq] Successfully fetched {symbol}")
+            return df_st
+            
+        # --- Fallback 3: Stale Cache (Last Resort) ---
+        if os.path.exists(csv_path):
+            print(f"⚠️ [Emergency] All APIs failed. Using STALE cache for {symbol}")
+            try:
+                df_stale = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+                if not df_stale.empty:
+                    return df_stale
+            except: pass
+
         return pd.DataFrame()
 
 
@@ -290,7 +307,14 @@ def get_cost_snapshot(
 
     if spot_rate is None:
         df_fx = get_history_data("AUDCNY=X", "1d")
-        spot_rate = df_fx['Close'].iloc[-1] if not df_fx.empty else 0.0
+        if not df_fx.empty:
+            spot_rate = df_fx['Close'].iloc[-1]
+        else:
+            print("🔄 [Stooq] Fetching spot rate fallback...")
+            spot_rate = get_stooq_forex("AUDCNY")
+            
+            if spot_rate is None:
+                spot_rate = 0.0
 
     fx_data = calc.calculate_forex_friction(invest_cny, spot_rate)
 

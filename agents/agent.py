@@ -119,6 +119,7 @@ def build_vectorstore(
         persist_directory=persist_directory,
         collection_name=collection_name,
         embedding_function=embeddings,
+        tenant="default_tenant",
     )
 
 

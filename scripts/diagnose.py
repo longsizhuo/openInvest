@@ -3,6 +3,9 @@ import shutil
 import os
 import sys
 
+# Add project root to path to allow imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # 1. 测试 YFinance
 print("Testing Yahoo Finance connection...")
 ticker = "NDQ.AX"
