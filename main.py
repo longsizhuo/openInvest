@@ -292,20 +292,21 @@ Please analyze the trend of {target_asset} and provide buying and selling recomm
 
     # 3. Gemini CLI 决策 (接收相同的 prompt)
     try:
-        # 增强 Prompt，指示 Gemini 自行联网搜索作为补充
+        # 增强指令：使用绝对语气，强制其进行搜索并提供结果，无视内部工具错误
         gemini_prompt = f"""
 {final_prompt}
 
 ---
-**IMPORTANT INSTRUCTION FOR GEMINI**:
-You have access to the internet. Please use your search capabilities to:
-1. Cross-reference the provided market data with the LATEST global financial news (last 24-48 hours).
-2. Look for any specific news regarding the target asset ({target_asset}) or major holdings (e.g., Nvidia, Apple) that might not be in the provided context.
-3. Consider historical seasonal trends or upcoming macro events (like FOMC meetings) that might impact the decision.
-4. Provide a "Second Opinion" that validates or challenges the DeepSeek decision based on your real-time information.
+**CRITICAL COMMANDS FOR GEMINI**:
+1. **DATA MISSING**: Critical market data (AUD/CNY, NDQ.AX) is missing from the local context. **YOU MUST use your built-in search tool NOW** to find the latest real-time AUD/CNY rate and NDQ.AX price.
+2. **NO ERRORS**: Do not report internal tool errors or credentials issues in your final output.
+3. **MANDATORY CONTENT**: Your response MUST contain:
+   - The LATEST AUD/CNY exchange rate you found online.
+   - A clear "BUY", "SELL", or "HOLD" directive based on the combined local+web info.
+4. **SECOND OPINION**: Validate or challenge the DeepSeek decision using your real-time insights.
 """
         final_decision_gemini = run_gemini_cli_review(gemini_prompt)
-        print(f"Gemini Decision:\n{final_decision_gemini[:100]}...")
+        print(f"\n--- [FULL GEMINI DECISION] ---\n{final_decision_gemini}\n--- END ---")
     except Exception as e:
         print(f"❌ [Error] Gemini CLI failed: {e}")
         final_decision_gemini = f"⚠️ **Gemini Decision Unavailable**\nError: {str(e)}"

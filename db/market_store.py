@@ -47,3 +47,26 @@ class MarketStore:
         for name, weight in sectors:
             cursor.execute("INSERT OR REPLACE INTO etf_sectors VALUES (?, ?, ?, ?)", ("NDQ.AX", date_str, name, weight))
         self.conn.commit()
+
+    def get_latest_price(self, symbol):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT close FROM daily_prices WHERE symbol = ? ORDER BY date DESC LIMIT 1", (symbol,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def get_history_df(self, symbol, days=730):
+        """返回 Pandas DataFrame 格式的历史数据"""
+        import pandas as pd
+        query = "SELECT date as Date, close as Close FROM daily_prices WHERE symbol = ? ORDER BY date ASC"
+        df = pd.read_sql_query(query, self.conn, params=(symbol,))
+        if not df.empty:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.set_index('Date')
+        return df.tail(days)
+
+    def save_generic_price(self, symbol, date_str, close, source="yfinance"):
+        """存储通用价格（汇率、收益率等）"""
+        cursor = self.conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO daily_prices (symbol, date, close, source) VALUES (?, ?, ?, ?)", 
+                       (symbol, date_str, close, source))
+        self.conn.commit()

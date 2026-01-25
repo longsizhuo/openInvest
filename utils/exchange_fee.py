@@ -6,10 +6,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from .stooq_helper import get_stooq_history, get_stooq_forex
-from .betashares_scraper import get_ndq_local_history
+from .betashares_scraper import scrape_full_ndq_data
+from db.market_store import MarketStore
 
 CACHE_DIR = "cache_data"
+_STORE = MarketStore()
 
 
 # ==========================================
@@ -112,68 +113,54 @@ class TransactionCostCalculator:
 # 1. 通用数据获取 (yfinance)
 # ==========================================
 def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
-    # --- 特殊处理: NDQ.AX 优先使用本地爬虫维护的数据库 ---
-    if symbol.upper() == "NDQ.AX":
-        print(f"📡 [Local Scraper] Fetching data for {symbol}...")
-        df_local = get_ndq_local_history()
-        if not df_local.empty:
-            return df_local
+    symbol = symbol.upper()
+    
+    # 1. 尝试从数据库获取
+    df_db = _STORE.get_history_df(symbol)
+    
+    # 2. 判断是否需要更新 (如果今天还没更新过)
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    needs_update = df_db.empty or df_db.index[-1].strftime('%Y-%m-%d') != today_str
 
-    # --- 特殊处理: 如果是汇率且 API 都挂了，尝试读旧的缓存 CSV ---
+    if needs_update:
+        if symbol == "NDQ.AX":
+            print(f"📡 [Scraper] Updating database for {symbol}...")
+            snapshot = scrape_full_ndq_data()
+            if snapshot and snapshot["date"] and snapshot["nav"]:
+                _STORE.save_ndq_snapshot(
+                    snapshot["date"], snapshot["nav"], 
+                    snapshot["stats"], snapshot["holdings"], snapshot["sectors"]
+                )
+                df_db = _STORE.get_history_df(symbol)
+        else:
+            try:
+                print(f"🔄 [yfinance] Refreshing {symbol}...")
+                ticker = yf.Ticker(symbol)
+                df_yf = ticker.history(period="5d")
+                if not df_yf.empty:
+                    for idx, row in df_yf.iterrows():
+                        _STORE.save_generic_price(symbol, idx.strftime('%Y-%m-%d'), row['Close'])
+                    df_db = _STORE.get_history_df(symbol)
+            except Exception as e:
+                print(f"❌ yfinance sync failed for {symbol}: {e}")
+
+    if not df_db.empty:
+        return df_db
+
+    # 3. 最终保底：读取旧 CSV 缓存并同步至 DB
     safe_symbol = symbol.replace("=", "").replace(".", "_").replace("/", "")
     csv_path = os.path.join(CACHE_DIR, f"{safe_symbol}_{period}.csv")
-
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR)
-
-    # Hit Cache
     if os.path.exists(csv_path):
-        file_time = datetime.fromtimestamp(os.path.getmtime(csv_path))
-        if file_time.date() == datetime.now().date():
-            try:
-                df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-                if not df.empty:
-                    return df
-            except:
-                pass
+        print(f"⚠️ [Emergency] DB Empty. Using legacy CSV for {symbol}")
+        try:
+            df_csv = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+            if not df_csv.empty:
+                for idx, row in df_csv.iterrows():
+                    _STORE.save_generic_price(symbol, idx.strftime('%Y-%m-%d'), row['Close'], source="legacy_csv")
+                return df_csv
+        except: pass
 
-    print(f"🔄 [yfinance] Fetching: {symbol} (period={period})...")
-    
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period)
-        
-        if df.empty:
-            print(f"⚠️ yfinance returned empty data for {symbol}")
-            return pd.DataFrame()
-
-        # Ensure index is datetime
-        df.index = pd.to_datetime(df.index)
-        
-        # Save Cache
-        df.to_csv(csv_path)
-        return df
-
-    except Exception as e:
-        print(f"❌ yfinance Request Failed for {symbol}: {e}")
-        
-        # --- Fallback 2: Stooq ---
-        print(f"🔄 [Stooq] Attempting fallback for {symbol}...")
-        df_st = get_stooq_history(symbol)
-        if not df_st.empty:
-            print(f"✅ [Stooq] Successfully fetched {symbol}")
-            return df_st
-            
-        # --- Fallback 3: Stale Cache (Last Resort) ---
-        if os.path.exists(csv_path):
-            print(f"⚠️ [Emergency] All APIs failed. Using STALE cache for {symbol}")
-            try:
-                df_stale = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-                if not df_stale.empty:
-                    return df_stale
-            except: pass
-
-        return pd.DataFrame()
+    return pd.DataFrame()
 
 
 # ==========================================
@@ -310,10 +297,17 @@ def get_cost_snapshot(
         if not df_fx.empty:
             spot_rate = df_fx['Close'].iloc[-1]
         else:
-            print("🔄 [Stooq] Fetching spot rate fallback...")
-            spot_rate = get_stooq_forex("AUDCNY")
-            
-            if spot_rate is None:
+            # Last resort: Try stale cache from file
+            safe_symbol = "AUDCNY=X".replace("=", "").replace(".", "_").replace("/", "")
+            stale_path = os.path.join(CACHE_DIR, f"{safe_symbol}_2y.csv")
+            if os.path.exists(stale_path):
+                print("⚠️ [Emergency] Using stale cache for spot rate.")
+                try:
+                    df_stale = pd.read_csv(stale_path, index_col=0, parse_dates=True)
+                    spot_rate = float(df_stale['Close'].iloc[-1])
+                except:
+                    spot_rate = 0.0
+            else:
                 spot_rate = 0.0
 
     fx_data = calc.calculate_forex_friction(invest_cny, spot_rate)

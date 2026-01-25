@@ -22,4 +22,5 @@ dependencies = [
     "alpha-vantage>=3.0.0",
     "beautifulsoup4>=4.14.3",
     "lxml>=6.0.2",
+    "pandas>=2.3.3",
 ]
