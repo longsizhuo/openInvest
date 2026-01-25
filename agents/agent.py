@@ -106,7 +106,10 @@ def build_vectorstore(
     collection_name: str = "langchain",
     **kwargs,
 ) -> Chroma:
-    # embeddings 的 key/base_url 走 kwargs 透传（兼容你现有参数习惯）
+    import chromadb
+    from chromadb.config import Settings
+    
+    # embeddings 的 key/base_url 走 kwargs 透传
     embedding_kwargs: Dict[str, Any] = {}
     if "openai_api_key" in kwargs:
         embedding_kwargs["openai_api_key"] = kwargs["openai_api_key"]
@@ -115,11 +118,16 @@ def build_vectorstore(
 
     embeddings = OpenAIEmbeddings(**embedding_kwargs)
 
+    # 使用显式的客户端初始化，避免 tenant 错误
+    client = chromadb.PersistentClient(
+        path=persist_directory,
+        settings=Settings(allow_reset=True, anonymized_telemetry=False)
+    )
+
     return Chroma(
-        persist_directory=persist_directory,
+        client=client,
         collection_name=collection_name,
         embedding_function=embeddings,
-        tenant="default_tenant",
     )
 
 
@@ -226,17 +234,29 @@ def create_agent_graph(
     **llm_kwargs,
 ):
     llm = build_llm(temperature=temperature, model=model, **llm_kwargs)
-    vectordb = build_vectorstore(
-        persist_directory=persist_directory,
-        collection_name=collection_name,
-        **llm_kwargs,
-    )
-    tools = build_tools(
-        vectordb=vectordb,
-        enable_search=enable_search,
-        bing_subscription_key=bing_subscription_key,
-        bing_search_url=bing_search_url,
-    )
+    
+    tools = []
+    try:
+        vectordb = build_vectorstore(
+            persist_directory=persist_directory,
+            collection_name=collection_name,
+            **llm_kwargs,
+        )
+        tools = build_tools(
+            vectordb=vectordb,
+            enable_search=enable_search,
+            bing_subscription_key=bing_subscription_key,
+            bing_search_url=bing_search_url,
+        )
+    except Exception as e:
+        print(f"⚠️ Vectorstore/Tools init failed: {e}. Falling back to basic search.")
+        # 如果向量库挂了，至少保留联网搜索能力
+        from langchain.tools import tool
+        @tool("finance_news")
+        def finance_news(query: str) -> str:
+            """Deep finance news search (DDG news + fetch + article extraction)."""
+            return search_finance_news_impl(query)
+        tools = [finance_news]
 
     agent = create_agent(
         model=llm,
