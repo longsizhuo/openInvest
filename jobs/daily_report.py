@@ -23,10 +23,9 @@ from dotenv import load_dotenv
 
 from agents.agent import SimpleAgent
 from agents.forex import PROMPT_FOREX_AGENT
-from agents.gold import build_gold_prompt
 from agents.macro import PROMPT_MACRO_AGENT
 from agents.manager import build_manager_prompt
-from agents.stock import build_stock_prompt
+from core.debate import run_debate
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
 from services.notifier import send_gmail_notification
@@ -102,29 +101,30 @@ def _run_gemini_cli_review(prompt: str) -> str:
         return f"Skipped: {e}"
 
 
-def _build_asset_job(asset: Dict[str, Any]) -> Dict[str, Any]:
-    """根据 asset 配置返回一个 job 描述（prompt + label + 市场数据查询）"""
-    symbol = asset["symbol"]
-    asset_type = asset.get("type", "equity_etf")
+def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
+    """读 memory/insights/ 里跟该 asset 相关的长期洞察（Dreaming 写入）"""
+    insights_dir = store.root / "insights"
+    if not insights_dir.exists():
+        return ""
+    sym = asset.get("symbol", "").lower()
+    name = asset.get("display_name", "").lower()
+    matches = []
+    for f in sorted(insights_dir.glob("*.md")):
+        if sym.replace("=", "_") in f.stem.lower() or any(
+            tok in f.stem.lower() for tok in ["gold", "ndq"] if tok in sym
+        ):
+            matches.append(f"## {f.stem}\n{f.read_text(encoding='utf-8')[:600]}")
+    return "\n\n".join(matches)
 
-    if asset_type == "metal":
-        prompt = build_gold_prompt(symbol)
-        emoji = "🪙"
-    else:
-        prompt = build_stock_prompt(symbol)
-        emoji = "📈"
 
-    return {
-        "asset": asset,
-        "symbol": symbol,
-        "type": asset_type,
-        "display_name": asset.get("display_name", symbol),
-        "prompt": prompt,
-        "preview_label": f"✅ {emoji} {asset.get('display_name', symbol)} 观点",
-        "error_log_label": f"Asset Agent ({symbol})",
-        "failed_msg": f"⚠️ **Analysis Failed**: {symbol} agent encountered an error.",
-        "unavailable_title": f"{symbol} Analysis",
-    }
+def _portfolio_summary(pm: PortfolioManager) -> str:
+    return (
+        f"现金 ¥{float(pm.portfolio.get('cash_cny', 0)):,.0f}, "
+        f"AUD ${float(pm.portfolio.get('aud_cash', 0)):,.0f}, "
+        f"NDQ.AX {float(pm.portfolio.get('ndq_shares', 0))} 股, "
+        f"黄金 {float(pm.portfolio.get('gold_grams', 0)):.4f}g "
+        f"(均价 ¥{float(pm.portfolio.get('gold_avg_cost_cny_per_gram', 0)):.2f}/g)"
+    )
 
 
 def _run_agent_job(job: Dict[str, Any], query: str) -> tuple[str, str]:
@@ -214,16 +214,8 @@ def run() -> Dict[str, Any]:
         },
     }
 
-    for asset in target_assets:
-        symbol = asset["symbol"]
-        asset_job = _build_asset_job(asset)
-        asset_job["query"] = (
-            f"# target asset: {asset.get('display_name', symbol)} ({symbol})\n"
-            f"# channel: {asset.get('channel', 'N/A')}\n"
-            f"# market data:\n{asset_market_reports[symbol]}\n\n"
-            f"Please analyze the trend and provide buying recommendations."
-        )
-        jobs[f"asset:{symbol}"] = asset_job
+    # 注：每个 asset 的分析改成 Bull/Bear/Judge 辩论（见 core/debate.py），
+    # 而不是单一 stock/gold agent。这里 jobs 字典只留 macro / fx 两个独立信息源。
 
     if has_non_cny_asset:
         fx_report = analyze_multi_timeframe(
@@ -255,14 +247,38 @@ def run() -> Dict[str, Any]:
 
     macro_analysis = results.get("macro", "")
     fx_analysis = results.get("fx", "⚠️ **Forex Analysis Skipped** (CNY-only assets)")
-    asset_analyses = {
-        a["symbol"]: results.get(f"asset:{a['symbol']}", "") for a in target_assets
-    }
+
+    # --- 9.5. 对每个 asset 跑 Bull/Bear/Judge 辩论 ---
+    print(f"\n⚔️  对 {len(target_assets)} 个资产跑辩论 (Bull → Bear → Rebuttals → Judge)...")
+    asset_debates: Dict[str, Dict[str, Any]] = {}
+    portfolio_summary = _portfolio_summary(pm)
+    for asset in target_assets:
+        sym = asset["symbol"]
+        prior = _gather_relevant_insights(store, asset)
+        debate_result = run_debate(
+            asset=asset,
+            market_data_summary=asset_market_reports[sym],
+            macro_summary=macro_analysis,
+            portfolio_summary=portfolio_summary,
+            prior_insights=prior,
+        )
+        asset_debates[sym] = debate_result
+        v = debate_result["verdict"]
+        print(
+            f"  ⚖️  {sym}: {v['verdict']} "
+            f"(conf {v['confidence']:.2f}, dom {v['dominant_side']}, "
+            f"alloc {v['alloc_pct']}%)"
+        )
 
     # --- 10. Manager 综合决策 ---
-    print("\n🤖 [Chief Manager] 综合决策中...")
+    print("\n🤖 [Chief Manager] 综合所有辩论裁决...")
     asset_block = "\n\n".join([
-        f"### {a.get('display_name', a['symbol'])} ({a['symbol']})\n{asset_analyses[a['symbol']]}"
+        f"### {a.get('display_name', a['symbol'])} ({a['symbol']}) — Debate Verdict\n"
+        f"- **VERDICT**: {asset_debates[a['symbol']]['verdict']['verdict']}\n"
+        f"- **CONFIDENCE**: {asset_debates[a['symbol']]['verdict']['confidence']:.2f}\n"
+        f"- **DOMINANT_SIDE**: {asset_debates[a['symbol']]['verdict']['dominant_side']}\n"
+        f"- **SUGGESTED_ALLOC_PCT**: {asset_debates[a['symbol']]['verdict']['alloc_pct']}%\n"
+        f"- **Verdict 详细**:\n{asset_debates[a['symbol']]['verdict']['raw'][:800]}"
         for a in target_assets
     ])
     final_prompt = f"""
@@ -310,11 +326,24 @@ def run() -> Dict[str, Any]:
         final_decision_gemini = f"⚠️ Gemini error: {e}"
 
     # --- 11. 拼最终报告 ---
-    asset_section = "\n\n---\n\n".join([
-        f"## {idx+2}. {a.get('display_name', a['symbol'])} ({a['symbol']}) 分析\n"
-        f"{asset_analyses[a['symbol']]}"
-        for idx, a in enumerate(target_assets)
-    ])
+    asset_section_chunks = []
+    for idx, a in enumerate(target_assets):
+        sym = a["symbol"]
+        debate = asset_debates[sym]
+        v = debate["verdict"]
+        # 把辩论 transcript 折叠展示
+        transcript_md = "\n\n".join([
+            f"**{e['role'].upper()}** — {e['ts']}\n\n{e['content']}"
+            for e in debate["transcript"]
+        ])
+        asset_section_chunks.append(
+            f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n"
+            f"**Verdict**: {v['verdict']} (confidence {v['confidence']:.2f}, "
+            f"dominant {v['dominant_side']}, suggested alloc {v['alloc_pct']}%)\n\n"
+            f"<details><summary>📜 完整辩论记录 (Bull / Bear / Judge)</summary>\n\n"
+            f"{transcript_md}\n\n</details>"
+        )
+    asset_section = "\n\n---\n\n".join(asset_section_chunks)
     full_report = f"""
 # 投资分析报告 / Invest Agent Report ({today})
 
@@ -356,16 +385,21 @@ def run() -> Dict[str, Any]:
 """
 
     # --- 12. Append 到 memory/daily/<date>.md（供 Dreaming 用） ---
-    daily_block = f"""**资产分析摘要**
+    daily_block = f"""**资产辩论摘要**
 
 - 宏观: {macro_analysis[:300]}...
 - 外汇: {fx_analysis[:200]}...
 
-**每个资产**:
+**每个资产辩论裁决**:
 """
     for a in target_assets:
         sym = a["symbol"]
-        daily_block += f"\n### {a.get('display_name', sym)} ({sym})\n{asset_analyses[sym][:400]}...\n"
+        v = asset_debates[sym]["verdict"]
+        daily_block += (
+            f"\n- **{a.get('display_name', sym)} ({sym})**: "
+            f"{v['verdict']} (conf {v['confidence']:.2f}, "
+            f"{v['dominant_side']} dominated, alloc {v['alloc_pct']}%)\n"
+        )
     daily_block += f"\n**最终决策 (DeepSeek)**:\n{final_decision_ds[:600]}...\n"
 
     store.append_daily("daily_report", daily_block, date=today)
@@ -386,6 +420,12 @@ def run() -> Dict[str, Any]:
         "status": "success",
         "date": today,
         "assets": [a["symbol"] for a in target_assets],
+        "verdicts": {
+            sym: {"verdict": v["verdict"]["verdict"],
+                  "confidence": v["verdict"]["confidence"],
+                  "alloc_pct": v["verdict"]["alloc_pct"]}
+            for sym, v in asset_debates.items()
+        },
         "decision_excerpt": final_decision_ds[:200],
     }
 
