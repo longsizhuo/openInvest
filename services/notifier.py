@@ -14,18 +14,40 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _resolve_receiver(default_sender: str) -> str:
+    """收件人优先级：memory/user.md 的 email 字段 → .env DIGEST_EMAIL_TO → 发件人自身"""
+    try:
+        from core.memory_store import MemoryStore
+        store = MemoryStore()
+        user_doc = store.read("user")
+        if user_doc:
+            email = user_doc.get("email")
+            if email:
+                return str(email)
+    except Exception:
+        pass
+    digest = os.getenv("DIGEST_EMAIL_TO")
+    if digest:
+        return digest
+    return default_sender
+
+
 def send_gmail_notification(content: str):
     """
     Sends an email notification via Google SMTP with retry logic.
     Requires EMAIL_SENDER and EMAIL_PASSWORD (App Password) in .env.
+
+    Receiver 优先级（不再硬编码 longsizhuo@gmail.com）:
+    1. memory/user.md 的 email 字段
+    2. .env 的 DIGEST_EMAIL_TO
+    3. 发件人本身
     """
     sender = os.getenv("EMAIL_SENDER")
     password = os.getenv("EMAIL_PASSWORD")  # Use Gmail App Password
-    receiver = "longsizhuo@gmail.com"
-
     if not sender or not password:
         print("⚠️ Email credentials not found in .env. Skipping email notification.")
         return
+    receiver = _resolve_receiver(default_sender=sender)
 
     subject = f"Invest Agent Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
 
