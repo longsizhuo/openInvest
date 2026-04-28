@@ -1,7 +1,8 @@
 """NapCat 私聊 connector - QQ 命令式交互入口
 
 设计要点：
-- 只响应白名单 QQ（默认 1169771750）
+- 只响应白名单 QQ（必须通过 INVEST_WHITELIST_QQ env 配置；未配置时默认 0
+  = 拒绝所有，audit security m1 修复，避免公开仓库泄露个人 QQ）
 - 命令格式 `/cmd args` —— 不依赖 LLM 解析，零 token 成本
   （自然语言交互留给 P5: Claude Skill）
 - 长跑 daemon，建议 `nohup python -m connectors.napcat_bot &` 或 systemd
