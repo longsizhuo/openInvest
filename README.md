@@ -322,6 +322,11 @@ target_assets:
 - [ ] `tests/test_concurrency.py` 把 50 线程压测固化进 pytest，加 GitHub Actions
 - [ ] Multi-tenant：`memory/<user_id>/...` schema
 - [ ] Prometheus metrics 出口（job_runs / llm_call_duration / price_staleness_days）
+- [ ] **PnL 图升级为"vs 基准"对比**：现在 SVG 只画自己的实盘相对趋势。真正能凸显
+  系统价值的是"vs 余额宝 / 沪深 300 / 知名 AI 投顾产品"的超额收益。改造方案：在
+  `jobs/pnl_snapshot` 里加几条基准 series（年化 3% 直线 / yfinance 拉沪深 300 /
+  公开 AI agent 产品的历史回报），同图叠加。隐私不变（仍是 % 趋势），但能告诉
+  访客"我们比 XX 多赚 N% / 跑赢基金经理"
 
 ---
 
