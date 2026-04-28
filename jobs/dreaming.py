@@ -31,6 +31,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from core.consolidation_lock import (
+    rollback_consolidation_lock,
+    try_acquire_consolidation_lock,
+)
 from core.memory_store import MemoryStore
 from utils.exchange_fee import get_history_data
 
@@ -331,20 +335,33 @@ def _append_dreams_diary(store: MemoryStore, accepted: List[Dict[str, Any]]) -> 
 # ----------------------------------------------------------------------
 
 def run() -> Dict[str, Any]:
+    """跑三阶段 dreaming，带 consolidation lock 防止多进程并发撕裂数据
+
+    锁仿 Claude Code v2.1.88 leaked 的 src/services/autoDream/consolidationLock.ts
+    （PID + mtime 文件锁，60min stale guard）
+    """
     store = MemoryStore()
-    store.dream_event({"phase": "start"})
+    prior = try_acquire_consolidation_lock(store.root)
+    if prior is None:
+        return {"status": "skipped", "reason": "consolidation_lock_held"}
 
-    signals = light_sleep(store)
-    candidates = rem_sleep(store, signals)
-    accepted = deep_sleep(store, candidates)
-
-    store.dream_event({"phase": "end", "accepted": len(accepted)})
-    return {
-        "status": "success",
-        "signals": len(signals),
-        "candidates": len(candidates),
-        "accepted_insights": len(accepted),
-    }
+    try:
+        store.dream_event({"phase": "start", "lock_acquired": True})
+        signals = light_sleep(store)
+        candidates = rem_sleep(store, signals)
+        accepted = deep_sleep(store, candidates)
+        store.dream_event({"phase": "end", "accepted": len(accepted)})
+        return {
+            "status": "success",
+            "signals": len(signals),
+            "candidates": len(candidates),
+            "accepted_insights": len(accepted),
+        }
+    except Exception as e:
+        # 出错就把 mtime 倒回去，下次还能跑
+        rollback_consolidation_lock(store.root, prior)
+        store.dream_event({"phase": "error", "error": str(e)})
+        raise
 
 
 if __name__ == "__main__":

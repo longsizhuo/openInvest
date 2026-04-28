@@ -250,11 +250,12 @@ def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
     return "\n\n".join(matches)
 
 
-def cmd_prepare_debate(args: argparse.Namespace) -> None:
-    """输出辩论 brief — 含项目原生 prompt + 上下文，给 Claude 在对话里扮演 agent 用"""
-    from agents.bull import build_bull_prompt
-    from agents.bear import build_bear_prompt
-    from agents.judge import build_judge_prompt
+def cmd_prepare_committee(args: argparse.Namespace) -> None:
+    """输出 Investment Committee brief — 含项目原生 prompt + 用户上下文，给 Claude 扮演 4 角色"""
+    from agents.cio import build_cio_prompt
+    from agents.macro_strategist import PROMPT_MACRO_STRATEGIST
+    from agents.quant import build_quant_prompt
+    from agents.risk_officer import build_risk_officer_prompt
     from core.portfolio_manager import PortfolioManager
     from utils.exchange_fee import (
         analyze_multi_timeframe, get_history_data, get_macro_data
@@ -274,75 +275,80 @@ def cmd_prepare_debate(args: argparse.Namespace) -> None:
         get_history_data(target["symbol"], "2y"),
         f"{target.get('display_name', target['symbol'])} ({target['symbol']})",
     )
-    macro = get_macro_data()
+    macro_data = get_macro_data()
     snap = get_gold_snapshot(offset_pct=0.0)
     gold_ctx = format_gold_report(snap) if (snap and target.get("type") == "metal") else ""
 
+    # 详细的 portfolio 上下文给 Risk Officer
+    cash_cny = float(pm.portfolio.get("cash_cny", 0))
+    aud_cash = float(pm.portfolio.get("aud_cash", 0))
+    ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
+    ndq_cost = float(pm.portfolio.get("ndq_avg_cost_aud_per_share", 0))
+    gold_grams = float(pm.portfolio.get("gold_grams", 0))
+    gold_cost = float(pm.portfolio.get("gold_avg_cost_cny_per_gram", 0))
+    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
+    dry_powder = max(0.0, cash_cny - buffer_cny)
+    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
+
+    audcny = _safe_close("AUDCNY=X")
+    gold_now = snap.spot_cny_per_gram if snap else 0.0
+    total_cny = (
+        cash_cny + aud_cash * audcny
+        + ndq_shares * _safe_close("NDQ.AX") * audcny
+        + gold_grams * gold_now
+    )
+
     portfolio_summary = (
-        f"现金 ¥{float(pm.portfolio.get('cash_cny', 0)):,.0f}, "
-        f"AUD ${float(pm.portfolio.get('aud_cash', 0)):,.0f}, "
-        f"NDQ.AX {float(pm.portfolio.get('ndq_shares', 0))} 股, "
-        f"黄金 {float(pm.portfolio.get('gold_grams', 0)):.4f}g "
-        f"(均价 ¥{float(pm.portfolio.get('gold_avg_cost_cny_per_gram', 0)):.2f}/g)"
+        f"用户风险偏好: {risk_level}\n"
+        f"总资产估算: ¥{total_cny:,.0f}\n"
+        f"  - CNY 现金: ¥{cash_cny:,.0f} (应急金 ¥{buffer_cny:,} 不可投)\n"
+        f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
+        f"  - AUD 现金: ${aud_cash:,.0f}\n"
+        f"  - NDQ.AX: {ndq_shares} 股 (均价 ${ndq_cost:.4f} AUD)\n"
+        f"  - 黄金 (浙商): {gold_grams:.4f}g (均价 ¥{gold_cost:.2f}/g)"
     )
     insights = _gather_relevant_insights(pm.store, target)
 
     out = {
         "asset": target,
         "portfolio_summary": portfolio_summary,
-        "macro_summary": macro,
+        "macro_data": macro_data,
         "market_data": market,
         "gold_snapshot": gold_ctx,
         "prior_insights": insights,
         "prompts": {
-            "bull_opening": build_bull_prompt(target, "opening"),
-            "bear_opening": build_bear_prompt(target, "opening"),
-            "bull_rebuttal": build_bull_prompt(target, "rebuttal"),
-            "bear_rebuttal": build_bear_prompt(target, "rebuttal"),
-            "judge": build_judge_prompt(target),
+            "macro_strategist": PROMPT_MACRO_STRATEGIST,
+            "quant_round1": build_quant_prompt(target, "opening"),
+            "risk_round1": build_risk_officer_prompt(target, "opening"),
+            "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),
+            "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal"),
+            "cio": build_cio_prompt(target),
         },
         "save_command": (
-            f"~/.claude/skills/invest/run.sh save_debate {args.symbol}"
+            f"~/.claude/skills/invest/run.sh save_committee {args.symbol}"
         ),
         "instructions": (
-            "Claude: 你将依次扮演下面 5 个角色，每个角色严格按对应 prompt 输出。"
-            "全部 5 段输出后，把整段 transcript（用 === BULL_OPENING === / === BEAR_OPENING === "
-            "/ === BULL_REBUTTAL === / === BEAR_REBUTTAL === / === JUDGE === 分段）通过 stdin "
-            f"喂给 `{args.symbol}` 的 save_debate 子命令落地。"
+            "Claude: 这是 Investment Committee 的 3 轮流程：\n"
+            "  Round 1 - 独立陈述: Macro (跨资产共享) + Quant + Risk Officer 各自看自己的数据\n"
+            "  Round 2 - 横向交流: Quant 看到 Risk 报告后调整 + Risk 看到 Quant 报告后调整\n"
+            "  Round 3 - CIO 综合 4 份输出 + portfolio_summary，输出完整 memo\n"
+            "请依次扮演 6 段输出，用以下分隔符：\n"
+            "=== MACRO ===\n=== QUANT_R1 ===\n=== RISK_R1 ===\n"
+            "=== QUANT_R2 ===\n=== RISK_R2 ===\n=== CIO ===\n"
+            f"全部完成后通过 stdin 喂给 save_committee {args.symbol}"
         ),
     }
     _print_json(out)
 
 
-# ---------- save_debate ----------
-
-VERDICT_RE = re.compile(r"VERDICT:\s*(BUY|HOLD|SELL)", re.I)
-CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
-DOMINANT_RE = re.compile(r"DOMINANT_SIDE:\s*(bull|bear|tie)", re.I)
-ALLOC_RE = re.compile(r"SUGGESTED_ALLOC_PCT:\s*(\d+)")
-
-# 正则切分 stdin 里的 transcript 段落
 SECTION_RE = re.compile(
-    r"^===\s*(BULL_OPENING|BEAR_OPENING|BULL_REBUTTAL|BEAR_REBUTTAL|JUDGE)\s*===\s*$",
+    r"^===\s*(MACRO|QUANT_R1|RISK_R1|QUANT_R2|RISK_R2|CIO|QUANT|RISK)\s*===\s*$",
     re.MULTILINE,
 )
 
 
-def _parse_verdict(judge_text: str) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"raw": judge_text}
-    m = VERDICT_RE.search(judge_text)
-    out["verdict"] = m.group(1).upper() if m else "UNCLEAR"
-    m = CONFIDENCE_RE.search(judge_text)
-    out["confidence"] = float(m.group(1)) if m else 0.0
-    m = DOMINANT_RE.search(judge_text)
-    out["dominant_side"] = m.group(1).lower() if m else "tie"
-    m = ALLOC_RE.search(judge_text)
-    out["alloc_pct"] = int(m.group(1)) if m else 0
-    return out
-
-
-def cmd_save_debate(args: argparse.Namespace) -> None:
-    """读 stdin 上来的多段 transcript，落到 memory/.debate/<date>/<asset>.md"""
+def cmd_save_committee(args: argparse.Namespace) -> None:
+    """读 stdin 上来的 4 段 transcript，落到 memory/.committee/<date>/<asset>.md"""
     raw = sys.stdin.read()
     if not raw.strip():
         _print_json({"error": "empty stdin"})
@@ -351,34 +357,35 @@ def cmd_save_debate(args: argparse.Namespace) -> None:
     parts = SECTION_RE.split(raw)
     sections: Dict[str, str] = {}
     if len(parts) > 1:
-        # parts[0] is header; alternating role / content
         for i in range(1, len(parts), 2):
             role = parts[i].strip()
             content = parts[i + 1].strip() if i + 1 < len(parts) else ""
             sections[role] = content
 
-    # 兜底：如果 Claude 没用分隔符，就把整段当 judge
-    judge_text = sections.get("JUDGE", raw if not sections else "")
-    verdict = _parse_verdict(judge_text)
+    cio_text = sections.get("CIO", raw if not sections else "")
+
+    # 解析 CIO 输出
+    from core.committee import parse_cio_memo
+    verdict = parse_cio_memo(cio_text)
 
     store = MemoryStore()
     today = datetime.now().strftime("%Y-%m-%d")
-    debate_dir = store.root / ".debate" / today
-    debate_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = store.root / ".committee" / today
+    out_dir.mkdir(parents=True, exist_ok=True)
     safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", args.symbol)
-    path = debate_dir / f"{safe_sym}.md"
+    path = out_dir / f"{safe_sym}.md"
 
     lines = [
-        f"# Debate: {args.symbol}",
+        f"# Committee: {args.symbol}",
         f"\n**Date**: {today}",
         f"**Provider**: claude (skill mode)",
         f"**Verdict**: {verdict['verdict']} (confidence {verdict['confidence']:.2f})",
-        f"**Dominant**: {verdict['dominant_side']}",
-        f"**Suggested allocation**: {verdict['alloc_pct']}% of single-trade cap",
-        "\n\n---\n\n## Transcript\n",
+        f"**Dominant view**: {verdict['dominant_view']}",
+        f"**Suggested allocation CNY**: {verdict['alloc_cny']}",
+        "\n\n---\n\n## Reports\n",
     ]
-    for role in ["BULL_OPENING", "BEAR_OPENING",
-                 "BULL_REBUTTAL", "BEAR_REBUTTAL", "JUDGE"]:
+    for role in ["MACRO", "QUANT_R1", "RISK_R1",
+                 "QUANT_R2", "RISK_R2", "CIO", "QUANT", "RISK"]:
         if role in sections:
             lines.append(f"\n### {role}\n\n{sections[role]}\n")
     if not sections:
@@ -386,7 +393,7 @@ def cmd_save_debate(args: argparse.Namespace) -> None:
 
     path.write_text("\n".join(lines), encoding="utf-8")
     store.dream_event({
-        "phase": "debate_finished_skill",
+        "phase": "committee_finished_skill",
         "asset": args.symbol,
         "verdict": verdict["verdict"],
         "confidence": verdict["confidence"],
@@ -417,13 +424,13 @@ def main() -> None:
     p.add_argument("--audcny", type=float)
     p.set_defaults(func=cmd_what_if)
 
-    p = sub.add_parser("prepare_debate")
+    p = sub.add_parser("prepare_committee")
     p.add_argument("symbol")
-    p.set_defaults(func=cmd_prepare_debate)
+    p.set_defaults(func=cmd_prepare_committee)
 
-    p = sub.add_parser("save_debate")
+    p = sub.add_parser("save_committee")
     p.add_argument("symbol")
-    p.set_defaults(func=cmd_save_debate)
+    p.set_defaults(func=cmd_save_committee)
 
     args = parser.parse_args()
     args.func(args)
