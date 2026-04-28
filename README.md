@@ -65,3 +65,20 @@ irm https://astral.sh/uv/install.ps1 | iex
     ```bash
     python scheduler.py
     ```
+
+## 🧠 Claude Code Skill 集成（可选）
+
+把 invest 当作 Claude Code 的本地 skill 用（`status` / `prepare_committee` /
+`save_committee` 等子命令直接在 Claude 对话里调用）：
+
+```bash
+cd $INVEST_HOME       # 默认 ~/projects-review/invest
+bash skill/install.sh
+```
+
+`install.sh` 会在 `~/.claude/skills/invest/` 建立两个 symlink 指向仓库里的
+`skill/SKILL.md` 和 `skill/run.sh`。这样以后改 skill 协议（`prepare_committee`
+返回字段、`save_committee` 路径布局等）只需要在仓库里改 → commit → 其他设备
+`git pull` 立即生效，不用手动同步。
+
+详见 [`skill/README.md`](skill/README.md)。
