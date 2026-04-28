@@ -5,7 +5,6 @@ description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
     "ddgs>=9.10.0",
-    "duckduckgo-search>=8.1.1",
     "langchain>=0.3.27",
     "langchain-chroma>=1.1.0",
     "langchain-community>=0.3.31",
@@ -13,13 +12,11 @@ dependencies = [
     "trafilatura>=2.0.0",
     "yfinance>=0.2.66",
     "readability-lxml>=0.8.1",
-    "langgraph>=0.2.53",
     "python-dotenv>=1.0.1",
     "pandas-stubs~=2.3.3",
     "markdown>=3.10",
     "requests-cache>=1.2.1",
     "requests>=2.32.5",
-    "alpha-vantage>=3.0.0",
     "beautifulsoup4>=4.14.3",
     "lxml>=6.0.2",
     "pandas>=2.3.3",
@@ -27,3 +24,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "websockets>=15.0.1",
 ]
+# 删除的未用 dep（audit eng M5）：
+# - duckduckgo-search: 已被 ddgs 取代
+# - langgraph: grep 全仓零引用
+# - alpha-vantage: grep 全仓零引用

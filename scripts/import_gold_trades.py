@@ -1,50 +1,60 @@
-"""一次性导入用户报的浙商积存金交易记录
+"""一次性导入浙商积存金交易记录到 memory/portfolio_history.jsonl
 
-从用户在 NapCat / 对话中报的真实数据：
-- 7 笔交易（含 1 笔赠金）
-- 总持仓 124.00 克
-- 总成本 ¥125,009.41
-- 平均成本 ¥1008.14/克
+数据来源：从 git-ignored 私有文件 memory/.state/gold_trades.private.json 读取，
+绝不硬编码到入库代码（audit C1）。Schema 见该文件首行 _comment 注释。
 
-同时：
-1. portfolio.gold_grams 写实
-2. strategy.target_assets[gold].price_offset_pct = 0.0（实测接近 0）
-3. strategy.target_assets[gold].sell_fee_pct = 0.0038（用户实际卖出手续费）
+不存在私有文件时使用合成 demo 数据，让公开仓库 clone 的人能跑通流程，
+但拿不到任何真实人的持仓信息。
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from typing import Dict, List
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.memory_store import MemoryStore  # noqa: E402
 
-# 用户报的实际交易（日期已修正：2025 → 2026）
-TRADES = [
-    {"ts_origin": "2026-04-22T02:56:22", "action": "bought", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "实时", "units": 9.6289,
-     "price_per_unit": 1038.54, "total_amount": 10000.00, "fee": 0, "currency": "CNY"},
-    {"ts_origin": "2026-04-22T01:10:24", "action": "bought", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "限价", "units": 19.2389,
-     "price_per_unit": 1039.56, "total_amount": 20000.00, "fee": 0, "currency": "CNY"},
-    {"ts_origin": "2026-04-21T22:45:05", "action": "bought", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "实时", "units": 19.1663,
-     "price_per_unit": 1043.50, "total_amount": 20000.00, "fee": 0, "currency": "CNY"},
-    {"ts_origin": "2026-04-21T22:37:58", "action": "bought", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "实时", "units": 9.5441,
-     "price_per_unit": 1047.77, "total_amount": 10000.00, "fee": 0, "currency": "CNY"},
-    {"ts_origin": "2026-03-27T02:20:56", "action": "bought", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "限价", "units": 15.3560,
-     "price_per_unit": 976.82, "total_amount": 15000.00, "fee": 0, "currency": "CNY"},
-    {"ts_origin": "2026-03-27T00:58:12", "action": "gift", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "赠金", "units": 0.0096,
-     "price_per_unit": 980.72, "total_amount": 9.41, "fee": 0, "currency": "CNY"},
-    {"ts_origin": "2026-03-27T00:58:11", "action": "bought", "symbol": "GOLD-CNY",
-     "channel": "浙商积存金", "kind": "实时", "units": 50.9762,
-     "price_per_unit": 980.85, "total_amount": 50000.00, "fee": 0, "currency": "CNY"},
+PRIVATE_TRADES_PATH = ROOT / "memory" / ".state" / "gold_trades.private.json"
+
+DEMO_TRADES: List[Dict] = [
+    # 演示用合成数据：单笔 10g 买入 @ ¥500，便于跑通脚本；与任何真实账户无关
+    {"ts_origin": "2024-01-15T10:00:00", "action": "bought", "symbol": "GOLD-CNY",
+     "channel": "浙商积存金", "kind": "实时", "units": 10.0,
+     "price_per_unit": 500.00, "total_amount": 5000.00, "fee": 0, "currency": "CNY"},
 ]
+
+
+def _load_trades() -> List[Dict]:
+    """从私有 JSON 加载，转换 schema 为本脚本期望的格式"""
+    if not PRIVATE_TRADES_PATH.exists():
+        return DEMO_TRADES
+    with open(PRIVATE_TRADES_PATH, "r", encoding="utf-8") as f:
+        raw = json.load(f).get("trades", [])
+    out: List[Dict] = []
+    for t in raw:
+        # private json schema: {ts, kind, grams, price, total}
+        # 转成 portfolio_history 期望的: {ts_origin, action, units, price_per_unit, total_amount, ...}
+        is_gift = t["kind"] == "赠金"
+        out.append({
+            "ts_origin": t["ts"].replace(" ", "T"),
+            "action": "gift" if is_gift else "bought",
+            "symbol": "GOLD-CNY",
+            "channel": "浙商积存金",
+            "kind": t["kind"].replace("买金-", ""),
+            "units": t["grams"],
+            "price_per_unit": t["price"],
+            "total_amount": t["total"],
+            "fee": 0,
+            "currency": "CNY",
+        })
+    return out
+
+
+TRADES = _load_trades()
 
 
 def main():

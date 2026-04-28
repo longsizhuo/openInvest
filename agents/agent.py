@@ -42,11 +42,13 @@ def _format_news_items(items: List[Dict[str, Any]], max_items: int = 4) -> str:
 
 
 def search_finance_news_impl(query: str) -> str:
+    """深度金融新闻搜索：DDGS 找 URL → 自有抓取器抽正文 → 质量评分分桶。
+
+    .AX 等 yahoo ticker 替换为搜索友好关键词（"ETF"），避免 DDGS 把它
+    当成股票代码后无意义结果。
+    """
     if ".AX" in query.upper():
         query = query.upper().replace(".AX", " ETF")
-    """
-    深度金融新闻搜索：DDGS 找 URL -> 你自己的抓取器抽正文 -> 质量评分分桶
-    """
     try:
         results = get_real_finance_news(
             query,
@@ -161,7 +163,8 @@ def build_tools(
     @tool("kb_search")
     def kb_search(query: str) -> str:
         """Search local Chroma knowledge base and return the most relevant passages with metadata."""
-        docs = retriever.get_relevant_documents(query)
+        # LangChain 0.3 新 API：旧的 .get_relevant_documents 已弃用
+        docs = retriever.invoke(query)
         if not docs:
             return "No relevant documents found in local KB."
 

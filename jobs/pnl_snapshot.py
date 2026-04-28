@@ -71,6 +71,20 @@ class Snapshot:
     gold_pnl_pct: Optional[float]
 
 
+def _get_gold_offset_from_strategy(store: MemoryStore) -> float:
+    """从 strategy.md 的 target_assets[gold] 拿 price_offset_pct。
+
+    让 gold_now 与用户买入价同口径（浙商点差）。找不到时退回 0.0（spot 价）。
+    """
+    strategy = store.read("strategy")
+    if strategy is None:
+        return 0.0
+    for asset in strategy.get("target_assets", []) or []:
+        if asset.get("symbol") == "GC=F":
+            return float(asset.get("price_offset_pct", 0.0) or 0.0)
+    return 0.0
+
+
 def _safe_close(symbol: str) -> Optional[float]:
     df = get_history_data(symbol, "1d")
     if df.empty:
@@ -94,8 +108,12 @@ def _compute_snapshot(store: MemoryStore) -> Optional[Snapshot]:
 
     audcny = _safe_close("AUDCNY=X") or 4.7
     ndq_price = _safe_close("NDQ.AX")
-    snap = get_gold_snapshot(offset_pct=0.0)
-    gold_now = snap.spot_cny_per_gram if snap else None
+    # 用 strategy.target_assets[gold].price_offset_pct 让 gold_now（"现在按浙商克价
+    # 算的估值价"）与用户实际买入价同口径，避免 spot vs bank 不一致导致系统性
+    # 偏低 1-1.5% 浮盈（audit financial C1）
+    gold_offset = _get_gold_offset_from_strategy(store)
+    snap = get_gold_snapshot(offset_pct=gold_offset)
+    gold_now = snap.bank_cny_per_gram if snap else None
 
     # 各资产浮盈 %
     ndq_pnl_pct = (
@@ -230,11 +248,14 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
     ndq_line = _series_polyline(history, "ndq_pnl_pct", vmin, vmax)
     gold_line = _series_polyline(history, "gold_pnl_pct", vmin, vmax)
 
-    latest_total = next(
+    # latest_total 永远是 float（next 的 default 是 0.0），但 mypy 看不出来：
+    # 显式 cast 让类型检查器满意，也避免后续 > / < 比较的 None 风险（audit eng M8）
+    _lt = next(
         (e.get("total_pnl_pct") for e in reversed(history)
          if e.get("total_pnl_pct") is not None),
         0.0,
     )
+    latest_total: float = float(_lt) if _lt is not None else 0.0
     arrow = "▲" if latest_total > 0 else ("▼" if latest_total < 0 else "■")
     arrow_color = "#3fb950" if latest_total > 0 else ("#f85149" if latest_total < 0 else "#8b949e")
 
@@ -352,13 +373,20 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
   <line x1="{MARGIN_L}" y1="{LINE_H + 10}" x2="{W - MARGIN_R}" y2="{LINE_H + 10}"
         stroke="#21262d" stroke-width="1"/>
 
-  <!-- ===== 下半：横向柱状图（vs 11 基准 + 用户实盘）===== -->
-  <text x="{MARGIN_L}" y="{LINE_H + 38}" fill="#c9d1d9" class="title">🏆 vs 11 基准 · 截至今日累计涨幅</text>
+  <!-- ===== 下半：横向柱状图（vs N 基准 + 用户实盘）===== -->
+  <text x="{MARGIN_L}" y="{LINE_H + 38}" fill="#c9d1d9" class="title">🏆 vs {len(benchmark_series)} 基准 · 截至今日累计涨幅 (60 天，sample size 较小不构成 alpha 证据)</text>
 
   {zero_line_svg}
   {chr(10).join(bar_svg)}
 </svg>
 """
+
+
+def _redact_token_in(text: str) -> str:
+    """脱敏 git stderr 里可能出现的 'https://x-access-token:gho_xxx@github.com/...'
+    避免 GITHUB_TOKEN 流到 scheduler 日志（audit security M1）"""
+    import re as _re
+    return _re.sub(r"x-access-token:[^@\s]+@", "x-access-token:***@", text)
 
 
 def _auto_push_svg() -> Dict[str, Any]:
@@ -461,7 +489,7 @@ def _auto_push_svg() -> Dict[str, Any]:
                 )
                 _git(["worktree", "remove", "--force", wt_dir], check=False)
                 if push.returncode != 0:
-                    return {"pushed": False, "reason": f"push failed: {push.stderr[:200]}",
+                    return {"pushed": False, "reason": f"push failed: {_redact_token_in(push.stderr[:200])}",
                             "branch": branch}
                 return {"pushed": True, "branch": branch, "mode": "orphan"}
 

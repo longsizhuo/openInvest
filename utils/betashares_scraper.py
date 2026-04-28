@@ -33,7 +33,8 @@ def parse_betashares_content(html):
             try:
                 dt = datetime.strptime(date_match.group(1), "%d %B %Y")
                 data["date"] = dt.strftime("%Y-%m-%d")
-            except: pass
+            except ValueError:
+                pass  # 日期格式异常，data["date"] 保持空
 
     # 2. 提取表格数据 (Holdings & Sectors)
     # 我们遍历所有的 <tr>
@@ -50,8 +51,8 @@ def parse_betashares_content(html):
                     data["holdings"].append((name, val))
                 elif any(x in name for x in ["Technology", "Services", "Discretionary", "Health", "Staples", "Industrials", "Utilities", "Materials", "Energy", "Financials"]):
                     data["sectors"].append((name, val))
-            except:
-                continue
+            except ValueError:
+                continue  # 不是数字（如 "N/A"），跳过这行
 
     # 3. 补全统计指标
     text = soup.get_text(separator=' ', strip=True)

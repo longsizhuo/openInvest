@@ -37,18 +37,35 @@ from core.memory_store import MemoryStore  # noqa: E402
 
 HISTORY_PATH = ROOT / "memory" / ".state" / "pnl_history.jsonl"
 
-# 用户给的黄金交易历史（按时间正序）
-GOLD_TRADES: List[Dict] = [
-    {"ts": "2025-03-27 00:58:11", "kind": "买金-实时", "grams": 50.9762, "price": 980.85, "total": 50000.00},
-    {"ts": "2025-03-27 00:58:12", "kind": "赠金", "grams": 0.0096, "price": 980.72, "total": 9.41},
-    {"ts": "2025-03-27 02:20:56", "kind": "买金-限价", "grams": 15.3560, "price": 976.82, "total": 15000.00},
-    {"ts": "2025-04-21 22:37:58", "kind": "买金-实时", "grams": 9.5441, "price": 1047.77, "total": 10000.00},
-    {"ts": "2025-04-21 22:45:05", "kind": "买金-实时", "grams": 19.1663, "price": 1043.50, "total": 20000.00},
-    {"ts": "2025-04-22 01:10:24", "kind": "买金-限价", "grams": 19.2389, "price": 1039.56, "total": 20000.00},
-    {"ts": "2025-04-22 02:56:22", "kind": "买金-实时", "grams": 9.6289, "price": 1038.54, "total": 10000.00},
+# 黄金交易明细从 git-ignored 私有文件读取，绝不硬编码到入库代码
+# Schema 见 memory/.state/gold_trades.private.json 注释；不存在时用合成 demo
+# 数据，让公开仓库 clone 的人能跑通流程但拿不到任何真实人的持仓信息
+PRIVATE_TRADES_PATH = ROOT / "memory" / ".state" / "gold_trades.private.json"
+
+DEMO_GOLD_TRADES: List[Dict] = [
+    # 演示用合成数据：单笔 10g 买入 @ ¥500，便于跑通脚本；与任何真实账户无关
+    {"ts": "2024-01-15 10:00:00", "kind": "买金-演示", "grams": 10.0, "price": 500.00, "total": 5000.00},
 ]
 
+
+def _load_gold_trades() -> List[Dict]:
+    """优先读私有 JSON，没有则用合成数据。
+
+    将真实交易明细从 git 仓库剥离出去（audit C1），避免：
+    - 公开仓库被 clone 后精确反推持仓规模 / 入场点位
+    - 分钟级时间戳被用于浙商客服侧的社工对账
+    """
+    if PRIVATE_TRADES_PATH.exists():
+        with open(PRIVATE_TRADES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("trades", [])
+    return DEMO_GOLD_TRADES
+
+
 GOLD_OZ_PER_GRAM = 31.1035
+
+# 浙商积存金点差（实测 ≈ 0%，可被 strategy.md target_assets[gold].price_offset_pct
+# 覆盖；本脚本是 one-shot backfill，不动态读 strategy 简化）
+GOLD_OFFSET_PCT = 0.0
 
 # 回填窗口：只填最近 N 天。早期数据有 yfinance GC=F 现货价 vs 浙商积存金
 # 实际报价的固有 spread（银行点差 + 期货-现货差），算出来会有 -27% 的虚假浮亏，
@@ -80,12 +97,12 @@ def _last_close_on_or_before(prices: Dict[str, float], date_str: str) -> Optiona
     return None
 
 
-def _gold_state_at(date_str: str) -> Tuple[float, float]:
+def _gold_state_at(date_str: str, trades: List[Dict]) -> Tuple[float, float]:
     """该日期收盘时（含当日交易），累计 grams 和 cumulative cost (CNY)"""
     cutoff = datetime.strptime(date_str, "%Y-%m-%d").date()
     grams = 0.0
     cost = 0.0
-    for t in GOLD_TRADES:
+    for t in trades:
         trade_date = datetime.strptime(t["ts"][:10], "%Y-%m-%d").date()
         if trade_date <= cutoff:
             grams += t["grams"]
@@ -96,6 +113,12 @@ def _gold_state_at(date_str: str) -> Tuple[float, float]:
 
 
 def main() -> None:
+    trades = _load_gold_trades()
+    if trades is DEMO_GOLD_TRADES:
+        print(f"⚠️ 未找到 {PRIVATE_TRADES_PATH}，使用合成 demo 数据。")
+        print(f"   要用真实数据请把交易明细写到该路径（git ignored）")
+    else:
+        print(f"📋 加载真实交易明细 {len(trades)} 笔（来源: gold_trades.private.json）")
     print(f"📡 拉取 yfinance 历史数据 ({START_DATE} → {END_DATE})...")
     gc_prices = _fetch_yf("GC=F")
     usdcny_prices = _fetch_yf("USDCNY=X")
@@ -130,8 +153,11 @@ def main() -> None:
             continue
 
         # 黄金当日克价 + 该日累计持仓 + 平均成本
-        gold_now = (gc_usd / GOLD_OZ_PER_GRAM) * usdcny
-        gold_grams, gold_cost = _gold_state_at(date_str)
+        # 算 spot 克价后乘 (1+offset) 得"浙商口径估值价"，与用户买入价同基础
+        # （audit financial C2: 不修这里 backfill 历史浮盈系统性偏低 1-1.5%）
+        gold_spot = (gc_usd / GOLD_OZ_PER_GRAM) * usdcny
+        gold_now = gold_spot * (1 + GOLD_OFFSET_PCT)
+        gold_grams, gold_cost = _gold_state_at(date_str, trades)
         if gold_grams > 0 and gold_cost > 0:
             gold_avg = gold_cost / gold_grams
             gold_pnl_pct = ((gold_now / gold_avg) - 1) * 100

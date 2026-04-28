@@ -100,9 +100,20 @@ def _is_transient(exc: BaseException) -> bool:
     return True
 
 
+# 失败哨兵：让 CIO 上下文里能识别"这个 worker 没产出"，避免 CIO 在错误消息上面综合
+AGENT_UNAVAILABLE_MARKER = "[WORKER_UNAVAILABLE]"
+
+
 def _ask(agent: Optional[SimpleAgent], context: str) -> str:
+    """LLM 调用 + 重试。失败时返回明确的哨兵字符串，让 CIO prompt 可识别降权。
+
+    audit (algo M4): 之前失败返回 'Agent error: ...' 这种自然语言，CIO 会
+    礼貌地尝试综合错误消息，输出 silent corruption 的 verdict。现在返回
+    带 [WORKER_UNAVAILABLE] 前缀，CIO prompt 已加 hard rule 看到此标记必须
+    把 confidence 压到 ≤ 0.4 + verdict 必须 HOLD。
+    """
     if agent is None:
-        return "⚠️ Agent unavailable"
+        return f"{AGENT_UNAVAILABLE_MARKER} reason=agent_not_constructed"
     last_exc: Optional[BaseException] = None
     for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
         try:
@@ -119,7 +130,11 @@ def _ask(agent: Optional[SimpleAgent], context: str) -> str:
                 f"{type(e).__name__}: {e} → sleep {delay:.1f}s"
             )
             time.sleep(delay)
-    return f"⚠️ Agent error after {LLM_MAX_ATTEMPTS} attempts: {type(last_exc).__name__}: {last_exc}"
+    return (
+        f"{AGENT_UNAVAILABLE_MARKER} "
+        f"reason=retry_exhausted exc_type={type(last_exc).__name__} "
+        f"exc_msg={str(last_exc)[:120]}"
+    )
 
 
 # ----------------------------------------------------------------------
@@ -142,6 +157,36 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
     out["dominant_view"] = m.group(1).lower() if m else "tie"
     m = ALLOC_RE.search(text)
     out["alloc_cny"] = int(m.group(1)) if m else 0
+
+    # Sanity check 1（audit security M3）: 防 prompt injection / LLM 过度自信
+    # confidence ≥ 0.95 + BUY 的组合在统计上不可能（60 天 sample size 信号太弱），
+    # 99% 是 LLM hallucination 或 prompt 被新闻 / 行情字符串污染
+    if out["verdict"] == "BUY" and out["confidence"] >= 0.95:
+        out["_original_verdict"] = "BUY"
+        out["_original_confidence"] = out["confidence"]
+        out["verdict"] = "ACCUMULATE"
+        out["confidence"] = 0.6
+        print(f"⚠️ parse_cio_memo: 降级 BUY({out['_original_confidence']}) → ACCUMULATE(0.6) "
+              f"防 LLM 过度自信 / prompt injection")
+
+    # Sanity check 2（audit financial Minor）: alloc_cny 合理性 clamp
+    # LLM 偶发输出无单位数字会被错解读，单笔超过 ¥100k 的提议大概率有问题
+    if abs(out["alloc_cny"]) > 100000:
+        print(f"⚠️ parse_cio_memo: alloc_cny={out['alloc_cny']} 超出合理区间，clamp 到 ±100000")
+        out["_original_alloc"] = out["alloc_cny"]
+        out["alloc_cny"] = max(-100000, min(100000, out["alloc_cny"]))
+
+    # Sanity check 3（audit algo M4）: worker 输入失败时 confidence 降级
+    # 上游传来的 raw 是 brief，含 macro/quant/risk 内容；如果 brief 里出现 worker
+    # unavailable 哨兵，CIO 大概率是在 garbage 上综合
+    if "[WORKER_UNAVAILABLE]" in text:
+        if out["confidence"] > 0.4:
+            out["_original_confidence_unavailable"] = out["confidence"]
+            out["confidence"] = 0.4
+            out["verdict"] = "HOLD"
+            print("⚠️ parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
+                  "强制 verdict=HOLD + confidence≤0.4")
+
     return out
 
 

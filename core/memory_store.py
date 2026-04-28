@@ -220,13 +220,21 @@ class MemoryStore:
         是可能被插入）。
 
         如果 doc 不存在，返回的 _DocTx 仍然可写，等于"在锁内创建新文件"。
+
+        **commit-on-success 语义**（audit C2 修复）：caller 在 with 块内抛异常
+        时，已经修改的 tx.metadata / tx.body **不会**被写入。这避免了"frontmatter
+        改了一半 + body 没重渲染"的撕裂状态被持久化。锁仍在 finally 中释放。
         """
         path = self.path_of(name)
         with _file_lock(path):
             doc = self._read_unlocked(path, name)
             tx = _DocTx(name=name, doc=doc)
-            yield tx
-            # commit
+            try:
+                yield tx
+            except BaseException:
+                # caller 抛异常 → 放弃所有修改，让异常向上传播
+                raise
+            # 只有 yield 块正常结束才 commit
             meta_clean = {
                 k: v for k, v in tx.metadata.items()
                 if k not in {"name", "type", "updated"}

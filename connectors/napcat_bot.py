@@ -49,7 +49,7 @@ load_dotenv()
 
 NAPCAT_WS_URL = os.getenv("NAPCAT_WS_URL", "ws://localhost:6101")
 NAPCAT_HTTP_URL = os.getenv("NAPCAT_HTTP_URL", "http://localhost:6100")
-WHITELIST_QQ = int(os.getenv("INVEST_WHITELIST_QQ", "1169771750"))
+WHITELIST_QQ = int(os.getenv("INVEST_WHITELIST_QQ", "0"))  # 必须 env 配置，0 = 拒绝所有
 
 logging.basicConfig(
     level=logging.INFO,
