@@ -1,35 +1,37 @@
 <div align="center">
 
-# 🤖 invest — Your AI Investment Committee
+# openInvest
 
-### *4 个 AI 专家、1 个交易员、0 失眠夜*
+### 给 LLM 一个投资委员会，给你一份每天 6 分钟的备忘录
 
-**让 Coordinator-Worker 多智能体替你开投资委员会，每天 6 分钟，跨资产、跨周期、不漏一个利空。**
+**4 个 Agent 开会、互相 challenge、写 memo、做梦、记住你 90 天前的判断。**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-5C2D91?logo=openai&logoColor=white)](https://deepseek.com)
+[![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-5C2D91)](https://deepseek.com)
 [![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
-[![OpenClaw Memory](https://img.shields.io/badge/Memory-OpenClaw-success)](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)
-[![APScheduler](https://img.shields.io/badge/Cron-APScheduler-blue)](https://apscheduler.readthedocs.io/)
+[![OpenClaw Memory](https://img.shields.io/badge/Memory-OpenClaw--style-success)](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
+[![Stars](https://img.shields.io/github/stars/longsizhuo/invest?style=social)](https://github.com/longsizhuo/invest)
 
-[**🚀 Quick Start**](#-quick-start) ·
-[**🧠 Architecture**](#-architecture) ·
-[**🛡️ Why Production-Grade**](#%EF%B8%8F-为什么是-production-grade-不是-toy-project) ·
-[**🪄 Claude Code Skill**](#-claude-code-skill-把-invest-装进-claude)
+[Quick Start](#quick-start) · [架构](#架构) · [硬化日志](#硬化日志) · [Claude Code Skill](#claude-code-skill)
 
 </div>
 
 ---
 
-## ⚡ 30 秒看懂这是什么
+## 它在做什么
 
-> **传统**：你订阅几个公众号 / 看 Bloomberg / 自己查 RSI → 半小时后还在纠结要不要 buy
->
-> **invest**：cron 触发 → **Macro / Quant / Risk Officer / CIO 4 个 LLM 各自出报告并 cross-challenge** → 邮箱里收到 1 份带置信度的投资委员会备忘录 → 你决定是否执行
+每天早上 03:00，cron 触发一次投资委员会。
 
-它**不是聊天机器人**，是一个**有持久状态、能记住你 90 天交易模式、跨进程并发安全的 production agent system**。
+4 个 LLM 各开各的 session，信息隔离：
+
+- **Macro Strategist** 看宏观（VIX / TNX / USDCNY）
+- **Quant Analyst** 看技术面（RSI / 多周期分位 / 趋势），不知道你的持仓
+- **Risk Officer** 看风控（集中度 / 浮盈缓冲 / 尾部损失），不知道技术信号
+- **Round 2**：Quant 和 Risk 互看对方报告，调整观点
+- **CIO** 综合所有人的发言，输出 BUY / ACCUMULATE / HOLD / TRIM / SELL + 置信度
+
+输出是一份带署名的 Markdown memo，发到你邮箱。你决定要不要执行。
 
 ```
                   ┌──────────────────────────────────────────┐
@@ -53,50 +55,28 @@
 
 ---
 
-## 🌟 核心卖点
+## 三个设计选择
 
-<table>
-<tr>
-<td width="50%" valign="top">
+### 1. Coordinator-Worker，不是大 prompt 塞人格
 
-### 🧠 真 · 多智能体投资委员会
+很多 multi-agent demo 是这样写的："你现在是 4 个分析师，请用 4 段话分别给出意见"。这种东西没有信息隔离，没有顺序依赖，也没有真正的 cross-challenge，本质上还是单次调用。
 
-不是"prompt 里塞 4 个 persona"，是 **真 · Coordinator-Worker 模式** —— 4 个独立 LLM session，信息严格隔离：
+openInvest 是 4 个独立 LLM session，按 DAG 跑：
 
-- **Macro Strategist** 看宏观（VIX / TNX / USDCNY），跨资产共享
-- **Quant Analyst** 看技术面（RSI / 多周期分位 / 趋势），不知道用户持仓
-- **Risk Officer** 看风控（集中度 / 浮盈缓冲 / 尾部损失），不知道技术信号
-- **Round 2 cross-challenge**：Quant 和 Risk 互看对方报告调整观点
-- **CIO** 综合所有，给 BUY/ACCUMULATE/HOLD/TRIM/SELL + confidence
+```
+Macro ──┐
+        ├─→ Quant + Risk (并行, 信息隔离)
+        ├─→ Round 2: 互看对方报告再发言一次
+        └─→ CIO 综合
+```
 
-</td>
-<td width="50%" valign="top">
+Worker 之间能看见什么、看不见什么，全部在 `core/committee.py` 里显式控制。Quant 永远不知道用户持仓多少，Risk Officer 永远不知道 RSI 是多少，避免 LLM 互相污染观点。
 
-### 💤 OpenClaw-style Dreaming Memory
+### 2. Markdown 就是数据库
 
-借鉴 [OpenClaw](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) 的"AI 也要做梦"理念，每天凌晨 03:00 跑三阶段记忆整合：
+抛弃 `user_profile.json` 单文件 + 全量加载。改用 frontmatter + Markdown 双向通道：
 
-- **Light Sleep** — 摄入近 90 天交易 + 多 symbol 行情上下文，提取信号
-- **REM Sleep** — 找跨时间重复模式，输出候选 insight
-- **Deep Sleep** — 阈值门 (`score≥0.8` / `count≥3`) 通过 → 写入 `insights/` + 索引
-
-LLM 不再"金鱼记忆"——你 6 个月前的过度集中持仓，今天的 Risk Officer 看得见。
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 📝 Markdown-as-Truth 持久化
-
-抛弃 `user_profile.json` 单文件 + 全量加载。改用 **frontmatter + Markdown** 双向通道：
-
-- **Frontmatter** = 结构化数据（代码读写）
-- **Body** = 自然语言版（LLM 直接读）
-- 同一份 `portfolio.md` —— Python 改完，LLM 拿到的也是最新状态
-- `fcntl.flock` + atomic `tmp → fsync → os.replace` 双保险
-
-```yaml
+```markdown
 ---
 cash_cny: 18290.51
 gold_grams: 123.92
@@ -105,67 +85,65 @@ ndq_shares: 128
 ---
 # 当前持仓
 - CNY 现金: ¥18,290.51
-- 黄金: 123.92 克 ...
+- 黄金: 123.92 克，均价 ¥1008.79/g
+- NDQ.AX: 128 股
 ```
 
-</td>
-<td width="50%" valign="top">
+- Frontmatter 给代码读写，atomic
+- Body 给 LLM 直接读，不需要二次格式化
+- 同一份 `portfolio.md`，Python 和 LLM 看到的永远一致
+- `fcntl.flock` + `tmp → fsync → os.replace` 双保险，进程被 kill 也不会写一半
 
-### 🪄 双 LLM 模式 · 一份代码
+### 3. OpenClaw 风格的 Dreaming Memory
 
-同一套 `agents/`、同一套 `core/committee.py`、同一套 prompts —— 跑哪个 LLM 看你心情：
+LLM 没有跨会话记忆。你 6 个月前因为过度集中持仓被 Risk Officer 警告过的事情，今天的 Risk Officer 完全不知道。
 
-- **DeepSeek** (cron 模式)：每天 daily_report 自动跑，省 token
-- **Claude** (skill 模式)：在 Claude Code 对话里随时召唤委员会，4 个 agent **真 async 并行**，工作流和 cron 完全等价
+借鉴 [OpenClaw](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) 的思路，每天凌晨跑三阶段记忆整合：
 
-```bash
-# Claude Code 里直接：
-~/.claude/skills/invest/run.sh prepare_committee NDQ.AX
-# Coordinator-Worker fan-out → 4 个 worker 并行 → CIO 综合
-```
+| 阶段 | 干什么 | 输出 |
+|------|--------|------|
+| Light Sleep | 摄入近 90 天交易 + 多 symbol 行情 | 信号清单 |
+| REM Sleep | 找跨时间重复模式 | 候选 insight |
+| Deep Sleep | 阈值门 (`score≥0.8` & `count≥3`) | 写入 `insights/` |
 
-> 💡 这是 [Claude Code v2.1.88 Coordinator Mode](https://claude.com/claude-code) 的标准实现样本之一。
-
-</td>
-</tr>
-</table>
+凝固出来的 insight 第二天会注入 CIO 的上下文。它真的会记住你。
 
 ---
 
-## 🛡️ 为什么是 Production-Grade，不是 Toy Project
+## 硬化日志
 
-> 大多数 AI agent demo 写完就丢，跑两天就开始崩。invest 经过完整 audit + 5 轮硬化 commit，专治 LLM 系统的常见死法：
+大多数 agent demo 写完就丢，跑两天就崩。下面是 5 轮 audit 之后修掉的实际死法，每一条都能在代码里找到：
 
-| 死法 | 我们的修法 | 出处 |
-|---|---|---|
-| 💥 进程被 kill 时 `portfolio.md` 写到一半，状态损坏 | **Atomic write**: `tmp + fsync + os.replace` 三步走 | `core/memory_store.py:_atomic_write_text` |
-| 💥 NapCat 存款 + scheduler 扣款并发，有一笔凭空消失 (TOCTOU) | **单锁 RMW + `transaction()` context manager**，50 线程压测 0 丢失 | `core/memory_store.py:transaction` |
-| 💥 DeepSeek 偶发 429/5xx，CIO 在空字符串上编 memo | **指数退避 + jitter retry**，区分 transient vs auth 错误 | `core/committee.py:_ask` |
-| 💥 yfinance 拉不到价 → 估值返回 0 → Risk Officer "集中度爆表"建议清仓 | **`Optional[float]` + 跳过该资产**，scheduler return 标 `degraded` | `jobs/daily_report.py:_get_last_close` |
-| 💥 BetaShares scraper 403 反爬 → NDQ 价完全拿不到 | **fallback yfinance**，scrape 失败保 close 价 | `utils/exchange_fee.py` |
-| 💥 数据陈旧 5 天但 LLM 不知道，编今天策略 | **Staleness 阈值检测** + 注入 LLM 上下文"⚠️ 数据陈旧 N 天" | `INVEST_PRICE_STALE_DAYS` env |
-| 💥 邮件 SMTP 失败静默 return，user 永远不知道日报没收到 | **`EmailDeliveryError` raise**，scheduler `job_runs` 表自动记录 | `services/notifier.py` |
-| 💥 LLM 失败事件无审计，事后查不到 | **全部落 `.dreams/events.jsonl`**：`price_fetch_failed` / `price_stale` / `email_delivery_failed` | `core/memory_store.py:dream_event` |
+| 死法 | 修法 | 出处 |
+|------|------|------|
+| 进程被 kill 时 `portfolio.md` 写到一半，状态损坏 | Atomic write: `tmp + fsync + os.replace` 三步走 | `core/memory_store.py:_atomic_write_text` |
+| NapCat 存款 + scheduler 扣款并发，有一笔凭空消失 (TOCTOU) | 单锁 RMW + `transaction()` context manager | `core/memory_store.py:transaction` |
+| DeepSeek 偶发 429/5xx，CIO 在空字符串上编 memo | 指数退避 + jitter retry，区分 transient vs auth | `core/committee.py:_ask` |
+| yfinance 拉不到价 → 估值返回 0 → Risk Officer 建议清仓 | `Optional[float]` + 跳过该资产，scheduler 标 `degraded` | `jobs/daily_report.py:_get_last_close` |
+| BetaShares scraper 403 反爬 → NDQ 价拿不到 | Fallback yfinance，scrape 失败保 close 价 | `utils/exchange_fee.py` |
+| 数据陈旧 5 天但 LLM 不知道，编今天的策略 | Staleness 阈值检测 + 注入 LLM 上下文 "⚠️ 数据陈旧 N 天" | `INVEST_PRICE_STALE_DAYS` env |
+| 邮件 SMTP 失败静默 return，user 不知道日报丢了 | `EmailDeliveryError` raise，scheduler `job_runs` 表自动记录 | `services/notifier.py` |
+| LLM 失败事件无审计，事后查不到 | 全部落 `.dreams/events.jsonl` | `core/memory_store.py:dream_event` |
 
-📊 **并发压测证据**：
+并发压测：
 
 ```
-50 线程并发 cash_cny += 1 → 最终 delta = 50.0 ✅ 0 lost updates
-20 轮 scheduler 扣款 + napcat 存款 race → delta 精确 = -37880 ✅ 0 lost updates
+50 线程并发 cash_cny += 1   →  最终 delta = 50.0   (0 lost updates)
+20 轮 scheduler 扣款 + napcat 存款 race  →  delta 精确 = -37880  (0 lost updates)
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Clone + 装依赖
 git clone https://github.com/longsizhuo/invest.git
 cd invest && uv sync --frozen --python 3.13
 
-# 2. 初始化你的持仓 / 策略 (memory/)
+# 2. 初始化你的持仓 / 策略
 cp user_profile.example.json user_profile.json
-# 编辑：填邮箱、初始现金、target_assets、风险偏好
+# 填邮箱、初始现金、target_assets、风险偏好
 python scripts/migrate_profile.py    # JSON → memory/{user,strategy,portfolio}.md
 
 # 3. 凭据
@@ -174,56 +152,48 @@ cp .env.example .env
 
 # 4. 选一种方式跑
 python -m jobs.daily_report      # 跑一次完整委员会 (~6 min)
-python -m scheduler.runner        # 全套 cron 持续跑 (推荐生产)
-docker compose up -d              # 容器化部署
-```
-
-🪄 **想在 Claude Code 里互动地用？**
-
-```bash
-bash skill/install.sh                                       # 一行装
-~/.claude/skills/invest/run.sh status                       # 看持仓 / 浮盈
-~/.claude/skills/invest/run.sh prepare_committee NDQ.AX     # 召唤 4 角色委员会
+python -m scheduler.runner       # 全套 cron 持续跑 (推荐生产)
+docker compose up -d             # 容器化部署
 ```
 
 ---
 
-## 🧠 Architecture
+## 架构
 
 ```
 invest/
-├── agents/                    🤖 4 个角色 + macro strategist 的 prompts
+├── agents/                    4 个角色 + macro strategist 的 prompts
 │   ├── macro_strategist.py
 │   ├── quant.py
 │   ├── risk_officer.py
 │   └── cio.py
 ├── core/
-│   ├── committee.py           🎯 Coordinator-Worker 编排（cross-challenge / Round 2 / CIO 综合）
-│   ├── memory_store.py        💾 frontmatter + atomic write + transaction()
-│   ├── portfolio_manager.py   👤 with_portfolio_tx() — 单锁 RMW 闭包
-│   └── consolidation_lock.py  🔒 Dreaming 跨进程独占锁
-├── jobs/                      ⏰ APScheduler 自动发现的 YAML 定义
+│   ├── committee.py           Coordinator-Worker 编排
+│   ├── memory_store.py        frontmatter + atomic write + transaction()
+│   ├── portfolio_manager.py   with_portfolio_tx() 单锁 RMW 闭包
+│   └── consolidation_lock.py  Dreaming 跨进程独占锁
+├── jobs/                      APScheduler 自动发现的 YAML 定义
 │   ├── daily_report.py / .yml
-│   ├── dreaming.py / .yml     💤 OpenClaw 三阶段记忆整合
+│   ├── dreaming.py / .yml     OpenClaw 三阶段记忆整合
 │   ├── payday_check.py / .yml
 │   └── commsec_sync.py / .yml
-├── scheduler/runner.py        🕐 APScheduler + SQLAlchemy 持久化
-├── connectors/napcat_bot.py   📱 微信/QQ 命令接口（/deposit /gold_buy ...）
-├── skill/                     🪄 Claude Code Skill (SKILL.md + run.sh + install.sh)
-├── memory/                    💾 source-of-truth（不入 git）
+├── scheduler/runner.py        APScheduler + SQLAlchemy 持久化
+├── connectors/napcat_bot.py   微信/QQ 命令接口（/deposit /gold_buy ...）
+├── skill/                     Claude Code Skill
+├── memory/                    source-of-truth（不入 git）
 │   ├── user.md / strategy.md / portfolio.md
-│   ├── daily/<date>.md        — 日志
-│   ├── .committee/<date>/*.md — 委员会备忘
-│   ├── .dreams/events.jsonl   — 审计 + 失败事件流
-│   └── insights/*.md          — Dreaming 凝固出的长期模式
+│   ├── daily/<date>.md        日志
+│   ├── .committee/<date>/*.md 委员会备忘
+│   ├── .dreams/events.jsonl   审计 + 失败事件流
+│   └── insights/*.md          Dreaming 凝固出的长期模式
 └── utils/
-    ├── exchange_fee.py        💱 多源行情（DB → scraper → yfinance → CSV 兜底）
-    └── gold_price.py          🥇 浙商积存金克价换算
+    ├── exchange_fee.py        多源行情（DB → scraper → yfinance → CSV 兜底）
+    └── gold_price.py          浙商积存金克价换算
 ```
 
 ---
 
-## ⚙️ 配置详解
+## 配置
 
 ### `target_assets` 多资产 schema
 
@@ -244,10 +214,10 @@ target_assets:
 
 每个资产独立 cap、独立 channel、独立点差。详见 [`docs/memory_layout.md`](docs/memory_layout.md)。
 
-### 可调 env (默认值已合理)
+### 可调 env
 
 | Env | 默认 | 作用 |
-|---|---|---|
+|-----|------|------|
 | `INVEST_LLM_MAX_ATTEMPTS` | 3 | LLM 最大尝试次数 |
 | `INVEST_LLM_BASE_DELAY` | 2.0 | 重试初始延迟 (秒) |
 | `INVEST_LLM_MAX_DELAY` | 20.0 | 重试单次上限 (秒) |
@@ -257,21 +227,24 @@ target_assets:
 
 ---
 
-## 🪄 Claude Code Skill：把 invest 装进 Claude
+## Claude Code Skill
 
-> 🔥 **OpenClaw + Claude Code v2.1.88 Coordinator Mode 的标准实现样本之一。**
+同一套 `agents/` 和 `core/committee.py`，跑哪个 LLM 看你心情：
+
+- **DeepSeek (cron 模式)**：每天 daily_report 自动跑，省 token
+- **Claude (skill 模式)**：在 Claude Code 对话里随时召唤委员会，4 个 agent 真 async 并行
 
 ```bash
 cd $INVEST_HOME && bash skill/install.sh
 ```
 
 `install.sh` 在 `~/.claude/skills/invest/` 建立 symlink 指向仓库里的
-`skill/SKILL.md` + `skill/run.sh`。改协议只需 commit + 其他设备 `git pull` 立即同步。
+`skill/SKILL.md` + `skill/run.sh`。改协议只需 commit + 其他设备 `git pull`。
 
 可用子命令：
 
 | Command | 干啥 |
-|---|---|
+|---------|------|
 | `status` | 持仓 + 浮盈 + 实时价（JSON） |
 | `strategy` | target_assets + Dreaming 长期 insight |
 | `live_prices` | VIX / TNX / USDCNY / GC=F / NDQ.AX |
@@ -284,9 +257,9 @@ cd $INVEST_HOME && bash skill/install.sh
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
-✅ **已交付**
+已交付：
 
 - [x] OpenClaw 风格 frontmatter Markdown memory store
 - [x] APScheduler + YAML job discovery
@@ -295,49 +268,30 @@ cd $INVEST_HOME && bash skill/install.sh
 - [x] 多资产支持（股票 / 黄金，单元独立 cap）
 - [x] NapCat 微信/QQ 命令接口
 - [x] Claude Code Skill 双 LLM 模式
-- [x] 5 轮 audit 硬化：atomic write / LLM retry / TOCTOU / data quality 4 件套 / email raise
+- [x] 5 轮 audit 硬化（atomic write / LLM retry / TOCTOU / data quality / email raise）
 - [x] Docker + APScheduler 容器化部署
 
-🔜 **路上**
+路上：
 
-- [ ] `tests/test_concurrency.py` —— 把 50 线程压测固化进 pytest，加 GitHub Actions
-- [ ] Multi-tenant：`memory/<user_id>/...` schema，`MemoryStore.path_of` 加 user_id 维度
+- [ ] `tests/test_concurrency.py` 把 50 线程压测固化进 pytest，加 GitHub Actions
+- [ ] Multi-tenant：`memory/<user_id>/...` schema
 - [ ] Prometheus metrics 出口（job_runs / llm_call_duration / price_staleness_days）
 
 ---
 
-## 🚨 投资免责声明
+## 免责
 
-本系统为 LLM-driven 决策辅助工具。
+LLM-driven 决策辅助工具。不构成投资建议。LLM 会出错、会过度自信、会漏看东西。
 
-- 不构成任何投资建议
-- LLM 输出可能出错、过度自信、漏看重要信息
-- 交易行为请你自己评估、自己执行、自己负责
-- 系统当前默认**只建议入场/加仓/减仓，不会自动下单**
+系统默认只建议入场/加仓/减仓，不会自动下单。
 
-LLM 失误的损失没人能赔。**用之前先用 `what_if` 在小金额上跑两周。**
+用之前先用 `what_if` 在小金额上跑两周。
 
 ---
 
-## 🤝 Contributing & 引用
+## 致谢
 
-PR / Issue 欢迎。如果你在论文 / 博客 / 项目里引用这个架构（4 角色委员会 + Dreaming + frontmatter memory），请反链回来：
+- [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 三阶段记忆整合架构灵感来源
+- [Claude Code](https://claude.com/claude-code) — Skill 模式 Coordinator-Worker fan-out 实现
 
-```
-https://github.com/longsizhuo/invest
-```
-
-借鉴 / 致敬：
-
-- [**OpenClaw Dreaming Guide**](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — Dreaming 三阶段架构灵感来源
-- [**Claude Code v2.1.88**](https://claude.com/claude-code) — Coordinator-Worker 协议样本
-
----
-
-<div align="center">
-
-**如果这个项目帮到了你，给个 ⭐️ 是最好的鼓励。**
-
-*Built with 🧠 by humans + AIs · 让 Coordinator 帮你睡个好觉*
-
-</div>
+PR 和 Issue 欢迎。觉得有用的话给个 ⭐️。
