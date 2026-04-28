@@ -79,12 +79,14 @@ python scripts/import_gold_trades.py
 - 同进程多线程（agent ThreadPool）安全
 - 跨进程（scheduler runner + napcat_bot 同时跑）也安全
 
-## Dreaming 整合（P3 待实施）
+## Dreaming 整合
 
-`jobs/dreaming.py` 每天 03:00 跑三阶段：
+`jobs/dreaming.py` 每天 03:00 跑三阶段（实际实现见 `jobs/dreaming.py`）：
 
-1. **Light Sleep** — 读 `daily/*.md` 最近 30 天，提取信号到 `.dreams/short-term-recall.json`
-2. **REM Sleep** — 找跨日重复模式，输出 `.dreams/candidates.json`
-3. **Deep Sleep** — 阈值门（score≥0.8 / recall≥3 / source≥3）通过的 → 写 `insights/*.md` + 更新 `MEMORY.md` 索引
+1. **Light Sleep** — 读 `memory/portfolio_history.jsonl` 最近 90 天交易（`LOOKBACK_DAYS=90`），结合多 symbol 的 2y 行情上下文（`CONTEXT_SYMBOLS`）提取信号 + 各 window 事后收益 → `.dreams/short-term-recall.json`
+2. **REM Sleep** — 找跨时间重复模式，输出 `.dreams/candidates.json`
+3. **Deep Sleep** — 阈值门 `score≥0.8 / count≥3` 通过的 → 写 `insights/*.md` + 更新 `MEMORY.md` 索引
+
+> 后续如果改为消费 `daily/*.md` 或调整 LOOKBACK_DAYS / 阈值门，请同步更新本节，避免文档与实现脱节。
 
 详见 [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)。

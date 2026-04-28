@@ -55,10 +55,21 @@ class PortfolioManager:
         aud_cash = float(self.portfolio.get("aud_cash", 0))
         ndq_shares = float(self.portfolio.get("ndq_shares", 0))
         exchange_buffer = float(self.user.get("exchange_buffer_cny", 0))
-        max_single = float(self.strategy.get("max_single_invest_cny", 10000))
-        target_asset = str(self.strategy.get("target_asset", "NDQ.AX"))
 
-        # 持仓市值（粗算 AUD->CNY）
+        # 多资产策略下从 target_assets 各 cap 取 max 当兜底（每资产独立 cap，
+        # 调用方按当前操作的资产单独取更准）。旧字段 strategy.max_single_invest_cny /
+        # strategy.target_asset 已废弃，保留 .get() 仅为单资产旧 memory 的兼容兜底。
+        target_assets = list(self.strategy.get("target_assets", []) or [])
+        if target_assets:
+            max_single = max(
+                float(t.get("max_single_invest_cny", 0) or 0) for t in target_assets
+            ) or 10000.0
+            primary_asset = str(target_assets[0].get("symbol", "NDQ.AX"))
+        else:
+            max_single = float(self.strategy.get("max_single_invest_cny", 10000))
+            primary_asset = str(self.strategy.get("target_asset", "NDQ.AX"))
+
+        # 持仓市值（粗算 AUD->CNY，黄金估值由调用方负责）
         stock_val_cny = ndq_shares * current_stock_price * exchange_rate
         total_portfolio = stock_val_cny + cash_cny + aud_cash * exchange_rate
 
@@ -72,7 +83,7 @@ class PortfolioManager:
             disposable_for_invest=disposable,
             risk_level=str(self.user.get("risk_tolerance", "Balanced")),
             portfolio_value=total_portfolio,
-            target_asset=target_asset,
+            target_asset=primary_asset,
             max_single_invest_cny=max_single,
             user_name=str(self.user.get("display_name", "Anonymous")),
         )
@@ -154,16 +165,23 @@ class PortfolioManager:
         cash_cny = float(doc.get("cash_cny", 0))
         aud_cash = float(doc.get("aud_cash", 0))
         ndq_shares = float(doc.get("ndq_shares", 0))
+        gold_grams = float(doc.get("gold_grams", 0) or 0)
+        gold_avg_cost = float(doc.get("gold_avg_cost_cny_per_gram", 0) or 0)
+        gold_line = (
+            f"- **黄金持仓 (浙商积存金)**: {gold_grams:.4f} 克"
+            + (f"，均价 ¥{gold_avg_cost:.2f}/克" if gold_avg_cost else "")
+        ) if gold_grams else "- **黄金持仓 (浙商积存金)**: 0"
         body = f"""# 当前持仓
 
 - **CNY 现金**: ¥{cash_cny:,.2f}
 - **AUD 现金**: ${aud_cash:,.2f}
 - **NDQ.AX 持仓**: {ndq_shares} 股
+{gold_line}
 
 ## 说明
 
-此文件由 daily_report / commsec_sync / payday_check 三个 job 自动更新。
-不要手动编辑——如需调整，请走 jobs/manual_adjust.py。
+此文件由 daily_report / commsec_sync / payday_check / napcat_bot 自动更新。
+不要手动编辑——如需调整，请走 jobs/manual_adjust.py 或 NapCat /cmd 命令。
 """
         # 保留 frontmatter 业务字段
         meta = {k: v for k, v in doc.metadata.items()

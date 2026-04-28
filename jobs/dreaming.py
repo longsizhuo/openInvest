@@ -110,10 +110,10 @@ def light_sleep(store: MemoryStore) -> List[Dict[str, Any]]:
         outcomes: Dict[str, Optional[float]] = {}
         if price_sym:
             for w in WINDOWS:
-                outcomes[f"return_{w}d"] = (
-                    round(_market_outcome(price_sym, trade_date, w), 2)
-                    if _market_outcome(price_sym, trade_date, w) is not None else None
-                )
+                # _market_outcome 内部每次都会拉 2y 历史；判空+round 复用同一次结果，
+                # 避免 N 笔交易 × M window 把行情拉取量翻倍
+                ret = _market_outcome(price_sym, trade_date, w)
+                outcomes[f"return_{w}d"] = round(ret, 2) if ret is not None else None
 
         signals.append({
             "trade_date": trade_date,

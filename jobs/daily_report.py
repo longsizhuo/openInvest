@@ -128,8 +128,11 @@ def run() -> Dict[str, Any]:
     if not target_assets:
         return {"status": "skipped", "reason": "no_target_assets"}
 
-    primary_symbol = target_assets[0]["symbol"]
-    current_price = _get_last_close(primary_symbol, "主资产")
+    # 估值用的"主资产价格"专门给 NDQ 持仓估值用，不能依赖 target_assets 顺序
+    # （未来可能把黄金放第一项，会把克价当 NDQ 股价导致总资产爆炸）。
+    # 显式找 NDQ.AX；找不到（纯 CNY 组合）就退回 0，让 stock_val_cny 自然为 0。
+    ndq_entry = next((a for a in target_assets if a.get("symbol") == "NDQ.AX"), None)
+    current_price = _get_last_close("NDQ.AX", "NDQ.AX") if ndq_entry else 0.0
     current_rate = _get_last_close("AUDCNY=X", "汇率")
 
     # 计算总资产估算（给 Risk Officer 用）
