@@ -58,8 +58,13 @@ def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
     return "\n\n".join(matches)
 
 
-def _portfolio_summary(pm: PortfolioManager, total_assets_cny: float) -> str:
-    """详细的用户上下文，给 Risk Officer 压力测试用"""
+def _portfolio_summary(
+    pm: PortfolioManager,
+    total_assets_cny: float,
+    current_ndq_aud: float,
+    current_gold_cny_per_g: float,
+) -> str:
+    """详细的用户上下文，给 Risk Officer 压力测试用 (含当前市价 + 浮盈)"""
     cash_cny = float(pm.portfolio.get("cash_cny", 0))
     aud_cash = float(pm.portfolio.get("aud_cash", 0))
     ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
@@ -70,14 +75,26 @@ def _portfolio_summary(pm: PortfolioManager, total_assets_cny: float) -> str:
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
     dry_powder = max(0.0, cash_cny - buffer_cny)
 
+    ndq_pnl_pct = ((current_ndq_aud / ndq_cost) - 1) * 100 if ndq_cost > 0 else 0
+    gold_pnl_pct = (
+        ((current_gold_cny_per_g / gold_cost) - 1) * 100 if gold_cost > 0 else 0
+    )
+    ndq_pnl_aud = (current_ndq_aud - ndq_cost) * ndq_shares if ndq_cost > 0 else 0
+    gold_pnl_cny = (
+        (current_gold_cny_per_g - gold_cost) * gold_grams if gold_cost > 0 else 0
+    )
+
     return (
         f"用户风险偏好: {risk_level}\n"
         f"总资产估算: ¥{total_assets_cny:,.0f}\n"
         f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)\n"
         f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
         f"  - AUD 现金: ${aud_cash:,.0f}\n"
-        f"  - NDQ.AX: {ndq_shares} 股 (均价 ${ndq_cost:.4f} AUD)\n"
-        f"  - 黄金 (浙商): {gold_grams:.4f}g (均价 ¥{gold_cost:.2f}/g)\n"
+        f"  - **NDQ.AX**: {ndq_shares} 股, 均价 ${ndq_cost:.4f}, 现价 ${current_ndq_aud:.2f}, "
+        f"浮盈 {ndq_pnl_pct:+.2f}% (≈ ${ndq_pnl_aud:+.2f} AUD)\n"
+        f"  - **黄金 (浙商)**: {gold_grams:.4f}g, 均价 ¥{gold_cost:.2f}/g, "
+        f"现价 ¥{current_gold_cny_per_g:.2f}/g, 浮盈 {gold_pnl_pct:+.2f}% "
+        f"(≈ ¥{gold_pnl_cny:+,.2f})\n"
     )
 
 
@@ -126,7 +143,11 @@ def run() -> Dict[str, Any]:
         + float(pm.portfolio.get("ndq_shares", 0)) * current_price * current_rate
         + gold_grams * gold_now
     )
-    portfolio_summary = _portfolio_summary(pm, total_assets_cny)
+    portfolio_summary = _portfolio_summary(
+        pm, total_assets_cny,
+        current_ndq_aud=current_price,
+        current_gold_cny_per_g=gold_now,
+    )
 
     has_non_cny = any(a.get("currency", "CNY") != "CNY" for a in target_assets)
 

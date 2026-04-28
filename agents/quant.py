@@ -34,6 +34,7 @@ ONE_LINER: <一句话技术结论，含支撑/阻力位>
 - neutral: 中间状态
 
 不允许"待观察"——必须给明确 SIGNAL。
+**严禁**：不要抱怨工具不可用 / 数据缺失。market_data 已经给了所有需要的技术指标。
 """
 
     # Round 2 — 看到 Risk Officer 的报告后再调整

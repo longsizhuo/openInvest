@@ -298,14 +298,20 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         + gold_grams * gold_now
     )
 
+    ndq_now = _safe_close("NDQ.AX")
+    ndq_pnl_pct = ((ndq_now / ndq_cost) - 1) * 100 if ndq_cost > 0 else 0
+    gold_pnl_pct = ((gold_now / gold_cost) - 1) * 100 if gold_cost > 0 else 0
+
     portfolio_summary = (
         f"用户风险偏好: {risk_level}\n"
         f"总资产估算: ¥{total_cny:,.0f}\n"
         f"  - CNY 现金: ¥{cash_cny:,.0f} (应急金 ¥{buffer_cny:,} 不可投)\n"
         f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
         f"  - AUD 现金: ${aud_cash:,.0f}\n"
-        f"  - NDQ.AX: {ndq_shares} 股 (均价 ${ndq_cost:.4f} AUD)\n"
-        f"  - 黄金 (浙商): {gold_grams:.4f}g (均价 ¥{gold_cost:.2f}/g)"
+        f"  - **NDQ.AX**: {ndq_shares} 股, 均价 ${ndq_cost:.4f}, 现价 ${ndq_now:.2f}, "
+        f"浮盈 {ndq_pnl_pct:+.2f}%\n"
+        f"  - **黄金 (浙商)**: {gold_grams:.4f}g, 均价 ¥{gold_cost:.2f}/g, "
+        f"现价 ¥{gold_now:.2f}/g, 浮盈 {gold_pnl_pct:+.2f}%"
     )
     insights = _gather_relevant_insights(pm.store, target)
 
