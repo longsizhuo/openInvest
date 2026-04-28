@@ -6,11 +6,21 @@
 3. 算各类资产的浮盈百分比（**只算 %，不存绝对金额到 git**）
 4. append 到 memory/.state/pnl_history.jsonl（git ignore）
 5. 渲染 docs/pnl_chart.svg（入 git，但只含百分比线段，无明文数字）
+6. （可选）自动 git commit + push 让 GitHub README 实时更新
 
 隐私设计：
 - 原始 jsonl 含 cash 等绝对值 → gitignore，永不入库
 - SVG 只含百分比线段，且 axis 上不写任何数字 / 日期
 - 看图能看出涨跌趋势 + 哪个资产贡献多，但读不出"今天浮盈多少元 / 资产规模多大"
+
+自动 push（可选）：
+- 设 INVEST_PNL_AUTOPUSH=1 + GITHUB_TOKEN=ghp_xxx 启用
+- INVEST_PNL_PUSH_BRANCH=main（默认）：commit 到主分支，git log 会有每小时一条
+  "chore(pnl): hourly snapshot" 噪音；但 README 引用相对路径 `docs/pnl_chart.svg`
+  GitHub 自动渲染最新版。
+- INVEST_PNL_PUSH_BRANCH=pnl-data：用单独 orphan 分支只放 SVG，主分支干净；
+  README 改用 raw URL 引用：
+    https://raw.githubusercontent.com/<owner>/<repo>/pnl-data/docs/pnl_chart.svg
 
 触发方式：
 - jobs/pnl_snapshot.yml 自动每小时跑
@@ -19,6 +29,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -242,8 +254,134 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
 """
 
 
+def _auto_push_svg() -> Dict[str, Any]:
+    """可选：把 docs/pnl_chart.svg commit 到 git 并 push 到 GitHub。
+
+    只在 INVEST_PNL_AUTOPUSH=1 时启用。token 从 GITHUB_TOKEN env 读。
+    任何失败都吞掉只 print，避免 PnL 数据已落盘但 push 失败导致整个 job 标 fail。
+
+    分支策略：
+    - INVEST_PNL_PUSH_BRANCH=main (默认): 直接推主分支，git log 会有 hourly 噪音
+    - INVEST_PNL_PUSH_BRANCH=pnl-data: 推到独立 orphan 分支（每次 reset 到只
+      含最新 SVG），主分支历史保持干净
+    """
+    if os.getenv("INVEST_PNL_AUTOPUSH", "0") != "1":
+        return {"pushed": False, "reason": "INVEST_PNL_AUTOPUSH != 1"}
+
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if not token:
+        return {"pushed": False, "reason": "GITHUB_TOKEN env 缺失"}
+
+    branch = os.getenv("INVEST_PNL_PUSH_BRANCH", "main").strip() or "main"
+    use_orphan = (branch != "main")
+
+    def _git(args: List[str], check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args], cwd=str(ROOT), capture_output=True, text=True,
+            check=check,
+        )
+
+    try:
+        # 拿 remote URL，注入 token 走 https
+        remote = _git(["config", "--get", "remote.origin.url"]).stdout.strip()
+        if not remote.startswith("https://github.com/"):
+            return {"pushed": False, "reason": f"only https github remote supported, got {remote}"}
+        # https://github.com/owner/repo.git → https://x-access-token:TOKEN@github.com/owner/repo.git
+        authed_remote = remote.replace(
+            "https://", f"https://x-access-token:{token}@", 1
+        )
+
+        if use_orphan:
+            # Orphan 分支模式：临时 worktree 切到 pnl-data，只 commit SVG，force push
+            import tempfile
+            with tempfile.TemporaryDirectory() as wt_dir:
+                # 检查远端有没有这个分支
+                ls = _git(["ls-remote", "--heads", authed_remote, branch], check=False)
+                exists_remote = bool(ls.stdout.strip())
+                if exists_remote:
+                    _git(["worktree", "add", wt_dir, "-B", branch,
+                          f"refs/remotes/origin/{branch}"], check=False)
+                else:
+                    # 全新 orphan：先 worktree add 主分支占位，然后切到 orphan
+                    _git(["worktree", "add", "--detach", wt_dir, "HEAD"])
+
+                wt = Path(wt_dir)
+                if not exists_remote:
+                    subprocess.run(["git", "checkout", "--orphan", branch],
+                                   cwd=str(wt), check=True, capture_output=True)
+                    subprocess.run(["git", "rm", "-rf", "--cached", "."],
+                                   cwd=str(wt), check=False, capture_output=True)
+                    # 清空 worktree 但保留 .git
+                    for p in wt.iterdir():
+                        if p.name != ".git":
+                            if p.is_dir():
+                                import shutil
+                                shutil.rmtree(p)
+                            else:
+                                p.unlink()
+
+                # 复制最新 SVG 进 worktree 并 commit
+                target_svg = wt / "docs" / "pnl_chart.svg"
+                target_svg.parent.mkdir(parents=True, exist_ok=True)
+                target_svg.write_bytes(SVG_PATH.read_bytes())
+                # README 提示
+                (wt / "README.md").write_text(
+                    "# pnl-data branch\n\n"
+                    "This orphan branch holds the auto-generated PnL chart only. "
+                    "Do not commit code here. Updated hourly by `jobs/pnl_snapshot`.\n",
+                    encoding="utf-8",
+                )
+
+                subprocess.run(["git", "add", "docs/pnl_chart.svg", "README.md"],
+                               cwd=str(wt), check=True, capture_output=True)
+                # 没变化跳过
+                diff = subprocess.run(["git", "diff", "--cached", "--quiet"],
+                                       cwd=str(wt), capture_output=True)
+                if diff.returncode == 0:
+                    _git(["worktree", "remove", "--force", wt_dir], check=False)
+                    return {"pushed": False, "reason": "no svg change", "branch": branch}
+
+                subprocess.run([
+                    "git", "-c", "user.name=pnl-bot",
+                    "-c", "user.email=pnl-bot@invest.local",
+                    "commit", "-m", "chore(pnl): hourly snapshot [skip ci]",
+                ], cwd=str(wt), check=True, capture_output=True)
+
+                # Orphan 分支总是 force push（每次 reset 到最新）
+                push = subprocess.run(
+                    ["git", "push", "--force", authed_remote, f"HEAD:{branch}"],
+                    cwd=str(wt), capture_output=True, text=True,
+                )
+                _git(["worktree", "remove", "--force", wt_dir], check=False)
+                if push.returncode != 0:
+                    return {"pushed": False, "reason": f"push failed: {push.stderr[:200]}",
+                            "branch": branch}
+                return {"pushed": True, "branch": branch, "mode": "orphan"}
+
+        # 主分支模式：直接 add + commit + push
+        _git(["add", "docs/pnl_chart.svg"])
+        diff = _git(["diff", "--cached", "--quiet"], check=False)
+        if diff.returncode == 0:
+            return {"pushed": False, "reason": "no svg change", "branch": "main"}
+        _git([
+            "-c", "user.name=pnl-bot",
+            "-c", "user.email=pnl-bot@invest.local",
+            "commit", "-m", "chore(pnl): hourly snapshot [skip ci]",
+        ])
+        push = _git(["push", authed_remote, f"HEAD:{branch}"], check=False)
+        if push.returncode != 0:
+            return {"pushed": False, "reason": f"push failed: {push.stderr[:200]}",
+                    "branch": branch}
+        return {"pushed": True, "branch": branch, "mode": "main"}
+
+    except subprocess.CalledProcessError as e:
+        return {"pushed": False, "reason": f"git failure: {e.stderr[:200] if e.stderr else e}"}
+    except Exception as e:
+        return {"pushed": False, "reason": f"unexpected: {type(e).__name__}: {e}"}
+
+
 def run() -> Dict[str, Any]:
-    """job entry：算快照 + 写历史 + 渲染 SVG"""
+    """job entry：算快照 + 写历史 + 渲染 SVG + 可选自动 push"""
     store = MemoryStore()
     snap = _compute_snapshot(store)
     if snap is None:
@@ -259,6 +397,9 @@ def run() -> Dict[str, Any]:
     tmp.write_text(svg_content, encoding="utf-8")
     tmp.replace(SVG_PATH)
 
+    # 可选：commit + push 到 GitHub（受 INVEST_PNL_AUTOPUSH env 控制）
+    push_result = _auto_push_svg()
+
     return {
         "status": "ok",
         "ts": snap.ts,
@@ -268,6 +409,7 @@ def run() -> Dict[str, Any]:
         "trend": "up" if snap.total_pnl_pct > 0 else (
             "down" if snap.total_pnl_pct < 0 else "flat"
         ),
+        "push": push_result,
     }
 
 
