@@ -24,3 +24,4 @@ db/*.sqlite-journal
 
 # fcntl 文件锁
 *.lock
+docs/pnl_chart.svg
