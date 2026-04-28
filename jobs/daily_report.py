@@ -15,13 +15,14 @@ from __future__ import annotations
 import os
 import subprocess
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
 from core.committee import run_committee, run_macro_view
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
+from db.market_store import MarketStore
 from services.notifier import EmailDeliveryError, send_gmail_notification
 from utils.exchange_fee import (
     analyze_multi_timeframe,
@@ -33,15 +34,55 @@ from utils.gold_price import format_gold_report, get_gold_snapshot
 
 load_dotenv()
 
+# 数据陈旧阈值：DB 最新日期距今超过这个天数，仍然能跑但要在 LLM 上下文里
+# 显式标注"数据陈旧 N 天"，让 LLM 不要在过期价上面编今天的策略。
+STALE_THRESHOLD_DAYS = int(os.getenv("INVEST_PRICE_STALE_DAYS", "3"))
 
-def _get_last_close(symbol: str, label: str) -> float:
+_MARKET_STORE = MarketStore()
+
+
+def _get_last_close(
+    symbol: str, label: str
+) -> Tuple[Optional[float], Optional[int]]:
+    """返回 (close_price, age_days)。
+
+    age_days: 0=今天的价、N=N 天前的价、None=完全没数据。
+    price=None 时调用方必须显式判空，绝不能用 0 兜底——0 进入估值算式
+    会让 NDQ 总值变 0，Risk Officer 看到"集中度爆表"建议清仓，全是数据
+    缺失导致的虚假信号。
+    """
     df = get_history_data(symbol, "1d")
     if df.empty:
         df = get_history_data(symbol, "5d")
     if df.empty:
         print(f"⚠️ {label} 数据缺失: {symbol}")
-        return 0.0
-    return float(df["Close"].iloc[-1])
+        return None, None
+
+    price = float(df["Close"].iloc[-1])
+
+    # 算 staleness：DB 最新日期 vs. 今天
+    latest_date_str = _MARKET_STORE.get_latest_date(symbol)
+    if latest_date_str:
+        try:
+            latest = datetime.strptime(latest_date_str, "%Y-%m-%d").date()
+            age_days = (datetime.now().date() - latest).days
+        except Exception:
+            age_days = None
+    else:
+        age_days = None
+    return price, age_days
+
+
+def _format_staleness(label: str, age_days: Optional[int]) -> str:
+    """给 portfolio_summary 用的陈旧警告字符串，age_days >= 阈值才输出。
+    LLM 看到这段会知道当前估值用的是 N 天前的价，不要假装是今天的市场。"""
+    if age_days is None or age_days < STALE_THRESHOLD_DAYS:
+        return ""
+    return (
+        f"\n⚠️ **{label} 价格数据陈旧 {age_days} 天** —— 今日 scraper / yfinance "
+        f"未能更新行情，估值基于 {age_days} 天前的收盘价。请在结论里明确标注"
+        f"\"基于陈旧数据\"，不要假设当前价仍接近此值。"
+    )
 
 
 def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
@@ -128,29 +169,83 @@ def run() -> Dict[str, Any]:
     if not target_assets:
         return {"status": "skipped", "reason": "no_target_assets"}
 
-    # 估值用的"主资产价格"专门给 NDQ 持仓估值用，不能依赖 target_assets 顺序
-    # （未来可能把黄金放第一项，会把克价当 NDQ 股价导致总资产爆炸）。
-    # 显式找 NDQ.AX；找不到（纯 CNY 组合）就退回 0，让 stock_val_cny 自然为 0。
-    ndq_entry = next((a for a in target_assets if a.get("symbol") == "NDQ.AX"), None)
-    current_price = _get_last_close("NDQ.AX", "NDQ.AX") if ndq_entry else 0.0
-    current_rate = _get_last_close("AUDCNY=X", "汇率")
+    # 估值用的"主资产价格"专门给 NDQ 持仓估值用，不能依赖 target_assets 顺序。
+    # 价格 None = 完全没数据（DB + scraper + yfinance 全失败），上层显式跳过该
+    # 资产委员会而不是用 0 兜底；age_days = 数据陈旧多少天，超阈值要在 LLM 上下文
+    # 里告警。
+    data_warnings: list[str] = []   # 累积价格陈旧/缺失的警告，注入 portfolio_summary
+    skipped_assets: set[str] = set()  # 完全没价的资产 → 跳过该资产 committee
 
-    # 计算总资产估算（给 Risk Officer 用）
+    ndq_entry = next((a for a in target_assets if a.get("symbol") == "NDQ.AX"), None)
+    if ndq_entry:
+        ndq_price, ndq_age = _get_last_close("NDQ.AX", "NDQ.AX")
+        if ndq_price is None:
+            print("⛔ NDQ.AX 价格获取完全失败（scrape + yfinance + DB + CSV 均空），跳过 NDQ committee")
+            store.dream_event({"phase": "price_fetch_failed", "symbol": "NDQ.AX", "date": today})
+            skipped_assets.add("NDQ.AX")
+            current_price = 0.0  # 仅给后面 cash_aud * rate 用，但 NDQ 持仓估值会被跳过
+        else:
+            current_price = ndq_price
+            stale_msg = _format_staleness("NDQ.AX", ndq_age)
+            if stale_msg:
+                data_warnings.append(stale_msg)
+                store.dream_event({"phase": "price_stale", "symbol": "NDQ.AX",
+                                   "age_days": ndq_age, "date": today})
+    else:
+        current_price = 0.0  # 纯 CNY 组合，NDQ 持仓本来就 0
+
+    rate_price, rate_age = _get_last_close("AUDCNY=X", "汇率")
+    if rate_price is None:
+        # 汇率拿不到比较罕见但仍要兜底——AUDCNY 的历史均值约 4.7 当作 sentinel
+        # 避免直接抛异常让 daily_report 整体挂掉，但要明确告警 LLM
+        print("⚠️ AUDCNY=X 完全失败，使用历史均值 4.7 兜底")
+        store.dream_event({"phase": "price_fetch_failed", "symbol": "AUDCNY=X", "date": today})
+        current_rate = 4.7
+        data_warnings.append(
+            "\n⚠️ **AUDCNY 汇率今日无法获取，使用历史均值 4.7 兜底**。汇率敏感的 AUD 估值"
+            "可能偏差 ±5%，请勿据此做换汇决策。"
+        )
+    else:
+        current_rate = rate_price
+        stale_msg = _format_staleness("AUDCNY=X 汇率", rate_age)
+        if stale_msg:
+            data_warnings.append(stale_msg)
+            store.dream_event({"phase": "price_stale", "symbol": "AUDCNY=X",
+                               "age_days": rate_age, "date": today})
+
+    # 计算总资产估算（给 Risk Officer 用）—— NDQ 跳过时不算它的市值
     user_status = pm.get_user_status(current_price, current_rate)
     snap = get_gold_snapshot(offset_pct=0.0)
-    gold_now = snap.spot_cny_per_gram if snap else 0.0
+    if snap is None:
+        store.dream_event({"phase": "price_fetch_failed", "symbol": "GC=F", "date": today})
+        # 黄金 yfinance 没有 cache 兜底，失败就只能跳过黄金 committee
+        skipped_assets.add("GC=F")
+        gold_now = 0.0
+        data_warnings.append(
+            "\n⚠️ **黄金现货今日无法获取**（GC=F + USDCNY 双双失败），"
+            "本次跳过黄金 committee 分析。"
+        )
+    else:
+        gold_now = snap.spot_cny_per_gram
+
     gold_grams = float(pm.portfolio.get("gold_grams", 0))
+    ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
+    # 跳过的资产从总资产估算里剔除，避免用 0 当价格污染集中度计算
+    ndq_value_cny = ndq_shares * current_price * current_rate if "NDQ.AX" not in skipped_assets else 0.0
+    gold_value_cny = gold_grams * gold_now if "GC=F" not in skipped_assets else 0.0
     total_assets_cny = (
         user_status.cash_cny
         + user_status.cash_aud * current_rate
-        + float(pm.portfolio.get("ndq_shares", 0)) * current_price * current_rate
-        + gold_grams * gold_now
+        + ndq_value_cny
+        + gold_value_cny
     )
     portfolio_summary = _portfolio_summary(
         pm, total_assets_cny,
         current_ndq_aud=current_price,
         current_gold_cny_per_g=gold_now,
     )
+    if data_warnings:
+        portfolio_summary += "\n\n=== 数据可信度告警 ===" + "".join(data_warnings)
 
     has_non_cny = any(a.get("currency", "CNY") != "CNY" for a in target_assets)
 
@@ -169,10 +264,13 @@ def run() -> Dict[str, Any]:
     macro_view = run_macro_view(macro_data_report)
     print(f"  Macro: {macro_view[:120]}")
 
-    # 2) 对每个资产跑 committee
+    # 2) 对每个资产跑 committee（数据完全缺失的资产直接跳过，不让 LLM 在 0 价上瞎编）
     asset_committees: Dict[str, Dict[str, Any]] = {}
     for asset in target_assets:
         sym = asset["symbol"]
+        if sym in skipped_assets:
+            print(f"⏭️  Skip committee for {sym}（价格数据缺失）")
+            continue
         print(f"\n⚖️ Committee for {sym}...")
         market_data = analyze_multi_timeframe(
             get_history_data(sym, "2y"),
@@ -274,10 +372,13 @@ def run() -> Dict[str, Any]:
 *Generated by Investment Committee — Quant / Macro / Risk Officer / CIO*
 """
 
-    # 5) Append 给 Dreaming
+    # 5) Append 给 Dreaming（被跳过的资产标 N/A）
     daily_block = f"**委员会摘要**\n\n- 宏观: {macro_view[:200]}\n\n**资产裁决**:"
     for a in target_assets:
         sym = a["symbol"]
+        if sym in skipped_assets:
+            daily_block += f"\n- {a.get('display_name', sym)} ({sym}): SKIPPED（数据缺失）"
+            continue
         v = asset_committees[sym]["verdict"]
         daily_block += (
             f"\n- {a.get('display_name', sym)} ({sym}): "
@@ -313,9 +414,11 @@ def run() -> Dict[str, Any]:
         })
 
     return {
-        "status": "success",
+        "status": "success" if not skipped_assets else "degraded",
         "date": today,
         "assets": [a["symbol"] for a in target_assets],
+        "skipped_assets": sorted(skipped_assets),
+        "data_warnings": data_warnings,
         "email": email_status,
         "verdicts": {
             sym: {

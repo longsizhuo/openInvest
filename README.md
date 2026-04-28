@@ -82,6 +82,7 @@ cp .env.example .env
 | `INVEST_LLM_MAX_ATTEMPTS` | 3 | LLM 调用最大尝试次数（含首次） |
 | `INVEST_LLM_BASE_DELAY` | 2.0 | LLM 重试初始延迟 (秒)，指数退避 + jitter |
 | `INVEST_LLM_MAX_DELAY` | 20.0 | LLM 重试单次延迟上限 (秒) |
+| `INVEST_PRICE_STALE_DAYS` | 3 | 价格陈旧阈值（DB 最新日期距今超此值时给 LLM 加告警） |
 | `INVEST_WHITELIST_QQ` | — | NapCat 命令白名单 QQ 号（多用户场景必填） |
 | `DIGEST_EMAIL_TO` | — | 兜底收件人（user.md 的 email 字段缺失时用） |
 
@@ -138,10 +139,21 @@ docker compose logs -f invest-agent
 - **多资产估值不依赖列表顺序**：`jobs/daily_report` 显式按 `symbol == NDQ.AX`
   查找估值价格，未来重排 `target_assets` 不会把克价当股价导致总资产爆炸。
 
+- **行情数据失败/陈旧不再幻觉**（4 件套）：
+  1. `_get_last_close()` 返回 `(price, age_days)`，`price=None` 不再用 `0.0` 兜底，
+     上层显式跳过该资产委员会；总资产估算也剔除被跳过的资产，避免"集中度爆表"假信号
+  2. NDQ.AX 走 BetaShares 网页 scraper 容易被反爬 403 —— 现已 fallback 到
+     `yfinance.Ticker("NDQ.AX")`，保证 close 价仍能拉到（仅丢 holdings/sectors）
+  3. 价格陈旧 ≥ `INVEST_PRICE_STALE_DAYS` 天时往 portfolio_summary 注入"⚠️ 数据陈旧 N 天"
+     段，让 LLM 看到后停止"在过期数据上面编今天的策略"
+  4. 所有失败 / 陈旧事件落 `.dreams/events.jsonl`：`price_fetch_failed` /
+     `price_stale` / `email_delivery_failed`，外部监控可基于此告警
+  - daily_report return 新增 `status` 可能值 `degraded` 和 `skipped_assets` /
+    `data_warnings` 字段，scheduler runner 能感知到"job 跑了但有数据问题"
+
 剩余还在 backlog 的 audit 硬伤（按工作量排）：
 
 - [ ] NapCat ↔ scheduler **TOCTOU 窗口**（read-modify-write 不在单一锁内）
-- [ ] yfinance 失败 fallback 0 → 估值污染
 - [ ] **测试 + CI**（仅有 1 个 `tests/test_commsec.py`，无 GitHub Actions）
 - [ ] 单用户假设硬编码（`MemoryStore.path_of` 无 user_id 维度，做 SaaS 需要重构）
 

@@ -67,6 +67,18 @@ class MarketStore:
             row = cursor.fetchone()
             return row[0] if row else None
 
+    def get_latest_date(self, symbol):
+        """该 symbol DB 里最新的日期字符串 (YYYY-MM-DD)，没记录返回 None。
+
+        给上层做 staleness 判断用：scrape/yfinance 失败时 daily_report 仍能
+        从这里看到"我手里这个价是 N 天前的"，决定是降级跑还是跳过该资产委员会。
+        """
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT date FROM daily_prices WHERE symbol = ? ORDER BY date DESC LIMIT 1", (symbol,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+
     def get_history_df(self, symbol, days=730):
         """返回 Pandas DataFrame 格式的历史数据"""
         import pandas as pd

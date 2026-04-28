@@ -125,13 +125,34 @@ def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
     if needs_update:
         if symbol == "NDQ.AX":
             print(f"📡 [Scraper] Updating database for {symbol}...")
-            snapshot = scrape_full_ndq_data()
-            if snapshot and snapshot["date"] and snapshot["nav"]:
-                _STORE.save_ndq_snapshot(
-                    snapshot["date"], snapshot["nav"], 
-                    snapshot["stats"], snapshot["holdings"], snapshot["sectors"]
-                )
-                df_db = _STORE.get_history_df(symbol)
+            scrape_ok = False
+            try:
+                snapshot = scrape_full_ndq_data()
+                if snapshot and snapshot["date"] and snapshot["nav"]:
+                    _STORE.save_ndq_snapshot(
+                        snapshot["date"], snapshot["nav"],
+                        snapshot["stats"], snapshot["holdings"], snapshot["sectors"]
+                    )
+                    df_db = _STORE.get_history_df(symbol)
+                    scrape_ok = True
+            except Exception as e:
+                print(f"❌ Scraper Error: {e}")
+
+            # NDQ.AX scraper 经常被 BetaShares 反爬 403。如果失败，fallback 到 yfinance
+            # 只能拉到 close 价（拿不到 holdings/sectors），但起码估值能跑下去
+            if not scrape_ok:
+                try:
+                    print(f"🔄 [yfinance fallback] Refreshing {symbol}...")
+                    df_yf = yf.Ticker(symbol).history(period="5d")
+                    if not df_yf.empty:
+                        for idx, row in df_yf.iterrows():
+                            _STORE.save_generic_price(
+                                symbol, idx.strftime('%Y-%m-%d'),
+                                row['Close'], source="yfinance_fallback"
+                            )
+                        df_db = _STORE.get_history_df(symbol)
+                except Exception as e:
+                    print(f"❌ yfinance fallback also failed for {symbol}: {e}")
         else:
             try:
                 print(f"🔄 [yfinance] Refreshing {symbol}...")
