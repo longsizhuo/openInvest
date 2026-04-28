@@ -34,7 +34,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -49,11 +49,15 @@ ROOT = Path(__file__).parent.parent
 HISTORY_PATH = ROOT / "memory" / ".state" / "pnl_history.jsonl"
 SVG_PATH = ROOT / "docs" / "pnl_chart.svg"
 
-# SVG 画布尺寸
-W, H = 800, 280
+# SVG 画布：上半部分折线图 + 下半部分横向柱状图
+W = 800
+LINE_H = 240        # 上半折线图区域高度
+BAR_ROW_H = 22      # 每条 bar 的高度
+BAR_TOP_PAD = 50    # 柱状图区上方留给标题
+BAR_BOTTOM_PAD = 30
 MARGIN_L, MARGIN_R, MARGIN_T, MARGIN_B = 50, 30, 30, 30
 PLOT_W = W - MARGIN_L - MARGIN_R
-PLOT_H = H - MARGIN_T - MARGIN_B
+PLOT_H = LINE_H - MARGIN_T - MARGIN_B
 
 # 时间窗：图上只展示最近 30 天
 WINDOW_DAYS = 30
@@ -177,175 +181,182 @@ def _series_polyline(
     return " ".join(pts)
 
 
-def _benchmark_polyline(
-    series: BenchmarkSeries, history: List[Dict[str, Any]],
-    vmin: float, vmax: float,
-) -> str:
-    """把 BenchmarkSeries 的 {date: pct} 投影到 history 时间轴上的 SVG points。
-
-    history 里每条记录有 ts（用户实盘的时间戳），找最近的基准日期 → 取那天的 pct。
-    """
-    if not history or not series.points:
-        return ""
-    pts: List[str] = []
-    n = len(history)
-    sorted_bench_dates = sorted(series.points.keys())
-    for i, entry in enumerate(history):
-        # 用户 history 的 ts 是 ISO，截前 10 位拿日期
-        date_str = entry["ts"][:10]
-        # 找最近的（不晚于）基准日期
-        candidates = [d for d in sorted_bench_dates if d <= date_str]
-        if not candidates:
-            continue
-        v = series.points[candidates[-1]]
-        x = MARGIN_L + (PLOT_W * i / max(n - 1, 1))
-        y = _project_y(v, vmin, vmax)
-        pts.append(f"{x:.1f},{y:.1f}")
-    return " ".join(pts)
+def _latest_pct(series: BenchmarkSeries, start_date: str) -> Optional[float]:
+    """基准 series 截至最新的累计涨幅 % (相对 start_date)"""
+    if not series.points:
+        return None
+    valid = [(d, v) for d, v in series.points.items() if d >= start_date]
+    if not valid:
+        return None
+    valid.sort()
+    return valid[-1][1]
 
 
 def render_svg(history: List[Dict[str, Any]]) -> str:
-    """渲染折线图。**故意不写任何数字标签**，只显示线条、0% 基线、方向箭头。
+    """上半部分：用户三线折线趋势 (Total / NDQ / Gold)
+       下半部分：横向柱状图，11 个基准 + 用户实盘按累计涨幅排序
 
-    叠加 vs 基准：从 core/benchmarks 加载所有缓存的 series（沪深 300 / 公募基金 /
-    余额宝 / Wealthfront 等），按用户线的时间轴投影同图叠加。
-    用户线（Total / NDQ / Gold）保持粗实线 + 高对比；基准线细 + 半透明。
+    柱状图灵感：类似 LLM benchmark (MMLU / HellaSwag) 的对比图。基准的"累计涨幅"
+    与时间轴弱相关，柱子高度 (= % 涨幅) 一目了然，比折线叠加更直观。
+    用户实盘柱用粗黄色 + ★ 标识突出，基准柱按色系分组。
     """
     if not history:
-        # 空状态：一句话占位
-        return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="PnL trend chart (no data yet)">
-  <rect width="{W}" height="{H}" fill="#0d1117"/>
-  <text x="{W//2}" y="{H//2}" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, monospace" font-size="14">
+        return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} 100" role="img" aria-label="PnL chart (no data yet)">
+  <rect width="{W}" height="100" fill="#0d1117"/>
+  <text x="{W//2}" y="55" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, monospace" font-size="14">
     [PnL chart — 数据采集中，请等待 jobs/pnl_snapshot 跑几次后查看]
   </text>
 </svg>
 """
 
-    # 加载所有基准 series（用 history 起始日当 baseline）
     start_date = history[0]["ts"][:10]
     benchmark_series = get_all_series(start_date)
 
-    # 算 y 轴范围（含基准）
-    all_values: List[float] = []
+    # ===== 上半：用户三线折线（不再叠加基准）=====
+    user_values: List[float] = []
     for entry in history:
         for k in ("total_pnl_pct", "ndq_pnl_pct", "gold_pnl_pct"):
             v = entry.get(k)
             if v is not None:
-                all_values.append(v)
-    for s in benchmark_series:
-        # 只考虑窗口内（>= start_date）的基准点
-        for d, v in s.points.items():
-            if d >= start_date:
-                all_values.append(v)
-    all_values.append(0.0)  # 0% 基线必在范围内
-    vmin, vmax = min(all_values), max(all_values)
-    pad = max((vmax - vmin) * 0.1, 0.5)
+                user_values.append(v)
+    user_values.append(0.0)
+    vmin, vmax = min(user_values), max(user_values)
+    pad = max((vmax - vmin) * 0.15, 0.5)
     vmin -= pad
     vmax += pad
-
     zero_y = _project_y(0.0, vmin, vmax)
 
     total_line = _series_polyline(history, "total_pnl_pct", vmin, vmax)
     ndq_line = _series_polyline(history, "ndq_pnl_pct", vmin, vmax)
     gold_line = _series_polyline(history, "gold_pnl_pct", vmin, vmax)
 
-    # 最新点的趋势方向：仅在末尾画一个上箭头/下箭头表示当前趋势，但不写数值
     latest_total = next(
-        (entry.get("total_pnl_pct") for entry in reversed(history)
-         if entry.get("total_pnl_pct") is not None),
+        (e.get("total_pnl_pct") for e in reversed(history)
+         if e.get("total_pnl_pct") is not None),
         0.0,
     )
     arrow = "▲" if latest_total > 0 else ("▼" if latest_total < 0 else "■")
     arrow_color = "#3fb950" if latest_total > 0 else ("#f85149" if latest_total < 0 else "#8b949e")
 
-    # 渲染基准线（细 + 半透明，不抢用户线视觉焦点）
-    bench_polylines = []
+    # ===== 下半：横向柱状图 =====
+    # 收集所有数据点：(label, pct, color, is_user)
+    bars: List[Tuple[str, float, str, bool]] = []
     for s in benchmark_series:
-        pts = _benchmark_polyline(s, history, vmin, vmax)
-        if pts:
-            bench_polylines.append(
-                f'<polyline points="{pts}" fill="none" stroke="{s.color}" '
-                f'stroke-width="1" stroke-dasharray="{s.dash}" opacity="0.45"/>'
-            )
-
-    # 图例（基准分组，每组一行）—— SVG 高度从 280 拉到 380 留出图例空间
-    legend_lines: List[str] = []
-    legend_y = MARGIN_T + 12
-    # 用户线（最显眼）
-    legend_lines.append(
-        f'<g transform="translate({MARGIN_L + 8}, {legend_y})" class="label">'
-        f'<line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>'
-        f'<text x="20" y="4" fill="#c9d1d9" font-weight="bold">我的实盘 Total</text>'
-        f'<line x1="120" y1="0" x2="134" y2="0" stroke="#58a6ff" stroke-width="1.5"/>'
-        f'<text x="140" y="4" fill="#c9d1d9">NDQ.AX</text>'
-        f'<line x1="200" y1="0" x2="214" y2="0" stroke="#f0a500" stroke-width="1.5"/>'
-        f'<text x="220" y="4" fill="#c9d1d9">Gold</text>'
-        f'</g>'
-    )
-    # 基准按 group 分组列出
-    grouped: Dict[str, List[BenchmarkSeries]] = {}
-    for s in benchmark_series:
-        grouped.setdefault(s.group, []).append(s)
-    group_titles = {
-        "index": "📊 大盘指数",
-        "fund": "🏦 公募基金",
-        "savings": "💰 银行 / 货币基金",
-        "ai_advisor": "🤖 AI 投顾基准",
-    }
-    legend_y = H - 70
-    for group_key in ["index", "fund", "savings", "ai_advisor"]:
-        if group_key not in grouped:
+        pct = _latest_pct(s, start_date)
+        if pct is None:
             continue
-        items = grouped[group_key]
-        legend_lines.append(
-            f'<text x="{MARGIN_L + 8}" y="{legend_y}" fill="#8b949e" class="label">'
-            f'{group_titles[group_key]}:</text>'
+        bars.append((s.key, pct, s.color, False))
+    # 用户实盘 Total 加进去（粗黄色 + ★ 标识）
+    bars.append((f"★ 我的实盘", latest_total, "#d29922", True))
+
+    # 按 % 降序排列
+    bars.sort(key=lambda x: x[1], reverse=True)
+
+    # 算柱状图 X 轴范围
+    bar_pcts = [b[1] for b in bars]
+    bar_max = max(max(bar_pcts), 0.5)
+    bar_min = min(min(bar_pcts), -0.5)
+    bar_range = bar_max - bar_min
+    # 0% 在柱状图中的 x 坐标
+    BAR_AXIS_LEFT = 200    # 左侧给 label 留空间
+    BAR_AXIS_RIGHT = W - 80  # 右侧给百分比数字留空间
+    BAR_AXIS_W = BAR_AXIS_RIGHT - BAR_AXIS_LEFT
+    if bar_range == 0:
+        zero_x = BAR_AXIS_LEFT + BAR_AXIS_W / 2
+    else:
+        zero_x = BAR_AXIS_LEFT + BAR_AXIS_W * (-bar_min / bar_range)
+
+    bar_y_start = LINE_H + BAR_TOP_PAD
+    bar_svg: List[str] = []
+    for i, (label, pct, color, is_user) in enumerate(bars):
+        y = bar_y_start + i * BAR_ROW_H
+        # 柱条 x 起点和宽度
+        if pct >= 0:
+            bar_x = zero_x
+            bar_w = (pct / bar_max) * (BAR_AXIS_RIGHT - zero_x) if bar_max > 0 else 0
+        else:
+            bar_w = (abs(pct) / abs(bar_min)) * (zero_x - BAR_AXIS_LEFT) if bar_min < 0 else 0
+            bar_x = zero_x - bar_w
+
+        # label（左侧）
+        label_color = "#d29922" if is_user else "#c9d1d9"
+        label_weight = "bold" if is_user else "normal"
+        bar_svg.append(
+            f'<text x="{BAR_AXIS_LEFT - 8}" y="{y + BAR_ROW_H / 2 + 4:.1f}" '
+            f'text-anchor="end" fill="{label_color}" class="label" font-weight="{label_weight}">{label}</text>'
         )
-        x = MARGIN_L + 130
-        for s in items:
-            legend_lines.append(
-                f'<line x1="{x}" y1="{legend_y - 4}" x2="{x + 12}" y2="{legend_y - 4}" '
-                f'stroke="{s.color}" stroke-width="1.5" stroke-dasharray="{s.dash}" opacity="0.7"/>'
-            )
-            legend_lines.append(
-                f'<text x="{x + 16}" y="{legend_y}" fill="#c9d1d9" class="label" font-size="10">'
-                f'{s.key}</text>'
-            )
-            x += max(110, len(s.key) * 7 + 30)
-        legend_y += 14
+        # bar 矩形（用户柱粗 + 不透明，基准柱半透明）
+        rect_h = BAR_ROW_H - 6
+        opacity = "1" if is_user else "0.7"
+        bar_svg.append(
+            f'<rect x="{bar_x:.1f}" y="{y + 3}" width="{bar_w:.1f}" height="{rect_h}" '
+            f'fill="{color}" opacity="{opacity}" rx="2"/>'
+        )
+        # 百分比数字（产品对比榜单语境下，用户柱也直接显示真实 %，
+        # 因为 % 是相对量、不暴露资产规模，与基准并排时藏起来反而显得心虚）
+        pct_text = f"{pct:+.2f}%"
+        pct_x = (bar_x + bar_w + 6) if pct >= 0 else (bar_x - 6)
+        pct_anchor = "start" if pct >= 0 else "end"
+        bar_svg.append(
+            f'<text x="{pct_x:.1f}" y="{y + BAR_ROW_H / 2 + 4:.1f}" '
+            f'text-anchor="{pct_anchor}" fill="{color}" class="label" '
+            f'font-weight="{label_weight}">{pct_text}</text>'
+        )
 
-    # SVG 高度自适应（基准多了图例占地多）
-    H_DYNAMIC = max(H, MARGIN_T + PLOT_H + 80 + 14 * len(grouped))
-    new_zero_y = zero_y  # 不需重算，因为图区高度 PLOT_H 不变
+    # 0 线（贯穿整个柱状图区）
+    bar_y_end = bar_y_start + len(bars) * BAR_ROW_H
+    zero_line_svg = (
+        f'<line x1="{zero_x:.1f}" y1="{bar_y_start - 5}" '
+        f'x2="{zero_x:.1f}" y2="{bar_y_end + 5}" '
+        f'stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>'
+        f'<text x="{zero_x:.1f}" y="{bar_y_start - 8}" text-anchor="middle" '
+        f'fill="#6e7681" class="label">0%</text>'
+    )
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H_DYNAMIC}" role="img" aria-label="PnL trend chart with benchmarks (privacy-preserving, no absolute numbers)">
+    # SVG 总高度
+    H_TOTAL = bar_y_end + BAR_BOTTOM_PAD
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H_TOTAL}" role="img" aria-label="PnL chart with benchmark bars">
   <style>
     .label {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }}
+    .title {{ font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; font-weight: bold; }}
   </style>
-  <!-- 背景 -->
-  <rect width="{W}" height="{H_DYNAMIC}" fill="#0d1117"/>
-  <!-- 0% 基线 -->
-  <line x1="{MARGIN_L}" y1="{new_zero_y:.1f}" x2="{W - MARGIN_R}" y2="{new_zero_y:.1f}"
+  <rect width="{W}" height="{H_TOTAL}" fill="#0d1117"/>
+
+  <!-- ===== 上半：折线图（用户三线趋势）===== -->
+  <text x="{MARGIN_L}" y="20" fill="#c9d1d9" class="title">📈 实盘 PnL 趋势 (最近 {WINDOW_DAYS} 天)</text>
+  <line x1="{MARGIN_L}" y1="{zero_y:.1f}" x2="{W - MARGIN_R}" y2="{zero_y:.1f}"
         stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
-  <text x="{MARGIN_L - 6}" y="{new_zero_y + 4:.1f}" text-anchor="end" fill="#6e7681" class="label">0%</text>
+  <text x="{MARGIN_L - 6}" y="{zero_y + 4:.1f}" text-anchor="end" fill="#6e7681" class="label">0%</text>
   <text x="{MARGIN_L - 6}" y="{MARGIN_T + 10}" text-anchor="end" fill="#3fb950" class="label">+</text>
   <text x="{MARGIN_L - 6}" y="{MARGIN_T + PLOT_H - 2}" text-anchor="end" fill="#f85149" class="label">−</text>
-  <text x="{MARGIN_L}" y="{MARGIN_T + PLOT_H + 18}" fill="#6e7681" class="label">30 天前</text>
+  <text x="{MARGIN_L}" y="{MARGIN_T + PLOT_H + 18}" fill="#6e7681" class="label">{WINDOW_DAYS} 天前</text>
   <text x="{W - MARGIN_R}" y="{MARGIN_T + PLOT_H + 18}" text-anchor="end" fill="#6e7681" class="label">今天</text>
 
-  <!-- 基准线（先画，避免遮挡用户线）-->
-  {chr(10).join(bench_polylines)}
-
-  <!-- 用户实盘三线（粗实线，高对比）-->
   {f'<polyline points="{ndq_line}" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>' if ndq_line else ''}
   {f'<polyline points="{gold_line}" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>' if gold_line else ''}
   {f'<polyline points="{total_line}" fill="none" stroke="#d29922" stroke-width="2.5"/>' if total_line else ''}
-
-  <!-- 当前趋势箭头 -->
   <text x="{W - MARGIN_R - 10}" y="{MARGIN_T + 18}" text-anchor="end" fill="{arrow_color}" font-size="22" font-weight="bold">{arrow}</text>
 
-  <!-- 图例 -->
-  {chr(10).join(legend_lines)}
+  <!-- 折线图图例 -->
+  <g transform="translate({MARGIN_L + 8}, {MARGIN_T + 12})" class="label">
+    <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
+    <text x="20" y="4" fill="#c9d1d9" font-weight="bold">Total</text>
+    <line x1="80" y1="0" x2="94" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="100" y="4" fill="#c9d1d9">NDQ.AX</text>
+    <line x1="170" y1="0" x2="184" y2="0" stroke="#f0a500" stroke-width="1.5"/>
+    <text x="190" y="4" fill="#c9d1d9">Gold</text>
+  </g>
+
+  <!-- ===== 分隔线 ===== -->
+  <line x1="{MARGIN_L}" y1="{LINE_H + 10}" x2="{W - MARGIN_R}" y2="{LINE_H + 10}"
+        stroke="#21262d" stroke-width="1"/>
+
+  <!-- ===== 下半：横向柱状图（vs 11 基准 + 用户实盘）===== -->
+  <text x="{MARGIN_L}" y="{LINE_H + 38}" fill="#c9d1d9" class="title">🏆 vs 11 基准 · 截至今日累计涨幅</text>
+
+  {zero_line_svg}
+  {chr(10).join(bar_svg)}
 </svg>
 """
 
@@ -476,8 +487,34 @@ def _auto_push_svg() -> Dict[str, Any]:
         return {"pushed": False, "reason": f"unexpected: {type(e).__name__}: {e}"}
 
 
+def _is_trading_window(now: Optional[datetime] = None) -> bool:
+    """是否在交易时段。
+
+    cron 表达式已经限制工作日 9-23 点 / 每 2h 触发，但仍可能：
+    1. 公共假期（cron 无法识别），跳过
+    2. 手动 `python -m jobs.pnl_snapshot` 在凌晨调试时也跑了
+
+    简化判断（中国时区下）：
+    - 周末（5/6 是周六/日）→ 跳过
+    - 工作日 9:00-23:59 → 跑（覆盖 A 股 9:30-15:00 + 美股盘前 + 全球黄金）
+    - 其他时间（凌晨）→ 跳过
+
+    不查具体节假日（PyPI 上的 `chinese_calendar` 太重，不引依赖）；
+    访客觉得节假日没有数据点很正常。
+    """
+    now = now or datetime.now()
+    if now.weekday() >= 5:
+        return False
+    return 9 <= now.hour <= 23
+
+
 def run() -> Dict[str, Any]:
     """job entry：算快照 + 写历史 + 渲染 SVG + 可选自动 push"""
+    # 跳过非交易时段（周末 / 凌晨）
+    if not _is_trading_window():
+        return {"status": "skipped", "reason": "non_trading_window",
+                "now": datetime.now().isoformat(timespec="seconds")}
+
     store = MemoryStore()
     snap = _compute_snapshot(store)
     if snap is None:

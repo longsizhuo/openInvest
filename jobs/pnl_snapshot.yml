@@ -1,6 +1,8 @@
 name: pnl_snapshot
-description: 每小时打一次 PnL 快照，渲染 docs/pnl_chart.svg（隐私优先：只画 % 折线，无明文金额）
-schedule: "0 * * * *"
+description: 工作日交易时段每 2h 打一次 PnL 快照，渲染 docs/pnl_chart.svg
+# 北京时间周一到周五 9 / 11 / 13 / 15 / 17 / 19 / 21 / 23 点（覆盖 A 股 +
+# 美股盘前），周末和节假日跳过；非交易时段 yfinance 数据不会变，跑了浪费。
+schedule: "0 9-23/2 * * 1-5"
 timezone: Asia/Shanghai
 entry: jobs.pnl_snapshot:run
 enabled: true

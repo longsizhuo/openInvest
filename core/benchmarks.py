@@ -30,20 +30,20 @@ CACHE_DIR = ROOT / "memory" / ".state" / "benchmarks"
 
 
 # 基准定义。key 是显示用的标签，写中文方便 SVG 图例。
-# source 决定怎么取数；color 是 SVG 线条颜色（GitHub dark mode 友好）；group 用于分类
+# source 决定怎么取数；color 是 SVG 线条颜色（GitHub dark mode 友好）；group 用于分类。
+#
+# ⚠️ 选基准的原则：避免"自相关"（用户已持有的资产不能当基准对比）
+#   - ❌ 纳指 100：用户的 NDQ.AX 就是跟踪它的 ETF
+#   - ❌ 标普 500：与纳指相关性 0.85+，部分重叠
+#   - ❌ 黄金 spot：用户已持仓
+#   - ✅ 沪深 300：用户没买 A 股，是真正的"另一个市场"对比
+#   - ✅ 公募基金 / AI 投顾：同类策略产品，比的是策略质量
+#   - ✅ 余额宝 / 定存：机会成本基线
 BENCHMARKS: Dict[str, Dict[str, Any]] = {
-    # === Tier 1: 指数 ===
+    # === Tier 1: 不持有的市场参照（淡化）===
     "沪深300": {
         "source": "yfinance", "symbol": "000300.SS",
         "color": "#e3b341", "group": "index", "dash": "1 0",
-    },
-    "标普500": {
-        "source": "yfinance", "symbol": "^GSPC",
-        "color": "#a371f7", "group": "index", "dash": "1 0",
-    },
-    "纳指100": {
-        "source": "yfinance", "symbol": "^NDX",
-        "color": "#ff7b72", "group": "index", "dash": "1 0",
     },
     # === Tier 1: 常数年化（理财基线，水平虚线）===
     "余额宝 (1.3%)": {

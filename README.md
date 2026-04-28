@@ -19,23 +19,28 @@
 
 ---
 
-## 实盘 PnL 趋势（live）· vs 11 个基准
+## 实盘 PnL 趋势（live）· vs 8 个基准
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL trend chart with benchmarks" width="100%"/>
-  <sub>每小时自动 force-push 到独立 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 实盘 vs 大盘指数 / 公募基金 / 银行理财 / AI 投顾</sub>
+  <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart with benchmark bars" width="100%"/>
+  <sub>每 2h（工作日交易时段）自动 force-push 到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半折线 = 实盘 30 天趋势，下半柱状图 = vs 同类策略产品的累计涨幅排行（类似 LLM benchmark）</sub>
 </div>
 
-**叠加的 11 条基准**（粗黄色是用户实盘 Total，其余细线是基准对比）：
+**对比的 8 条基准**（按"产品逻辑相关度"分层）：
 
-| 类别 | series | 数据源 |
-|---|---|---|
-| 📊 大盘指数 | 沪深 300 / 标普 500 / 纳指 100 | yfinance (`000300.SS` / `^GSPC` / `^NDX`) |
-| 🏦 公募基金 | 易方达蓝筹 / 兴全合宜 / 招商白酒 | 天天基金 API (`fund.eastmoney.com/pingzhongdata/<code>.js`) |
-| 💰 货币基金 / 定存 | 余额宝 (1.3%) / 1 年定存 (1.5%) | 写死年化（按日复利模拟） |
-| 🤖 AI 投顾 | Wealthfront (6.2%) / Betterment (6.1%) / 蚂蚁帮你投 (5.16%) | [NerdWallet 2025 robo-advisor 比较](https://tokenist.com/investing/betterment-vs-wealthfront/) + [蚂蚁财富智能投顾 (知乎)](https://zhuanlan.zhihu.com/p/128638957)，一次性搜索得来 |
+| 层级 | 类别 | 哪些 | 数据源 |
+|---|---|---|---|
+| **L1 同类策略产品**（核心对比） | 🤖 AI 投顾 | Wealthfront 6.2% / Betterment 6.1% / 蚂蚁帮你投 5.16% | [NerdWallet 2025 robo 比较](https://tokenist.com/investing/betterment-vs-wealthfront/) + [蚂蚁财富智能投顾](https://zhuanlan.zhihu.com/p/128638957)（一次性搜索） |
+| **L1 同类策略产品** | 🏦 公募基金 | 易方达蓝筹 005827 / 兴全合宜 163417 / 招商白酒 161725 | 天天基金 API (`fund.eastmoney.com/pingzhongdata/<code>.js`) |
+| **L2 机会成本基线** | 💰 储蓄/理财 | 余额宝 1.3% / 1 年定存 1.5% | 写死年化（按日复利） |
+| **L3 不持有的市场** | 📊 大盘指数 | 沪深 300 | yfinance `000300.SS` |
 
-**隐私设计**：用户实盘线只显示 % 趋势，无任何金额 / 具体数值；只有基准产品的公开年化（如 `Wealthfront 6.2%`）会作为图例标注，因为这是各产品自己宣传的数字，本来就公开。访客能看出"我们 vs Betterment 谁涨得快"，但读不出我们的资产规模。
+**故意不比的基准**（避免自相关）：
+
+- ❌ **纳指 100 / 标普 500** —— 用户持有 NDQ.AX 跟踪纳指 100，标普 500 与纳指相关性 0.85+。比这两个等于"和自己的影子比"，无意义
+- ❌ **黄金 spot (GC=F)** —— 用户已持仓黄金，同样自相关
+
+**为什么是柱状图**：基准的"今日累计涨幅"和时间轴弱相关，柱子高度一目了然。这是 LLM benchmark（GPT-4 vs Claude vs Gemini）那种产品对比榜单，不是某人的私人账本。
 
 **刷新基准数据**：
 
@@ -44,7 +49,7 @@ python -m scripts.refresh_benchmarks               # 全量刷
 python -m scripts.refresh_benchmarks --key 沪深300  # 单刷一条
 ```
 
-建议作为 weekly cron job（基金净值每周更新即可）。指数 / 基金会从 API 拉最新；常数年化的 Wealthfront / Betterment 等数据是**单次搜索**的快照，需要人工定期复查（在 [`core/benchmarks.py`](core/benchmarks.py) 的 `_meta` 字段里有 `retrieved` 日期）。
+建议作为 weekly cron job（基金净值每周更新即可）。AI 投顾类（Wealthfront/Betterment/帮你投）的年化是单次搜索快照，需人工定期复查 [`core/benchmarks.py`](core/benchmarks.py) 的 `_meta.retrieved` 字段。
 
 ---
 
