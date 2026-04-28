@@ -488,24 +488,24 @@ def _auto_push_svg() -> Dict[str, Any]:
 
 
 def _is_trading_window(now: Optional[datetime] = None) -> bool:
-    """是否在交易时段。
+    """是否在交易时段（按**北京时间**判断，不受服务器本地时区影响）。
 
-    cron 表达式已经限制工作日 9-23 点 / 每 2h 触发，但仍可能：
-    1. 公共假期（cron 无法识别），跳过
-    2. 手动 `python -m jobs.pnl_snapshot` 在凌晨调试时也跑了
+    服务器可能跑在 UTC（容器或国外 VPS），datetime.now() 直接拿 hour
+    会按 UTC 算，导致北京凌晨 4 点（UTC 20 点）被误判成"在 9-23 范围内"
+    照常采样，写出折线图噪声。强制 .astimezone(+08:00) 解决。
 
-    简化判断（中国时区下）：
-    - 周末（5/6 是周六/日）→ 跳过
-    - 工作日 9:00-23:59 → 跑（覆盖 A 股 9:30-15:00 + 美股盘前 + 全球黄金）
-    - 其他时间（凌晨）→ 跳过
-
-    不查具体节假日（PyPI 上的 `chinese_calendar` 太重，不引依赖）；
-    访客觉得节假日没有数据点很正常。
+    cron 表达式已经限制工作日 9/11/.../23 点 / 每 2h 触发；这里是手动
+    `python -m jobs.pnl_snapshot` 调试时的二次保护。
     """
-    now = now or datetime.now()
-    if now.weekday() >= 5:
+    from datetime import timezone, timedelta
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    bj = now.astimezone(timezone(timedelta(hours=8)))
+    if bj.weekday() >= 5:
         return False
-    return 9 <= now.hour <= 23
+    return 9 <= bj.hour <= 23
 
 
 def run() -> Dict[str, Any]:
@@ -546,5 +546,30 @@ def run() -> Dict[str, Any]:
     }
 
 
+def render_only() -> Dict[str, Any]:
+    """只读现有 history → 重渲染 SVG → 可选 push，不 append 新 entry。
+
+    场景：清理过 pnl_history.jsonl 噪声后，想重新生成图但不想再追加新点
+    （尤其当前是非交易时段）。
+    """
+    history = _read_history()
+    SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    svg_content = render_svg(history)
+    tmp = SVG_PATH.with_suffix(".svg.tmp")
+    tmp.write_text(svg_content, encoding="utf-8")
+    tmp.replace(SVG_PATH)
+    push_result = _auto_push_svg()
+    return {
+        "status": "ok_render_only",
+        "history_points": len(history),
+        "svg_path": str(SVG_PATH),
+        "push": push_result,
+    }
+
+
 if __name__ == "__main__":
-    print(run())
+    import sys
+    if "--render-only" in sys.argv:
+        print(render_only())
+    else:
+        print(run())

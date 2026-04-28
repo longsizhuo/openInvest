@@ -51,6 +51,25 @@ python -m scripts.refresh_benchmarks --key 沪深300  # 单刷一条
 
 建议作为 weekly cron job（基金净值每周更新即可）。AI 投顾类（Wealthfront/Betterment/帮你投）的年化是单次搜索快照，需人工定期复查 [`core/benchmarks.py`](core/benchmarks.py) 的 `_meta.retrieved` 字段。
 
+**陈旧度提醒**（建议挂月度 cron，超过 90 天未更新就告警）：
+
+```bash
+python -m scripts.check_benchmark_freshness               # 默认 90 天
+python -m scripts.check_benchmark_freshness --days 60     # 自定义阈值
+```
+
+退出码 0 = 全部新鲜；1 = 有陈旧，可被 cron 转告警邮件。
+
+**清理历史噪声**（凌晨手动调试 / 同日多次采样导致折线图水平噪声）：
+
+```bash
+python -m scripts.clean_pnl_history --dry-run             # 预览
+python -m scripts.clean_pnl_history                       # 实际执行（自动备份原文件）
+python -m jobs.pnl_snapshot --render-only                 # 重渲染 SVG（不追加新 entry）
+```
+
+清理规则：① 北京时间 9-23 点之外的 entry 视为凌晨噪声删除；② 同日多条只保留最后一条合法采样。
+
 ---
 
 ## 它在做什么
