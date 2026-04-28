@@ -228,15 +228,22 @@ def run() -> Dict[str, Any]:
     snap = get_gold_snapshot(offset_pct=gold_offset)
     if snap is None:
         store.dream_event({"phase": "price_fetch_failed", "symbol": "GC=F", "date": today})
-        # 黄金 yfinance 没有 cache 兜底，失败就只能跳过黄金 committee
+        # yfinance + DB 兜底全失败时跳过黄金 committee
         skipped_assets.add("GC=F")
         gold_now = 0.0
         data_warnings.append(
-            "\n⚠️ **黄金现货今日无法获取**（GC=F + USDCNY 双双失败），"
+            "\n⚠️ **黄金现货今日无法获取**（yfinance 实时 + DB 兜底全失败），"
             "本次跳过黄金 committee 分析。"
         )
     else:
         gold_now = snap.bank_cny_per_gram  # 含浙商点差的克价，与用户成本同口径
+        if snap.is_stale:
+            # DB 兜底返回的是陈旧数据，告知 LLM 不要假装是今天的市场
+            store.dream_event({"phase": "gold_price_stale_fallback", "date": today})
+            data_warnings.append(
+                "\n⚠️ **黄金价格来自 DB 兜底（非实时）**：yfinance 今日不可达，"
+                "估值用最近一次成功拉取的价格。请在结论里明确标注'基于陈旧数据'。"
+            )
 
     gold_grams = float(pm.portfolio.get("gold_grams", 0))
     ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
