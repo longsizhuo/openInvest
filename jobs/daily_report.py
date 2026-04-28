@@ -325,34 +325,46 @@ def run() -> Dict[str, Any]:
     except Exception as e:
         final_decision_gemini = f"⚠️ Gemini error: {e}"
 
-    # --- 11. 拼最终报告 ---
+    # --- 11. 拼最终报告（精简版：只显 verdict + KEY_REASONS，辩论原文走附录） ---
     asset_section_chunks = []
     for idx, a in enumerate(target_assets):
         sym = a["symbol"]
         debate = asset_debates[sym]
         v = debate["verdict"]
-        # 把辩论 transcript 折叠展示
-        transcript_md = "\n\n".join([
-            f"**{e['role'].upper()}** — {e['ts']}\n\n{e['content']}"
-            for e in debate["transcript"]
-        ])
+        # 从 verdict raw 里抽 KEY_REASONS / RISK_TRIGGER 段落（已是中文）
+        verdict_raw = v.get("raw", "")
         asset_section_chunks.append(
             f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n"
-            f"**Verdict**: {v['verdict']} (confidence {v['confidence']:.2f}, "
-            f"dominant {v['dominant_side']}, suggested alloc {v['alloc_pct']}%)\n\n"
-            f"<details><summary>📜 完整辩论记录 (Bull / Bear / Judge)</summary>\n\n"
-            f"{transcript_md}\n\n</details>"
+            f"**裁决**: {v['verdict']} | "
+            f"置信度 {v['confidence']:.2f} | "
+            f"主导方 {v['dominant_side']} | "
+            f"建议仓位 {v['alloc_pct']}%\n\n"
+            f"```\n{verdict_raw}\n```"
         )
     asset_section = "\n\n---\n\n".join(asset_section_chunks)
-    full_report = f"""
-# 投资分析报告 / Invest Agent Report ({today})
 
-## 1. 宏观策略环境
+    # 辩论原文做成附录（折叠到邮件最末，平时不看）
+    appendix_chunks = []
+    for a in target_assets:
+        sym = a["symbol"]
+        debate = asset_debates[sym]
+        transcript_md = "\n\n".join([
+            f"**{e['role'].upper()}**\n{e['content']}"
+            for e in debate["transcript"]
+        ])
+        appendix_chunks.append(
+            f"### {a.get('display_name', sym)} ({sym}) 辩论原文\n\n{transcript_md}"
+        )
+    debate_appendix = "\n\n---\n\n".join(appendix_chunks)
+    full_report = f"""
+# 投资分析报告 ({today})
+
+## 1. 宏观环境
 {macro_analysis}
 
 ---
 
-## 黄金价格快照 (浙商积存金参考)
+## 黄金价格快照
 ```
 {gold_report}
 ```
@@ -375,13 +387,21 @@ def run() -> Dict[str, Any]:
 
 ---
 
-## {len(target_assets)+4}. 首席顾问决策 (DeepSeek)
+## {len(target_assets)+4}. 首席顾问最终决策
 {final_decision_ds}
 
 ---
 
-## {len(target_assets)+5}. 首席顾问决策 (Gemini 第二意见)
+## {len(target_assets)+5}. Gemini 第二意见
 {final_decision_gemini}
+
+---
+
+# 附录：辩论原文
+
+> 想看每个资产的 Bull / Bear / Judge 完整辩论展开此附录。
+
+{debate_appendix}
 """
 
     # --- 12. Append 到 memory/daily/<date>.md（供 Dreaming 用） ---
