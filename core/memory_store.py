@@ -35,6 +35,33 @@ def _file_lock(path: Path):
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """原子写入：写到同目录的临时文件 → fsync → os.replace 到目标路径。
+
+    防止进程在写到一半时被 kill / OOM / 断电导致 path 被截断为半截文件
+    （audit 发现的 P0 数据完整性硬伤）。要求：
+    - tmp 必须和目标在同一文件系统/同一目录，rename 才能保证原子（POSIX）
+    - rename 前必须 fsync 到磁盘，否则元数据可能比 inode 数据先落盘
+    - 调用方仍需要在 _file_lock 内调用以序列化并发写
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # 用 pid 区分多进程并发，虽然外面有 fcntl 但保险一点
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    try:
+        with open(tmp, "w", encoding=encoding) as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        # 出错把 tmp 清掉，避免 *.tmp.<pid> 文件堆积
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
 def _now_iso() -> str:
     """本地时区 ISO 8601 时间戳"""
     return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -89,8 +116,7 @@ class MemoryStore:
         meta = {"name": name, "type": type_, "updated": _now_iso(), **data}
         post = frontmatter.Post(body, **meta)
         with _file_lock(path):
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(frontmatter.dumps(post))
+            _atomic_write_text(path, frontmatter.dumps(post))
         return path
 
     def update_fields(self, name: str, **fields) -> Optional[MemoryDoc]:
@@ -144,8 +170,7 @@ class MemoryStore:
         """写 .dreams/<name>.json（短期记忆 / 候选池）"""
         path = self.root / ".dreams" / f"{name}.json"
         with _file_lock(path):
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            _atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
         return path
 
     def read_dream_state(self, name: str) -> Optional[Dict[str, Any]]:
@@ -167,8 +192,7 @@ class MemoryStore:
     def state_set(self, name: str, value: Any) -> Path:
         path = self.root / ".state" / f"{name}.json"
         with _file_lock(path):
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(value, f, ensure_ascii=False, indent=2)
+            _atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2))
         return path
 
     # ---------- portfolio_history.jsonl - append-only 交易流水 ----------

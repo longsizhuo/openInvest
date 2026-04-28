@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import os
+import random
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -23,6 +25,12 @@ from agents.macro_strategist import PROMPT_MACRO_STRATEGIST
 from agents.quant import build_quant_prompt
 from agents.risk_officer import build_risk_officer_prompt
 from core.memory_store import MemoryStore
+
+# LLM 调用重试参数（覆盖 DeepSeek 偶发的 429 / 5xx / 网络抖动）。
+# 设计目标：3 次尝试在 ~14s 内完成，失败后才把空字符串回给 CIO 让它判 garbage。
+LLM_MAX_ATTEMPTS = int(os.getenv("INVEST_LLM_MAX_ATTEMPTS", "3"))
+LLM_BASE_DELAY = float(os.getenv("INVEST_LLM_BASE_DELAY", "2.0"))
+LLM_MAX_DELAY = float(os.getenv("INVEST_LLM_MAX_DELAY", "20.0"))
 
 
 @dataclass
@@ -78,13 +86,40 @@ def _create_agent(system_prompt: str, *, search_enabled: bool = True,
     )
 
 
+def _is_transient(exc: BaseException) -> bool:
+    """是否值得重试。auth/quota 类错误重试也没用，立刻放弃；
+    网络/超时/限流是常见 transient，重试有效。
+    DeepSeek/openai 客户端会把不同 HTTP 错误包成不同 *Error 类，名字里通常含
+    'Timeout' / 'Connection' / 'RateLimit' / 'APIStatusError'。"""
+    name = type(exc).__name__.lower()
+    if any(k in name for k in ("auth", "permission", "invalidrequest", "notfound")):
+        return False
+    if any(k in name for k in ("timeout", "connection", "ratelimit", "apistatus", "apierror")):
+        return True
+    # 默认重试——LLM SDK 错误类型多变，宁可重试 3 次也不要静默失败
+    return True
+
+
 def _ask(agent: Optional[SimpleAgent], context: str) -> str:
     if agent is None:
         return "⚠️ Agent unavailable"
-    try:
-        return agent.run(context)
-    except Exception as e:
-        return f"⚠️ Agent error: {type(e).__name__}: {e}"
+    last_exc: Optional[BaseException] = None
+    for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
+        try:
+            return agent.run(context)
+        except Exception as e:
+            last_exc = e
+            if attempt >= LLM_MAX_ATTEMPTS or not _is_transient(e):
+                break
+            # 指数退避 + jitter（避免多个并发 agent 同时撞重试窗口）
+            delay = min(LLM_BASE_DELAY * (2 ** (attempt - 1)), LLM_MAX_DELAY)
+            delay *= 0.5 + random.random()  # 0.5x ~ 1.5x jitter
+            print(
+                f"⚠️ Agent retry {attempt}/{LLM_MAX_ATTEMPTS - 1}: "
+                f"{type(e).__name__}: {e} → sleep {delay:.1f}s"
+            )
+            time.sleep(delay)
+    return f"⚠️ Agent error after {LLM_MAX_ATTEMPTS} attempts: {type(last_exc).__name__}: {last_exc}"
 
 
 # ----------------------------------------------------------------------
