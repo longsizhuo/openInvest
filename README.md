@@ -23,7 +23,7 @@
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL trend chart" width="100%"/>
-  <sub>由 <code>jobs/pnl_snapshot</code> 每小时自动 force-push 到独立 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a>（主分支历史保持干净）· 隐私优先：只画百分比折线，不显示任何金额或具体数值</sub>
+  <sub>由 <code>jobs/pnl_snapshot</code> 每小时自动 force-push 到独立 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a>（主分支历史保持干净）</sub>
 </div>
 
 ---
