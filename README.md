@@ -151,9 +151,17 @@ docker compose logs -f invest-agent
   - daily_report return 新增 `status` 可能值 `degraded` 和 `skipped_assets` /
     `data_warnings` 字段，scheduler runner 能感知到"job 跑了但有数据问题"
 
+- **TOCTOU / Lost Update 修复**（NapCat ↔ scheduler 并发写 `portfolio.md`）：
+  - `MemoryStore.update_fields` 改为单一 `_file_lock` 闭包内完成 read-modify-write
+  - 新增 `MemoryStore.transaction(name)` context manager，给"多字段联动写"或
+    "改 frontmatter + 重渲染 body"这类多步操作用，全程持锁
+  - `PortfolioManager.with_portfolio_tx()` 是对外暴露的 portfolio 专用闭包，
+    退出 with 自动重渲染 body + atomic 写入；NapCat / daily_report / payday
+    所有 portfolio 改动统一走它
+  - 50 线程并发 `+1` 压测 0 丢失；20 轮 scheduler 扣款 + napcat 存款并发场景 0 丢失
+
 剩余还在 backlog 的 audit 硬伤（按工作量排）：
 
-- [ ] NapCat ↔ scheduler **TOCTOU 窗口**（read-modify-write 不在单一锁内）
 - [ ] **测试 + CI**（仅有 1 个 `tests/test_commsec.py`，无 GitHub Actions）
 - [ ] 单用户假设硬编码（`MemoryStore.path_of` 无 user_id 维度，做 SaaS 需要重构）
 

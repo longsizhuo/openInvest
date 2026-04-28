@@ -79,6 +79,58 @@ class MemoryDoc:
         return self.metadata.get(key, default)
 
 
+class _DocTx:
+    """transaction() 闭包内 yield 给调用方的可变 doc 视图。
+
+    调用方可以像操作 dict 一样改 metadata，调用 set_body() 改 body；
+    退出 with 时由 MemoryStore.transaction() 一次性原子写回。
+    """
+
+    __slots__ = ("name", "type", "metadata", "body", "_existed")
+
+    def __init__(self, name: str, doc: Optional[MemoryDoc]):
+        self.name = name
+        if doc is not None:
+            self.type = doc.type
+            self.metadata = dict(doc.metadata)
+            self.body = doc.body
+            self._existed = True
+        else:
+            # 文件不存在时 transaction 内仍可写：相当于在锁内创建
+            self.type = "state"
+            self.metadata = {}
+            self.body = ""
+            self._existed = False
+
+    # dict-like API（read）
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.metadata.get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.metadata[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.metadata
+
+    # 写
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.metadata[key] = value
+
+    def update(self, **kw: Any) -> None:
+        self.metadata.update(kw)
+
+    def set_type(self, type_: str) -> None:
+        self.type = type_
+
+    def set_body(self, body: str) -> None:
+        self.body = body
+
+    @property
+    def existed(self) -> bool:
+        """transaction 进来时该文件是否已存在"""
+        return self._existed
+
+
 class MemoryStore:
     """memory/ 目录的读写门面"""
 
@@ -92,9 +144,8 @@ class MemoryStore:
         """name 支持 'portfolio' 或 'insights/risk_calibration' 这种带子目录的形式"""
         return self.root / f"{name}.md"
 
-    def read(self, name: str) -> Optional[MemoryDoc]:
-        """读取 memory 文档；不存在返回 None"""
-        path = self.path_of(name)
+    # 内部 helper：不加锁的 read/write，给 transaction() 闭包用，避免锁内套锁
+    def _read_unlocked(self, path: Path, name: str) -> Optional[MemoryDoc]:
         if not path.exists():
             return None
         with open(path, "r", encoding="utf-8") as f:
@@ -106,6 +157,19 @@ class MemoryStore:
             body=post.content,
         )
 
+    def _write_unlocked(
+        self, path: Path, name: str, type_: str, data: Dict[str, Any], body: str
+    ) -> None:
+        meta = {"name": name, "type": type_, "updated": _now_iso(), **data}
+        post = frontmatter.Post(body, **meta)
+        _atomic_write_text(path, frontmatter.dumps(post))
+
+    def read(self, name: str) -> Optional[MemoryDoc]:
+        """读取 memory 文档；不存在返回 None"""
+        path = self.path_of(name)
+        with _file_lock(path):
+            return self._read_unlocked(path, name)
+
     def write(self, name: str, type_: str, data: Dict[str, Any], body: str) -> Path:
         """写入 memory 文档（覆盖式）
 
@@ -113,21 +177,61 @@ class MemoryStore:
         body: markdown 正文
         """
         path = self.path_of(name)
-        meta = {"name": name, "type": type_, "updated": _now_iso(), **data}
-        post = frontmatter.Post(body, **meta)
         with _file_lock(path):
-            _atomic_write_text(path, frontmatter.dumps(post))
+            self._write_unlocked(path, name, type_, data, body)
         return path
 
     def update_fields(self, name: str, **fields) -> Optional[MemoryDoc]:
-        """局部更新 frontmatter 字段；不动 body"""
-        doc = self.read(name)
-        if doc is None:
-            return None
-        new_data = {k: v for k, v in doc.metadata.items() if k not in {"name", "type", "updated"}}
-        new_data.update(fields)
-        self.write(doc.name, doc.type, new_data, doc.body)
-        return self.read(name)
+        """局部更新 frontmatter 字段；不动 body。
+
+        关键修复（audit P1: TOCTOU）：
+        旧版是 "self.read() + self.write()" 两把分离的锁，中间任意进程能插
+        进来，造成 Lost Update（NapCat 的存款被 scheduler 的扣款覆盖）。
+        现在改成单一 _file_lock 闭包内 read-modify-write，并发写不会丢。
+        """
+        path = self.path_of(name)
+        with _file_lock(path):
+            doc = self._read_unlocked(path, name)
+            if doc is None:
+                return None
+            new_data = {
+                k: v for k, v in doc.metadata.items()
+                if k not in {"name", "type", "updated"}
+            }
+            new_data.update(fields)
+            self._write_unlocked(path, doc.name, doc.type, new_data, doc.body)
+            # 锁内再读一次，返回 caller 看到最终落盘状态
+            return self._read_unlocked(path, name)
+
+    @contextmanager
+    def transaction(self, name: str):
+        """RMW 安全闭包：read → 调用方修改 → 退出时 atomic write，全程持锁。
+
+        给"读两个字段联动写"或"先改 frontmatter 再重渲染 body"这类多步操作用：
+
+            with store.transaction("portfolio") as p:
+                p["cash_cny"] = float(p.get("cash_cny", 0)) - 6894
+                p["ndq_shares"] = float(p.get("ndq_shares", 0)) + 128
+                p.set_body(render_body(p))
+            # 退出 with 时自动一次性 atomic write
+
+        相比 update_fields() 的优势：调用方可以在锁内做任意复杂的派生计算，
+        不需要把多个 update_fields() 串起来（每串一次都开/关一次锁，期间还
+        是可能被插入）。
+
+        如果 doc 不存在，返回的 _DocTx 仍然可写，等于"在锁内创建新文件"。
+        """
+        path = self.path_of(name)
+        with _file_lock(path):
+            doc = self._read_unlocked(path, name)
+            tx = _DocTx(name=name, doc=doc)
+            yield tx
+            # commit
+            meta_clean = {
+                k: v for k, v in tx.metadata.items()
+                if k not in {"name", "type", "updated"}
+            }
+            self._write_unlocked(path, name, tx.type, meta_clean, tx.body)
 
     # ---------- daily/*.md - append-only 日志 ----------
 

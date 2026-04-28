@@ -226,9 +226,10 @@ def _deposit(ctx: CommandContext) -> str:
         amount = float(ctx.args[0])
     except ValueError:
         return "金额格式错误"
-    new_cash = float(ctx.pm.portfolio.get("cash_cny", 0)) + amount
-    ctx.pm.store.update_fields("portfolio", cash_cny=new_cash)
-    ctx.pm._refresh_portfolio_body()
+    # RMW 在单锁内完成，scheduler 同时写不会丢这次存款
+    with ctx.pm.with_portfolio_tx() as p:
+        new_cash = float(p.get("cash_cny", 0)) + amount
+        p["cash_cny"] = new_cash
     ctx.pm._reload()
     return f"✅ 已存入 ¥{amount:,.2f}，现金余额 ¥{new_cash:,.2f}"
 
@@ -241,9 +242,9 @@ def _withdraw(ctx: CommandContext) -> str:
         amount = float(ctx.args[0])
     except ValueError:
         return "金额格式错误"
-    new_cash = float(ctx.pm.portfolio.get("cash_cny", 0)) - amount
-    ctx.pm.store.update_fields("portfolio", cash_cny=new_cash)
-    ctx.pm._refresh_portfolio_body()
+    with ctx.pm.with_portfolio_tx() as p:
+        new_cash = float(p.get("cash_cny", 0)) - amount
+        p["cash_cny"] = new_cash
     ctx.pm._reload()
     return f"✅ 已扣减 ¥{amount:,.2f}，现金余额 ¥{new_cash:,.2f}"
 
@@ -260,18 +261,18 @@ def _gold_buy(ctx: CommandContext) -> str:
     price = float(match.group(2))
     total = grams * price
 
-    # 更新持仓 + 加权均价
-    cur_grams = float(ctx.pm.portfolio.get("gold_grams", 0))
-    cur_avg = float(ctx.pm.portfolio.get("gold_avg_cost_cny_per_gram", 0))
-    new_grams = cur_grams + grams
-    new_avg = (cur_avg * cur_grams + price * grams) / new_grams if new_grams else price
+    # RMW: 拿锁里读旧 grams + avg_cost，算加权均价，写回，避免被 scheduler 插入
+    with ctx.pm.with_portfolio_tx() as p:
+        cur_grams = float(p.get("gold_grams", 0))
+        cur_avg = float(p.get("gold_avg_cost_cny_per_gram", 0))
+        new_grams = cur_grams + grams
+        new_avg = (
+            (cur_avg * cur_grams + price * grams) / new_grams if new_grams else price
+        )
+        p["gold_grams"] = round(new_grams, 4)
+        p["gold_avg_cost_cny_per_gram"] = round(new_avg, 2)
 
-    ctx.pm.store.update_fields(
-        "portfolio",
-        gold_grams=round(new_grams, 4),
-        gold_avg_cost_cny_per_gram=round(new_avg, 2),
-    )
-    ctx.pm._refresh_portfolio_body()
+    # 历史 jsonl 是独立 append-only 文件，自带锁，放 portfolio 锁外
     ctx.pm.store.append_history({
         "ts_origin": datetime.now().isoformat(timespec="seconds"),
         "action": "bought", "symbol": "GOLD-CNY", "channel": "浙商积存金",
@@ -293,7 +294,7 @@ def _gold_sell(ctx: CommandContext) -> str:
     grams = float(match.group(1))
     price = float(match.group(2))
 
-    # 找 strategy 里的 sell_fee_pct
+    # 找 strategy 里的 sell_fee_pct（strategy 是只读，不需要进 portfolio 锁）
     targets = ctx.pm.strategy.get("target_assets", [])
     gold_a = next((a for a in targets if a.get("symbol") == "GC=F"), None)
     fee_pct = float(gold_a.get("sell_fee_pct", 0.0038)) if gold_a else 0.0038
@@ -302,17 +303,15 @@ def _gold_sell(ctx: CommandContext) -> str:
     fee = gross * fee_pct
     net = gross - fee
 
-    cur_grams = float(ctx.pm.portfolio.get("gold_grams", 0))
-    new_grams = max(0.0, cur_grams - grams)
-    cur_cash = float(ctx.pm.portfolio.get("cash_cny", 0))
-    new_cash = cur_cash + net
+    # RMW: 同时改 gold_grams 和 cash_cny，必须在同一锁内
+    with ctx.pm.with_portfolio_tx() as p:
+        cur_grams = float(p.get("gold_grams", 0))
+        new_grams = max(0.0, cur_grams - grams)
+        cur_cash = float(p.get("cash_cny", 0))
+        new_cash = cur_cash + net
+        p["gold_grams"] = round(new_grams, 4)
+        p["cash_cny"] = round(new_cash, 2)
 
-    ctx.pm.store.update_fields(
-        "portfolio",
-        gold_grams=round(new_grams, 4),
-        cash_cny=round(new_cash, 2),
-    )
-    ctx.pm._refresh_portfolio_body()
     ctx.pm.store.append_history({
         "ts_origin": datetime.now().isoformat(timespec="seconds"),
         "action": "sold", "symbol": "GOLD-CNY", "channel": "浙商积存金",
@@ -336,8 +335,9 @@ def _gold_set(ctx: CommandContext) -> str:
         grams = float(ctx.args[0])
     except ValueError:
         return "克数格式错误"
-    ctx.pm.store.update_fields("portfolio", gold_grams=round(grams, 4))
-    ctx.pm._refresh_portfolio_body()
+    # 直接设克数也走 transaction：body 重渲染要看其它字段，必须在同一锁内
+    with ctx.pm.with_portfolio_tx() as p:
+        p["gold_grams"] = round(grams, 4)
     ctx.pm._reload()
     return f"✅ 黄金克数已直接设为 {grams}g（成本均价不变）"
 
