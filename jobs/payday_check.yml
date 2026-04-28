@@ -1,0 +1,6 @@
+name: payday_check
+description: 每月 1 号 09:00 把净收入入账（monthly_income - monthly_expenses）
+schedule: "0 9 1 * *"
+timezone: Asia/Shanghai
+entry: jobs.payday_check:run
+enabled: false  # 用户决定手动 /deposit，不再自动入账

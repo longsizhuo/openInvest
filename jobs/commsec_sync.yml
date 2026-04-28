@@ -1,0 +1,6 @@
+name: commsec_sync
+description: 每 2 小时拉取 CommSec 成交回报邮件，自动更新 portfolio
+schedule: "0 */2 * * *"
+timezone: Asia/Shanghai
+entry: jobs.commsec_sync:run
+enabled: true

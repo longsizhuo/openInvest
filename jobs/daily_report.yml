@@ -1,0 +1,6 @@
+name: daily_report
+description: 每日 10:00 跑多 agent 投资分析，发邮件
+schedule: "0 10 * * *"
+timezone: Asia/Shanghai
+entry: jobs.daily_report:run
+enabled: true

@@ -1,9 +1,18 @@
-import json
-import os
+"""持仓与策略门面 - 基于 MemoryStore（OpenClaw 风格 markdown 持久化）
+
+职责重新切分（相比旧版）：
+- 只负责"读 memory + 计算用户状态 + 记录交易"
+- 工资入账（process_income）已迁出 → jobs/payday_check.py
+- 文件 IO 统一走 MemoryStore（带文件锁）
+- 不再直接持有 user_profile.json
+"""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
+from typing import List, Optional
 
-PROFILE_PATH = "user_profile.json"
+from core.memory_store import MemoryStore
 
 
 @dataclass
@@ -13,125 +22,174 @@ class UserStatus:
     disposable_for_invest: float
     risk_level: str
     portfolio_value: float
-    is_payday: bool
-
-
-def _load_profile():
-    if not os.path.exists(PROFILE_PATH):
-        raise FileNotFoundError(f"找不到 {PROFILE_PATH}，请先创建配置。")
-    with open(PROFILE_PATH, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    target_asset: str
+    max_single_invest_cny: float
+    user_name: str
+    user_email: Optional[str] = None  # 预留，目前从 .env 拿
 
 
 class PortfolioManager:
-    def __init__(self):
-        self.profile = _load_profile()
+    """所有数据通过 MemoryStore 读写；调用方不用关心文件布局。"""
 
-    def _save_profile(self):
-        with open(PROFILE_PATH, 'w', encoding='utf-8') as f:
-            json.dump(self.profile, f, indent=2, ensure_ascii=False)
+    def __init__(self, store: Optional[MemoryStore] = None):
+        self.store = store or MemoryStore()
 
-    def process_income(self):
-        """
-        检查是否需要'发工资'。
-        逻辑：简单的按月检测。实际生产中可以根据具体日期。
-        """
-        last_run = datetime.strptime(self.profile.get("last_run_date", "2025-12-20"), "%Y-%m-%d")
-        today = datetime.now()
+        user_doc = self.store.read("user")
+        strategy_doc = self.store.read("strategy")
+        portfolio_doc = self.store.read("portfolio")
 
-        income_added = False
-        # 如果月份不同，且今天是1号以后（简化逻辑，实际可按需调整）
-        if today.month != last_run.month:
-            income = self.profile["monthly_income_cny"]
-            expense = self.profile["monthly_expenses_cny"]
-            net_income = income - expense
+        if not (user_doc and strategy_doc and portfolio_doc):
+            raise FileNotFoundError(
+                "memory/user.md / strategy.md / portfolio.md 缺失。"
+                "请先跑 `python scripts/migrate_profile.py` 迁移旧的 user_profile.json"
+            )
 
-            self.profile["current_assets"]["cash_cny"] += net_income
-            print(f"💰 [Payday] 检测到新月份，已自动存入净收入: ¥{net_income}")
-            income_added = True
+        self.user = user_doc
+        self.strategy = strategy_doc
+        self.portfolio = portfolio_doc
 
-        # 更新运行时间
-        self.profile["last_run_date"] = today.strftime("%Y-%m-%d")
-        self._save_profile()
-        return income_added
+    # ---------- 读 ----------
 
     def get_user_status(self, current_stock_price: float, exchange_rate: float) -> UserStatus:
-        assets = self.profile["current_assets"]
-        strategy = self.profile["investment_strategy"]
+        cash_cny = float(self.portfolio.get("cash_cny", 0))
+        aud_cash = float(self.portfolio.get("aud_cash", 0))
+        ndq_shares = float(self.portfolio.get("ndq_shares", 0))
+        exchange_buffer = float(self.user.get("exchange_buffer_cny", 0))
 
-        # 1. 计算当前持仓市值 (转为 CNY)
-        stock_val_aud = assets.get("ndq_shares", 0) * current_stock_price
-        stock_val_cny = stock_val_aud * exchange_rate  # 粗略估算
+        # 多资产策略下从 target_assets 各 cap 取 max 当兜底（每资产独立 cap，
+        # 调用方按当前操作的资产单独取更准）。旧字段 strategy.max_single_invest_cny /
+        # strategy.target_asset 已废弃，保留 .get() 仅为单资产旧 memory 的兼容兜底。
+        target_assets = list(self.strategy.get("target_assets", []) or [])
+        if target_assets:
+            max_single = max(
+                float(t.get("max_single_invest_cny", 0) or 0) for t in target_assets
+            ) or 10000.0
+            primary_asset = str(target_assets[0].get("symbol", "NDQ.AX"))
+        else:
+            max_single = float(self.strategy.get("max_single_invest_cny", 10000))
+            primary_asset = str(self.strategy.get("target_asset", "NDQ.AX"))
 
-        total_portfolio = stock_val_cny + assets["cash_cny"] + (assets.get("aud_cash", 0.0) * exchange_rate)
+        # 持仓市值（粗算 AUD->CNY，黄金估值由调用方负责）
+        stock_val_cny = ndq_shares * current_stock_price * exchange_rate
+        total_portfolio = stock_val_cny + cash_cny + aud_cash * exchange_rate
 
-        # 2. 计算本期“可支配投资资金”
-        # 逻辑：当前现金 - 必须留的周转金 (exchange_buffer)
-        available_cash = assets["cash_cny"] - self.profile["exchange_buffer_cny"]
-        if available_cash < 0: available_cash = 0
-
-        # 3. 基础投资额度 (Base Cap)
-        # 即使非常有钱，单次也不超过设置的上限，防止梭哈风险
-        invest_cap = strategy["max_single_invest_cny"]
-        disposable = min(available_cash, invest_cap)
+        # 本期可投资金 = 现金 - 周转金，封顶 max_single
+        available = max(0.0, cash_cny - exchange_buffer)
+        disposable = min(available, max_single)
 
         return UserStatus(
-            cash_cny=assets["cash_cny"],
-            cash_aud=assets.get("aud_cash", 0.0),
+            cash_cny=cash_cny,
+            cash_aud=aud_cash,
             disposable_for_invest=disposable,
-            risk_level=self.profile["risk_tolerance"],
+            risk_level=str(self.user.get("risk_tolerance", "Balanced")),
             portfolio_value=total_portfolio,
-            is_payday=False  # 由 process_income 外部控制打印
+            target_asset=primary_asset,
+            max_single_invest_cny=max_single,
+            user_name=str(self.user.get("display_name", "Anonymous")),
         )
 
-    def update_after_invest(self, invest_cny: float):
-        self.profile["current_assets"]["cash_cny"] -= invest_cny
-        self._save_profile()
+    def get_processed_emails(self) -> List[str]:
+        return list(self.store.state_get("processed_emails", []))
 
-    # --- 新增功能: 处理外部交易 ---
+    # ---------- 写 ----------
 
-    def get_processed_emails(self):
-        return self.profile.get("processed_emails", [])
+    def update_after_invest(self, invest_cny: float) -> None:
+        """daily_report 在用户实际买入后调用（目前是手动操作，先留接口）"""
+        new_cash = float(self.portfolio.get("cash_cny", 0)) - invest_cny
+        self.store.update_fields("portfolio", cash_cny=new_cash)
+        self._refresh_portfolio_body()
+        self._reload()
 
-    def record_external_trade(self, trade_data: dict):
-        """
-        处理从邮件读取的外部交易
-        trade_data: {action, units, symbol, price_per_unit, total_amount, currency, email_id...}
-        """
-        assets = self.profile["current_assets"]
-        
-        # 简单映射 NDQ -> ndq_shares
-        is_ndq = "NDQ" in trade_data['symbol']
-        
-        if trade_data['action'] == 'bought':
+    def record_external_trade(self, trade: dict) -> None:
+        """从 CommSec 邮件解析出的成交回报 → 更新 portfolio + 历史 + 已处理邮件"""
+        symbol = str(trade.get("symbol", ""))
+        units = float(trade.get("units", 0))
+        action = str(trade.get("action", "")).lower()
+        amount = float(trade.get("total_amount", 0))
+        currency = str(trade.get("currency", "AUD"))
+
+        is_ndq = "NDQ" in symbol
+        ndq_shares = float(self.portfolio.get("ndq_shares", 0))
+        aud_cash = float(self.portfolio.get("aud_cash", 0))
+
+        if action == "bought":
             if is_ndq:
-                assets["ndq_shares"] = assets.get("ndq_shares", 0) + trade_data['units']
-            else:
-                # 处理其他股票 (可选)
-                pass
-            
-            # 扣减澳元现金 (假设是用澳元买的)
-            if trade_data['currency'] == 'AUD':
-                assets["aud_cash"] = assets.get("aud_cash", 0) - trade_data['total_amount']
-                
-        elif trade_data['action'] == 'sold':
+                ndq_shares += units
+            if currency == "AUD":
+                aud_cash -= amount
+        elif action == "sold":
             if is_ndq:
-                assets["ndq_shares"] = max(0, assets.get("ndq_shares", 0) - trade_data['units'])
-            
-            # 增加澳元现金
-            if trade_data['currency'] == 'AUD':
-                assets["aud_cash"] = assets.get("aud_cash", 0) + trade_data['total_amount']
+                ndq_shares = max(0.0, ndq_shares - units)
+            if currency == "AUD":
+                aud_cash += amount
 
-        # 2. 记录交易历史
-        if "transaction_history" not in self.profile:
-            self.profile["transaction_history"] = []
-        
-        self.profile["transaction_history"].append(trade_data)
-        
-        # 3. 记录 Email ID
-        if "processed_emails" not in self.profile:
-            self.profile["processed_emails"] = []
-        self.profile["processed_emails"].append(trade_data['email_id'])
+        self.store.update_fields(
+            "portfolio",
+            ndq_shares=ndq_shares,
+            aud_cash=aud_cash,
+        )
+        self._refresh_portfolio_body()
+        self.store.append_history(trade)
 
-        self._save_profile()
-        print(f"💾 已记录外部交易: {trade_data['action']} {trade_data['units']} {trade_data['symbol']} (成本: ${trade_data['total_amount']})")
+        email_id = trade.get("email_id")
+        if email_id:
+            processed = self.get_processed_emails()
+            if email_id not in processed:
+                processed.append(email_id)
+                self.store.state_set("processed_emails", processed)
+
+        self._reload()
+        print(
+            f"💾 已记录外部交易: {action} {units} {symbol} "
+            f"(成本: ${amount:.2f} {currency})"
+        )
+
+    def add_income(self, net_income_cny: float, payday_label: str) -> None:
+        """payday_check job 调用 - 把月度净收入加进 cash_cny，并更新 last_payday"""
+        new_cash = float(self.portfolio.get("cash_cny", 0)) + net_income_cny
+        self.store.update_fields("portfolio", cash_cny=new_cash)
+        self._refresh_portfolio_body()
+
+        self.store.update_fields("user", last_payday=payday_label)
+        self._reload()
+        print(f"💰 [Payday {payday_label}] 净收入 ¥{net_income_cny:,.0f} 已入账，"
+              f"现金余额 ¥{new_cash:,.2f}")
+
+    # ---------- 内部 ----------
+
+    def _refresh_portfolio_body(self) -> None:
+        """用最新 frontmatter 数据重写 portfolio.md 的 body（保持自然语言部分新鲜）"""
+        doc = self.store.read("portfolio")
+        if doc is None:
+            return
+        cash_cny = float(doc.get("cash_cny", 0))
+        aud_cash = float(doc.get("aud_cash", 0))
+        ndq_shares = float(doc.get("ndq_shares", 0))
+        gold_grams = float(doc.get("gold_grams", 0) or 0)
+        gold_avg_cost = float(doc.get("gold_avg_cost_cny_per_gram", 0) or 0)
+        gold_line = (
+            f"- **黄金持仓 (浙商积存金)**: {gold_grams:.4f} 克"
+            + (f"，均价 ¥{gold_avg_cost:.2f}/克" if gold_avg_cost else "")
+        ) if gold_grams else "- **黄金持仓 (浙商积存金)**: 0"
+        body = f"""# 当前持仓
+
+- **CNY 现金**: ¥{cash_cny:,.2f}
+- **AUD 现金**: ${aud_cash:,.2f}
+- **NDQ.AX 持仓**: {ndq_shares} 股
+{gold_line}
+
+## 说明
+
+此文件由 daily_report / commsec_sync / payday_check / napcat_bot 自动更新。
+不要手动编辑——如需调整，请走 jobs/manual_adjust.py 或 NapCat /cmd 命令。
+"""
+        # 保留 frontmatter 业务字段
+        meta = {k: v for k, v in doc.metadata.items()
+                if k not in {"name", "type", "updated"}}
+        self.store.write("portfolio", "state", meta, body)
+
+    def _reload(self) -> None:
+        """写入后重新读，保证下一次访问看到最新数据"""
+        self.user = self.store.read("user")  # type: ignore[assignment]
+        self.strategy = self.store.read("strategy")  # type: ignore[assignment]
+        self.portfolio = self.store.read("portfolio")  # type: ignore[assignment]

@@ -1,0 +1,6 @@
+name: weekly_review
+description: 周日 11:00 复盘过去一周建议命中率（依赖 dreaming 写入的 insights）
+schedule: "0 11 * * 0"
+timezone: Asia/Shanghai
+entry: jobs.weekly_review:run
+enabled: false  # P3 完成后再启用

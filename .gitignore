@@ -1,6 +1,26 @@
 .env
 chroma.*
 .idea
-# 隐私数据
+
+# 隐私
 cache_data
 user_profile.json
+user_profile.json.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Memory (全部隐私 - 含资产/工资/交易历史/agent 决策日志)
+# 想了解结构看 docs/memory_layout.md
+memory/
+
+# 数据库 (SQLite jobstore + 行情缓存)
+db/*.sqlite
+db/*.db
+db/*.sqlite-journal
+
+# fcntl 文件锁
+*.lock

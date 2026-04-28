@@ -1,0 +1,6 @@
+name: dreaming
+description: 每天凌晨 3:00 跑 Light → REM → Deep Sleep，把短期信号整合成长期 insights
+schedule: "0 3 * * *"
+timezone: Asia/Shanghai
+entry: jobs.dreaming:run
+enabled: false  # P3 完成后再启用
