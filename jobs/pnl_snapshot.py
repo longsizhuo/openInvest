@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from core.benchmarks import BenchmarkSeries, get_all_series
 from core.memory_store import MemoryStore
 from utils.exchange_fee import get_history_data
 from utils.gold_price import get_gold_snapshot
@@ -176,8 +177,40 @@ def _series_polyline(
     return " ".join(pts)
 
 
+def _benchmark_polyline(
+    series: BenchmarkSeries, history: List[Dict[str, Any]],
+    vmin: float, vmax: float,
+) -> str:
+    """把 BenchmarkSeries 的 {date: pct} 投影到 history 时间轴上的 SVG points。
+
+    history 里每条记录有 ts（用户实盘的时间戳），找最近的基准日期 → 取那天的 pct。
+    """
+    if not history or not series.points:
+        return ""
+    pts: List[str] = []
+    n = len(history)
+    sorted_bench_dates = sorted(series.points.keys())
+    for i, entry in enumerate(history):
+        # 用户 history 的 ts 是 ISO，截前 10 位拿日期
+        date_str = entry["ts"][:10]
+        # 找最近的（不晚于）基准日期
+        candidates = [d for d in sorted_bench_dates if d <= date_str]
+        if not candidates:
+            continue
+        v = series.points[candidates[-1]]
+        x = MARGIN_L + (PLOT_W * i / max(n - 1, 1))
+        y = _project_y(v, vmin, vmax)
+        pts.append(f"{x:.1f},{y:.1f}")
+    return " ".join(pts)
+
+
 def render_svg(history: List[Dict[str, Any]]) -> str:
-    """渲染折线图。**故意不写任何数字标签**，只显示线条、0% 基线、方向箭头。"""
+    """渲染折线图。**故意不写任何数字标签**，只显示线条、0% 基线、方向箭头。
+
+    叠加 vs 基准：从 core/benchmarks 加载所有缓存的 series（沪深 300 / 公募基金 /
+    余额宝 / Wealthfront 等），按用户线的时间轴投影同图叠加。
+    用户线（Total / NDQ / Gold）保持粗实线 + 高对比；基准线细 + 半透明。
+    """
     if not history:
         # 空状态：一句话占位
         return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="PnL trend chart (no data yet)">
@@ -188,12 +221,21 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
 </svg>
 """
 
-    # 算 y 轴范围（pad 10% 让线不顶到边缘）
+    # 加载所有基准 series（用 history 起始日当 baseline）
+    start_date = history[0]["ts"][:10]
+    benchmark_series = get_all_series(start_date)
+
+    # 算 y 轴范围（含基准）
     all_values: List[float] = []
     for entry in history:
         for k in ("total_pnl_pct", "ndq_pnl_pct", "gold_pnl_pct"):
             v = entry.get(k)
             if v is not None:
+                all_values.append(v)
+    for s in benchmark_series:
+        # 只考虑窗口内（>= start_date）的基准点
+        for d, v in s.points.items():
+            if d >= start_date:
                 all_values.append(v)
     all_values.append(0.0)  # 0% 基线必在范围内
     vmin, vmax = min(all_values), max(all_values)
@@ -216,40 +258,94 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
     arrow = "▲" if latest_total > 0 else ("▼" if latest_total < 0 else "■")
     arrow_color = "#3fb950" if latest_total > 0 else ("#f85149" if latest_total < 0 else "#8b949e")
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="PnL trend chart (privacy-preserving, no absolute numbers)">
+    # 渲染基准线（细 + 半透明，不抢用户线视觉焦点）
+    bench_polylines = []
+    for s in benchmark_series:
+        pts = _benchmark_polyline(s, history, vmin, vmax)
+        if pts:
+            bench_polylines.append(
+                f'<polyline points="{pts}" fill="none" stroke="{s.color}" '
+                f'stroke-width="1" stroke-dasharray="{s.dash}" opacity="0.45"/>'
+            )
+
+    # 图例（基准分组，每组一行）—— SVG 高度从 280 拉到 380 留出图例空间
+    legend_lines: List[str] = []
+    legend_y = MARGIN_T + 12
+    # 用户线（最显眼）
+    legend_lines.append(
+        f'<g transform="translate({MARGIN_L + 8}, {legend_y})" class="label">'
+        f'<line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>'
+        f'<text x="20" y="4" fill="#c9d1d9" font-weight="bold">我的实盘 Total</text>'
+        f'<line x1="120" y1="0" x2="134" y2="0" stroke="#58a6ff" stroke-width="1.5"/>'
+        f'<text x="140" y="4" fill="#c9d1d9">NDQ.AX</text>'
+        f'<line x1="200" y1="0" x2="214" y2="0" stroke="#f0a500" stroke-width="1.5"/>'
+        f'<text x="220" y="4" fill="#c9d1d9">Gold</text>'
+        f'</g>'
+    )
+    # 基准按 group 分组列出
+    grouped: Dict[str, List[BenchmarkSeries]] = {}
+    for s in benchmark_series:
+        grouped.setdefault(s.group, []).append(s)
+    group_titles = {
+        "index": "📊 大盘指数",
+        "fund": "🏦 公募基金",
+        "savings": "💰 银行 / 货币基金",
+        "ai_advisor": "🤖 AI 投顾基准",
+    }
+    legend_y = H - 70
+    for group_key in ["index", "fund", "savings", "ai_advisor"]:
+        if group_key not in grouped:
+            continue
+        items = grouped[group_key]
+        legend_lines.append(
+            f'<text x="{MARGIN_L + 8}" y="{legend_y}" fill="#8b949e" class="label">'
+            f'{group_titles[group_key]}:</text>'
+        )
+        x = MARGIN_L + 130
+        for s in items:
+            legend_lines.append(
+                f'<line x1="{x}" y1="{legend_y - 4}" x2="{x + 12}" y2="{legend_y - 4}" '
+                f'stroke="{s.color}" stroke-width="1.5" stroke-dasharray="{s.dash}" opacity="0.7"/>'
+            )
+            legend_lines.append(
+                f'<text x="{x + 16}" y="{legend_y}" fill="#c9d1d9" class="label" font-size="10">'
+                f'{s.key}</text>'
+            )
+            x += max(110, len(s.key) * 7 + 30)
+        legend_y += 14
+
+    # SVG 高度自适应（基准多了图例占地多）
+    H_DYNAMIC = max(H, MARGIN_T + PLOT_H + 80 + 14 * len(grouped))
+    new_zero_y = zero_y  # 不需重算，因为图区高度 PLOT_H 不变
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H_DYNAMIC}" role="img" aria-label="PnL trend chart with benchmarks (privacy-preserving, no absolute numbers)">
   <style>
     .label {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }}
   </style>
   <!-- 背景 -->
-  <rect width="{W}" height="{H}" fill="#0d1117"/>
-  <!-- 0% 基线（虚线灰）-->
-  <line x1="{MARGIN_L}" y1="{zero_y:.1f}" x2="{W - MARGIN_R}" y2="{zero_y:.1f}"
+  <rect width="{W}" height="{H_DYNAMIC}" fill="#0d1117"/>
+  <!-- 0% 基线 -->
+  <line x1="{MARGIN_L}" y1="{new_zero_y:.1f}" x2="{W - MARGIN_R}" y2="{new_zero_y:.1f}"
         stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
-  <text x="{MARGIN_L - 6}" y="{zero_y + 4:.1f}" text-anchor="end" fill="#6e7681" class="label">0%</text>
-  <!-- y 轴方向标识（不带数字）-->
+  <text x="{MARGIN_L - 6}" y="{new_zero_y + 4:.1f}" text-anchor="end" fill="#6e7681" class="label">0%</text>
   <text x="{MARGIN_L - 6}" y="{MARGIN_T + 10}" text-anchor="end" fill="#3fb950" class="label">+</text>
-  <text x="{MARGIN_L - 6}" y="{H - MARGIN_B - 2}" text-anchor="end" fill="#f85149" class="label">−</text>
-  <!-- x 轴标签：相对时间，无具体日期 -->
-  <text x="{MARGIN_L}" y="{H - 8}" fill="#6e7681" class="label">30 天前</text>
-  <text x="{W - MARGIN_R}" y="{H - 8}" text-anchor="end" fill="#6e7681" class="label">今天</text>
+  <text x="{MARGIN_L - 6}" y="{MARGIN_T + PLOT_H - 2}" text-anchor="end" fill="#f85149" class="label">−</text>
+  <text x="{MARGIN_L}" y="{MARGIN_T + PLOT_H + 18}" fill="#6e7681" class="label">30 天前</text>
+  <text x="{W - MARGIN_R}" y="{MARGIN_T + PLOT_H + 18}" text-anchor="end" fill="#6e7681" class="label">今天</text>
 
-  <!-- 三条 series 线 -->
+  <!-- 基准线（先画，避免遮挡用户线）-->
+  {chr(10).join(bench_polylines)}
+
+  <!-- 用户实盘三线（粗实线，高对比）-->
   {f'<polyline points="{ndq_line}" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>' if ndq_line else ''}
   {f'<polyline points="{gold_line}" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>' if gold_line else ''}
   {f'<polyline points="{total_line}" fill="none" stroke="#d29922" stroke-width="2.5"/>' if total_line else ''}
 
-  <!-- 当前趋势方向箭头（不带数字）-->
+  <!-- 当前趋势箭头 -->
   <text x="{W - MARGIN_R - 10}" y="{MARGIN_T + 18}" text-anchor="end" fill="{arrow_color}" font-size="22" font-weight="bold">{arrow}</text>
 
   <!-- 图例 -->
-  <g transform="translate({MARGIN_L + 8}, {MARGIN_T + 12})" class="label">
-    <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
-    <text x="20" y="4" fill="#c9d1d9">Total</text>
-    <line x1="70" y1="0" x2="84" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="90" y="4" fill="#c9d1d9">NDQ.AX</text>
-    <line x1="155" y1="0" x2="169" y2="0" stroke="#f0a500" stroke-width="1.5"/>
-    <text x="175" y="4" fill="#c9d1d9">Gold</text>
-  </g>
+  {chr(10).join(legend_lines)}
 </svg>
 """
 
