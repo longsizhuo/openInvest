@@ -6,8 +6,10 @@ services:
     # 挂载配置文件 (用户只需修改本地的 .env)
     env_file:
       - .env
-    # 数据持久化 (数据库和缓存映射到本地)
+    # 数据持久化 (memory/ 是 portfolio 状态的 source of truth，必挂；db / cache_data
+    # 是 yfinance 行情缓存，丢了会从外网重新拉但费时间)
     volumes:
+      - ./memory:/app/memory
       - ./db:/app/db
       - ./cache_data:/app/cache_data
       # 可选：如果需要在容器外查看日志文件
@@ -15,3 +17,20 @@ services:
     # 时区设置 (确保定时任务准确)
     environment:
       - TZ=Asia/Shanghai
+    # 启动前检查 onboarding 是否完成；缺 memory/ 就直接退出，
+    # 友好提示用户先在 Claude Code 里用 skill 走 onboarding，或手动跑 init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /app/memory/user.md ]; then
+          echo "❌ memory/ 未初始化，scheduler 没法跑。" >&2
+          echo "" >&2
+          echo "三种方式完成 onboarding：" >&2
+          echo "  1. 推荐：在 Claude Code 里说 \"帮我初始化 invest\"，让 skill 走 5 个问题" >&2
+          echo "  2. 一次性容器跑 onboarding：" >&2
+          echo "       docker compose run --rm invest-agent python -m scripts.skill init" >&2
+          echo "  3. 直接编辑 user_profile.json 后跑：" >&2
+          echo "       docker compose run --rm invest-agent python scripts/migrate_profile.py" >&2
+          exit 1
+        fi
+        exec python -m scheduler.runner

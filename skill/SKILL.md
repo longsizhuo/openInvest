@@ -21,11 +21,86 @@ project on first use, so anyone deploying it gets the same behaviour.
 ## Bootstrap
 
 `run.sh` checks `$INVEST_HOME`; if missing it:
-1. `git clone --branch feat/openclaw-overhaul https://github.com/longsizhuo/invest.git $INVEST_HOME`
+1. `git clone --branch main https://github.com/longsizhuo/invest.git $INVEST_HOME`
 2. `cd $INVEST_HOME && uv sync --frozen --python 3.13`
-3. Hints user to copy `user_profile.example.json` and run `migrate_profile.py`
 
 Override via env: `INVEST_HOME`, `INVEST_REPO`, `INVEST_BRANCH`.
+
+## ⚡ First-Time Onboarding Protocol — DO THIS FIRST
+
+**ANY user-facing subcommand may fail if the user hasn't onboarded yet.** Before
+running `status` / `prepare_committee` / `history`, ALWAYS check readiness:
+
+```bash
+~/.claude/skills/invest/run.sh doctor
+```
+
+Returns JSON with `status: "ready" | "needs_setup"` and per-check details.
+
+### If `status == "needs_setup"`
+
+You (Claude) MUST onboard the user — DO NOT ask them to "manually edit
+user_profile.json" or "fill .env". This is the WHOLE POINT of the skill: the
+user opens Claude Code, says "帮我看看持仓", and you walk them through 5
+questions in plain Chinese.
+
+**Onboarding flow** (use `AskUserQuestion` tool):
+
+```
+Q1. 怎么称呼你？（display name）
+Q2. 风险偏好？  Conservative / Balanced / Aggressive
+Q3. 月收入 / 月支出 / 换汇周转金 (CNY)？
+Q4. 当前持仓？ cash_cny / aud_cash / ndq_shares / gold_grams / 黄金均价
+Q5. 提供 DeepSeek API key 吗？（可选——如果不给，cron 模式不能跑，但
+    skill 模式仍可在 Claude Code 里用 prepare_committee 跑委员会）
+Q6. 提供 Gmail App Password 吗？（可选——不给则不发邮件日报）
+```
+
+Then build the JSON payload and pipe it to `run.sh init --from-stdin`:
+
+```bash
+echo '{
+  "profile": {
+    "name": "<Q1>",
+    "risk_tolerance": "<Q2>",
+    "monthly_income_cny": <Q3a>, "monthly_expenses_cny": <Q3b>,
+    "exchange_buffer_cny": <Q3c>,
+    "last_run_date": "<today YYYY-MM-DD>",
+    "current_assets": {
+      "cash_cny": <Q4a>, "aud_cash": <Q4b>, "ndq_shares": <Q4c>,
+      "gold_grams": <Q4d>, "gold_avg_cost_cny_per_gram": <Q4e>
+    },
+    "investment_strategy": {
+      "target_allocation_stock": 0.7, "target_allocation_cash": 0.3,
+      "max_single_invest_cny": 10000
+    }
+  },
+  "env": {
+    "DEEPSEEK_API_KEY": "<Q5 or empty>",
+    "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    "EMAIL_SENDER": "<Q6a or empty>",
+    "EMAIL_PASSWORD": "<Q6b or empty>"
+  }
+}' | ~/.claude/skills/invest/run.sh init --from-stdin
+```
+
+After `init` returns `status: "ok"`, immediately re-run `doctor` to confirm
+`status: "ready"`, then run the user's original request (e.g. `status`).
+
+### Tips
+
+- **Don't ask for `target_assets`**. Default to `NDQ.AX` + `GC=F` (浙商积存金)
+  — the existing `migrate_profile.py` writes a sane starter strategy.
+- **Don't ask for fields the user clearly doesn't have**. If they say "I only
+  have CNY cash, no shares", set `aud_cash=0, ndq_shares=0, gold_grams=0`.
+- **DeepSeek key is optional**. The skill mode (Coordinator-Worker fan-out via
+  your `Agent` tool) works without it — DeepSeek is only needed for the cron
+  daily_report. Tell user this so they don't feel forced to register.
+- **Gmail App Password requires 2FA + special password**. If user gets confused,
+  link them to https://myaccount.google.com/apppasswords. Skip if they don't
+  want email.
+- **Re-onboarding**: if user wants to redo from scratch, call `init` with
+  `--force` to overwrite `user_profile.json`.
 
 ## Subcommands (read-only, fast)
 

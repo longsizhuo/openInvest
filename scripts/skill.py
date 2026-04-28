@@ -31,6 +31,14 @@ from typing import Any, Dict, List
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+# 让 cmd_doctor 能看到 .env 里的 DEEPSEEK_API_KEY 等（_safe_close 等模块里也会
+# 自己 load_dotenv，但 doctor 不依赖 utils 所以这里显式加一道）
+try:
+    from dotenv import load_dotenv  # noqa: E402
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass  # dotenv 尚未装时（极少见）跳过
+
 from core.memory_store import MemoryStore  # noqa: E402
 
 
@@ -412,6 +420,273 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
     _print_json({"saved": str(path), "verdict": verdict})
 
 
+# ---------- doctor ----------
+
+def cmd_doctor(_: argparse.Namespace) -> None:
+    """健康自检：onboarding 是否完成？所有外部依赖可达？
+
+    给 Claude 看的 JSON：每一项是 ok / missing / unreachable，附 hint 教 Claude
+    怎么修。让 Claude 第一次帮用户跑 status 失败时，先 doctor 看到底差什么，
+    再决定走 AskUserQuestion 还是直接 init。
+    """
+    import os
+
+    checks: List[Dict[str, Any]] = []
+
+    # 1) memory/ 是否已 onboarding
+    store = MemoryStore()
+    user_doc = store.read("user")
+    portfolio_doc = store.read("portfolio")
+    strategy_doc = store.read("strategy")
+    memory_ok = bool(user_doc and portfolio_doc and strategy_doc)
+    checks.append({
+        "name": "memory_initialized",
+        "status": "ok" if memory_ok else "missing",
+        "detail": (
+            "memory/{user,strategy,portfolio}.md 全部就绪"
+            if memory_ok else
+            "缺 memory/user.md（或 strategy / portfolio）—— 用户还没 onboarding"
+        ),
+        "hint": (
+            None if memory_ok else
+            "向用户问以下信息后调 `run.sh init`：display_name, monthly_income_cny, "
+            "monthly_expenses_cny, exchange_buffer_cny, risk_tolerance "
+            "(Conservative/Balanced/Aggressive), 当前持仓（cash_cny / aud_cash / "
+            "ndq_shares / gold_grams / gold_avg_cost_cny_per_gram），以及 "
+            "target_assets 数组（可用默认 NDQ.AX + GC=F）"
+        ),
+    })
+
+    # 2) .env 凭据
+    env_path = ROOT / ".env"
+    has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY"))
+    has_email_sender = bool(os.getenv("EMAIL_SENDER"))
+    has_email_pass = bool(os.getenv("EMAIL_PASSWORD"))
+    checks.append({
+        "name": ".env_file",
+        "status": "ok" if env_path.exists() else "missing",
+        "detail": str(env_path) if env_path.exists() else f"{env_path} 不存在",
+        "hint": (
+            None if env_path.exists() else
+            "调 `run.sh init` 时把 deepseek_api_key / email_sender / email_password "
+            "写在 stdin JSON 里，或者直接 cp .env.example .env 后用户自己填"
+        ),
+    })
+    checks.append({
+        "name": "deepseek_key",
+        "status": "ok" if has_deepseek else "missing",
+        "detail": "DEEPSEEK_API_KEY 已设" if has_deepseek else "DEEPSEEK_API_KEY 缺失",
+        "hint": (
+            None if has_deepseek else
+            "向用户引导：去 https://platform.deepseek.com 注册 → API keys 页面创建 "
+            "→ 把 sk-xxxx 通过 init 的 stdin 传入。失败时仍可用 Claude skill 模式"
+            "（不需要 DeepSeek key），但 cron 模式无法跑。"
+        ),
+    })
+    checks.append({
+        "name": "gmail_credentials",
+        "status": "ok" if (has_email_sender and has_email_pass) else "missing",
+        "detail": (
+            f"sender={os.getenv('EMAIL_SENDER')}, password set"
+            if (has_email_sender and has_email_pass) else
+            "EMAIL_SENDER 或 EMAIL_PASSWORD 缺失"
+        ),
+        "hint": (
+            None if (has_email_sender and has_email_pass) else
+            "Gmail 必须用 App Password（不是登录密码），需先开 2FA 然后去 "
+            "https://myaccount.google.com/apppasswords 生成 16 位 App Password。"
+            "未配置时 daily_report 仍能跑完，只是不发邮件。"
+        ),
+    })
+
+    # 3) 行情数据库 / cache_data 目录
+    db_path = ROOT / "db" / "market_data.db"
+    cache_dir = ROOT / "cache_data"
+    checks.append({
+        "name": "data_dirs",
+        "status": "ok",  # Dockerfile 里 mkdir 过，本地脚本也兜底
+        "detail": (
+            f"db={'exists' if db_path.exists() else 'will_be_created'}, "
+            f"cache={'exists' if cache_dir.exists() else 'will_be_created'}"
+        ),
+        "hint": None,
+    })
+
+    # 4) Python venv（skill 本身能跑到这里就证明 venv ok，但报告上有更友好）
+    checks.append({
+        "name": "python_venv",
+        "status": "ok",
+        "detail": f"running on {sys.version.split()[0]}",
+        "hint": None,
+    })
+
+    overall = "ready" if all(c["status"] == "ok" for c in checks) else "needs_setup"
+
+    _print_json({
+        "status": overall,
+        "ready_for_subcommands": memory_ok and has_deepseek,
+        "next_step": (
+            "用户已就绪，可以直接调 status / prepare_committee 等子命令"
+            if overall == "ready" else
+            "调 run.sh init 完成 onboarding，缺什么字段看 checks 里 status='missing' 的项"
+        ),
+        "checks": checks,
+    })
+
+
+# ---------- init ----------
+
+def cmd_init(args: argparse.Namespace) -> None:
+    """交互式 / 半交互式 onboarding 入口。
+
+    两种调用方式：
+
+    1. Claude 模式：从 stdin 喂 JSON，全自动写文件
+       $ echo '{"profile": {...}, "env": {...}}' | run.sh init --from-stdin
+
+    2. CLI 模式：用户直接跑，走标准的 input()
+       $ run.sh init                        # 交互式问 5 个问题
+
+    JSON schema (见 user_profile.example.json)：
+    {
+      "profile": {
+        "name": "Loong", "risk_tolerance": "Aggressive",
+        "monthly_income_cny": 20000, "monthly_expenses_cny": 8000,
+        "exchange_buffer_cny": 5000, "last_run_date": "2026-01-01",
+        "current_assets": {"cash_cny": 50000, "aud_cash": 0, "ndq_shares": 0,
+                           "gold_grams": 0, "gold_avg_cost_cny_per_gram": 0},
+        "investment_strategy": {
+          "target_allocation_stock": 0.7, "target_allocation_cash": 0.3,
+          "max_single_invest_cny": 10000
+        }
+      },
+      "env": {
+        "DEEPSEEK_API_KEY": "sk-...", "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+        "EMAIL_SENDER": "x@gmail.com", "EMAIL_PASSWORD": "xxxx xxxx xxxx xxxx"
+      }
+    }
+    """
+    import os
+    import shutil
+    import subprocess
+
+    if args.from_stdin:
+        try:
+            payload = json.load(sys.stdin)
+        except json.JSONDecodeError as e:
+            _print_json({"status": "error", "error": f"invalid JSON on stdin: {e}"})
+            sys.exit(1)
+    else:
+        payload = _interactive_prompt()
+
+    profile = payload.get("profile", {}) or {}
+    env_data = payload.get("env", {}) or {}
+
+    # 1) 写 user_profile.json
+    profile_path = ROOT / "user_profile.json"
+    if profile_path.exists() and not args.force:
+        _print_json({
+            "status": "skipped",
+            "reason": "user_profile.json 已存在，传 --force 覆盖",
+            "path": str(profile_path),
+        })
+        sys.exit(0)
+    profile_path.write_text(
+        json.dumps(profile, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    # 2) 写 .env（合并已存在的，不覆盖未提供字段）
+    env_path = ROOT / ".env"
+    existing_env: Dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, _, v = line.partition("=")
+                existing_env[k.strip()] = v.strip()
+    merged_env = {**existing_env, **{k: str(v) for k, v in env_data.items() if v}}
+    env_lines = [
+        "# Auto-generated by run.sh init — 后续手动修改请直接编辑此文件",
+    ]
+    for k, v in merged_env.items():
+        env_lines.append(f"{k}={v}")
+    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+
+    # 3) 触发 migrate_profile.py
+    migrate_script = ROOT / "scripts" / "migrate_profile.py"
+    venv_python = ROOT / ".venv" / "bin" / "python"
+    py = str(venv_python) if venv_python.exists() else sys.executable
+    result = subprocess.run(
+        [py, str(migrate_script)],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+
+    # 4) 第一次 init 后跑 doctor 让 Claude 知道还差什么
+    final_checks_status = "completed_full" if (
+        env_data.get("DEEPSEEK_API_KEY") and env_data.get("EMAIL_SENDER")
+    ) else "completed_partial"
+
+    _print_json({
+        "status": "ok",
+        "completion": final_checks_status,
+        "user_profile_path": str(profile_path),
+        "env_path": str(env_path),
+        "memory_initialized": (ROOT / "memory" / "user.md").exists(),
+        "migrate_stdout": result.stdout[-500:] if result.stdout else "",
+        "migrate_stderr": result.stderr[-500:] if result.stderr else "",
+        "migrate_returncode": result.returncode,
+        "next_step": (
+            "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后可以试"
+            "`run.sh prepare_committee NDQ.AX` 跑首次委员会。"
+            if final_checks_status == "completed_full" else
+            "Profile 已写入，但 .env 凭据不完整。Claude 模式（在 Claude Code 里"
+            "用 prepare_committee）可以立刻跑；DeepSeek cron 模式需要补 "
+            "DEEPSEEK_API_KEY 后才能跑 daily_report。"
+        ),
+    })
+
+
+def _interactive_prompt() -> Dict[str, Any]:
+    """CLI 直接 init 时的交互式输入（Claude 模式不会走这里）"""
+    print("=== invest onboarding (CLI mode) ===", file=sys.stderr)
+    print("提示：在 Claude Code 里用更友好，让 AI 帮你问。", file=sys.stderr)
+
+    def ask(prompt: str, default: str = "") -> str:
+        suffix = f" [{default}]" if default else ""
+        v = input(f"{prompt}{suffix}: ").strip()
+        return v or default
+
+    profile = {
+        "name": ask("姓名 / display name", "Anonymous"),
+        "risk_tolerance": ask(
+            "风险偏好 (Conservative / Balanced / Aggressive)", "Balanced"
+        ),
+        "monthly_income_cny": float(ask("月收入 (CNY)", "20000")),
+        "monthly_expenses_cny": float(ask("月支出 (CNY)", "8000")),
+        "exchange_buffer_cny": float(ask("换汇周转金 (CNY)", "5000")),
+        "last_run_date": "1970-01-01",
+        "current_assets": {
+            "cash_cny": float(ask("当前 CNY 现金", "0")),
+            "aud_cash": float(ask("当前 AUD 现金", "0")),
+            "ndq_shares": float(ask("当前 NDQ.AX 持仓股数", "0")),
+        },
+        "investment_strategy": {
+            "target_allocation_stock": 0.7,
+            "target_allocation_cash": 0.3,
+            "max_single_invest_cny": float(ask("单次入场上限 (CNY)", "10000")),
+        },
+    }
+    env = {
+        "DEEPSEEK_API_KEY": ask("DeepSeek API Key (sk-... 可留空)", ""),
+        "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+        "EMAIL_SENDER": ask("Gmail 发件人地址（可留空跳过邮件）", ""),
+        "EMAIL_PASSWORD": ask("Gmail App Password（16 位，可留空）", ""),
+    }
+    return {"profile": profile, "env": env}
+
+
 # ---------- main ----------
 
 def main() -> None:
@@ -425,6 +700,14 @@ def main() -> None:
     sub.add_parser("status").set_defaults(func=cmd_status)
     sub.add_parser("strategy").set_defaults(func=cmd_strategy)
     sub.add_parser("live_prices").set_defaults(func=cmd_live_prices)
+    sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("init")
+    p.add_argument("--from-stdin", action="store_true",
+                   help="读 stdin 上的 JSON（Claude 模式），否则走交互 input()")
+    p.add_argument("--force", action="store_true",
+                   help="user_profile.json 已存在时也覆盖")
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("history")
     p.add_argument("-n", type=int, default=10)

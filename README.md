@@ -13,7 +13,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/invest?style=social)](https://github.com/longsizhuo/invest)
 
-[Quick Start](#quick-start) · [架构](#架构) · [硬化日志](#硬化日志) · [Claude Code Skill](#claude-code-skill)
+[30 秒 Skill 一键安装](#-30-秒上手claude-code-skill主推) · [其他部署方式](#-其他部署方式) · [架构](#架构) · [硬化日志](#硬化日志)
 
 </div>
 
@@ -134,26 +134,67 @@ LLM 没有跨会话记忆。你 6 个月前因为过度集中持仓被 Risk Offi
 
 ---
 
-## Quick Start
+## 🪄 30 秒上手：Claude Code Skill（主推）
+
+**最简单的方式：把 invest 装成 Claude Code 的 skill，让 Claude 帮你 onboard。**
+
+不用注册账号、不用编辑 JSON、不用研究 env。打开 Claude Code，跑这一行：
 
 ```bash
-# 1. Clone + 装依赖
-git clone https://github.com/longsizhuo/invest.git
-cd invest && uv sync --frozen --python 3.13
+git clone https://github.com/longsizhuo/invest.git ~/projects-review/invest
+bash ~/projects-review/invest/skill/install.sh
+```
 
-# 2. 初始化你的持仓 / 策略
-cp user_profile.example.json user_profile.json
-# 填邮箱、初始现金、target_assets、风险偏好
-python scripts/migrate_profile.py    # JSON → memory/{user,strategy,portfolio}.md
+然后回 Claude Code 对话里说：
 
-# 3. 凭据
-cp .env.example .env
-# 至少填 DEEPSEEK_API_KEY + EMAIL_SENDER + EMAIL_PASSWORD (Gmail App Password)
+> **「帮我初始化 invest」**
 
-# 4. 选一种方式跑
+Claude 会：
+
+1. 自动检测 `memory/` 和 `.env` 缺失（`run.sh doctor`）
+2. **用 5 个问题问你的情况**：姓名 / 风险偏好 / 月收入 / 当前持仓 / API key（可选）
+3. 一键写入 `user_profile.json` + `.env` 并跑 migrate（`run.sh init --from-stdin`）
+4. 直接给你跑 `run.sh status` 验证
+
+之后任何时候说 **"看看我的持仓"** / **"分析一下黄金"** / **"该不该加仓 NDQ"**，
+Claude 会自己调 `prepare_committee` → 派 4 个 worker（Macro/Quant/Risk/CIO）并行
+分析 → 给你一份完整 CIO memo。
+
+> 💡 **DeepSeek API key 是可选的**。Skill 模式下委员会 LLM 是 Claude 自己，不需要
+> DeepSeek。只有想跑后台 cron 自动日报才需要注册 DeepSeek。
+
+---
+
+## 🚀 其他部署方式
+
+### Option B · Docker（一键容器化，适合服务器跑 cron）
+
+```bash
+git clone https://github.com/longsizhuo/invest.git && cd invest
+cp .env.example .env       # 填 DEEPSEEK_API_KEY / EMAIL_*
+
+# 第一次：交互式 onboarding（写 user_profile.json + memory/）
+docker compose run --rm invest-agent python -m scripts.skill init
+
+# 起服务，自动跑 cron（daily_report / dreaming / payday_check ...）
+docker compose up -d
+docker compose logs -f invest-agent
+```
+
+`docker-compose.yml` 已挂载 `./memory ./db ./cache_data`，容器重建状态不丢。
+启动前会自动检查 `memory/user.md` 是否存在，没初始化会友好提示并指引你跑 onboarding。
+
+### Option C · 手动 Python（开发者 / 想魔改 prompts）
+
+```bash
+git clone https://github.com/longsizhuo/invest.git && cd invest
+uv sync --frozen --python 3.13
+
+# 跑交互式 onboarding（5 个问题）
+.venv/bin/python -m scripts.skill init
+
 python -m jobs.daily_report      # 跑一次完整委员会 (~6 min)
-python -m scheduler.runner       # 全套 cron 持续跑 (推荐生产)
-docker compose up -d             # 容器化部署
+python -m scheduler.runner       # 全套 cron 持续跑
 ```
 
 ---
@@ -227,24 +268,20 @@ target_assets:
 
 ---
 
-## Claude Code Skill
+## Claude Code Skill 子命令
 
 同一套 `agents/` 和 `core/committee.py`，跑哪个 LLM 看你心情：
 
 - **DeepSeek (cron 模式)**：每天 daily_report 自动跑，省 token
 - **Claude (skill 模式)**：在 Claude Code 对话里随时召唤委员会，4 个 agent 真 async 并行
 
-```bash
-cd $INVEST_HOME && bash skill/install.sh
-```
-
 `install.sh` 在 `~/.claude/skills/invest/` 建立 symlink 指向仓库里的
 `skill/SKILL.md` + `skill/run.sh`。改协议只需 commit + 其他设备 `git pull`。
 
-可用子命令：
-
 | Command | 干啥 |
 |---------|------|
+| `doctor` | 健康自检：memory / .env / API key 状态（onboarding 入口） |
+| `init [--from-stdin]` | 完成 onboarding：写 user_profile.json + .env + 跑 migrate |
 | `status` | 持仓 + 浮盈 + 实时价（JSON） |
 | `strategy` | target_assets + Dreaming 长期 insight |
 | `live_prices` | VIX / TNX / USDCNY / GC=F / NDQ.AX |
