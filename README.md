@@ -2,20 +2,34 @@
 
 # openInvest
 
-### 给 LLM 一个投资委员会，给你一份每天 6 分钟的备忘录
+### 4 个 AI 专家 · 1 份晨间 memo · 0 失眠夜
 
-**4 个 Agent 开会、互相 challenge、写 memo、做梦、记住你 90 天前的判断。**
+**不付 Wealthfront 0.25% 管理费。让 4 个独立 LLM 互相 challenge，告诉你今天该不该加仓。代码、决策、实盘 PnL 全开源。**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-5C2D91)](https://deepseek.com)
 [![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
-[![OpenClaw Memory](https://img.shields.io/badge/Memory-OpenClaw--style-success)](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
-[![Stars](https://img.shields.io/github/stars/longsizhuo/invest?style=social)](https://github.com/longsizhuo/invest)
+[![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
-[30 秒 Skill 一键安装](#-30-秒上手claude-code-skill主推) · [其他部署方式](#-其他部署方式) · [架构](#架构) · [硬化日志](#硬化日志)
+[⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
 
 </div>
+
+---
+
+## 我们 vs 现有方案
+
+| | **openInvest** | Wealthfront / Betterment | 主动型公募 | 大盘 ETF (SPY / 沪深 300) |
+|---|---|---|---|---|
+| 决策可解释 | ✅ 4 agent transcript 全公开 | ❌ 黑箱 | ⚠️ 季报 | — |
+| 管理费 | **$0** (自托管) | 0.25% AUM | 1.5%+ | 0.05-0.5% |
+| 全球资产 | ✅ 美 / 澳 / 中 | 🇺🇸 only | 🇨🇳 only | 单一市场 |
+| 自托管 / 数据私有 | ✅ memory/ 留在你机器 | ❌ | ❌ | — |
+| 跨会话长期记忆 | ✅ Dreaming 90 天 | ❌ | — | — |
+| **实盘对比** | [📊 见下方榜单](#实盘-pnl-趋势live--vs-8-个基准) — 公开比 60 天累计 | 仅披露年化均值 | 月度净值 | 实时指数 |
+
+> ⚠️ **不是 alpha 卖点**：60 天 sample size 太小，"跑赢"的统计意义弱。当作"AI 投资决策助理"用合理，当"基金经理替代品"会自欺。详见 [硬化日志](#硬化日志) 末尾的金融审计 TL;DR。
 
 ---
 

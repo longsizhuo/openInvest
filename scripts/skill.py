@@ -499,7 +499,42 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         ),
     })
 
-    # 3) 行情数据库 / cache_data 目录
+    # 3) DeepSeek key 实测可达（audit PM Major: 失败前置）
+    deepseek_reachable = "skipped"
+    deepseek_detail = "DEEPSEEK_API_KEY 未设，跳过实测"
+    if has_deepseek:
+        try:
+            import requests
+            base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+            r = requests.get(
+                f"{base_url}/v1/models",
+                headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                deepseek_reachable = "ok"
+                deepseek_detail = "DeepSeek API 响应 200，key 有效"
+            elif r.status_code == 401:
+                deepseek_reachable = "auth_failed"
+                deepseek_detail = "DeepSeek 返回 401，key 无效或已过期"
+            else:
+                deepseek_reachable = "unreachable"
+                deepseek_detail = f"DeepSeek 返回 HTTP {r.status_code}"
+        except Exception as e:
+            deepseek_reachable = "network_error"
+            deepseek_detail = f"无法连接 DeepSeek: {type(e).__name__}: {e}"
+    checks.append({
+        "name": "deepseek_reachable",
+        "status": deepseek_reachable if deepseek_reachable in ("ok", "skipped") else "missing",
+        "detail": deepseek_detail,
+        "hint": (
+            None if deepseek_reachable in ("ok", "skipped") else
+            "去 https://platform.deepseek.com 检查 key 是否被禁用 / 余额不足。"
+            "失败时仍可用 Claude skill 模式跑 prepare_committee。"
+        ),
+    })
+
+    # 4) 行情数据库 / cache_data 目录
     db_path = ROOT / "db" / "market_data.db"
     cache_dir = ROOT / "cache_data"
     checks.append({

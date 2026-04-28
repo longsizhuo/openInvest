@@ -19,12 +19,15 @@
 """
 from __future__ import annotations
 
+import errno
+import fcntl
 import os
 import time
 from pathlib import Path
 from typing import Optional
 
 LOCK_FILE = ".consolidate-lock"
+LOCK_FCNTL_FILE = ".consolidate-lock.flock"  # 配对的 fcntl mutex（audit algo C3）
 HOLDER_STALE_MS = 60 * 60 * 1000  # 60 min — 与 leaked 源码一致
 
 
@@ -60,40 +63,57 @@ def try_acquire_consolidation_lock(memory_root: Path) -> Optional[float]:
     锁占用判定：
     - 文件存在且 mtime 在 60min 内 + PID 还活着 → 占用
     - 文件存在但 PID 死了 OR mtime 超过 60min → 视为僵尸，重新认领
+
+    并发正确性（audit algo C3 修复）：
+    原版 path.write_text(PID) 后 read-back-verify 的 race window 让两个进程
+    都可能读到自己的 PID（如果 OS 调度让它们交替执行）。现在外加一道 fcntl
+    flock 跨进程互斥：写 PID 的整个段被串行化，物理上不会撞车。
     """
     path = _lock_path(memory_root)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    mtime_ms: Optional[float] = None
-    holder_pid: Optional[int] = None
-    if path.exists():
-        try:
-            mtime_ms = path.stat().st_mtime * 1000
-            holder_pid = int(path.read_text().strip())
-        except (ValueError, OSError):
-            mtime_ms = None
-            holder_pid = None
-
-    now_ms = time.time() * 1000
-    if mtime_ms is not None and now_ms - mtime_ms < HOLDER_STALE_MS:
-        if holder_pid and _is_process_running(holder_pid):
-            print(f"[autoDream] 锁被活 PID {holder_pid} 持有，"
-                  f"距上次刷新 {(now_ms - mtime_ms) / 1000:.0f}s，跳过")
-            return None
-        # PID 死了或不可解析 → 重新认领
-
-    # 写入自己的 PID + 更新 mtime
-    path.write_text(str(os.getpid()))
-
-    # 双进程同时认领时，最后写入的赢；输的下一步读到非自己的 PID 就退出
+    flock_path = path.parent / LOCK_FCNTL_FILE
+    flock_fd = None
     try:
-        verify = int(path.read_text().strip())
-    except (ValueError, OSError):
-        return None
-    if verify != os.getpid():
-        return None
+        flock_fd = os.open(str(flock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            # 非阻塞 LOCK_EX：拿不到立刻失败，让 caller 知道"另一进程正在认领"
+            fcntl.flock(flock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                print("[autoDream] 另一进程正在认领锁，跳过")
+                return None
+            raise
 
-    return mtime_ms or 0.0
+        # 进入临界区：检查现有锁状态
+        mtime_ms: Optional[float] = None
+        holder_pid: Optional[int] = None
+        if path.exists():
+            try:
+                mtime_ms = path.stat().st_mtime * 1000
+                holder_pid = int(path.read_text().strip())
+            except (ValueError, OSError):
+                mtime_ms = None
+                holder_pid = None
+
+        now_ms = time.time() * 1000
+        if mtime_ms is not None and now_ms - mtime_ms < HOLDER_STALE_MS:
+            if holder_pid and holder_pid != os.getpid() and _is_process_running(holder_pid):
+                print(f"[autoDream] 锁被活 PID {holder_pid} 持有，"
+                      f"距上次刷新 {(now_ms - mtime_ms) / 1000:.0f}s，跳过")
+                return None
+
+        # 写入自己的 PID + 更新 mtime（仍在 fcntl 互斥下）
+        path.write_text(str(os.getpid()))
+        return mtime_ms or 0.0
+    finally:
+        # 写完即释放 fcntl mutex；PID file 本身仍在，作为长生命周期的"持有者标识"
+        if flock_fd is not None:
+            try:
+                fcntl.flock(flock_fd, fcntl.LOCK_UN)
+                os.close(flock_fd)
+            except OSError:
+                pass
 
 
 def rollback_consolidation_lock(memory_root: Path, prior_mtime: float) -> None:

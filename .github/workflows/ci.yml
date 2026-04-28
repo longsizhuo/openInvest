@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# pnl-data 分支是 hourly auto-push 的 SVG，跳过 CI 节省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # 跳过 [skip ci] 标记的 commit（我们的 pnl-bot autocommit 会带这个）
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install deps
+        run: uv sync --frozen
+
+      - name: Run pytest
+        run: uv run pytest tests/ -v --tb=short
+        env:
+          # 测试不需要真凭据，用占位避免 dotenv warning
+          DEEPSEEK_API_KEY: test-fake-key
+          INVEST_LLM_BASE_DELAY: "0.01"  # 加速测试
+
+      - name: Smoke import check
+        # 确保关键模块没有 import 错误
+        run: |
+          uv run python -c "from core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
+          uv run python -c "from core.memory_store import MemoryStore, _atomic_write_text"
+          uv run python -c "from core.portfolio_manager import PortfolioManager, _render_portfolio_body"
+          uv run python -c "from jobs.pnl_snapshot import _is_trading_window, _redact_token_in"
+          uv run python -c "from core.benchmarks import BENCHMARKS, get_all_series"

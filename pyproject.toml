@@ -24,6 +24,11 @@ dependencies = [
     "apscheduler>=3.11.2",
     "websockets>=15.0.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
 # 删除的未用 dep（audit eng M5）：
 # - duckduckgo-search: 已被 ddgs 取代
 # - langgraph: grep 全仓零引用
