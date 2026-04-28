@@ -43,7 +43,11 @@ def _safe_close(symbol: str) -> float:
 
 
 def _print_json(obj: Any) -> None:
-    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+    """直接写到原始 stdout，避免被 utils/* 的 print noise 污染"""
+    real_stdout = getattr(sys, "__stdout__", sys.stdout)
+    real_stdout.write(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+    real_stdout.write("\n")
+    real_stdout.flush()
 
 
 # ---------- status ----------
@@ -411,6 +415,10 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
 # ---------- main ----------
 
 def main() -> None:
+    # 把 sys.stdout 重定向到 stderr，让 utils/* 里的 print() noise 走 stderr。
+    # _print_json 用 sys.__stdout__ 写真正的 JSON。
+    sys.stdout = sys.stderr
+
     parser = argparse.ArgumentParser(prog="skill")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
