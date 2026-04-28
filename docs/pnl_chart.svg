@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" role="img" aria-label="PnL trend chart (privacy-preserving, no absolute numbers)">
+  <style>
+    .label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  </style>
+  <!-- 背景 -->
+  <rect width="800" height="280" fill="#0d1117"/>
+  <!-- 0% 基线（虚线灰）-->
+  <line x1="50" y1="125.5" x2="770" y2="125.5"
+        stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="44" y="129.5" text-anchor="end" fill="#6e7681" class="label">0%</text>
+  <!-- y 轴方向标识（不带数字）-->
+  <text x="44" y="40" text-anchor="end" fill="#3fb950" class="label">+</text>
+  <text x="44" y="248" text-anchor="end" fill="#f85149" class="label">−</text>
+  <!-- x 轴标签：相对时间，无具体日期 -->
+  <text x="50" y="272" fill="#6e7681" class="label">30 天前</text>
+  <text x="770" y="272" text-anchor="end" fill="#6e7681" class="label">今天</text>
+
+  <!-- 三条 series 线 -->
+  <polyline points="50.0,231.7 72.5,231.4 95.0,201.5 117.5,207.4 140.0,207.4 162.5,207.4 185.0,207.4 207.5,207.4 230.0,192.6 252.5,168.0 275.0,170.6 297.5,164.5 320.0,164.5 342.5,164.5 365.0,169.1 387.5,150.4 410.0,140.4 432.5,121.8 455.0,118.7 477.5,118.7 500.0,118.7 522.5,105.4 545.0,98.5 567.5,101.1 590.0,89.1 612.5,78.6 635.0,78.6 657.5,78.6 680.0,65.5 702.5,72.2 725.0,72.2 747.5,72.2 770.0,72.2" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>
+  <polyline points="50.0,129.6 72.5,92.7 95.0,55.3 117.5,99.9 140.0,97.0 162.5,97.0 185.0,97.0 207.5,95.9 230.0,95.8 252.5,73.3 275.0,66.3 297.5,74.8 320.0,74.8 342.5,74.8 365.0,81.4 387.5,56.1 410.0,66.7 432.5,70.6 455.0,48.3 477.5,48.3 500.0,48.3 522.5,64.5 545.0,96.7 567.5,85.8 590.0,93.3 612.5,87.8 635.0,87.8 657.5,87.8 680.0,99.8 702.5,119.5 725.0,119.6 747.5,119.6 770.0,119.8" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>
+  <polyline points="50.0,150.7 72.5,121.4 95.0,85.7 117.5,122.3 140.0,119.9 162.5,119.9 185.0,119.9 207.5,119.0 230.0,115.9 252.5,93.3 275.0,88.2 297.5,93.7 320.0,93.7 342.5,93.7 365.0,99.7 387.5,76.0 410.0,82.3 432.5,81.5 455.0,63.3 477.5,63.3 500.0,63.3 522.5,73.1 545.0,97.1 567.5,89.1 590.0,92.4 612.5,85.9 635.0,85.9 657.5,85.9 680.0,92.6 702.5,109.4 725.0,109.5 747.5,109.5 770.0,109.7" fill="none" stroke="#d29922" stroke-width="2.5"/>
+
+  <!-- 当前趋势方向箭头（不带数字）-->
+  <text x="760" y="48" text-anchor="end" fill="#3fb950" font-size="22" font-weight="bold">▲</text>
+
+  <!-- 图例 -->
+  <g transform="translate(58, 42)" class="label">
+    <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
+    <text x="20" y="4" fill="#c9d1d9">Total</text>
+    <line x1="70" y1="0" x2="84" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="90" y="4" fill="#c9d1d9">NDQ.AX</text>
+    <line x1="155" y1="0" x2="169" y2="0" stroke="#f0a500" stroke-width="1.5"/>
+    <text x="175" y="4" fill="#c9d1d9">Gold</text>
+  </g>
+</svg>
