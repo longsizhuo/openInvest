@@ -1,35 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" role="img" aria-label="PnL trend chart (privacy-preserving, no absolute numbers)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 540" role="img" aria-label="PnL chart with benchmark bars">
   <style>
     .label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .title { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; font-weight: bold; }
   </style>
-  <!-- 背景 -->
-  <rect width="800" height="280" fill="#0d1117"/>
-  <!-- 0% 基线（虚线灰）-->
-  <line x1="50" y1="125.5" x2="770" y2="125.5"
+  <rect width="800" height="540" fill="#0d1117"/>
+
+  <!-- ===== 上半：折线图（用户三线趋势）===== -->
+  <text x="50" y="20" fill="#c9d1d9" class="title">📈 实盘 PnL 趋势 (最近 30 天)</text>
+  <line x1="50" y1="109.1" x2="770" y2="109.1"
         stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
-  <text x="44" y="129.5" text-anchor="end" fill="#6e7681" class="label">0%</text>
-  <!-- y 轴方向标识（不带数字）-->
+  <text x="44" y="113.1" text-anchor="end" fill="#6e7681" class="label">0%</text>
   <text x="44" y="40" text-anchor="end" fill="#3fb950" class="label">+</text>
-  <text x="44" y="248" text-anchor="end" fill="#f85149" class="label">−</text>
-  <!-- x 轴标签：相对时间，无具体日期 -->
-  <text x="50" y="272" fill="#6e7681" class="label">30 天前</text>
-  <text x="770" y="272" text-anchor="end" fill="#6e7681" class="label">今天</text>
+  <text x="44" y="208" text-anchor="end" fill="#f85149" class="label">−</text>
+  <text x="50" y="228" fill="#6e7681" class="label">30 天前</text>
+  <text x="770" y="228" text-anchor="end" fill="#6e7681" class="label">今天</text>
 
-  <!-- 三条 series 线 -->
-  <polyline points="50.0,231.7 72.5,231.4 95.0,201.5 117.5,207.4 140.0,207.4 162.5,207.4 185.0,207.4 207.5,207.4 230.0,192.6 252.5,168.0 275.0,170.6 297.5,164.5 320.0,164.5 342.5,164.5 365.0,169.1 387.5,150.4 410.0,140.4 432.5,121.8 455.0,118.7 477.5,118.7 500.0,118.7 522.5,105.4 545.0,98.5 567.5,101.1 590.0,89.1 612.5,78.6 635.0,78.6 657.5,78.6 680.0,65.5 702.5,72.2 725.0,72.2 747.5,72.2 770.0,72.2" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>
-  <polyline points="50.0,129.6 72.5,92.7 95.0,55.3 117.5,99.9 140.0,97.0 162.5,97.0 185.0,97.0 207.5,95.9 230.0,95.8 252.5,73.3 275.0,66.3 297.5,74.8 320.0,74.8 342.5,74.8 365.0,81.4 387.5,56.1 410.0,66.7 432.5,70.6 455.0,48.3 477.5,48.3 500.0,48.3 522.5,64.5 545.0,96.7 567.5,85.8 590.0,93.3 612.5,87.8 635.0,87.8 657.5,87.8 680.0,99.8 702.5,119.5 725.0,119.6 747.5,119.6 770.0,119.8" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>
-  <polyline points="50.0,150.7 72.5,121.4 95.0,85.7 117.5,122.3 140.0,119.9 162.5,119.9 185.0,119.9 207.5,119.0 230.0,115.9 252.5,93.3 275.0,88.2 297.5,93.7 320.0,93.7 342.5,93.7 365.0,99.7 387.5,76.0 410.0,82.3 432.5,81.5 455.0,63.3 477.5,63.3 500.0,63.3 522.5,73.1 545.0,97.1 567.5,89.1 590.0,92.4 612.5,85.9 635.0,85.9 657.5,85.9 680.0,92.6 702.5,109.4 725.0,109.5 747.5,109.5 770.0,109.7" fill="none" stroke="#d29922" stroke-width="2.5"/>
-
-  <!-- 当前趋势方向箭头（不带数字）-->
+  <polyline points="50.0,189.2 74.8,189.0 99.7,166.5 124.5,170.9 149.3,170.9 174.1,170.9 199.0,170.9 223.8,170.9 248.6,159.7 273.4,141.2 298.3,143.1 323.1,138.5 347.9,138.5 372.8,138.5 397.6,141.9 422.4,127.9 447.2,120.3 472.1,106.2 496.9,103.9 521.7,103.9 546.6,103.9 571.4,93.9 596.2,88.7 621.0,90.6 645.9,81.5 670.7,73.6 695.5,73.6 720.3,73.6 745.2,63.8 770.0,68.8" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>
+  <polyline points="50.0,112.1 74.8,84.3 99.7,56.0 124.5,89.7 149.3,87.5 174.1,87.5 199.0,87.5 223.8,86.7 248.6,86.6 273.4,69.6 298.3,64.3 323.1,70.8 347.9,70.8 372.8,70.8 397.6,75.8 422.4,56.7 447.2,64.6 472.1,67.6 496.9,50.8 521.7,50.8 546.6,50.8 571.4,62.9 596.2,87.3 621.0,79.1 645.9,84.8 670.7,80.6 695.5,80.6 720.3,80.6 745.2,89.7 770.0,103.7" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>
+  <polyline points="50.0,128.1 74.8,106.0 99.7,79.0 124.5,106.6 149.3,104.8 174.1,104.8 199.0,104.8 223.8,104.1 248.6,101.8 273.4,84.7 298.3,80.8 323.1,85.0 347.9,85.0 372.8,85.0 397.6,89.6 422.4,71.7 447.2,76.4 472.1,75.8 496.9,62.0 521.7,62.0 546.6,62.0 571.4,69.5 596.2,87.6 621.0,81.5 645.9,84.1 670.7,79.1 695.5,79.1 720.3,79.1 745.2,84.2 770.0,96.2" fill="none" stroke="#d29922" stroke-width="2.5"/>
   <text x="760" y="48" text-anchor="end" fill="#3fb950" font-size="22" font-weight="bold">▲</text>
 
-  <!-- 图例 -->
+  <!-- 折线图图例 -->
   <g transform="translate(58, 42)" class="label">
     <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
-    <text x="20" y="4" fill="#c9d1d9">Total</text>
-    <line x1="70" y1="0" x2="84" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="90" y="4" fill="#c9d1d9">NDQ.AX</text>
-    <line x1="155" y1="0" x2="169" y2="0" stroke="#f0a500" stroke-width="1.5"/>
-    <text x="175" y="4" fill="#c9d1d9">Gold</text>
+    <text x="20" y="4" fill="#c9d1d9" font-weight="bold">Total</text>
+    <line x1="80" y1="0" x2="94" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="100" y="4" fill="#c9d1d9">NDQ.AX</text>
+    <line x1="170" y1="0" x2="184" y2="0" stroke="#f0a500" stroke-width="1.5"/>
+    <text x="190" y="4" fill="#c9d1d9">Gold</text>
   </g>
+
+  <!-- ===== 分隔线 ===== -->
+  <line x1="50" y1="250" x2="770" y2="250"
+        stroke="#21262d" stroke-width="1"/>
+
+  <!-- ===== 下半：横向柱状图（vs N 基准 + 用户实盘）===== -->
+  <text x="50" y="278" fill="#c9d1d9" class="title">🏆 vs 9 基准 · 截至今日累计涨幅 (60 天，sample size 较小不构成 alpha 证据)</text>
+
+  <line x1="297.6" y1="285" x2="297.6" y2="515" stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/><text x="297.6" y="282" text-anchor="middle" fill="#6e7681" class="label">0%</text>
+  <text x="192" y="305.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">兴全合宜 163417</text>
+<rect x="297.6" y="293" width="422.4" height="16" fill="#56d364" opacity="0.7" rx="2"/>
+<text x="726.0" y="305.0" text-anchor="start" fill="#56d364" class="label" font-weight="normal">+9.21%</text>
+<text x="192" y="327.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">沪深300</text>
+<rect x="297.6" y="315" width="284.9" height="16" fill="#e3b341" opacity="0.7" rx="2"/>
+<text x="588.4" y="327.0" text-anchor="start" fill="#e3b341" class="label" font-weight="normal">+6.21%</text>
+<text x="192" y="349.0" text-anchor="end" fill="#d29922" class="label" font-weight="bold">★ 我的实盘</text>
+<rect x="297.6" y="337" width="56.7" height="16" fill="#d29922" opacity="1" rx="2"/>
+<text x="360.2" y="349.0" text-anchor="start" fill="#d29922" class="label" font-weight="bold">+1.24%</text>
+<text x="192" y="371.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">Wealthfront (年化 6.2%)</text>
+<rect x="297.6" y="359" width="22.0" height="16" fill="#58a6ff" opacity="0.7" rx="2"/>
+<text x="325.5" y="371.0" text-anchor="start" fill="#58a6ff" class="label" font-weight="normal">+0.48%</text>
+<text x="192" y="393.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">Betterment (年化 6.1%)</text>
+<rect x="297.6" y="381" width="21.6" height="16" fill="#79c0ff" opacity="0.7" rx="2"/>
+<text x="325.2" y="393.0" text-anchor="start" fill="#79c0ff" class="label" font-weight="normal">+0.47%</text>
+<text x="192" y="415.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">蚂蚁帮你投 (年化 5.16%)</text>
+<rect x="297.6" y="403" width="18.4" height="16" fill="#bc8cff" opacity="0.7" rx="2"/>
+<text x="321.9" y="415.0" text-anchor="start" fill="#bc8cff" class="label" font-weight="normal">+0.40%</text>
+<text x="192" y="437.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">1 年定存 (1.5%)</text>
+<rect x="297.6" y="425" width="5.4" height="16" fill="#6e7681" opacity="0.7" rx="2"/>
+<text x="309.0" y="437.0" text-anchor="start" fill="#6e7681" class="label" font-weight="normal">+0.12%</text>
+<text x="192" y="459.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">余额宝 (1.3%)</text>
+<rect x="297.6" y="447" width="4.7" height="16" fill="#7d8590" opacity="0.7" rx="2"/>
+<text x="308.3" y="459.0" text-anchor="start" fill="#7d8590" class="label" font-weight="normal">+0.10%</text>
+<text x="192" y="481.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">易方达蓝筹 005827</text>
+<rect x="218.4" y="469" width="79.2" height="16" fill="#3fb950" opacity="0.7" rx="2"/>
+<text x="212.4" y="481.0" text-anchor="end" fill="#3fb950" class="label" font-weight="normal">-1.73%</text>
+<text x="192" y="503.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">招商白酒 161725</text>
+<rect x="200.0" y="491" width="97.6" height="16" fill="#2ea043" opacity="0.7" rx="2"/>
+<text x="194.0" y="503.0" text-anchor="end" fill="#2ea043" class="label" font-weight="normal">-2.13%</text>
 </svg>
