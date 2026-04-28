@@ -2,7 +2,7 @@ import os
 import smtplib
 import socket
 import ssl
-import time  # 新增：用于重试间隔
+import time  # 用于重试间隔
 from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -12,6 +12,17 @@ import markdown
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+class EmailDeliveryError(RuntimeError):
+    """邮件投递失败（重试耗尽）。
+
+    在此之前 send_gmail_notification 重试 5 次后只 print 一行就 return，
+    调用方（jobs/daily_report.py）拿不到任何信号，scheduler/runner 也无法
+    记 status=failed —— 用户以为收到日报，实际上从未发出。改为重试耗尽
+    时显式抛出本异常，让 scheduler runner 自动记入 job_runs 表，并允许
+    上层做差异化处理（继续 job vs. 中断）。
+    """
 
 
 def _resolve_receiver(default_sender: str) -> str:
@@ -32,10 +43,13 @@ def _resolve_receiver(default_sender: str) -> str:
     return default_sender
 
 
-def send_gmail_notification(content: str):
-    """
-    Sends an email notification via Google SMTP with retry logic.
-    Requires EMAIL_SENDER and EMAIL_PASSWORD (App Password) in .env.
+def send_gmail_notification(content: str) -> str:
+    """通过 Gmail SMTP 发邮件，自带 5 次指数退避重试。
+
+    成功：返回收件人地址。
+    凭据缺失：返回空字符串（视为"故意 skip"，不算失败）。
+    重试耗尽：抛 EmailDeliveryError —— 让 scheduler runner 记 job 状态为 failed，
+    上层 job 也可以选择 catch 后继续。
 
     Receiver 优先级（不再硬编码 longsizhuo@gmail.com）:
     1. memory/user.md 的 email 字段
@@ -46,7 +60,7 @@ def send_gmail_notification(content: str):
     password = os.getenv("EMAIL_PASSWORD")  # Use Gmail App Password
     if not sender or not password:
         print("⚠️ Email credentials not found in .env. Skipping email notification.")
-        return
+        return ""
     receiver = _resolve_receiver(default_sender=sender)
 
     subject = f"Invest Agent Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
@@ -101,7 +115,8 @@ def send_gmail_notification(content: str):
 
     # --- 重试逻辑开始 ---
     max_retries = 5  # 最大重试次数
-    retry_interval = 5  # 初始重试间隔（秒）
+    retry_interval = 5  # 初始重试间隔（秒），失败后翻倍（指数退避）
+    last_exc: Exception | None = None
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -110,11 +125,9 @@ def send_gmail_notification(content: str):
             # 显式设置超时，防止握手无限挂起
             socket.setdefaulttimeout(30)
 
-            # 注意：context 创建放在循环里也是安全的，或者提出来也可以
             context = ssl.create_default_context()
 
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-                # server.set_debuglevel(1) # 如果需要看详细握手日志可开启，生产环境建议关闭保持清爽
                 server.ehlo()
                 server.starttls(context=context)  # TLS 握手
                 server.ehlo()
@@ -125,23 +138,26 @@ def send_gmail_notification(content: str):
                 print(f"📨 [Attempt {attempt}/{max_retries}] 正在发送数据...")
                 server.sendmail(sender, [receiver], msg.as_string())
 
-            # 如果执行到这里没有报错，说明成功了
+            # 成功
             print(f"✅ Email report successfully sent to {receiver}")
-            return  # 成功后直接退出函数
+            return receiver
 
         except (socket.timeout, smtplib.SMTPException, ConnectionError, OSError) as e:
-            # 捕获常见的网络和协议错误
+            last_exc = e
             print(f"❌ [Attempt {attempt}/{max_retries}] 发送失败: {e}")
 
             if attempt < max_retries:
                 print(f"⏳ 等待 {retry_interval} 秒后进行下一次重试...")
                 time.sleep(retry_interval)
-                # 可选：指数退避，每次等待时间翻倍，避免拥塞
-                # retry_interval *= 2
-            else:
-                print("⛔️ 已达到最大重试次数，放弃发送。")
-                # 这里可以选择抛出异常，或者只是记录日志
-                # raise e
+                retry_interval *= 2  # 指数退避：5s → 10s → 20s → 40s → 80s
+
+    # 重试耗尽：必须抛异常让上层（scheduler runner）能感知到投递失败，
+    # 之前只 print 一行就静默 return，user 永远不知道日报没收到
+    print("⛔️ 已达到最大重试次数，放弃发送。")
+    raise EmailDeliveryError(
+        f"send_gmail_notification 重试 {max_retries} 次后仍失败: "
+        f"{type(last_exc).__name__}: {last_exc}"
+    ) from last_exc
 
 
 if __name__ == "__main__":

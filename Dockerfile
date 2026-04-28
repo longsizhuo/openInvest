@@ -23,5 +23,5 @@ RUN mkdir -p db cache_data
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 
-# 启动命令 (默认运行调度器)
-CMD ["python", "scheduler.py"]
+# 启动命令：APScheduler 入口（旧的 scheduler.py 已在 P4 重构里删除）
+CMD ["python", "-m", "scheduler.runner"]

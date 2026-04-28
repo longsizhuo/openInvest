@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from core.committee import run_committee, run_macro_view
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
-from services.notifier import send_gmail_notification
+from services.notifier import EmailDeliveryError, send_gmail_notification
 from utils.exchange_fee import (
     analyze_multi_timeframe,
     get_cost_report,
@@ -291,12 +291,32 @@ def run() -> Dict[str, Any]:
     )
 
     # 6) 发邮件
-    send_gmail_notification(full_report)
+    # committee 结果已经持久化到 .committee/<date>/ 和 daily/<date>.md，邮件
+    # 失败不应该让整个 job 状态变成 failed —— 但必须能在 return value 和审计日志
+    # 里看到 email 失败这件事，让外部监控（看 dream_event）能告警。
+    email_status: Dict[str, Any] = {"sent": False, "receiver": "", "error": None}
+    try:
+        receiver = send_gmail_notification(full_report)
+        email_status = {
+            "sent": bool(receiver),
+            "receiver": receiver,
+            "error": None,
+            "skipped": not receiver,  # 凭据缺失等于故意 skip
+        }
+    except EmailDeliveryError as e:
+        email_status = {"sent": False, "receiver": "", "error": str(e), "skipped": False}
+        print(f"⛔ Email delivery failed (committee 已落盘，job 仍标 success): {e}")
+        store.dream_event({
+            "phase": "email_delivery_failed",
+            "date": today,
+            "error": str(e),
+        })
 
     return {
         "status": "success",
         "date": today,
         "assets": [a["symbol"] for a in target_assets],
+        "email": email_status,
         "verdicts": {
             sym: {
                 "verdict": r["verdict"]["verdict"],
