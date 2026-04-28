@@ -19,6 +19,15 @@
 
 ---
 
+## 实盘 PnL 趋势（live）
+
+<div align="center">
+  <img src="docs/pnl_chart.svg" alt="PnL trend chart" width="100%"/>
+  <sub>由 <code>jobs/pnl_snapshot</code> 每小时自动更新 · 隐私优先：只画百分比折线，不显示任何金额或具体数值</sub>
+</div>
+
+---
+
 ## 它在做什么
 
 每天早上 03:00，cron 触发一次投资委员会。

@@ -1,0 +1,6 @@
+name: pnl_snapshot
+description: 每小时打一次 PnL 快照，渲染 docs/pnl_chart.svg（隐私优先：只画 % 折线，无明文金额）
+schedule: "0 * * * *"
+timezone: Asia/Shanghai
+entry: jobs.pnl_snapshot:run
+enabled: true

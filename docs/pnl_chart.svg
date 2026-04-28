@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" role="img" aria-label="PnL trend chart (privacy-preserving, no absolute numbers)">
+  <style>
+    .label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  </style>
+  <!-- 背景 -->
+  <rect width="800" height="280" fill="#0d1117"/>
+  <!-- 0% 基线（虚线灰）-->
+  <line x1="50" y1="227.4" x2="770" y2="227.4"
+        stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="44" y="231.4" text-anchor="end" fill="#6e7681" class="label">0%</text>
+  <!-- y 轴方向标识（不带数字）-->
+  <text x="44" y="40" text-anchor="end" fill="#3fb950" class="label">+</text>
+  <text x="44" y="248" text-anchor="end" fill="#f85149" class="label">−</text>
+  <!-- x 轴标签：相对时间，无具体日期 -->
+  <text x="50" y="272" fill="#6e7681" class="label">30 天前</text>
+  <text x="770" y="272" text-anchor="end" fill="#6e7681" class="label">今天</text>
+
+  <!-- 三条 series 线 -->
+  <polyline points="50.0,52.6" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>
+  <polyline points="50.0,206.9" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>
+  <polyline points="50.0,174.0" fill="none" stroke="#d29922" stroke-width="2.5"/>
+
+  <!-- 当前趋势方向箭头（不带数字）-->
+  <text x="760" y="48" text-anchor="end" fill="#3fb950" font-size="22" font-weight="bold">▲</text>
+
+  <!-- 图例 -->
+  <g transform="translate(58, 42)" class="label">
+    <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
+    <text x="20" y="4" fill="#c9d1d9">Total</text>
+    <line x1="70" y1="0" x2="84" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="90" y="4" fill="#c9d1d9">NDQ.AX</text>
+    <line x1="155" y1="0" x2="169" y2="0" stroke="#f0a500" stroke-width="1.5"/>
+    <text x="175" y="4" fill="#c9d1d9">Gold</text>
+  </g>
+</svg>
