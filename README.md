@@ -145,16 +145,37 @@ Worker 之间能看见什么、看不见什么，全部在 `core/committee.py` �
 
 ```markdown
 ---
-cash_cny: 18290.51
-gold_grams: 123.92
-gold_avg_cost_cny_per_gram: 1008.79
-ndq_shares: 128
+schema_version: 2
+cash:
+  CNY: 18290.51
+  AUD: 1000.00
+holdings:
+  - symbol: NDQ.AX
+    kind: etf
+    units: 128
+    unit_label: 股
+    avg_cost: 38.50
+    cost_currency: AUD
+    channel: CommSec
+  - symbol: GC=F
+    kind: metal
+    units: 123.92
+    unit_label: 克
+    avg_cost: 1008.79
+    cost_currency: CNY
+    channel: 浙商积存金
+    yfinance_proxy: GC=F
+    proxy_kind: gold_cny_per_gram
 ---
 # 当前持仓
-- CNY 现金: ¥18,290.51
+- CNY 现金: ¥18,290.51 / AUD 现金: $1,000.00
 - 黄金: 123.92 克，均价 ¥1008.79/g
 - NDQ.AX: 128 股
 ```
+
+**v2 通用化**（2026-05）：cash 从 `cash_cny`/`aud_cash` 扁平字段升级为多币种 dict；
+holdings 从 `ndq_shares`/`gold_grams` 升级为 list[dict]。任意 yfinance symbol 都能
+plug-and-play，不用改代码。v1 portfolio.md 自动 read-time fallback 兼容。
 
 - Frontmatter 给代码读写，atomic
 - Body 给 LLM 直接读，不需要二次格式化
@@ -195,7 +216,7 @@ LLM 没有跨会话记忆。你 6 个月前因为过度集中持仓被 Risk Offi
 并发压测：
 
 ```
-50 线程并发 cash_cny += 1   →  最终 delta = 50.0   (0 lost updates)
+50 线程并发 cash["CNY"] += 1   →  最终 delta = 50.0   (0 lost updates)
 20 轮 scheduler 扣款 + napcat 存款 race  →  delta 精确 = -37880  (0 lost updates)
 ```
 
@@ -260,7 +281,7 @@ uv sync --frozen --python 3.13
 # 跑交互式 onboarding（5 个问题）
 .venv/bin/python -m scripts.skill init
 
-python -m jobs.daily_report      # 跑一次完整委员会 (~6 min)
+python -m jobs.daily_report      # 跑一次完整委员会 (v3 真并行 ~15-60s)
 python -m scheduler.runner       # 全套 cron 持续跑
 ```
 
@@ -296,7 +317,7 @@ uv run python -m scripts.sync_gui_dist
 uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
 
 # 浏览器开 http://localhost:8765
-#   /                完整 GUI（持仓、委员会、透视）
+#   /                完整 GUI（主面板 / 流水 / 策略 / 委员会 / 系统）
 #   /api/...         REST API（同源，无 CORS）
 #   /docs            OpenAPI Swagger
 ```
