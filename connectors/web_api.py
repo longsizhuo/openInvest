@@ -358,6 +358,113 @@ async def get_holdings() -> HoldingsListResponse:
     return HoldingsListResponse(cash=pm.cash, holdings=holdings)
 
 
+# ============ 多币种总市值折算（v3 补充）============
+
+class TotalValueBreakdownItem(BaseModel):
+    """单项资产 / 现金 在折算币种下的金额"""
+    label: str
+    kind: str   # "cash" | "holding"
+    amount_local: float
+    currency_local: str
+    amount_in_base: Optional[float] = None
+    fx_rate: Optional[float] = None
+    note: Optional[str] = None
+
+
+class TotalValueResponse(BaseModel):
+    """完整资产折算到指定币种"""
+    base_currency: str
+    cash_total: float
+    holdings_total: float
+    grand_total: float
+    breakdown: List[TotalValueBreakdownItem]
+    fx_rates: Dict[str, Optional[float]]
+
+
+@app.get("/api/portfolio/total_value", response_model=TotalValueResponse, tags=["read"])
+async def get_portfolio_total_value(
+    base: str = Query("CNY", min_length=3, max_length=5, description="折算目标币种"),
+) -> TotalValueResponse:
+    """所有现金 + 持仓 折算到指定币种的总市值
+
+    现金：用 cash dict + yfinance 汇率
+    持仓：用 quote.price * units，quote 是 cost_currency 计价，再用汇率折算
+    追踪仓不计入（is_tracking_only）
+    """
+    from utils.fx import get_fx_rate
+    base = base.upper().strip()
+    pm = _new_pm()
+
+    breakdown: List[TotalValueBreakdownItem] = []
+    fx_rates: Dict[str, Optional[float]] = {}
+
+    cash_total = 0.0
+    for ccy, amt in pm.cash.items():
+        rate = get_fx_rate(ccy, base)
+        fx_rates[ccy] = rate
+        in_base = amt * rate if rate is not None else None
+        if in_base is not None:
+            cash_total += in_base
+        breakdown.append(TotalValueBreakdownItem(
+            label=f"现金 {ccy}",
+            kind="cash",
+            amount_local=amt,
+            currency_local=ccy,
+            amount_in_base=in_base,
+            fx_rate=rate,
+            note=None if rate is not None else "汇率拉取失败，未计入总额",
+        ))
+
+    holdings_total = 0.0
+    for h in pm.holdings:
+        if h.get("is_tracking_only"):
+            continue
+        units = float(h.get("units", 0) or 0)
+        if units <= 0:
+            continue
+        cost_ccy = str(h.get("cost_currency", "")).upper()
+        sym = str(h.get("symbol", ""))
+        # 用实时 quote 算市值
+        quote = get_quote(h)
+        if quote is None or quote.price <= 0:
+            breakdown.append(TotalValueBreakdownItem(
+                label=h.get("display_name") or sym,
+                kind="holding",
+                amount_local=0,
+                currency_local=cost_ccy,
+                amount_in_base=None,
+                fx_rate=None,
+                note="行情拉取失败，未计入",
+            ))
+            continue
+        market_value_local = quote.price * units
+        rate = fx_rates.get(cost_ccy)
+        if rate is None:
+            rate = get_fx_rate(cost_ccy, base)
+            fx_rates[cost_ccy] = rate
+        in_base = market_value_local * rate if rate is not None else None
+        if in_base is not None:
+            holdings_total += in_base
+        breakdown.append(TotalValueBreakdownItem(
+            label=f"{h.get('display_name') or sym} ({sym})",
+            kind="holding",
+            amount_local=round(market_value_local, 2),
+            currency_local=cost_ccy,
+            amount_in_base=round(in_base, 2) if in_base is not None else None,
+            fx_rate=rate,
+            note=None if rate is not None else "汇率拉取失败",
+        ))
+
+    return TotalValueResponse(
+        base_currency=base,
+        cash_total=round(cash_total, 2),
+        holdings_total=round(holdings_total, 2),
+        grand_total=round(cash_total + holdings_total, 2),
+        breakdown=breakdown,
+        fx_rates=fx_rates,
+    )
+
+
 # ============ v2 通用 holdings CRUD ============
 
 class HoldingCreateRequest(BaseModel):
