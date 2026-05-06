@@ -2457,6 +2457,107 @@ async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...)) -> Wr
 # ============================================================
 # GUI 静态文件挂载（如果 static/ 已 sync）
 # ============================================================
+# ============ CommSec 手动导入端点（Task #38）============
+# 替代旧 cron 自动模式：cron 模式 IMAP 临时失败会静默丢成交。改成
+# 用户主动触发：先 /preview 看拉到了什么，确认后再 /apply 写入
+
+class CommsecPreviewResponse(BaseModel):
+    """GET /api/commsec/preview"""
+    ok: bool = True
+    lookback_days: int
+    new_trades: List[Dict[str, Any]] = Field(default_factory=list)
+    skipped_count: int = 0
+    error: Optional[str] = None
+
+
+class CommsecApplyRequest(BaseModel):
+    lookback_days: int = Field(default=180, ge=1, le=365)
+
+
+class CommsecApplyResponse(BaseModel):
+    ok: bool = True
+    written: int = 0
+    skipped: int = 0
+    errors: List[str] = Field(default_factory=list)
+
+
+def _commsec_fetch(lookback_days: int) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """共享拉取逻辑：返回 (new_trades, err_msg)"""
+    email_user = os.getenv("EMAIL_SENDER")
+    email_pass = os.getenv("EMAIL_PASSWORD")
+    if not (email_user and email_pass):
+        return [], "缺少 EMAIL_SENDER / EMAIL_PASSWORD 环境变量"
+
+    from services.commsec_reader import CommSecReader
+
+    pm = _new_pm()
+    reader = CommSecReader(email_user, email_pass)
+    if not reader.connect():
+        return [], "IMAP 连接失败（凭证错误或 Gmail 限速）"
+
+    try:
+        processed = pm.get_processed_emails()
+        trades = reader.fetch_trade_confirmations(
+            lookback_days=lookback_days, processed_ids=processed,
+        )
+    finally:
+        reader.close()
+    return trades, None
+
+
+@app.get(
+    "/api/commsec/preview",
+    response_model=CommsecPreviewResponse,
+    tags=["commsec"],
+)
+async def commsec_preview(
+    lookback_days: int = Query(180, ge=1, le=365),
+) -> CommsecPreviewResponse:
+    """预览 CommSec 邮件拉到的新成交（不写入）。GUI [Import] 按钮先调它"""
+    trades, err = _commsec_fetch(lookback_days)
+    if err:
+        return CommsecPreviewResponse(
+            ok=False, lookback_days=lookback_days, error=err,
+        )
+    return CommsecPreviewResponse(
+        ok=True, lookback_days=lookback_days, new_trades=trades,
+    )
+
+
+@app.post(
+    "/api/commsec/apply",
+    response_model=CommsecApplyResponse,
+    tags=["commsec"],
+)
+async def commsec_apply(
+    body: CommsecApplyRequest = Body(...),
+) -> CommsecApplyResponse:
+    """实际写入 CommSec 拉到的成交到 portfolio + history.jsonl
+
+    GUI 弹确认窗 → 用户点 Confirm → 调本接口
+    """
+    trades, err = _commsec_fetch(body.lookback_days)
+    if err:
+        raise HTTPException(status_code=503, detail=err)
+
+    pm = _new_pm()
+    written = 0
+    errors: List[str] = []
+    for t in trades:
+        try:
+            pm.record_external_trade(t)
+            written += 1
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{t.get('symbol', '?')}: {type(e).__name__} {e}")
+
+    return CommsecApplyResponse(
+        ok=len(errors) == 0,
+        written=written,
+        skipped=len(trades) - written,
+        errors=errors,
+    )
+
+
 # 一键部署模式：跑完 `python -m scripts.sync_gui_dist` 后，static/ 含 invest-gui 构建产物
 # FastAPI 把它挂到 /，所有非 /api/* 请求自动 serve GUI（含 SPA 路由 fallback）
 #
