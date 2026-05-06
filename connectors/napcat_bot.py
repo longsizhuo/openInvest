@@ -122,12 +122,15 @@ def _help(ctx: CommandContext) -> str:
 
 @cmd("balance")
 def _balance(ctx: CommandContext) -> str:
+    """v2 通用化：从 cash dict + holdings list 读，旧 v1 字段已不存在"""
     pm = ctx.pm
-    cash_cny = float(pm.portfolio.get("cash_cny", 0))
-    aud_cash = float(pm.portfolio.get("aud_cash", 0))
-    ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
-    gold_grams = float(pm.portfolio.get("gold_grams", 0))
-    gold_avg_cost = float(pm.portfolio.get("gold_avg_cost_cny_per_gram", 0))
+    cash_cny = pm.cash_amount("CNY")
+    aud_cash = pm.cash_amount("AUD")
+    ndq_h = pm.holdings.find("NDQ.AX")
+    gold_h = pm.holdings.find("GC=F")
+    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
+    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
+    gold_avg_cost = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
 
     snap = get_gold_snapshot(offset_pct=0.0)
     if snap:
@@ -221,33 +224,61 @@ def _history(ctx: CommandContext) -> str:
 
 @cmd("deposit")
 def _deposit(ctx: CommandContext) -> str:
+    """v2: 存入 CNY。/deposit <amount> 默认 CNY；/deposit <ccy> <amount> 任意币种"""
     if not ctx.args:
-        return "用法: /deposit <CNY金额>"
-    try:
-        amount = float(ctx.args[0])
-    except ValueError:
-        return "金额格式错误"
-    # RMW 在单锁内完成，scheduler 同时写不会丢这次存款
+        return "用法: /deposit <CNY金额> 或 /deposit USD 100"
+    # 解析币种 + 金额（兼容旧的单参 = CNY）
+    if len(ctx.args) >= 2:
+        ccy = ctx.args[0].upper()
+        try:
+            amount = float(ctx.args[1])
+        except ValueError:
+            return "金额格式错误"
+    else:
+        ccy = "CNY"
+        try:
+            amount = float(ctx.args[0])
+        except ValueError:
+            return "金额格式错误"
+
     with ctx.pm.with_portfolio_tx() as p:
-        new_cash = float(p.get("cash_cny", 0)) + amount
-        p["cash_cny"] = new_cash
+        cash = dict(p.get("cash") or {})
+        new_balance = float(cash.get(ccy, 0) or 0) + amount
+        cash[ccy] = round(new_balance, 2)
+        p["cash"] = cash
     ctx.pm._reload()
-    return f"✅ 已存入 ¥{amount:,.2f}，现金余额 ¥{new_cash:,.2f}"
+    return f"✅ 已存入 {ccy} {amount:,.2f}，新余额 {new_balance:,.2f}"
 
 
 @cmd("withdraw")
 def _withdraw(ctx: CommandContext) -> str:
+    """v2: 取出 CNY。/withdraw <amount> 或 /withdraw <ccy> <amount>。余额不足拒绝"""
     if not ctx.args:
-        return "用法: /withdraw <CNY金额>"
-    try:
-        amount = float(ctx.args[0])
-    except ValueError:
-        return "金额格式错误"
+        return "用法: /withdraw <CNY金额> 或 /withdraw USD 100"
+    if len(ctx.args) >= 2:
+        ccy = ctx.args[0].upper()
+        try:
+            amount = float(ctx.args[1])
+        except ValueError:
+            return "金额格式错误"
+    else:
+        ccy = "CNY"
+        try:
+            amount = float(ctx.args[0])
+        except ValueError:
+            return "金额格式错误"
+
+    cur = ctx.pm.cash_amount(ccy)
+    if cur < amount:
+        return f"❌ {ccy} 余额不足：当前 {cur:.2f}，要扣 {amount:.2f}（防误操作）"
+
     with ctx.pm.with_portfolio_tx() as p:
-        new_cash = float(p.get("cash_cny", 0)) - amount
-        p["cash_cny"] = new_cash
+        cash = dict(p.get("cash") or {})
+        new_balance = float(cash.get(ccy, 0) or 0) - amount
+        cash[ccy] = round(new_balance, 2)
+        p["cash"] = cash
     ctx.pm._reload()
-    return f"✅ 已扣减 ¥{amount:,.2f}，现金余额 ¥{new_cash:,.2f}"
+    return f"✅ 已扣减 {ccy} {amount:,.2f}，新余额 {new_balance:,.2f}"
 
 
 GOLD_BUY_RE = re.compile(r"([\d.]+)\s*g?\s*@\s*([\d.]+)")
@@ -262,16 +293,29 @@ def _gold_buy(ctx: CommandContext) -> str:
     price = float(match.group(2))
     total = grams * price
 
-    # RMW: 拿锁里读旧 grams + avg_cost，算加权均价，写回，避免被 scheduler 插入
+    # v2 RMW: holdings.find("GC=F") + 加权均价；克数 + 均价必须在同一锁内
     with ctx.pm.with_portfolio_tx() as p:
-        cur_grams = float(p.get("gold_grams", 0))
-        cur_avg = float(p.get("gold_avg_cost_cny_per_gram", 0))
+        holdings = list(p.get("holdings") or [])
+        gold = next((h for h in holdings if h.get("symbol") == "GC=F"), None)
+        cur_grams = float(gold.get("units", 0) or 0) if gold else 0.0
+        cur_avg = float(gold.get("avg_cost", 0) or 0) if gold else 0.0
         new_grams = cur_grams + grams
         new_avg = (
             (cur_avg * cur_grams + price * grams) / new_grams if new_grams else price
         )
-        p["gold_grams"] = round(new_grams, 4)
-        p["gold_avg_cost_cny_per_gram"] = round(new_avg, 2)
+        if gold:
+            gold["units"] = round(new_grams, 4)
+            gold["avg_cost"] = round(new_avg, 2)
+        else:
+            holdings.append({
+                "symbol": "GC=F", "kind": "metal",
+                "units": round(new_grams, 4), "unit_label": "克",
+                "avg_cost": round(new_avg, 2), "cost_currency": "CNY",
+                "channel": "浙商积存金", "display_name": "伦敦金 (浙商积存金)",
+                "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
+                "sell_fee_pct": 0.0038,
+            })
+        p["holdings"] = holdings
 
     # 历史 jsonl 是独立 append-only 文件，自带锁，放 portfolio 锁外
     ctx.pm.store.append_history({
@@ -304,14 +348,24 @@ def _gold_sell(ctx: CommandContext) -> str:
     fee = gross * fee_pct
     net = gross - fee
 
-    # RMW: 同时改 gold_grams 和 cash_cny，必须在同一锁内
+    # v2 RMW: holdings GC=F 减克数 + cash CNY 加现金，同一锁内
     with ctx.pm.with_portfolio_tx() as p:
-        cur_grams = float(p.get("gold_grams", 0))
-        new_grams = max(0.0, cur_grams - grams)
-        cur_cash = float(p.get("cash_cny", 0))
-        new_cash = cur_cash + net
-        p["gold_grams"] = round(new_grams, 4)
-        p["cash_cny"] = round(new_cash, 2)
+        holdings = list(p.get("holdings") or [])
+        gold = next((h for h in holdings if h.get("symbol") == "GC=F"), None)
+        cur_grams = float(gold.get("units", 0) or 0) if gold else 0.0
+        if cur_grams < grams:
+            raise RuntimeError(
+                f"卖出克数 {grams} 超过持仓 {cur_grams}（防误操作）",
+            )
+        new_grams = round(cur_grams - grams, 4)
+        if gold:
+            gold["units"] = new_grams
+        cash = dict(p.get("cash") or {})
+        cur_cash = float(cash.get("CNY", 0) or 0)
+        new_cash = round(cur_cash + net, 2)
+        cash["CNY"] = new_cash
+        p["holdings"] = holdings
+        p["cash"] = cash
 
     ctx.pm.store.append_history({
         "ts_origin": datetime.now().isoformat(timespec="seconds"),
@@ -336,9 +390,22 @@ def _gold_set(ctx: CommandContext) -> str:
         grams = float(ctx.args[0])
     except ValueError:
         return "克数格式错误"
-    # 直接设克数也走 transaction：body 重渲染要看其它字段，必须在同一锁内
+    # v2: 直接覆盖 GC=F holding 的 units（均价不变，不计流水）
     with ctx.pm.with_portfolio_tx() as p:
-        p["gold_grams"] = round(grams, 4)
+        holdings = list(p.get("holdings") or [])
+        gold = next((h for h in holdings if h.get("symbol") == "GC=F"), None)
+        if gold:
+            gold["units"] = round(grams, 4)
+        else:
+            holdings.append({
+                "symbol": "GC=F", "kind": "metal",
+                "units": round(grams, 4), "unit_label": "克",
+                "avg_cost": 0.0, "cost_currency": "CNY",
+                "channel": "浙商积存金", "display_name": "伦敦金 (浙商积存金)",
+                "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
+                "sell_fee_pct": 0.0038,
+            })
+        p["holdings"] = holdings
     ctx.pm._reload()
     return f"✅ 黄金克数已直接设为 {grams}g（成本均价不变）"
 
