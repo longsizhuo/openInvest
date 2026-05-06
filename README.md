@@ -264,6 +264,30 @@ python -m jobs.daily_report      # 跑一次完整委员会 (~6 min)
 python -m scheduler.runner       # 全套 cron 持续跑
 ```
 
+### Option D · Web API（FastAPI REST 层，给 invest-gui 前端用）
+
+```bash
+uv sync --frozen --python 3.13
+uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+# 浏览 http://127.0.0.1:8765/docs 看 OpenAPI Swagger
+```
+
+设计：
+- **同源部署**：单域名 `invest.example.com`，Caddy 把 `/api/*` 反代到 `127.0.0.1:8765`，`/*` 兜底前端静态文件
+- **认证**：本服务不写 auth，由 Cloudflare Access 在边缘把关整个域名
+- **多消费者模式**：core 业务逻辑共享，NapCat / Claude Skill / Web API 三个 connector 平级
+- **systemd**：仓库自带 `systemd/invest-web.service`，`sudo cp systemd/invest-web.service /etc/systemd/system/ && sudo systemctl enable --now invest-web`
+
+前端配套仓库 [longsizhuo/invest-gui](https://github.com/longsizhuo/invest-gui)（Vite + React，部署到本机 `/srv/invest-gui/`，与 Caddy file_server 配合）。
+
+端点（GET 已实现 / POST 见 PR 2）：
+- `GET /api/portfolio` 完整持仓快照（现金 + 黄金 + NDQ）
+- `GET /api/strategy` 当前策略 + 各资产 cap
+- `GET /api/gold` `GET /api/ndq` 单资产实时
+- `GET /api/history?limit=N` 交易流水（按时间倒序）
+- `GET /api/daily?since=N` 最近 N 天 daily 决策快照（markdown）
+- `GET /openapi.json` OpenAPI schema，前端 `pnpm openapi-typescript` 自动生成 TS 类型
+
 ---
 
 ## 架构

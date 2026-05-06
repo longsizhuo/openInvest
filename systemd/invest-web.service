@@ -1,0 +1,29 @@
+[Unit]
+Description=Invest Web API (FastAPI) — REST 层供 invest-gui 前端消费
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/projects-review/invest
+EnvironmentFile=/home/ubuntu/projects-review/invest/.env
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TZ=Asia/Shanghai
+Environment=UV_CACHE_DIR=/home/ubuntu/projects-review/invest/.uv-cache
+# 仅绑 127.0.0.1，公网由 Caddy 反代，CF Access 在边缘鉴权
+ExecStart=/home/ubuntu/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/projects-review/invest
+
+[Install]
+WantedBy=multi-user.target
