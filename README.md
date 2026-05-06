@@ -264,6 +264,24 @@ python -m jobs.daily_report      # 跑一次完整委员会 (~6 min)
 python -m scheduler.runner       # 全套 cron 持续跑
 ```
 
+### 🔀 投资委员会的两条执行路径
+
+openInvest 的 "Quant + Risk + Macro + CIO 投资委员会" 有两套实现，**结果可能不同**：
+
+| 路径 | 触发 | 跑什么 | 模型 / 成本 | 真 subagent? |
+|------|------|--------|------------|-------------|
+| **Skill** | Claude / OpenClaw 用户用 `~/.claude/skills/invest/run.sh prepare_committee` | 用户的 Claude 当 coordinator，spawn 4 个独立 Claude subagent | Claude 4 / 由用户订阅承担 | ✅ 真 Agent Teams（subprocess 隔离）|
+| **Web / Cron** | `POST /api/committee/run` 或 cron 自动跑 daily_report | 后端 4 个 `SDKAgent` (DeepSeek) + ThreadPoolExecutor 并行 | DeepSeek / ¥0.01-0.03 一次 | ❌ 同进程多线程（信息分隔但非 SDK subagent）|
+
+**两条同 prompt 不同实现的好处**：
+- Skill 路径让用户的 Claude 跑——项目本身**零 API 成本**
+- Web/Cron 走 DeepSeek——cron 每日跑成本可控
+- 可以对比同问题两套 verdict，**验证模型偏差**
+
+详见 [skill/SKILL.md](skill/SKILL.md)。
+
+---
+
 ### Option D · Web API + 自带 GUI（推荐：30 秒 quick start）
 
 ```bash

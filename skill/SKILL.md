@@ -24,6 +24,28 @@ GUI 升级：再跑一次 `python -m scripts.sync_gui_dist` 即可（每次 inve
 
 不要 GUI？跳过 sync 脚本，FastAPI 仅 serve API。
 
+## ⚙️ Two execution paths (重要：committee 有两套实现)
+
+openInvest 的"投资委员会"可走两条路径，**结果可能不同**（不同模型 + 不同协议）：
+
+| 路径 | 触发方式 | 实际跑什么 | 模型 / 成本 | 真 subagent? |
+|------|---------|----------|------------|-------------|
+| **A. Skill 模式** | Claude 用户跟 Claude 说"分析 NDQ"，Claude 按本 SKILL.md 协议跑 | Claude 自己当 coordinator，用 `Agent({subagent_type})` 真 spawn 4 个 Claude subagent（独立 context） | Claude 4 / 用户的 Claude 订阅 | ✅ **真 Agent Teams**（subprocess 隔离） |
+| **B. Web/Cron 模式** | `POST /api/committee/run` 或 cron 自动跑 daily_report | 后端单进程 Python：4 个 `SDKAgent` 实例 + ThreadPool 并行 | DeepSeek-Chat / ¥0.01-0.03 一次 | ❌ **同进程多线程**（信息分隔等同 subagent，但不是 SDK 子 agent）|
+
+**为什么两条**：
+- Skill 路径让用户的 Claude 当指挥官——成本由用户 Claude 订阅承担，**项目本身零开销**
+- Web/Cron 让后端独立运行——cron 每天自动跑、GUI 用户点按钮都走这条
+- 两条等价于"同 prompt 不同实现"，可对比 verdict 验证模型偏差
+
+**作为外部 agent**：
+- 想要**真 Agent Teams 体验** → 走 Skill 路径（`prepare_committee` + 自己 spawn worker）
+- 想要**便宜的批处理**（不消耗 Claude 额度）→ 调 `POST /api/committee/run`
+
+未来会考虑用 Claude Agent SDK 把 Web 路径也升级到真 subagent，但当前 DeepSeek 性价比 + 多线程信息分隔已经足够生产用。
+
+---
+
 User runs a multi-asset investment system at `$INVEST_HOME`
 (default `~/projects-review/invest`, repo: `https://github.com/longsizhuo/openInvest`).
 
