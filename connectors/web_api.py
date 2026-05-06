@@ -2345,3 +2345,38 @@ async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...)) -> Wr
         history_appended=True,
         message=f"已扣减 {ccy} {body.amount}，新余额 {new_balance:.2f}",
     )
+
+
+# ============================================================
+# GUI 静态文件挂载（如果 static/ 已 sync）
+# ============================================================
+# 一键部署模式：跑完 `python -m scripts.sync_gui_dist` 后，static/ 含 invest-gui 构建产物
+# FastAPI 把它挂到 /，所有非 /api/* 请求自动 serve GUI（含 SPA 路由 fallback）
+#
+# 生产 Caddy 部署时这块不会被触发——Caddy 优先 file_server /srv/invest-gui，
+# 只把 /api/* 反代到本服务，根本不会到这条 mount。共存无冲突。
+#
+# 必须放在所有路由声明之后；StaticFiles(html=True) 让 / 自动 serve index.html
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+if _STATIC_DIR.exists() and (_STATIC_DIR / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+    from starlette.responses import FileResponse
+
+    class _SPAStaticFiles(StaticFiles):
+        """SPA 路由 fallback：未找到的路径回退到 index.html，让 React Router 接管"""
+        async def get_response(self, path: str, scope):  # type: ignore[override]
+            try:
+                return await super().get_response(path, scope)
+            except _StarletteHTTPException as e:
+                if e.status_code == 404:
+                    return FileResponse(str(Path(self.directory or "") / "index.html"))
+                raise
+
+    app.mount("/", _SPAStaticFiles(directory=str(_STATIC_DIR), html=True), name="gui")
+    log.info(f"✓ GUI 已挂载（SPA fallback 模式）: / → {_STATIC_DIR}")
+else:
+    log.info(
+        "⚠️  GUI 未挂载（static/ 不存在或缺 index.html）。"
+        "跑 `python -m scripts.sync_gui_dist` 拉 GUI 构建产物。"
+    )

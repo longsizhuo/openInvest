@@ -29,3 +29,6 @@ docs/pnl_chart.svg
 # verdict review 报告含真实命中率数据，不入库
 docs/verdict_accuracy.md
 .env.bak.*
+
+# 前端 GUI dist 通过 scripts/sync_gui_dist 拉 invest-gui release，不入 git
+static/

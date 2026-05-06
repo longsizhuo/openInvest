@@ -1,10 +1,28 @@
 ---
 name: invest
-version: 0.4.0
-description: Multi-asset investment system with Coordinator-Worker architecture. Read portfolio / live prices / strategy / committee history; run Quant + Macro + Risk Officer + CIO investment committee with optional async worker fan-out (mirrors Claude Code's Agent Teams protocol). v2 generalized: supports ANY yfinance symbol (AAPL, TSLA, BTC-USD, NDQ.AX, GC=F, ...) and any currency (CNY, AUD, USD, ...). Auto-bootstraps from GitHub on first use. Trigger when user asks about positions, P&L, prices, "should I buy/sell", or "run committee / analyze [symbol]".
+version: 0.5.0
+description: Multi-asset investment system with Coordinator-Worker architecture. Read portfolio / live prices / strategy / committee history; run Quant + Macro + Risk Officer + CIO investment committee with optional async worker fan-out (mirrors Claude Code's Agent Teams protocol). v2 generalized: supports ANY yfinance symbol (AAPL, TSLA, BTC-USD, NDQ.AX, GC=F, ...) and any currency (CNY, AUD, USD, ...). v0.5 self-contained: backend ships with Web GUI via `python -m scripts.sync_gui_dist`. Auto-bootstraps from GitHub on first use. Trigger when user asks about positions, P&L, prices, "should I buy/sell", or "run committee / analyze [symbol]".
 ---
 
-# Invest Skill (v0.4 — Generalized portfolio model)
+# Invest Skill (v0.5 — Self-contained backend + GUI)
+
+## 30-second Quick Start
+
+```bash
+git clone https://github.com/longsizhuo/openInvest && cd openInvest
+uv sync --frozen
+cp .env.example .env  # 填 DEEPSEEK_API_KEY
+uv run python -m scripts.skill init  # 5 个问题交互式 onboarding
+uv run python -m scripts.sync_gui_dist  # 一次性拉 GUI dist（130 KB）
+uv run uvicorn connectors.web_api:app --port 8765
+# 浏览器开 http://localhost:8765 → 完整 GUI
+```
+
+GUI 功能：持仓主面板 + 历史 + 策略 + 实时委员会直播（SSE）+ AI 透视（4 角色 prompt + 命中率 + LLM 用量 + 数据源健康）。
+
+GUI 升级：再跑一次 `python -m scripts.sync_gui_dist` 即可（每次 invest-gui push main 会自动发新 release）。
+
+不要 GUI？跳过 sync 脚本，FastAPI 仅 serve API。
 
 User runs a multi-asset investment system at `$INVEST_HOME`
 (default `~/projects-review/invest`, repo: `https://github.com/longsizhuo/openInvest`).
