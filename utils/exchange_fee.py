@@ -228,14 +228,25 @@ def _analyze_slice(df_slice: pd.DataFrame, label: str, current_price: float) -> 
 
 
 def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
+    """格式化层 — 数值计算交给 utils.market_metrics.compute_metrics（SSOT 唯一来源）。
+
+    本函数只负责：拿 metrics dict + 切窗口算阶段收益 + 拼成给 LLM 看的字符串。
+    任何 MA / RSI / 分位 / ATR 改动 → 改 utils/market_metrics.py，不要在这里加。
+    """
+    from .market_metrics import compute_metrics
+
     if hist.empty:
         return f"数据缺失: {title}"
 
-    current_price = hist['Close'].iloc[-1]
-    ma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
-    ma_120 = hist['Close'].rolling(window=120).mean().iloc[-1]
-    ma_250 = hist['Close'].rolling(window=250).mean().iloc[-1]
-    rsi_14 = _calc_rsi(hist['Close'])
+    metrics = compute_metrics(hist)
+    current_price = metrics["current_price"]
+    if current_price is None:
+        return f"数据缺失: {title}"
+
+    ma_120 = metrics["ma120"]
+    ma_250 = metrics["ma250"]
+    rsi_14 = metrics["rsi14"]
+    pos = metrics["price_quantile_2y"]
 
     slices = {
         "1-Week": hist.tail(5),
@@ -245,23 +256,27 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
         "2-Years": hist
     }
 
-    report_lines = [f"--- {title} ANALYSIS ---", f"Current Price: {current_price:.4f} | RSI(14): {rsi_14:.2f}"]
-    
-    high_2y = hist['Close'].max()
-    low_2y = hist['Close'].min()
-    pos = (current_price - low_2y) / (high_2y - low_2y) if high_2y != low_2y else 0.5
-    report_lines.append(f"Price Rank (2y): {pos:.0%} (0%=Low, 100%=High)")
+    rsi_str = f"{rsi_14:.2f}" if rsi_14 is not None else "N/A"
+    report_lines = [
+        f"--- {title} ANALYSIS ---",
+        f"Current Price: {current_price:.4f} | RSI(14): {rsi_str}",
+    ]
+
+    if pos is not None:
+        report_lines.append(f"Price Rank (2y): {pos:.0%} (0%=Low, 100%=High)")
 
     report_lines.append("**Timeframe Performance:**")
     for label, df_slice in slices.items():
         report_lines.append(_analyze_slice(df_slice, label, current_price))
 
     report_lines.append("**Key Levels:**")
-    if pd.notna(ma_120): report_lines.append(f"- MA120 (Trend): {ma_120:.4f}")
-    if pd.notna(ma_250): report_lines.append(f"- MA250 (Base): {ma_250:.4f}")
-    if pd.notna(ma_250) and ma_250 != 0:
-        bias = (current_price / ma_250 - 1)
-        report_lines.append(f"- MA250 Deviation: {bias:.2%}")
+    if ma_120 is not None:
+        report_lines.append(f"- MA120 (Trend): {ma_120:.4f}")
+    if ma_250 is not None:
+        report_lines.append(f"- MA250 (Base): {ma_250:.4f}")
+        if ma_250 != 0:
+            bias = (current_price / ma_250 - 1)
+            report_lines.append(f"- MA250 Deviation: {bias:.2%}")
 
     return "\n".join(report_lines)
 

@@ -1,16 +1,20 @@
 ---
 name: invest
-version: 0.3.0
-description: Multi-asset investment system with proper Coordinator-Worker architecture. Read portfolio / live prices / strategy / committee history; run Quant + Macro + Risk Officer + CIO investment committee with optional async worker fan-out (mirrors Claude Code's Agent Teams protocol). Auto-bootstraps the invest project from GitHub on first use. Trigger when user asks about positions, P&L, gold/NDQ price, "should I buy/sell", or "run committee / analyze [asset]".
+version: 0.4.0
+description: Multi-asset investment system with Coordinator-Worker architecture. Read portfolio / live prices / strategy / committee history; run Quant + Macro + Risk Officer + CIO investment committee with optional async worker fan-out (mirrors Claude Code's Agent Teams protocol). v2 generalized: supports ANY yfinance symbol (AAPL, TSLA, BTC-USD, NDQ.AX, GC=F, ...) and any currency (CNY, AUD, USD, ...). Auto-bootstraps from GitHub on first use. Trigger when user asks about positions, P&L, prices, "should I buy/sell", or "run committee / analyze [symbol]".
 ---
 
-# Invest Skill (v0.3 — Agent Teams aligned)
+# Invest Skill (v0.4 — Generalized portfolio model)
 
 User runs a multi-asset investment system at `$INVEST_HOME`
-(default `~/projects-review/invest`, repo: `https://github.com/longsizhuo/invest`).
-Tracks two assets:
-- **NDQ.AX** — BetaShares Nasdaq 100 ETF (Australia / AUD / via CommSec)
-- **GC=F / 浙商积存金** — Gold via Zheshang Bank (CNY / per-gram)
+(default `~/projects-review/invest`, repo: `https://github.com/longsizhuo/openInvest`).
+
+**v2 generalized data model**:
+- **Cash** — any currency: `{CNY: ..., AUD: ..., USD: ..., ...}`
+- **Holdings** — any yfinance symbol: NDQ.AX / GC=F / AAPL / TSLA / BTC-USD / ...
+- **Tracking-only positions** — observe + run committee without real ownership (great for "should I enter")
+
+User's typical setup tracks 2 real positions (NDQ.AX equity_etf + GC=F via Zheshang Bank gold) but the schema supports unlimited symbols. To add new ones, see "Adding assets" below.
 
 **Key insight**: this skill **shares the same code as the cron-driven DeepSeek
 pipeline**. The only difference is the LLM doing the talking — when user invokes
@@ -106,11 +110,35 @@ After `init` returns `status: "ok"`, immediately re-run `doctor` to confirm
 
 All via `~/.claude/skills/invest/run.sh <cmd> [args]`. Output is JSON.
 
-- `run.sh status` — portfolio + live prices + unrealized P&L. **Default entry for "how am I doing"**.
+- `run.sh status` — portfolio + live prices + unrealized P&L. **Default entry for "how am I doing"**. v2 returns `cash.all_currencies` (full dict) and `all_holdings` (full array) so agents can see ANY tracked symbol, not just NDQ/Gold.
 - `run.sh strategy` — target_assets list + Dreaming long-term insights.
 - `run.sh history [-n N]` — last N trades + last N committee verdicts.
 - `run.sh live_prices` — VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F.
 - `run.sh what_if [--gold-price X | --gold-pct ±N | ...]` — arithmetic P&L scenario, no LLM.
+
+## Adding / tracking new assets (v2)
+
+The user can add ANY yfinance symbol to be tracked. Three ways:
+
+1. **Web GUI** (preferred for the user): `invest.longsizhuo.com` → main panel → `[+ 新增资产]` → search box (uses yfinance search, no API key). Set `is_tracking_only=true` to observe without ownership.
+
+2. **REST API** (for agents that have web access via the same auth):
+   ```http
+   POST /api/holdings
+   {
+     "symbol": "AAPL",
+     "kind": "equity",
+     "cost_currency": "USD",
+     "is_tracking_only": true,
+     "display_name": "Apple Inc."
+   }
+   ```
+
+3. **Direct portfolio.md edit** (last resort, agents shouldn't touch this — leads to schema drift): edit `memory/portfolio.md` frontmatter `holdings` array.
+
+**As an agent**: if the user asks "track AAPL for me" or "should I buy TSLA", and the symbol is NOT in their current holdings, you can either:
+- Run `prepare_committee AAPL` directly (works for any yfinance symbol — the committee analyzes regardless of ownership)
+- Or guide the user to add it as a tracking-only holding via the GUI for persistent tracking
 
 ## Investment Committee (Coordinator-Worker mode)
 
@@ -130,6 +158,8 @@ Returns JSON with:
 - `portfolio_summary` — user's current positions + dry powder + risk profile
 - `macro_data` — live VIX / TNX / USDCNY snapshot
 - `market_data` — multi-timeframe technical analysis
+- `regime_brief` — Python 确定性算出的市场 regime 上下文（REGIME/REASON/INPUTS/STRATEGY_HINT）。
+  **Quant Round 1/2 worker 必须收到这个**，否则会退回到老 bug 路径（震荡市底部错喊 bearish）
 - `prior_insights` — Dreaming long-term patterns (may be empty)
 - `prompts.{macro_strategist, quant_round1, risk_round1, quant_round2_after_risk, risk_round2_after_quant, cio}` —
   the EXACT prompts the cron pipeline uses, pulled from `agents/*.py`
@@ -150,7 +180,7 @@ Agent({
 Agent({
   description: "Quant analysis (Round 1)",
   subagent_type: "general-purpose",
-  prompt: "<paste prompts.quant_round1 verbatim>\n\n# 市场数据:\n<paste market_data>"
+  prompt: "<paste prompts.quant_round1 verbatim>\n\n# 市场 Regime (确定性算出，必须遵循):\n<paste regime_brief>\n\n# 市场数据:\n<paste market_data>"
 })
 Agent({
   description: "Risk Officer (Round 1)",
@@ -172,7 +202,7 @@ adjust their own view.
 Agent({
   description: "Quant Round 2 (sees Risk's report)",
   subagent_type: "general-purpose",
-  prompt: "<paste prompts.quant_round2_after_risk>\n\n# Round 1 你自己的输出:\n<quant R1 result>\n\n# Risk Officer 的报告:\n<risk R1 result>"
+  prompt: "<paste prompts.quant_round2_after_risk>\n\n# 市场 Regime (Round 1 给你的事实，Round 2 仍然有效):\n<paste regime_brief>\n\n# Round 1 你自己的输出:\n<quant R1 result>\n\n# Risk Officer 的报告:\n<risk R1 result>"
 })
 Agent({
   description: "Risk Round 2 (sees Quant's signals)",

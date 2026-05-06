@@ -106,12 +106,15 @@ def _portfolio_summary(
     current_gold_cny_per_g: float,
 ) -> str:
     """详细的用户上下文，给 Risk Officer 压力测试用 (含当前市价 + 浮盈)"""
-    cash_cny = float(pm.portfolio.get("cash_cny", 0))
-    aud_cash = float(pm.portfolio.get("aud_cash", 0))
-    ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
-    ndq_cost = float(pm.portfolio.get("ndq_avg_cost_aud_per_share", 0))
-    gold_grams = float(pm.portfolio.get("gold_grams", 0))
-    gold_cost = float(pm.portfolio.get("gold_avg_cost_cny_per_gram", 0))
+    # v2 通用化：用 PortfolioManager 接口（含 read-time fallback）
+    cash_cny = pm.cash_amount("CNY")
+    aud_cash = pm.cash_amount("AUD")
+    ndq_h = pm.holdings.find("NDQ.AX")
+    gold_h = pm.holdings.find("GC=F")
+    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
+    ndq_cost = float(ndq_h.get("avg_cost", 0) or 0) if ndq_h else 0.0
+    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
+    gold_cost = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
     buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
     dry_powder = max(0.0, cash_cny - buffer_cny)
@@ -245,8 +248,11 @@ def run() -> Dict[str, Any]:
                 "估值用最近一次成功拉取的价格。请在结论里明确标注'基于陈旧数据'。"
             )
 
-    gold_grams = float(pm.portfolio.get("gold_grams", 0))
-    ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
+    # v2 通用化读
+    ndq_h2 = pm.holdings.find("NDQ.AX")
+    gold_h2 = pm.holdings.find("GC=F")
+    ndq_shares = float(ndq_h2.get("units", 0) or 0) if ndq_h2 else 0.0
+    gold_grams = float(gold_h2.get("units", 0) or 0) if gold_h2 else 0.0
     # 跳过的资产从总资产估算里剔除，避免用 0 当价格污染集中度计算
     ndq_value_cny = ndq_shares * current_price * current_rate if "NDQ.AX" not in skipped_assets else 0.0
     gold_value_cny = gold_grams * gold_now if "GC=F" not in skipped_assets else 0.0
@@ -289,10 +295,18 @@ def run() -> Dict[str, Any]:
             print(f"⏭️  Skip committee for {sym}（价格数据缺失）")
             continue
         print(f"\n⚖️ Committee for {sym}...")
+        # 算 metrics + regime 一次，给 analyze_multi_timeframe（人类可读 brief）
+        # 和 format_regime_brief（Quant prompt 用的 REGIME 上下文）共用
+        from core.regime import format_regime_brief
+        from utils.market_metrics import compute_metrics
+
+        df_asset = get_history_data(sym, "2y")
+        metrics = compute_metrics(df_asset)
         market_data = analyze_multi_timeframe(
-            get_history_data(sym, "2y"),
+            df_asset,
             f"{asset.get('display_name', sym)} ({sym})",
         )
+        regime_brief = format_regime_brief(metrics)
         prior = _gather_relevant_insights(store, asset)
         result = run_committee(
             asset=asset,
@@ -300,6 +314,7 @@ def run() -> Dict[str, Any]:
             macro_view=macro_view,
             portfolio_summary=portfolio_summary,
             prior_insights=prior,
+            regime_brief=regime_brief,
         )
         asset_committees[sym] = result
         v = result["verdict"]

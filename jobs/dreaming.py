@@ -36,7 +36,9 @@ from core.consolidation_lock import (
     try_acquire_consolidation_lock,
 )
 from core.memory_store import MemoryStore
+from core.regime import classify_regime
 from utils.exchange_fee import get_history_data
+from utils.market_metrics import compute_metrics
 
 LOOKBACK_DAYS = 90        # Light Sleep 摄入最近 N 天交易
 WINDOWS = [7, 30]         # 回看交易后 N 天的市场表现

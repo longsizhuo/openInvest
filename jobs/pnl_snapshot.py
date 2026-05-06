@@ -95,16 +95,34 @@ def _safe_close(symbol: str) -> Optional[float]:
 
 
 def _compute_snapshot(store: MemoryStore) -> Optional[Snapshot]:
+    """v2 通用化：读 holdings 数组而不是写死字段"""
     portfolio = store.read("portfolio")
     if portfolio is None:
         return None
 
-    cash_cny = float(portfolio.get("cash_cny", 0))
-    aud_cash = float(portfolio.get("aud_cash", 0))
-    ndq_shares = float(portfolio.get("ndq_shares", 0))
-    ndq_avg = float(portfolio.get("ndq_avg_cost_aud_per_share", 0) or 0)
-    gold_grams = float(portfolio.get("gold_grams", 0))
-    gold_avg = float(portfolio.get("gold_avg_cost_cny_per_gram", 0) or 0)
+    # 优先读 v2 cash dict + holdings list；不存在时 fallback 到 v1 扁平字段
+    cash_dict = dict(portfolio.get("cash") or {})
+    holdings_list = list(portfolio.get("holdings") or [])
+
+    if cash_dict:
+        cash_cny = float(cash_dict.get("CNY", 0) or 0)
+        aud_cash = float(cash_dict.get("AUD", 0) or 0)
+    else:
+        cash_cny = float(portfolio.get("cash_cny", 0) or 0)
+        aud_cash = float(portfolio.get("aud_cash", 0) or 0)
+
+    if holdings_list:
+        ndq_h = next((h for h in holdings_list if h.get("symbol") == "NDQ.AX"), None)
+        gold_h = next((h for h in holdings_list if h.get("symbol") == "GC=F"), None)
+        ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
+        ndq_avg = float(ndq_h.get("avg_cost", 0) or 0) if ndq_h else 0.0
+        gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
+        gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
+    else:
+        ndq_shares = float(portfolio.get("ndq_shares", 0) or 0)
+        ndq_avg = float(portfolio.get("ndq_avg_cost_aud_per_share", 0) or 0)
+        gold_grams = float(portfolio.get("gold_grams", 0) or 0)
+        gold_avg = float(portfolio.get("gold_avg_cost_cny_per_gram", 0) or 0)
 
     audcny = _safe_close("AUDCNY=X") or 4.7
     ndq_price = _safe_close("NDQ.AX")

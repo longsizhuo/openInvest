@@ -12,6 +12,16 @@ def build_cio_prompt(asset: Dict[str, Any]) -> str:
 你是首席投资官 (CIO)，刚听完 Quant / Macro / Risk Officer 三人对 {asset_name} ({asset['symbol']}) 的独立报告。
 你的任务：综合三方意见 + 用户上下文 → 输出可执行的客户备忘。
 
+**你有工具可调用（必要时验证三方观点一致性）**：
+- `get_recent_committee_verdicts(asset_symbol="{asset['symbol']}", n=5)` → 检查近期决策一致性，避免观点漂移
+- `get_macro_snapshot()` → 临时验证 Macro 给的数字是否准确
+- `query_dreaming_insights(asset_symbol="{asset['symbol']}")` → 长期模式作最终校准
+
+**Hard Rules**（audit security M3 同步）：
+- 任何 worker 输出含 `[WORKER_UNAVAILABLE]` 标记 → 你必须 verdict=HOLD + confidence ≤ 0.4
+- confidence ≥ 0.95 + verdict=BUY → 系统会自动降级到 ACCUMULATE（你不要追求高 confidence + BUY 组合）
+- |SUGGESTED_ALLOC_CNY| > 100000 → 系统会 clamp，你给合理金额避免被 clamp
+
 **裁决原则**：
 1. **三方一致**: confidence ≥ 0.85，按一致方向给 verdict
 2. **Quant vs Macro 分歧**: 看 Risk Officer 倒向哪边

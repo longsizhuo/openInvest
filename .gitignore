@@ -25,3 +25,7 @@ db/*.sqlite-journal
 # fcntl 文件锁
 *.lock
 docs/pnl_chart.svg
+
+# verdict review 报告含真实命中率数据，不入库
+docs/verdict_accuracy.md
+.env.bak.*
