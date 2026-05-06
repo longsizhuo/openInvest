@@ -1,36 +1,101 @@
 """持仓与策略门面 - 基于 MemoryStore（OpenClaw 风格 markdown 持久化）
 
-职责重新切分（相比旧版）：
+v1 → v2 重构（2026-05-06）：
+- 持仓从「扁平字段」(cash_cny/aud_cash/ndq_shares/gold_*) 改成「cash dict + holdings list」
+- 支持任意币种现金 + 任意 yfinance symbol 持仓
+- 旧字段在数据层由 scripts/migrate_portfolio_to_holdings.py 一次性迁移；本类不再读
+
+职责：
 - 只负责"读 memory + 计算用户状态 + 记录交易"
-- 工资入账（process_income）已迁出 → jobs/payday_check.py
 - 文件 IO 统一走 MemoryStore（带文件锁）
-- 不再直接持有 user_profile.json
+- 工资入账 / 委员会触发等业务逻辑见 jobs/
 """
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from core.memory_store import MemoryStore, _DocTx
+from core.schemas import validate_portfolio
 
+log = logging.getLogger(__name__)
+
+
+# ============ 数据模型 ============
 
 @dataclass
 class UserStatus:
-    cash_cny: float
-    cash_aud: float
-    disposable_for_invest: float
+    """get_user_status() 返回值（用于 daily_report 等场景）"""
+    cash_cny: float                     # CNY 现金（兼容字段：v2 内部从 cash["CNY"] 取）
+    cash_aud: float                     # AUD 现金
+    disposable_for_invest: float        # 本期可投 CNY = max(0, cash_cny - exchange_buffer)，封顶 cap
     risk_level: str
-    portfolio_value: float
-    target_asset: str
+    portfolio_value: float              # 总市值（CNY 折算粗算）
+    target_asset: str                   # 主资产 symbol（target_assets[0]）
     max_single_invest_cny: float
     user_name: str
-    user_email: Optional[str] = None  # 预留，目前从 .env 拿
+    user_email: Optional[str] = None
+    holdings_count: int = 0             # v2 新增：持仓资产数量
 
+
+# ============ HoldingsView：持仓数组的可读写视图 ============
+
+class HoldingsView:
+    """包装 portfolio.holdings list，提供 find / upsert / remove 等便利方法
+
+    所有写操作都直接修改 underlying list（in-place），调用方用 with_portfolio_tx 包住保证锁安全
+    """
+
+    def __init__(self, raw: List[Dict[str, Any]]):
+        self._raw = raw
+
+    def __iter__(self):
+        return iter(self._raw)
+
+    def __len__(self):
+        return len(self._raw)
+
+    def __getitem__(self, idx):
+        return self._raw[idx]
+
+    def all(self) -> List[Dict[str, Any]]:
+        """返回 list 副本（只读快照）"""
+        return list(self._raw)
+
+    def find(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """按 symbol 找单个 holding；找不到返回 None"""
+        return next((h for h in self._raw if h.get("symbol") == symbol), None)
+
+    def upsert(self, symbol: str, **fields) -> Dict[str, Any]:
+        """存在则 update 字段，不存在则插入新 holding。返回最终的 dict"""
+        h = self.find(symbol)
+        if h is None:
+            h = {"symbol": symbol, **fields}
+            self._raw.append(h)
+        else:
+            h.update(fields)
+        return h
+
+    def remove(self, symbol: str) -> bool:
+        """删除 symbol；返回是否真删了"""
+        before = len(self._raw)
+        self._raw[:] = [h for h in self._raw if h.get("symbol") != symbol]
+        return len(self._raw) < before
+
+
+# ============ PortfolioManager ============
 
 class PortfolioManager:
-    """所有数据通过 MemoryStore 读写；调用方不用关心文件布局。"""
+    """持仓门面（v2 通用化）
+
+    属性：
+    - `pm.cash` (Dict[str, float]) — 任意币种现金
+    - `pm.holdings` (HoldingsView) — 任意 yfinance symbol 持仓
+    - `pm.user` / `pm.strategy` (MemoryDoc) — 不动
+    """
 
     def __init__(self, store: Optional[MemoryStore] = None):
         self.store = store or MemoryStore()
@@ -42,118 +107,242 @@ class PortfolioManager:
         if not (user_doc and strategy_doc and portfolio_doc):
             raise FileNotFoundError(
                 "memory/user.md / strategy.md / portfolio.md 缺失。"
-                "请先跑 `python scripts/migrate_profile.py` 迁移旧的 user_profile.json"
+                "首次使用请跑 `python -m scripts.skill init` 初始化",
             )
 
         self.user = user_doc
         self.strategy = strategy_doc
         self.portfolio = portfolio_doc
 
-    # ---------- 读 ----------
+    # ---------- v2 新接口：cash + holdings（自带 v1 read-time fallback）----------
+
+    @property
+    def cash(self) -> Dict[str, float]:
+        """任意币种现金视图：pm.cash["CNY"] / pm.cash["AUD"] 等
+
+        Read-time fallback：portfolio.md 还是 v1（cash_cny/aud_cash）时，
+        自动构造等价的 cash dict 返回，让调用方无感知 v1/v2 状态。
+        """
+        cash = dict(self.portfolio.get("cash") or {})
+        if not cash:
+            # v1 fallback：从扁平字段聚合
+            cny = self.portfolio.get("cash_cny")
+            aud = self.portfolio.get("aud_cash")
+            if cny is not None:
+                cash["CNY"] = float(cny)
+            if aud is not None:
+                cash["AUD"] = float(aud)
+        return cash
+
+    @property
+    def holdings(self) -> HoldingsView:
+        """持仓数组视图：pm.holdings.find('NDQ.AX') 等
+
+        Read-time fallback：portfolio.md 还是 v1 时，从 ndq_shares/gold_grams
+        构造等价的 holdings list（带完整 v2 字段，方便业务代码直接读）。
+        """
+        raw = list(self.portfolio.get("holdings") or [])
+        if not raw:
+            # v1 fallback
+            ndq = float(self.portfolio.get("ndq_shares", 0) or 0)
+            ndq_avg = float(self.portfolio.get("ndq_avg_cost_aud_per_share", 0) or 0)
+            gold = float(self.portfolio.get("gold_grams", 0) or 0)
+            gold_avg = float(self.portfolio.get("gold_avg_cost_cny_per_gram", 0) or 0)
+            if ndq > 0:
+                raw.append({
+                    "symbol": "NDQ.AX", "kind": "etf",
+                    "units": ndq, "unit_label": "股",
+                    "avg_cost": ndq_avg, "cost_currency": "AUD",
+                    "channel": "CommSec",
+                    "display_name": "BetaShares Nasdaq 100 ETF",
+                    "proxy_kind": "direct",
+                })
+            if gold > 0:
+                raw.append({
+                    "symbol": "GC=F", "kind": "metal",
+                    "units": gold, "unit_label": "克",
+                    "avg_cost": gold_avg, "cost_currency": "CNY",
+                    "channel": "浙商积存金",
+                    "display_name": "伦敦金 (浙商积存金)",
+                    "yfinance_proxy": "GC=F",
+                    "proxy_kind": "gold_cny_per_gram",
+                    "sell_fee_pct": 0.0038,
+                })
+        return HoldingsView(raw)
+
+    def cash_amount(self, currency: str) -> float:
+        """快捷读：pm.cash_amount('CNY') → 0.0 if 不存在"""
+        return float(self.cash.get(currency.upper(), 0) or 0)
+
+    def find_holding(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """快捷读：pm.find_holding('NDQ.AX')"""
+        return self.holdings.find(symbol)
+
+    # ---------- 读：用户状态聚合 ----------
 
     def get_user_status(self, current_stock_price: float, exchange_rate: float) -> UserStatus:
-        cash_cny = float(self.portfolio.get("cash_cny", 0))
-        aud_cash = float(self.portfolio.get("aud_cash", 0))
-        ndq_shares = float(self.portfolio.get("ndq_shares", 0))
-        exchange_buffer = float(self.user.get("exchange_buffer_cny", 0))
+        """汇总用户状态 → daily_report / committee 用
 
-        # 多资产策略下从 target_assets 各 cap 取 max 当兜底（每资产独立 cap，
-        # 调用方按当前操作的资产单独取更准）。旧字段 strategy.max_single_invest_cny /
-        # strategy.target_asset 已废弃，保留 .get() 仅为单资产旧 memory 的兼容兜底。
+        注意：v2 通用化后，"主资产"概念变弱，这里仍提供 target_asset 字段（=target_assets[0]）
+        以兼容旧调用方；新调用方建议直接遍历 holdings。
+        """
+        cash_cny = self.cash_amount("CNY")
+        cash_aud = self.cash_amount("AUD")
+        exchange_buffer = float(self.user.get("exchange_buffer_cny", 0) or 0)
+
         target_assets = list(self.strategy.get("target_assets", []) or [])
         if target_assets:
             max_single = max(
                 float(t.get("max_single_invest_cny", 0) or 0) for t in target_assets
             ) or 10000.0
-            primary_asset = str(target_assets[0].get("symbol", "NDQ.AX"))
+            primary_asset = str(target_assets[0].get("symbol", ""))
         else:
-            max_single = float(self.strategy.get("max_single_invest_cny", 10000))
-            primary_asset = str(self.strategy.get("target_asset", "NDQ.AX"))
+            max_single = float(self.strategy.get("max_single_invest_cny", 10000) or 10000)
+            primary_asset = str(self.strategy.get("target_asset", ""))
 
-        # 持仓市值（粗算 AUD->CNY，黄金估值由调用方负责）
-        stock_val_cny = ndq_shares * current_stock_price * exchange_rate
-        total_portfolio = stock_val_cny + cash_cny + aud_cash * exchange_rate
+        # 总市值粗算：所有 holding 用 cost_currency 和 avg_cost 估算
+        # （真实行情应该由调用方传，这里只用 cost 作为兜底）
+        # 实际生产路径走 utils/quotes.get_quote 拉实时价
+        portfolio_value = cash_cny + cash_aud * exchange_rate
+        for h in self.holdings:
+            if h.get("is_tracking_only"):
+                continue   # 追踪仓不计入资产
+            units = float(h.get("units", 0) or 0)
+            avg = float(h.get("avg_cost", 0) or 0)
+            ccy = str(h.get("cost_currency", "CNY"))
+            value_local = units * avg
+            # CNY 直接加；AUD 走汇率；其他币种这里粗算用 1:1（v1 行为对 NDQ 是用 ndq_price * rate，迁移后调用方可补）
+            if ccy == "CNY":
+                portfolio_value += value_local
+            elif ccy == "AUD":
+                # 兼容旧 NDQ 估值路径：用 current_stock_price 而不是 avg_cost
+                if h.get("symbol") == "NDQ.AX":
+                    portfolio_value += units * current_stock_price * exchange_rate
+                else:
+                    portfolio_value += value_local * exchange_rate
+            # 其他币种暂不折算（PM 评审：v1 砍多币种汇率折算）
 
-        # 本期可投资金 = 现金 - 周转金，封顶 max_single
         available = max(0.0, cash_cny - exchange_buffer)
         disposable = min(available, max_single)
 
         return UserStatus(
             cash_cny=cash_cny,
-            cash_aud=aud_cash,
+            cash_aud=cash_aud,
             disposable_for_invest=disposable,
             risk_level=str(self.user.get("risk_tolerance", "Balanced")),
-            portfolio_value=total_portfolio,
+            portfolio_value=portfolio_value,
             target_asset=primary_asset,
             max_single_invest_cny=max_single,
             user_name=str(self.user.get("display_name", "Anonymous")),
+            holdings_count=len([h for h in self.holdings if not h.get("is_tracking_only")]),
         )
 
     def get_processed_emails(self) -> List[str]:
         return list(self.store.state_get("processed_emails", []))
 
-    # ---------- 写 ----------
-    #
-    # 所有 portfolio 修改都走 store.transaction("portfolio") 单锁闭包，避免
-    # TOCTOU/Lost Update：之前是先 update_fields 再 _refresh_portfolio_body
-    # 两次独立锁，中间另一进程能插入造成丢更新。
-    #
-    # 外部调用方（NapCat bot 等）通过 with_portfolio_tx() 也能拿到同样的安全
-    # 闭包，退出 with 自动重渲染 body + atomic 写入。
+    # ---------- 写：单锁 RMW 闭包 ----------
 
     @contextmanager
     def with_portfolio_tx(self) -> Iterator[_DocTx]:
-        """对外暴露的 portfolio RMW 闭包。
+        """对外暴露的 portfolio RMW 闭包
 
         用法：
             with pm.with_portfolio_tx() as p:
-                p["cash_cny"] = float(p.get("cash_cny", 0)) + amount
-                # p["ndq_shares"] = ...
-            # 退出 with 自动：1) 重渲染 body 2) atomic write
-            pm._reload()  # 让 pm.portfolio 视图也跟上
+                # 改 cash
+                cash = dict(p.get("cash") or {})
+                cash["CNY"] = cash.get("CNY", 0) + amount
+                p["cash"] = cash
+                # 改 holdings（list of dict）
+                holdings = list(p.get("holdings") or [])
+                # ... 找/改/插入 ...
+                p["holdings"] = holdings
+                # schema_version 必须保留
+                p["schema_version"] = 2
+            # 退出 with 自动: 1) schema validate 2) body 重渲染 3) atomic write
+            pm._reload()  # 刷新 self.portfolio 视图
 
-        想保证多字段联动写不会被并发进程踩，所有改动必须放在同一个 with 里——
-        分开两次 with 又退化成 TOCTOU 窗口。
+        commit-on-success：with 块内抛异常 → 整个写不会落盘（已改的 metadata 丢弃）。
         """
         with self.store.transaction("portfolio") as p:
+            # 进 with 前自动 v1→v2 fallback（让调用方直接拿到 cash + holdings）
+            _ensure_v2_inplace(p)
             yield p
-            p.set_body(_render_portfolio_body(p))
+            # commit 前：清理 v1 旧字段 + 标记 schema_version=2 + 校验 + 渲染 body
+            for k in ("cash_cny", "aud_cash", "ndq_shares",
+                      "ndq_avg_cost_aud_per_share",
+                      "gold_grams", "gold_avg_cost_cny_per_gram"):
+                p.metadata.pop(k, None)
+            p["schema_version"] = 2
+            try:
+                validate_portfolio(dict(p.metadata))
+            except Exception as e:
+                log.error(f"with_portfolio_tx schema validate failed: {e}")
+                raise
+            p.set_body(_render_portfolio_body_v2(p))
 
     def update_after_invest(self, invest_cny: float) -> None:
-        """daily_report 在用户实际买入后调用（目前是手动操作，先留接口）"""
+        """daily_report 在用户实际买入后调用（手动操作时留接口）"""
         with self.with_portfolio_tx() as p:
-            p["cash_cny"] = float(p.get("cash_cny", 0)) - invest_cny
+            cash = dict(p.get("cash") or {})
+            cash["CNY"] = float(cash.get("CNY", 0) or 0) - invest_cny
+            p["cash"] = cash
         self._reload()
 
     def record_external_trade(self, trade: dict) -> None:
-        """从 CommSec 邮件解析出的成交回报 → 更新 portfolio + 历史 + 已处理邮件"""
-        symbol = str(trade.get("symbol", ""))
-        units = float(trade.get("units", 0))
+        """从 CommSec 邮件解析出的成交回报 → 更新 holdings + cash + history + processed_emails
+
+        v2 通用化：trade dict 含 symbol/units/total_amount/currency/action/email_id/...
+        upsert holding by symbol；cash[currency] 扣减/增加。
+        """
+        symbol = str(trade.get("symbol", "")).strip()
+        if not symbol:
+            log.warning(f"record_external_trade: 空 symbol，跳过 {trade}")
+            return
+
+        units = float(trade.get("units", 0) or 0)
         action = str(trade.get("action", "")).lower()
-        amount = float(trade.get("total_amount", 0))
-        currency = str(trade.get("currency", "AUD"))
-        is_ndq = "NDQ" in symbol
+        amount = float(trade.get("total_amount", 0) or 0)
+        currency = str(trade.get("currency", "")).strip().upper() or "AUD"
+        kind = trade.get("kind") or _guess_kind_from_symbol(symbol)
 
-        # portfolio 改动 + body 重渲染在单一锁内完成
         with self.with_portfolio_tx() as p:
-            ndq_shares = float(p.get("ndq_shares", 0))
-            aud_cash = float(p.get("aud_cash", 0))
+            holdings = list(p.get("holdings") or [])
+            cash = dict(p.get("cash") or {})
+
+            # 找现有 holding
+            target = next((h for h in holdings if h.get("symbol") == symbol), None)
+            cur_units = float(target.get("units", 0) or 0) if target else 0.0
+            cur_avg = float(target.get("avg_cost", 0) or 0) if target else 0.0
+
             if action == "bought":
-                if is_ndq:
-                    ndq_shares += units
-                if currency == "AUD":
-                    aud_cash -= amount
+                new_units = cur_units + units
+                # 加权均价（cur_units==0 时退化为本次价）
+                new_avg = (
+                    (cur_avg * cur_units + amount) / new_units if new_units else (amount / units if units else 0)
+                )
+                if target:
+                    target["units"] = new_units
+                    target["avg_cost"] = round(new_avg, 4)
+                else:
+                    holdings.append({
+                        "symbol": symbol,
+                        "kind": kind,
+                        "units": new_units,
+                        "unit_label": "股" if kind in ("equity", "etf") else "share",
+                        "avg_cost": round(new_avg, 4),
+                        "cost_currency": currency,
+                        "channel": trade.get("channel"),
+                    })
+                cash[currency] = float(cash.get(currency, 0) or 0) - amount
             elif action == "sold":
-                if is_ndq:
-                    ndq_shares = max(0.0, ndq_shares - units)
-                if currency == "AUD":
-                    aud_cash += amount
-            p["ndq_shares"] = ndq_shares
-            p["aud_cash"] = aud_cash
+                if target:
+                    target["units"] = max(0.0, cur_units - units)
+                cash[currency] = float(cash.get(currency, 0) or 0) + amount
 
-        # 历史 jsonl 是 append-only 独立文件，自带锁，不需要在 portfolio 锁内
-        self.store.append_history(trade)
+            p["holdings"] = holdings
+            p["cash"] = cash
 
+        # processed_emails 在 transaction 外（独立 state 文件）
         email_id = trade.get("email_id")
         if email_id:
             processed = self.get_processed_emails()
@@ -161,23 +350,24 @@ class PortfolioManager:
                 processed.append(email_id)
                 self.store.state_set("processed_emails", processed)
 
+        # history.jsonl 也在 transaction 外（独立 append-only 锁）
+        self.store.append_history(trade)
         self._reload()
-        print(
-            f"💾 已记录外部交易: {action} {units} {symbol} "
-            f"(成本: ${amount:.2f} {currency})"
-        )
 
     def add_income(self, net_income_cny: float, payday_label: str) -> None:
-        """payday_check job 调用 - 把月度净收入加进 cash_cny，并更新 last_payday"""
+        """payday_check job 调用 - CNY 月度净收入入账"""
         with self.with_portfolio_tx() as p:
-            p["cash_cny"] = float(p.get("cash_cny", 0)) + net_income_cny
-            new_cash = float(p["cash_cny"])
+            cash = dict(p.get("cash") or {})
+            cash["CNY"] = float(cash.get("CNY", 0) or 0) + net_income_cny
+            p["cash"] = cash
+            new_cash = cash["CNY"]
 
-        # user.md 是另一份文件，自己一次单锁 update 即可
         self.store.update_fields("user", last_payday=payday_label)
         self._reload()
-        print(f"💰 [Payday {payday_label}] 净收入 ¥{net_income_cny:,.0f} 已入账，"
-              f"现金余额 ¥{new_cash:,.2f}")
+        log.info(
+            f"💰 [Payday {payday_label}] 净收入 ¥{net_income_cny:,.0f} 已入账，"
+            f"现金余额 ¥{new_cash:,.2f}",
+        )
 
     # ---------- 内部 ----------
 
@@ -188,33 +378,106 @@ class PortfolioManager:
         self.portfolio = self.store.read("portfolio")  # type: ignore[assignment]
 
 
-def _render_portfolio_body(p) -> str:
-    """根据 portfolio frontmatter 重渲染 body。
+# ============ 工具函数 ============
 
-    给 transaction 闭包用：在锁内拿着 _DocTx 直接算出最新 body，避免之前
-    "update_fields → 释放锁 → _refresh_portfolio_body 再拿锁" 的两段式（中
-    间会被插入）。
+def _ensure_v2_inplace(p) -> None:
+    """transaction 入口处 in-place 把 v1 数据转 v2（仅修改 tx.metadata）
 
-    p 可以是 _DocTx 或 MemoryDoc，只要支持 .get(key, default) 即可。
+    这样 with 块内 caller 拿到的 cash / holdings 已经是 v2 形态，
+    退出时 commit 写回的也是 v2（旧字段被 with_portfolio_tx 退出逻辑清掉）。
     """
-    cash_cny = float(p.get("cash_cny", 0))
-    aud_cash = float(p.get("aud_cash", 0))
-    ndq_shares = float(p.get("ndq_shares", 0))
-    gold_grams = float(p.get("gold_grams", 0) or 0)
-    gold_avg_cost = float(p.get("gold_avg_cost_cny_per_gram", 0) or 0)
-    gold_line = (
-        f"- **黄金持仓 (浙商积存金)**: {gold_grams:.4f} 克"
-        + (f"，均价 ¥{gold_avg_cost:.2f}/克" if gold_avg_cost else "")
-    ) if gold_grams else "- **黄金持仓 (浙商积存金)**: 0"
-    return f"""# 当前持仓
+    cash = dict(p.get("cash") or {})
+    if not cash:
+        cny = p.get("cash_cny")
+        aud = p.get("aud_cash")
+        if cny is not None:
+            cash["CNY"] = float(cny)
+        if aud is not None:
+            cash["AUD"] = float(aud)
+        if cash:
+            p["cash"] = cash
 
-- **CNY 现金**: ¥{cash_cny:,.2f}
-- **AUD 现金**: ${aud_cash:,.2f}
-- **NDQ.AX 持仓**: {ndq_shares} 股
-{gold_line}
+    holdings = list(p.get("holdings") or [])
+    if not holdings:
+        ndq = float(p.get("ndq_shares", 0) or 0)
+        ndq_avg = float(p.get("ndq_avg_cost_aud_per_share", 0) or 0)
+        gold = float(p.get("gold_grams", 0) or 0)
+        gold_avg = float(p.get("gold_avg_cost_cny_per_gram", 0) or 0)
+        if ndq > 0:
+            holdings.append({
+                "symbol": "NDQ.AX", "kind": "etf", "units": ndq, "unit_label": "股",
+                "avg_cost": ndq_avg, "cost_currency": "AUD", "channel": "CommSec",
+                "display_name": "BetaShares Nasdaq 100 ETF", "proxy_kind": "direct",
+            })
+        if gold > 0:
+            holdings.append({
+                "symbol": "GC=F", "kind": "metal", "units": gold, "unit_label": "克",
+                "avg_cost": gold_avg, "cost_currency": "CNY", "channel": "浙商积存金",
+                "display_name": "伦敦金 (浙商积存金)",
+                "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
+                "sell_fee_pct": 0.0038,
+            })
+        if holdings:
+            p["holdings"] = holdings
 
-## 说明
 
-此文件由 daily_report / commsec_sync / payday_check / napcat_bot 自动更新。
-不要手动编辑——如需调整，请走 jobs/manual_adjust.py 或 NapCat /cmd 命令。
-"""
+def _guess_kind_from_symbol(symbol: str) -> str:
+    """根据 symbol 启发式猜测 kind（CommSec 邮件 trade dict 没显式给 kind 时用）"""
+    s = symbol.upper()
+    if s.endswith(".AX") or s.endswith(".HK") or "." in s:
+        return "equity"
+    if "-USD" in s or s in ("BTC", "ETH"):
+        return "crypto"
+    if s in ("GC=F", "SI=F", "GOLD"):
+        return "metal"
+    return "equity"
+
+
+def _render_portfolio_body_v2(p) -> str:
+    """v2 portfolio.md body 渲染。p 是 _DocTx（也支持 MemoryDoc）"""
+    cash = dict(p.get("cash") or {})
+    holdings = list(p.get("holdings") or [])
+
+    lines = ["# 当前持仓", ""]
+
+    if cash:
+        lines.append("## 现金")
+        for ccy, amt in sorted(cash.items()):
+            lines.append(f"- **{ccy}**: {amt:,.2f}")
+        lines.append("")
+
+    real_holdings = [h for h in holdings if not h.get("is_tracking_only")]
+    tracking_holdings = [h for h in holdings if h.get("is_tracking_only")]
+
+    if real_holdings:
+        lines.append("## 持仓")
+        for h in real_holdings:
+            unit = h.get("unit_label", "share")
+            label = h.get("display_name") or h["symbol"]
+            avg = float(h.get("avg_cost", 0) or 0)
+            ccy = h.get("cost_currency", "")
+            line = f"- **{label}** (`{h['symbol']}`): {h.get('units', 0)} {unit}"
+            if avg:
+                line += f"，均价 {avg:.2f} {ccy}/{unit}"
+            channel = h.get("channel")
+            if channel:
+                line += f"（渠道 {channel}）"
+            lines.append(line)
+        lines.append("")
+
+    if tracking_holdings:
+        lines.append("## 追踪仓（仅观察，不计 P&L）")
+        for h in tracking_holdings:
+            label = h.get("display_name") or h["symbol"]
+            lines.append(f"- 🔍 **{label}** (`{h['symbol']}`)")
+        lines.append("")
+
+    if not real_holdings and not tracking_holdings:
+        lines.extend(["（暂无持仓）", ""])
+
+    lines.extend([
+        "## 说明",
+        "",
+        f"_schema_version: {p.get('schema_version', 2)}_  此文件由 daily_report / commsec_sync / payday_check / web_api / napcat_bot 自动更新；不要手动编辑。",
+    ])
+    return "\n".join(lines) + "\n"

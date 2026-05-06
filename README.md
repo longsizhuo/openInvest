@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
-[⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
+[⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [🚀 30 分钟 fork](docs/QUICK_START.md) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
 
 </div>
 ---
@@ -129,16 +129,37 @@ Worker 之间能看见什么、看不见什么，全部在 `core/committee.py` �
 
 ```markdown
 ---
-cash_cny: 18290.51
-gold_grams: 123.92
-gold_avg_cost_cny_per_gram: 1008.79
-ndq_shares: 128
+schema_version: 2
+cash:
+  CNY: 18290.51
+  AUD: 1000.00
+holdings:
+  - symbol: NDQ.AX
+    kind: etf
+    units: 128
+    unit_label: 股
+    avg_cost: 38.50
+    cost_currency: AUD
+    channel: CommSec
+  - symbol: GC=F
+    kind: metal
+    units: 123.92
+    unit_label: 克
+    avg_cost: 1008.79
+    cost_currency: CNY
+    channel: 浙商积存金
+    yfinance_proxy: GC=F
+    proxy_kind: gold_cny_per_gram
 ---
 # 当前持仓
-- CNY 现金: ¥18,290.51
+- CNY 现金: ¥18,290.51 / AUD 现金: $1,000.00
 - 黄金: 123.92 克，均价 ¥1008.79/g
 - NDQ.AX: 128 股
 ```
+
+**v2 通用化**（2026-05）：cash 从 `cash_cny`/`aud_cash` 扁平字段升级为多币种 dict；
+holdings 从 `ndq_shares`/`gold_grams` 升级为 list[dict]。任意 yfinance symbol 都能
+plug-and-play，不用改代码。v1 portfolio.md 自动 read-time fallback 兼容。
 
 - Frontmatter 给代码读写，atomic
 - Body 给 LLM 直接读，不需要二次格式化
@@ -179,7 +200,7 @@ LLM 没有跨会话记忆。你 6 个月前因为过度集中持仓被 Risk Offi
 并发压测：
 
 ```
-50 线程并发 cash_cny += 1   →  最终 delta = 50.0   (0 lost updates)
+50 线程并发 cash["CNY"] += 1   →  最终 delta = 50.0   (0 lost updates)
 20 轮 scheduler 扣款 + napcat 存款 race  →  delta 精确 = -37880  (0 lost updates)
 ```
 
@@ -244,9 +265,65 @@ uv sync --frozen --python 3.13
 # 跑交互式 onboarding（5 个问题）
 .venv/bin/python -m scripts.skill init
 
-python -m jobs.daily_report      # 跑一次完整委员会 (~6 min)
+python -m jobs.daily_report      # 跑一次完整委员会 (v3 真并行 ~15-60s)
 python -m scheduler.runner       # 全套 cron 持续跑
 ```
+
+### 🔀 投资委员会的两条执行路径
+
+openInvest 的 "Quant + Risk + Macro + CIO 投资委员会" 有两套实现，**结果可能不同**：
+
+| 路径 | 触发 | 跑什么 | 模型 / 成本 | 真 subagent? |
+|------|------|--------|------------|-------------|
+| **Skill** | Claude / OpenClaw 用户用 `~/.claude/skills/invest/run.sh prepare_committee` | 用户的 Claude 当 coordinator，spawn 4 个独立 Claude subagent | Claude 4 / 由用户订阅承担 | ✅ 真 Agent Teams（subprocess 隔离）|
+| **Web / Cron** | `POST /api/committee/run` 或 cron 自动跑 daily_report | 后端 4 个 `SDKAgent` (DeepSeek) + ThreadPoolExecutor 并行 | DeepSeek / ¥0.01-0.03 一次 | ❌ 同进程多线程（信息分隔但非 SDK subagent）|
+
+**两条同 prompt 不同实现的好处**：
+- Skill 路径让用户的 Claude 跑——项目本身**零 API 成本**
+- Web/Cron 走 DeepSeek——cron 每日跑成本可控
+- 可以对比同问题两套 verdict，**验证模型偏差**
+
+详见 [skill/SKILL.md](skill/SKILL.md)。
+
+---
+
+### Option D · Web API + 自带 GUI（推荐：30 秒 quick start）
+
+```bash
+git clone https://github.com/longsizhuo/openInvest && cd openInvest
+uv sync --frozen --python 3.13
+cp .env.example .env  # 填 DEEPSEEK_API_KEY
+
+# 一次性拉前端 dist（130 KB，从 invest-gui Releases 拉）
+uv run python -m scripts.sync_gui_dist
+
+# 启动后端（自带 GUI mount）
+uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+
+# 浏览器开 http://localhost:8765
+#   /                完整 GUI（主面板 / 流水 / 策略 / 委员会 / 系统）
+#   /api/...         REST API（同源，无 CORS）
+#   /docs            OpenAPI Swagger
+```
+
+**升级 GUI**：重跑 `python -m scripts.sync_gui_dist` 拉最新（每次 invest-gui push main，GitHub Action 自动发新 release）。
+
+**纯 API 模式**（不要 GUI）：跳过 sync 脚本即可，FastAPI 检测到 `static/` 不存在会自动只 serve API。
+
+### Option E · 生产部署（Caddy 反代 + Cloudflare Access）
+
+适合自托管想公网访问的高级用户：
+- `Caddy` 单域名 `invest.example.com`：`/api/*` 反代 `127.0.0.1:8765`，`/*` `file_server /srv/invest-gui/`
+- Cloudflare Access 在域名层把关（仅授权邮箱）
+- `systemd/invest-web.service` 仓库自带，`sudo cp` 到 `/etc/systemd/system/` + `enable --now`
+- 详见 [SKILL.md](skill/SKILL.md) 的 v0.5 文档
+
+前端 dist 来源：
+
+| 方式 | 适合 |
+|------|------|
+| `python -m scripts.sync_gui_dist` 拉到 `static/` | 单机一键跑，FastAPI 自带 GUI mount |
+| 在 [longsizhuo/invest-gui](https://github.com/longsizhuo/invest-gui) clone + `pnpm build` 自部署 `/srv/invest-gui/` | 高度自定义、想改 UI 的开发者 |
 
 ---
 

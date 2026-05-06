@@ -39,9 +39,12 @@ jobs:
 
       - name: Smoke import check
         # 确保关键模块没有 import 错误
+        # v2 重构（2026-05）：_render_portfolio_body → _render_portfolio_body_v2 (cash dict + holdings list)
         run: |
           uv run python -c "from core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
           uv run python -c "from core.memory_store import MemoryStore, _atomic_write_text"
-          uv run python -c "from core.portfolio_manager import PortfolioManager, _render_portfolio_body"
+          uv run python -c "from core.portfolio_manager import PortfolioManager, _render_portfolio_body_v2"
           uv run python -c "from jobs.pnl_snapshot import _is_trading_window, _redact_token_in"
           uv run python -c "from core.benchmarks import BENCHMARKS, get_all_series"
+          uv run python -c "from utils.fx import get_fx_rate, cash_total_in_base"
+          uv run python -c "from connectors.web_api import app"

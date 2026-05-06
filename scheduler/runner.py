@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -36,8 +35,12 @@ ROOT = Path(__file__).parent.parent
 JOBS_DIR = ROOT / "jobs"
 DB_DIR = ROOT / "db"
 DB_DIR.mkdir(parents=True, exist_ok=True)
-JOBS_DB_URL = f"sqlite:///{DB_DIR / 'jobs.sqlite'}"
 RUN_LOG_DB = DB_DIR / "jobs.sqlite"
+# 不再用 SQLAlchemyJobStore 持久化 APScheduler job：YAML 是唯一事实来源，
+# 启动时 register_jobs 会带 replace_existing=True 全量重建。早期版本试图
+# 持久化 _wrap_job 的闭包，pickle 报错导致 daemon 启动直接崩 —— 这是用户
+# 从未收到自动邮件的根因。run_log（job_runs 表）走另一条手写 sqlite 路径，
+# 不受这个改动影响。
 
 logging.basicConfig(
     level=logging.INFO,
@@ -130,10 +133,8 @@ def _wrap_job(job_name: str, entry: str) -> Callable[[], None]:
 # ---------- scheduler 管理 ----------
 
 def build_scheduler() -> BackgroundScheduler:
-    sched = BackgroundScheduler(
-        jobstores={"default": SQLAlchemyJobStore(url=JOBS_DB_URL)},
-        timezone="Asia/Shanghai",
-    )
+    # 默认 MemoryJobStore，YAML 每次启动重建，无需持久化
+    sched = BackgroundScheduler(timezone="Asia/Shanghai")
     return sched
 
 

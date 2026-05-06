@@ -61,16 +61,18 @@ def _print_json(obj: Any) -> None:
 # ---------- status ----------
 
 def cmd_status(_: argparse.Namespace) -> None:
+    """v2 通用化：从 cash dict + holdings list 读，对外保持原 JSON 结构兼容老 agent"""
     from utils.gold_price import get_gold_snapshot
-    store = MemoryStore()
-    user = store.read("user")
-    portfolio = store.read("portfolio")
+    from core.portfolio_manager import PortfolioManager
+    pm = PortfolioManager()
 
-    cash_cny = float(portfolio.get("cash_cny", 0))
-    aud_cash = float(portfolio.get("aud_cash", 0))
-    ndq_shares = float(portfolio.get("ndq_shares", 0))
-    gold_grams = float(portfolio.get("gold_grams", 0))
-    gold_avg = float(portfolio.get("gold_avg_cost_cny_per_gram", 0))
+    cash_cny = pm.cash_amount("CNY")
+    aud_cash = pm.cash_amount("AUD")
+    ndq_h = pm.holdings.find("NDQ.AX")
+    gold_h = pm.holdings.find("GC=F")
+    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
+    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
+    gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
 
     ndq_price = _safe_close("NDQ.AX")
     audcny = _safe_close("AUDCNY=X")
@@ -79,13 +81,15 @@ def cmd_status(_: argparse.Namespace) -> None:
 
     out = {
         "user": {
-            "name": user.get("display_name") if user else "unknown",
-            "risk_tolerance": user.get("risk_tolerance") if user else None,
+            "name": pm.user.get("display_name") if pm.user else "unknown",
+            "risk_tolerance": pm.user.get("risk_tolerance") if pm.user else None,
         },
         "cash": {
             "cny": round(cash_cny, 2),
             "aud": round(aud_cash, 2),
             "aud_in_cny": round(aud_cash * audcny, 2),
+            # v2 通用：列出所有币种（其他 agent 想读非 CNY/AUD 时方便）
+            "all_currencies": pm.cash,
         },
         "ndq": {
             "shares": ndq_shares,
@@ -100,6 +104,14 @@ def cmd_status(_: argparse.Namespace) -> None:
             "pnl_cny": round((gold_now - gold_avg) * gold_grams, 2) if gold_avg else 0,
             "pnl_pct": round(((gold_now / gold_avg) - 1) * 100, 2) if gold_avg > 0 else 0,
         },
+        # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
+        "all_holdings": [
+            {k: h[k] for k in (
+                "symbol", "kind", "units", "unit_label", "avg_cost",
+                "cost_currency", "channel", "display_name", "is_tracking_only",
+            ) if k in h}
+            for h in pm.holdings
+        ],
         "total_assets_cny": round(
             cash_cny + aud_cash * audcny
             + ndq_shares * ndq_price * audcny
@@ -169,18 +181,22 @@ def cmd_history(args: argparse.Namespace) -> None:
 # ---------- what_if ----------
 
 def cmd_what_if(args: argparse.Namespace) -> None:
+    """v2 通用化：从 PortfolioManager 读 cash + holdings"""
     from utils.gold_price import get_gold_snapshot
-    store = MemoryStore()
-    portfolio = store.read("portfolio")
-    if portfolio is None:
-        _print_json({"error": "portfolio.md missing"})
+    from core.portfolio_manager import PortfolioManager
+    try:
+        pm = PortfolioManager()
+    except FileNotFoundError as e:
+        _print_json({"error": str(e)})
         return
 
-    cash_cny = float(portfolio.get("cash_cny", 0))
-    aud_cash = float(portfolio.get("aud_cash", 0))
-    ndq_shares = float(portfolio.get("ndq_shares", 0))
-    gold_grams = float(portfolio.get("gold_grams", 0))
-    gold_avg = float(portfolio.get("gold_avg_cost_cny_per_gram", 0))
+    cash_cny = pm.cash_amount("CNY")
+    aud_cash = pm.cash_amount("AUD")
+    ndq_h = pm.holdings.find("NDQ.AX")
+    gold_h = pm.holdings.find("GC=F")
+    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
+    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
+    gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
 
     snap = get_gold_snapshot(offset_pct=0.0)
     cur_gold = snap.spot_cny_per_gram if snap else 1000.0
@@ -283,21 +299,30 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         _print_json({"error": f"asset {args.symbol} not in strategy.target_assets"})
         return
 
+    # 算 metrics + regime 一次，给 analyze_multi_timeframe 和 format_regime_brief 共用
+    from core.regime import format_regime_brief
+    from utils.market_metrics import compute_metrics
+
+    df_target = get_history_data(target["symbol"], "2y")
+    metrics = compute_metrics(df_target)
     market = analyze_multi_timeframe(
-        get_history_data(target["symbol"], "2y"),
+        df_target,
         f"{target.get('display_name', target['symbol'])} ({target['symbol']})",
     )
+    regime_brief = format_regime_brief(metrics)
     macro_data = get_macro_data()
     snap = get_gold_snapshot(offset_pct=0.0)
     gold_ctx = format_gold_report(snap) if (snap and target.get("type") == "metal") else ""
 
-    # 详细的 portfolio 上下文给 Risk Officer
-    cash_cny = float(pm.portfolio.get("cash_cny", 0))
-    aud_cash = float(pm.portfolio.get("aud_cash", 0))
-    ndq_shares = float(pm.portfolio.get("ndq_shares", 0))
-    ndq_cost = float(pm.portfolio.get("ndq_avg_cost_aud_per_share", 0))
-    gold_grams = float(pm.portfolio.get("gold_grams", 0))
-    gold_cost = float(pm.portfolio.get("gold_avg_cost_cny_per_gram", 0))
+    # 详细的 portfolio 上下文给 Risk Officer (v2 通用化读)
+    cash_cny = pm.cash_amount("CNY")
+    aud_cash = pm.cash_amount("AUD")
+    ndq_h = pm.holdings.find("NDQ.AX")
+    gold_h = pm.holdings.find("GC=F")
+    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
+    ndq_cost = float(ndq_h.get("avg_cost", 0) or 0) if ndq_h else 0.0
+    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
+    gold_cost = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
     buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
     dry_powder = max(0.0, cash_cny - buffer_cny)
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
@@ -332,6 +357,7 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         "portfolio_summary": portfolio_summary,
         "macro_data": macro_data,
         "market_data": market,
+        "regime_brief": regime_brief,  # Claude worker 必须把这个塞进 Quant Round 1/2 prompt
         "gold_snapshot": gold_ctx,
         "prior_insights": insights,
         "prompts": {
@@ -350,6 +376,11 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             "  Round 1 - 独立陈述: Macro (跨资产共享) + Quant + Risk Officer 各自看自己的数据\n"
             "  Round 2 - 横向交流: Quant 看到 Risk 报告后调整 + Risk 看到 Quant 报告后调整\n"
             "  Round 3 - CIO 综合 4 份输出 + portfolio_summary，输出完整 memo\n"
+            "**重要**: 召唤 Quant Round 1 worker 时，必须把 regime_brief 字段塞进 prompt:\n"
+            '  "<paste prompts.quant_round1>\\n\\n# 市场 Regime:\\n<paste regime_brief>'
+            '\\n\\n# 市场数据:\\n<paste market_data>"\n'
+            "Quant Round 2 worker 同样把 regime_brief 重新塞一次，确保它在 cross-challenge 时\n"
+            "仍然受 REGIME 硬保护规则约束（防止震荡市底部被 Risk 带跑改 SIGNAL）。\n"
             "请依次扮演 6 段输出，用以下分隔符：\n"
             "=== MACRO ===\n=== QUANT_R1 ===\n=== RISK_R1 ===\n"
             "=== QUANT_R2 ===\n=== RISK_R2 ===\n=== CIO ===\n"
