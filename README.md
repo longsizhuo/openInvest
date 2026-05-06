@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
-[⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [🚀 30 分钟 fork](docs/QUICK_START.md) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
+[⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [🚀 30 分钟 fork](docs/QUICK_START.md) · [📚 完整 Wiki](docs/wiki/README.md) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
 
 </div>
 ---
