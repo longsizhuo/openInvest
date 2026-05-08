@@ -182,6 +182,33 @@ DOMINANT_RE = re.compile(r"DOMINANT_VIEW:\s*(quant|macro|risk)", re.I)
 ALLOC_RE = re.compile(r"SUGGESTED_ALLOC_CNY:\s*(-?\d+)")
 
 
+# ============ Sanity-check 阈值（单点维护，便于调参）============
+#
+# 统一抽到这里，避免散落 magic number。每条都附"为什么这个数"的来源说明，
+# 否则未来无法判断该改还是不该改。
+#
+# 调参流程：
+#   1. 改这里
+#   2. 同步 docs/wiki/02-agents.md "CIO Sanity Check" 表
+#   3. tests/test_committee_parser.py 跑一遍
+#
+THRESHOLDS = {
+    # confidence ≥ 此值 + BUY 几乎一定是 LLM hallucination（60 天 sample size
+    # 信号统计上不显著，>0.95 的 BUY 历史命中率反而低于 0.7-0.8 区间）
+    "buy_confidence_overdrive": 0.95,
+    # 触发降级后用的保守 confidence（不用 0.85 因为我们要表达"原 LLM 过度自信"
+    # 而非"现在仍较自信"）
+    "buy_confidence_downgrade_to": 0.6,
+
+    # alloc_cny 单笔上限（CNY）。来源：用户每月可投 ~¥10k，单笔超 10x 月度
+    # 节余几乎一定是 LLM 单位错乱（把 10 万写成 100 万）或 prompt injection
+    "alloc_cny_ceiling": 100_000,
+
+    # worker 失败时的最低 confidence floor（worker 不全 → 决议证据不足）
+    "worker_unavailable_confidence_floor": 0.4,
+}
+
+
 def parse_cio_memo(text: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {"raw": text}
     m = VERDICT_RE.search(text)
@@ -193,31 +220,37 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
     m = ALLOC_RE.search(text)
     out["alloc_cny"] = int(m.group(1)) if m else 0
 
-    # Sanity check 1（audit security M3）: 防 prompt injection / LLM 过度自信
-    # confidence ≥ 0.95 + BUY 的组合在统计上不可能（60 天 sample size 信号太弱），
-    # 99% 是 LLM hallucination 或 prompt 被新闻 / 行情字符串污染
-    if out["verdict"] == "BUY" and out["confidence"] >= 0.95:
+    # Sanity check 1: 防 prompt injection / LLM 过度自信
+    confidence_threshold = THRESHOLDS["buy_confidence_overdrive"]
+    confidence_downgrade = THRESHOLDS["buy_confidence_downgrade_to"]
+    if out["verdict"] == "BUY" and out["confidence"] >= confidence_threshold:
         out["_original_verdict"] = "BUY"
         out["_original_confidence"] = out["confidence"]
         out["verdict"] = "ACCUMULATE"
-        out["confidence"] = 0.6
-        print(f"⚠️ parse_cio_memo: 降级 BUY({out['_original_confidence']}) → ACCUMULATE(0.6) "
-              f"防 LLM 过度自信 / prompt injection")
+        out["confidence"] = confidence_downgrade
+        print(
+            f"⚠️ parse_cio_memo: 降级 BUY({out['_original_confidence']}) → "
+            f"ACCUMULATE({confidence_downgrade}) — 防 LLM 过度自信 / prompt injection",
+        )
 
-    # Sanity check 2（audit financial Minor）: alloc_cny 合理性 clamp
-    # LLM 偶发输出无单位数字会被错解读，单笔超过 ¥100k 的提议大概率有问题
-    if abs(out["alloc_cny"]) > 100000:
-        print(f"⚠️ parse_cio_memo: alloc_cny={out['alloc_cny']} 超出合理区间，clamp 到 ±100000")
+    # Sanity check 2: alloc_cny 合理性 clamp
+    alloc_ceiling = THRESHOLDS["alloc_cny_ceiling"]
+    if abs(out["alloc_cny"]) > alloc_ceiling:
+        print(
+            f"⚠️ parse_cio_memo: alloc_cny={out['alloc_cny']} 超出合理区间，"
+            f"clamp 到 ±{alloc_ceiling}",
+        )
         out["_original_alloc"] = out["alloc_cny"]
-        out["alloc_cny"] = max(-100000, min(100000, out["alloc_cny"]))
+        out["alloc_cny"] = max(-alloc_ceiling, min(alloc_ceiling, out["alloc_cny"]))
 
     # Sanity check 3（audit algo M4）: worker 输入失败时 confidence 降级
     # 上游传来的 raw 是 brief，含 macro/quant/risk 内容；如果 brief 里出现 worker
     # unavailable 哨兵，CIO 大概率是在 garbage 上综合
+    floor = THRESHOLDS["worker_unavailable_confidence_floor"]
     if "[WORKER_UNAVAILABLE]" in text:
-        if out["confidence"] > 0.4:
+        if out["confidence"] > floor:
             out["_original_confidence_unavailable"] = out["confidence"]
-            out["confidence"] = 0.4
+            out["confidence"] = floor
             out["verdict"] = "HOLD"
             print("⚠️ parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
                   "强制 verdict=HOLD + confidence≤0.4")

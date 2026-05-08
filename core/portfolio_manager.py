@@ -180,11 +180,19 @@ class PortfolioManager:
 
     # ---------- 读：用户状态聚合 ----------
 
-    def get_user_status(self, current_stock_price: float, exchange_rate: float) -> UserStatus:
+    def get_user_status(
+        self,
+        current_stock_price: Optional[float],
+        exchange_rate: float,
+    ) -> UserStatus:
         """汇总用户状态 → daily_report / committee 用
 
         注意：v2 通用化后，"主资产"概念变弱，这里仍提供 target_asset 字段（=target_assets[0]）
         以兼容旧调用方；新调用方建议直接遍历 holdings。
+
+        current_stock_price=None 表示 NDQ 价完全拉不到（数据源全失败）—— 此时 NDQ 持仓
+        从总市值里剔除而不是用 0 兜底。**禁止传 0 当 sentinel**，0 会让"NDQ 估值=0"
+        被 Risk Officer 误读为"集中度爆表，建议清仓"。
         """
         cash_cny = self.cash_amount("CNY")
         cash_aud = self.cash_amount("AUD")
@@ -217,6 +225,10 @@ class PortfolioManager:
             elif ccy == "AUD":
                 # 兼容旧 NDQ 估值路径：用 current_stock_price 而不是 avg_cost
                 if h.get("symbol") == "NDQ.AX":
+                    if current_stock_price is None:
+                        # NDQ 价拿不到 → 该资产从总市值里剔除（**不用 0 兜底**，
+                        # 0 会让 Risk Officer 误判"集中度爆表"）
+                        continue
                     portfolio_value += units * current_stock_price * exchange_rate
                 else:
                     portfolio_value += value_local * exchange_rate

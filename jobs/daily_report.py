@@ -38,6 +38,13 @@ load_dotenv()
 # 显式标注"数据陈旧 N 天"，让 LLM 不要在过期价上面编今天的策略。
 STALE_THRESHOLD_DAYS = int(os.getenv("INVEST_PRICE_STALE_DAYS", "3"))
 
+# 硬熔断阈值：超过这个天数的数据**禁止参与决策**。
+# 阈值不同的层次：
+#   STALE_THRESHOLD_DAYS (3) — 软警告，注入 LLM 上下文里说"数据有点旧"
+#   STALE_HARD_ABORT_DAYS (7) — 硬熔断，所有资产都旧到这程度 → daily_report 整个跳过
+# 设 7 天因为周末 + 节假日最多 4-5 天没数据是正常的；超过一周是数据源真的挂了。
+STALE_HARD_ABORT_DAYS = int(os.getenv("INVEST_HARD_ABORT_STALE_DAYS", "7"))
+
 _MARKET_STORE = MarketStore()
 
 
@@ -181,14 +188,33 @@ def run() -> Dict[str, Any]:
     data_warnings: list[str] = []   # 累积价格陈旧/缺失的警告，注入 portfolio_summary
     skipped_assets: set[str] = set()  # 完全没价的资产 → 跳过该资产 committee
 
+    # 硬熔断：每个资产的"数据可信度"打标，最后用来判断是否所有资产都崩了
+    # status: "fresh" | "stale" (软警告内) | "very_stale" (硬熔断阈值外) | "missing"
+    asset_freshness: Dict[str, str] = {}
+
+    def _classify_freshness(price: Optional[float], age_days: Optional[int]) -> str:
+        if price is None:
+            return "missing"
+        if age_days is None or age_days < STALE_THRESHOLD_DAYS:
+            return "fresh"
+        if age_days < STALE_HARD_ABORT_DAYS:
+            return "stale"
+        return "very_stale"
+
+    # current_price 用 Optional[float]：None = NDQ 价拉不到或纯 CNY 组合
+    # 下游 get_user_status / 估值算式必须显式 gate None，**禁止 0 兜底**
+    # （0 会让"NDQ 估值=0"被 Risk Officer 误读为"集中度爆表，建议清仓"）
+    current_price: Optional[float] = None
+
     ndq_entry = next((a for a in target_assets if a.get("symbol") == "NDQ.AX"), None)
     if ndq_entry:
         ndq_price, ndq_age = _get_last_close("NDQ.AX", "NDQ.AX")
+        asset_freshness["NDQ.AX"] = _classify_freshness(ndq_price, ndq_age)
         if ndq_price is None:
             print("⛔ NDQ.AX 价格获取完全失败（scrape + yfinance + DB + CSV 均空），跳过 NDQ committee")
             store.dream_event({"phase": "price_fetch_failed", "symbol": "NDQ.AX", "date": today})
             skipped_assets.add("NDQ.AX")
-            current_price = 0.0  # 仅给后面 cash_aud * rate 用，但 NDQ 持仓估值会被跳过
+            # current_price 保持 None，下游显式跳过 NDQ 估值
         else:
             current_price = ndq_price
             stale_msg = _format_staleness("NDQ.AX", ndq_age)
@@ -196,8 +222,7 @@ def run() -> Dict[str, Any]:
                 data_warnings.append(stale_msg)
                 store.dream_event({"phase": "price_stale", "symbol": "NDQ.AX",
                                    "age_days": ndq_age, "date": today})
-    else:
-        current_price = 0.0  # 纯 CNY 组合，NDQ 持仓本来就 0
+    # else: 纯 CNY 组合，NDQ 持仓为 0 → current_price 保持 None
 
     rate_price, rate_age = _get_last_close("AUDCNY=X", "汇率")
     if rate_price is None:
@@ -230,6 +255,7 @@ def run() -> Dict[str, Any]:
             break
     snap = get_gold_snapshot(offset_pct=gold_offset)
     if snap is None:
+        asset_freshness["GC=F"] = "missing"
         store.dream_event({"phase": "price_fetch_failed", "symbol": "GC=F", "date": today})
         # yfinance + DB 兜底全失败时跳过黄金 committee
         skipped_assets.add("GC=F")
@@ -240,6 +266,10 @@ def run() -> Dict[str, Any]:
         )
     else:
         gold_now = snap.bank_cny_per_gram  # 含浙商点差的克价，与用户成本同口径
+        # snap.is_stale 表示走了 DB 兜底，没有具体 age_days；保守按 stale 标
+        # （硬熔断关心的是"全部都崩"，单 stale 不会触发；想拿到准确 age_days
+        # 需要扩 GoldSnapshot dataclass，过度工程暂跳过）
+        asset_freshness["GC=F"] = "stale" if snap.is_stale else "fresh"
         if snap.is_stale:
             # DB 兜底返回的是陈旧数据，告知 LLM 不要假装是今天的市场
             store.dream_event({"phase": "gold_price_stale_fallback", "date": today})
@@ -248,13 +278,63 @@ def run() -> Dict[str, Any]:
                 "估值用最近一次成功拉取的价格。请在结论里明确标注'基于陈旧数据'。"
             )
 
+    # ================================================================
+    # 硬熔断 (P0-6)：所有 target_asset 价格全废 → daily_report 整个跳过
+    #
+    # 触发条件：所有 asset 的 freshness 都是 "missing" 或 "very_stale"
+    #          （即没有任何可信价格做决策）
+    # 行为：
+    #   - 不跑委员会（不烧 LLM token）
+    #   - 不发邮件（避免发"一份基于垃圾数据的 verdict"出去）
+    #   - 不写 daily/<date>.md verdict（避免污染历史）
+    #   - 写 dream_event 留 audit trail
+    #   - 返回 status="aborted_stale_data" 让 cron / scheduler 知道
+    #
+    # 不触发的情况（即使数据有问题）：
+    #   - 部分资产 fresh + 部分 stale → 跑（跳过 stale 资产单独处理）
+    #   - 全 stale 但都在 STALE_HARD_ABORT_DAYS 阈值内 → 跑（LLM 看到 warning）
+    # ================================================================
+    rated_assets = list(asset_freshness.keys())
+    deadly = {"missing", "very_stale"}
+    if rated_assets and all(asset_freshness[s] in deadly for s in rated_assets):
+        msg = (
+            f"所有 {len(rated_assets)} 个目标资产数据全废："
+            + ", ".join(f"{s}={asset_freshness[s]}" for s in rated_assets)
+        )
+        print(f"⛔ STALE DATA HARD ABORT: {msg}")
+        store.dream_event({
+            "phase": "daily_report_aborted_stale",
+            "reason": "all_assets_unusable",
+            "asset_freshness": dict(asset_freshness),
+            "abort_threshold_days": STALE_HARD_ABORT_DAYS,
+            "date": today,
+        })
+        return {
+            "status": "aborted",
+            "reason": "stale_data_hard_abort",
+            "asset_freshness": dict(asset_freshness),
+            "abort_threshold_days": STALE_HARD_ABORT_DAYS,
+            "skipped_assets": sorted(skipped_assets),
+            "date": today,
+            "next_step": (
+                f"所有数据源都过时超 {STALE_HARD_ABORT_DAYS} 天或全失败。"
+                "检查 yfinance 网络 / DB 是否被定期更新。强制跑（绕过熔断）："
+                "INVEST_HARD_ABORT_STALE_DAYS=999 重跑。"
+            ),
+        }
+
     # v2 通用化读
     ndq_h2 = pm.holdings.find("NDQ.AX")
     gold_h2 = pm.holdings.find("GC=F")
     ndq_shares = float(ndq_h2.get("units", 0) or 0) if ndq_h2 else 0.0
     gold_grams = float(gold_h2.get("units", 0) or 0) if gold_h2 else 0.0
     # 跳过的资产从总资产估算里剔除，避免用 0 当价格污染集中度计算
-    ndq_value_cny = ndq_shares * current_price * current_rate if "NDQ.AX" not in skipped_assets else 0.0
+    # current_price=None 也算"该资产无估值"，跟 skipped_assets 等价
+    ndq_value_cny = (
+        ndq_shares * current_price * current_rate
+        if (current_price is not None and "NDQ.AX" not in skipped_assets)
+        else 0.0
+    )
     gold_value_cny = gold_grams * gold_now if "GC=F" not in skipped_assets else 0.0
     total_assets_cny = (
         user_status.cash_cny
