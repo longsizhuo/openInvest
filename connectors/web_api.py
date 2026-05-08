@@ -1053,6 +1053,63 @@ def _committee_status_path(task_id: str) -> Path:
     return COMMITTEE_DIR / task_id / "status.json"
 
 
+def _committee_meta_path(task_id: str) -> Path:
+    """审计 trail：runtime metadata（commit hash / model / temperature / 等）"""
+    return COMMITTEE_DIR / task_id / "meta.json"
+
+
+# 模块级 cache：commit hash 跑一次 git 就够（lru_cache 在 multiprocessing 跨进程
+# 不共享，但每个进程跑一次也只是 ~10ms 的 subprocess）
+import functools as _functools
+import subprocess as _subprocess
+import sys as _sys
+
+
+@_functools.lru_cache(maxsize=1)
+def _audit_commit_hash() -> str:
+    """git rev-parse --short HEAD —— 失败返回 'unknown' 而不是抛异常"""
+    try:
+        result = _subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=2,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:  # noqa: BLE001 git 不存在/不在仓库等都视为 unknown
+        pass
+    return "unknown"
+
+
+def _build_audit_meta(
+    task_id: str,
+    symbols: Optional[List[str]],
+    max_rounds: int,
+) -> Dict[str, Any]:
+    """采集本次 committee 跑的运行环境快照，落审计 trail
+
+    关键字段（合规视角）：
+    - commit_hash: 跑这次的代码版本
+    - model + temperature: LLM 运行参数（决定 verdict 的可复现性）
+    - max_debate_rounds: 辩论轮数上限
+    - python_version: 运行时
+    - symbols: 这次跑了哪些资产
+    """
+    return {
+        "task_id": task_id,
+        "started_at": _now_iso(),
+        "commit_hash": _audit_commit_hash(),
+        "python_version": _sys.version.split()[0],
+        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        "model_temperature": float(os.getenv("INVEST_LLM_TEMPERATURE", "0.2")),
+        "max_debate_rounds": max_rounds,
+        "symbols": symbols if symbols else "(strategy.target_assets all)",
+        "executor": "core.committee_runner.run_committee_for_symbol",
+        "provider": "deepseek (Web/Cron path)",
+    }
+
+
 # v3 真并行后多线程并发写 status.json（每个 asset 的 progress callback 在线程池里跑）
 # 必须按 task_id 加锁，避免 tmp 文件冲突 + JSON 文件被半截写花
 import threading as _threading
@@ -1108,6 +1165,18 @@ async def _run_committee_task(
     cur = _read_committee_status(task_id) or {}
     cur.update({"status": "running", "running_at": _now_iso(), "events": []})
     _write_committee_status(task_id, cur)
+
+    # 审计 trail：runtime metadata 落 meta.json，永不被 progress 写覆盖
+    audit_meta = _build_audit_meta(task_id, symbols, max_rounds)
+    try:
+        meta_path = _committee_meta_path(task_id)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(
+            json.dumps(audit_meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:  # noqa: BLE001 审计落盘失败不能阻断业务
+        log.warning(f"audit meta.json 落盘失败 task_id={task_id}: {e}")
 
     def on_progress(event: Dict[str, Any]) -> None:
         s = _read_committee_status(task_id) or {}
@@ -1251,6 +1320,25 @@ async def committee_status(task_id: str) -> CommitteeStatusResponse:
     status.setdefault("task_id", task_id)
     status.setdefault("started_at", _now_iso())
     return CommitteeStatusResponse(**status)
+
+
+@app.get("/api/committee/{task_id}/audit", tags=["committee"])
+async def committee_audit_meta(task_id: str) -> Dict[str, Any]:
+    """读取审计 trail（commit_hash / model / temperature / max_debate_rounds 等）
+
+    给合规 / 复盘用：监管来查"那天 verdict 是哪个 commit / 哪个 model 跑的"时一查就有。
+    Frontmatter 进 memory/.committee/<task_id>/meta.json，永不被 progress 覆盖。
+    """
+    meta_path = _committee_meta_path(task_id)
+    if not meta_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"audit meta for task_id {task_id} not found（旧 task 没写过 meta.json）",
+        )
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"meta.json 损坏: {e}") from e
 
 
 @app.get("/api/committee/live/{task_id}", tags=["committee"])
