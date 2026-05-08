@@ -5,10 +5,6 @@ description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
     "ddgs>=9.10.0",
-    "langchain>=0.3.27",
-    "langchain-chroma>=1.1.0",
-    "langchain-community>=0.3.31",
-    "langchain-openai>=0.3.35",
     "trafilatura>=2.0.0",
     "yfinance>=0.2.66",
     "readability-lxml>=0.8.1",
@@ -27,6 +23,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "croniter>=6.2.2",
+    "openai>=1.45",  # SDKAgent 直接走 OpenAI 兼容客户端调 DeepSeek
 ]
 
 [dependency-groups]
@@ -34,7 +31,10 @@ dev = [
     "pytest>=9.0.3",
     "httpx>=0.27",
 ]
-# 删除的未用 dep（audit eng M5）：
-# - duckduckgo-search: 已被 ddgs 取代
+# 已删的孤儿 dep：
+# - duckduckgo-search: 被 ddgs 取代
 # - langgraph: grep 全仓零引用
 # - alpha-vantage: grep 全仓零引用
+# - langchain / langchain-chroma / langchain-community / langchain-openai
+#   (P1-4, 2026-05): 唯一用户是 agents/agent.py + scripts/diagnose.py，已被 SDKAgent 替代
+# - chromadb: 只 agents/agent.py 用 (跟 langchain 一起删)
