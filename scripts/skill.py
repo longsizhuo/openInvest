@@ -587,6 +587,52 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         "hint": None,
     })
 
+    # 5) GUI dist + 是否在跑（让 agent 能提醒用户"还有个 Web GUI 哦"）
+    gui_index = ROOT / "static" / "index.html"
+    gui_dist_ready = gui_index.exists()
+    gui_port = int(os.getenv("INVEST_WEB_PORT", "8765"))
+    gui_host = os.getenv("INVEST_WEB_HOST", "127.0.0.1")
+    gui_running = False
+    try:
+        # 不发 HTTP 请求（怕被 hang），用 socket connect 测端口
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            gui_running = (s.connect_ex((gui_host, gui_port)) == 0)
+    except Exception:  # noqa: BLE001
+        gui_running = False
+
+    if gui_running:
+        gui_status = "ok"
+        gui_detail = f"GUI 在跑：http://{gui_host}:{gui_port}"
+        gui_hint = (
+            f"告诉用户：「还可以打开 http://{gui_host}:{gui_port} 看完整 Web GUI"
+            "（持仓 + 委员会直播 + 历史决议 + LLM 用量）」"
+        )
+    elif gui_dist_ready:
+        gui_status = "ok"  # dist 装了就算 ok，没启动是 feature 不是 bug
+        gui_detail = f"GUI dist 已装但未启动（端口 {gui_port} 没人监听）"
+        gui_hint = (
+            f"告诉用户：「想看 Web GUI？另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui` "
+            f"然后浏览器开 http://{gui_host}:{gui_port}」"
+        )
+    else:
+        gui_status = "missing"
+        gui_detail = "static/index.html 不存在，GUI dist 未装"
+        gui_hint = (
+            "Bootstrap 时应自动装。手动补：`cd $INVEST_HOME && "
+            "uv run python -m scripts.sync_gui_dist`。或者用户不要 GUI 也行——CLI/skill 模式不依赖。"
+        )
+    checks.append({
+        "name": "web_gui",
+        "status": gui_status,
+        "detail": gui_detail,
+        "hint": gui_hint,
+        "gui_url": f"http://{gui_host}:{gui_port}" if gui_dist_ready else None,
+        "gui_running": gui_running,
+        "gui_dist_ready": gui_dist_ready,
+    })
+
     overall = "ready" if all(c["status"] == "ok" for c in checks) else "needs_setup"
 
     _print_json({
