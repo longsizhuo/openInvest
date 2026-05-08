@@ -309,7 +309,8 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         df_target,
         f"{target.get('display_name', target['symbol'])} ({target['symbol']})",
     )
-    regime_brief = format_regime_brief(metrics)
+    # P1-2: 传 symbol 让 regime 用 per-asset 阈值
+    regime_brief = format_regime_brief(metrics, symbol=target["symbol"])
     macro_data = get_macro_data()
     snap = get_gold_snapshot(offset_pct=0.0)
     gold_ctx = format_gold_report(snap) if (snap and target.get("type") == "metal") else ""

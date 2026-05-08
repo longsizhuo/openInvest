@@ -6,7 +6,8 @@
 阶段：
   Light Sleep  — 读 portfolio_history + 当时市场价 → .dreams/short-term-recall.json
   REM Sleep    — 跨笔聚合找模式 → .dreams/candidates.json
-  Deep Sleep   — 阈值门 (score≥0.8 / count≥3) → insights/*.md + MEMORY.md + DREAMS.md
+  Deep Sleep   — 阈值门 (score≥0.8 / count≥3) → 可选 LLM 验伪 →
+                  insights/*.md + MEMORY.md + DREAMS.md
 
 输入：
   - memory/portfolio_history.jsonl  (实际交易)
@@ -18,11 +19,16 @@
   - memory/insights/<topic>.md         (Deep 通过)
   - memory/DREAMS.md                   (人类可读叙事)
 
-故意不依赖 LLM — 评分纯统计 + 模板化叙事，零 token 成本。
+默认零 LLM 成本（纯统计阈值门 + 模板化叙事）。
+P1-3: 设 INVEST_DREAMING_LLM_VERIFY=1 后，Deep Sleep 在写 insights 前会过一次
+廉价 LLM（DeepSeek-Chat）验伪——挑出"统计 ≥ 阈值但很可能是 spurious correlation"
+的候选拒绝。env off 时行为完全不变。
 """
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -30,6 +36,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 from core.consolidation_lock import (
     rollback_consolidation_lock,
@@ -201,8 +209,116 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
 
 
 # ----------------------------------------------------------------------
-# Deep Sleep — 阈值门 + 写 insights
+# Deep Sleep — 阈值门 + （可选）LLM 验伪 + 写 insights
 # ----------------------------------------------------------------------
+
+LLM_VERIFY_SYSTEM_PROMPT = """\
+你是金融模式审稿人。下面是一系列"用户历史交易行为 vs 市场结果"的统计候选。
+每个候选都已经通过统计阈值门（命中率 + 样本量 + 平均收益）。
+
+但**统计阈值不能区分**：
+1. 真实可学习的行为模式 — 应该 KEEP 写入长期记忆
+2. 虚假相关性（spurious correlation） — 应该 REJECT，不污染未来决策
+
+虚假相关性的常见特征：
+- 样本量勉强（count 接近 MIN_RECALL）+ 命中率刚好擦边（hit_rate 0.6-0.7）
+- regime 标签太具体导致样本被切薄（例 "vix_low + tnx_mid + asset 三联组合"）
+- avg_return_pct 绝对值很小（< 1%）—— 可能纯噪音
+- 同一资产的对称模式都通过（"买金赚 / 卖金亏"+"卖金赚 / 买金亏" 同时通过 → 多半是回测过拟合）
+
+真实模式的特征：
+- 样本量充分（count ≥ 6）+ 命中率明显（≥ 0.75）
+- regime 简单或宽泛（vix_low 单标签）
+- 收益方向和动作意图一致（买入后正收益 / 卖出后负收益）
+
+你的任务：对每个候选输出 KEEP 或 REJECT，给一句话理由（中文，≤30 字）。
+
+输出格式（严格 JSON，无其他文字）：
+{
+  "verdicts": [
+    {"id": 0, "decision": "KEEP", "reason": "样本充分命中明确"},
+    {"id": 1, "decision": "REJECT", "reason": "regime 三联标签样本被切薄"}
+  ]
+}
+"""
+
+
+def _llm_verify_candidates(
+    candidates: List[Dict[str, Any]],
+) -> Tuple[List[bool], List[Dict[str, Any]]]:
+    """让 LLM 给每个候选输出 KEEP/REJECT。返回 (kept_mask, raw_verdicts)
+
+    失败时 fallback 全部 KEEP（保守策略：宁可放过 spurious 也不漏 real pattern；
+    LLM 只是额外过滤层，统计阈值才是底线）。
+
+    成本：单次 LLM 调用，输入 ~500-2000 token / 输出 ~200-500 token，
+    DeepSeek-Chat 价格 ≈ ¥0.001-0.005 一次。每天最多一次。
+    """
+    if not candidates:
+        return [], []
+
+    # 缩简候选 payload，不浪费 token
+    minimal = [
+        {
+            "id": i,
+            "asset": c["asset"],
+            "action": c["action"],
+            "regime": c["regime"],
+            "window_days": c["window_days"],
+            "count": c["count"],
+            "hit_rate": c["hit_rate"],
+            "avg_return_pct": c["avg_return_pct"],
+            "score": c["score"],
+        }
+        for i, c in enumerate(candidates)
+    ]
+
+    user_payload = (
+        f"统计阈值: hit_rate≥0.5 隐含; count≥{MIN_RECALL}; score≥{MIN_SCORE}\n"
+        f"候选数: {len(candidates)}\n"
+        f"候选 JSON:\n{json.dumps(minimal, ensure_ascii=False, indent=2)}"
+    )
+
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    if not api_key:
+        log.warning("DEEPSEEK_API_KEY 未设，跳过 LLM 验伪 (全部 KEEP)")
+        return [True] * len(candidates), []
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": LLM_VERIFY_SYSTEM_PROMPT},
+                {"role": "user", "content": user_payload},
+            ],
+            temperature=0.1,  # 验伪要稳定，不要发散
+            timeout=60,
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content or "{}"
+        parsed = json.loads(raw)
+        verdicts = parsed.get("verdicts") or []
+    except Exception as e:  # noqa: BLE001  网络/解析任一失败 → 全 KEEP fallback
+        log.warning(f"Dreaming LLM 验伪失败 ({type(e).__name__}: {e})，fallback 全 KEEP")
+        return [True] * len(candidates), []
+
+    # 把 verdicts 映射到 mask
+    mask = [True] * len(candidates)
+    for v in verdicts:
+        try:
+            idx = int(v.get("id", -1))
+            decision = str(v.get("decision", "KEEP")).upper().strip()
+            if 0 <= idx < len(candidates) and decision == "REJECT":
+                mask[idx] = False
+        except (ValueError, TypeError):
+            continue
+
+    return mask, verdicts
+
 
 def _score(c: Dict[str, Any]) -> float:
     """综合评分：命中率 0.5 + 平均收益绝对值（截断 5%）0.3 + 样本量 0.2"""
@@ -218,7 +334,10 @@ def _slugify(text: str) -> str:
 
 
 def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """阈值门通过的写 insights/*.md + 更新 MEMORY.md + 追加 DREAMS.md"""
+    """阈值门通过的写 insights/*.md + 更新 MEMORY.md + 追加 DREAMS.md
+
+    P1-3: 阈值门后再加一道可选 LLM 验伪（INVEST_DREAMING_LLM_VERIFY=1 启用）。
+    """
     accepted: List[Dict[str, Any]] = []
     for c in candidates:
         score = _score(c)
@@ -231,6 +350,31 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
         store.dream_event({"phase": "deep_sleep", "accepted": 0,
                           "note": "no_candidate_passed_threshold"})
         return []
+
+    # P1-3 LLM 验伪（可选）：默认 off，env 开 INVEST_DREAMING_LLM_VERIFY=1 启用
+    # 设计意图：统计阈值（命中率 + 样本量）能挡掉随机噪音，但挡不掉
+    # "样本被切薄的虚假相关性"。让一个廉价 LLM 看完所有候选一次性给意见，
+    # 把"看着像但其实是过拟合"的候选 REJECT 掉。LLM 不能改原数据，只能否决。
+    if os.getenv("INVEST_DREAMING_LLM_VERIFY", "0") == "1":
+        keep_mask, verdicts = _llm_verify_candidates(accepted)
+        kept = [c for c, k in zip(accepted, keep_mask) if k]
+        rejected_count = sum(1 for k in keep_mask if not k)
+        store.dream_event({
+            "phase": "deep_sleep_llm_verify",
+            "input_count": len(accepted),
+            "kept": len(kept),
+            "rejected": rejected_count,
+            "verdicts": verdicts[:20],  # 限长，防 events.jsonl 爆
+        })
+        log.info(
+            f"Dreaming LLM 验伪: {len(accepted)} 候选 → "
+            f"KEEP {len(kept)} / REJECT {rejected_count}",
+        )
+        accepted = kept
+        if not accepted:
+            store.dream_event({"phase": "deep_sleep", "accepted": 0,
+                              "note": "all_rejected_by_llm_verify"})
+            return []
 
     insights_dir = store.root / "insights"
     insights_dir.mkdir(parents=True, exist_ok=True)

@@ -67,7 +67,8 @@ def run_committee_for_symbol(
     market_data = analyze_multi_timeframe(
         df, f"{target.get('display_name', symbol)} ({symbol})",
     )
-    regime_brief = format_regime_brief(metrics)
+    # P1-2: 传 symbol 让 regime 用 per-asset 阈值（黄金/纳指/加密各异）
+    regime_brief = format_regime_brief(metrics, symbol=symbol)
     emit("data_ready", regime_brief=regime_brief[:240])
 
     # 3. Macro view —— 共享版优先（多资产 orchestrator 已经跑过一次）
