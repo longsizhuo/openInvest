@@ -122,9 +122,9 @@ def send_gmail_notification(content: str) -> str:
         try:
             print(f"🔄 [Attempt {attempt}/{max_retries}] 正在连接 SMTP 服务器...")
 
-            # 显式设置超时，防止握手无限挂起
-            socket.setdefaulttimeout(30)
-
+            # 注：socket.setdefaulttimeout 是进程级副作用——会改 uvicorn / scheduler
+            # 同进程里所有 HTTP 请求的默认 timeout。SMTP 已经传 timeout=30 给
+            # smtplib.SMTP，per-call 已 cover，不需要全局兜底。
             context = ssl.create_default_context()
 
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:

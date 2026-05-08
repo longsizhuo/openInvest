@@ -21,6 +21,8 @@ memory/
 db/*.sqlite
 db/*.db
 db/*.sqlite-journal
+db/*.db-shm
+db/*.db-wal
 
 # fcntl 文件锁
 *.lock

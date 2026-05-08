@@ -6,17 +6,31 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "market_data.db")
 
 
 class MarketStore:
-    """线程安全的 SQLite 行情库
+    """线程安全 + 多进程并发安全的 SQLite 行情库
 
-    旧版 sqlite3.connect() 默认 check_same_thread=True，多线程跑 agent 时
-    任意一个 agent 在 worker thread 里访问全局 _STORE 都会抛 ProgrammingError。
-    现在加 check_same_thread=False + 显式锁，跨线程安全。
+    跨线程：check_same_thread=False + RLock
+    跨进程：journal_mode=WAL（默认 DELETE 模式锁整个文件，多进程会饿死）
+            + busy_timeout=5000（被锁时最多等 5s 而不是立即 OperationalError）
+
+    场景：scheduler / web_api / napcat_bot 三个进程同时读写时不再互相阻塞。
     """
 
     def __init__(self):
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         # 允许跨线程使用（配合下面的 _lock）
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        self.conn = sqlite3.connect(
+            DB_PATH,
+            check_same_thread=False,
+            timeout=5.0,  # busy_timeout fallback for older sqlite versions
+        )
+        # 跨进程并发：WAL 让 reader / writer 不再互相 block
+        # busy_timeout 让被 lock 时等 5s 而不是立刻抛 OperationalError
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA synchronous=NORMAL")  # WAL + NORMAL 是推荐组合
+        self.conn.commit()
+
         self._lock = threading.RLock()
         self._init_db()
 
