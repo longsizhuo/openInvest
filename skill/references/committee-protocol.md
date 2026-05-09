@@ -3,6 +3,12 @@
 用户说了 **"该不该买/卖 X"** / **"分析一下 X"** / **"跑委员会 X"**——严格按
 6 个 stage 跑。
 
+> **路径前提**：本文档描述的是 **Skill 路径**（你在 Claude Code 里 spawn
+> subagent）。Skill 模式下 Macro 不共享，每次进 Round 1 一起 spawn → R1 共
+> 3 个 worker。Web/Cron 路径里 Macro 跨资产共享，R1 只有 Quant + Risk 2 个
+> worker，详见 [docs/wiki/02-agents.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/02-agents.md#两条路径-llm-调用数对照)。
+> 不要混着引用两份。
+
 ## Stage 0：同日检查（避免重复跑）
 
 ```bash
