@@ -284,18 +284,23 @@ def get_macro_data() -> str:
         return f"Error fetching macro data: {e}"
 
 
-def get_full_market_data(target_asset: str = "NDQ.AX") -> str:
+def get_full_market_data(target_asset: str, fx_symbol: Optional[str] = None) -> str:
+    """合并目标资产 + 关联汇率的多时间维度报告
+
+    Args:
+        target_asset: yfinance ticker（510300.SS / AAPL / NDQ.AX 等都行，
+            必填——之前默认 "NDQ.AX" 会让 fork 用户错拉到作者持仓数据）
+        fx_symbol: 关联汇率 ticker（None 则 daily_report 单独决定）
+    """
     df_asset = get_history_data(target_asset, "2y")
     report_asset = analyze_multi_timeframe(df_asset, f"TARGET ASSET ({target_asset})")
 
-    df_fx = get_history_data("AUDCNY=X", "2y")
-    report_fx = analyze_multi_timeframe(df_fx, "CURRENCY RATE (AUD/CNY)")
+    if fx_symbol is None:
+        return report_asset
 
-    return f"""
-{report_asset}
-
-{report_fx}
-"""
+    df_fx = get_history_data(fx_symbol, "2y")
+    report_fx = analyze_multi_timeframe(df_fx, f"CURRENCY RATE ({fx_symbol})")
+    return f"{report_asset}\n\n{report_fx}\n"
 
 
 def get_cost_snapshot(
@@ -398,4 +403,6 @@ def get_cost_report(
 
 
 if __name__ == "__main__":
-    print(get_full_market_data())
+    import sys
+    sym = sys.argv[1] if len(sys.argv) > 1 else "AAPL"
+    print(get_full_market_data(sym))

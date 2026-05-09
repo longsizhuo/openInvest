@@ -35,9 +35,14 @@ if [ ! -d ".venv" ]; then
     echo "📦 第一次跑：用 uv 装依赖..." >&2
     if ! command -v uv >/dev/null 2>&1; then
         echo "❌ uv 未安装。装一下：curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+        # 同时输出 JSON 到 stdout 让 agent (Claude) 能解析为结构化错误并引导用户
+        echo '{"status":"error","error":"uv (Python 包管理器) 未安装","hint":"运行 `curl -LsSf https://astral.sh/uv/install.sh | sh` 装好 uv 后重试本命令"}'
         exit 1
     fi
-    uv sync --frozen --python 3.13 >&2
+    if ! uv sync --frozen --python 3.13 >&2; then
+        echo '{"status":"error","error":"uv sync 失败","hint":"通常是网络拉 Python 3.13 失败 / 依赖锁文件冲突。手动跑 `uv sync --frozen --python 3.13` 看完整输出"}'
+        exit 1
+    fi
 fi
 
 # 3) GUI dist：从 invest-gui dist-latest release 拉静态文件到 static/

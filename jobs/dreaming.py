@@ -53,11 +53,36 @@ WINDOWS = [7, 30]         # 回看交易后 N 天的市场表现
 MIN_RECALL = 3            # 一个 pattern 至少出现 3 次
 MIN_SCORE = 0.8           # Deep Sleep 阈值（OpenClaw 同款）
 
-# 资产 → 行情对照符号
-ASSET_PRICE_SYMBOL = {
-    "GOLD-CNY": "GC=F",
-    "NDQ.AX": "NDQ.AX",
-}
+# 旧（v1 写死 2 个 symbol，fork 用户持 AAPL/510300/BTC-USD 时 outcomes 完全空）：
+#   ASSET_PRICE_SYMBOL = {"GOLD-CNY": "GC=F", "NDQ.AX": "NDQ.AX"}
+# 新：从 holding.symbol → yfinance ticker 动态查
+#   - 优先看 holding 自己的 yfinance_proxy 字段（黄金 GOLD-CNY → GC=F 这种 proxy）
+#   - 否则 holding.symbol 直接当 yfinance ticker（510300.SS / AAPL / BTC-USD 都直接能用）
+
+def _resolve_price_symbol(symbol: str, store: MemoryStore) -> Optional[str]:
+    """把 trade.symbol 解析成 yfinance ticker。
+
+    Light Sleep 给每笔历史交易补市场表现时调。fork 用户持任意 symbol 都不再
+    被静默跳过——只要 portfolio.md 里有这条 holding（就算 strategy.target_assets
+    里没列），也能拿到 outcomes。
+    """
+    if not symbol:
+        return None
+    # 1) 在 portfolio holdings / strategy target_assets 里找 yfinance_proxy
+    portfolio = store.read("portfolio") or {}
+    strategy = store.read("strategy") or {}
+    candidates: List[Dict[str, Any]] = []
+    candidates.extend(portfolio.get("holdings") or [])
+    candidates.extend(strategy.get("target_assets") or [])
+    for h in candidates:
+        if str(h.get("symbol", "")) == symbol:
+            proxy = str(h.get("yfinance_proxy") or "").strip()
+            if proxy:
+                return proxy
+            return symbol  # 没 proxy 就直接当 yfinance ticker
+    # 2) 没找到也 fallback 直接当 ticker —— yfinance 返回空时 _market_outcome 会
+    #    自然返回 None，不会报错
+    return symbol
 
 # 上下文指标符号（每笔交易都拉一遍）
 CONTEXT_SYMBOLS = {
@@ -108,7 +133,7 @@ def light_sleep(store: MemoryStore) -> List[Dict[str, Any]]:
             continue
 
         symbol = t.get("symbol", "")
-        price_sym = ASSET_PRICE_SYMBOL.get(symbol)
+        price_sym = _resolve_price_symbol(symbol, store)
 
         context: Dict[str, float] = {}
         for label, ctx_sym in CONTEXT_SYMBOLS.items():

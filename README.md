@@ -15,6 +15,19 @@
 [⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [🚀 30 分钟 fork](docs/QUICK_START.md) · [📚 完整 Wiki](docs/wiki/README.md) · [🤝 贡献指南](CONTRIBUTING.md) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
 
 </div>
+
+---
+
+## 我该用哪种安装方式？
+
+> 90% 的用户走 **Skill**——3 行命令，让 Claude 帮你装。剩下两条是给想自己改代码的开发者。
+
+| 你是 | 看哪段 | 工时 |
+|------|--------|------|
+| **小白用户**（只想用，不想改代码） | [🪄 30 秒上手 — Claude Code Skill](#-30-秒上手claude-code-skill主推) ⭐ **首选** | 30 秒 |
+| 开发者（想 fork、改 prompt、加资产）| [🚀 30 分钟 fork 部署](docs/QUICK_START.md) | 30 分钟 |
+| 自部署 Web GUI 给小白家人用 | [☁️ 服务器部署 + Cloudflare](docs/QUICK_START.md#服务器部署可选) | 1 小时 |
+
 ---
 
 ## 实盘 PnL 趋势（live）· vs 8 个基准
@@ -22,6 +35,8 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart with benchmark bars" width="100%"/>
   <sub>每 2h（工作日交易时段）自动 force-push 到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半折线 = 实盘 30 天趋势，下半柱状图 = vs 同类策略产品的累计涨幅排行（类似 LLM benchmark）</sub>
+  <br/>
+  <sub>📌 <b>图中数据为作者本人账户</b>，仅作信任背书与对比方法论展示。你跑起来后看到的是<b>你自己的</b>持仓曲线（仓库里没有任何作者持仓内容会被拉到你的部署）。</sub>
 </div>
 
 **对比的 8 条基准**（按"产品逻辑相关度"分层）：
@@ -35,8 +50,8 @@
 
 **故意不比的基准**（避免自相关）：
 
-- ❌ **纳指 100 / 标普 500** —— 用户持有 NDQ.AX 跟踪纳指 100，标普 500 与纳指相关性 0.85+。比这两个等于"和自己的影子比"，无意义
-- ❌ **黄金 spot (GC=F)** —— 用户已持仓黄金，同样自相关
+- ❌ **跟你持仓相关的指数** —— 比如你持有纳指 100 ETF，再用纳指/标普做基准就是"和自己的影子比"
+- ❌ **跟你持仓重合的现货** —— 比如你已持仓黄金，再用黄金 spot 做基准也是自相关
 
 **为什么是柱状图**：基准的"今日累计涨幅"和时间轴弱相关，柱子高度一目了然。这是 LLM benchmark（GPT-4 vs Claude vs Gemini）那种产品对比榜单，不是某人的私人账本。
 
@@ -213,7 +228,7 @@ LLM 没有跨会话记忆。你 6 个月前因为过度集中持仓被 Risk Offi
 不用注册账号、不用编辑 JSON、不用研究 env。打开 Claude Code，跑这一行：
 
 ```bash
-git clone https://github.com/longsizhuo/invest.git ~/projects-review/invest
+git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
 bash ~/projects-review/invest/skill/install.sh
 ```
 
@@ -242,7 +257,7 @@ Claude 会自己调 `prepare_committee` → 派 4 个 worker（Macro/Quant/Risk/
 ### Option B · Docker（一键容器化，适合服务器跑 cron）
 
 ```bash
-git clone https://github.com/longsizhuo/invest.git && cd invest
+git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
 cp .env.example .env       # 填 DEEPSEEK_API_KEY / EMAIL_*
 
 # 第一次：交互式 onboarding（写 user_profile.json + memory/）
@@ -259,7 +274,7 @@ docker compose logs -f invest-agent
 ### Option C · 手动 Python（开发者 / 想魔改 prompts）
 
 ```bash
-git clone https://github.com/longsizhuo/invest.git && cd invest
+git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
 uv sync --frozen --python 3.13
 
 # 跑交互式 onboarding（5 个问题）

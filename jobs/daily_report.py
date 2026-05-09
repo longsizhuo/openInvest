@@ -234,7 +234,6 @@ def run() -> Dict[str, Any]:
     #   未识别 kind             → 也走 yfinance close（兜底）
     # 之前是写死 NDQ.AX 一个分支，fork 用户持有 510300.SS / AAPL 直接被静默跳过
     current_prices: Dict[str, float] = {}     # symbol → 当前价（per asset 币种）
-    current_price: Optional[float] = None      # 兼容旧 get_user_status 的 NDQ 价（AUD）
 
     for asset_cfg in target_assets:
         sym = str(asset_cfg.get("symbol", ""))
@@ -256,10 +255,6 @@ def run() -> Dict[str, Any]:
             store.dream_event({
                 "phase": "price_stale", "symbol": sym, "age_days": age, "date": today,
             })
-        # NDQ.AX 特殊：旧 get_user_status 仍按 NDQ AUD 价 + AUDCNY 折算
-        # （单一"主资产"概念，v3 完全去掉时一起拆）
-        if sym == "NDQ.AX":
-            current_price = price
 
     rate_price, rate_age = _get_last_close("AUDCNY=X", "汇率")
     if rate_price is None:
@@ -281,7 +276,7 @@ def run() -> Dict[str, Any]:
                                "age_days": rate_age, "date": today})
 
     # 计算总资产估算（给 Risk Officer 用）—— NDQ 跳过时不算它的市值
-    user_status = pm.get_user_status(current_price, current_rate)
+    user_status = pm.get_user_status(current_prices, current_rate)
     # 从 strategy.target_assets[gold] 拿 price_offset_pct，让估值与用户成本同口径
     # （audit financial C1: 之前 offset_pct=0.0 + spot_cny_per_gram 让浮盈系统性
     # 偏低 1-1.5%）

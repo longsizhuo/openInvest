@@ -1,4 +1,4 @@
-"""伦敦金 / 浙商积存金价格换算
+"""伦敦金 / 银行积存金价格换算
 
 公式：
     spot_cny_per_gram = (gold_usd_per_oz / 31.1035) * usdcny_rate
@@ -9,8 +9,9 @@
 - yfinance USDCNY=X
 
 Auto offset 推断：
-- 每次用户在 NapCat 报当日浙商显示克价 → 反算 offset_pct 写回 strategy.md
-- 这样不用手动维护点差，系统自动学习
+- 每次用户在 NapCat 报当日实际买入克价 → 反算 offset_pct 写回 strategy.md
+- 这样不用手动维护各家银行（浙商 / 工行 / 招行 / 建行 / 华安 ETF 等）的点差，
+  系统自动学习用户实际渠道的溢价
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ class GoldPriceSnapshot:
     gold_usd_per_oz: float
     usdcny_rate: float
     spot_cny_per_gram: float
-    bank_cny_per_gram: float       # 浙商估算价 = spot * (1 + offset)
+    bank_cny_per_gram: float       # 渠道估算价 = spot * (1 + offset)
     offset_pct: float               # 当前使用的点差
     is_stale: bool = False          # 来自 DB 兜底（audit algo M7）
 
@@ -60,7 +61,8 @@ def _get_db_fallback_snapshot(offset_pct: float) -> Optional[GoldPriceSnapshot]:
 def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
     """拉一次实时黄金 + 美元人民币，算出克价。
 
-    offset_pct: 浙商积存金点差（默认 1.5%，可被 strategy.md 的 auto 推断值覆盖）
+    offset_pct: 银行积存金/纸黄金渠道点差（默认 1.5%，由 strategy.md 的 auto
+                推断值覆盖；用 /gold_offset 命令报当日实际买入克价让系统学习）
 
     数据通路（audit algo M7 加了 DB 兜底）：
     1. 主：yfinance GC=F + USDCNY=X 实时 → 写 DB cache → 返回 fresh snapshot
@@ -103,9 +105,9 @@ def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
 
 
 def infer_offset_pct(reported_bank_price_cny_per_gram: float) -> Optional[float]:
-    """用户在 NapCat 报"今天浙商克价 1050"时，反推当下点差
+    """用户报"今天买入克价 X"时反推当下点差（任何银行/纸黄金渠道都通用）
 
-    返回的 offset_pct 应该被写回 memory/strategy.md 的 target_assets[gold].price_offset_pct
+    返回的 offset_pct 写回 memory/strategy.md 的 target_assets[gold].price_offset_pct
     """
     snap = get_gold_snapshot(offset_pct=0.0)  # 拿现货价
     if snap is None or snap.spot_cny_per_gram <= 0:
@@ -120,7 +122,7 @@ def format_gold_report(snap: GoldPriceSnapshot) -> str:
         f"伦敦金现货 (GC=F): ${snap.gold_usd_per_oz:.2f}/oz\n"
         f"USD/CNY: {snap.usdcny_rate:.4f}\n"
         f"现货克价: ¥{snap.spot_cny_per_gram:.2f}/g\n"
-        f"浙商积存金估价 (offset {snap.offset_pct:.2%}): ¥{snap.bank_cny_per_gram:.2f}/g"
+        f"渠道估价 (offset {snap.offset_pct:.2%}): ¥{snap.bank_cny_per_gram:.2f}/g"
     )
 
 

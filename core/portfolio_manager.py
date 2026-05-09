@@ -148,13 +148,16 @@ class PortfolioManager:
             ndq_avg = float(self.portfolio.get("ndq_avg_cost_aud_per_share", 0) or 0)
             gold = float(self.portfolio.get("gold_grams", 0) or 0)
             gold_avg = float(self.portfolio.get("gold_avg_cost_cny_per_gram", 0) or 0)
+            # v1 fallback —— channel/display_name 留中性，避免给 fork 用户硬塞作者
+            # 用过的 CommSec / 浙商积存金。要带具体券商/银行名应该走 v2 holdings 列表
+            # 直接配置，不该从 v1 扁平字段反推
             if ndq > 0:
                 raw.append({
                     "symbol": "NDQ.AX", "kind": "etf",
                     "units": ndq, "unit_label": "股",
                     "avg_cost": ndq_avg, "cost_currency": "AUD",
-                    "channel": "CommSec",
-                    "display_name": "BetaShares Nasdaq 100 ETF",
+                    "channel": "未指定",
+                    "display_name": "NDQ.AX",
                     "proxy_kind": "direct",
                 })
             if gold > 0:
@@ -162,8 +165,8 @@ class PortfolioManager:
                     "symbol": "GC=F", "kind": "metal",
                     "units": gold, "unit_label": "克",
                     "avg_cost": gold_avg, "cost_currency": "CNY",
-                    "channel": "浙商积存金",
-                    "display_name": "伦敦金 (浙商积存金)",
+                    "channel": "未指定",
+                    "display_name": "黄金（按克）",
                     "yfinance_proxy": "GC=F",
                     "proxy_kind": "gold_cny_per_gram",
                     "sell_fee_pct": 0.0038,
@@ -182,21 +185,26 @@ class PortfolioManager:
 
     def get_user_status(
         self,
-        current_stock_price: Optional[float],
+        current_prices: Optional[Dict[str, float]],
         exchange_rate: float,
     ) -> UserStatus:
         """汇总用户状态 → daily_report / committee 用
 
-        注意：v2 通用化后，"主资产"概念变弱，这里仍提供 target_asset 字段（=target_assets[0]）
-        以兼容旧调用方；新调用方建议直接遍历 holdings。
+        Args:
+            current_prices: {symbol: 当前价 in cost_currency} dict。任一资产的当前价
+                拉不到，**不要在 dict 里塞 0**——直接 omit key（用 cost 兜底）或
+                设为 None（剔除该 holding 不进总市值，避免 Risk Officer 把 0 误读成
+                "集中度爆表，建议清仓"）。传 None 表示全部资产没拉到价。
+            exchange_rate: AUD→CNY 汇率（用于 cost_currency=AUD 的 holding 折算）
 
-        current_stock_price=None 表示 NDQ 价完全拉不到（数据源全失败）—— 此时 NDQ 持仓
-        从总市值里剔除而不是用 0 兜底。**禁止传 0 当 sentinel**，0 会让"NDQ 估值=0"
-        被 Risk Officer 误读为"集中度爆表，建议清仓"。
+        v2 通用化：之前是写死 NDQ.AX 一个分支接 current_stock_price，fork 用户持
+        AAPL/510300 完全按 cost 兜底估值，市值偏差大。改成 dict 让所有 holding
+        都能用最新价。
         """
         cash_cny = self.cash_amount("CNY")
         cash_aud = self.cash_amount("AUD")
         exchange_buffer = float(self.user.get("exchange_buffer_cny", 0) or 0)
+        prices = dict(current_prices or {})
 
         target_assets = list(self.strategy.get("target_assets", []) or [])
         if target_assets:
@@ -208,31 +216,28 @@ class PortfolioManager:
             max_single = float(self.strategy.get("max_single_invest_cny", 10000) or 10000)
             primary_asset = str(self.strategy.get("target_asset", ""))
 
-        # 总市值粗算：所有 holding 用 cost_currency 和 avg_cost 估算
-        # （真实行情应该由调用方传，这里只用 cost 作为兜底）
-        # 实际生产路径走 utils/quotes.get_quote 拉实时价
+        # 总市值聚合：所有 holding 优先用 current_prices[sym]，没有就 cost 兜底
         portfolio_value = cash_cny + cash_aud * exchange_rate
         for h in self.holdings:
             if h.get("is_tracking_only"):
                 continue   # 追踪仓不计入资产
+            sym = str(h.get("symbol", ""))
             units = float(h.get("units", 0) or 0)
             avg = float(h.get("avg_cost", 0) or 0)
             ccy = str(h.get("cost_currency", "CNY"))
-            value_local = units * avg
-            # CNY 直接加；AUD 走汇率；其他币种这里粗算用 1:1（v1 行为对 NDQ 是用 ndq_price * rate，迁移后调用方可补）
+            # 取价：dict 里 explicit None = "拉不到，剔除"；缺 key = "用 cost 兜底"
+            if sym in prices:
+                price = prices[sym]
+                if price is None:
+                    continue   # 该资产剔除（不用 0，防 Risk 误判清仓）
+            else:
+                price = avg
+            value_local = units * price
             if ccy == "CNY":
                 portfolio_value += value_local
             elif ccy == "AUD":
-                # 兼容旧 NDQ 估值路径：用 current_stock_price 而不是 avg_cost
-                if h.get("symbol") == "NDQ.AX":
-                    if current_stock_price is None:
-                        # NDQ 价拿不到 → 该资产从总市值里剔除（**不用 0 兜底**，
-                        # 0 会让 Risk Officer 误判"集中度爆表"）
-                        continue
-                    portfolio_value += units * current_stock_price * exchange_rate
-                else:
-                    portfolio_value += value_local * exchange_rate
-            # 其他币种暂不折算（PM 评审：v1 砍多币种汇率折算）
+                portfolio_value += value_local * exchange_rate
+            # 其他币种（USD/HKD 等）暂不折算 —— v3 加 multi-FX 时一起处理
 
         available = max(0.0, cash_cny - exchange_buffer)
         disposable = min(available, max_single)
@@ -415,17 +420,19 @@ def _ensure_v2_inplace(p) -> None:
         ndq_avg = float(p.get("ndq_avg_cost_aud_per_share", 0) or 0)
         gold = float(p.get("gold_grams", 0) or 0)
         gold_avg = float(p.get("gold_avg_cost_cny_per_gram", 0) or 0)
+        # v1 fallback：留中性 channel/display_name，避免给 fork 用户硬塞作者
+        # 用过的 CommSec / 浙商积存金（详见 read-time 同款 fallback 注释）
         if ndq > 0:
             holdings.append({
                 "symbol": "NDQ.AX", "kind": "etf", "units": ndq, "unit_label": "股",
-                "avg_cost": ndq_avg, "cost_currency": "AUD", "channel": "CommSec",
-                "display_name": "BetaShares Nasdaq 100 ETF", "proxy_kind": "direct",
+                "avg_cost": ndq_avg, "cost_currency": "AUD", "channel": "未指定",
+                "display_name": "NDQ.AX", "proxy_kind": "direct",
             })
         if gold > 0:
             holdings.append({
                 "symbol": "GC=F", "kind": "metal", "units": gold, "unit_label": "克",
-                "avg_cost": gold_avg, "cost_currency": "CNY", "channel": "浙商积存金",
-                "display_name": "伦敦金 (浙商积存金)",
+                "avg_cost": gold_avg, "cost_currency": "CNY", "channel": "未指定",
+                "display_name": "黄金（按克）",
                 "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
                 "sell_fee_pct": 0.0038,
             })

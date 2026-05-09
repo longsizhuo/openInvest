@@ -296,7 +296,14 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         None,
     )
     if target is None:
-        _print_json({"error": f"asset {args.symbol} not in strategy.target_assets"})
+        _print_json({
+            "status": "error",
+            "error": f"asset {args.symbol} not in strategy.target_assets",
+            "hint": (
+                f"先把 {args.symbol} 加进 strategy.md target_assets 再重试。"
+                "GUI 策略页可以加，或参考 references/adding-assets.md 手动编辑。"
+            ),
+        })
         return
 
     # 算 metrics + regime 一次，给 analyze_multi_timeframe 和 format_regime_brief 共用
@@ -500,17 +507,36 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     report = result.get("report")
     cio_memo = report.cio_memo if report is not None else ""
 
+    # 检测用户是否配了 NapCat（白名单 QQ 不为 0）—— 没配的话别推 NapCat 命令，
+    # 改走 Web GUI / API 路径。多数小白用户没装 NapCat，硬塞会让他们一脸懵
+    napcat_qq = os.getenv("INVEST_WHITELIST_QQ", "0").strip()
+    has_napcat = napcat_qq and napcat_qq != "0"
+
+    if has_napcat:
+        next_step = (
+            "已生成 verdict。如果用户同意：黄金/现金交易告诉用户用 NapCat 命令"
+            "（如 `/gold_buy 5g @1040`）；其他 yfinance symbol 走 GUI HoldingDialog "
+            "或 `POST/PUT /api/holdings/{symbol}`。**不要直接写 memory/**——所有"
+            "状态变更必须走带审计的入口。"
+        )
+    else:
+        next_step = (
+            "已生成 verdict。如果用户同意：**通过 Web GUI 录入这笔交易**"
+            "（http://127.0.0.1:8765 → 持仓页 → 编辑/新增 holding），或 `POST/PUT "
+            "/api/holdings/{symbol}` API 直接写。**不要直接写 memory/**——所有"
+            "状态变更必须走带审计的入口。\n\n"
+            "用户问'我现在去哪买'：告诉他打开自己的证券 App / 银行 App "
+            "（按 verdict 的 alloc_cny 金额 + 资产 symbol 自己去执行）—— openInvest "
+            "本身不接交易所，只做决策。"
+        )
+
     _print_json({
         "status": "ok",
         "asset": target,
         "verdict": verdict,
         "cio_memo": cio_memo,
         "transcript_path": str(transcript_path) if transcript_path.exists() else "",
-        "next_step": (
-            "已生成 verdict。如果用户同意：黄金/现金交易告诉用户用 NapCat 命令；"
-            "其他 yfinance symbol 走 GUI HoldingDialog 或 `POST/PUT /api/holdings/{symbol}`。"
-            "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
-        ),
+        "next_step": next_step,
     })
 
 
@@ -775,11 +801,20 @@ def cmd_doctor(_: argparse.Namespace) -> None:
 
     overall = "ready" if all(c["status"] == "ok" for c in checks) else "needs_setup"
 
+    # ready_for_subcommands 兼容旧字段；新增分路径就绪标志：
+    # - coordinator_ready：Claude Code 走 prepare_committee + spawn 4 subagent，
+    #   不需要 DeepSeek key（用 Claude 订阅扮演 worker）
+    # - direct_ready：任意 agent 走 run_committee，需要 DeepSeek key 跑 4 角色
+    # 旧 ready_for_subcommands 之前要求 has_deepseek，会让 Coordinator 用户被
+    # 误判"还没就绪" → agent 反复引导去注册 DeepSeek，体验糟糕
     _print_json({
         "status": overall,
-        "ready_for_subcommands": memory_ok and has_deepseek,
+        "ready_for_subcommands": memory_ok,  # 等价于 coordinator_ready
+        "coordinator_ready": memory_ok,
+        "direct_ready": memory_ok and has_deepseek,
         "next_step": (
-            "用户已就绪，可以直接调 status / prepare_committee 等子命令"
+            "用户已就绪。Claude Code 用户直接调 status / prepare_committee；"
+            "其他 agent（Cursor/Cline/Codex）走 run_committee（需 DEEPSEEK_API_KEY）"
             if overall == "ready" else
             "调 run.sh init 完成 onboarding，缺什么字段看 checks 里 status='missing' 的项"
         ),
@@ -1057,10 +1092,25 @@ def cmd_init(args: argparse.Namespace) -> None:
         "migrate_returncode": result.returncode,
         "holdings_parse_note": holdings_parse_note or "no holdings_description provided",
         "holdings_count": len((holdings_v2 or {}).get("holdings", [])),
+        "parsed_holdings_for_user_review": (
+            # 把 LLM 解析出来的 holdings 原样回放给 agent，让 agent 把它读给用户确认
+            # 一遍："我理解你持有：A 3000 股 4.2 元、B 5 万现金。对吗？"——避免
+            # LLM symbol 映射错（比如把宁德时代猜成 300750.SZ 但用户实际买的是 3750.HK）
+            holdings_v2 if holdings_v2 else None
+        ),
+        "user_review_required": bool(holdings_v2 and holdings_v2.get("holdings")),
         "next_step": (
-            "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后跑 "
-            "`run.sh strategy` 看 target_assets。如果你没追踪任何 yfinance symbol，"
-            "可以从 references/adding-assets.md 加。"
+            (
+                # 如果走了 LLM 解析路径，先让用户确认再继续
+                "**先让用户确认 LLM 解析的持仓**（读 `parsed_holdings_for_user_review` "
+                "字段给他听）。确认有错的话用 `POST /api/holdings/{symbol}` 修正或重跑 "
+                "`run.sh init --force`。确认无误后，调 `run.sh status` 验证持仓显示正确。"
+                if (holdings_v2 and holdings_v2.get("holdings"))
+                else
+                "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后跑 "
+                "`run.sh strategy` 看 target_assets。如果你没追踪任何 yfinance symbol，"
+                "可以从 references/adding-assets.md 加。"
+            )
             if final_checks_status == "completed_full" else
             "Profile 已写入，但 .env 凭据不完整。Coordinator 模式（Claude Code 里"
             "用 prepare_committee）可以立刻跑；Direct/Cron 模式（任意 agent 跑 "
@@ -1091,9 +1141,9 @@ def _interactive_prompt() -> Dict[str, Any]:
         "risk_tolerance": ask(
             "风险偏好 (Conservative / Balanced / Aggressive)", "Balanced"
         ),
-        "monthly_income_cny": float(ask("月收入 (CNY)", "20000")),
-        "monthly_expenses_cny": float(ask("月支出 (CNY)", "8000")),
-        "exchange_buffer_cny": float(ask("换汇周转金 (CNY)", "5000")),
+        "monthly_income_cny": float(ask("月收入 (CNY，填 0 跳过)", "0")),
+        "monthly_expenses_cny": float(ask("月支出 (CNY，填 0 跳过)", "0")),
+        "exchange_buffer_cny": float(ask("换汇周转金 (CNY，填 0 表示无)", "0")),
         "last_run_date": "1970-01-01",
         # 给 migrate_profile.py 兜底；如果走自然语言路径，3b 步骤会覆盖
         "current_assets": {"cash_cny": 0.0, "aud_cash": 0.0, "ndq_shares": 0.0},

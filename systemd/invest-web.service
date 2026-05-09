@@ -5,15 +5,19 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# 部署到自己机器时改 User/Group 为你的用户名（默认 ubuntu）
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/home/ubuntu/projects-review/invest
-EnvironmentFile=/home/ubuntu/projects-review/invest/.env
-Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+# %h 在 systemd 里展开成本服务 User 的 home dir
+# fork 用户：把 INVEST_HOME 改成你 clone openInvest 的位置（默认 ~/openInvest）
+Environment=INVEST_HOME=%h/openInvest
+WorkingDirectory=%h/openInvest
+EnvironmentFile=%h/openInvest/.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=TZ=Asia/Shanghai
-Environment=UV_CACHE_DIR=/home/ubuntu/projects-review/invest/.uv-cache
+Environment=UV_CACHE_DIR=%h/openInvest/.uv-cache
 # 仅绑 127.0.0.1，公网由 Caddy 反代，CF Access 在边缘鉴权
-ExecStart=/home/ubuntu/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+ExecStart=%h/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=15
 StandardOutput=journal
@@ -23,7 +27,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/ubuntu/projects-review/invest
+ReadWritePaths=%h/openInvest
 
 [Install]
 WantedBy=multi-user.target

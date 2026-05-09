@@ -228,18 +228,21 @@ def review_all(*, include_backtest: bool = True, include_live: bool = True) -> L
     store = MemoryStore()
     reviews: List[VerdictReview] = []
 
-    asset_symbols_to_check = ["NDQ.AX", "GC=F", "GC_F"]  # 兼容旧 sym 命名
-
     sources: List[Path] = []
     if include_live and (store.root / ".committee").exists():
         sources.extend(sorted((store.root / ".committee").iterdir()))
     if include_backtest and (store.root / ".backtest").exists():
         sources.extend(sorted((store.root / ".backtest").iterdir()))
 
+    # 旧（写死 ["NDQ.AX", "GC=F", "GC_F"] 三个 symbol，fork 用户持有 AAPL/510300
+    # 跑 review_all 永远扫不到自己的 verdict）：
+    # 新：每个日期目录里 glob 出实际存在的 *.md 当 asset symbol，文件名就是 symbol。
+    # 顺带兼容 GC=F → 文件名可能写成 GC_F（路径不允许 = 时的转义）
     for date_dir in sources:
         if not date_dir.is_dir():
             continue
-        for asset in asset_symbols_to_check:
+        for md_file in date_dir.glob("*.md"):
+            asset = md_file.stem  # GC_F.md → "GC_F"; NDQ.AX.md → "NDQ.AX"
             rv = review_one(date_dir, asset)
             if rv:
                 reviews.append(rv)

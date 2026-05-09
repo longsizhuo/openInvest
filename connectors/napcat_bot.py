@@ -11,15 +11,16 @@
   /help                                  显示帮助
   /balance                               当前持仓 + 现金 + 黄金估值
   /strategy                              当前策略与目标资产
-  /gold                                  实时伦敦金 + 浙商参考价
-  /ndq                                   实时 NDQ.AX
+  /gold                                  实时伦敦金 + 渠道参考价（含点差）
+  /price <symbol>                        通用现价查询（例 /price 510300.SS）
+  /ndq                                   deprecated：等同 /price NDQ.AX
   /history [N]                           最近 N 笔交易（默认 5）
   /deposit <amount_cny>                  增加 CNY 现金（工资/转入）
   /withdraw <amount_cny>                 减少 CNY 现金
   /gold_buy <grams> @<price>             记录黄金买入
   /gold_sell <grams> @<price>            记录黄金卖出
   /gold_set <grams>                      直接设置黄金克数
-  /gold_offset <bank_price>              报浙商当日克价，自动反推 offset 写回 strategy
+  /gold_offset <bank_price>              报当日实际买入克价，自动反推渠道点差写回 strategy
   /risk <conservative|balanced|aggressive> 调整风险偏好
   /payday                                立即触发月度入账
   /run                                   异步触发 daily_report (~6 分钟)
@@ -105,15 +106,16 @@ def _help(ctx: CommandContext) -> str:
         "📋 命令列表：\n"
         "/balance — 持仓 + 现金\n"
         "/strategy — 当前策略\n"
-        "/gold — 实时金价 + 浙商参考\n"
-        "/ndq — 实时 NDQ.AX\n"
+        "/gold — 实时金价 + 渠道参考\n"
+        "/price <symbol> — 通用现价查询\n"
+        "/ndq — 等同 /price NDQ.AX (deprecated)\n"
         "/history [N] — 最近 N 笔交易\n"
         "/deposit <数额> — CNY 入账\n"
         "/withdraw <数额> — CNY 出账\n"
         "/gold_buy <克数> @<克价> — 记买入\n"
         "/gold_sell <克数> @<克价> — 记卖出\n"
         "/gold_set <克数> — 直接覆盖黄金克数\n"
-        "/gold_offset <浙商克价> — 报当日克价，反推点差\n"
+        "/gold_offset <当日克价> — 反推渠道点差\n"
         "/risk <conservative|balanced|aggressive>\n"
         "/payday — 月度入账\n"
         "/run — 异步触发 daily_report"
@@ -122,43 +124,69 @@ def _help(ctx: CommandContext) -> str:
 
 @cmd("balance")
 def _balance(ctx: CommandContext) -> str:
-    """v2 通用化：从 cash dict + holdings list 读，旧 v1 字段已不存在"""
+    """v2 通用化：遍历 holdings 列表显示，不再硬编码 NDQ.AX + GC=F 两条"""
     pm = ctx.pm
     cash_cny = pm.cash_amount("CNY")
     aud_cash = pm.cash_amount("AUD")
-    ndq_h = pm.holdings.find("NDQ.AX")
-    gold_h = pm.holdings.find("GC=F")
-    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
-    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
-    gold_avg_cost = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
+
+    lines = [
+        "💰 当前持仓",
+        "━━━━━━━━━━━━",
+        "现金",
+        f"  CNY: ¥{cash_cny:,.2f}",
+    ]
+    if aud_cash > 0:
+        lines.append(f"  AUD: ${aud_cash:,.2f}")
+    # 把其他币种现金也展示出来（USD/HKD 等 fork 用户场景）
+    for ccy, amount in (pm.cash or {}).items():
+        if ccy in ("CNY", "AUD"):
+            continue
+        if float(amount) > 0:
+            lines.append(f"  {ccy}: {amount:,.2f}")
+
+    if not list(pm.holdings):
+        lines.append("\n持仓: (无)")
+        return "\n".join(lines) + "\n"
 
     snap = get_gold_snapshot(offset_pct=0.0)
-    if snap:
-        gold_value = snap.spot_cny_per_gram * gold_grams
-        gold_pnl = (snap.spot_cny_per_gram - gold_avg_cost) * gold_grams if gold_avg_cost else 0
-    else:
-        gold_value = 0
-        gold_pnl = 0
 
-    ndq_df = get_history_data("NDQ.AX", "1d")
-    ndq_price = float(ndq_df["Close"].iloc[-1]) if not ndq_df.empty else 0
+    for h in pm.holdings:
+        sym = str(h.get("symbol", "?"))
+        units = float(h.get("units", 0) or 0)
+        avg = float(h.get("avg_cost", 0) or 0)
+        ccy = str(h.get("cost_currency", "CNY"))
+        unit_label = str(h.get("unit_label", ""))
+        display = h.get("display_name") or sym
+        kind = str(h.get("kind", ""))
 
-    # 黄金 holding 的渠道名（fork 用户可能不是浙商积存金）
-    gold_display = (gold_h.get("display_name") if gold_h else None) or "黄金"
-    return (
-        f"💰 当前持仓\n"
-        f"━━━━━━━━━━━━\n"
-        f"现金\n"
-        f"  CNY: ¥{cash_cny:,.2f}\n"
-        f"  AUD: ${aud_cash:,.2f}\n"
-        f"\n"
-        f"NDQ.AX: {ndq_shares} 股 @ ${ndq_price:.2f}\n"
-        f"\n"
-        f"{gold_display}: {gold_grams:.4f}g\n"
-        f"  均价: ¥{gold_avg_cost:.2f}/g\n"
-        f"  现值: ¥{gold_value:,.2f}\n"
-        f"  浮盈: ¥{gold_pnl:+,.2f}\n"
-    )
+        lines.append("")
+        # 黄金类按克现价折算 CNY
+        if kind == "metal" and snap is not None:
+            value = snap.spot_cny_per_gram * units
+            pnl = (snap.spot_cny_per_gram - avg) * units if avg else 0
+            lines.append(f"{display} ({sym}): {units:.4f}{unit_label}")
+            if avg:
+                lines.append(f"  均价: ¥{avg:.2f}/{unit_label or '克'}")
+                lines.append(f"  现值: ¥{value:,.2f}")
+                lines.append(f"  浮盈: ¥{pnl:+,.2f}")
+            else:
+                lines.append(f"  现值: ¥{value:,.2f}")
+            continue
+
+        # 其他类按 yfinance close 取最近价
+        df = get_history_data(sym, "5d")
+        cur_price = float(df["Close"].iloc[-1]) if not df.empty else 0.0
+        unit_sign = "$" if ccy in ("USD", "AUD", "HKD") else "¥"
+        lines.append(f"{display} ({sym}): {units}{unit_label}")
+        if avg:
+            lines.append(f"  均价: {unit_sign}{avg:.4f} {ccy}")
+        if cur_price > 0:
+            lines.append(f"  现价: {unit_sign}{cur_price:.2f} {ccy}")
+            if avg:
+                pnl_pct = ((cur_price / avg) - 1) * 100
+                lines.append(f"  浮盈: {pnl_pct:+.2f}%")
+
+    return "\n".join(lines) + "\n"
 
 
 @cmd("strategy")
@@ -172,7 +200,8 @@ def _strategy(ctx: CommandContext) -> str:
             f"\n  单次上限: ¥{a.get('max_single_invest_cny', 0):,}"
         )
         if "price_offset_pct" in a:
-            lines.append(f"\n  浙商点差: {a['price_offset_pct']*100:.2f}%")
+            # 旧"浙商点差"是作者偏好；通用化用"渠道点差"
+            lines.append(f"\n  渠道点差: {a['price_offset_pct']*100:.2f}%")
         if "sell_fee_pct" in a:
             lines.append(f"\n  卖出手续费: {a['sell_fee_pct']*100:.2f}%")
     return "".join(lines)
@@ -186,24 +215,39 @@ def _gold(ctx: CommandContext) -> str:
     offset = float(gold_a.get("price_offset_pct", 0.0)) if gold_a else 0.0
     snap = get_gold_snapshot(offset_pct=offset)
     if snap is None:
-        return "❌ 黄金数据获取失败"
+        return "❌ 黄金数据获取失败（可能是 yfinance 限流或网络问题，稍候重试）"
     return f"🪙 {format_gold_report(snap)}"
 
 
-@cmd("ndq")
-def _ndq(ctx: CommandContext) -> str:
-    df = get_history_data("NDQ.AX", "5d")
+@cmd("price")
+def _price(ctx: CommandContext, *args: str) -> str:
+    """`/price <symbol>` 通用现价查询（旧 /ndq 是 NDQ.AX 专属，被 /price 取代）"""
+    if not args:
+        # 缺参数兜底：如果用户有持仓就给一句友好提示
+        holdings = list(ctx.pm.holdings)
+        if holdings:
+            samples = ", ".join(h.get("symbol", "?") for h in holdings[:3])
+            return f"用法: /price <symbol>  (你的持仓: {samples})"
+        return "用法: /price <symbol>  (例: /price NDQ.AX 或 /price 510300.SS 或 /price BTC-USD)"
+    sym = args[0].upper()
+    df = get_history_data(sym, "5d")
     if df.empty:
-        return "❌ NDQ.AX 数据获取失败"
+        return f"❌ {sym} 数据获取失败（symbol 不存在 / yfinance 限流 / 网络问题）"
     last = float(df["Close"].iloc[-1])
     prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
     pct = (last / prev - 1) * 100
     return (
-        f"📈 NDQ.AX\n"
-        f"价格: ${last:.2f}\n"
+        f"📈 {sym}\n"
+        f"价格: {last:.4f}\n"
         f"日变化: {pct:+.2f}%\n"
         f"日期: {df.index[-1].strftime('%Y-%m-%d')}"
     )
+
+
+@cmd("ndq")
+def _ndq(ctx: CommandContext) -> str:
+    """deprecated: NDQ.AX 专属命令，请改用 `/price NDQ.AX`。保留给老用户"""
+    return _price(ctx, "NDQ.AX")
 
 
 @cmd("history")
@@ -441,7 +485,7 @@ def _gold_set(ctx: CommandContext) -> str:
 @cmd("gold_offset")
 def _gold_offset(ctx: CommandContext) -> str:
     if not ctx.args:
-        return "用法: /gold_offset <浙商克价>  (例: /gold_offset 1040)"
+        return "用法: /gold_offset <当日实际买入克价>  (例: /gold_offset 1040)"
     try:
         bank_price = float(ctx.args[0])
     except ValueError:
@@ -449,7 +493,7 @@ def _gold_offset(ctx: CommandContext) -> str:
 
     offset = infer_offset_pct(bank_price)
     if offset is None:
-        return "❌ 无法获取实时金价反推"
+        return "❌ 无法获取实时金价反推（可能是 yfinance 限流，稍候重试）"
 
     targets = list(ctx.pm.strategy.get("target_assets", []))
     for a in targets:
@@ -464,8 +508,8 @@ def _gold_offset(ctx: CommandContext) -> str:
     ctx.pm.store.write("strategy", "strategy", new_data, ctx.pm.strategy.body)
     ctx.pm._reload()
     return (
-        f"✅ 浙商点差已更新: {offset*100:+.2f}%\n"
-        f"(用户报 ¥{bank_price}/g，反推现货 spot 后写回 strategy.md)"
+        f"✅ 渠道点差已更新: {offset*100:+.2f}%\n"
+        f"(用户报当日买入价 ¥{bank_price}/g，反推现货 spot 后写回 strategy.md)"
     )
 
 

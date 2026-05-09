@@ -67,7 +67,7 @@ class HealthResponse(BaseModel):
 class CashSummary(BaseModel):
     """现金部分"""
     cny: float = Field(..., description="CNY 现金")
-    aud: float = Field(..., description="AUD 现金（CommSec 子弹）")
+    aud: float = Field(..., description="AUD 现金")
 
 
 class GoldHolding(BaseModel):
@@ -75,8 +75,8 @@ class GoldHolding(BaseModel):
     grams: float = Field(..., description="持仓克数")
     avg_cost_cny_per_gram: float = Field(..., description="加权均价 CNY/g")
     spot_cny_per_gram: Optional[float] = Field(None, description="实时现货价 CNY/g（yfinance）")
-    bank_cny_per_gram: Optional[float] = Field(None, description="浙商参考克价（含点差）")
-    offset_pct: float = Field(0.0, description="浙商点差")
+    bank_cny_per_gram: Optional[float] = Field(None, description="渠道参考克价（含点差，渠道由 strategy/INVEST_GOLD_CHANNEL 决定）")
+    offset_pct: float = Field(0.0, description="渠道点差（spot → 实际买入克价的溢价）")
     market_value_cny: Optional[float] = Field(None, description="持仓现值 CNY")
     pnl_cny: Optional[float] = Field(None, description="浮盈 CNY")
     is_stale: bool = Field(False, description="价格来自 DB 兜底（yfinance 不可用）")
@@ -173,8 +173,22 @@ if DEV_CORS:
 
 def _new_pm() -> PortfolioManager:
     """每请求新建 PortfolioManager（仿 napcat_bot.route 内的做法），
-    保证读到 scheduler 刚写完的最新 memory，避免缓存陈旧"""
-    return PortfolioManager()
+    保证读到 scheduler 刚写完的最新 memory，避免缓存陈旧
+
+    fork 用户初次部署时 memory/*.md 还没生成 → PortfolioManager 抛 FileNotFoundError
+    → 这里转成 503 友好提示，不让前端拿到 generic 500 + traceback
+    """
+    try:
+        return PortfolioManager()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"openInvest 还没初始化（{exc!s}）。先在服务器上跑 "
+                "`~/.claude/skills/invest/scripts/run.sh init` 完成 onboarding，"
+                "然后刷新本页面。"
+            ),
+        ) from exc
 
 
 # ============ 端点：健康检查 ============
@@ -637,7 +651,7 @@ async def get_strategy() -> StrategyResponse:
 
 @app.get("/api/gold", response_model=GoldHolding, tags=["read"])
 async def get_gold() -> GoldHolding:
-    """黄金持仓 + 实时金价 + 浙商参考价（独立端点，前端可单独刷新而不重拉 NDQ）"""
+    """黄金持仓 + 实时金价 + 渠道参考价（独立端点，前端可单独刷新而不重拉其他资产）"""
     return _build_gold(_new_pm())
 
 
@@ -745,8 +759,8 @@ class GoldSetRequest(BaseModel):
 
 
 class GoldOffsetRequest(BaseModel):
-    """POST /api/gold/offset body — 报当日浙商克价，反推点差"""
-    bank_price: float = Field(..., gt=0, description="浙商当日克价 CNY/g")
+    """POST /api/gold/offset body — 报当日实际买入克价，反推渠道点差"""
+    bank_price: float = Field(..., gt=0, description="当日实际买入克价 CNY/g（任何银行/纸黄金渠道都通用）")
 
 
 class WriteResponse(BaseModel):
@@ -995,11 +1009,11 @@ async def gold_set(body: GoldSetRequest = Body(...)) -> WriteResponse:
     )
 
 
-# ===== /api/gold/offset — 反推浙商点差，写回 strategy.md =====
+# ===== /api/gold/offset — 反推渠道点差，写回 strategy.md =====
 
 @app.post("/api/gold/offset", response_model=WriteResponse, tags=["write"])
 async def gold_offset(body: GoldOffsetRequest = Body(...)) -> WriteResponse:
-    """报当日浙商克价 → 反推点差 offset → 写回 strategy.md。系统自学习浙商溢价"""
+    """报当日实际买入克价 → 反推点差 offset → 写回 strategy.md。系统自学习渠道溢价"""
     offset = infer_offset_pct(body.bank_price)
     if offset is None:
         raise HTTPException(status_code=503, detail="无法获取实时金价，反推失败")
@@ -1020,7 +1034,7 @@ async def gold_offset(body: GoldOffsetRequest = Body(...)) -> WriteResponse:
 
     return WriteResponse(
         history_appended=False,
-        message=f"浙商点差已更新: {offset*100:+.2f}%（用户报 ¥{body.bank_price}/g）",
+        message=f"渠道点差已更新: {offset*100:+.2f}%（用户报当日买入价 ¥{body.bank_price}/g）",
     )
 
 

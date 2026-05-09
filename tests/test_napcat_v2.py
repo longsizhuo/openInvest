@@ -42,13 +42,15 @@ def _seed_memory(root: Path, *, cash_cny=10000.0, cash_aud=2000.0,
     root.mkdir(parents=True, exist_ok=True)
 
     holdings = []
+    # fixture seed 用通用 channel/display_name —— 之前写死 CommSec / 浙商积存金，
+    # fork 用户跑测试通过不代表他们的实际渠道路径被覆盖
     if ndq_shares > 0:
         holdings.append({
             "symbol": "NDQ.AX", "kind": "etf",
             "units": ndq_shares, "unit_label": "股",
             "avg_cost": ndq_avg, "cost_currency": "AUD",
-            "channel": "CommSec",
-            "display_name": "BetaShares Nasdaq 100 ETF",
+            "channel": "broker_a",
+            "display_name": "NDQ.AX",
             "proxy_kind": "direct",
         })
     if gold_grams > 0:
@@ -56,8 +58,8 @@ def _seed_memory(root: Path, *, cash_cny=10000.0, cash_aud=2000.0,
             "symbol": "GC=F", "kind": "metal",
             "units": gold_grams, "unit_label": "克",
             "avg_cost": gold_avg, "cost_currency": "CNY",
-            "channel": "浙商积存金",
-            "display_name": "伦敦金 (浙商积存金)",
+            "channel": "bank_gold_a",
+            "display_name": "黄金（按克）",
             "yfinance_proxy": "GC=F",
             "proxy_kind": "gold_cny_per_gram",
             "sell_fee_pct": 0.0038,
@@ -130,9 +132,13 @@ def test_balance_reads_v2_cash_and_holdings(pm, monkeypatch):
     out = _balance(_ctx(pm, "/balance", []))
     assert "CNY: ¥10,000.00" in out
     assert "AUD: $2,000.00" in out
-    assert "NDQ.AX: 50" in out
-    assert "20.0000g" in out
-    assert "¥700.00/g" in out
+    # v2 通用化后 /balance 输出格式：`<display_name> (<symbol>): <units><unit_label>`
+    # 不再硬编码 NDQ.AX / 浙商两条；遍历 holdings 列表显示
+    assert "(NDQ.AX): 50" in out
+    assert "(GC=F): 20" in out
+    assert "克" in out  # 黄金 unit_label
+    assert "$38" in out  # NDQ.AX AUD 均价
+    assert "¥700" in out  # 黄金 CNY 均价
 
 
 # ---------- _deposit ----------
