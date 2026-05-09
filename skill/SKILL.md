@@ -33,8 +33,10 @@ verdict 可能不同（不同模型，cross-validation 用）。
    "看持仓 / 我现在多少钱"          → run.sh status
    "我的策略是什么"                  → run.sh strategy
    "最近交易 / 流水"                 → run.sh history
-   "现在 VIX / NDQ 多少"             → run.sh live_prices
-   "如果黄金跌 5% 我亏多少"          → run.sh what_if --gold-pct -5
+   "现在大盘 / VIX 多少"             → run.sh live_prices
+   "如果 X 跌 5% 我亏多少"           → run.sh what_if --symbol X --pct -5
+                                       （X 是用户持仓里的 yfinance symbol；
+                                        --gold-pct / --ndq-pct 兼容旧用法）
    "该不该买/卖 X / 分析一下 X"      → 委员会协议 ↓
    "跟踪 AAPL / 我想看看 TSLA"       → 见 references/adding-assets.md
 
@@ -42,7 +44,11 @@ verdict 可能不同（不同模型，cross-validation 用）。
    - Coordinator → 读 references/committee-protocol.md（spawn 4 subagent）
    - Direct      → 直接 `run.sh run_committee <SYMBOL>` 拿 JSON verdict
 
-4. 执行环节：告诉用户 NapCat 命令。**永远不要**直接写 memory/（见 Constraints）。
+4. 拿到 verdict / cio_memo 后：
+   - **`cio_memo` 是 Markdown 字符串**（包含 `# 标题 ## verdict` 等结构）。
+     直接把它**作为 Markdown 渲染给用户看**，不要打印原始 JSON 让用户自己解析
+   - 执行环节：检查 next_step 字段，按里面写的引导用户。**永远不要**直接写
+     memory/（见 Constraints）
 ```
 
 ## Coordinator 路径详情（Claude Code 专用）

@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -1906,6 +1907,13 @@ async def get_reengagement_alerts() -> ReengagementResponse:
             ))
 
     # 2. high_confidence_buy: 最新 verdict
+    # 注意：committee .md 不写 frontmatter，verdict / confidence 在正文
+    # `**Verdict**: BUY (confidence 0.85)` 这一行，所以用 regex 解析（既兼容
+    # save_committee skill 路径写的格式，也兼容 daily_report DeepSeek 路径写的）
+    verdict_re = re.compile(
+        r"\*\*Verdict\*\*:\s*([A-Z_]+)\s*\(confidence\s+([0-9.]+)\)",
+        re.IGNORECASE,
+    )
     committee_dir = store.root / ".committee"
     if committee_dir.exists():
         for date_dir in sorted(committee_dir.iterdir(), reverse=True)[:3]:
@@ -1913,15 +1921,16 @@ async def get_reengagement_alerts() -> ReengagementResponse:
                 continue
             for md in date_dir.glob("*.md"):
                 try:
-                    doc = store.read(str(md.relative_to(store.root)).replace(".md", ""))
+                    text = md.read_text(encoding="utf-8")
                 except Exception:
-                    doc = None
-                if not doc:
                     continue
-                meta = doc.metadata or {}
-                verdict = str(meta.get("verdict") or "").upper()
-                conf = meta.get("confidence")
-                if not isinstance(conf, (int, float)):
+                m = verdict_re.search(text)
+                if not m:
+                    continue
+                verdict = m.group(1).upper()
+                try:
+                    conf = float(m.group(2))
+                except ValueError:
                     continue
                 if conf >= 0.8 and verdict in ("BUY", "ACCUMULATE"):
                     alerts.append(ReengagementAlert(
@@ -1929,7 +1938,7 @@ async def get_reengagement_alerts() -> ReengagementResponse:
                         asset=md.stem,
                         message=f"{md.stem} 最新决议 {verdict}（置信 {conf:.2f}），高置信加仓信号值得复核",
                         severity="info",
-                        detected_at=str(meta.get("decision_date") or date_dir.name),
+                        detected_at=date_dir.name,
                     ))
 
     # 3. stale_decision: 最近一次委员会 > 7 天

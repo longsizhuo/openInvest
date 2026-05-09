@@ -181,66 +181,129 @@ def cmd_history(args: argparse.Namespace) -> None:
 # ---------- what_if ----------
 
 def cmd_what_if(args: argparse.Namespace) -> None:
-    """v2 通用化：从 PortfolioManager 读 cash + holdings"""
+    """通用化情景模拟：支持任意 yfinance symbol 涨跌 X% 后总市值变化
+
+    新接口 (P1-F 修复)：
+        run.sh what_if --symbol 510300.SS --pct -5      # 任意持仓涨跌
+        run.sh what_if --symbol BTC-USD --price 65000   # 任意持仓变绝对价
+    旧接口（兼容）：
+        run.sh what_if --gold-pct -5
+        run.sh what_if --ndq-pct -3
+        run.sh what_if --audcny 5.0
+    """
     from utils.gold_price import get_gold_snapshot
     from core.portfolio_manager import PortfolioManager
     try:
         pm = PortfolioManager()
     except FileNotFoundError as e:
-        _print_json({"error": str(e)})
+        _print_json({
+            "status": "error",
+            "error": str(e),
+            "hint": "memory 还没初始化。先跑 `run.sh init` 完成 onboarding。",
+        })
         return
-
-    cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-    ndq_h = pm.holdings.find("NDQ.AX")
-    gold_h = pm.holdings.find("GC=F")
-    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
-    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
-    gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
 
     snap = get_gold_snapshot(offset_pct=0.0)
     cur_gold = snap.spot_cny_per_gram if snap else 1000.0
-    cur_ndq = _safe_close("NDQ.AX")
     cur_audcny = _safe_close("AUDCNY=X") or 4.9
 
-    new_gold = args.gold_price if args.gold_price else cur_gold
-    if args.gold_pct is not None:
-        new_gold = cur_gold * (1 + args.gold_pct / 100)
-    new_ndq = args.ndq_price if args.ndq_price else cur_ndq
-    if args.ndq_pct is not None:
-        new_ndq = cur_ndq * (1 + args.ndq_pct / 100)
+    # 通用价格 dict：每个 holding 的当前价 + 情景价
+    cur_prices: Dict[str, float] = {}
+    new_prices: Dict[str, float] = {}
+    for h in pm.holdings:
+        sym = str(h.get("symbol") or "")
+        if not sym:
+            continue
+        if str(h.get("kind")) == "metal":
+            cur_prices[sym] = cur_gold
+        else:
+            cur_prices[sym] = _safe_close(sym)
+        new_prices[sym] = cur_prices[sym]
+
+    # 应用 --symbol/--pct/--price 通用参数
+    if args.symbol:
+        sym = args.symbol
+        if sym not in cur_prices:
+            _print_json({
+                "status": "error",
+                "error": f"{sym} 不在持仓里",
+                "hint": f"用 `run.sh status` 看你有哪些持仓；或先用 GUI / `POST /api/holdings/{sym}` 加进去再跑 what_if",
+            })
+            return
+        if args.price is not None:
+            new_prices[sym] = float(args.price)
+        elif args.pct is not None:
+            new_prices[sym] = cur_prices[sym] * (1 + args.pct / 100)
+
+    # 兼容老 --gold-pct / --gold-price
+    if args.gold_price is not None or args.gold_pct is not None:
+        new_gold = cur_gold
+        if args.gold_price is not None:
+            new_gold = args.gold_price
+        if args.gold_pct is not None:
+            new_gold = cur_gold * (1 + args.gold_pct / 100)
+        # 应用到所有 metal holdings
+        for h in pm.holdings:
+            if str(h.get("kind")) == "metal":
+                sym = str(h.get("symbol") or "")
+                if sym:
+                    new_prices[sym] = new_gold
+
+    # 兼容老 --ndq-pct / --ndq-price
+    if args.ndq_price is not None or args.ndq_pct is not None:
+        if "NDQ.AX" in cur_prices:
+            new_ndq = cur_prices["NDQ.AX"]
+            if args.ndq_price is not None:
+                new_ndq = args.ndq_price
+            if args.ndq_pct is not None:
+                new_ndq = cur_prices["NDQ.AX"] * (1 + args.ndq_pct / 100)
+            new_prices["NDQ.AX"] = new_ndq
+
     new_audcny = args.audcny if args.audcny else cur_audcny
 
-    cur_total = (cash_cny + aud_cash * cur_audcny
-                 + ndq_shares * cur_ndq * cur_audcny
-                 + gold_grams * cur_gold)
-    new_total = (cash_cny + aud_cash * new_audcny
-                 + ndq_shares * new_ndq * new_audcny
-                 + gold_grams * new_gold)
-    delta = new_total - cur_total
+    cash_cny = pm.cash_amount("CNY")
+    aud_cash = pm.cash_amount("AUD")
 
+    def _value_in_cny(holding: Dict[str, Any], price: float, fx: float) -> float:
+        units = float(holding.get("units", 0) or 0)
+        ccy = str(holding.get("cost_currency", "CNY"))
+        if ccy == "CNY":
+            return units * price
+        if ccy == "AUD":
+            return units * price * fx
+        return units * price  # 其他币种暂当 1:1（v3 多币种再处理）
+
+    cur_total = cash_cny + aud_cash * cur_audcny
+    new_total = cash_cny + aud_cash * new_audcny
+    breakdown: Dict[str, Any] = {}
+    for h in pm.holdings:
+        if h.get("is_tracking_only"):
+            continue
+        sym = str(h.get("symbol") or "")
+        if not sym:
+            continue
+        cur_v = _value_in_cny(h, cur_prices.get(sym, 0.0), cur_audcny)
+        new_v = _value_in_cny(h, new_prices.get(sym, 0.0), new_audcny)
+        cur_total += cur_v
+        new_total += new_v
+        breakdown[sym] = {
+            "units": float(h.get("units", 0) or 0),
+            "cur_price": round(cur_prices.get(sym, 0.0), 4),
+            "scenario_price": round(new_prices.get(sym, 0.0), 4),
+            "cur_value_cny": round(cur_v, 2),
+            "scenario_value_cny": round(new_v, 2),
+            "delta_cny": round(new_v - cur_v, 2),
+        }
+
+    delta = new_total - cur_total
     _print_json({
-        "current": {
-            "gold_cny_per_g": round(cur_gold, 2),
-            "ndq_aud": round(cur_ndq, 2),
-            "audcny": round(cur_audcny, 4),
-            "total_cny": round(cur_total, 2),
-        },
-        "scenario": {
-            "gold_cny_per_g": round(new_gold, 2),
-            "ndq_aud": round(new_ndq, 2),
-            "audcny": round(new_audcny, 4),
-            "total_cny": round(new_total, 2),
-        },
+        "status": "ok",
+        "current_total_cny": round(cur_total, 2),
+        "scenario_total_cny": round(new_total, 2),
         "delta_cny": round(delta, 2),
         "delta_pct": round((delta / cur_total) * 100, 2) if cur_total else 0.0,
-        "breakdown": {
-            "gold_grams": gold_grams,
-            "gold_avg_cost": gold_avg,
-            "gold_pnl_at_scenario_cny": round((new_gold - gold_avg) * gold_grams, 2),
-            "ndq_shares": ndq_shares,
-            "ndq_value_at_scenario_cny": round(ndq_shares * new_ndq * new_audcny, 2),
-        },
+        "fx": {"audcny_cur": round(cur_audcny, 4), "audcny_scenario": round(new_audcny, 4)},
+        "breakdown": breakdown,
     })
 
 
@@ -512,22 +575,35 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     napcat_qq = os.getenv("INVEST_WHITELIST_QQ", "0").strip()
     has_napcat = napcat_qq and napcat_qq != "0"
 
+    # 顺带把 cio_memo 是 Markdown 这件事再叮嘱一句，agent 拿到后必须 render
+    cio_render_hint = (
+        "⚠️ `cio_memo` 字段是 Markdown 字符串（含 `## verdict` `**confidence**` 等格式），"
+        "**直接当 Markdown 渲染给用户看**，不要把整个 JSON 原样打印。"
+    )
+    gui_url = f"http://{os.getenv('INVEST_WEB_HOST', '127.0.0.1')}:{os.getenv('INVEST_WEB_PORT', '8765')}"
+    gui_troubleshoot = (
+        f"如果 {gui_url} 打不开（端口没起 / 网页加载不出来），告诉用户另开终端跑 "
+        "`~/.claude/skills/invest/scripts/run.sh gui` 启动后端，然后浏览器刷新。"
+    )
+
     if has_napcat:
         next_step = (
+            f"{cio_render_hint}\n\n"
             "已生成 verdict。如果用户同意：黄金/现金交易告诉用户用 NapCat 命令"
             "（如 `/gold_buy 5g @1040`）；其他 yfinance symbol 走 GUI HoldingDialog "
-            "或 `POST/PUT /api/holdings/{symbol}`。**不要直接写 memory/**——所有"
-            "状态变更必须走带审计的入口。"
+            f"（{gui_url}）或 `POST/PUT /api/holdings/{{symbol}}`。**不要直接写 "
+            f"memory/**——所有状态变更必须走带审计的入口。\n\n{gui_troubleshoot}"
         )
     else:
         next_step = (
-            "已生成 verdict。如果用户同意：**通过 Web GUI 录入这笔交易**"
-            "（http://127.0.0.1:8765 → 持仓页 → 编辑/新增 holding），或 `POST/PUT "
-            "/api/holdings/{symbol}` API 直接写。**不要直接写 memory/**——所有"
-            "状态变更必须走带审计的入口。\n\n"
-            "用户问'我现在去哪买'：告诉他打开自己的证券 App / 银行 App "
-            "（按 verdict 的 alloc_cny 金额 + 资产 symbol 自己去执行）—— openInvest "
-            "本身不接交易所，只做决策。"
+            f"{cio_render_hint}\n\n"
+            "已生成 verdict。如果用户同意，告诉他按下面三步走：\n"
+            f"1) 在 openInvest 里登记这笔（最方便：浏览器开 {gui_url} → 持仓页 → "
+            "编辑/新增 holding；或 `POST/PUT /api/holdings/{symbol}` API）\n"
+            "2) 打开他自己的证券 App / 银行 App，按 verdict 里的 alloc_cny 金额 + "
+            "资产 symbol 真实下单（openInvest 本身不接交易所，只做决策）\n"
+            f"3) 回 openInvest 标记成交\n\n{gui_troubleshoot}\n\n"
+            "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
         )
 
     _print_json({
@@ -630,11 +706,14 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         ),
         "hint": (
             None if memory_ok else
-            "向用户问以下信息后调 `run.sh init`：display_name, monthly_income_cny, "
-            "monthly_expenses_cny, exchange_buffer_cny, risk_tolerance "
-            "(Conservative/Balanced/Aggressive), 当前持仓（cash_cny / aud_cash / "
-            "ndq_shares / gold_grams / gold_avg_cost_cny_per_gram），以及 "
-            "target_assets 数组（可用默认 NDQ.AX + GC=F）"
+            "向用户问以下信息后调 `run.sh init --from-stdin`（详细流程见 "
+            "skill/references/onboarding.md）：display_name, risk_tolerance "
+            "(Conservative/Balanced/Aggressive), monthly_income_cny / "
+            "monthly_expenses_cny / exchange_buffer_cny（都可填 0 跳过），"
+            "holdings_description（自由描述持仓，例如 '510300 沪深300ETF "
+            "3000 股 4.2 元，余额宝 5 万 CNY'），DEEPSEEK_API_KEY（可选，"
+            "Coordinator 路径不需要）。target_assets 留空也行，onboarding "
+            "完用户可以通过 GUI 或 references/adding-assets.md 加任意 yfinance symbol。"
         ),
     })
 
@@ -963,13 +1042,14 @@ def cmd_init(args: argparse.Namespace) -> None:
     2. CLI 模式：用户直接跑，走标准的 input()
        $ run.sh init                        # 交互式问 5 个问题
 
-    JSON schema (见 user_profile.example.json)：
+    JSON schema（仅作字段格式示意，agent 必须用**用户实际值**填，不要照抄数字）：
     {
       "profile": {
-        "name": "Loong", "risk_tolerance": "Aggressive",
-        "monthly_income_cny": 20000, "monthly_expenses_cny": 8000,
-        "exchange_buffer_cny": 5000, "last_run_date": "2026-01-01",
-        "current_assets": {"cash_cny": 50000, "aud_cash": 0, "ndq_shares": 0,
+        "name": "<display_name>", "risk_tolerance": "Conservative|Balanced|Aggressive",
+        "monthly_income_cny": 0, "monthly_expenses_cny": 0,
+        "exchange_buffer_cny": 0, "last_run_date": "YYYY-MM-DD",
+        "holdings_description": "<自然语言持仓描述，让后端 LLM 解析>",
+        "current_assets": {"cash_cny": 0, "aud_cash": 0, "ndq_shares": 0,
                            "gold_grams": 0, "gold_avg_cost_cny_per_gram": 0},
         "investment_strategy": {
           "target_allocation_stock": 0.7, "target_allocation_cash": 0.3,
@@ -1112,9 +1192,10 @@ def cmd_init(args: argparse.Namespace) -> None:
                 "可以从 references/adding-assets.md 加。"
             )
             if final_checks_status == "completed_full" else
-            "Profile 已写入，但 .env 凭据不完整。Coordinator 模式（Claude Code 里"
-            "用 prepare_committee）可以立刻跑；Direct/Cron 模式（任意 agent 跑 "
-            "run_committee）需要补 DEEPSEEK_API_KEY 才能用。"
+            "Profile 已写入，但 .env 凭据不完整。**告诉用户**：你现在还能在 Claude "
+            "Code 对话里直接说 '看看我的持仓' / '该不该加仓 X' —— Claude 帮你跑分析"
+            "不烧任何 token；之后想用网页/手机看面板，再跑 `run.sh gui` 启动；"
+            "想让服务器后台每天自动跑，那时候再去 platform.deepseek.com 注册 key 填 .env。"
         ),
     })
 
@@ -1215,12 +1296,19 @@ def main() -> None:
     p.add_argument("-n", type=int, default=10)
     p.set_defaults(func=cmd_history)
 
-    p = sub.add_parser("what_if")
-    p.add_argument("--gold-price", type=float)
-    p.add_argument("--gold-pct", type=float)
-    p.add_argument("--ndq-price", type=float)
-    p.add_argument("--ndq-pct", type=float)
-    p.add_argument("--audcny", type=float)
+    p = sub.add_parser("what_if",
+        help="P&L 情景模拟（任意 yfinance symbol 涨跌）",
+    )
+    # 通用参数（推荐）：--symbol + --pct/--price 配对使用
+    p.add_argument("--symbol", help="持仓里的 yfinance symbol，如 510300.SS / AAPL / BTC-USD")
+    p.add_argument("--pct", type=float, help="该 symbol 涨跌百分比，如 -5 表示跌 5%%")
+    p.add_argument("--price", type=float, help="该 symbol 的情景绝对价（与 --pct 二选一）")
+    # 旧参数（兼容）：仅对 NDQ.AX 黄金生效
+    p.add_argument("--gold-price", type=float, help="兼容旧参数：黄金克价绝对值 CNY/g")
+    p.add_argument("--gold-pct", type=float, help="兼容旧参数：黄金涨跌百分比")
+    p.add_argument("--ndq-price", type=float, help="兼容旧参数：NDQ.AX 价格 AUD")
+    p.add_argument("--ndq-pct", type=float, help="兼容旧参数：NDQ.AX 涨跌百分比")
+    p.add_argument("--audcny", type=float, help="情景 AUDCNY 汇率")
     p.set_defaults(func=cmd_what_if)
 
     p = sub.add_parser("prepare_committee")

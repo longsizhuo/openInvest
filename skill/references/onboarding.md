@@ -16,9 +16,9 @@ skill 失败模式。两条路径都喂 stdin：
 |---|------|------|
 | Q1 | 怎么称呼你？ | display name；用户不愿给就 `Anonymous` |
 | Q2 | 风险偏好？ | `Conservative` / `Balanced` / `Aggressive` 三选一 |
-| Q3 | 月收入 / 月支出 / 换汇周转金 (CNY)？ | 三个数。换汇周转金 = 应急金，不会被投资 |
+| Q3 | 月收入 / 月支出 / 换汇周转金 (CNY)？ | 三个数。**都可填 0 跳过**（不影响委员会跑，只影响 Risk Officer 算 dry_powder）|
 | Q4 | **当前持有什么？**（自由描述）| 见下面 "Q4 自然语言"——不要按字段问 |
-| Q5 | DeepSeek API key & Gmail App Password？ | **可选**。Coordinator 路径不需要 DeepSeek；Direct 路径才需要。Gmail 不给则跳邮件日报 |
+| Q5 | DeepSeek API key & Gmail App Password？ | **可选**。Coordinator 路径（Claude Code 里说话）不需要任何 key 就能跑；只有想让服务器后台每天自动跑/发邮件才需要。详见下面 "Q5 详细" |
 
 ### Q4 自然语言（核心改动 2026-05）
 
@@ -87,6 +87,38 @@ echo '{
 
 `status: "ok"` 后**马上**再跑一次 `run.sh doctor` 确认 `status: "ready"`，
 然后回去执行用户最初的请求。
+
+## Q5 详细：DeepSeek key & Gmail App Password 怎么搞
+
+**两个都是可选**。如果用户在 Claude Code 里聊天就够，**两个都跳过没问题**——
+告诉用户："你直接说 '看看我的持仓' / '该不该加仓 X'，Claude 会帮你跑分析，
+不烧任何 token 也不用注册账号。"
+
+### DeepSeek key
+
+什么时候需要：用户想让服务器后台每天 03:00 自动跑、想用 GUI 触发委员会、
+或者用 Cursor / Cline / Codex 等非 Claude agent 跑。
+
+去哪开：[platform.deepseek.com](https://platform.deepseek.com) 注册 → API
+keys 页面创建。复制以 `sk-` 开头的字符串。
+
+### Gmail App Password（用于发每日决议邮件）
+
+什么时候需要：用户想让 cron 跑完每日 daily_report 后给自己发邮件总结。
+**不发邮件就跳过**。
+
+去哪开（**告诉用户这个完整链接**）：
+1. Gmail 账号必须先开 2FA（[myaccount.google.com/security](https://myaccount.google.com/security)）
+2. 然后去 [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) 生成 16 位密码
+3. **不是登录密码** —— 是 16 位带空格的随机串，例如 `abcd efgh ijkl mnop`
+
+### 用户跳过 Q5 后的引导（**关键**）
+
+`init` 完了，告诉用户：
+> 现在你可以直接对我说"看看我的持仓"或"该不该加仓 X"，我会帮你跑 4 角色 AI
+> 委员会分析。想看图形化面板的话另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui`。
+
+**不要**说 "Coordinator 模式 / Direct 模式" 这种术语 —— 小白听不懂。
 
 ## 直接结构化喂 v2（高级用户 / 脚本场景）
 
