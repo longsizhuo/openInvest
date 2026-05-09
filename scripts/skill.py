@@ -710,7 +710,13 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         "hint": None,
     })
 
-    # 5) GUI dist + 是否在跑（让 agent 能提醒用户"还有个 Web GUI 哦"）
+    # 5) GUI dist + 是否在跑
+    # 只是 informational，不再让 agent 主动推销。dist 没装算 status: "ok"
+    # （CLI/skill 模式完全独立工作，GUI 是可选增项）。hint 字段只在用户问起
+    # GUI / dashboard / 网页时拿来用，不主动展示。
+    # 用户彻底不想被打扰可以在 .env 设 INVEST_GUI_NUDGE=off —— 这种场景
+    # gui_hint 永远是 None，agent 提示词就没素材可推销了。
+    gui_nudge_off = os.getenv("INVEST_GUI_NUDGE", "").strip().lower() in {"off", "0", "false", "no"}
     gui_index = ROOT / "static" / "index.html"
     gui_dist_ready = gui_index.exists()
     gui_port = int(os.getenv("INVEST_WEB_PORT", "8765"))
@@ -726,34 +732,31 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         gui_running = False
 
     if gui_running:
-        gui_status = "ok"
         gui_detail = f"GUI 在跑：http://{gui_host}:{gui_port}"
-        gui_hint = (
-            f"告诉用户：「还可以打开 http://{gui_host}:{gui_port} 看完整 Web GUI"
-            "（持仓 + 委员会直播 + 历史决议 + LLM 用量）」"
+        gui_hint = None if gui_nudge_off else (
+            f"如果用户**主动**问 GUI / dashboard / 网页：告诉他 http://{gui_host}:{gui_port} "
+            "可以看完整面板。不要自己挑话题推销。"
         )
     elif gui_dist_ready:
-        gui_status = "ok"  # dist 装了就算 ok，没启动是 feature 不是 bug
         gui_detail = f"GUI dist 已装但未启动（端口 {gui_port} 没人监听）"
-        gui_hint = (
-            f"告诉用户：「想看 Web GUI？另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui` "
-            f"然后浏览器开 http://{gui_host}:{gui_port}」"
+        gui_hint = None if gui_nudge_off else (
+            f"如果用户**主动**问 GUI / dashboard / 网页：告诉他另开终端跑 "
+            f"`~/.claude/skills/invest/scripts/run.sh gui` 然后浏览器开 http://{gui_host}:{gui_port}。"
+            "不要自己挑话题推销。"
         )
     else:
-        gui_status = "missing"
-        gui_detail = "static/index.html 不存在，GUI dist 未装"
-        gui_hint = (
-            "Bootstrap 时应自动装。手动补：`cd $INVEST_HOME && "
-            "uv run python -m scripts.sync_gui_dist`。或者用户不要 GUI 也行——CLI/skill 模式不依赖。"
-        )
+        gui_detail = "GUI dist 未装（CLI/skill 模式不依赖，正常）"
+        gui_hint = None  # dist 没装代表用户/fork 显然没要 GUI，绝对不主动推销
+
     checks.append({
         "name": "web_gui",
-        "status": gui_status,
+        "status": "ok",  # GUI 状态从来不是错误：dist 没装、没启动都是 feature
         "detail": gui_detail,
         "hint": gui_hint,
         "gui_url": f"http://{gui_host}:{gui_port}" if gui_dist_ready else None,
         "gui_running": gui_running,
         "gui_dist_ready": gui_dist_ready,
+        "gui_nudge_off": gui_nudge_off,
     })
 
     overall = "ready" if all(c["status"] == "ok" for c in checks) else "needs_setup"

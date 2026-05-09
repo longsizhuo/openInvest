@@ -87,22 +87,18 @@ verdict 可能不同（不同模型，cross-validation 用）。
 **前置条件**：`.env` 有 `DEEPSEEK_API_KEY`。如果调用 agent 在用户机器上跑
 但没有 key，提示用户先 `run.sh init` 把 key 配好。
 
-## 提醒用户 Web GUI 存在
+## Web GUI（**不要主动推销**）
 
-`doctor` 输出里 `web_gui` check 的 `hint` 字段会告诉你 GUI 是否在跑。
+`doctor` 输出里 `web_gui` check 包含 GUI 状态，但**只在用户主动问起**时拿来用。
+触发词：用户说"网页"、"dashboard"、"GUI"、"页面"、"浏览器"、"想看图"。
 
-- 如果 `gui_running: true`：在你回答的末尾顺带一句：
-  > "顺便：Web GUI 在 http://127.0.0.1:8765 跑着，可以打开看完整面板（持仓 / 委员会直播 / 历史决议 / LLM 用量）。"
+**不主动推销**——多数 fork 用户走 CLI/skill 路径已经满足，被反复告知"还有
+GUI 哦"会变成噪音。dist 没装 / 没启动都不是错误（`status: "ok"`），它本来
+就是可选增项。
 
-- 如果 `gui_dist_ready: true` 但 `gui_running: false`：用户**有可能**还不知道 GUI 存在。
-  在第一次回答时提一次：
-  > "顺便：项目自带 Web GUI，想用的话另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui`，
-  > 然后浏览器开 http://127.0.0.1:8765。"
-
-  之后同一会话不要重复提。
-
-- 如果 `gui_dist_ready: false`：bootstrap 时应该已经自动装了。如果没装上，是网络
-  问题，告诉用户手动跑 `cd $INVEST_HOME && uv run python -m scripts.sync_gui_dist`。
+收到 GUI 相关问题时按 `web_gui.hint` 字段回答即可。如果用户在 `.env` 设了
+`INVEST_GUI_NUDGE=off`，hint 字段会是 `null`——这种用户彻底不想看见 GUI 字眼，
+更不要找理由提。
 
 ## 子命令一览
 
