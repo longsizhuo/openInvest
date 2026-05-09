@@ -1,38 +1,49 @@
 # Onboarding（doctor 返回 `needs_setup` 时读）
 
-用户还没第一次配。用 `AskUserQuestion` 工具问 6 个问题，然后拼 JSON
-piped 给 `run.sh init --from-stdin`。**永远不要**让用户"自己去编辑
-user_profile.json"——那是 skill 失败模式。
+用户还没第一次配。**永远不要**让用户"自己去编辑 user_profile.json"——那是
+skill 失败模式。两条路径都喂 stdin：
 
-## 6 个问题
+- **Coordinator 路径（Claude Code）**：你（Claude）用 `AskUserQuestion`
+  问下面 5 个问题，拼 JSON piped 给 `run.sh init --from-stdin`。
+- **Direct 路径（任意 agent）**：照样可以走 `init --from-stdin`，把答案
+  拼成 JSON 喂进去；问问题靠你自己的对话工具。
 
-用普通话问（如果用户用其他语言，跟随用户）：
+## 5 个问题（默认问，不要问"你追踪哪些 yfinance symbol"）
+
+普通话提问（如果用户用其他语言，跟随用户）：
 
 | # | 问 | 备注 |
 |---|------|------|
-| Q1 | 怎么称呼你？ | display name；用户不愿给就 "Anonymous" |
-| Q2 | 风险偏好？ | Conservative / Balanced / Aggressive 三选一 |
+| Q1 | 怎么称呼你？ | display name；用户不愿给就 `Anonymous` |
+| Q2 | 风险偏好？ | `Conservative` / `Balanced` / `Aggressive` 三选一 |
 | Q3 | 月收入 / 月支出 / 换汇周转金 (CNY)？ | 三个数。换汇周转金 = 应急金，不会被投资 |
-| Q4 | 当前持仓？ | 看下面 "Q4 详细"——大多数人用默认就行 |
-| Q5 | DeepSeek API key？ | **可选**。Skill 模式（你正在用的）不需要；只有 cron 自动模式需要。告诉用户这点，免得他们以为必须去 platform.deepseek.com 注册 |
-| Q6 | Gmail App Password？ | **可选**。不给则不发邮件日报。Gmail 必须先开 2FA 再去 [App Passwords](https://myaccount.google.com/apppasswords) 生成 16 位密码（不是登录密码！） |
+| Q4 | **当前持有什么？**（自由描述）| 见下面 "Q4 自然语言"——不要按字段问 |
+| Q5 | DeepSeek API key & Gmail App Password？ | **可选**。Coordinator 路径不需要 DeepSeek；Direct 路径才需要。Gmail 不给则跳邮件日报 |
 
-### Q4 详细
+### Q4 自然语言（核心改动 2026-05）
 
-5 个字段对应用户**默认**的两个追踪资产（NDQ.AX + GC=F 浙商积存金）。
-**不要问 `target_assets`**——默认覆盖 90% 用户，他们之后可以通过 Web GUI
-或 `POST /api/holdings` 加任意 yfinance symbol（看 references/adding-assets.md）。
+**不要再硬编码 "NDQ.AX 股数 / 黄金克数 / aud_cash / cash_cny"**。让用户自由
+描述。后端 `cmd_init` 看到 `holdings_description` 字段会自动调 DeepSeek 解析
+成 v2 schema。
 
-| 字段 | 问法 | 用户没这资产时填 |
-|------|------|------------------|
-| `cash_cny` | CNY 现金多少？ | 0 |
-| `aud_cash` | AUD 现金多少？(澳元，没有可填 0) | 0 |
-| `ndq_shares` | NDQ.AX 股数？(BetaShares 纳指 100 ETF，澳交所) | 0 |
-| `gold_grams` | 黄金克数？(浙商积存金) | 0 |
-| `gold_avg_cost_cny_per_gram` | 黄金均价 CNY/g？(0 表示未持有) | 0 |
+**问法**：
+> 用一句话告诉我你现在持有什么（资产 + 现金都说）。例：
+> "510300 沪深 300 ETF 3000 股 4.2 元，招行朝朝宝 8 万，工行积存金 50 克 750 均价"
+> "AAPL 100 股 150 美元成本，BTC 0.3 个，CNY 现金 5 万"
+> "什么都没有，就 1 万块 CNY"
 
-如果用户只有 CNY 现金没别的，全部填 0 也 OK。委员会能跑——只是没仓位
-评估，等用户后续 GUI 加资产再说。
+**几条边界规则告诉用户**（不强制，但帮 LLM 解析得准）：
+- A 股直接说代码（`510300`），不需要后缀
+- 港股 / 美股说 ticker（`0700.HK` 或干脆"腾讯"）
+- 加密直接说币种（`BTC` / `ETH`）
+- 余额宝 / 朝朝宝 / 银行理财 / 货币基金 → 解析器会归到 cash，不进 holdings
+- 没说均价 / 渠道也行，缺啥后端补默认
+
+**回退路径**：
+- 如果用户**没有提供 DeepSeek key**（Q5 留空）：解析跑不了，cmd_init 会回退
+  到 v1 字段，只把 `cash_cny`、`aud_cash` 写进 portfolio。这种用户之后必须
+  通过 GUI 或 `POST /api/holdings` 加追踪资产。**告诉用户这点**。
+- 如果用户**真的什么都没有**：可以填 `"什么都没有，CNY 现金 0"`，pipeline 跑通就行。
 
 ## 拼 payload
 
@@ -47,11 +58,8 @@ echo '{
     "monthly_expenses_cny": <Q3b>,
     "exchange_buffer_cny": <Q3c>,
     "last_run_date": "<今天 YYYY-MM-DD>",
-    "current_assets": {
-      "cash_cny": <Q4a>, "aud_cash": <Q4b>,
-      "ndq_shares": <Q4c>, "gold_grams": <Q4d>,
-      "gold_avg_cost_cny_per_gram": <Q4e>
-    },
+    "holdings_description": "<Q4 用户原话，原样塞这里>",
+    "current_assets": {"cash_cny": 0, "aud_cash": 0, "ndq_shares": 0},
     "investment_strategy": {
       "target_allocation_stock": 0.7,
       "target_allocation_cash": 0.3,
@@ -59,24 +67,49 @@ echo '{
     }
   },
   "env": {
-    "DEEPSEEK_API_KEY": "<Q5 或空字符串>",
+    "DEEPSEEK_API_KEY": "<Q5a 或空字符串>",
     "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
-    "EMAIL_SENDER": "<Q6a 或空字符串>",
-    "EMAIL_PASSWORD": "<Q6b 或空字符串>"
+    "EMAIL_SENDER": "<Q5b 或空字符串>",
+    "EMAIL_PASSWORD": "<Q5c 或空字符串>"
   }
 }' | ~/.claude/skills/invest/scripts/run.sh init --from-stdin
 ```
 
-`init` 返回 `status: "ok"` 后，**马上**再跑一次 `run.sh doctor` 确认
-`status: "ready"`，然后回去执行用户最初的请求。
+`current_assets` 里那三个 v1 字段全填 0 也 OK——`holdings_description` 走通
+之后会**覆盖**写 portfolio.md（v2 schema 含完整 holdings list）。
 
-## 为什么 wire 格式还在用 v1 字段
+`init` 返回 JSON 里看 `holdings_parse_note`：
+- `"parsed via DeepSeek; portfolio.md overwritten with v2 schema"` → 成功
+- `"LLM parse failed (...); fell back to v1 fields"` → DeepSeek 出错，跑了 v1
+  兜底；告诉用户 + 让他用 GUI 重补
+- `"DEEPSEEK_API_KEY 缺失"` → Q5 没填 key，回退 v1。要么让用户填，要么让他
+  之后用 GUI 加资产
 
-JSON payload 用扁平字段（`cash_cny`、`ndq_shares` 等）但 `portfolio.md` 存储是
-v2（cash dict + holdings list）。`migrate_profile.py` 是转换层——它接受 v1 payload
-然后写 v2 `portfolio.md`（带 `schema_version: 2`）。wire 格式保持扁平是为了
-最小化 onboarding 问题数量；用户之后通过 GUI 或 `POST /api/holdings` 加新 symbol /
-新币种。
+`status: "ok"` 后**马上**再跑一次 `run.sh doctor` 确认 `status: "ready"`，
+然后回去执行用户最初的请求。
+
+## 直接结构化喂 v2（高级用户 / 脚本场景）
+
+如果调用方已经能算 v2 schema（比如另一个 agent 解析了 broker statement），
+跳过 `holdings_description`，直接传 `holdings_v2`：
+
+```json
+{
+  "profile": {
+    "...": "...",
+    "holdings_v2": {
+      "cash": {"CNY": 50000, "AUD": 800},
+      "holdings": [
+        {"symbol": "510300.SS", "kind": "etf", "units": 3000,
+         "unit_label": "股", "avg_cost": 4.20, "cost_currency": "CNY",
+         "channel": "未指定", "display_name": "沪深 300 ETF"}
+      ]
+    }
+  }
+}
+```
+
+`holdings_v2` 优先级高于 `holdings_description`（不调 LLM，省 token）。
 
 ## 重新 onboarding
 
@@ -88,5 +121,8 @@ v2（cash dict + holdings list）。`migrate_profile.py` 是转换层——它�
 - **Gmail App Password 不是 16 位** → 用户给的多半是登录密码。指他们去
   https://myaccount.google.com/apppasswords。
 - **DeepSeek key 不以 `sk-` 开头** → 多半是页面标题误粘了。让用户重新复制 key。
-- **用户不记得 NDQ.AX 股数 / 黄金克数** → 说"填 0 也行，之后用 GUI 或 NapCat 命令补"。
-  别因为记忆问题卡住 onboarding。
+- **LLM 解析的 symbol 不对**（如把"宁德时代"映射成 `300750.SZ` 但用户其实买的
+  港股 `3750.HK`）→ 让用户跑 `run.sh status` 检查，不对就用 GUI 改一下。
+- **Coordinator 路径用户没给 DeepSeek key** → 完全 OK，Coordinator 不调
+  DeepSeek。但要告诉用户："你跳过 key 之后没法用 Direct 路径（Cron / 非
+  Claude agent），如果只在 Claude Code 里用就够了。"

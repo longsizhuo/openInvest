@@ -67,15 +67,18 @@ def main():
 
     # --- 2. strategy.md  投资策略 ---
     strat = profile.get("investment_strategy", {})
+    # B7: target_asset 默认值不再硬编码 NDQ.AX —— 让 fork 用户在 onboarding
+    # 或之后自己用 GUI/strategy_dialog 配。空字符串走 doctor 引导补全流程。
     strategy_data = {
-        "target_asset": strat.get("target_asset", "NDQ.AX"),
+        "target_asset": strat.get("target_asset", ""),
         "target_allocation_stock": strat.get("target_allocation_stock", 0.7),
         "target_allocation_cash": strat.get("target_allocation_cash", 0.3),
         "max_single_invest_cny": strat.get("max_single_invest_cny", 10000),
     }
+    target_display = strategy_data["target_asset"] or "(未配置 — 请在 GUI 策略页或 strategy.md 里加 target_assets)"
     strategy_body = f"""# 投资策略
 
-- **目标资产**: `{strategy_data['target_asset']}`
+- **目标资产**: `{target_display}`
 - **股票仓位目标**: {strategy_data['target_allocation_stock']:.0%}
 - **现金仓位目标**: {strategy_data['target_allocation_cash']:.0%}
 - **单次入场上限 (CNY)**: ¥{strategy_data['max_single_invest_cny']:,}
@@ -90,23 +93,27 @@ def main():
     print(f"✓ memory/strategy.md 已写入")
 
     # --- 3. portfolio.md  当前持仓 ---
+    # B7: 不再硬编码 NDQ.AX 持仓行——让 body 只列实际有数据的字段，
+    # fork 用户填 0 就不在 body 里出现"NDQ.AX 持仓 0 股"误导（下一步会被
+    # migrate_portfolio_to_holdings.py 转成 v2 cash dict + holdings list）。
     assets = profile.get("current_assets", {})
     portfolio_data = {
         "cash_cny": assets.get("cash_cny", 0.0),
         "aud_cash": assets.get("aud_cash", 0.0),
         "ndq_shares": assets.get("ndq_shares", 0.0),
     }
-    portfolio_body = f"""# 当前持仓
-
-- **CNY 现金**: ¥{portfolio_data['cash_cny']:,.2f}
-- **AUD 现金**: ${portfolio_data['aud_cash']:,.2f}
-- **NDQ.AX 持仓**: {portfolio_data['ndq_shares']} 股
-
-## 说明
-
-此文件由 daily_report / commsec_sync / payday_check 三个 job 自动更新。
-不要手动编辑——如需调整，请走 jobs/manual_adjust.py。
-"""
+    body_lines = ["# 当前持仓", ""]
+    body_lines.append(f"- **CNY 现金**: ¥{portfolio_data['cash_cny']:,.2f}")
+    if portfolio_data["aud_cash"] > 0:
+        body_lines.append(f"- **AUD 现金**: ${portfolio_data['aud_cash']:,.2f}")
+    if portfolio_data["ndq_shares"] > 0:
+        body_lines.append(f"- **NDQ.AX 持仓**: {portfolio_data['ndq_shares']} 股")
+    body_lines.append("")
+    body_lines.append("## 说明")
+    body_lines.append("")
+    body_lines.append("此文件由 daily_report / commsec_sync / payday_check 三个 job 自动更新。")
+    body_lines.append("通过 GUI / NapCat 命令调整，不要手动编辑 frontmatter。")
+    portfolio_body = "\n".join(body_lines) + "\n"
     store.write("portfolio", "state", portfolio_data, portfolio_body)
     print(f"✓ memory/portfolio.md 已写入")
 

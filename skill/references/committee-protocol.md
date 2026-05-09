@@ -3,9 +3,26 @@
 用户说了 **"该不该买/卖 X"** / **"分析一下 X"** / **"跑委员会 X"**——严格按
 6 个 stage 跑。
 
-> **路径前提**：本文档描述的是 **Skill 路径**（你在 Claude Code 里 spawn
-> subagent）。Skill 模式下 Macro 不共享，每次进 Round 1 一起 spawn → R1 共
-> 3 个 worker。Web/Cron 路径里 Macro 跨资产共享，R1 只有 Quant + Risk 2 个
+## ⚠️ 先确认你能走这条路
+
+本文档是 **Coordinator 路径**——你（Claude Code）用 `Agent({...})` 工具
+spawn 4 个 subagent 自己扮演各角色。
+
+**如果你不是 Claude Code**（Cursor / Cline / Codex / DeepSeek 本地 / 普通
+脚本 / 其他 agent），**不要按这里跑**——你没有 `Agent({...})` 工具。改用
+**Direct 路径**：
+
+```bash
+~/.claude/skills/invest/scripts/run.sh run_committee <SYMBOL>
+```
+
+一条命令拿到 verdict + CIO memo + transcript。需要 `DEEPSEEK_API_KEY`。
+详见 SKILL.md 的"选路径"章节和 `references/two-paths.md`。
+
+---
+
+> **Coordinator 路径背景**：Macro 不共享，每次进 Round 1 一起 spawn → R1 共
+> 3 个 worker。Direct/Cron 路径里 Macro 跨资产共享，R1 只有 Quant + Risk 2 个
 > worker，详见 [docs/wiki/02-agents.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/02-agents.md#两条路径-llm-调用数对照)。
 > 不要混着引用两份。
 

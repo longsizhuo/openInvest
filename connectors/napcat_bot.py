@@ -35,7 +35,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 import websockets
@@ -143,6 +143,8 @@ def _balance(ctx: CommandContext) -> str:
     ndq_df = get_history_data("NDQ.AX", "1d")
     ndq_price = float(ndq_df["Close"].iloc[-1]) if not ndq_df.empty else 0
 
+    # 黄金 holding 的渠道名（fork 用户可能不是浙商积存金）
+    gold_display = (gold_h.get("display_name") if gold_h else None) or "黄金"
     return (
         f"💰 当前持仓\n"
         f"━━━━━━━━━━━━\n"
@@ -152,7 +154,7 @@ def _balance(ctx: CommandContext) -> str:
         f"\n"
         f"NDQ.AX: {ndq_shares} 股 @ ${ndq_price:.2f}\n"
         f"\n"
-        f"黄金 (浙商积存金): {gold_grams:.4f}g\n"
+        f"{gold_display}: {gold_grams:.4f}g\n"
         f"  均价: ¥{gold_avg_cost:.2f}/g\n"
         f"  现值: ¥{gold_value:,.2f}\n"
         f"  浮盈: ¥{gold_pnl:+,.2f}\n"
@@ -284,6 +286,29 @@ def _withdraw(ctx: CommandContext) -> str:
 GOLD_BUY_RE = re.compile(r"([\d.]+)\s*g?\s*@\s*([\d.]+)")
 
 
+def _gold_defaults(pm: "PortfolioManager") -> Tuple[str, str]:
+    """计算"创建黄金 holding"时用的默认 (channel, display_name)
+
+    优先级：
+      1. strategy.target_assets[GC=F].channel / display_name（用户在 GUI/策略里配的）
+      2. INVEST_GOLD_CHANNEL / INVEST_GOLD_DISPLAY env（fork 用户最简配置点）
+      3. 通用兜底"黄金（自营）" / "实物黄金"
+    避免硬编码"浙商积存金"——非作者用户用工行/招行/华安 ETF 等渠道时账目从第一笔就错。
+    """
+    targets = list(pm.strategy.get("target_assets", []) or [])
+    gold_cfg = next((a for a in targets if a.get("symbol") == "GC=F"), None)
+    if gold_cfg:
+        ch = str(gold_cfg.get("channel") or "").strip()
+        dn = str(gold_cfg.get("display_name") or "").strip()
+        if ch and dn:
+            return ch, dn
+    env_ch = os.getenv("INVEST_GOLD_CHANNEL", "").strip()
+    env_dn = os.getenv("INVEST_GOLD_DISPLAY", "").strip()
+    if env_ch and env_dn:
+        return env_ch, env_dn
+    return "黄金（自营）", "实物黄金"
+
+
 @cmd("gold_buy")
 def _gold_buy(ctx: CommandContext) -> str:
     match = GOLD_BUY_RE.search(ctx.raw)
@@ -294,6 +319,7 @@ def _gold_buy(ctx: CommandContext) -> str:
     total = grams * price
 
     # v2 RMW: holdings.find("GC=F") + 加权均价；克数 + 均价必须在同一锁内
+    channel, display_name = _gold_defaults(ctx.pm)
     with ctx.pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         gold = next((h for h in holdings if h.get("symbol") == "GC=F"), None)
@@ -311,7 +337,7 @@ def _gold_buy(ctx: CommandContext) -> str:
                 "symbol": "GC=F", "kind": "metal",
                 "units": round(new_grams, 4), "unit_label": "克",
                 "avg_cost": round(new_avg, 2), "cost_currency": "CNY",
-                "channel": "浙商积存金", "display_name": "伦敦金 (浙商积存金)",
+                "channel": channel, "display_name": display_name,
                 "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
                 "sell_fee_pct": 0.0038,
             })
@@ -320,7 +346,7 @@ def _gold_buy(ctx: CommandContext) -> str:
     # 历史 jsonl 是独立 append-only 文件，自带锁，放 portfolio 锁外
     ctx.pm.store.append_history({
         "ts_origin": datetime.now().isoformat(timespec="seconds"),
-        "action": "bought", "symbol": "GOLD-CNY", "channel": "浙商积存金",
+        "action": "bought", "symbol": "GOLD-CNY", "channel": channel,
         "units": grams, "price_per_unit": price, "total_amount": total,
         "currency": "CNY", "source": "napcat",
     })
@@ -343,6 +369,7 @@ def _gold_sell(ctx: CommandContext) -> str:
     targets = ctx.pm.strategy.get("target_assets", [])
     gold_a = next((a for a in targets if a.get("symbol") == "GC=F"), None)
     fee_pct = float(gold_a.get("sell_fee_pct", 0.0038)) if gold_a else 0.0038
+    channel, _ = _gold_defaults(ctx.pm)
 
     gross = grams * price
     fee = gross * fee_pct
@@ -369,7 +396,7 @@ def _gold_sell(ctx: CommandContext) -> str:
 
     ctx.pm.store.append_history({
         "ts_origin": datetime.now().isoformat(timespec="seconds"),
-        "action": "sold", "symbol": "GOLD-CNY", "channel": "浙商积存金",
+        "action": "sold", "symbol": "GOLD-CNY", "channel": channel,
         "units": grams, "price_per_unit": price, "total_amount": gross,
         "fee": round(fee, 2), "net_amount": round(net, 2),
         "currency": "CNY", "source": "napcat",
@@ -391,6 +418,7 @@ def _gold_set(ctx: CommandContext) -> str:
     except ValueError:
         return "克数格式错误"
     # v2: 直接覆盖 GC=F holding 的 units（均价不变，不计流水）
+    channel, display_name = _gold_defaults(ctx.pm)
     with ctx.pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         gold = next((h for h in holdings if h.get("symbol") == "GC=F"), None)
@@ -401,7 +429,7 @@ def _gold_set(ctx: CommandContext) -> str:
                 "symbol": "GC=F", "kind": "metal",
                 "units": round(grams, 4), "unit_label": "克",
                 "avg_cost": 0.0, "cost_currency": "CNY",
-                "channel": "浙商积存金", "display_name": "伦敦金 (浙商积存金)",
+                "channel": channel, "display_name": display_name,
                 "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
                 "sell_fee_pct": 0.0038,
             })

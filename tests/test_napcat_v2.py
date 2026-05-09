@@ -202,8 +202,8 @@ def test_gold_buy_existing_holding_weighted_avg(pm):
 
 
 def test_gold_buy_creates_holding_when_none(tmp_path):
-    """空仓首次买入 → upsert 一条 GC=F"""
-    _seed_memory(tmp_path, gold_grams=0)  # 不创 GC=F
+    """空仓首次买入 → upsert 一条 GC=F；strategy 没设 channel 时走通用 fallback"""
+    _seed_memory(tmp_path, gold_grams=0)  # 不创 GC=F；fixture strategy 也没设 channel
     pm = PortfolioManager(MemoryStore(tmp_path))
     assert pm.holdings.find("GC=F") is None
 
@@ -213,7 +213,38 @@ def test_gold_buy_creates_holding_when_none(tmp_path):
     assert h is not None
     assert h["units"] == pytest.approx(5.0)
     assert h["avg_cost"] == pytest.approx(900.0)
-    assert h["channel"] == "浙商积存金"
+    # B4: strategy.target_assets[GC=F] 没 channel 字段 → 走 _gold_defaults 通用 fallback
+    # 不再硬编码"浙商积存金"（fork 用户用工行/招行/华安 ETF 各异）
+    assert h["channel"] == "黄金（自营）"
+    assert h["display_name"] == "实物黄金"
+
+
+def test_gold_buy_uses_strategy_channel_when_configured(tmp_path):
+    """strategy.target_assets[GC=F] 配了 channel/display_name → upsert 用配置值"""
+    _seed_memory(tmp_path, gold_grams=0)
+    pm = PortfolioManager(MemoryStore(tmp_path))
+    # 在已有 strategy 上覆盖 GC=F entry 加 channel
+    strat = pm.strategy
+    new_targets = list(strat.get("target_assets") or [])
+    for t in new_targets:
+        if t.get("symbol") == "GC=F":
+            t["channel"] = "工行积存金"
+            t["display_name"] = "ICBC 黄金"
+            break
+    pm.store.write(
+        "strategy", "strategy",
+        {"target_assets": new_targets,
+         "target_allocation_stock": strat.get("target_allocation_stock", 0.7),
+         "target_allocation_cash": strat.get("target_allocation_cash", 0.3)},
+        strat.body,
+    )
+    pm._reload()
+
+    _gold_buy(_ctx(pm, "/gold_buy 3g @950", []))
+    pm._reload()
+    h = pm.holdings.find("GC=F")
+    assert h["channel"] == "工行积存金"
+    assert h["display_name"] == "ICBC 黄金"
 
 
 def test_gold_buy_invalid_format(pm):

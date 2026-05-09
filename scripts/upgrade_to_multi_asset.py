@@ -1,8 +1,15 @@
-"""一次性升级脚本：strategy.md → 多资产 / portfolio.md 加 gold_grams
+"""legacy: v0.1 → v0.2 单资产升多资产的迁移脚本
 
-执行后生效：
-- strategy.md: target_asset (单值) → target_assets (list, 含 NDQ.AX + GC=F)
-- portfolio.md: 新增 gold_grams 字段（默认 0，等用户在 NapCat 报实际持仓）
+⚠️ B7 (2026-05) 起此脚本仅给**原作者 fork** 用——它会无条件写入
+NDQ.AX + GC=F (浙商积存金) 两条 target_asset。陌生 fork 用户跑这个会得到
+他们从没持有过的两条数据。
+
+正确流程（fork 用户）：
+- 跑 migrate_profile.py（已 B7 处理：target_asset 默认空字符串，等 GUI 配）
+- 在 GUI 策略页或 strategy.md 里手动加 target_assets list
+- 不要跑这个脚本
+
+陌生用户跑会被首行 print 警告并要求显式 --i-really-want-author-defaults flag。
 """
 from __future__ import annotations
 
@@ -16,6 +23,17 @@ from core.memory_store import MemoryStore  # noqa: E402
 
 
 def main():
+    # B7: 防陌生 fork 用户误跑得到作者持仓
+    if "--i-really-want-author-defaults" not in sys.argv:
+        print(
+            "⚠️ 此脚本会把作者的 target_assets（NDQ.AX + GC=F 浙商积存金）"
+            "写进你的 strategy.md。\n"
+            "  - 如果你**不是**原作者：不要跑这个，去 GUI 策略页或手编 strategy.md "
+            "添加你自己的 target_assets。\n"
+            "  - 如果你**确实**想要作者默认（比如复刻同款组合做对照）：\n"
+            "    `python -m scripts.upgrade_to_multi_asset --i-really-want-author-defaults`",
+        )
+        return
     store = MemoryStore()
 
     # --- strategy.md 升级 ---

@@ -391,6 +391,129 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
     _print_json(out)
 
 
+# ---------- run_committee (Direct path — 给非 Claude agent 用) ----------
+
+def cmd_run_committee(args: argparse.Namespace) -> None:
+    """一键跑完委员会，返回最终 verdict JSON。
+
+    与 `prepare_committee` + Claude spawn 4 subagent 的 Coordinator 路径不同：
+    这个命令直接调 backend `core.committee.run_committee`（DeepSeek-Chat 跑 4 角色），
+    任何 agent（Cursor / Cline / Codex / DeepSeek-based / 普通 Python 脚本）一次
+    调用就能拿到完整 verdict。**需要 DEEPSEEK_API_KEY**——同 daily_report cron。
+
+    特性：
+    - Stage 0 同日检查：今天跑过了直接读历史 transcript 不重跑（可加 --force 强跑）
+    - 整个委员会落盘到 memory/.committee/<date>/<asset>.md（带 Provider: deepseek (skill direct)）
+    - 输出 JSON：verdict + confidence + 完整 CIO memo + transcript 路径
+    """
+    import os
+
+    if not os.getenv("DEEPSEEK_API_KEY"):
+        _print_json({
+            "status": "error",
+            "error": "DEEPSEEK_API_KEY 未设。Direct 路径必须有 DeepSeek key。",
+            "hint": (
+                "走 Coordinator 路径（在 Claude Code 里用 prepare_committee + spawn"
+                " subagent）不需要 key。或在 .env 里加 DEEPSEEK_API_KEY 后重试。"
+            ),
+        })
+        sys.exit(1)
+
+    from core.committee import run_committee, run_macro_view
+    from core.portfolio_manager import PortfolioManager
+    from core.regime import format_regime_brief
+    from utils.exchange_fee import (
+        analyze_multi_timeframe, get_history_data, get_macro_data,
+    )
+    from utils.market_metrics import compute_metrics
+
+    pm = PortfolioManager()
+    target = next(
+        (a for a in pm.strategy.get("target_assets", []) if a["symbol"] == args.symbol),
+        None,
+    )
+    if target is None:
+        _print_json({
+            "status": "error",
+            "error": f"asset {args.symbol} not in strategy.target_assets",
+            "hint": "先把 symbol 加进 strategy.md target_assets，见 references/adding-assets.md",
+        })
+        sys.exit(1)
+
+    # Stage 0：同日检查
+    today = datetime.now().strftime("%Y-%m-%d")
+    transcript_path = ROOT / "memory" / ".committee" / today / f"{args.symbol}.md"
+    if transcript_path.exists() and not args.force:
+        _print_json({
+            "status": "cached",
+            "reason": "今天已经跑过这个资产了；用 --force 重跑",
+            "transcript_path": str(transcript_path),
+            "transcript_md": transcript_path.read_text(encoding="utf-8"),
+        })
+        return
+
+    # 1) Macro view（跨资产共享，但 Direct 单 symbol 调用就跑一次）
+    macro_view = run_macro_view(get_macro_data())
+
+    # 2) market data + regime
+    df = get_history_data(args.symbol, "2y")
+    metrics = compute_metrics(df)
+    market_data = analyze_multi_timeframe(
+        df, f"{target.get('display_name', args.symbol)} ({args.symbol})",
+    )
+    regime_brief = format_regime_brief(metrics, symbol=args.symbol)
+
+    # 3) portfolio_summary（复用 prepare_committee 的逻辑做精简版）
+    cash_cny = pm.cash_amount("CNY")
+    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
+    dry_powder = max(0.0, cash_cny - buffer_cny)
+    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
+    holdings_lines = []
+    for h in pm.holdings:
+        sym = h.get("symbol", "?")
+        units = h.get("units", 0)
+        avg = h.get("avg_cost", 0)
+        ccy = h.get("cost_currency", "CNY")
+        holdings_lines.append(f"  - {sym}: {units} @ avg {avg} {ccy}")
+    holdings_block = "\n".join(holdings_lines) if holdings_lines else "  - (无)"
+    portfolio_summary = (
+        f"用户风险偏好: {risk_level}\n"
+        f"CNY 现金: ¥{cash_cny:,.0f} (应急金 ¥{buffer_cny:,} 不可投)\n"
+        f"可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
+        f"持仓:\n{holdings_block}"
+    )
+    prior_insights = _gather_relevant_insights(pm.store, target)
+
+    # 4) 跑！persist_to_memory=True 让 backend 自动落盘 transcript
+    result = run_committee(
+        asset=target,
+        market_data=market_data,
+        macro_view=macro_view,
+        portfolio_summary=portfolio_summary,
+        prior_insights=prior_insights,
+        regime_brief=regime_brief,
+        persist_to_memory=True,
+        max_debate_rounds=args.max_rounds,
+    )
+
+    verdict = result.get("verdict", {})
+    report = result.get("report")
+    cio_memo = report.cio_memo if report is not None else ""
+
+    _print_json({
+        "status": "ok",
+        "asset": target,
+        "verdict": verdict,
+        "cio_memo": cio_memo,
+        "transcript_path": str(transcript_path) if transcript_path.exists() else "",
+        "next_step": (
+            "已生成 verdict。如果用户同意：黄金/现金交易告诉用户用 NapCat 命令；"
+            "其他 yfinance symbol 走 GUI HoldingDialog 或 `POST/PUT /api/holdings/{symbol}`。"
+            "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
+        ),
+    })
+
+
 SECTION_RE = re.compile(
     r"^===\s*(MACRO|QUANT_R1|RISK_R1|QUANT_R2|RISK_R2|CIO|QUANT|RISK)\s*===\s*$",
     re.MULTILINE,
@@ -649,6 +772,134 @@ def cmd_doctor(_: argparse.Namespace) -> None:
 
 # ---------- init ----------
 
+# 自然语言持仓解析的 system prompt —— 喂 DeepSeek-Chat
+_HOLDINGS_PARSE_SYSTEM_PROMPT = """你是金融数据解析助手。把用户的自然语言持仓描述解析成严格 JSON。
+
+输出 schema（无 markdown 无解释）：
+{
+  "cash": {"<currency_code>": <number>},
+  "holdings": [
+    {
+      "symbol": "<yfinance ticker>",
+      "kind": "<stock|etf|fund|metal|crypto|bond|other>",
+      "units": <number>,
+      "unit_label": "<股|份|克|个|盎司>",
+      "avg_cost": <number>,
+      "cost_currency": "<currency_code>",
+      "channel": "<券商/银行渠道，没说就 '未指定'>",
+      "display_name": "<易读名>"
+    }
+  ]
+}
+
+Symbol 映射规则：
+- 沪市股票/ETF: 6 位代码 + .SS  (510300 → 510300.SS, 600519 → 600519.SS)
+- 深市: 6 位 + .SZ
+- 港股: 5 位 + .HK
+- 美股: 直接 ticker (AAPL, TSLA)
+- 澳股: ticker + .AX (NDQ.AX)
+- 加密: 大写 + -USD (BTC-USD, ETH-USD)
+- 黄金/纸黄金/积存金: GC=F (浙商/工行/招行积存金都映射到 GC=F，渠道写银行名)
+- 货币基金/余额宝/朝朝宝/银行理财: 不放 holdings，并入 cash
+
+币种规则：
+- 用户没说币种 → CNY
+- 美元/USD → USD; 澳元/AUD → AUD; 港元/HKD → HKD
+
+数值规则：
+- 用户没说均价 → avg_cost: 0
+- 用户没说渠道 → channel: "未指定"
+- 缺字段就用合理默认，不要抛错
+
+只输出 JSON 对象本身。"""
+
+
+def _parse_holdings_with_llm(
+    description: str, api_key: str, base_url: str = "https://api.deepseek.com",
+    model: str = "deepseek-chat",
+) -> Dict[str, Any]:
+    """调 DeepSeek 把"510300 ETF 3000股 4.2元 + 余额宝 5万"这种自然语言转成 v2 持仓 JSON。
+
+    返回 {"cash": {...}, "holdings": [...]}.
+    出错时抛异常，让 cmd_init 决定回退策略（不阻塞 onboarding）。
+    """
+    from openai import OpenAI
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": _HOLDINGS_PARSE_SYSTEM_PROMPT},
+            {"role": "user", "content": description},
+        ],
+        temperature=0.0,
+        response_format={"type": "json_object"},
+    )
+    raw = resp.choices[0].message.content or "{}"
+    parsed = json.loads(raw)
+    # 兜底归一化：保证两个顶层 key 都在
+    parsed.setdefault("cash", {})
+    parsed.setdefault("holdings", [])
+    return parsed
+
+
+def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) -> None:
+    """把 LLM 解析出的 v2 schema 直接覆盖写 memory/portfolio.md。
+
+    在 migrate_profile.py 跑完之后调用 —— migrate 写的是 v1 兜底 portfolio.md，
+    这里把它替换成包含完整 holdings list 的 v2 版本。
+    """
+    store = MemoryStore()
+    portfolio_data: Dict[str, Any] = {
+        "schema_version": 2,
+        "cash": {k: float(v) for k, v in cash.items() if v},
+        "holdings": [],
+    }
+    for h in holdings:
+        sym = str(h.get("symbol") or "").strip()
+        if not sym:
+            continue  # 跳过 LLM 漏 symbol 的脏行
+        portfolio_data["holdings"].append({
+            "symbol": sym,
+            "kind": str(h.get("kind") or "other"),
+            "units": float(h.get("units", 0) or 0),
+            "unit_label": str(h.get("unit_label") or ""),
+            "avg_cost": float(h.get("avg_cost", 0) or 0),
+            "cost_currency": str(h.get("cost_currency") or "CNY"),
+            "channel": str(h.get("channel") or "未指定"),
+            "display_name": str(h.get("display_name") or sym),
+        })
+
+    body_lines = ["# 当前持仓", ""]
+    body_lines.append("## 现金")
+    if not portfolio_data["cash"]:
+        body_lines.append("- (无)")
+    else:
+        for ccy, amount in portfolio_data["cash"].items():
+            body_lines.append(f"- **{ccy}**: {amount:,.2f}")
+    body_lines += ["", "## 持仓"]
+    if not portfolio_data["holdings"]:
+        body_lines.append("- (无)")
+    else:
+        for h in portfolio_data["holdings"]:
+            label = h["unit_label"] or ""
+            avg = h["avg_cost"]
+            ccy = h["cost_currency"]
+            body_lines.append(
+                f"- **{h['symbol']}** ({h['display_name']}): "
+                f"{h['units']} {label} @ avg {avg} {ccy} "
+                f"[{h['channel']}]"
+            )
+    body_lines += [
+        "",
+        "## 说明",
+        "",
+        "由 onboarding 写入。之后通过 GUI / NapCat / `POST /api/holdings` 调整，"
+        "不要手动编辑 frontmatter。",
+    ]
+    store.write("portfolio", "state", portfolio_data, "\n".join(body_lines) + "\n")
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """交互式 / 半交互式 onboarding 入口。
 
@@ -736,6 +987,43 @@ def cmd_init(args: argparse.Namespace) -> None:
         text=True,
     )
 
+    # 3b) v2 持仓覆盖：如果 profile 带了 holdings_description（自然语言）或
+    # holdings_v2（结构化），优先用它们生成完整 v2 portfolio.md。这一步在
+    # migrate_profile.py 之后跑，结果会覆盖 migrate 写的 v1 兜底版本。
+    holdings_v2: Dict[str, Any] = profile.get("holdings_v2") or {}  # 结构化直传
+    holdings_text = str(profile.get("holdings_description") or "").strip()
+    holdings_parse_note: str = ""
+
+    if not holdings_v2 and holdings_text:
+        api_key = env_data.get("DEEPSEEK_API_KEY", "").strip()
+        if api_key:
+            try:
+                holdings_v2 = _parse_holdings_with_llm(
+                    holdings_text,
+                    api_key=api_key,
+                    base_url=env_data.get(
+                        "DEEPSEEK_BASE_URL", "https://api.deepseek.com",
+                    ),
+                )
+                holdings_parse_note = "parsed via DeepSeek"
+            except Exception as exc:  # noqa: BLE001 LLM 失败不阻塞 onboarding
+                holdings_parse_note = f"LLM parse failed ({exc!s}); fell back to v1 fields"
+        else:
+            holdings_parse_note = (
+                "holdings_description 提供了，但 DEEPSEEK_API_KEY 缺失 —— "
+                "已回退到 v1 cash/ndq_shares 字段。配 key 后跑 init --force 重做。"
+            )
+
+    if holdings_v2 and (holdings_v2.get("cash") or holdings_v2.get("holdings")):
+        try:
+            _write_v2_portfolio(
+                holdings_v2.get("cash", {}) or {},
+                holdings_v2.get("holdings", []) or [],
+            )
+            holdings_parse_note = (holdings_parse_note or "v2 written") + "; portfolio.md overwritten with v2 schema"
+        except Exception as exc:  # noqa: BLE001 不阻塞
+            holdings_parse_note += f"; v2 write failed: {exc!s}"
+
     # 4) 第一次 init 后跑 doctor 让 Claude 知道还差什么
     final_checks_status = "completed_full" if (
         env_data.get("DEEPSEEK_API_KEY") and env_data.get("EMAIL_SENDER")
@@ -750,28 +1038,38 @@ def cmd_init(args: argparse.Namespace) -> None:
         "migrate_stdout": result.stdout[-500:] if result.stdout else "",
         "migrate_stderr": result.stderr[-500:] if result.stderr else "",
         "migrate_returncode": result.returncode,
+        "holdings_parse_note": holdings_parse_note or "no holdings_description provided",
+        "holdings_count": len((holdings_v2 or {}).get("holdings", [])),
         "next_step": (
-            "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后可以试"
-            "`run.sh prepare_committee NDQ.AX` 跑首次委员会。"
+            "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后跑 "
+            "`run.sh strategy` 看 target_assets。如果你没追踪任何 yfinance symbol，"
+            "可以从 references/adding-assets.md 加。"
             if final_checks_status == "completed_full" else
-            "Profile 已写入，但 .env 凭据不完整。Claude 模式（在 Claude Code 里"
-            "用 prepare_committee）可以立刻跑；DeepSeek cron 模式需要补 "
-            "DEEPSEEK_API_KEY 后才能跑 daily_report。"
+            "Profile 已写入，但 .env 凭据不完整。Coordinator 模式（Claude Code 里"
+            "用 prepare_committee）可以立刻跑；Direct/Cron 模式（任意 agent 跑 "
+            "run_committee）需要补 DEEPSEEK_API_KEY 才能用。"
         ),
     })
 
 
 def _interactive_prompt() -> Dict[str, Any]:
-    """CLI 直接 init 时的交互式输入（Claude 模式不会走这里）"""
+    """CLI 直接 init 时的交互式输入（Claude 模式从 stdin 喂 JSON，不走这里）"""
     print("=== invest onboarding (CLI mode) ===", file=sys.stderr)
-    print("提示：在 Claude Code 里用更友好，让 AI 帮你问。", file=sys.stderr)
+    print(
+        "提示：用 Claude Code 的 invest skill 走 Coordinator 路径更友好；"
+        "或者把答案拼成 JSON 走 `run.sh init --from-stdin`。",
+        file=sys.stderr,
+    )
 
     def ask(prompt: str, default: str = "") -> str:
         suffix = f" [{default}]" if default else ""
         v = input(f"{prompt}{suffix}: ").strip()
         return v or default
 
-    profile = {
+    # DeepSeek key 先问 —— 决定后面持仓走自然语言还是手动字段
+    deepseek_key = ask("DeepSeek API Key (sk-... 可留空跳过)", "")
+
+    profile: Dict[str, Any] = {
         "name": ask("姓名 / display name", "Anonymous"),
         "risk_tolerance": ask(
             "风险偏好 (Conservative / Balanced / Aggressive)", "Balanced"
@@ -780,19 +1078,43 @@ def _interactive_prompt() -> Dict[str, Any]:
         "monthly_expenses_cny": float(ask("月支出 (CNY)", "8000")),
         "exchange_buffer_cny": float(ask("换汇周转金 (CNY)", "5000")),
         "last_run_date": "1970-01-01",
-        "current_assets": {
-            "cash_cny": float(ask("当前 CNY 现金", "0")),
-            "aud_cash": float(ask("当前 AUD 现金", "0")),
-            "ndq_shares": float(ask("当前 NDQ.AX 持仓股数", "0")),
-        },
+        # 给 migrate_profile.py 兜底；如果走自然语言路径，3b 步骤会覆盖
+        "current_assets": {"cash_cny": 0.0, "aud_cash": 0.0, "ndq_shares": 0.0},
         "investment_strategy": {
             "target_allocation_stock": 0.7,
             "target_allocation_cash": 0.3,
             "max_single_invest_cny": float(ask("单次入场上限 (CNY)", "10000")),
         },
     }
+
+    if deepseek_key:
+        print(
+            "\n--- 持仓自然语言录入（推荐）---\n"
+            "用一句话描述当前所有持仓 + 现金。例：\n"
+            "  '510300 沪深300ETF 3000 股 4.2 元，工行积存金 50 克 750 均价，"
+            "余额宝 5 万，AUD 现金 800'\n"
+            "留空就跳过，之后用 GUI 或 NapCat 命令补。",
+            file=sys.stderr,
+        )
+        desc = ask("持仓描述（留空跳过）", "")
+        if desc:
+            profile["holdings_description"] = desc
+        else:
+            # 没填自然语言也至少问下现金，避免 portfolio.md 全空
+            profile["current_assets"]["cash_cny"] = float(
+                ask("CNY 现金（用于跑委员会算 dry_powder）", "0")
+            )
+    else:
+        print(
+            "\n--- 持仓字段（手动模式 —— 没给 DeepSeek key 没法解析自然语言）---\n"
+            "持仓只问现金；新加 yfinance symbol 之后用 GUI / `POST /api/holdings` 补。",
+            file=sys.stderr,
+        )
+        profile["current_assets"]["cash_cny"] = float(ask("CNY 现金", "0"))
+        profile["current_assets"]["aud_cash"] = float(ask("AUD 现金", "0"))
+
     env = {
-        "DEEPSEEK_API_KEY": ask("DeepSeek API Key (sk-... 可留空)", ""),
+        "DEEPSEEK_API_KEY": deepseek_key,
         "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
         "EMAIL_SENDER": ask("Gmail 发件人地址（可留空跳过邮件）", ""),
         "EMAIL_PASSWORD": ask("Gmail App Password（16 位，可留空）", ""),
@@ -841,6 +1163,22 @@ def main() -> None:
     p = sub.add_parser("save_committee")
     p.add_argument("symbol")
     p.set_defaults(func=cmd_save_committee)
+
+    p = sub.add_parser(
+        "run_committee",
+        help="Direct 路径：调 DeepSeek 一键跑完委员会（任意 agent 可用，"
+             "不依赖 Claude Code 的 Agent 工具）。需要 DEEPSEEK_API_KEY。",
+    )
+    p.add_argument("symbol")
+    p.add_argument(
+        "--force", action="store_true",
+        help="即使今天已经跑过也重新跑（默认会读 cache 不重复消耗 token）",
+    )
+    p.add_argument(
+        "--max-rounds", type=int, default=1, dest="max_rounds",
+        help="cross-challenge 最大轮数，默认 1（同 daily_report cron）",
+    )
+    p.set_defaults(func=cmd_run_committee)
 
     args = parser.parse_args()
     args.func(args)

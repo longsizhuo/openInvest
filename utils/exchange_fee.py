@@ -6,8 +6,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from .betashares_scraper import scrape_full_ndq_data
 from db.market_store import MarketStore
+
+# B6: betashares_scraper 历史上做 NDQ.AX 专用爬取，但 BetaShares 站点长期 403
+# + 它返的 etf_holdings/sectors/stats 全仓零消费 → 改成统一 yfinance 路径，
+# 文件保留作 optional plugin（万一未来想看 ETF top10 持仓再启用）。
 
 CACHE_DIR = "cache_data"
 _STORE = MarketStore()
@@ -123,47 +126,21 @@ def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
     needs_update = df_db.empty or df_db.index[-1].strftime('%Y-%m-%d') != today_str
 
     if needs_update:
-        if symbol == "NDQ.AX":
-            print(f"📡 [Scraper] Updating database for {symbol}...")
-            scrape_ok = False
-            try:
-                snapshot = scrape_full_ndq_data()
-                if snapshot and snapshot["date"] and snapshot["nav"]:
-                    _STORE.save_ndq_snapshot(
-                        snapshot["date"], snapshot["nav"],
-                        snapshot["stats"], snapshot["holdings"], snapshot["sectors"]
+        # B6 通用化：所有 symbol 走统一 yfinance 路径。
+        # NDQ.AX 之前有 BetaShares scraper 特殊分支，但其返回的 holdings/sectors
+        # 全仓零消费 + 站点长期 403 → 删除特殊路径让代码 generic。
+        try:
+            print(f"🔄 [yfinance] Refreshing {symbol}...")
+            ticker = yf.Ticker(symbol)
+            df_yf = ticker.history(period="5d")
+            if not df_yf.empty:
+                for idx, row in df_yf.iterrows():
+                    _STORE.save_generic_price(
+                        symbol, idx.strftime('%Y-%m-%d'), row['Close'],
                     )
-                    df_db = _STORE.get_history_df(symbol)
-                    scrape_ok = True
-            except Exception as e:
-                print(f"❌ Scraper Error: {e}")
-
-            # NDQ.AX scraper 经常被 BetaShares 反爬 403。如果失败，fallback 到 yfinance
-            # 只能拉到 close 价（拿不到 holdings/sectors），但起码估值能跑下去
-            if not scrape_ok:
-                try:
-                    print(f"🔄 [yfinance fallback] Refreshing {symbol}...")
-                    df_yf = yf.Ticker(symbol).history(period="5d")
-                    if not df_yf.empty:
-                        for idx, row in df_yf.iterrows():
-                            _STORE.save_generic_price(
-                                symbol, idx.strftime('%Y-%m-%d'),
-                                row['Close'], source="yfinance_fallback"
-                            )
-                        df_db = _STORE.get_history_df(symbol)
-                except Exception as e:
-                    print(f"❌ yfinance fallback also failed for {symbol}: {e}")
-        else:
-            try:
-                print(f"🔄 [yfinance] Refreshing {symbol}...")
-                ticker = yf.Ticker(symbol)
-                df_yf = ticker.history(period="5d")
-                if not df_yf.empty:
-                    for idx, row in df_yf.iterrows():
-                        _STORE.save_generic_price(symbol, idx.strftime('%Y-%m-%d'), row['Close'])
-                    df_db = _STORE.get_history_df(symbol)
-            except Exception as e:
-                print(f"❌ yfinance sync failed for {symbol}: {e}")
+                df_db = _STORE.get_history_df(symbol)
+        except Exception as e:
+            print(f"❌ yfinance sync failed for {symbol}: {e}")
 
     if not df_db.empty:
         return df_db

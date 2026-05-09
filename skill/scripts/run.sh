@@ -94,9 +94,13 @@ Onboarding（首次必跑）:
 Web GUI:
   gui                      启动 uvicorn 前端（http://127.0.0.1:8765，Ctrl+C 退出）
 
-委员会（Coordinator-Worker）:
+委员会 — Coordinator 路径（仅 Claude Code，不烧 DeepSeek token）:
   prepare_committee SYM    输出 brief + 4 角色 prompt 给 Claude 做 fan-out
   save_committee SYM       从 stdin 落盘 transcript 到 memory/.committee/<date>/
+
+委员会 — Direct 路径（任意 agent 可用，需要 DEEPSEEK_API_KEY）:
+  run_committee SYM [--force]
+                           一键跑完 4 角色委员会，输出最终 verdict JSON + CIO memo
 EOF
     exit 1
 fi

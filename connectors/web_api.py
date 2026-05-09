@@ -22,7 +22,7 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException, Query
@@ -836,6 +836,31 @@ async def withdraw(body: WithdrawRequest = Body(...)) -> WriteResponse:
     )
 
 
+# ===== Gold helpers =====
+
+def _gold_channel_defaults(pm: PortfolioManager) -> tuple[str, str]:
+    """B4: 计算"创建黄金 holding"时用的默认 (channel, display_name)
+
+    fork 用户可能用工行积存金 / 招行积存金 / 华安黄金 ETF / 实物黄金等渠道，
+    硬编码 "浙商积存金" 会让账目从第一笔就语义错误。优先级：
+      1. strategy.target_assets[GC=F].channel/display_name
+      2. INVEST_GOLD_CHANNEL / INVEST_GOLD_DISPLAY env
+      3. 通用兜底
+    """
+    targets = list(pm.strategy.get("target_assets", []) or [])
+    gold_cfg = next((a for a in targets if a.get("symbol") == "GC=F"), None)
+    if gold_cfg:
+        ch = str(gold_cfg.get("channel") or "").strip()
+        dn = str(gold_cfg.get("display_name") or "").strip()
+        if ch and dn:
+            return ch, dn
+    env_ch = os.getenv("INVEST_GOLD_CHANNEL", "").strip()
+    env_dn = os.getenv("INVEST_GOLD_DISPLAY", "").strip()
+    if env_ch and env_dn:
+        return env_ch, env_dn
+    return "黄金（自营）", "实物黄金"
+
+
 # ===== /api/gold/buy =====（保留旧 path 给前端兼容；内部用 holdings 写）
 
 @app.post("/api/gold/buy", response_model=WriteResponse, tags=["write"])
@@ -844,6 +869,7 @@ async def gold_buy(body: GoldTradeRequest = Body(...)) -> WriteResponse:
     pm = _new_pm()
     grams, price = body.grams, body.price_per_gram
     total = grams * price
+    channel, display_name = _gold_channel_defaults(pm)
 
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
@@ -862,8 +888,8 @@ async def gold_buy(body: GoldTradeRequest = Body(...)) -> WriteResponse:
                 "symbol": "GC=F", "kind": "metal",
                 "units": round(new_grams, 4), "unit_label": "克",
                 "avg_cost": round(new_avg, 2), "cost_currency": "CNY",
-                "channel": "浙商积存金",
-                "display_name": "伦敦金 (浙商积存金)",
+                "channel": channel,
+                "display_name": display_name,
                 "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
                 "sell_fee_pct": 0.0038,
             })
@@ -872,7 +898,7 @@ async def gold_buy(body: GoldTradeRequest = Body(...)) -> WriteResponse:
 
     pm.store.append_history({
         "ts_origin": _now_iso(), "action": "bought",
-        "symbol": "GOLD-CNY", "channel": "浙商积存金",
+        "symbol": "GOLD-CNY", "channel": channel,
         "units": grams, "price_per_unit": price,
         "total_amount": total, "currency": "CNY", "source": "web_api",
     })
@@ -897,6 +923,7 @@ async def gold_sell(body: GoldTradeRequest = Body(...)) -> WriteResponse:
     targets = pm.strategy.get("target_assets", [])
     gold_target = next((a for a in targets if a.get("symbol") == "GC=F"), None)
     fee_pct = float(gold_target.get("sell_fee_pct", 0.0038)) if gold_target else 0.0038
+    channel, _ = _gold_channel_defaults(pm)
 
     gross = grams * price
     fee = gross * fee_pct
@@ -920,7 +947,7 @@ async def gold_sell(body: GoldTradeRequest = Body(...)) -> WriteResponse:
 
     pm.store.append_history({
         "ts_origin": _now_iso(), "action": "sold",
-        "symbol": "GOLD-CNY", "channel": "浙商积存金",
+        "symbol": "GOLD-CNY", "channel": channel,
         "units": grams, "price_per_unit": price,
         "total_amount": gross, "fee": round(fee, 2), "net_amount": round(net, 2),
         "currency": "CNY", "source": "web_api",
@@ -941,6 +968,7 @@ async def gold_sell(body: GoldTradeRequest = Body(...)) -> WriteResponse:
 async def gold_set(body: GoldSetRequest = Body(...)) -> WriteResponse:
     """直接设置黄金克数（v2: holdings GC=F units 直接覆盖；均价不变）"""
     pm = _new_pm()
+    channel, display_name = _gold_channel_defaults(pm)
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         gold = next((h for h in holdings if h.get("symbol") == "GC=F"), None)
@@ -952,8 +980,8 @@ async def gold_set(body: GoldSetRequest = Body(...)) -> WriteResponse:
                 "symbol": "GC=F", "kind": "metal",
                 "units": round(body.grams, 4), "unit_label": "克",
                 "avg_cost": 0.0, "cost_currency": "CNY",
-                "channel": "浙商积存金",
-                "display_name": "伦敦金 (浙商积存金)",
+                "channel": channel,
+                "display_name": display_name,
                 "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
                 "sell_fee_pct": 0.0038,
             })
@@ -1996,19 +2024,34 @@ class DataSourcesHealthResponse(BaseModel):
 async def get_data_sources_health() -> DataSourcesHealthResponse:
     """所有数据源的当前可达性 + 最后成功拉取时间。GUI 透明化"我们用什么数据决策"
 
-    数据源：yfinance NDQ.AX / GC=F / USDCNY=X / VIX / TNX；DB market_store；CommSec processed_emails
+    B5 通用化（2026-05）：监控 symbol 不再硬编码作者持仓（NDQ.AX/GC=F），
+    动态读用户实际 holdings；额外保留宏观指标（VIX/TNX/USDCNY 等）作背景。
     """
     sources: List[DataSourceHealth] = []
 
-    # 1-5: yfinance 5 个核心 symbol
-    yf_symbols = [
-        ("NDQ.AX", "BetaShares Nasdaq 100 ETF (AUD)"),
-        ("GC=F", "COMEX 黄金期货 (USD/oz)"),
+    # 用户实际持仓 + 通用宏观背景指标
+    pm = _new_pm()
+    user_symbols: List[Tuple[str, str]] = []
+    for h in pm.holdings:
+        sym = str(h.get("symbol") or "")
+        if not sym:
+            continue
+        # GC=F 走 gold_cny_per_gram 反推链路，单独检查（下方）
+        if h.get("proxy_kind") == "gold_cny_per_gram":
+            continue
+        display = str(h.get("display_name") or sym)
+        ccy = str(h.get("cost_currency") or "")
+        user_symbols.append((sym, f"{display} ({ccy})" if ccy else display))
+
+    # 通用宏观背景：所有用户都关心（不因 fork 而异）
+    macro_symbols = [
         ("USDCNY=X", "美元兑人民币汇率"),
         ("AUDCNY=X", "澳元兑人民币汇率"),
         ("^VIX", "波动率指数 VIX"),
         ("^TNX", "10 年美债收益率 TNX"),
     ]
+
+    yf_symbols = user_symbols + macro_symbols
     for symbol, desc in yf_symbols:
         try:
             df = get_history_data(symbol, "5d")

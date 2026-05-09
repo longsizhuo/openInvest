@@ -109,44 +109,71 @@ def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
 def _portfolio_summary(
     pm: PortfolioManager,
     total_assets_cny: float,
-    current_ndq_aud: float,
-    current_gold_cny_per_g: float,
+    current_prices: Dict[str, float],
 ) -> str:
-    """详细的用户上下文，给 Risk Officer 压力测试用 (含当前市价 + 浮盈)"""
-    # v2 通用化：用 PortfolioManager 接口（含 read-time fallback）
+    """详细的用户上下文，给 Risk Officer 压力测试用 (含当前市价 + 浮盈)
+
+    v3 通用化：动态遍历用户实际 holdings，不再写死 NDQ.AX/GC=F。fork 用户
+    持仓 510300.SS / AAPL / BTC-USD 等任何 yfinance symbol 都能正确显示。
+
+    current_prices: dict[symbol, price] —— 每个资产当前市价（per asset 币种）
+                    黄金特殊：传 'GC=F' → bank_cny_per_gram（含点差，与 cost_currency 一致）
+    """
     cash_cny = pm.cash_amount("CNY")
     aud_cash = pm.cash_amount("AUD")
-    ndq_h = pm.holdings.find("NDQ.AX")
-    gold_h = pm.holdings.find("GC=F")
-    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
-    ndq_cost = float(ndq_h.get("avg_cost", 0) or 0) if ndq_h else 0.0
-    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
-    gold_cost = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
     buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
     dry_powder = max(0.0, cash_cny - buffer_cny)
 
-    ndq_pnl_pct = ((current_ndq_aud / ndq_cost) - 1) * 100 if ndq_cost > 0 else 0
-    gold_pnl_pct = (
-        ((current_gold_cny_per_g / gold_cost) - 1) * 100 if gold_cost > 0 else 0
-    )
-    ndq_pnl_aud = (current_ndq_aud - ndq_cost) * ndq_shares if ndq_cost > 0 else 0
-    gold_pnl_cny = (
-        (current_gold_cny_per_g - gold_cost) * gold_grams if gold_cost > 0 else 0
-    )
+    # 现金部分（多币种通用）
+    lines = [
+        f"用户风险偏好: {risk_level}",
+        f"总资产估算: ¥{total_assets_cny:,.0f}",
+        f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)",
+        f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}",
+    ]
+    if aud_cash > 0:
+        lines.append(f"  - AUD 现金: ${aud_cash:,.0f}")
 
-    return (
-        f"用户风险偏好: {risk_level}\n"
-        f"总资产估算: ¥{total_assets_cny:,.0f}\n"
-        f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)\n"
-        f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
-        f"  - AUD 现金: ${aud_cash:,.0f}\n"
-        f"  - **NDQ.AX**: {ndq_shares} 股, 均价 ${ndq_cost:.4f}, 现价 ${current_ndq_aud:.2f}, "
-        f"浮盈 {ndq_pnl_pct:+.2f}% (≈ ${ndq_pnl_aud:+.2f} AUD)\n"
-        f"  - **黄金 (浙商)**: {gold_grams:.4f}g, 均价 ¥{gold_cost:.2f}/g, "
-        f"现价 ¥{current_gold_cny_per_g:.2f}/g, 浮盈 {gold_pnl_pct:+.2f}% "
-        f"(≈ ¥{gold_pnl_cny:+,.2f})\n"
-    )
+    # 持仓部分：遍历实际 holdings，按 unit_label / cost_currency 通用化展示
+    real_holdings = [
+        h for h in pm.holdings
+        if not h.get("is_tracking_only") and float(h.get("units", 0) or 0) > 0
+    ]
+    if not real_holdings:
+        lines.append("  - **当前无实仓持仓**（onboarding 后请通过 GUI/NapCat 添加）")
+
+    for h in real_holdings:
+        sym = str(h.get("symbol", ""))
+        units = float(h.get("units", 0) or 0)
+        cost = float(h.get("avg_cost", 0) or 0)
+        unit_label = str(h.get("unit_label", "份"))
+        ccy = str(h.get("cost_currency", "CNY"))
+        display = h.get("display_name") or sym
+        channel = h.get("channel") or ""
+        channel_str = f" ({channel})" if channel else ""
+
+        cur = current_prices.get(sym)
+        if cur is None or cost <= 0:
+            # 缺价 / 无成本时仅显示持仓量
+            lines.append(
+                f"  - **{display}** ({sym}){channel_str}: "
+                f"{units:.4f} {unit_label}, 均价 {cost:.2f} {ccy}/{unit_label}",
+            )
+            continue
+
+        pnl_pct = ((cur / cost) - 1) * 100
+        pnl_local = (cur - cost) * units
+        ccy_symbol = "¥" if ccy == "CNY" else ("$" if ccy in ("USD", "AUD") else "")
+        lines.append(
+            f"  - **{display}** ({sym}){channel_str}: "
+            f"{units:.4f} {unit_label}, "
+            f"均价 {ccy_symbol}{cost:.2f}, "
+            f"现价 {ccy_symbol}{cur:.2f}, "
+            f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})",
+        )
+
+    return "\n".join(lines) + "\n"
 
 
 def _run_gemini_cli_review(prompt: str) -> str:
@@ -201,28 +228,38 @@ def run() -> Dict[str, Any]:
             return "stale"
         return "very_stale"
 
-    # current_price 用 Optional[float]：None = NDQ 价拉不到或纯 CNY 组合
-    # 下游 get_user_status / 估值算式必须显式 gate None，**禁止 0 兜底**
-    # （0 会让"NDQ 估值=0"被 Risk Officer 误读为"集中度爆表，建议清仓"）
-    current_price: Optional[float] = None
+    # 通用价格采集 (B3): 遍历 target_assets，按 kind 分发取价
+    #   kind=etf/stock/fund/bond → yfinance close（_get_last_close）
+    #   kind=metal              → 由下方 get_gold_snapshot 单独处理
+    #   未识别 kind             → 也走 yfinance close（兜底）
+    # 之前是写死 NDQ.AX 一个分支，fork 用户持有 510300.SS / AAPL 直接被静默跳过
+    current_prices: Dict[str, float] = {}     # symbol → 当前价（per asset 币种）
+    current_price: Optional[float] = None      # 兼容旧 get_user_status 的 NDQ 价（AUD）
 
-    ndq_entry = next((a for a in target_assets if a.get("symbol") == "NDQ.AX"), None)
-    if ndq_entry:
-        ndq_price, ndq_age = _get_last_close("NDQ.AX", "NDQ.AX")
-        asset_freshness["NDQ.AX"] = _classify_freshness(ndq_price, ndq_age)
-        if ndq_price is None:
-            print("⛔ NDQ.AX 价格获取完全失败（scrape + yfinance + DB + CSV 均空），跳过 NDQ committee")
-            store.dream_event({"phase": "price_fetch_failed", "symbol": "NDQ.AX", "date": today})
-            skipped_assets.add("NDQ.AX")
-            # current_price 保持 None，下游显式跳过 NDQ 估值
-        else:
-            current_price = ndq_price
-            stale_msg = _format_staleness("NDQ.AX", ndq_age)
-            if stale_msg:
-                data_warnings.append(stale_msg)
-                store.dream_event({"phase": "price_stale", "symbol": "NDQ.AX",
-                                   "age_days": ndq_age, "date": today})
-    # else: 纯 CNY 组合，NDQ 持仓为 0 → current_price 保持 None
+    for asset_cfg in target_assets:
+        sym = str(asset_cfg.get("symbol", ""))
+        kind = str(asset_cfg.get("kind", ""))
+        if not sym or kind == "metal":
+            # 金属下面单独处理（gold_price.py 含点差反推）
+            continue
+        price, age = _get_last_close(sym, sym)
+        asset_freshness[sym] = _classify_freshness(price, age)
+        if price is None:
+            print(f"⛔ {sym} 价格获取完全失败，跳过 committee")
+            store.dream_event({"phase": "price_fetch_failed", "symbol": sym, "date": today})
+            skipped_assets.add(sym)
+            continue
+        current_prices[sym] = price
+        stale_msg = _format_staleness(sym, age)
+        if stale_msg:
+            data_warnings.append(stale_msg)
+            store.dream_event({
+                "phase": "price_stale", "symbol": sym, "age_days": age, "date": today,
+            })
+        # NDQ.AX 特殊：旧 get_user_status 仍按 NDQ AUD 价 + AUDCNY 折算
+        # （单一"主资产"概念，v3 完全去掉时一起拆）
+        if sym == "NDQ.AX":
+            current_price = price
 
     rate_price, rate_age = _get_last_close("AUDCNY=X", "汇率")
     if rate_price is None:
@@ -323,30 +360,33 @@ def run() -> Dict[str, Any]:
             ),
         }
 
-    # v2 通用化读
-    ndq_h2 = pm.holdings.find("NDQ.AX")
-    gold_h2 = pm.holdings.find("GC=F")
-    ndq_shares = float(ndq_h2.get("units", 0) or 0) if ndq_h2 else 0.0
-    gold_grams = float(gold_h2.get("units", 0) or 0) if gold_h2 else 0.0
-    # 跳过的资产从总资产估算里剔除，避免用 0 当价格污染集中度计算
-    # current_price=None 也算"该资产无估值"，跟 skipped_assets 等价
-    ndq_value_cny = (
-        ndq_shares * current_price * current_rate
-        if (current_price is not None and "NDQ.AX" not in skipped_assets)
-        else 0.0
-    )
-    gold_value_cny = gold_grams * gold_now if "GC=F" not in skipped_assets else 0.0
-    total_assets_cny = (
-        user_status.cash_cny
-        + user_status.cash_aud * current_rate
-        + ndq_value_cny
-        + gold_value_cny
-    )
-    portfolio_summary = _portfolio_summary(
-        pm, total_assets_cny,
-        current_ndq_aud=current_price,
-        current_gold_cny_per_g=gold_now,
-    )
+    # B3 通用化总资产估算：遍历 holdings 按 kind/cost_currency 算
+    # gold_now 仍是 GC=F 黄金的"含点差克价"，单独传进 current_prices
+    if "GC=F" not in skipped_assets and gold_now > 0:
+        current_prices["GC=F"] = gold_now
+
+    total_assets_cny = user_status.cash_cny + user_status.cash_aud * current_rate
+    for h in pm.holdings:
+        if h.get("is_tracking_only"):
+            continue
+        sym = str(h.get("symbol", ""))
+        if sym in skipped_assets:
+            continue
+        units = float(h.get("units", 0) or 0)
+        if units <= 0:
+            continue
+        ccy = str(h.get("cost_currency", "CNY"))
+        cur = current_prices.get(sym)
+        if cur is None:
+            continue
+        # 折算到 CNY: CNY 直接加；AUD 走 AUDCNY 汇率；其他币种暂不折（v2 行为）
+        if ccy == "CNY":
+            total_assets_cny += units * cur
+        elif ccy == "AUD":
+            total_assets_cny += units * cur * current_rate
+        # USD/EUR 等暂不折算（已知缺口，v3 将引入 utils/fx 模块）
+
+    portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices)
     if data_warnings:
         portfolio_summary += "\n\n=== 数据可信度告警 ===" + "".join(data_warnings)
 
