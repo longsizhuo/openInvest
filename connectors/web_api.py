@@ -1781,6 +1781,178 @@ async def get_insights() -> InsightsResponse:
     return InsightsResponse(count=len(items), items=items)
 
 
+class FreshInsightItem(BaseModel):
+    """新鲜出炉的 Dreaming insight，给 GUI toast 用（PM-3 留存杠杆）"""
+    slug: str = Field(..., description="insight 文件名（不含 .md）")
+    title: str = Field(..., description="一句话总结，供 toast 直接展示")
+    hit_rate: Optional[float] = Field(None, description="该模式历史命中率 0-1")
+    sample_count: Optional[int] = Field(None, description="支持样本数")
+    asset: Optional[str] = Field(None, description="资产 symbol（如适用）")
+    written_at: str = Field(..., description="insight 文件 mtime ISO")
+
+
+class FreshInsightsResponse(BaseModel):
+    count: int = Field(..., description="返回的 fresh insight 条数")
+    items: List[FreshInsightItem] = Field(..., description="按写入时间倒序")
+
+
+@app.get("/api/insights/fresh", response_model=FreshInsightsResponse, tags=["system"])
+async def get_fresh_insights(
+    since_hours: int = Query(48, ge=1, le=720, description="只返回 N 小时内新写入的"),
+    limit: int = Query(5, ge=1, le=50),
+) -> FreshInsightsResponse:
+    """最近 N 小时新写入的 Dreaming insight，给 GUI 主面板做 toast/nudge 用
+
+    PM-3 留存漏洞 #1 修复：之前 Dreaming 三阶段（Light/REM/Deep Sleep）的产物
+    insights 只在 System 页深处展示，用户感受不到 "AI 在变聪明"。这个端点专门
+    挑"刚出炉"的 insight 让前端做 toast：
+        "AI 学到一条 80% 命中率新模式：黄金 ATR>3% 时 ACCUMULATE 7 天后..."
+    """
+    import time
+    store = MemoryStore()
+    insights_dir = store.root / "insights"
+    if not insights_dir.exists():
+        return FreshInsightsResponse(count=0, items=[])
+
+    cutoff_ts = time.time() - since_hours * 3600
+    candidates: List[FreshInsightItem] = []
+    for md_file in insights_dir.glob("*.md"):
+        try:
+            mtime = md_file.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff_ts:
+            continue
+        doc = store.read(f"insights/{md_file.stem}")
+        if not doc:
+            continue
+        meta = doc.metadata or {}
+        # title 优先用 metadata.title，没就抓 body 第一行 h1/h2
+        title = str(meta.get("title") or meta.get("summary") or "").strip()
+        if not title:
+            for line in (doc.body or "").splitlines():
+                stripped = line.strip().lstrip("#").strip()
+                if stripped:
+                    title = stripped
+                    break
+        if not title:
+            title = md_file.stem
+        candidates.append(FreshInsightItem(
+            slug=md_file.stem,
+            title=title[:120],
+            hit_rate=meta.get("hit_rate") if isinstance(meta.get("hit_rate"), (int, float)) else None,
+            sample_count=meta.get("sample_count") if isinstance(meta.get("sample_count"), int) else None,
+            asset=str(meta.get("asset")) if meta.get("asset") else None,
+            written_at=datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
+        ))
+    candidates.sort(key=lambda x: x.written_at, reverse=True)
+    return FreshInsightsResponse(count=len(candidates[:limit]), items=candidates[:limit])
+
+
+class ReengagementAlert(BaseModel):
+    """主动 nudge 用户回来的事件（PM-3 留存漏洞 #3 修复）"""
+    kind: str = Field(..., description="alert 类型：volatile / high_confidence_buy / stale_decision")
+    asset: Optional[str] = Field(None, description="资产 symbol")
+    message: str = Field(..., description="给用户看的一句话")
+    severity: str = Field(..., description="info / warn / urgent")
+    detected_at: str = Field(..., description="检测时间 ISO")
+
+
+class ReengagementResponse(BaseModel):
+    count: int
+    alerts: List[ReengagementAlert]
+
+
+@app.get("/api/reengagement", response_model=ReengagementResponse, tags=["system"])
+async def get_reengagement_alerts() -> ReengagementResponse:
+    """主动 nudge 用户回 GUI 的事件流。前端轮询，detected 就弹 toast。
+
+    PM-3 留存漏洞 #3 修复：当前没有任何 outbound 触发器把"事件"推到用户面前。
+    这个端点把以下三类事件聚合：
+      - volatile: 任一持仓今日涨跌幅 > 5%
+      - high_confidence_buy: 最新 verdict confidence > 0.8 且方向是 BUY/ACCUMULATE
+      - stale_decision: 上次跑委员会 > 7 天（用户该看一眼了）
+    """
+    pm = _new_pm()
+    store = MemoryStore()
+    alerts: List[ReengagementAlert] = []
+    now = datetime.now()
+
+    # 1. volatile: 今日涨跌 > 5%
+    for h in pm.holdings:
+        if h.get("is_tracking_only"):
+            continue
+        sym = str(h.get("symbol") or "")
+        if not sym:
+            continue
+        try:
+            df = get_history_data(sym, "5d")
+        except Exception:
+            continue
+        if df is None or df.empty or len(df) < 2:
+            continue
+        last = float(df["Close"].iloc[-1])
+        prev = float(df["Close"].iloc[-2])
+        if prev <= 0:
+            continue
+        pct = (last / prev - 1) * 100
+        if abs(pct) >= 5.0:
+            alerts.append(ReengagementAlert(
+                kind="volatile",
+                asset=sym,
+                message=f"{h.get('display_name', sym)} 今日 {pct:+.2f}%，超过 5% 异动阈值，建议查看",
+                severity="warn" if abs(pct) < 8 else "urgent",
+                detected_at=now.isoformat(timespec="seconds"),
+            ))
+
+    # 2. high_confidence_buy: 最新 verdict
+    committee_dir = store.root / ".committee"
+    if committee_dir.exists():
+        for date_dir in sorted(committee_dir.iterdir(), reverse=True)[:3]:
+            if not date_dir.is_dir():
+                continue
+            for md in date_dir.glob("*.md"):
+                try:
+                    doc = store.read(str(md.relative_to(store.root)).replace(".md", ""))
+                except Exception:
+                    doc = None
+                if not doc:
+                    continue
+                meta = doc.metadata or {}
+                verdict = str(meta.get("verdict") or "").upper()
+                conf = meta.get("confidence")
+                if not isinstance(conf, (int, float)):
+                    continue
+                if conf >= 0.8 and verdict in ("BUY", "ACCUMULATE"):
+                    alerts.append(ReengagementAlert(
+                        kind="high_confidence_buy",
+                        asset=md.stem,
+                        message=f"{md.stem} 最新决议 {verdict}（置信 {conf:.2f}），高置信加仓信号值得复核",
+                        severity="info",
+                        detected_at=str(meta.get("decision_date") or date_dir.name),
+                    ))
+
+    # 3. stale_decision: 最近一次委员会 > 7 天
+    if committee_dir.exists():
+        all_dates = sorted([d.name for d in committee_dir.iterdir() if d.is_dir()], reverse=True)
+        if all_dates:
+            try:
+                last_date = datetime.strptime(all_dates[0], "%Y-%m-%d")
+                age_days = (now - last_date).days
+                if age_days >= 7:
+                    alerts.append(ReengagementAlert(
+                        kind="stale_decision",
+                        asset=None,
+                        message=f"上次跑委员会是 {age_days} 天前，建议今日复盘一次",
+                        severity="info",
+                        detected_at=now.isoformat(timespec="seconds"),
+                    ))
+            except Exception:
+                pass
+
+    return ReengagementResponse(count=len(alerts), alerts=alerts)
+
+
 @app.get("/api/regime/{symbol:path}", response_model=RegimeResponse, tags=["system"])
 async def get_regime(symbol: str) -> RegimeResponse:
     """实时算指定 symbol 的市场 regime（牛/熊/震荡）+ 给 LLM 看的 brief"""
@@ -1883,6 +2055,50 @@ async def get_pnl_history(
         except Exception as e:  # noqa: BLE001
             log.warning(f"读 pnl_history 失败: {e}")
     return PnLHistoryResponse(count=len(points), points=points)
+
+
+class OutperformEvent(BaseModel):
+    """openInvest 跑赢某个基准的"可分享瞬间" event（jobs/pnl_snapshot 写入）"""
+    ts: str = Field(..., description="snapshot 时间戳 ISO")
+    benchmark: str = Field(..., description="基准名，如 余额宝 / 沪深300 / Wealthfront")
+    user_pct: float = Field(..., description="openInvest 实盘累计涨幅 %")
+    bench_pct: float = Field(..., description="基准累计涨幅 %")
+    diff_pct: float = Field(..., description="跑赢幅度 % (user - bench)")
+    label: str = Field(..., description="拼好的可分享文案")
+
+
+class OutperformEventsResponse(BaseModel):
+    count: int = Field(..., description="返回的事件数")
+    events: List[OutperformEvent] = Field(..., description="按时间倒序")
+
+
+@app.get("/api/outperform_events", response_model=OutperformEventsResponse, tags=["system"])
+async def get_outperform_events(
+    since: int = Query(20, ge=1, le=500),
+) -> OutperformEventsResponse:
+    """openInvest 跑赢基准的"可分享瞬间"列表
+
+    PM-3 增长杠杆：每次 pnl_snapshot 检测到 user_pct > bench_pct 都会落一条到
+    docs/outperform_events.jsonl。GUI 可以把最近一条做成 toast / 截图分享卡。
+    """
+    docs_path = Path(__file__).parent.parent / "docs" / "outperform_events.jsonl"
+    events: List[OutperformEvent] = []
+    if docs_path.exists():
+        try:
+            with open(docs_path, encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in reversed(lines[-since:]):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    events.append(OutperformEvent(**obj))
+                except Exception:
+                    continue
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"读 outperform_events 失败: {e}")
+    return OutperformEventsResponse(count=len(events), events=events)
 
 
 @app.get("/api/committee_sessions", response_model=CommitteeSessionsResponse, tags=["system"])

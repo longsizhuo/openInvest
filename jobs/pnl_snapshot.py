@@ -29,12 +29,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -554,6 +557,64 @@ def _is_trading_window(now: Optional[datetime] = None) -> bool:
     return 9 <= bj.hour <= 23
 
 
+def _outperform_events(snap: Snapshot) -> List[Dict[str, Any]]:
+    """对比所有基准的当前累计涨幅 → 找出"openInvest 跑赢 X 多少"的事件
+
+    PM-3 增长杠杆：每次 pnl_snapshot 都生成事件化文本，让用户拥有"可分享的瞬间"
+    （"我跑赢了余额宝 +2.3%"截图发朋友圈），而不是只有一张静态图。事件落盘到
+    docs/outperform_events.jsonl 给后续 daily digest / web GUI 引用。
+
+    返回 List[{"benchmark": str, "diff_pct": float, "label": str, "user_pct": float,
+              "bench_pct": float, "ts": ISO}]，按 diff_pct 倒序。**diff_pct 必须 > 0**
+    才算 outperform 事件 —— 落后基准时不生成"事件"（避免每次都报负面）。
+    """
+    if snap.total_pnl_pct is None:
+        return []
+    user_pct = float(snap.total_pnl_pct)
+
+    # 用 history 的第一条 ts 作为对比起点（与 SVG 同源）
+    history = _read_history(window_days=WINDOW_DAYS)
+    if not history:
+        return []
+    start_date = history[0]["ts"][:10]
+
+    try:
+        all_series = get_all_series()
+    except Exception as e:
+        log.warning(f"benchmark series 拉失败，跳过 outperform 事件: {e}")
+        return []
+
+    events: List[Dict[str, Any]] = []
+    for series in all_series:
+        bench_pct = _latest_pct(series, start_date)
+        if bench_pct is None:
+            continue
+        diff = user_pct - bench_pct
+        if diff <= 0:
+            continue   # 不报负面（生成 "我跑输了余额宝" 没意义）
+        events.append({
+            "ts": snap.ts,
+            "benchmark": series.label,
+            "user_pct": round(user_pct, 4),
+            "bench_pct": round(bench_pct, 4),
+            "diff_pct": round(diff, 4),
+            "label": f"openInvest 在过去 {len(history)} 个数据点里跑赢{series.label} +{diff:.2f}%",
+        })
+    events.sort(key=lambda e: e["diff_pct"], reverse=True)
+    return events
+
+
+def _persist_outperform(events: List[Dict[str, Any]]) -> None:
+    """事件落盘 → docs/outperform_events.jsonl（append-only）"""
+    if not events:
+        return
+    out_path = SVG_PATH.parent / "outperform_events.jsonl"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("a", encoding="utf-8") as f:
+        for ev in events:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+
+
 def run() -> Dict[str, Any]:
     """job entry：算快照 + 写历史 + 渲染 SVG + 可选自动 push"""
     # 跳过非交易时段（周末 / 凌晨）
@@ -576,6 +637,10 @@ def run() -> Dict[str, Any]:
     tmp.write_text(svg_content, encoding="utf-8")
     tmp.replace(SVG_PATH)
 
+    # 跑赢基准的"可分享瞬间"事件（PM-3 增长杠杆）
+    events = _outperform_events(snap)
+    _persist_outperform(events)
+
     # 可选：commit + push 到 GitHub（受 INVEST_PNL_AUTOPUSH env 控制）
     push_result = _auto_push_svg()
 
@@ -588,6 +653,9 @@ def run() -> Dict[str, Any]:
         "trend": "up" if snap.total_pnl_pct > 0 else (
             "down" if snap.total_pnl_pct < 0 else "flat"
         ),
+        "outperform_count": len(events),
+        # 不直接返回 events 内容（避免 logger 暴露具体涨幅），交由
+        # /api/outperform_events 端点按需读取
         "push": push_result,
     }
 

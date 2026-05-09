@@ -4,7 +4,10 @@
 
 ### 4 个 AI 专家 · 1 份晨间 memo · 0 失眠夜
 
-**不付 Wealthfront 0.25% 管理费。让 4 个独立 LLM 互相 challenge，告诉你今天该不该加仓。代码、决策、实盘 PnL 全开源。**
+**让 4 个独立 LLM 互相 challenge，告诉你今天该不该加仓。代码、决策、实盘 PnL 全开源。MIT 协议自部署。**
+
+> 💡 **省下来的钱**：Wealthfront 收 0.25% 管理费 = 50 万本金每年白送 ¥1,250 美元。Betterment 同样档位。  
+> Wealthfront 用户多数不会自己部署 Python，所以这费一收就是十年。openInvest 在你自己电脑上跑 4 个 AI 角色辩论 + 实盘命中率公开（[`docs/verdict_accuracy.md`](docs/verdict_accuracy.md)），决策权归你。
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-5C2D91)](https://deepseek.com)
