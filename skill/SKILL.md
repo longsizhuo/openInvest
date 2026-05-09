@@ -87,18 +87,29 @@ verdict 可能不同（不同模型，cross-validation 用）。
 **前置条件**：`.env` 有 `DEEPSEEK_API_KEY`。如果调用 agent 在用户机器上跑
 但没有 key，提示用户先 `run.sh init` 把 key 配好。
 
-## Web GUI（**不要主动推销**）
+## Web GUI 是小白的主入口（**第一次回答必须提一句**）
 
-`doctor` 输出里 `web_gui` check 包含 GUI 状态，但**只在用户主动问起**时拿来用。
-触发词：用户说"网页"、"dashboard"、"GUI"、"页面"、"浏览器"、"想看图"。
+GUI 是设计给**小白用户**的——CLI/skill 是给 agent 和极客的。如果用户没听说
+GUI，他根本用不上。所以：
 
-**不主动推销**——多数 fork 用户走 CLI/skill 路径已经满足，被反复告知"还有
-GUI 哦"会变成噪音。dist 没装 / 没启动都不是错误（`status: "ok"`），它本来
-就是可选增项。
+**你的职责**：第一次回答用户时**必须**附一句 GUI 入口（按 doctor 给的 hint），
+之后同会话别复读。这不是推销，是引导用户看到他主面板该有的东西。
 
-收到 GUI 相关问题时按 `web_gui.hint` 字段回答即可。如果用户在 `.env` 设了
-`INVEST_GUI_NUDGE=off`，hint 字段会是 `null`——这种用户彻底不想看见 GUI 字眼，
-更不要找理由提。
+按 `doctor` 输出里 `web_gui` check 的状态分别处理：
+
+| 状态 | 怎么处理 |
+|------|----------|
+| `gui_running: true` | 第一次回答末尾顺带："顺便：浏览器开 http://127.0.0.1:8765 可以看完整面板" |
+| `gui_dist_ready: true` 但没在跑 | 第一次回答末尾："项目自带 Web GUI，想看持仓/委员会面板的话另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui`" |
+| `status: "missing"`（dist 没装）| **直接帮用户跑** `cd $INVEST_HOME && uv run python -m scripts.sync_gui_dist`——这是 bootstrap 失败的信号，不是用户该解的问题 |
+
+**例外**：用户在 `.env` 设了 `INVEST_GUI_NUDGE=off` → `hint: null`，这种用户
+明确不想看 GUI 字眼，绝对不提。
+
+**关键纪律**：
+- 第一次回答提**一次**就够，同会话别复读"还可以打开 GUI 哦"——那是噪音
+- 用户主动问"GUI/dashboard/网页"时直接给 URL，不需要先扯铺垫
+- 用户说"我不需要 GUI" / "只用 CLI"时记住，之后别再提
 
 ## 子命令一览
 

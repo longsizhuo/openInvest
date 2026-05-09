@@ -711,11 +711,12 @@ def cmd_doctor(_: argparse.Namespace) -> None:
     })
 
     # 5) GUI dist + 是否在跑
-    # 只是 informational，不再让 agent 主动推销。dist 没装算 status: "ok"
-    # （CLI/skill 模式完全独立工作，GUI 是可选增项）。hint 字段只在用户问起
-    # GUI / dashboard / 网页时拿来用，不主动展示。
-    # 用户彻底不想被打扰可以在 .env 设 INVEST_GUI_NUDGE=off —— 这种场景
-    # gui_hint 永远是 None，agent 提示词就没素材可推销了。
+    # GUI 是面向**小白用户**的主入口（CLI/skill 是给 agent 和极客的）。
+    # 设计原则：
+    #   - dist 在 bootstrap 阶段自动拉好（skill/scripts/run.sh 第一次跑就 sync）
+    #   - agent 必须主动告知用户 GUI 入口在哪，否则小白找不到
+    #   - 但同一会话只在第一次回答提一次 URL，之后别复读
+    # 高级用户（明确不想看 GUI 提示）可以 `INVEST_GUI_NUDGE=off`
     gui_nudge_off = os.getenv("INVEST_GUI_NUDGE", "").strip().lower() in {"off", "0", "false", "no"}
     gui_index = ROOT / "static" / "index.html"
     gui_dist_ready = gui_index.exists()
@@ -732,25 +733,38 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         gui_running = False
 
     if gui_running:
+        gui_status = "ok"
         gui_detail = f"GUI 在跑：http://{gui_host}:{gui_port}"
         gui_hint = None if gui_nudge_off else (
-            f"如果用户**主动**问 GUI / dashboard / 网页：告诉他 http://{gui_host}:{gui_port} "
-            "可以看完整面板。不要自己挑话题推销。"
+            f"⭐ GUI 在跑，URL: http://{gui_host}:{gui_port}。这是面向小白用户的"
+            "主面板（持仓 / 委员会直播 / 历史决议 / LLM 用量）。**第一次回答用户**"
+            f"时附一句：顺便：浏览器开 http://{gui_host}:{gui_port} 可以看完整面板。"
+            "同会话之后别再复读。"
         )
     elif gui_dist_ready:
+        gui_status = "ok"
         gui_detail = f"GUI dist 已装但未启动（端口 {gui_port} 没人监听）"
         gui_hint = None if gui_nudge_off else (
-            f"如果用户**主动**问 GUI / dashboard / 网页：告诉他另开终端跑 "
-            f"`~/.claude/skills/invest/scripts/run.sh gui` 然后浏览器开 http://{gui_host}:{gui_port}。"
-            "不要自己挑话题推销。"
+            f"⭐ GUI dist 已就绪但 uvicorn 没起。这是面向**小白用户**的主面板，"
+            "不告诉他他就找不到。**第一次回答用户**时附一句：「顺便：项目自带 "
+            "Web GUI，想看持仓/委员会面板的话另开终端跑 "
+            f"`~/.claude/skills/invest/scripts/run.sh gui`，浏览器开 "
+            f"http://{gui_host}:{gui_port}」。同会话别复读。"
         )
     else:
-        gui_detail = "GUI dist 未装（CLI/skill 模式不依赖，正常）"
-        gui_hint = None  # dist 没装代表用户/fork 显然没要 GUI，绝对不主动推销
+        # dist 没装是 bootstrap 失败的信号——主动帮用户装，不是丢锅给用户
+        gui_status = "missing"
+        gui_detail = "static/index.html 不存在 — bootstrap 阶段 GUI dist 没拉成功"
+        gui_hint = (
+            "GUI dist 应该在 skill 第一次跑时自动拉，没拉到大概率是 GitHub 网络问题。"
+            "**直接帮用户跑** `cd $INVEST_HOME && uv run python -m scripts.sync_gui_dist` "
+            "把 dist 装好（不要让用户自己 google 怎么修）；装好后告诉他 GUI 入口在 "
+            f"http://{gui_host}:{gui_port}。"
+        )
 
     checks.append({
         "name": "web_gui",
-        "status": "ok",  # GUI 状态从来不是错误：dist 没装、没启动都是 feature
+        "status": gui_status,
         "detail": gui_detail,
         "hint": gui_hint,
         "gui_url": f"http://{gui_host}:{gui_port}" if gui_dist_ready else None,
