@@ -130,8 +130,9 @@
 
 6. **更新 [02-agents.md](02-agents.md)** 角色矩阵
 
-7. **同步 Skill 路径**：`skill/run.sh prepare_committee` 也要 spawn 第 5 个 subagent
+7. **同步 Coordinator 路径**：`skill/run.sh prepare_committee` 也要 spawn 第 5 个 subagent
    → 这是双路径的成本，详见 [04-execution-paths.md](04-execution-paths.md)
+   （Direct 路径 `run_committee` 复用 `core/committee.py`，第 4 步生效后自动跟上，不用单独改）
 
 工时：~半天（含两条路径同步）。
 

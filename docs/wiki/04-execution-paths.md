@@ -1,25 +1,31 @@
 # 双执行路径
 
-> 同一套委员会逻辑，**两个独立实现**：Skill 路径让用户的 Claude 当协调者真 spawn 4 个 subagent，
-> Web/Cron 路径用 DeepSeek + ThreadPool 同进程多线程。结果可能不同——这是 feature。
+> 同一套委员会逻辑，**两个独立实现**：Coordinator 路径让用户的 Claude 当协调者真 spawn 4 个 subagent，
+> Direct 路径用 DeepSeek + ThreadPool 同进程多线程。结果可能不同——这是 feature。
 
 [← 03-dreaming](03-dreaming.md) · [Wiki 索引](README.md) · [05-data-model →](05-data-model.md)
+
+> **2026-05 重命名**：旧文档叫 "Skill 路径" vs "Web/Cron 路径"。但 skill 现在
+> 同时支持两条（`prepare_committee` + spawn subagent 走 Coordinator；
+> `run_committee` 走 Direct，任意非 Claude agent 也能用），所以统一改叫
+> **Coordinator** vs **Direct**。Direct 包含原 cron 路径 + Web GUI 触发版本 +
+> skill 里的 `run_committee` 子命令。
 
 ---
 
 ## TL;DR
 
-| 路径 | 触发 | 协调者 | Worker 实现 | 模型 | 真 subagent? | 成本 |
-|------|------|--------|-------------|------|-------------|------|
-| **Skill** | `~/.claude/skills/invest/run.sh prepare_committee SYM` | 用户的 Claude | `Agent({subagent_type})` 真 spawn 4 个 subagent（subprocess 隔离）| Claude 4 | ✅ | 由用户订阅承担（项目本身 ¥0）|
-| **Web/Cron** | `POST /api/committee/run` 或 cron `daily_report` | `core/committee.py` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
+| 路径 | 谁能用 | 触发 | 协调者 | Worker 实现 | 模型 | 真 subagent? | 成本 |
+|------|--------|------|--------|-------------|------|-------------|------|
+| **Coordinator** | 仅 Claude Code（要 `Agent({...})` 工具）| skill `prepare_committee SYM` | 用户的 Claude | `Agent({subagent_type})` 真 spawn 4 subagent（subprocess 隔离）| Claude 4 | ✅ | 由用户订阅承担（项目 ¥0）|
+| **Direct** | 任意 agent（Cursor / Cline / Codex / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee.py` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
 
 **功能等价**：同一套 prompt，同一套 cross-challenge 协议，同一套 REGIME 硬约束。
 **模型不同**：verdict 可能不同——这是**对比验证机制**而不是 bug。
 
 ---
 
-## 1. Skill 路径
+## 1. Coordinator 路径（仅 Claude Code）
 
 ### 触发
 
@@ -71,7 +77,15 @@ Agent({...})  // cio 综合 transcript
 
 ---
 
-## 2. Web/Cron 路径
+## 2. Direct 路径（任意 agent / cron / Web GUI）
+
+三个触发入口都走同一份 `core/committee.py:run_committee`：
+
+| 入口 | 谁用 | 备注 |
+|------|------|------|
+| `~/.claude/skills/invest/run.sh run_committee SYM` | Cursor / Cline / Codex / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
+| `POST /api/committee/run` | Web GUI 的"触发/直播"按钮 | 异步 + SSE 进度推送 |
+| cron `0 3 * * *` 跑 `jobs/daily_report.py` | 服务器自动每日 | 跑全部 target_assets，可选发邮件 |
 
 ### 触发
 
@@ -143,8 +157,8 @@ cio_memo = _ask(cio_agent, cio_prompt_with_full_transcript)
 
 ### 3.3 容灾
 
-DeepSeek 限速 / 涨价 / 跑路？Skill 路径不受影响，用户照常用。
-Claude API 抖？Web/Cron 不受影响，自动化照跑。
+DeepSeek 限速 / 涨价 / 跑路？Coordinator 路径不受影响，用户照常用。
+Claude API 抖？Direct 路径不受影响，自动化照跑。
 
 ---
 
@@ -156,11 +170,12 @@ Claude API 抖？Web/Cron 不受影响，自动化照跑。
 ├─────────────────────────────────────────────────┤
 │  core/regime.py REGIME 硬约束算法                │ ← 共享
 ├─────────────────────────────────────────────────┤
-│  core/committee.py run_committee 编排逻辑        │ ← 仅 Web/Cron 用
-│  skill/run.sh prepare_committee 提示生成         │ ← 仅 Skill 用
+│  core/committee.py run_committee 编排逻辑        │ ← 仅 Direct 用
+│  skill/run.sh prepare_committee 提示生成         │ ← 仅 Coordinator 用
+│  skill/run.sh run_committee（包 run_committee） │ ← Direct 在 skill 里的入口
 ├─────────────────────────────────────────────────┤
-│  agents/sdk_agent.py SDKAgent (DeepSeek HTTP)   │ ← 仅 Web/Cron 用
-│  Claude Agent({...}) tool                        │ ← 仅 Skill 用
+│  agents/sdk_agent.py SDKAgent (DeepSeek HTTP)   │ ← 仅 Direct 用
+│  Claude Agent({...}) tool                        │ ← 仅 Coordinator 用
 └─────────────────────────────────────────────────┘
 ```
 
@@ -173,7 +188,7 @@ Claude API 抖？Web/Cron 不受影响，自动化照跑。
 
 ## 5. 升级 Claude Agent SDK？
 
-调研过（2026-05）：可以用 [`anthropics/claude-agent-sdk-python`](https://github.com/anthropics/claude-agent-sdk-python) 让 Web/Cron 也走 Claude 真 subagent。
+调研过（2026-05）：可以用 [`anthropics/claude-agent-sdk-python`](https://github.com/anthropics/claude-agent-sdk-python) 让 Direct 路径也走 Claude 真 subagent。
 
 **问题**：
 1. 强绑 Claude 模型（不能 DeepSeek），cron 每日跑成本 30-100×
@@ -188,13 +203,16 @@ Claude API 抖？Web/Cron 不受影响，自动化照跑。
 
 ```
 你在 Claude Code 里 + 想问"该不该买"？
-  → Skill 路径（让你的 Claude 跑）
+  → Coordinator 路径（让你的 Claude spawn 4 subagent，不烧 DeepSeek token）
 
-你在 Web GUI 想触发？
-  → Web 路径（POST /api/committee/run）
+你在 Cursor / Cline / Codex / 其他非 Claude agent 里？
+  → Direct 路径（skill `run_committee SYM` 一键拿 verdict，需要 DEEPSEEK_API_KEY）
+
+你在 Web GUI 想点按钮触发 + 看实时进度？
+  → Direct 路径（POST /api/committee/run，自带 SSE）
 
 你想每天 03:00 自动跑（无人值守）？
-  → Cron 路径（jobs/daily_report.py）
+  → Direct 路径 cron（jobs/daily_report.py）
 
 你想对比同问题两个模型的 verdict 看一致性？
   → 两条都跑一遍

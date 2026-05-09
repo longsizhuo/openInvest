@@ -20,10 +20,9 @@
 
 ---
 
-## 一次完整跑 6 步（Web/Cron 路径视角）
+## 一次完整跑 6 步（Direct 路径视角）
 
-下面的 round 划分**对应 Web/Cron 路径**（`core/committee.py`）。Skill 路径
-分法略不同——见本节末"两条路径 LLM 调用数对照"。
+下面的 round 划分**对应 Direct 路径**（`core/committee.py`，包括 cron / Web GUI / skill `run_committee`）。Coordinator 路径（Claude Code spawn 4 subagent）分法略不同——见本节末"两条路径 LLM 调用数对照"。
 
 ```
 Round 0  ─ Macro 1 LLM call（跨资产共享，每次跑只 1 次）
@@ -50,16 +49,16 @@ Quant 和 Risk（同样的 *角色*，新的 prompt）。
 
 | 路径 | 场景 | Macro | R1 | R2..N | CIO | 单资产典型总数 |
 |------|------|-------|-----|-------|-----|--------------|
-| **Web/Cron** | 多资产并行优化 | 1（**跨资产共享**）| 2 (Quant+Risk) | 2/轮 | 1 | 5 (收敛) ~ 9 (4 轮) per asset |
-| **Skill** | 用户在 Claude Code 单资产 | 1（**进 Round 1 一起 spawn**）| 3 (Macro+Quant+Risk) | 2/轮 | 1 | 6 (1 R2) ~ 10 (3 R2) |
+| **Direct** | 多资产并行优化 / 任意 agent 单资产 | 1（**跨资产共享**）| 2 (Quant+Risk) | 2/轮 | 1 | 5 (收敛) ~ 9 (4 轮) per asset |
+| **Coordinator** | Claude Code 单资产 spawn subagent | 1（**进 Round 1 一起 spawn**）| 3 (Macro+Quant+Risk) | 2/轮 | 1 | 6 (1 R2) ~ 10 (3 R2) |
 
-**为什么 Skill 路径不共享 Macro**：用户每次问一个资产，没有"跨资产复用"的池子；
+**为什么 Coordinator 路径不共享 Macro**：用户每次问一个资产，没有"跨资产复用"的池子；
 让 Macro 进 Round 1 一起 spawn 反而更并行（Claude `Agent({...})` 同消息发 3 个就并发跑）。
 
-**Web 路径多资产实测**：2 资产收敛 = 1 + 5×2 = 11 calls；2 资产 max=4 不收敛 = 1 + 9×2 = 19 calls；
+**Direct 路径多资产实测**：2 资产收敛 = 1 + 5×2 = 11 calls；2 资产 max=4 不收敛 = 1 + 9×2 = 19 calls；
 journal 实证 16 calls 介于两者间。
 
-引用本图前先想清楚是哪条路径——Skill 文档（[skill/references/committee-protocol.md](https://github.com/longsizhuo/openInvest/blob/main/skill/references/committee-protocol.md)）按 Skill 路径写，本文按 Web 路径写，**两份各自正确**但前提不同。
+引用本图前先想清楚是哪条路径——Coordinator 文档（[skill/references/committee-protocol.md](https://github.com/longsizhuo/openInvest/blob/main/skill/references/committee-protocol.md)）按 Coordinator 路径写，本文按 Direct 路径写，**两份各自正确**但前提不同。
 
 ---
 
