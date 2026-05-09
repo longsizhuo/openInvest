@@ -127,11 +127,16 @@ GUI，他根本用不上。所以：
 | `strategy` | 通用 | 看策略 | target_assets + Dreaming insights |
 | `history [-n N]` | 通用 | 看流水 | 最近 N 笔交易 + 委员会决议 |
 | `live_prices` | 通用 | 背景行情 | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
-| `what_if [...]` | 通用 | "X 跌 Y% 我亏多少" | 算术情景，无 LLM |
+| `what_if [--symbol X --pct N \| --gold-pct N \| --ndq-pct N]` | 通用 | "X 跌 Y% 我亏多少" | 算术情景，无 LLM |
 | `prepare_committee SYM` | Coordinator | 拿 brief 给 4 subagent | brief JSON + 6 段 prompts |
 | `save_committee SYM` | Coordinator | 落盘 transcript | stdin 4 段输出 → markdown |
 | `run_committee SYM [--force]` | Direct | 一键完整委员会 | verdict JSON + CIO memo |
 | `gui` | 通用 | 启动 Web GUI | uvicorn :8765，Ctrl+C 退出 |
+
+**子命令名是封闭集合 —— 上表之外的命令都不存在**。看到自己想调
+`get_committee_context` / `analyze_asset` / `pull_brief` 这种名字时，停下，
+回上表对照 —— 你大概率是在脑补不存在的命令名，应该选 `prepare_committee` 或
+`run_committee`。
 
 输出都是 JSON。**始终从 JSON 引用数字**，不从 `memory/*.md` markdown 读
 （markdown body 是 frontmatter 的渲染产物，可能略滞后）。
