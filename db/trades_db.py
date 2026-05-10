@@ -6,7 +6,11 @@
 - 不连真实支付渠道，不动 portfolio.md，不动 fcntl.flock
 
 schema：
-  trades(id, ts, verdict_id, symbol, direction, units, price, cost_currency, note, status)
+  trades(id, ts, verdict_id, symbol, direction, units, price, cost_currency, note, status,
+         intended_date)
+  - ts:            记录意向的 UTC 时间戳（自动生成，ISO 8601）
+  - intended_date: 计划成交日期（用户填写，ISO 日期 YYYY-MM-DD，可空）
+                   None 表示"记录时就打算立即执行"
   status 值域：planned → executed → cancelled
 """
 from __future__ import annotations
@@ -51,9 +55,10 @@ class TradesDB:
         self._init_db()
 
     def _init_db(self) -> None:
-        """建表 + 索引（幂等，用 IF NOT EXISTS）"""
+        """建表 + 索引 + schema 迁移（全部幂等）"""
         with self._lock:
             cur = self.conn.cursor()
+            # 建表（含最新 schema，IF NOT EXISTS 保证新库直接建全字段）
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS trades (
                     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,9 +70,18 @@ class TradesDB:
                     price          REAL,
                     cost_currency  TEXT    DEFAULT 'CNY',
                     note           TEXT,
-                    status         TEXT    DEFAULT 'planned'
+                    status         TEXT    DEFAULT 'planned',
+                    intended_date  TEXT
                 )
             """)
+            # ---- 在线迁移：旧库补 intended_date 列 ----
+            # ALTER TABLE ADD COLUMN 对已有列会抛 OperationalError，用 try/except 兜底
+            try:
+                cur.execute("ALTER TABLE trades ADD COLUMN intended_date TEXT")
+            except Exception:
+                # 列已存在（OperationalError: duplicate column name）时静默跳过
+                pass
+
             # 按时间倒序查最近 N 笔是最常见操作
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts DESC)"
@@ -92,6 +106,7 @@ class TradesDB:
         verdict_id: Optional[str] = None,
         note: Optional[str] = None,
         ts: Optional[str] = None,
+        intended_date: Optional[str] = None,
     ) -> int:
         """插入一笔计划交易，返回新行 id。
 
@@ -103,7 +118,10 @@ class TradesDB:
             cost_currency: 计价货币，默认 CNY
             verdict_id:    关联的 committee transcript 路径（可选）
             note:          备注（可选）
-            ts:            ISO 时间戳，默认用 UTC now
+            ts:            记录意向时刻（ISO 8601 时间戳，默认 UTC now）
+            intended_date: 计划成交日期（ISO 日期 YYYY-MM-DD，可空）
+                           None 表示"现在记录、现在打算执行"；
+                           填具体日期表示计划在该日成交（金融审计用）
         Returns:
             新插入行的 id（int）
         """
@@ -118,10 +136,10 @@ class TradesDB:
             cur.execute(
                 """INSERT INTO trades
                        (ts, verdict_id, symbol, direction, units, price,
-                        cost_currency, note, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned')""",
+                        cost_currency, note, status, intended_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)""",
                 (now, verdict_id, symbol, direction, units, price,
-                 cost_currency, note),
+                 cost_currency, note, intended_date),
             )
             self.conn.commit()
             return cur.lastrowid  # type: ignore[return-value]

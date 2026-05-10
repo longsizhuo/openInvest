@@ -191,3 +191,60 @@ def test_concurrent_read_write_no_error(tmp_path):
 
     # WAL 模式下不应有并发异常
     assert errors == [], f"并发读写出错: {errors}"
+
+
+# ---------- intended_date 字段 ----------
+
+def test_record_with_intended_date(tdb):
+    """record_trade 传入 intended_date 时应正确存储"""
+    new_id = tdb.record_trade(
+        symbol="NDQ.AX",
+        direction="BUY",
+        units=10.0,
+        price=130.0,
+        intended_date="2026-05-20",
+    )
+    row = tdb.get_trade(new_id)
+    assert row is not None
+    assert row["intended_date"] == "2026-05-20"
+
+
+def test_record_without_intended_date(tdb):
+    """不传 intended_date 时，字段应为 None（不报错）"""
+    new_id = tdb.record_trade(
+        symbol="GC=F",
+        direction="BUY",
+        units=5.0,
+    )
+    row = tdb.get_trade(new_id)
+    assert row is not None
+    assert row["intended_date"] is None
+
+
+def test_intended_date_in_list(tdb):
+    """list_trades 返回的 dict 含 intended_date 字段"""
+    tdb.record_trade(symbol="NDQ.AX", direction="BUY", units=1.0,
+                     intended_date="2026-06-01")
+    tdb.record_trade(symbol="GC=F", direction="SELL", units=2.0)
+
+    rows = tdb.list_trades(limit=10)
+    # 第一条（最新）有 intended_date
+    assert rows[0]["intended_date"] == "2026-06-01" or rows[1]["intended_date"] == "2026-06-01"
+    # 其中一条为 None
+    dates = [r["intended_date"] for r in rows]
+    assert None in dates
+
+
+def test_schema_migration_idempotent(tmp_path):
+    """反复构建 TradesDB（模拟 ALTER TABLE ADD COLUMN 被调用多次）不应报错"""
+    db_path = str(tmp_path / "migrate_test.db")
+    # 第一次：建表并加 intended_date
+    db1 = TradesDB(db_path=db_path)
+    db1.record_trade(symbol="NDQ.AX", direction="BUY", units=1.0,
+                     intended_date="2026-05-10")
+    # 第二次：再次构建，ALTER TABLE 走 try/except 兜底，不崩溃
+    db2 = TradesDB(db_path=db_path)
+    row = db2.list_trades(limit=1)[0]
+    # 已写入的数据不丢失
+    assert row["symbol"] == "NDQ.AX"
+    assert row["intended_date"] == "2026-05-10"

@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
+from core.portfolio_manager import PortfolioManager, _guess_kind_from_symbol
 from core.schemas import (
     StrategyData,
     TargetAsset as SchemaTargetAsset,
@@ -2979,12 +2979,21 @@ class RecordTradeRequest(BaseModel):
     verdict_id: Optional[str] = Field(None, max_length=256,
                                       description="关联 committee transcript 路径（可选）")
     note: Optional[str] = Field(None, max_length=512, description="备注（可选）")
+    intended_date: Optional[str] = Field(
+        None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description=(
+            "计划成交日期，ISO 格式 YYYY-MM-DD，可空。"
+            "None 表示「现在记录、现在打算执行」；"
+            "填具体日期表示计划在该日成交（金融审计用，与 ts 独立）。"
+        ),
+    )
 
 
 class TradeRecord(BaseModel):
     """单笔 trade 记录（返回给前端）"""
     id: int
-    ts: str
+    ts: str                          # 记录意向时刻（UTC ISO 8601 时间戳，自动生成）
     verdict_id: Optional[str] = None
     symbol: str
     direction: str
@@ -2993,6 +3002,7 @@ class TradeRecord(BaseModel):
     cost_currency: str
     note: Optional[str] = None
     status: str
+    intended_date: Optional[str] = None  # 计划成交日期（ISO YYYY-MM-DD，可空；None=立即执行）
 
 
 class TradesListResponse(BaseModel):
@@ -3017,6 +3027,7 @@ async def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
             cost_currency=body.cost_currency.upper(),
             verdict_id=body.verdict_id,
             note=body.note,
+            intended_date=body.intended_date,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3032,20 +3043,176 @@ async def list_trades(limit: int = Query(20, ge=1, le=500,
     return TradesListResponse(count=len(trades), trades=trades)
 
 
+def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """把一笔 executed trade 同步写入 portfolio.md。
+
+    仅在 status 改为 executed 时调用。用 PortfolioManager.with_portfolio_tx()
+    保证 fcntl 锁安全（单进程内多线程共享同一把锁）。
+
+    Returns:
+        (synced: bool, holding_snapshot: dict | None)
+        - synced=False 表示跳过同步（price 缺失/units=0 等边缘情况）
+        - holding_snapshot 是同步后该 symbol 的 holding dict（供前端 toast）
+    """
+    symbol = trade.get("symbol", "")
+    direction = str(trade.get("direction", "")).upper()
+    units = float(trade.get("units") or 0)
+    price = trade.get("price")  # 可能为 None（市价单）
+    cost_currency = str(trade.get("cost_currency") or "CNY").upper()
+
+    if not symbol or units <= 0:
+        # 数据不完整，静默跳过，不阻断主流程
+        log.warning(f"_sync_trade_to_portfolio: 数据不完整，跳过 trade={trade}")
+        return False, None
+
+    try:
+        pm = PortfolioManager()
+    except Exception as e:
+        # portfolio.md 不存在时（单测环境等）不崩溃
+        log.warning(f"_sync_trade_to_portfolio: PortfolioManager 初始化失败，跳过 — {e}")
+        return False, None
+
+    synced_holding: Optional[Dict[str, Any]] = None
+
+    try:
+        with pm.with_portfolio_tx() as p:
+            holdings = list(p.get("holdings") or [])
+
+            # 找现有 holding（symbol 大小写精确匹配，与 portfolio.md 保持一致）
+            target = next((h for h in holdings if h.get("symbol") == symbol), None)
+
+            if direction == "BUY":
+                # ---- BUY：upsert holding，重新算加权均价 ----
+                cur_units = float(target.get("units") or 0) if target else 0.0
+                cur_avg = float(target.get("avg_cost") or 0) if target else 0.0
+
+                new_units = cur_units + units
+
+                if price is not None and new_units > 0:
+                    # 加权均价：(旧均价 × 旧持仓 + 本次单价 × 本次数量) / 新持仓
+                    new_avg = round(
+                        (cur_avg * cur_units + price * units) / new_units, 4
+                    )
+                else:
+                    # price=None（市价单）：仅更新 units，avg_cost 保持不变
+                    new_avg = cur_avg
+
+                if target is not None:
+                    # 更新现有 holding（in-place 修改 list 里的 dict）
+                    target["units"] = new_units
+                    if price is not None:
+                        target["avg_cost"] = new_avg
+                    # 兜底：旧 holding 若缺 kind 字段（v1 迁移残留），补上启发式推断值
+                    if not target.get("kind"):
+                        target["kind"] = _guess_kind_from_symbol(symbol)
+                else:
+                    # 新建 holding：补全 schema 必填字段（kind/cost_currency）
+                    # kind 用启发式规则猜测（与 record_external_trade 保持一致）
+                    new_holding: Dict[str, Any] = {
+                        "symbol": symbol,
+                        "kind": _guess_kind_from_symbol(symbol),
+                        "units": new_units,
+                        "cost_currency": cost_currency,
+                        "avg_cost": round(new_avg, 4) if price is not None else 0.0,
+                    }
+                    holdings.append(new_holding)
+                    target = new_holding
+
+                synced_holding = dict(target)
+
+            elif direction == "SELL":
+                # ---- SELL：减 units，归零则 remove ----
+                if target is None:
+                    # portfolio.md 里没有这个 symbol，无法减仓，跳过
+                    log.warning(
+                        f"_sync_trade_to_portfolio: SELL {symbol} 但 portfolio 中无持仓，跳过"
+                    )
+                    # 抛出一个标记异常，让 with 块回滚（不写 portfolio.md）
+                    raise _SkipSync("no holding to sell")
+
+                cur_units = float(target.get("units") or 0)
+                new_units = max(0.0, cur_units - units)
+
+                if new_units == 0:
+                    # 全部卖出 → remove holding
+                    holdings[:] = [h for h in holdings if h.get("symbol") != symbol]
+                    synced_holding = {"symbol": symbol, "units": 0.0, "removed": True}
+                else:
+                    # 部分卖出：avg_cost 不变（卖出不影响成本基础）
+                    target["units"] = new_units
+                    # 兜底：旧 holding 若缺 kind 字段（v1 迁移残留），补上启发式推断值
+                    if not target.get("kind"):
+                        target["kind"] = _guess_kind_from_symbol(symbol)
+                    synced_holding = dict(target)
+
+            p["holdings"] = holdings
+
+        # with_portfolio_tx 退出后自动落盘
+        pm._reload()  # 刷新 pm 的内存视图（保持和 record_external_trade 一致）
+        return True, synced_holding
+
+    except _SkipSync:
+        # SELL 但无持仓：不同步，但也不报错（业务上允许"账本有、持仓无"）
+        return False, None
+    except Exception as e:
+        # 同步失败不能阻断状态更新——记日志后降级
+        log.error(f"_sync_trade_to_portfolio 异常，portfolio.md 未变动: {e}", exc_info=True)
+        return False, None
+
+
+class _SkipSync(Exception):
+    """内部标记异常：让 with_portfolio_tx 回滚但不对外报错"""
+
+
 @app.patch("/api/trades/{trade_id}/status", tags=["trades"])
 async def patch_trade_status(
     trade_id: int,
     status: str = Body(..., embed=True,
                        description="新状态：planned / executed / cancelled"),
 ) -> Dict[str, Any]:
-    """修改账本记录状态（planned → executed → cancelled）"""
+    """修改账本记录状态（planned → executed → cancelled）
+
+    当 status 改为 executed 时，自动同步更新 portfolio.md 持仓：
+    - BUY: upsert holding，重新算加权均价（avg_cost = 加权平均）
+    - SELL: holding.units -= trade.units；归零则 remove
+
+    响应额外携带 portfolio_synced 和 synced_holding 让前端展示 toast。
+    """
+    # 先取 trade 原始数据（patch 前），供后面同步用
+    trade_before = _trades_db.get_trade(trade_id)
+
     try:
         found = _trades_db.patch_status(trade_id, status)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not found:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
-    return {"id": trade_id, "status": status, "ok": True}
+
+    # ---- executed 时同步 portfolio.md ----
+    portfolio_synced = False
+    synced_holding: Optional[Dict[str, Any]] = None
+
+    if status == "executed" and trade_before is not None:
+        # 在 asyncio event loop 里用 run_in_executor 跑同步 IO（fcntl/文件写）
+        # 避免阻塞 event loop；出错降级，不影响状态更新结果
+        loop = asyncio.get_event_loop()
+        portfolio_synced, synced_holding = await loop.run_in_executor(
+            None, _sync_trade_to_portfolio, trade_before
+        )
+        if portfolio_synced:
+            log.info(
+                f"portfolio.md 已同步: trade_id={trade_id} "
+                f"{trade_before.get('direction')} {trade_before.get('units')} "
+                f"{trade_before.get('symbol')}"
+            )
+
+    return {
+        "id": trade_id,
+        "status": status,
+        "ok": True,
+        "portfolio_synced": portfolio_synced,
+        "synced_holding": synced_holding,
+    }
 
 
 # 一键部署模式：跑完 `python -m scripts.sync_gui_dist` 后，static/ 含 invest-gui 构建产物
