@@ -984,8 +984,38 @@ def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) 
 
     在 migrate_profile.py 跑完之后调用 —— migrate 写的是 v1 兜底 portfolio.md，
     这里把它替换成包含完整 holdings list 的 v2 版本。
+
+    **2026-05-10 事故防御**：之前测试调 cmd_init 把作者真实持仓覆盖成 fixture
+    的 cash 5000 + 空 holdings → 数据丢了。现在加 safety guard：
+      1. 如果已有 portfolio.md 含真实持仓（cash 任一币种 > 0 或 holdings 非空），
+         **拒绝覆盖**并抛 RuntimeError，让调用方明确传 force=True
+      2. 任何成功覆盖前都先备份到 portfolio.md.bak.<timestamp>，事故可恢复
     """
     store = MemoryStore()
+    # Safety guard：检查现有 portfolio.md 是否已含真实数据
+    existing = store.read("portfolio")
+    if existing is not None:
+        existing_cash = existing.get("cash") or {}
+        existing_holdings = existing.get("holdings") or []
+        has_real_data = (
+            any(float(v or 0) > 0 for v in existing_cash.values())
+            or len(existing_holdings) > 0
+        )
+        if has_real_data:
+            # 备份当前 portfolio.md（事故时可恢复）
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = store.root / f"portfolio.md.bak.{ts}"
+            current_path = store.root / "portfolio.md"
+            if current_path.exists():
+                backup_path.write_text(
+                    current_path.read_text(encoding="utf-8"), encoding="utf-8",
+                )
+            raise RuntimeError(
+                f"⚠️ portfolio.md 已含真实数据（cash={existing_cash}, "
+                f"{len(existing_holdings)} 条 holdings），拒绝被 cmd_init 覆盖。"
+                f"已备份当前到 {backup_path.name}。如确实想重置，删 portfolio.md "
+                f"再重跑 init，或调 web_api 的 holdings/cash 端点逐项修改。"
+            )
     portfolio_data: Dict[str, Any] = {
         "schema_version": 2,
         "cash": {k: float(v) for k, v in cash.items() if v},
