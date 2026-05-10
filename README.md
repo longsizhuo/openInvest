@@ -9,6 +9,12 @@
 > 💡 **省下来的钱**：Wealthfront 收 0.25% 管理费 = 50 万本金每年白送 ¥1,250 美元。Betterment 同样档位。  
 > Wealthfront 用户多数不会自己部署 Python，所以这费一收就是十年。openInvest 在你自己电脑上跑 4 个 AI 角色辩论 + 实盘命中率公开（[`docs/verdict_accuracy.md`](docs/verdict_accuracy.md)），决策权归你。
 
+<!-- OUTPERFORM_FEED_START — 由 jobs/pnl_snapshot._persist_outperform 每 2h 自动追加，最近 3 条 -->
+> 📈 **跑赢瞬间**（最近 3 条，由 [pnl-data 分支](https://github.com/longsizhuo/openInvest/tree/pnl-data) 自动更新）：
+> 
+> *实盘启动后这里会自动滚动作者账户 vs 8 基准的对比事件，如"过去 30 天跑赢余额宝 +X.X%"。fork 用户的 README 会显示自己的事件。*
+<!-- OUTPERFORM_FEED_END -->
+
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-5C2D91)](https://deepseek.com)
 [![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)

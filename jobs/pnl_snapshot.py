@@ -584,28 +584,41 @@ def _outperform_events(snap: Snapshot) -> List[Dict[str, Any]]:
         log.warning(f"benchmark series 拉失败，跳过 outperform 事件: {e}")
         return []
 
+    # 金融视角红线：原版 `if diff <= 0: continue` 是 survivorship bias，对外
+    # 展示只有 winning streak 构成误导性宣传。新版同时记 winning + losing 两类
+    # 事件，label 主语用"作者账户"而非"openInvest"（工具本身没持仓，主语替换
+    # 会被误读为工具能力背书）。
     events: List[Dict[str, Any]] = []
     for series in all_series:
         bench_pct = _latest_pct(series, start_date)
         if bench_pct is None:
             continue
         diff = user_pct - bench_pct
-        if diff <= 0:
-            continue   # 不报负面（生成 "我跑输了余额宝" 没意义）
+        win = diff > 0
         events.append({
             "ts": snap.ts,
             "benchmark": series.label,
             "user_pct": round(user_pct, 4),
             "bench_pct": round(bench_pct, 4),
             "diff_pct": round(diff, 4),
-            "label": f"openInvest 在过去 {len(history)} 个数据点里跑赢{series.label} +{diff:.2f}%",
+            "is_outperform": win,
+            "label": (
+                f"作者账户过去 {len(history)} 个数据点 "
+                f"{'跑赢' if win else '跑输'}{series.label} {diff:+.2f}%"
+            ),
         })
-    events.sort(key=lambda e: e["diff_pct"], reverse=True)
+    # 按 |diff| 排序（绝对幅度大的优先展示），不再"只挑赢的"
+    events.sort(key=lambda e: abs(e["diff_pct"]), reverse=True)
     return events
 
 
 def _persist_outperform(events: List[Dict[str, Any]]) -> None:
-    """事件落盘 → docs/outperform_events.jsonl（append-only）"""
+    """事件落盘 → docs/outperform_events.jsonl（append-only）+ 同步刷 README marker
+
+    README hero 区有 `<!-- OUTPERFORM_FEED_START --> ... <!-- OUTPERFORM_FEED_END -->`
+    两个 marker，本函数会把最近 3 条事件渲染成 markdown bullet 写进中间。这样
+    pnl-data force-push 时 GitHub README 自动展示最新跑赢瞬间——PM-Growth 增长杠杆。
+    """
     if not events:
         return
     out_path = SVG_PATH.parent / "outperform_events.jsonl"
@@ -613,6 +626,87 @@ def _persist_outperform(events: List[Dict[str, Any]]) -> None:
     with out_path.open("a", encoding="utf-8") as f:
         for ev in events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    # 同步刷 README marker 区域
+    try:
+        _update_readme_outperform_feed(out_path)
+    except Exception as e:  # noqa: BLE001  README 刷新失败不阻断主流程
+        log.warning(f"README outperform feed 刷新失败（不影响 jsonl 落盘）: {e}")
+
+
+def _update_readme_outperform_feed(jsonl_path: Path, top_n: int = 3) -> None:
+    """读 outperform_events.jsonl 最新 N 条，渲染 markdown 写进 README marker 之间。
+
+    README marker：
+      <!-- OUTPERFORM_FEED_START -->
+      （内容由本函数自动生成）
+      <!-- OUTPERFORM_FEED_END -->
+    """
+    readme = SVG_PATH.parent.parent / "README.md"
+    if not readme.exists():
+        return
+    if not jsonl_path.exists():
+        return
+
+    # 取最后 N 条事件
+    lines = jsonl_path.read_text(encoding="utf-8").splitlines()
+    recent: List[Dict[str, Any]] = []
+    for line in lines[-200:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            recent.append(json.loads(line))
+        except Exception:
+            continue
+    if not recent:
+        return
+    recent.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    # 同基准只保留最新一条（避免列表全是"跑赢余额宝"5 次）
+    seen_bench: set = set()
+    deduped: List[Dict[str, Any]] = []
+    for ev in recent:
+        bench = ev.get("benchmark", "")
+        if bench in seen_bench:
+            continue
+        seen_bench.add(bench)
+        deduped.append(ev)
+        if len(deduped) >= top_n:
+            break
+
+    # 金融视角红线：固定免责 + 展示 winning + losing 两类事件，避免 survivorship 偏差
+    rendered = [
+        "> 📈 **作者账户实盘事件**（最近 vs 基准，由 [pnl-data 分支](https://github.com/longsizhuo/openInvest/tree/pnl-data) 每 2h 自动刷新）：",
+        ">",
+    ]
+    for ev in deduped:
+        ts = str(ev.get("ts", ""))[:10]
+        label = ev.get("label", "")
+        # win/loss 用不同 emoji 区分，避免视觉只看到"赢"
+        marker = "🟢" if ev.get("is_outperform") else "🔴"
+        rendered.append(f"> - {marker} `{ts}` {label}")
+    rendered.append(">")
+    rendered.append(
+        "> *以上为作者本人账户历史事件，仅供工具效果参考，**不构成投资建议**，"
+        "过去表现不预示未来收益。fork 用户的部署会看到自己的事件。*",
+    )
+
+    new_block = "\n".join(rendered)
+    text = readme.read_text(encoding="utf-8")
+    start_marker = "<!-- OUTPERFORM_FEED_START"
+    end_marker = "<!-- OUTPERFORM_FEED_END -->"
+    s_idx = text.find(start_marker)
+    e_idx = text.find(end_marker)
+    if s_idx == -1 or e_idx == -1 or e_idx < s_idx:
+        # marker 不存在则跳过（fork 用户可能删了 hero 区）
+        return
+    # 找到 START 行结尾
+    s_line_end = text.find("\n", s_idx)
+    if s_line_end == -1:
+        return
+    before = text[: s_line_end + 1]
+    after = text[e_idx:]
+    new_text = before + new_block + "\n" + after
+    readme.write_text(new_text, encoding="utf-8")
 
 
 def run() -> Dict[str, Any]:
