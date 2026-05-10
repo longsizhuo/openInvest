@@ -404,6 +404,14 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
     insights_dir = store.root / "insights"
     insights_dir.mkdir(parents=True, exist_ok=True)
 
+    # 按需懒加载 InsightsDB（DB 路径与 dreaming job 解耦；测试时传 db=None 跳过）
+    from db.insights_db import InsightsDB
+    try:
+        _insights_db: Optional[InsightsDB] = InsightsDB()
+    except Exception as e:
+        log.warning(f"InsightsDB 初始化失败（降级：只写 .md）: {e}")
+        _insights_db = None
+
     for c in accepted:
         regime_tag = "_".join(c["regime"]) or "any"
         slug = _slugify(f"{c['asset']}_{c['action']}_{regime_tag}_{c['window_days']}d")
@@ -425,7 +433,13 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
 > 这条洞察由 Dreaming Deep Sleep 自动生成，会在每日 manager agent 决策时
 > 通过 `MEMORY.md` 索引被注入到 prompt 上下文，作为"用户实证数据"参考。
 """
+        # 双写：.md 文件（人类可读副本，渐进迁移保留）+ SQLite（SQL 查询后端）
         store.write(f"insights/{slug}", "insight", c, body)
+        if _insights_db is not None:
+            try:
+                _insights_db.upsert_from_candidate(slug, c, body)
+            except Exception as e:
+                log.warning(f"insights SQLite 写入失败（slug={slug}）: {e}")
         store.dream_event({"phase": "deep_sleep", "accepted": slug, "score": c["score"]})
 
     # 更新 MEMORY.md 索引

@@ -114,63 +114,27 @@ class PortfolioManager:
         self.strategy = strategy_doc
         self.portfolio = portfolio_doc
 
-    # ---------- v2 新接口：cash + holdings（自带 v1 read-time fallback）----------
+    # ---------- v2 接口：cash + holdings ----------
+    # v1 fallback 已于 2026-05-10 正式退场（见 docs/wiki/adr/004-v1-fallback-retirement.md）
+    # 迁移工具：scripts/migrate_portfolio_to_holdings.py
 
     @property
     def cash(self) -> Dict[str, float]:
         """任意币种现金视图：pm.cash["CNY"] / pm.cash["AUD"] 等
 
-        Read-time fallback：portfolio.md 还是 v1（cash_cny/aud_cash）时，
-        自动构造等价的 cash dict 返回，让调用方无感知 v1/v2 状态。
+        v2 only：portfolio.md 必须已经是 v2 格式（schema_version=2）。
+        未迁移的旧数据请先跑 scripts/migrate_portfolio_to_holdings.py。
         """
-        cash = dict(self.portfolio.get("cash") or {})
-        if not cash:
-            # v1 fallback：从扁平字段聚合
-            cny = self.portfolio.get("cash_cny")
-            aud = self.portfolio.get("aud_cash")
-            if cny is not None:
-                cash["CNY"] = float(cny)
-            if aud is not None:
-                cash["AUD"] = float(aud)
-        return cash
+        return dict(self.portfolio.get("cash") or {})
 
     @property
     def holdings(self) -> HoldingsView:
         """持仓数组视图：pm.holdings.find('NDQ.AX') 等
 
-        Read-time fallback：portfolio.md 还是 v1 时，从 ndq_shares/gold_grams
-        构造等价的 holdings list（带完整 v2 字段，方便业务代码直接读）。
+        v2 only：从 portfolio.md 的 holdings 列表读取。
+        未迁移的旧数据请先跑 scripts/migrate_portfolio_to_holdings.py。
         """
         raw = list(self.portfolio.get("holdings") or [])
-        if not raw:
-            # v1 fallback
-            ndq = float(self.portfolio.get("ndq_shares", 0) or 0)
-            ndq_avg = float(self.portfolio.get("ndq_avg_cost_aud_per_share", 0) or 0)
-            gold = float(self.portfolio.get("gold_grams", 0) or 0)
-            gold_avg = float(self.portfolio.get("gold_avg_cost_cny_per_gram", 0) or 0)
-            # v1 fallback —— channel/display_name 留中性，避免给 fork 用户硬塞作者
-            # 用过的 CommSec / 浙商积存金。要带具体券商/银行名应该走 v2 holdings 列表
-            # 直接配置，不该从 v1 扁平字段反推
-            if ndq > 0:
-                raw.append({
-                    "symbol": "NDQ.AX", "kind": "etf",
-                    "units": ndq, "unit_label": "股",
-                    "avg_cost": ndq_avg, "cost_currency": "AUD",
-                    "channel": "未指定",
-                    "display_name": "NDQ.AX",
-                    "proxy_kind": "direct",
-                })
-            if gold > 0:
-                raw.append({
-                    "symbol": "GC=F", "kind": "metal",
-                    "units": gold, "unit_label": "克",
-                    "avg_cost": gold_avg, "cost_currency": "CNY",
-                    "channel": "未指定",
-                    "display_name": "黄金（按克）",
-                    "yfinance_proxy": "GC=F",
-                    "proxy_kind": "gold_cny_per_gram",
-                    "sell_fee_pct": 0.0038,
-                })
         return HoldingsView(raw)
 
     def cash_amount(self, currency: str) -> float:
@@ -398,46 +362,14 @@ class PortfolioManager:
 # ============ 工具函数 ============
 
 def _ensure_v2_inplace(p) -> None:
-    """transaction 入口处 in-place 把 v1 数据转 v2（仅修改 tx.metadata）
+    """transaction 入口处确保 cash / holdings 字段已就位（v2 only）
 
-    这样 with 块内 caller 拿到的 cash / holdings 已经是 v2 形态，
-    退出时 commit 写回的也是 v2（旧字段被 with_portfolio_tx 退出逻辑清掉）。
+    v1 fallback 已于 2026-05-10 正式退场。
+    调用方需确保 portfolio.md 已通过 scripts/migrate_portfolio_to_holdings.py 迁移。
+    此函数保留为空实现是为了兼容 with_portfolio_tx 的调用位置，后续可彻底删除。
     """
-    cash = dict(p.get("cash") or {})
-    if not cash:
-        cny = p.get("cash_cny")
-        aud = p.get("aud_cash")
-        if cny is not None:
-            cash["CNY"] = float(cny)
-        if aud is not None:
-            cash["AUD"] = float(aud)
-        if cash:
-            p["cash"] = cash
-
-    holdings = list(p.get("holdings") or [])
-    if not holdings:
-        ndq = float(p.get("ndq_shares", 0) or 0)
-        ndq_avg = float(p.get("ndq_avg_cost_aud_per_share", 0) or 0)
-        gold = float(p.get("gold_grams", 0) or 0)
-        gold_avg = float(p.get("gold_avg_cost_cny_per_gram", 0) or 0)
-        # v1 fallback：留中性 channel/display_name，避免给 fork 用户硬塞作者
-        # 用过的 CommSec / 浙商积存金（详见 read-time 同款 fallback 注释）
-        if ndq > 0:
-            holdings.append({
-                "symbol": "NDQ.AX", "kind": "etf", "units": ndq, "unit_label": "股",
-                "avg_cost": ndq_avg, "cost_currency": "AUD", "channel": "未指定",
-                "display_name": "NDQ.AX", "proxy_kind": "direct",
-            })
-        if gold > 0:
-            holdings.append({
-                "symbol": "GC=F", "kind": "metal", "units": gold, "unit_label": "克",
-                "avg_cost": gold_avg, "cost_currency": "CNY", "channel": "未指定",
-                "display_name": "黄金（按克）",
-                "yfinance_proxy": "GC=F", "proxy_kind": "gold_cny_per_gram",
-                "sell_fee_pct": 0.0038,
-            })
-        if holdings:
-            p["holdings"] = holdings
+    # v2 数据直接读取，无需任何转换
+    pass
 
 
 def _guess_kind_from_symbol(symbol: str) -> str:

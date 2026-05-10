@@ -23,6 +23,12 @@ from core.committee import run_committee, run_macro_view
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
 from db.market_store import MarketStore
+from jobs.daily_report_builder import (
+    assemble_full_report,
+    classify_asset_freshness,
+    format_staleness_warning,
+    portfolio_summary_text,
+)
 from services.notifier import EmailDeliveryError, send_gmail_notification
 from utils.exchange_fee import (
     analyze_multi_timeframe,
@@ -81,15 +87,8 @@ def _get_last_close(
 
 
 def _format_staleness(label: str, age_days: Optional[int]) -> str:
-    """给 portfolio_summary 用的陈旧警告字符串，age_days >= 阈值才输出。
-    LLM 看到这段会知道当前估值用的是 N 天前的价，不要假装是今天的市场。"""
-    if age_days is None or age_days < STALE_THRESHOLD_DAYS:
-        return ""
-    return (
-        f"\n⚠️ **{label} 价格数据陈旧 {age_days} 天** —— 今日 scraper / yfinance "
-        f"未能更新行情，估值基于 {age_days} 天前的收盘价。请在结论里明确标注"
-        f"\"基于陈旧数据\"，不要假设当前价仍接近此值。"
-    )
+    """告警文本委托给 daily_report_builder（见 ADR-005）"""
+    return format_staleness_warning(label, age_days, STALE_THRESHOLD_DAYS)
 
 
 def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
@@ -111,69 +110,8 @@ def _portfolio_summary(
     total_assets_cny: float,
     current_prices: Dict[str, float],
 ) -> str:
-    """详细的用户上下文，给 Risk Officer 压力测试用 (含当前市价 + 浮盈)
-
-    v3 通用化：动态遍历用户实际 holdings，不再写死 NDQ.AX/GC=F。fork 用户
-    持仓 510300.SS / AAPL / BTC-USD 等任何 yfinance symbol 都能正确显示。
-
-    current_prices: dict[symbol, price] —— 每个资产当前市价（per asset 币种）
-                    黄金特殊：传 'GC=F' → bank_cny_per_gram（含点差，与 cost_currency 一致）
-    """
-    cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
-    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
-    dry_powder = max(0.0, cash_cny - buffer_cny)
-
-    # 现金部分（多币种通用）
-    lines = [
-        f"用户风险偏好: {risk_level}",
-        f"总资产估算: ¥{total_assets_cny:,.0f}",
-        f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)",
-        f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}",
-    ]
-    if aud_cash > 0:
-        lines.append(f"  - AUD 现金: ${aud_cash:,.0f}")
-
-    # 持仓部分：遍历实际 holdings，按 unit_label / cost_currency 通用化展示
-    real_holdings = [
-        h for h in pm.holdings
-        if not h.get("is_tracking_only") and float(h.get("units", 0) or 0) > 0
-    ]
-    if not real_holdings:
-        lines.append("  - **当前无实仓持仓**（onboarding 后请通过 GUI/NapCat 添加）")
-
-    for h in real_holdings:
-        sym = str(h.get("symbol", ""))
-        units = float(h.get("units", 0) or 0)
-        cost = float(h.get("avg_cost", 0) or 0)
-        unit_label = str(h.get("unit_label", "份"))
-        ccy = str(h.get("cost_currency", "CNY"))
-        display = h.get("display_name") or sym
-        channel = h.get("channel") or ""
-        channel_str = f" ({channel})" if channel else ""
-
-        cur = current_prices.get(sym)
-        if cur is None or cost <= 0:
-            # 缺价 / 无成本时仅显示持仓量
-            lines.append(
-                f"  - **{display}** ({sym}){channel_str}: "
-                f"{units:.4f} {unit_label}, 均价 {cost:.2f} {ccy}/{unit_label}",
-            )
-            continue
-
-        pnl_pct = ((cur / cost) - 1) * 100
-        pnl_local = (cur - cost) * units
-        ccy_symbol = "¥" if ccy == "CNY" else ("$" if ccy in ("USD", "AUD") else "")
-        lines.append(
-            f"  - **{display}** ({sym}){channel_str}: "
-            f"{units:.4f} {unit_label}, "
-            f"均价 {ccy_symbol}{cost:.2f}, "
-            f"现价 {ccy_symbol}{cur:.2f}, "
-            f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})",
-        )
-
-    return "\n".join(lines) + "\n"
+    """用户上下文文本，委托给 daily_report_builder（见 ADR-005）"""
+    return portfolio_summary_text(pm, total_assets_cny, current_prices)
 
 
 def _run_gemini_cli_review(prompt: str) -> str:
@@ -220,13 +158,10 @@ def run() -> Dict[str, Any]:
     asset_freshness: Dict[str, str] = {}
 
     def _classify_freshness(price: Optional[float], age_days: Optional[int]) -> str:
-        if price is None:
-            return "missing"
-        if age_days is None or age_days < STALE_THRESHOLD_DAYS:
-            return "fresh"
-        if age_days < STALE_HARD_ABORT_DAYS:
-            return "stale"
-        return "very_stale"
+        # 委托给 builder 的 stateless 版本（同参数传入）
+        return classify_asset_freshness(
+            price, age_days, STALE_THRESHOLD_DAYS, STALE_HARD_ABORT_DAYS
+        )
 
     # 通用价格采集 (B3): 遍历 target_assets，按 kind 分发取价
     #   kind=etf/stock/fund/bond → yfinance close（_get_last_close）
@@ -444,6 +379,7 @@ def run() -> Dict[str, Any]:
         f"### {a.get('display_name', a['symbol'])} ({a['symbol']})\n"
         f"{asset_committees[a['symbol']]['report'].cio_memo}"
         for a in target_assets
+        if a["symbol"] not in skipped_assets and a["symbol"] in asset_committees
     ])
     gold_snapshot_text = format_gold_report(snap) if snap else "黄金数据获取失败"
     gemini_prompt = f"""
@@ -469,66 +405,18 @@ def run() -> Dict[str, Any]:
 """
     final_decision_gemini = _run_gemini_cli_review(gemini_prompt)
 
-    # 4) 拼报告
-    asset_section = "\n\n---\n\n".join([
-        f"## {idx+2}. {a.get('display_name', a['symbol'])} ({a['symbol']})\n\n"
-        f"**裁决**: {asset_committees[a['symbol']]['verdict']['verdict']} | "
-        f"置信度 {asset_committees[a['symbol']]['verdict']['confidence']:.2f} | "
-        f"主导方 {asset_committees[a['symbol']]['verdict']['dominant_view']} | "
-        f"建议金额 ¥{asset_committees[a['symbol']]['verdict']['alloc_cny']}\n\n"
-        f"### CIO 备忘\n```\n{asset_committees[a['symbol']]['report'].cio_memo}\n```\n\n"
-        f"<details><summary>📜 三个 analyst 详细意见</summary>\n\n"
-        f"**Quant**:\n{asset_committees[a['symbol']]['report'].quant_view}\n\n"
-        f"**Risk Officer**:\n{asset_committees[a['symbol']]['report'].risk_view}\n\n"
-        f"</details>"
-        for idx, a in enumerate(target_assets)
-    ])
-
-    full_report = f"""
-# 投资委员会日报 ({today})
-
-## 1. 宏观环境 (跨资产共享)
-{macro_view}
-
----
-
-## 黄金现货快照
-```
-{gold_snapshot_text}
-```
-
----
-
-{asset_section}
-
----
-
-## {len(target_assets)+2}. 摩擦成本 (CNY → AUD 换汇)
-```
-{friction_report}
-```
-
----
-
-## {len(target_assets)+3}. Gemini 第二意见 (独立 challenge)
-{final_decision_gemini}
-
----
-
-*用户当前总资产估算: ¥{total_assets_cny:,.0f}*
-*Generated by Investment Committee — Quant / Macro / Risk Officer / CIO*
-
----
-
-### ⚠️ 风险提示与免责声明
-
-- 本报告由 LLM 生成，**不构成任何投资建议**。LLM 可能误读数据、过度自信、漏看
-  重要信息或基于陈旧/错误数据编造结论。
-- 系统**不自动下单**，所有决策需人工复核后自行执行。
-- 数据样本量过小（近 60 天），任何"跑赢/跑输基准"的结论在统计意义上**不显著**，
-  不代表长期表现。
-- 投资有风险，过往业绩不预示未来。损失自负。
-"""
+    # 4) 拼报告（委托给 builder 的纯函数）
+    full_report = assemble_full_report(
+        today=today,
+        macro_view=macro_view,
+        gold_snapshot_text=gold_snapshot_text,
+        friction_report=friction_report,
+        target_assets=target_assets,
+        asset_committees=asset_committees,
+        skipped_assets=skipped_assets,
+        total_assets_cny=total_assets_cny,
+        final_decision_gemini=final_decision_gemini,
+    )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）
     daily_block = f"**委员会摘要**\n\n- 宏观: {macro_view[:200]}\n\n**资产裁决**:"

@@ -48,12 +48,36 @@ def _seed_memory(store: MemoryStore) -> None:
             },
         ],
     }, "# strategy body")
+    # v2 结构：v1 fallback 已退场，测试数据直接用 cash dict + holdings list
     store.write("portfolio", "state", {
-        "cash_cny": 12345.67,
-        "aud_cash": 100.0,
-        "ndq_shares": 128.0,
-        "gold_grams": 50.0,
-        "gold_avg_cost_cny_per_gram": 1000.0,
+        "schema_version": 2,
+        "cash": {"CNY": 12345.67, "AUD": 100.0},
+        "holdings": [
+            {
+                "symbol": "NDQ.AX",
+                "kind": "etf",
+                "units": 128.0,
+                "unit_label": "股",
+                "avg_cost": 53.86,
+                "cost_currency": "AUD",
+                "channel": "CommSec",
+                "display_name": "BetaShares Nasdaq 100",
+                "proxy_kind": "direct",
+            },
+            {
+                "symbol": "GC=F",
+                "kind": "metal",
+                "units": 50.0,
+                "unit_label": "克",
+                "avg_cost": 1000.0,
+                "cost_currency": "CNY",
+                "channel": "浙商积存金",
+                "display_name": "黄金（浙商积存金）",
+                "yfinance_proxy": "GC=F",
+                "proxy_kind": "gold_cny_per_gram",
+                "sell_fee_pct": 0.0038,
+            },
+        ],
     }, "# portfolio body")
 
 
