@@ -34,8 +34,8 @@ Content-Type: application/json
 
 `kind` 枚举：`stock` / `etf` / `metal` / `crypto` / `bond` / `fund` / `other`。
 
-用户得在 Cloudflare Access 鉴权后面打 API（或者本地 `curl http://127.0.0.1:8765/...`
-直连服务器）。你够不到他服务器，多半要指他自己跑 `curl`。
+GUI 推荐路径：让用户在浏览器 `http://127.0.0.1:8765/strategy` 直接加 holding，
+比 `curl` 友好。CLI 用户用 `curl http://127.0.0.1:8765/api/holdings/{symbol} -X POST ...`。
 
 ## 方式 3：用户只想分析不想持久化
 

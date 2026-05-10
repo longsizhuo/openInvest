@@ -148,6 +148,25 @@ keys 页面创建。复制以 `sk-` 开头的字符串。
 `run.sh init --force` 会覆盖现有 `user_profile.json`。用户想从头开始时用这个。
 （不动 `.env`——那个是合并写入的）。
 
+## 降级后必说话术
+
+`cmd_init` 返回的 `holdings_parse_note` 值决定 agent 必须说的话。**不允许跳过，不允许只在
+`next_step` 里藏着、等用户追问才说**。
+
+| `holdings_parse_note` 值（含以下关键词） | agent 必须对用户说的话（中文原文，不得改动要点） |
+|---|---|
+| `"DEEPSEEK_API_KEY 缺失"` | "你的持仓我暂时按基础模式记录了——只录了现金，没识别你说的具体股票。想让我自动识别 (510300 → 沪深300ETF 那种)，需要一个免费 DeepSeek API key，30 秒去 platform.deepseek.com 注册。要不要现在搞定？" |
+| `"LLM parse failed"` | "解析你说的持仓时出了点问题（DeepSeek 临时故障或网络超时），现在只录了现金部分。你可以等一会儿重跑 `run.sh init --force`，或者直接通过 GUI 手动加股票。" |
+| `"parsed via DeepSeek"` 且 `user_review_required: true` | 读出 `parsed_holdings_for_user_review` 里每条持仓让用户确认，例："我理解你持有：A 3000 股 4.2 元、B 50 克黄金 750 均价。对吗？" |
+| `"no holdings_description provided"` | 无需额外说（用户本来就没描述持仓） |
+
+### 降级后禁止做的事
+
+- 不要在 `next_step` 里简单带过，然后继续推进其他步骤——用户看不到 `next_step` 字段
+- 不要假设用户知道什么是 v1 / v2 fallback；改用"基础模式"这种说法
+- 不要在用户确认持仓前就跑 `run.sh status` 告诉用户"持仓正确"（status 命令会
+  输出空持仓，会让用户以为出错）
+
 ## 常见坑
 
 - **Gmail App Password 不是 16 位** → 用户给的多半是登录密码。指他们去

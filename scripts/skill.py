@@ -1161,6 +1161,46 @@ def cmd_init(args: argparse.Namespace) -> None:
         env_data.get("DEEPSEEK_API_KEY") and env_data.get("EMAIL_SENDER")
     ) else "completed_partial"
 
+    # ---------- next_step 话术组装 ----------
+    # 优先级（从高到低）：
+    #   1. holdings_description 给了但 key 缺失（v1 fallback）→ 强制降级话术（必说）
+    #   2. LLM 解析成功 → 让用户确认解析结果
+    #   3. completed_full → 正常 onboarding 完成话术
+    #   4. completed_partial（无 holdings_description 场景）→ 告知凭据不完整
+    _holdings_desc_given_no_key = (
+        bool(holdings_text) and not env_data.get("DEEPSEEK_API_KEY", "").strip()
+    )
+
+    if _holdings_desc_given_no_key:
+        # 强制话术：告知用户持仓仅记了现金，引导去注册 DeepSeek key
+        next_step_text = (
+            "你的持仓我暂时按基础模式记录了——只录了现金，没识别你说的具体股票。"
+            "想让我自动识别 (510300 → 沪深300ETF 那种)，需要一个免费 DeepSeek API key，"
+            "30 秒去 platform.deepseek.com 注册。要不要现在搞定？"
+        )
+    elif holdings_v2 and holdings_v2.get("holdings"):
+        # LLM 解析成功路径：先让用户确认解析内容
+        next_step_text = (
+            "**先让用户确认 LLM 解析的持仓**（读 `parsed_holdings_for_user_review` "
+            "字段给他听）。确认有错的话用 `POST /api/holdings/{symbol}` 修正或重跑 "
+            "`run.sh init --force`。确认无误后，调 `run.sh status` 验证持仓显示正确。"
+        )
+    elif final_checks_status == "completed_full":
+        # 完整 onboarding 完成
+        next_step_text = (
+            "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后跑 "
+            "`run.sh strategy` 看 target_assets。如果你没追踪任何 yfinance symbol，"
+            "可以从 references/adding-assets.md 加。"
+        )
+    else:
+        # 凭据不完整（无 holdings_description、无 DeepSeek key 的普通场景）
+        next_step_text = (
+            "Profile 已写入，但 .env 凭据不完整。**告诉用户**：你现在还能在 Claude "
+            "Code 对话里直接说 '看看我的持仓' / '该不该加仓 X' —— Claude 帮你跑分析"
+            "不烧任何 token；之后想用网页/手机看面板，再跑 `run.sh gui` 启动；"
+            "想让服务器后台每天自动跑，那时候再去 platform.deepseek.com 注册 key 填 .env。"
+        )
+
     _print_json({
         "status": "ok",
         "completion": final_checks_status,
@@ -1179,24 +1219,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             holdings_v2 if holdings_v2 else None
         ),
         "user_review_required": bool(holdings_v2 and holdings_v2.get("holdings")),
-        "next_step": (
-            (
-                # 如果走了 LLM 解析路径，先让用户确认再继续
-                "**先让用户确认 LLM 解析的持仓**（读 `parsed_holdings_for_user_review` "
-                "字段给他听）。确认有错的话用 `POST /api/holdings/{symbol}` 修正或重跑 "
-                "`run.sh init --force`。确认无误后，调 `run.sh status` 验证持仓显示正确。"
-                if (holdings_v2 and holdings_v2.get("holdings"))
-                else
-                "Onboarding 完成。建议立刻调 `run.sh status` 验证持仓正确，然后跑 "
-                "`run.sh strategy` 看 target_assets。如果你没追踪任何 yfinance symbol，"
-                "可以从 references/adding-assets.md 加。"
-            )
-            if final_checks_status == "completed_full" else
-            "Profile 已写入，但 .env 凭据不完整。**告诉用户**：你现在还能在 Claude "
-            "Code 对话里直接说 '看看我的持仓' / '该不该加仓 X' —— Claude 帮你跑分析"
-            "不烧任何 token；之后想用网页/手机看面板，再跑 `run.sh gui` 启动；"
-            "想让服务器后台每天自动跑，那时候再去 platform.deepseek.com 注册 key 填 .env。"
-        ),
+        "next_step": next_step_text,
     })
 
 

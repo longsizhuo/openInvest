@@ -62,11 +62,9 @@ frontmatter 有 `Provider: claude (skill mode)` 或 `Provider: deepseek`。
 
 1. `ps aux | grep uvicorn` —— `connectors.web_api` 在 :8765 跑吗？
 2. `curl http://127.0.0.1:8765/api/health` —— 200 吗？
-3. 如果 GUI 是 `invest.<域名>`，Caddy 把 `/api/*` 反代到 :8765 了吗？
 
-让用户：
-- 直接跑 `~/.claude/skills/invest/scripts/run.sh gui`（前台 uvicorn，Ctrl+C 退出），或
-- 走 systemd（生产）：[docs/wiki/08-deployment.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/08-deployment.md)
+让用户跑 `~/.claude/skills/invest/scripts/run.sh gui`（前台 uvicorn，Ctrl+C 退出），
+浏览器开 `http://127.0.0.1:8765`。
 
 ## `.env` 里有 DeepSeek key 但 `daily_report` 还报 401
 
