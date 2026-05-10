@@ -1153,43 +1153,13 @@ def _build_audit_meta(
     }
 
 
-# v3 真并行后多线程并发写 status.json（每个 asset 的 progress callback 在线程池里跑）
-# 必须按 task_id 加锁，避免 tmp 文件冲突 + JSON 文件被半截写花
-import threading as _threading
-_status_locks: Dict[str, _threading.Lock] = {}
-_status_locks_lock = _threading.Lock()
-
-
-def _get_status_lock(task_id: str) -> _threading.Lock:
-    with _status_locks_lock:
-        lk = _status_locks.get(task_id)
-        if lk is None:
-            lk = _threading.Lock()
-            _status_locks[task_id] = lk
-        return lk
-
-
-def _write_committee_status(task_id: str, payload: Dict[str, Any]) -> None:
-    """原子写 status.json（按 task_id 加 threading.Lock 防多线程混写）"""
-    path = _committee_status_path(task_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # 用 pid + thread id 区分 tmp 文件避免竞争（即便锁失效也不会冲突）
-    import os as _os
-    tmp = path.with_suffix(f".json.tmp.{_os.getpid()}.{_threading.get_ident()}")
-    with _get_status_lock(task_id):
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(path)
-
-
-def _read_committee_status(task_id: str) -> Optional[Dict[str, Any]]:
-    path = _committee_status_path(task_id)
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        log.error(f"committee status {task_id} 损坏: {e}")
-        return None
+# v3 真并行后多线程并发写 status.json
+# _status_locks / write / read 已抽到 connectors/state_bus.py 单例模块，
+# 这里只做 import alias，让后续 web_api 内部代码不需要改变调用名。
+from connectors.state_bus import (
+    write_committee_status as _write_committee_status,
+    read_committee_status as _read_committee_status,
+)
 
 
 async def _run_committee_task(
@@ -1761,7 +1731,33 @@ def _next_run_from_cron(schedule: str, tz: str = "Asia/Shanghai") -> Optional[st
 
 @app.get("/api/insights", response_model=InsightsResponse, tags=["system"])
 async def get_insights() -> InsightsResponse:
-    """Dreaming 整合出的长期模式（memory/insights/*.md）"""
+    """Dreaming 整合出的长期模式
+
+    优先从 SQLite（db/insights.db）读取，降级到 memory/insights/*.md glob 扫描。
+    SQLite 方案减少 I/O 开销并支持 SQL 查询；.md 文件保留为人类可读副本。
+    """
+    # 优先走 SQLite
+    try:
+        from db.insights_db import InsightsDB
+        db = InsightsDB()
+        rows = db.list_all()
+        if rows:
+            items = [
+                InsightItem(
+                    slug=row["slug"],
+                    metadata={
+                        k: row[k] for k in ("asset", "hit_rate", "sample_count", "source_score", "created_at")
+                        if row.get(k) is not None
+                    },
+                    body=row.get("body") or "",
+                )
+                for row in rows
+            ]
+            return InsightsResponse(count=len(items), items=items)
+    except Exception as e:
+        log.warning(f"InsightsDB 查询失败，降级到 .md glob: {e}")
+
+    # 降级：glob memory/insights/*.md（保留原有行为，确保渐进迁移期间不断服）
     store = MemoryStore()
     insights_dir = store.root / "insights"
     items: List[InsightItem] = []
@@ -1808,8 +1804,35 @@ async def get_fresh_insights(
     insights 只在 System 页深处展示，用户感受不到 "AI 在变聪明"。这个端点专门
     挑"刚出炉"的 insight 让前端做 toast：
         "AI 学到一条 80% 命中率新模式：黄金 ATR>3% 时 ACCUMULATE 7 天后..."
+
+    数据源优先级：
+      1. SQLite（db/insights.db），O(1) 查询，按 created_at 过滤
+      2. memory/insights/*.md glob + mtime（降级，渐进迁移期间保底）
     """
     import time
+
+    # 优先走 SQLite
+    try:
+        from db.insights_db import InsightsDB
+        db = InsightsDB()
+        rows = db.list_fresh(since_hours=since_hours, limit=limit)
+        if rows:
+            items = [
+                FreshInsightItem(
+                    slug=row["slug"],
+                    title=(row.get("title") or row["slug"])[:120],
+                    hit_rate=row.get("hit_rate"),
+                    sample_count=row.get("sample_count"),
+                    asset=row.get("asset"),
+                    written_at=row["created_at"],
+                )
+                for row in rows
+            ]
+            return FreshInsightsResponse(count=len(items), items=items)
+    except Exception as e:
+        log.warning(f"InsightsDB fresh 查询失败，降级到 .md glob: {e}")
+
+    # 降级：glob memory/insights/*.md + mtime 过滤（保留原有行为）
     store = MemoryStore()
     insights_dir = store.root / "insights"
     if not insights_dir.exists():
@@ -2926,6 +2949,103 @@ async def commsec_apply(
         skipped=len(trades) - written,
         errors=errors,
     )
+
+
+# ============================================================
+# 一键记账（Trades）
+# ============================================================
+# 设计：
+# - 用独立 db/trades.db（WAL），与 market_data.db 和 memory/ 完全隔离
+# - 不动 portfolio.md / fcntl.flock / holdings
+# - status 状态机：planned → executed → cancelled
+
+
+from db.trades_db import TradesDB as _TradesDB
+
+# 模块级单例（web_api 单进程内复用同一个连接）
+_trades_db = _TradesDB()
+
+
+class RecordTradeRequest(BaseModel):
+    """POST /api/trades/record body"""
+    symbol: str = Field(..., min_length=1, max_length=32,
+                        description="标的代码，如 NDQ.AX / GC=F")
+    direction: Literal["BUY", "SELL"] = Field(..., description="方向：BUY 或 SELL")
+    units: float = Field(..., gt=0, description="数量（股数 / 克数）")
+    price: Optional[float] = Field(None, gt=0,
+                                   description="每单位价格；None 表示市价")
+    cost_currency: str = Field("CNY", pattern=r"^[A-Za-z]{3,5}$",
+                               description="计价货币，默认 CNY")
+    verdict_id: Optional[str] = Field(None, max_length=256,
+                                      description="关联 committee transcript 路径（可选）")
+    note: Optional[str] = Field(None, max_length=512, description="备注（可选）")
+
+
+class TradeRecord(BaseModel):
+    """单笔 trade 记录（返回给前端）"""
+    id: int
+    ts: str
+    verdict_id: Optional[str] = None
+    symbol: str
+    direction: str
+    units: float
+    price: Optional[float] = None
+    cost_currency: str
+    note: Optional[str] = None
+    status: str
+
+
+class TradesListResponse(BaseModel):
+    """GET /api/trades 响应"""
+    count: int
+    trades: List[TradeRecord]
+
+
+@app.post("/api/trades/record", tags=["trades"])
+async def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
+    """记录一笔计划交易到本地账本（不连真实支付渠道）
+
+    写入 db/trades.db，返回 {id, ok: true}。
+    status 初始为 planned；跑完后用 PATCH /api/trades/{id}/status 改成 executed。
+    """
+    try:
+        new_id = _trades_db.record_trade(
+            symbol=body.symbol,
+            direction=body.direction,
+            units=body.units,
+            price=body.price,
+            cost_currency=body.cost_currency.upper(),
+            verdict_id=body.verdict_id,
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": new_id, "ok": True}
+
+
+@app.get("/api/trades", response_model=TradesListResponse, tags=["trades"])
+async def list_trades(limit: int = Query(20, ge=1, le=500,
+                                         description="最近 N 笔，最多 500")) -> TradesListResponse:
+    """按时间倒序返回最近 N 笔账本记录"""
+    rows = _trades_db.list_trades(limit=limit)
+    trades = [TradeRecord(**r) for r in rows]
+    return TradesListResponse(count=len(trades), trades=trades)
+
+
+@app.patch("/api/trades/{trade_id}/status", tags=["trades"])
+async def patch_trade_status(
+    trade_id: int,
+    status: str = Body(..., embed=True,
+                       description="新状态：planned / executed / cancelled"),
+) -> Dict[str, Any]:
+    """修改账本记录状态（planned → executed → cancelled）"""
+    try:
+        found = _trades_db.patch_status(trade_id, status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not found:
+        raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
+    return {"id": trade_id, "status": status, "ok": True}
 
 
 # 一键部署模式：跑完 `python -m scripts.sync_gui_dist` 后，static/ 含 invest-gui 构建产物

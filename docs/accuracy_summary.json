@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-05-10T19:50:30+00:00",
+  "windows": {
+    "30d": {
+      "direction_hit_rate": 0.8929,
+      "sample_size": 28,
+      "by_direction": {
+        "bullish": {
+          "hit": 0,
+          "total": 3,
+          "rate": 0.0
+        },
+        "bearish": {
+          "hit": 1,
+          "total": 1,
+          "rate": 1.0
+        },
+        "hold": {
+          "hit": 24,
+          "total": 24,
+          "rate": 1.0
+        }
+      }
+    },
+    "90d": {
+      "direction_hit_rate": 0.9118,
+      "sample_size": 34,
+      "by_direction": {
+        "bullish": {
+          "hit": 0,
+          "total": 3,
+          "rate": 0.0
+        },
+        "bearish": {
+          "hit": 1,
+          "total": 1,
+          "rate": 1.0
+        },
+        "hold": {
+          "hit": 30,
+          "total": 30,
+          "rate": 1.0
+        }
+      }
+    },
+    "all": {
+      "direction_hit_rate": 0.9118,
+      "sample_size": 34,
+      "by_direction": {
+        "bullish": {
+          "hit": 0,
+          "total": 3,
+          "rate": 0.0
+        },
+        "bearish": {
+          "hit": 1,
+          "total": 1,
+          "rate": 1.0
+        },
+        "hold": {
+          "hit": 30,
+          "total": 30,
+          "rate": 1.0
+        }
+      }
+    }
+  }
+}
