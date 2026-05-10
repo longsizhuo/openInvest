@@ -50,7 +50,7 @@ jobs:
           uv run python -c "from core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from utils.fx import get_fx_rate, cash_total_in_base"
           uv run python -c "from connectors.web_api import app"
-          uv run python -c "from connectors.state_bus import _write_committee_status, _read_committee_status"
+          uv run python -c "from connectors.state_bus import write_committee_status, read_committee_status, _get_status_lock"
           uv run python -c "from db.trades_db import TradesDB"
           uv run python -c "from db.insights_db import InsightsDB"
           uv run python -c "import scripts.export_accuracy"
