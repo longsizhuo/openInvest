@@ -141,6 +141,31 @@ GUI，他根本用不上。所以：
 输出都是 JSON。**始终从 JSON 引用数字**，不从 `memory/*.md` markdown 读
 （markdown body 是 frontmatter 的渲染产物，可能略滞后）。
 
+## Web API 写操作端点（agent 也能调）
+
+**产品哲学**：agent（你）拥有 openInvest 全部功能。CLI 不够时，直接调 Web API
+（默认 :8765）。GUI 是给小白用户的展示层，agent 不需要走 GUI。
+
+用户说"记一笔交易"/"我打算买 X"/"标记成交"/"加新资产"时调这些：
+
+| 端点 | 用在 | body 简例 |
+|------|------|-----------|
+| `POST /api/trades/record` | **记一笔意向交易**（不连真实支付，只内部账本）| `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
+| `GET /api/trades?limit=N` | 看最近 N 笔意向 / 已成交 | — |
+| `PATCH /api/trades/{id}/status` | **标记成交**（status: "executed"）→ 自动同步 portfolio.md（更新 holdings + 扣 cash）| `{status: "executed"}` |
+| `POST /api/holdings` | 新增 yfinance 跟踪资产（不下单，只录入持仓数据）| `{symbol, kind, units, avg_cost, cost_currency, channel?}` |
+| `PUT /api/holdings/{symbol}` | 改持仓字段 | `{units?, avg_cost?, channel?}` |
+| `POST /api/deposit` / `/api/withdraw` | 调 cash 现金 | `{currency: "CNY"\|"AUD"\|..., amount}` |
+| `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
+| `POST /api/strategy/asset` | 加 target_assets 条目 | `{symbol, channel?, max_single_invest_cny}` |
+
+**典型流程**：用户说"我打算..."/"刚买了 X"/"我的持仓多了 Y" → 用
+`POST /api/trades/record`（带 intended_date 区分计划 vs 已成交）→ 真实成交后用
+`PATCH .../status executed`，后端会**自动更新 portfolio.md**（加权均价 + cash 扣减），
+不需要你再调别的接口。
+
+**完整 OpenAPI**：`http://127.0.0.1:8765/openapi.json` 查所有端点 + Pydantic schema。
+
 ## Constraints（守好别破坏）
 
 - **不要主动跑 `daily_report` cron**——除非用户明说 "跑深度分析" / "run full report"。

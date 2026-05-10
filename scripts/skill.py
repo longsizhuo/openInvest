@@ -512,7 +512,12 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
 
     # Stage 0：同日检查
     today = datetime.now().strftime("%Y-%m-%d")
-    transcript_path = ROOT / "memory" / ".committee" / today / f"{args.symbol}.md"
+    # 注意：backend core/committee.py:_persist_committee_to_memory 用 re.sub
+    # 把 symbol 里的非 alnum 字符替换成 _（如 "GC=F" → "GC_F.md"）。这里必须
+    # 用同款转换，否则 transcript_path.exists() 永远返回 False，cmd_run_committee
+    # 输出的 transcript_path 字段就是空字符串（Fresh Claude 端到端测试发现）
+    safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", args.symbol)
+    transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
     if transcript_path.exists() and not args.force:
         _print_json({
             "status": "cached",

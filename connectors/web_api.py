@@ -3077,9 +3077,17 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
     try:
         with pm.with_portfolio_tx() as p:
             holdings = list(p.get("holdings") or [])
+            cash = dict(p.get("cash") or {})  # 同步扣/加 cash 用
 
             # 找现有 holding（symbol 大小写精确匹配，与 portfolio.md 保持一致）
             target = next((h for h in holdings if h.get("symbol") == symbol), None)
+
+            # 金融视角：BUY 应同时扣 cash[cost_currency]，SELL 加 cash —— 之前
+            # 只动 holdings 不动 cash 会让账本失衡（"凭空多了股票，cash 没动"）。
+            # price=None（市价单）→ 用户后续手动改成交价时不会触发 sync，所以
+            # 这种情况只动 units 不动 cash（一致性靠用户自己保证）
+            cash_delta_currency = cost_currency
+            cash_delta_amount = (price * units) if price is not None else 0.0
 
             if direction == "BUY":
                 # ---- BUY：upsert holding，重新算加权均价 ----
@@ -3118,6 +3126,13 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
                     holdings.append(new_holding)
                     target = new_holding
 
+                # BUY 同步扣 cash[cost_currency] —— 但**允许扣到负数**（不报错）
+                # 现实场景：用户记账时 cash 可能还没补上工资入账，强制限制反而误伤。
+                # 透支由 daily_report / Risk Officer 后续告警，这里只做账本一致性。
+                if cash_delta_amount > 0:
+                    prev_cash = float(cash.get(cash_delta_currency, 0) or 0)
+                    cash[cash_delta_currency] = round(prev_cash - cash_delta_amount, 2)
+
                 synced_holding = dict(target)
 
             elif direction == "SELL":
@@ -3145,7 +3160,22 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
                         target["kind"] = _guess_kind_from_symbol(symbol)
                     synced_holding = dict(target)
 
+                # SELL 同步加 cash[cost_currency] —— 不扣手续费（这一层简化处理；
+                # 真实手续费 = sell_fee_pct × 总额，由 holding.sell_fee_pct 决定。
+                # 后续可加，本轮先做最小一致性闭环）
+                if cash_delta_amount > 0:
+                    prev_cash = float(cash.get(cash_delta_currency, 0) or 0)
+                    cash[cash_delta_currency] = round(prev_cash + cash_delta_amount, 2)
+
             p["holdings"] = holdings
+            p["cash"] = cash
+
+            # 把 cash delta 信息塞进 synced_holding 给前端 toast 用
+            if synced_holding is not None and cash_delta_amount > 0:
+                sign = "-" if direction == "BUY" else "+"
+                synced_holding["_cash_delta"] = (
+                    f"{sign}{cash_delta_amount:,.2f} {cash_delta_currency}"
+                )
 
         # with_portfolio_tx 退出后自动落盘
         pm._reload()  # 刷新 pm 的内存视图（保持和 record_external_trade 一致）

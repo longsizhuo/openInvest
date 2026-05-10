@@ -103,6 +103,39 @@ class TestBuySync:
         assert h["units"] == pytest.approx(10.0)
         assert h["avg_cost"] == pytest.approx(130.0)
 
+    def test_buy_deducts_cash_in_cost_currency(self, tmp_path):
+        """金融视角红线：BUY 同步扣 cash[cost_currency]，避免账本失衡
+
+        Fresh Claude 在端到端测试发现：之前 PATCH executed 只更新 holdings
+        不动 cash → 总资产凭空多出股票。这里断言 BUY 1300 AUD 后 AUD 现金
+        从 5000 → 3700，CNY 现金不动（5000 → 5000）。
+        """
+        pm = _make_pm(tmp_path)
+        trade = {"symbol": "NDQ.AX", "direction": "BUY",
+                 "units": 10.0, "price": 130.0, "cost_currency": "AUD"}
+        synced, holding = _call_sync(trade, pm)
+        assert synced is True
+        assert "_cash_delta" in holding
+        assert "-1,300.00 AUD" in holding["_cash_delta"]
+
+        pm2 = PortfolioManager(pm.store)
+        assert pm2.cash_amount("AUD") == pytest.approx(3700.0)  # 5000 - 1300
+        assert pm2.cash_amount("CNY") == pytest.approx(10000.0)  # 不动
+
+    def test_sell_adds_cash_in_cost_currency(self, tmp_path):
+        """金融视角对称：SELL 同步加 cash"""
+        existing = [{"symbol": "NDQ.AX", "units": 20.0, "avg_cost": 100.0,
+                     "cost_currency": "AUD", "kind": "equity"}]
+        pm = _make_pm(tmp_path, holdings=existing)
+        trade = {"symbol": "NDQ.AX", "direction": "SELL",
+                 "units": 5.0, "price": 130.0, "cost_currency": "AUD"}
+        synced, holding = _call_sync(trade, pm)
+        assert synced is True
+        assert "+650.00 AUD" in holding.get("_cash_delta", "")
+
+        pm2 = PortfolioManager(pm.store)
+        assert pm2.cash_amount("AUD") == pytest.approx(5650.0)  # 5000 + 650
+
     def test_buy_updates_existing_holding_units(self, tmp_path):
         """BUY 已有 symbol → units 累加"""
         existing = [{"symbol": "NDQ.AX", "units": 5.0, "avg_cost": 120.0,
