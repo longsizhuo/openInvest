@@ -2,490 +2,119 @@
 
 # openInvest
 
-### 4 个 AI 专家 · 1 份晨间 memo · 0 失眠夜
-
-**让 4 个独立 LLM 互相 challenge，告诉你今天该不该加仓。代码、决策、实盘 PnL 全开源。MIT 协议自部署。**
-
-> 💡 **省下来的钱**：Wealthfront 收 0.25% 管理费 = 50 万本金每年白送 ¥1,250 美元。Betterment 同样档位。  
-> Wealthfront 用户多数不会自己部署 Python，所以这费一收就是十年。openInvest 在你自己电脑上跑 4 个 AI 角色辩论 + 实盘命中率公开（[`docs/verdict_accuracy.md`](docs/verdict_accuracy.md)），决策权归你。
-
-<!-- OUTPERFORM_FEED_START — 由 jobs/pnl_snapshot._persist_outperform 每 2h 自动追加，最近 3 条 -->
-> 📈 **跑赢瞬间**（最近 3 条，由 [pnl-data 分支](https://github.com/longsizhuo/openInvest/tree/pnl-data) 自动更新）：
-> 
-> *实盘启动后这里会自动滚动作者账户 vs 8 基准的对比事件，如"过去 30 天跑赢余额宝 +X.X%"。fork 用户的 README 会显示自己的事件。*
-<!-- OUTPERFORM_FEED_END -->
+**自部署的 AI 投资委员会工具。4 个独立 LLM 角色互相 challenge，给出投资建议——决策权归你。**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-5C2D91)](https://deepseek.com)
 [![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
-[⚡ 看一份示例 memo](examples/sample_memo.md) · [🪄 30 秒安装](#-30-秒上手claude-code-skill主推) · [🚀 30 分钟 fork](docs/QUICK_START.md) · [📚 完整 Wiki](docs/wiki/README.md) · [🤝 贡献指南](CONTRIBUTING.md) · [📊 vs 8 基准实盘](#实盘-pnl-趋势live--vs-8-个基准) · [🛡️ 硬化日志](#硬化日志)
+[⚡ 示例 memo](examples/sample_memo.md) · [🪄 装上](#装上) · [📚 完整文档](docs/wiki/README.md) · [🤝 贡献](CONTRIBUTING.md)
 
 </div>
-
----
-
-## 我该用哪种安装方式？
-
-> 90% 的用户走 **Skill**——3 行命令，让 Claude 帮你装。剩下两条是给想自己改代码的开发者。
-
-| 你是 | 看哪段 | 工时 |
-|------|--------|------|
-| **小白用户**（只想用，不想改代码） | [🪄 30 秒上手 — Claude Code Skill](#-30-秒上手claude-code-skill主推) ⭐ **首选** | 30 秒 |
-| 开发者（想 fork、改 prompt、加资产）| [🚀 30 分钟 fork 部署](docs/QUICK_START.md) | 30 分钟 |
-| 自部署 Web GUI 给小白家人用 | [☁️ 服务器部署 + Cloudflare](docs/QUICK_START.md#服务器部署可选) | 1 小时 |
-
----
-
-## 实盘 PnL 趋势（live）· vs 8 个基准
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart with benchmark bars" width="100%"/>
-  <sub>每 2h（工作日交易时段）自动 force-push 到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半折线 = 实盘 30 天趋势，下半柱状图 = vs 同类策略产品的累计涨幅排行（类似 LLM benchmark）</sub>
-  <br/>
-  <sub>📌 <b>图中数据为作者本人账户</b>，仅作信任背书与对比方法论展示。你跑起来后看到的是<b>你自己的</b>持仓曲线（仓库里没有任何作者持仓内容会被拉到你的部署）。</sub>
-</div>
-
-**对比的 8 条基准**（按"产品逻辑相关度"分层）：
-
-| 层级 | 类别 | 哪些 | 数据源 |
-|---|---|---|---|
-| **L1 同类策略产品**（核心对比） | 🤖 AI 投顾 | Wealthfront 6.2% / Betterment 6.1% / 蚂蚁帮你投 5.16% | [NerdWallet 2025 robo 比较](https://tokenist.com/investing/betterment-vs-wealthfront/) + [蚂蚁财富智能投顾](https://zhuanlan.zhihu.com/p/128638957)（一次性搜索） |
-| **L1 同类策略产品** | 🏦 公募基金 | 易方达蓝筹 005827 / 兴全合宜 163417 / 招商白酒 161725 | 天天基金 API (`fund.eastmoney.com/pingzhongdata/<code>.js`) |
-| **L2 机会成本基线** | 💰 储蓄/理财 | 余额宝 1.3% / 1 年定存 1.5% | 写死年化（按日复利） |
-| **L3 不持有的市场** | 📊 大盘指数 | 沪深 300 | yfinance `000300.SS` |
-
-**故意不比的基准**（避免自相关）：
-
-- ❌ **跟你持仓相关的指数** —— 比如你持有纳指 100 ETF，再用纳指/标普做基准就是"和自己的影子比"
-- ❌ **跟你持仓重合的现货** —— 比如你已持仓黄金，再用黄金 spot 做基准也是自相关
-
-**为什么是柱状图**：基准的"今日累计涨幅"和时间轴弱相关，柱子高度一目了然。这是 LLM benchmark（GPT-4 vs Claude vs Gemini）那种产品对比榜单，不是某人的私人账本。
-
-**刷新基准数据**：
-
-```bash
-python -m scripts.refresh_benchmarks               # 全量刷
-python -m scripts.refresh_benchmarks --key 沪深300  # 单刷一条
-```
-
-建议作为 weekly cron job（基金净值每周更新即可）。AI 投顾类（Wealthfront/Betterment/帮你投）的年化是单次搜索快照，需人工定期复查 [`core/benchmarks.py`](core/benchmarks.py) 的 `_meta.retrieved` 字段。
-
-**陈旧度提醒**（建议挂月度 cron，超过 90 天未更新就告警）：
-
-```bash
-python -m scripts.check_benchmark_freshness               # 默认 90 天
-python -m scripts.check_benchmark_freshness --days 60     # 自定义阈值
-```
-
-退出码 0 = 全部新鲜；1 = 有陈旧，可被 cron 转告警邮件。
-
-**清理历史噪声**（凌晨手动调试 / 同日多次采样导致折线图水平噪声）：
-
-```bash
-python -m scripts.clean_pnl_history --dry-run             # 预览
-python -m scripts.clean_pnl_history                       # 实际执行（自动备份原文件）
-python -m jobs.pnl_snapshot --render-only                 # 重渲染 SVG（不追加新 entry）
-```
-
-清理规则：① 北京时间 9-23 点之外的 entry 视为凌晨噪声删除；② 同日多条只保留最后一条合法采样。
 
 ---
 
 ## 它在做什么
 
-每天早上 03:00，cron 触发一次投资委员会。
+每天早上，4 个独立 LLM 各自看不同维度，互相 challenge 后给出建议：
 
-4 个 LLM 各开各的 session，信息隔离：
-
-- **Macro Strategist** 看宏观（VIX / TNX / USDCNY）
+- **Macro Strategist** 看宏观（VIX / 利率 / 汇率）
 - **Quant Analyst** 看技术面（RSI / 多周期分位 / 趋势），不知道你的持仓
 - **Risk Officer** 看风控（集中度 / 浮盈缓冲 / 尾部损失），不知道技术信号
 - **Round 2**：Quant 和 Risk 互看对方报告，调整观点
-- **CIO** 综合所有人的发言，输出 BUY / ACCUMULATE / HOLD / TRIM / SELL + 置信度
+- **CIO** 综合所有人发言，输出 BUY / ACCUMULATE / HOLD / TRIM / SELL + 置信度
 
-输出是一份带署名的 Markdown memo，发到你邮箱。你决定要不要执行。
-
-```
-                  ┌──────────────────────────────────────────┐
-                  │   APScheduler  (cron 03:00 / 09:30 ...)  │
-                  └─────────────┬────────────────────────────┘
-                                │ trigger
-       ┌────────────────────────▼─────────────────────────┐
-       │                Investment Committee              │
-       │                                                  │
-       │   🌐 Macro Strategist ─┐                         │
-       │   📊 Quant Analyst ────┼─→ cross-challenge ──→ 🎩 CIO Memo
-       │   🛡️ Risk Officer  ───┘   (Round 2)             │
-       └────────────┬─────────────────────────────────────┘
-                    │ persist + email
-       ┌────────────▼────────────┐  ┌──────────────────────────┐
-       │  memory/.committee/     │  │  📧 Gmail report         │
-       │  memory/daily/*.md      │  │  📱 NapCat /cmd 接口     │
-       │  memory/.dreams/*       │  │  🪄 Claude Code Skill    │
-       └─────────────────────────┘  └──────────────────────────┘
-```
+输出一份 Markdown memo。系统不会自动下单——决策仍归你。
 
 ---
 
-## 三个设计选择
+## 装上
 
-### 1. Coordinator-Worker，不是大 prompt 塞人格
-
-很多 multi-agent demo 是这样写的："你现在是 4 个分析师，请用 4 段话分别给出意见"。这种东西没有信息隔离，没有顺序依赖，也没有真正的 cross-challenge，本质上还是单次调用。
-
-openInvest 是 4 个独立 LLM session，按 DAG 跑：
-
-```
-Macro ──┐
-        ├─→ Quant + Risk (并行, 信息隔离)
-        ├─→ Round 2: 互看对方报告再发言一次
-        └─→ CIO 综合
-```
-
-Worker 之间能看见什么、看不见什么，全部在 `core/committee.py` 里显式控制。Quant 永远不知道用户持仓多少，Risk Officer 永远不知道 RSI 是多少，避免 LLM 互相污染观点。
-
-### 2. Markdown 就是数据库
-
-抛弃 `user_profile.json` 单文件 + 全量加载。改用 frontmatter + Markdown 双向通道：
-
-```markdown
----
-schema_version: 2
-cash:
-  CNY: 18290.51
-  AUD: 1000.00
-holdings:
-  - symbol: NDQ.AX
-    kind: etf
-    units: 128
-    unit_label: 股
-    avg_cost: 38.50
-    cost_currency: AUD
-    channel: CommSec
-  - symbol: GC=F
-    kind: metal
-    units: 123.92
-    unit_label: 克
-    avg_cost: 1008.79
-    cost_currency: CNY
-    channel: 浙商积存金
-    yfinance_proxy: GC=F
-    proxy_kind: gold_cny_per_gram
----
-# 当前持仓
-- CNY 现金: ¥18,290.51 / AUD 现金: $1,000.00
-- 黄金: 123.92 克，均价 ¥1008.79/g
-- NDQ.AX: 128 股
-```
-
-**v2 通用化**（2026-05）：cash 从 `cash_cny`/`aud_cash` 扁平字段升级为多币种 dict；
-holdings 从 `ndq_shares`/`gold_grams` 升级为 list[dict]。任意 yfinance symbol 都能
-plug-and-play，不用改代码。v1 portfolio.md 自动 read-time fallback 兼容。
-
-- Frontmatter 给代码读写，atomic
-- Body 给 LLM 直接读，不需要二次格式化
-- 同一份 `portfolio.md`，Python 和 LLM 看到的永远一致
-- `fcntl.flock` + `tmp → fsync → os.replace` 双保险，进程被 kill 也不会写一半
-
-### 3. OpenClaw 风格的 Dreaming Memory
-
-LLM 没有跨会话记忆。你 6 个月前因为过度集中持仓被 Risk Officer 警告过的事情，今天的 Risk Officer 完全不知道。
-
-借鉴 [OpenClaw](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) 的思路，每天凌晨跑三阶段记忆整合：
-
-| 阶段 | 干什么 | 输出 |
-|------|--------|------|
-| Light Sleep | 摄入近 90 天交易 + 多 symbol 行情 | 信号清单 |
-| REM Sleep | 找跨时间重复模式 | 候选 insight |
-| Deep Sleep | 阈值门 (`score≥0.8` & `count≥3`) | 写入 `insights/` |
-
-凝固出来的 insight 第二天会注入 CIO 的上下文。它真的会记住你。
-
----
-
-## 硬化日志
-
-大多数 agent demo 写完就丢，跑两天就崩。下面是 5 轮 audit 之后修掉的实际死法，每一条都能在代码里找到：
-
-| 死法 | 修法 | 出处 |
-|------|------|------|
-| 进程被 kill 时 `portfolio.md` 写到一半，状态损坏 | Atomic write: `tmp + fsync + os.replace` 三步走 | `core/memory_store.py:_atomic_write_text` |
-| NapCat 存款 + scheduler 扣款并发，有一笔凭空消失 (TOCTOU) | 单锁 RMW + `transaction()` context manager | `core/memory_store.py:transaction` |
-| DeepSeek 偶发 429/5xx，CIO 在空字符串上编 memo | 指数退避 + jitter retry，区分 transient vs auth | `core/committee.py:_ask` |
-| yfinance 拉不到价 → 估值返回 0 → Risk Officer 建议清仓 | `Optional[float]` + 跳过该资产，scheduler 标 `degraded` | `jobs/daily_report.py:_get_last_close` |
-| BetaShares scraper 403 反爬 → NDQ 价拿不到 | Fallback yfinance，scrape 失败保 close 价 | `utils/exchange_fee.py` |
-| 数据陈旧 5 天但 LLM 不知道，编今天的策略 | Staleness 阈值检测 + 注入 LLM 上下文 "⚠️ 数据陈旧 N 天" | `INVEST_PRICE_STALE_DAYS` env |
-| 邮件 SMTP 失败静默 return，user 不知道日报丢了 | `EmailDeliveryError` raise，scheduler `job_runs` 表自动记录 | `services/notifier.py` |
-| LLM 失败事件无审计，事后查不到 | 全部落 `.dreams/events.jsonl` | `core/memory_store.py:dream_event` |
-
-并发压测：
-
-```
-50 线程并发 cash["CNY"] += 1   →  最终 delta = 50.0   (0 lost updates)
-20 轮 scheduler 扣款 + napcat 存款 race  →  delta 精确 = -37880  (0 lost updates)
-```
-
----
-
-## 🪄 30 秒上手：Claude Code Skill（主推）
-
-**最简单的方式：把 invest 装成 Claude Code 的 skill，让 Claude 帮你 onboard。**
-
-不用注册账号、不用编辑 JSON、不用研究 env。打开 Claude Code，跑这一行：
+最简单的方式：装成 Claude Code 的 skill，让 Claude 帮你 onboard。
 
 ```bash
 git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
-bash ~/projects-review/invest/skill/install.sh
+bash ~/openInvest/skill/install.sh
 ```
 
-然后回 Claude Code 对话里说：
+回 Claude Code 对话里说："帮我初始化 invest"。Claude 会：
 
-> **「帮我初始化 invest」**
+1. 检测 memory / .env 缺失
+2. 用 5 个问题问你的情况（姓名 / 风险偏好 / 月收入 / 当前持仓 / 可选 API key）
+3. 写入配置 + 跑数据迁移
+4. 直接验证持仓
 
-Claude 会：
+之后任何时候说"看看我的持仓" / "分析一下黄金" / "该不该加仓 X"，Claude 会调委员会给你 memo。
 
-1. 自动检测 `memory/` 和 `.env` 缺失（`run.sh doctor`）
-2. **用 5 个问题问你的情况**：姓名 / 风险偏好 / 月收入 / 当前持仓 / API key（可选）
-3. 一键写入 `user_profile.json` + `.env` 并跑 migrate（`run.sh init --from-stdin`）
-4. 直接给你跑 `run.sh status` 验证
+> 💡 **DeepSeek API key 是可选的**。Skill 模式下委员会用 Claude 跑，不需要 DeepSeek。
+> 想后台自动跑（cron 日报 / 任意非 Claude agent 调用）才需要注册。
 
-之后任何时候说 **"看看我的持仓"** / **"分析一下黄金"** / **"该不该加仓 NDQ"**，
-Claude 会自己调 `prepare_committee` → 派 4 个 worker（Macro/Quant/Risk/CIO）并行
-分析 → 给你一份完整 CIO memo。
-
-> 💡 **DeepSeek API key 是可选的**。Skill 模式下委员会 LLM 是 Claude 自己，不需要
-> DeepSeek。只有想跑后台 cron 自动日报才需要注册 DeepSeek。
+**其他装法**（Docker / 手动 Python / 自带 GUI）：见 [QUICK_START.md](docs/QUICK_START.md)。
 
 ---
 
-## 🚀 其他部署方式
+## 实盘 PnL（live）
 
-### Option B · Docker（一键容器化，适合服务器跑 cron）
+<div align="center">
+  <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
+  <sub>每 2h 自动更新到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半 = 30 天趋势 · 下半 = vs 8 个基准的累计涨幅</sub>
+  <br/>
+  <sub>📌 <b>图中数据为作者本人账户</b>，仅作方法论展示。你跑起来后看到的是<b>你自己的</b>持仓曲线。</sub>
+</div>
 
-```bash
-git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
-cp .env.example .env       # 填 DEEPSEEK_API_KEY / EMAIL_*
+<!-- OUTPERFORM_FEED_START — jobs/pnl_snapshot 每 2h 追加 -->
+<!-- OUTPERFORM_FEED_END -->
 
-# 第一次：交互式 onboarding（写 user_profile.json + memory/）
-docker compose run --rm invest-agent python -m scripts.skill init
+**对比的基准**：AI 投顾 / 公募基金 / 储蓄理财 / 大盘指数 4 类共 8 条。完整对比方法论 + 数据源说明见 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
 
-# 起服务，自动跑 cron（daily_report / dreaming / payday_check ...）
-docker compose up -d
-docker compose logs -f invest-agent
-```
-
-`docker-compose.yml` 已挂载 `./memory ./db ./cache_data`，容器重建状态不丢。
-启动前会自动检查 `memory/user.md` 是否存在，没初始化会友好提示并指引你跑 onboarding。
-
-### Option C · 手动 Python（开发者 / 想魔改 prompts）
-
-```bash
-git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
-uv sync --frozen --python 3.13
-
-# 跑交互式 onboarding（5 个问题）
-.venv/bin/python -m scripts.skill init
-
-python -m jobs.daily_report      # 跑一次完整委员会 (v3 真并行 ~15-60s)
-python -m scheduler.runner       # 全套 cron 持续跑
-```
-
-### 🔀 投资委员会的两条执行路径
-
-openInvest 的 "Quant + Risk + Macro + CIO 投资委员会" 有两套实现，**结果可能不同**：
-
-| 路径 | 触发 | 跑什么 | 模型 / 成本 | 真 subagent? |
-|------|------|--------|------------|-------------|
-| **Skill** | Claude / OpenClaw 用户用 `~/.claude/skills/invest/run.sh prepare_committee` | 用户的 Claude 当 coordinator，spawn 4 个独立 Claude subagent | Claude 4 / 由用户订阅承担 | ✅ 真 Agent Teams（subprocess 隔离）|
-| **Web / Cron** | `POST /api/committee/run` 或 cron 自动跑 daily_report | 后端 4 个 `SDKAgent` (DeepSeek) + ThreadPoolExecutor 并行 | DeepSeek / ¥0.01-0.03 一次 | ❌ 同进程多线程（信息分隔但非 SDK subagent）|
-
-**两条同 prompt 不同实现的好处**：
-- Skill 路径让用户的 Claude 跑——项目本身**零 API 成本**
-- Web/Cron 走 DeepSeek——cron 每日跑成本可控
-- 可以对比同问题两套 verdict，**验证模型偏差**
-
-详见 [skill/SKILL.md](skill/SKILL.md)。
+**实盘命中率公开**（自我披露不利数字）：方向性 verdict 历史命中率 25%，HOLD 占 84%——见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。这工具不会让你致富，它只是把决策过程透明化。
 
 ---
 
-### Option D · Web API + 自带 GUI（推荐：30 秒 quick start）
+## 设计理念
 
-```bash
-git clone https://github.com/longsizhuo/openInvest && cd openInvest
-uv sync --frozen --python 3.13
-cp .env.example .env  # 填 DEEPSEEK_API_KEY
+三个核心选择，每个都有具体技术后果。详见 [docs/wiki/01-architecture.md](docs/wiki/README.md)：
 
-# 一次性拉前端 dist（130 KB，从 invest-gui Releases 拉）
-uv run python -m scripts.sync_gui_dist
-
-# 启动后端（自带 GUI mount）
-uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
-
-# 浏览器开 http://localhost:8765
-#   /                完整 GUI（主面板 / 流水 / 策略 / 委员会 / 系统）
-#   /api/...         REST API（同源，无 CORS）
-#   /docs            OpenAPI Swagger
-```
-
-**升级 GUI**：重跑 `python -m scripts.sync_gui_dist` 拉最新（每次 invest-gui push main，GitHub Action 自动发新 release）。
-
-**纯 API 模式**（不要 GUI）：跳过 sync 脚本即可，FastAPI 检测到 `static/` 不存在会自动只 serve API。
-
-### Option E · 生产部署（Caddy 反代 + Cloudflare Access）
-
-适合自托管想公网访问的高级用户：
-- `Caddy` 单域名 `invest.example.com`：`/api/*` 反代 `127.0.0.1:8765`，`/*` `file_server /srv/invest-gui/`
-- Cloudflare Access 在域名层把关（仅授权邮箱）
-- `systemd/invest-web.service` 仓库自带，`sudo cp` 到 `/etc/systemd/system/` + `enable --now`
-- 详见 [SKILL.md](skill/SKILL.md) 的 v0.5 文档
-
-前端 dist 来源：
-
-| 方式 | 适合 |
-|------|------|
-| `python -m scripts.sync_gui_dist` 拉到 `static/` | 单机一键跑，FastAPI 自带 GUI mount |
-| 在 [longsizhuo/invest-gui](https://github.com/longsizhuo/invest-gui) clone + `pnpm build` 自部署 `/srv/invest-gui/` | 高度自定义、想改 UI 的开发者 |
+1. **Coordinator-Worker，不是 prompt 塞 4 个人格** — 4 个独立 LLM session，按 DAG 跑，信息隔离在 `core/committee.py` 显式控制
+2. **Markdown 就是数据库** — frontmatter + body，Python 和 LLM 看到的永远一致；fcntl + atomic write 双保险
+3. **OpenClaw 风格 Dreaming Memory** — 三阶段记忆整合，把跨日交易模式凝固成 insight 注入下次决策
 
 ---
 
-## 架构
+## 架构与扩展
 
 ```
-invest/
-├── agents/                    4 个角色 + macro strategist 的 prompts
-│   ├── macro_strategist.py
-│   ├── quant.py
-│   ├── risk_officer.py
-│   └── cio.py
-├── core/
-│   ├── committee.py           Coordinator-Worker 编排
-│   ├── memory_store.py        frontmatter + atomic write + transaction()
-│   ├── portfolio_manager.py   with_portfolio_tx() 单锁 RMW 闭包
-│   └── consolidation_lock.py  Dreaming 跨进程独占锁
-├── jobs/                      APScheduler 自动发现的 YAML 定义
-│   ├── daily_report.py / .yml
-│   ├── dreaming.py / .yml     OpenClaw 三阶段记忆整合
-│   ├── payday_check.py / .yml
-│   └── commsec_sync.py / .yml
-├── scheduler/runner.py        APScheduler + SQLAlchemy 持久化
-├── connectors/napcat_bot.py   微信/QQ 命令接口（/deposit /gold_buy ...）
-├── skill/                     Claude Code Skill
-├── memory/                    source-of-truth（不入 git）
-│   ├── user.md / strategy.md / portfolio.md
-│   ├── daily/<date>.md        日志
-│   ├── .committee/<date>/*.md 委员会备忘
-│   ├── .dreams/events.jsonl   审计 + 失败事件流
-│   └── insights/*.md          Dreaming 凝固出的长期模式
-└── utils/
-    ├── exchange_fee.py        多源行情（DB → scraper → yfinance → CSV 兜底）
-    └── gold_price.py          浙商积存金克价换算
+agents/    4 个角色的 prompt
+core/      Coordinator-Worker 编排 + memory store
+jobs/      APScheduler cron tasks
+connectors/web_api.py + skill/ 两条调用入口
+db/        SQLite WAL（trades / insights / market data）
+docs/wiki/ 完整架构文档 + ADR
 ```
 
----
-
-## 配置
-
-### `target_assets` 多资产 schema
-
-```yaml
-target_assets:
-  - symbol: NDQ.AX
-    currency: AUD
-    max_single_invest_cny: 10000
-    channel: CommSec
-    note: AUD 子弹已用尽，重点观察突破回调
-  - symbol: GC=F
-    currency: CNY
-    max_single_invest_cny: 5000
-    channel: 浙商银行积存金
-    sell_fee_pct: 0.0038
-    price_offset_pct: 0.0
-```
-
-每个资产独立 cap、独立 channel、独立点差。详见 [`docs/memory_layout.md`](docs/memory_layout.md)。
-
-### 可调 env
-
-| Env | 默认 | 作用 |
-|-----|------|------|
-| `INVEST_LLM_MAX_ATTEMPTS` | 3 | LLM 最大尝试次数 |
-| `INVEST_LLM_BASE_DELAY` | 2.0 | 重试初始延迟 (秒) |
-| `INVEST_LLM_MAX_DELAY` | 20.0 | 重试单次上限 (秒) |
-| `INVEST_PRICE_STALE_DAYS` | 3 | 价格陈旧告警阈值 |
-| `INVEST_WHITELIST_QQ` | — | NapCat 命令白名单 QQ |
-| `DIGEST_EMAIL_TO` | — | 兜底收件人 |
-
----
-
-## Claude Code Skill 子命令
-
-同一套 `agents/` 和 `core/committee.py`，跑哪个 LLM 看你心情：
-
-- **DeepSeek (cron 模式)**：每天 daily_report 自动跑，省 token
-- **Claude (skill 模式)**：在 Claude Code 对话里随时召唤委员会，4 个 agent 真 async 并行
-
-`install.sh` 在 `~/.claude/skills/invest/` 建立 symlink 指向仓库里的
-`skill/SKILL.md` + `skill/run.sh`。改协议只需 commit + 其他设备 `git pull`。
-
-| Command | 干啥 |
-|---------|------|
-| `doctor` | 健康自检：memory / .env / API key 状态（onboarding 入口） |
-| `init [--from-stdin]` | 完成 onboarding：写 user_profile.json + .env + 跑 migrate |
-| `status` | 持仓 + 浮盈 + 实时价（JSON） |
-| `strategy` | target_assets + Dreaming 长期 insight |
-| `live_prices` | VIX / TNX / USDCNY / GC=F / NDQ.AX |
-| `history -n 10` | 最近 N 笔交易 + N 个委员会决议 |
-| `prepare_committee <SYMBOL>` | 拿到 brief + prompts，给 Claude 做 Coordinator-Worker fan-out |
-| `save_committee <SYMBOL>` | 持久化 4 角色 transcript 到 `memory/.committee/<date>/` |
-| `what_if --gold-pct -5` | 算 P&L 假设场景，无 LLM 调用 |
-
-详见 [`skill/README.md`](skill/README.md) 和 [`skill/SKILL.md`](skill/SKILL.md)。
-
----
-
-## Roadmap
-
-已交付：
-
-- [x] OpenClaw 风格 frontmatter Markdown memory store
-- [x] APScheduler + YAML job discovery
-- [x] 4 角色 Investment Committee + cross-challenge round
-- [x] Dreaming 三阶段记忆整合（Light/REM/Deep Sleep）
-- [x] 多资产支持（股票 / 黄金，单元独立 cap）
-- [x] NapCat 微信/QQ 命令接口
-- [x] Claude Code Skill 双 LLM 模式
-- [x] 5 轮 audit 硬化（atomic write / LLM retry / TOCTOU / data quality / email raise）
-- [x] Docker + APScheduler 容器化部署
-
-路上：
-
-- [ ] `tests/test_concurrency.py` 把 50 线程压测固化进 pytest，加 GitHub Actions
-- [ ] Multi-tenant：`memory/<user_id>/...` schema
-- [ ] Prometheus metrics 出口（job_runs / llm_call_duration / price_staleness_days）
-- [ ] **PnL 图升级为"vs 基准"对比**：现在 SVG 只画自己的实盘相对趋势。真正能凸显
-  系统价值的是"vs 余额宝 / 沪深 300 / 知名 AI 投顾产品"的超额收益。改造方案：在
-  `jobs/pnl_snapshot` 里加几条基准 series（年化 3% 直线 / yfinance 拉沪深 300 /
-  公开 AI agent 产品的历史回报），同图叠加。隐私不变（仍是 % 趋势），但能告诉
-  访客"我们比 XX 多赚 N% / 跑赢基金经理"
+详见：
+- [架构总览](docs/wiki/01-architecture.md) | [4 角色 prompt 解析](docs/wiki/02-agents.md) | [Dreaming](docs/wiki/03-dreaming.md)
+- [双执行路径 — Coordinator vs Direct](docs/wiki/04-execution-paths.md)
+- [数据模型 v2](docs/wiki/05-data-model.md) | [Web API](docs/wiki/06-api.md)
+- [扩展指南](docs/wiki/07-extending.md) | [故障排查](docs/wiki/09-troubleshooting.md)
+- [ADR — 关键决策记录](docs/wiki/adr/)
 
 ---
 
 ## 免责
 
-LLM-driven 决策辅助工具。不构成投资建议。LLM 会出错、会过度自信、会漏看东西。
+LLM-driven 决策辅助工具。**不构成投资建议**。LLM 会出错、会过度自信、会漏看东西。
 
-系统默认只建议入场/加仓/减仓，不会自动下单。
+系统不会自动下单。建议先用 `what_if` 在小金额上跑两周再上真仓。
 
-用之前先用 `what_if` 在小金额上跑两周。
+公开命中率数据 / PnL 曲线 / 跑赢事件均为作者本人账户历史记录，**过去表现不预示未来收益**。
 
 ---
 
 ## 致谢
 
-- [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 三阶段记忆整合架构灵感来源
-- [Claude Code](https://claude.com/claude-code) — Skill 模式 Coordinator-Worker fan-out 实现
+- [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 三阶段记忆架构
+- [Claude Code](https://claude.com/claude-code) — Skill 模式 Coordinator 实现
 
-PR 和 Issue 欢迎。觉得有用的话给个 ⭐️。
+PR / Issue 欢迎。

@@ -40,11 +40,31 @@ jobs:
       - name: Smoke import check
         # 确保关键模块没有 import 错误
         # v2 重构（2026-05）：_render_portfolio_body → _render_portfolio_body_v2 (cash dict + holdings list)
+        # Sprint 1+2 (2026-05) 新增：trades_db / state_bus / insights_db / daily_report_builder
         run: |
           uv run python -c "from core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
           uv run python -c "from core.memory_store import MemoryStore, _atomic_write_text"
           uv run python -c "from core.portfolio_manager import PortfolioManager, _render_portfolio_body_v2"
-          uv run python -c "from jobs.pnl_snapshot import _is_trading_window, _redact_token_in"
+          uv run python -c "from jobs.pnl_snapshot import _is_trading_window, _redact_token_in, _outperform_events"
+          uv run python -c "from jobs.daily_report_builder import assemble_full_report, classify_asset_freshness, format_staleness_warning, portfolio_summary_text"
           uv run python -c "from core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from utils.fx import get_fx_rate, cash_total_in_base"
           uv run python -c "from connectors.web_api import app"
+          uv run python -c "from connectors.state_bus import _write_committee_status, _read_committee_status"
+          uv run python -c "from db.trades_db import TradesDB"
+          uv run python -c "from db.insights_db import InsightsDB"
+          uv run python -c "import scripts.export_accuracy"
+
+      - name: 脱敏聚合输出无敏感字段（金融视角红线）
+        # PM-Growth 妥协方案：accuracy_summary.json 公开数据绝不能含 symbol / threshold / verdict 等
+        # 用仓库自带的 docs/accuracy_summary.json 作 fixture 验证
+        run: |
+          if [ -f docs/accuracy_summary.json ]; then
+            for keyword in symbol threshold NDQ GC=F verdict_id asset; do
+              if grep -q "\"$keyword\"" docs/accuracy_summary.json; then
+                echo "❌ accuracy_summary.json 含敏感字段 '$keyword'"
+                exit 1
+              fi
+            done
+            echo "✅ 脱敏聚合输出无敏感字段"
+          fi

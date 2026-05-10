@@ -32,11 +32,20 @@ if str(ROOT) not in sys.path:
 # ============ 辅助函数 ============
 
 def _run_cmd_doctor(fake_root: Path) -> Dict[str, Any]:
-    """在 fake_root 环境下调 cmd_doctor，捕获输出返回 JSON"""
+    """在 fake_root 环境下调 cmd_doctor，捕获输出返回 JSON。
+
+    cmd_doctor 内用 `MemoryStore()` 不传参 → 走 core.memory_store.MEMORY_ROOT 默认值。
+    所以必须**同时** patch `scripts.skill.ROOT` + `core.memory_store.MEMORY_ROOT`，
+    否则 CI 环境（memory/ 目录干净）下 doctor 永远报 "memory_initialized: missing"。
+    """
     from scripts.skill import cmd_doctor
+    import core.memory_store as ms_module
 
     captured = io.StringIO()
+    fake_memory_root = fake_root / "memory"
+
     with patch("scripts.skill.ROOT", fake_root), \
+         patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
          patch("sys.__stdout__", captured):
         cmd_doctor(SimpleNamespace())
 
