@@ -1,6 +1,36 @@
 <div align="center">
 
+<svg width="240" height="240" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="eyes-mask">
+      <rect width="240" height="240" fill="white"/>
+      <circle cx="108" cy="105" r="4.5" fill="black"/>
+      <circle cx="132" cy="105" r="4.5" fill="black"/>
+    </mask>
+  </defs>
+  <g mask="url(#eyes-mask)">
+    <g transform="translate(120, 120)" fill="#5B7FE9">
+      <path d="M -25 -5 Q -55 -25 -65 -10 Q -60 5 -45 5 Z"/>
+      <path d="M 25 -5 Q 55 -25 65 -10 Q 60 5 45 5 Z"/>
+      <path d="M -30 15 Q -70 20 -75 40 Q -65 50 -50 40 Z"/>
+      <path d="M 30 15 Q 70 20 75 40 Q 65 50 50 40 Z"/>
+      <path d="M -25 30 Q -55 65 -30 80 Q -10 75 -10 60 Z"/>
+      <path d="M 25 30 Q 55 65 30 80 Q 10 75 10 60 Z"/>
+      <path d="M -15 35 Q -25 55 -10 65 Q 0 60 -5 50 Z"/>
+      <path d="M 15 35 Q 25 55 10 65 Q 0 60 5 50 Z"/>
+      <path d="M -38 10 Q -42 -45 0 -48 Q 42 -45 38 10 Z"/>
+    </g>
+    <g transform="translate(120, 175)">
+      <rect x="-22" y="0" width="44" height="22" rx="1.5" fill="#1a1f2e"/>
+      <path d="M -22 0 Q -22 -12 0 -12 Q 22 -12 22 0 Z" fill="#1a1f2e"/>
+      <rect x="-22" y="6" width="44" height="2" fill="#FAF8F3"/>
+      <rect x="-3" y="-3" width="6" height="8" rx="0.5" fill="#E8B547"/>
+    </g>
+  </g>
+</svg>
+
 # openInvest
+
 
 **自部署的 AI 投资委员会工具。4 个独立 LLM 角色互相 challenge，给出投资建议——决策权归你。**
 
