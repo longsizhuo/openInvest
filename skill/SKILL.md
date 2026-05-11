@@ -132,6 +132,11 @@ GUI，他根本用不上。所以：
 | `save_committee SYM` | Coordinator | 落盘 transcript | stdin 4 段输出 → markdown |
 | `run_committee SYM [--force]` | Direct | 一键完整委员会 | verdict JSON + CIO memo |
 | `gui` | 通用 | 启动 Web GUI | uvicorn :8765，Ctrl+C 退出 |
+| `deposit -c CCY -a N` | 通用 写 | 存入现金（任意币种） | JSON 新余额 |
+| `withdraw -c CCY -a N` | 通用 写 | 取出现金，余额不足报错 | JSON 新余额 |
+| `buy --symbol S --units N --price P [-c CCY] [--kind etf/equity/...]` | 通用 写 | 加仓 / 建仓（加权平均成本） | JSON action + 估算成本 |
+| `sell --symbol S --units N --price P` | 通用 写 | 减仓（按 holding cost_currency 还现金） | JSON 剩余 units |
+| `delete_holding --symbol S [--force]` | 通用 写 | 删除持仓行（units 必须 0 或 --force） | JSON 已删 |
 
 **子命令名是封闭集合 —— 上表之外的命令都不存在**。看到自己想调
 `get_committee_context` / `analyze_asset` / `pull_brief` 这种名字时，停下，

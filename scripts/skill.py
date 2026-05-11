@@ -682,6 +682,222 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
     _print_json({"saved": str(path), "verdict": verdict})
 
 
+# ============================================================
+# 写操作子命令 ——  CLAUDE.md 产品哲学：Agent 必须拥有全部功能（不能只读不写）
+# ============================================================
+
+def _resolve_pm():
+    """统一拿 PortfolioManager，避免每个 cmd 重复 import"""
+    from core.portfolio_manager import PortfolioManager
+    return PortfolioManager()
+
+
+def _now_iso_local():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def cmd_deposit(args: argparse.Namespace) -> None:
+    """存入现金（任意币种）。等价 web_api POST /api/cash/{currency}/deposit。
+
+    示例:
+        skill deposit --currency CNY --amount 5000
+        skill deposit -c AUD -a 300
+    """
+    ccy = args.currency.upper()
+    amount = float(args.amount)
+    if amount <= 0:
+        _print_json({"status": "error", "error": "amount 必须 > 0"})
+        sys.exit(1)
+    if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
+        _print_json({"status": "error", "error": f"非法币种 {ccy}"})
+        sys.exit(1)
+
+    pm = _resolve_pm()
+    with pm.with_portfolio_tx() as p:
+        cash = dict(p.get("cash") or {})
+        new_balance = float(cash.get(ccy, 0) or 0) + amount
+        cash[ccy] = round(new_balance, 2)
+        p["cash"] = cash
+    pm._reload()
+    pm.store.append_history({
+        "ts_origin": _now_iso_local(), "action": "deposit",
+        "symbol": ccy, "units": amount, "currency": ccy, "source": "skill_cli",
+    })
+    _print_json({
+        "status": "ok", "currency": ccy, "amount_deposited": amount,
+        "new_balance": new_balance, "cny_total": pm.cash_amount("CNY"),
+    })
+
+
+def cmd_withdraw(args: argparse.Namespace) -> None:
+    """取出现金（任意币种）。余额不足返回 error。
+
+    示例:
+        skill withdraw -c CNY -a 1000
+    """
+    ccy = args.currency.upper()
+    amount = float(args.amount)
+    if amount <= 0:
+        _print_json({"status": "error", "error": "amount 必须 > 0"})
+        sys.exit(1)
+
+    pm = _resolve_pm()
+    with pm.with_portfolio_tx() as p:
+        cash = dict(p.get("cash") or {})
+        current = float(cash.get(ccy, 0) or 0)
+        if current < amount:
+            raise SystemExit(json.dumps({
+                "status": "error", "error": f"{ccy} 余额 {current} < 取出 {amount}",
+            }, ensure_ascii=False))
+        cash[ccy] = round(current - amount, 2)
+        p["cash"] = cash
+    pm._reload()
+    pm.store.append_history({
+        "ts_origin": _now_iso_local(), "action": "withdraw",
+        "symbol": ccy, "units": -amount, "currency": ccy, "source": "skill_cli",
+    })
+    _print_json({
+        "status": "ok", "currency": ccy, "amount_withdrawn": amount,
+        "new_balance": current - amount, "cny_total": pm.cash_amount("CNY"),
+    })
+
+
+def cmd_buy(args: argparse.Namespace) -> None:
+    """加仓（已有 symbol 增加 units + 加权平均成本；新 symbol 直接建仓）。
+
+    示例:
+        skill buy --symbol 510300.SS --units 1000 --price 4.2 --currency CNY --kind etf
+        skill buy --symbol AAPL --units 10 --price 175.5 --currency USD --kind equity
+        skill buy --symbol GC=F --units 5 --price 700 --currency CNY --kind metal --unit-label 克
+    """
+    symbol = args.symbol
+    units = float(args.units)
+    price = float(args.price)
+    ccy = args.currency.upper()
+    kind = args.kind  # equity/etf/metal/crypto/bond/fund/other
+    if units <= 0 or price <= 0:
+        _print_json({"status": "error", "error": "units / price 必须 > 0"})
+        sys.exit(1)
+
+    cost_cny = units * price  # 简化：fork 用户若用非 CNY 自己换算后再传 price=CNY 价
+    pm = _resolve_pm()
+    with pm.with_portfolio_tx() as p:
+        holdings = list(p.get("holdings") or [])
+        existing = next((h for h in holdings if h.get("symbol") == symbol), None)
+        if existing:
+            # 加权平均成本
+            old_units = float(existing.get("units", 0) or 0)
+            old_avg = float(existing.get("avg_cost", 0) or 0)
+            new_units = old_units + units
+            new_avg = (old_units * old_avg + units * price) / new_units
+            existing["units"] = round(new_units, 6)
+            existing["avg_cost"] = round(new_avg, 6)
+            action_kind = "add"
+        else:
+            holdings.append({
+                "symbol": symbol, "kind": kind, "units": units, "avg_cost": price,
+                "unit_label": args.unit_label, "cost_currency": ccy, "proxy_kind": "direct",
+            })
+            action_kind = "new"
+        p["holdings"] = holdings
+
+        # 同步扣现金（保证账本一致：买 X 元股 = 扣 X 元现金）
+        cash = dict(p.get("cash") or {})
+        cash[ccy] = round(float(cash.get(ccy, 0) or 0) - units * price, 2)
+        p["cash"] = cash
+    pm._reload()
+    pm.store.append_history({
+        "ts_origin": _now_iso_local(), "action": "buy",
+        "symbol": symbol, "units": units, "price": price,
+        "currency": ccy, "source": "skill_cli",
+    })
+    _print_json({
+        "status": "ok", "action": action_kind, "symbol": symbol,
+        "units_added": units, "price": price, "currency": ccy,
+        "cost_cny_estimate": cost_cny,
+    })
+
+
+def cmd_sell(args: argparse.Namespace) -> None:
+    """减仓（units 减少，cost_avg 不变）。units 减完后保留为 0（用 skill delete_holding 真删）。
+
+    示例:
+        skill sell --symbol 510300.SS --units 500 --price 4.5
+    """
+    symbol = args.symbol
+    units = float(args.units)
+    price = float(args.price)
+    if units <= 0 or price <= 0:
+        _print_json({"status": "error", "error": "units / price 必须 > 0"})
+        sys.exit(1)
+
+    pm = _resolve_pm()
+    with pm.with_portfolio_tx() as p:
+        holdings = list(p.get("holdings") or [])
+        target = next((h for h in holdings if h.get("symbol") == symbol), None)
+        if target is None:
+            raise SystemExit(json.dumps({
+                "status": "error", "error": f"symbol {symbol} 不在持仓里",
+            }, ensure_ascii=False))
+        old_units = float(target.get("units", 0) or 0)
+        if old_units < units:
+            raise SystemExit(json.dumps({
+                "status": "error", "error": f"{symbol} 持仓 {old_units} < 卖出 {units}",
+            }, ensure_ascii=False))
+        target["units"] = round(old_units - units, 6)
+        p["holdings"] = holdings
+
+        # 卖出收回现金（cost_currency = target 的 cost_currency）
+        ccy = str(target.get("cost_currency", "CNY")).upper()
+        cash = dict(p.get("cash") or {})
+        cash[ccy] = round(float(cash.get(ccy, 0) or 0) + units * price, 2)
+        p["cash"] = cash
+    pm._reload()
+    pm.store.append_history({
+        "ts_origin": _now_iso_local(), "action": "sell",
+        "symbol": symbol, "units": units, "price": price,
+        "currency": ccy, "source": "skill_cli",
+    })
+    _print_json({
+        "status": "ok", "symbol": symbol, "units_sold": units, "price": price,
+        "proceeds_cny_estimate": units * price,  # 简化估计
+        "remaining_units": old_units - units,
+    })
+
+
+def cmd_delete_holding(args: argparse.Namespace) -> None:
+    """删除持仓行（units 必须为 0，否则拒绝，让你先 sell 或 set 到 0）。
+
+    示例:
+        skill delete_holding --symbol 510300.SS
+        skill delete_holding --symbol 510300.SS --force   # 强删（units > 0 也删，慎用）
+    """
+    symbol = args.symbol
+    pm = _resolve_pm()
+    with pm.with_portfolio_tx() as p:
+        holdings = list(p.get("holdings") or [])
+        target = next((h for h in holdings if h.get("symbol") == symbol), None)
+        if target is None:
+            raise SystemExit(json.dumps({
+                "status": "error", "error": f"symbol {symbol} 不在持仓",
+            }, ensure_ascii=False))
+        units = float(target.get("units", 0) or 0)
+        is_tracking = bool(target.get("is_tracking_only", False))
+        if not is_tracking and units > 0 and not args.force:
+            raise SystemExit(json.dumps({
+                "status": "error",
+                "error": f"{symbol} 持仓 {units} > 0，请先 sell 或加 --force 强删",
+            }, ensure_ascii=False))
+        p["holdings"] = [h for h in holdings if h.get("symbol") != symbol]
+    pm._reload()
+    pm.store.append_history({
+        "ts_origin": _now_iso_local(), "action": "delete_holding",
+        "symbol": symbol, "source": "skill_cli",
+    })
+    _print_json({"status": "ok", "deleted": symbol})
+
+
 # ---------- doctor ----------
 
 def cmd_doctor(_: argparse.Namespace) -> None:
@@ -1397,6 +1613,38 @@ def main() -> None:
         help="cross-challenge 最大轮数，默认 1（同 daily_report cron）",
     )
     p.set_defaults(func=cmd_run_committee)
+
+    # ============ 写操作子命令（Agent 用） ============
+    p = sub.add_parser("deposit", help="存入现金（任意币种）")
+    p.add_argument("--currency", "-c", required=True, help="币种 (CNY/AUD/USD/HKD/...)")
+    p.add_argument("--amount", "-a", type=float, required=True, help="存入金额（正数）")
+    p.set_defaults(func=cmd_deposit)
+
+    p = sub.add_parser("withdraw", help="取出现金（任意币种），余额不足报错")
+    p.add_argument("--currency", "-c", required=True, help="币种")
+    p.add_argument("--amount", "-a", type=float, required=True, help="取出金额（正数）")
+    p.set_defaults(func=cmd_withdraw)
+
+    p = sub.add_parser("buy", help="加仓 / 建新仓（已有 symbol → 加权平均成本；新 → 建仓）")
+    p.add_argument("--symbol", required=True, help="yfinance symbol（如 510300.SS / AAPL / BTC-USD）")
+    p.add_argument("--units", type=float, required=True, help="买入数量")
+    p.add_argument("--price", type=float, required=True, help="单价（与 currency 同币种）")
+    p.add_argument("--currency", "-c", default="CNY", help="计价币种，默认 CNY")
+    p.add_argument("--kind", choices=["equity", "etf", "metal", "crypto", "bond", "fund", "other"],
+                   default="equity", help="资产类型，默认 equity")
+    p.add_argument("--unit-label", default="股", help="单位（股/克/oz/coin），默认 '股'")
+    p.set_defaults(func=cmd_buy)
+
+    p = sub.add_parser("sell", help="减仓（units 减，cost_avg 不变，按 holding 的 cost_currency 还现金）")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--units", type=float, required=True, help="卖出数量")
+    p.add_argument("--price", type=float, required=True, help="卖出单价")
+    p.set_defaults(func=cmd_sell)
+
+    p = sub.add_parser("delete_holding", help="删除持仓行（units 必须 0 或加 --force）")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--force", action="store_true", help="units > 0 也强删")
+    p.set_defaults(func=cmd_delete_holding)
 
     args = parser.parse_args()
     args.func(args)
