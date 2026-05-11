@@ -143,12 +143,15 @@ reward = annualized_return
 
 ### 阶段 4：Optuna 自动调参
 
-> **🚨 不是给最终用户配置的**：下面的 `INVEST_ALLOC_AGGRESSIVENESS` 等 env var 是
-> Optuna 训练时**内部**通过 env var 跨 trial 边界传参数的实现细节。这些**不在
-> `.env.example` 里**，普通用户 / fork 用户**不需要**配置它们。代码默认就是 v0
-> 行为（无 clamp / 1 round）。只有跑 `rl_train.py` 时 Optuna 才会 override 它们。
+> **想看 / 改训练参数？看 [`experiments/train_config.py`](../../experiments/train_config.py)**
+> —— 单一可信源，列出所有 hyperparameter + 范围 + 含义 + 实测有效性。
+>
+> **`INVEST_*` env var 是内部实现细节**：Optuna trial 之间通过 env var 跨边界传
+> 参数。这些**不在 `.env.example` 里**，普通用户 / fork 用户**不需要**配置——
+> 代码默认就是 v0 行为（无 clamp / 1 round）。只有 `rl_train.py` 跑起来时 Optuna
+> 才会临时 override，进程结束 env var 也消失。
 
-**5 个 hyperparameter**：
+**5 个 hyperparameter**（详细描述见 `train_config.py`）：
 
 | 参数（CLI/Optuna） | 内部 env var | 范围 | 含义 | 实测有效 |
 |---|---|---|---|---|

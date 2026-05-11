@@ -43,20 +43,17 @@ def _build_objective(
     from scripts.run_walk_forward import run_walk_forward
     from core.backtest_reward import compute_strategy_reward, explain_reward
 
+    # 单一可信源：experiments/train_config.py
+    # 改参数空间去改那里，不要 hardcode 在这里
+    from experiments.train_config import DEFAULT as _cfg
+
     def objective(trial: optuna.Trial) -> float:
-        # === 参数空间 ===
-        # 1. REGIME 阈值（影响 Quant 的硬约束）
-        regime_uptrend = trial.suggest_float("regime_uptrend", 3.0, 6.0)
-        regime_atr = trial.suggest_float("regime_atr", 2.5, 5.0)
-
-        # 2. cross-challenge 轮数（影响 LLM 互相纠正深度）
-        max_rounds = trial.suggest_int("max_rounds", 1, 3)
-
-        # 3. CIO confidence cap（高了倾向激进，低了倾向保守）
-        cio_confidence_cap = trial.suggest_float("cio_confidence_cap", 0.7, 0.95)
-
-        # 4. alloc 激进度（占 dry_powder 多少比例）
-        alloc_aggressiveness = trial.suggest_float("alloc_aggressiveness", 0.05, 0.30)
+        # === 参数空间（从 TrainConfig 读，不再 hardcode）===
+        regime_uptrend = _cfg.regime_uptrend.suggest(trial, "regime_uptrend")
+        regime_atr = _cfg.regime_atr.suggest(trial, "regime_atr")
+        max_rounds = _cfg.max_rounds.suggest(trial, "max_rounds")
+        cio_confidence_cap = _cfg.cio_confidence_cap.suggest(trial, "cio_confidence_cap")
+        alloc_aggressiveness = _cfg.alloc_aggressiveness.suggest(trial, "alloc_aggressiveness")
 
         # === apply 参数到代码（monkey-patch 全局常量）===
         # 注：实际 regime.THRESHOLDS 的 key 是 trend_ma_spread_pct / crash_atr_pct_min，
