@@ -24,7 +24,8 @@
 1. [02-agents.md](02-agents.md) —— 4 LLM 角色 + cross-challenge + REGIME 硬约束
 2. [03-dreaming.md](03-dreaming.md) —— OpenClaw 风格的三阶段记忆整合
 3. [04-execution-paths.md](04-execution-paths.md) —— Skill vs Web/Cron 双路径
-4. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
+4. [11-rl-training.md](11-rl-training.md) —— Optuna + paper trade + 训练 pipeline（**澄清：不是 GPU 训练**）
+5. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
 ### 🎨 我是设计师 / 前端，想改 GUI
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA
@@ -46,6 +47,7 @@
 | 08 | [生产部署](08-deployment.md) | Caddy + Cloudflare Access + systemd + sync_gui_dist |
 | 09 | [故障排查](09-troubleshooting.md) | 线上跑挂去哪查 journal / SSE 断了 / sync 失败 |
 | 10 | [设计系统](10-design-system.md) | GUI token + 排版三层 + IA 决策 |
+| 11 | [RL 训练 / Backtest](11-rl-training.md) | Optuna 调参 + paper trade simulation + DSPy（不是真 ML 训练）|
 
 ## 架构决策记录 (ADR)
 
