@@ -320,8 +320,11 @@ docs/training_report.md                         ← 完整一轮训练报告
 - ✅ `experiments/dspy_trainset_v1_*.json` 66 样本就绪
 - ✅ `scripts/rl_optimize_prompts.py` scaffold 完成
 - ✅ Smoke test 通过：**baseline 0.600 → optimized 0.700（+10pp）**
-- ⏳ 正式跑（10 candidate × 30 train，~30min ~¥3）待触发
-- ⏳ 把 optimized few-shot 注入回 `agents/cio.py` 待手工合并
+- ✅ **正式 run 完成**（10 candidate × 46 train × 20 dev，66 min）：
+  **baseline 0.725 → optimized 0.825（+10pp / +13.8% 相对）**
+  - archive: `experiments/dspy_optimized_v1_full.json`（含 10 个 best demos）
+  - summary: `experiments/dspy_optimized_v1_full.summary.json`
+- ⏳ 把 optimized few-shot 注入回 `agents/cio.py` 待手工合并 → 重跑 walk-forward 验证 reward 突破 0.42
 
 ### 跑 DSPy
 

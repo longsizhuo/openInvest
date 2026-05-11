@@ -1,0 +1,10 @@
+{
+  "n_train": 46,
+  "n_dev": 20,
+  "n_candidates": 10,
+  "n_bootstrap": 4,
+  "baseline_avg_score": 0.725,
+  "optimized_avg_score": 0.825,
+  "improvement_pp": 9.999999999999998,
+  "smoke_test": false
+}

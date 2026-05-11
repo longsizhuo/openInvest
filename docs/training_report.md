@@ -183,24 +183,37 @@ LLM 不善 timing 但擅避免"重大方向错"——长期累积仍 +15.5%。
 
 ---
 
-## 6. Next: DSPy（待实现）
+## 6. DSPy 阶段（已实现 + 跑完）
 
-### 现状
-- DSPy 3.2.1 已装
-- Trainset 已生成：`experiments/dspy_trainset_v1_2024_05_to_11.json`（66 样本，含 7d return + reward_score）
-- Scaffold 未写：`scripts/rl_optimize_prompts.py` 待实现
+`scripts/rl_optimize_prompts.py` 已落地，minimal viable 版本（不重做 4 角色
+cross-challenge，只 wrap CIO 单步 verdict 预测）。
 
-### 实施方案
+### 实测数据
 
-1. 定义 `dspy.Signature` 包装 CIO 的输入/输出 schema
-2. 用 trainset 作 dev set + 把 metric 定为 `total_return_pct - 0.5 × max_drawdown_pct`
-3. `BootstrapFewShotWithRandomSearch` 自动选最优 few-shot examples
-4. 把选中的 examples 注入到 `agents/cio.py` 的 system prompt
-5. 重跑 walk-forward 对比 reward
+| Run | Train | Dev | Candidates | Bootstrap | Baseline | Optimized | Δ |
+|---|---|---|---|---|---|---|---|
+| Smoke | 10 | 5 | 3 | 2 | 0.600 | 0.700 | **+10pp** |
+| **Full** | **46** | **20** | **10** | **4** | **0.725** | **0.825** | **+10pp** |
 
-### 预期工作量
-- 1-2 天（需 refactor CIO 的 SDKAgent → DSPy module）
-- 预期 reward 从 0.42 突破到 0.5+（不保证）
+两次跑都见 **+10pp 稳定改善**，dev set 准确率从 60%/72.5% 提升到 70%/82.5%。
+说明 DSPy 真的找到比手写 prompt 更好的 few-shot examples。
+
+### 重要 caveat
+
+DSPy 改善的是**单步 verdict 预测准确率**（dev set 上的 metric score），
+**不直接等于回测 reward**。要真正反映到 reward 0.42 → 0.5+，需要：
+
+1. 把 `experiments/dspy_optimized_v1_full.json` 里的 best demos 提取出来
+2. 写进 `agents/cio.py` 的 system prompt（作为 "## 历史成功决策参考" 段）
+3. 重跑 walk-forward + Optuna 验证 reward 是否真突破 0.42
+
+这一步**没做**（手工合并 + 验证另一轮 walk-forward 约 1h）。但 dev set +10pp
+是有力信号。
+
+### archive
+
+- `experiments/dspy_optimized_v1_full.json`（11 KB，含 10 个 best demos + traces）
+- `experiments/dspy_optimized_v1_full.summary.json`（baseline/optimized metrics）
 
 ---
 

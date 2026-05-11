@@ -1,0 +1,163 @@
+{
+  "predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%\n  - MA120(54.25)与MA250(53.62)均远低于现价59.52，趋势向上\n  - 1月涨幅14.11%但波动率仅8.76%，动量集中\nONE_LINER: 价格处于历史高位且RSI超买，虽趋势向上但追高风险大，信号中性，支撑54.25(MA120)，阻力60心理位。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "reasoning": "趋势向上但RSI极度超买，价格处于历史高位，追高风险大，现金状态下建议分批建仓等待回调。",
+        "verdict": "ACCUMULATE"
+      },
+      {
+        "augmented": true,
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%\n  - MA120(54.25)与MA250(53.62)均向上，趋势完好\n  - 1月涨幅14.11%且无显著回撤，动能过强\nONE_LINER: 价格在历史高位且RSI超买，虽趋势向上但追高风险极大，信号中性等待回调至MA120附近再考虑入场。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "reasoning": "趋势向上但RSI极度超买且价格处于历史高位，100%现金不宜空仓也不宜一次满仓，建议分批建仓以平衡追高风险与趋势收益。",
+        "verdict": "ACCUMULATE"
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%历史极值\n  - 价格高于MA120 9.7%，趋势完好但乖离过大\n  - 1月涨幅14.11%且无回撤，动量极端集中\nONE_LINER: 上升趋势结构完整，但RSI与分位均达极端区域，短期追多风险极高，信号中性等待回调至MA120附近再评估。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.75,
+        "actual_7d_return": 4.85,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%历史高位\n  - MA120(54.25)与MA250(53.62)均远低于现价，趋势向上但乖离过大\n  - 1月涨幅14.11%且无回撤，动量极端但缺乏修正\nONE_LINER: 价格处于历史最高分位且RSI超买，虽REGIME为uptrend禁止看空，但追高风险极大，信号中性，支撑位54.25(MA120)，阻力位60心理关口。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.7,
+        "actual_7d_return": 1.87,
+        "reward_score": 0
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 2\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%\n  - MA120 54.25 与 MA250 53.62 均远低于现价59.52，趋势向上\n  - 1月涨幅14.11%但波动率8.76%，短期动能极强\nONE_LINER: 价格处于历史高位且RSI严重超买，虽趋势向上但追高风险极大，信号中性，支撑位54.25（MA120），阻力位60.00心理关口。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.7,
+        "actual_7d_return": -3.04,
+        "reward_score": -1
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93 极度超买，2年价格分位100%历史高位\n  - 价格高于MA120 9.7%，趋势完好但乖离过大\n  - 1月涨幅14%且无回撤，动量极端集中\nONE_LINER: 上升趋势明确但RSI超买+价格创2年新高，短期追高风险大，中性信号等待回调至MA120附近再考虑做多。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.65,
+        "actual_7d_return": 2.89,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于高位区间\n  - RSI 51.65中性，无超买超卖\n  - 1月回撤-6.96%，波动率20.48%\nONE_LINER: 震荡市高位（84%分位）且RSI中性，倾向看空，支撑4683（MA120），阻力4750，SIGNAL与REGIME高位偏空一致。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.65,
+        "actual_7d_return": -0.54,
+        "reward_score": 0
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于震荡区间高位\n  - RSI 51.65中性，无超买但高位缺乏突破动能\n  - MA120支撑4683，价格偏离MA250仅15%，上行空间有限\nONE_LINER: 震荡市高位（84%分位）叠加RSI中性，倾向回调测试MA120支撑4683，SIGNAL与REGIME一致。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.7,
+        "actual_7d_return": 0.03,
+        "reward_score": 0
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%\n  - MA120(54.25)与MA250(53.62)均远低于现价59.52，趋势向上但乖离过大\n  - 1月涨幅14.11%且无显著回撤，动量极端\nONE_LINER: 价格处于历史最高分位且RSI超买，虽在上升趋势中但追高风险极大，信号中性，支撑位MA120 54.25，阻力位60心理关口。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "ACCUMULATE",
+        "confidence": 0.7,
+        "actual_7d_return": 2.19,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于高位区间\n  - RSI 51.65中性，但月线回撤-6.96%显示动能减弱\n  - MA120 4683.6为短期支撑，MA250 4118.3为长期支撑\nONE_LINER: 高位震荡区间内，价格接近上沿且动量衰减，信号偏空，支撑看4683，阻力看近期高点。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.65,
+        "actual_7d_return": -1.77,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 3\nKEY_DATA:\n  - RSI 93.07 极度超买，2年价格分位100%\n  - MA120(54.25)与MA250(53.62)均远低于现价59.52，趋势向上但乖离过大\n  - 1月涨幅14.11%且无显著回撤，动量极端\nONE_LINER: 价格处于历史最高分位且RSI超买，虽REGIME为uptrend禁止看空，但追高风险极大，信号中性，支撑位MA120(54.25)，阻力位60心理关口。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.65,
+        "actual_7d_return": -0.5,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 5\nKEY_DATA:\n  - RSI 93 极度超买，2年价格分位100%\n  - MA120(54.25)与MA250(53.62)均远低于现价59.52，趋势向上\n  - 1月涨幅14.11%且无显著回撤，动量极端\nONE_LINER: 价格处于历史最高分位且RSI严重超买，虽趋势向上但追高风险极大，信号中性，支撑54.25(MA120)，阻力60心理位。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.6,
+        "actual_7d_return": -1.41,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于高位区间\n  - RSI 51.65中性，无超买超卖信号\n  - 价格高于MA120 1.2%，但1月回撤-6.96%显示震荡特征\nONE_LINER: 震荡市高位（分位84%）叠加RSI中性，倾向看空，支撑位4683（MA120），阻力位4800附近。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.65,
+        "actual_7d_return": -0.26,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于高位区间\n  - RSI 51.65中性，无超买超卖\n  - MA120=4683.6，价格偏离MA250达15%\nONE_LINER: 震荡市高位（分位≥80%）叠加RSI中性，倾向看空，支撑4683（MA120），阻力4750。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.65,
+        "actual_7d_return": 1.48,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于震荡区间高位\n  - RSI 51.65中性，无超买但高位缺乏突破动能\n  - 1月回撤-6.96%显示区间上沿压力\nONE_LINER: 价格在MA120上方但2年分位84%接近区间顶部，RSI中性无突破信号，倾向回调至4680支撑。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.65,
+        "actual_7d_return": -1.15,
+        "reward_score": 1
+      },
+      {
+        "market_context": "REGIME: range_bound\nSIGNAL: bearish\nSTRENGTH: 7\nKEY_DATA:\n  - 价格2年分位84%，处于高位区间\n  - RSI 51.65中性，但价格偏离MA250达15%\n  - 1月回撤-6.96%显示上行动能减弱\nONE_LINER: 震荡市高位（分位84%）叠加RSI中性，价格在MA120上方但动能不足，倾向回调测试4683支撑，SIGNAL与REGIME高位偏空一致。",
+        "portfolio_state": "100% 现金 ¥100000（backtest baseline）",
+        "verdict": "HOLD",
+        "confidence": 0.65,
+        "actual_7d_return": 0.03,
+        "reward_score": 1
+      }
+    ],
+    "signature": {
+      "instructions": "根据市场技术面 + 用户持仓状态，给出投资建议。\n\nverdict 选项：\n  - BUY: 一次建满仓（强 bullish + 低估）\n  - ACCUMULATE: 分批建仓 / 加仓（默认；100% 现金时不允许 HOLD）\n  - HOLD: 维持现状（仅当已有仓位 20%+ 且无明确方向）\n  - TRIM: 部分减仓（超配 + 风险升温）\n  - SELL: 全部清仓（极端 risk_off）",
+      "fields": [
+        {
+          "prefix": "Market Context:",
+          "description": "技术面摘要：RSI / MA / 价格分位 / 趋势"
+        },
+        {
+          "prefix": "Portfolio State:",
+          "description": "持仓状态：现金 / 仓位 %"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "一句话理由"
+        },
+        {
+          "prefix": "Verdict:",
+          "description": "BUY | ACCUMULATE | HOLD | TRIM | SELL"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}
