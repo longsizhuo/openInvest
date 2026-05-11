@@ -59,9 +59,11 @@ def _build_objective(
         alloc_aggressiveness = trial.suggest_float("alloc_aggressiveness", 0.05, 0.30)
 
         # === apply 参数到代码（monkey-patch 全局常量）===
+        # 注：实际 regime.THRESHOLDS 的 key 是 trend_ma_spread_pct / crash_atr_pct_min，
+        # 不是 uptrend_trend_score / uptrend_atr_pct（之前写错了 silent fail）
         import core.regime as regime
-        regime.THRESHOLDS["uptrend_trend_score"] = regime_uptrend
-        regime.THRESHOLDS["uptrend_atr_pct"] = regime_atr
+        regime.THRESHOLDS["trend_ma_spread_pct"] = regime_uptrend
+        regime.THRESHOLDS["crash_atr_pct_min"] = regime_atr
 
         # max_rounds 通过环境或参数传给 run_walk_forward（暂用 env）
         import os

@@ -235,7 +235,16 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
         )
 
     # Sanity check 2: alloc_cny 合理性 clamp
+    # INVEST_ALLOC_AGGRESSIVENESS（Optuna 训练参数，0.05~0.30）会按 baseline ¥100k
+    # 收紧 ceiling 到 100_000 × agg。例如 agg=0.10 → 单笔 ≤ ¥10k，避免 LLM 给
+    # ¥50k alloc 导致 simulator 大量 SKIP。
     alloc_ceiling = THRESHOLDS["alloc_cny_ceiling"]
+    agg_env = os.getenv("INVEST_ALLOC_AGGRESSIVENESS")
+    if agg_env:
+        try:
+            alloc_ceiling = min(alloc_ceiling, int(100_000 * float(agg_env)))
+        except ValueError:
+            pass
     if abs(out["alloc_cny"]) > alloc_ceiling:
         print(
             f"⚠️ parse_cio_memo: alloc_cny={out['alloc_cny']} 超出合理区间，"
