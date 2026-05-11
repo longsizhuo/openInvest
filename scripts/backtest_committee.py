@@ -145,6 +145,9 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
                     f"假设用户持仓中性（无极端集中度），focus 在技术 + 宏观信号。"
                 )
 
+                # max_debate_rounds 从环境变量读（Optuna 训练用）
+                import os as _os
+                max_rounds = int(_os.getenv("INVEST_MAX_DEBATE_ROUNDS", "1"))
                 result = run_committee(
                     asset=asset,
                     market_data=market_data,
@@ -152,6 +155,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
                     portfolio_summary=portfolio_summary,
                     prior_insights="",  # backtest 不用 insights 防穿越
                     persist_to_memory=False,  # 我们手动 persist 到 .backtest/
+                    max_debate_rounds=max_rounds,
                 )
 
                 # 手动 persist 到 .backtest/<date>/

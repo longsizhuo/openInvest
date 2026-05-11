@@ -221,6 +221,17 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
     m = ALLOC_RE.search(text)
     out["alloc_cny"] = int(m.group(1)) if m else 0
 
+    # Sanity check 0: INVEST_CIO_CONFIDENCE_CAP（Optuna 训练参数）clamp confidence 上限
+    cap_env = os.getenv("INVEST_CIO_CONFIDENCE_CAP")
+    if cap_env:
+        try:
+            cap = float(cap_env)
+            if out["confidence"] > cap:
+                out["_original_confidence_cap"] = out["confidence"]
+                out["confidence"] = cap
+        except ValueError:
+            pass
+
     # Sanity check 1: 防 prompt injection / LLM 过度自信
     confidence_threshold = THRESHOLDS["buy_confidence_overdrive"]
     confidence_downgrade = THRESHOLDS["buy_confidence_downgrade_to"]

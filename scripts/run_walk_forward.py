@@ -31,9 +31,16 @@ log = logging.getLogger(__name__)
 
 
 def _generate_decision_dates(start: str, end: str, step_days: int) -> List[str]:
-    """生成 walk-forward 的 decision_date 列表（跳周末）"""
+    """生成 walk-forward 的 decision_date 列表（跳周末）
+
+    边界处理：start 落周末时先推到下个周一，否则 step=7 永远落周末，
+    decision_dates 会是空列表（曾 silent fail 让 Optuna trial 全 reward=-10）。
+    """
     start_d = datetime.strptime(start, "%Y-%m-%d").date()
     end_d = datetime.strptime(end, "%Y-%m-%d").date()
+    # start 落周六/周日 → 推到周一
+    while start_d.weekday() >= 5 and start_d <= end_d:
+        start_d += timedelta(days=1)
     dates: List[str] = []
     cur = start_d
     while cur <= end_d:
