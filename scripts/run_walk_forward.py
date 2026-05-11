@@ -181,12 +181,14 @@ def run_walk_forward(
             log.error(f"  {d} 失败: {e}")
             continue
 
-        for sym, asset_data in day_result.get("assets", {}).items():
+        # run_one_day 返回 {"verdicts": {sym: {"verdict": "BUY", "confidence": 0.7, "alloc_cny": 5000}}}
+        for sym, asset_data in day_result.get("verdicts", {}).items():
             if "error" in asset_data:
+                log.warning(f"    {sym}: error {asset_data['error'][:80]}")
                 continue
-            verdict = asset_data.get("verdict", {})
-            tx = sim.execute_verdict(d, sym, verdict)
-            log.info(f"    {sym}: {verdict.get('verdict', '?')} → {tx.action}")
+            # asset_data 直接是 verdict dict（不嵌套）
+            tx = sim.execute_verdict(d, sym, asset_data)
+            log.info(f"    {sym}: {asset_data.get('verdict', '?')} → {tx.action} (alloc={asset_data.get('alloc_cny', 0)})")
 
     # 3. 沿每个交易日 mark-to-market
     log.info("📊 mark-to-market 沿时间线...")

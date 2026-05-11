@@ -952,7 +952,7 @@ Symbol 映射规则：
 
 def _parse_holdings_with_llm(
     description: str, api_key: str, base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
 ) -> Dict[str, Any]:
     """调 DeepSeek 把"510300 ETF 3000股 4.2元 + 余额宝 5万"这种自然语言转成 v2 持仓 JSON。
 
@@ -962,6 +962,10 @@ def _parse_holdings_with_llm(
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key, base_url=base_url)
+    # v4-flash 默认 thinking 模式，关掉走旧 chat 行为
+    extra_body = {}
+    if "v4" in model.lower() or model == "deepseek-chat":
+        extra_body["thinking"] = {"type": "disabled"}
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -970,6 +974,7 @@ def _parse_holdings_with_llm(
         ],
         temperature=0.0,
         response_format={"type": "json_object"},
+        extra_body=extra_body or None,
     )
     raw = resp.choices[0].message.content or "{}"
     parsed = json.loads(raw)

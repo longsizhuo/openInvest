@@ -101,16 +101,17 @@ def _create_agent(
         return None
     # v3 透明化：把 role/asset/round 传进 telemetry meta，让 LLM 调用记录可按维度切片
     from core.llm_telemetry import TelemetryMeta
+    model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     meta = TelemetryMeta(
         agent_role=role,
         asset=asset,
         round=round_label,
         provider="deepseek",
-        model="deepseek-chat",
+        model=model_name,
     )
     return SDKAgent(
         system_prompt=system_prompt,
-        model="deepseek-chat",
+        model=model_name,
         api_key=api_key,
         base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         temperature=temperature,

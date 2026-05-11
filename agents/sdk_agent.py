@@ -49,7 +49,7 @@ class SDKAgent:
         self,
         *,
         system_prompt: str,
-        model: str = "deepseek-chat",
+        model: str = "deepseek-v4-flash",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         temperature: float = 0.2,
@@ -136,6 +136,11 @@ class SDKAgent:
             "messages": messages,
             "temperature": self.temperature,
         }
+        # v4-flash 默认 thinking 模式，multi-turn 需要把 reasoning_content 回传；
+        # 我们的 tool-loop 没传 → 报 "reasoning_content must be passed back"。
+        # 关掉 thinking → 跟旧 deepseek-chat 行为完全一致（fast / non-thinking）
+        if "v4" in self.model.lower() or self.model == "deepseek-chat":
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         if self.enable_tools:
             kwargs["tools"] = TOOL_DEFINITIONS
             kwargs["tool_choice"] = "auto"

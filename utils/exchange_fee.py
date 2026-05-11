@@ -140,13 +140,34 @@ def get_history_data(
     today_str = datetime.now().strftime('%Y-%m-%d')
     needs_update = df_db.empty or df_db.index[-1].strftime('%Y-%m-%d') != today_str
 
-    # backtest 模式下不主动 yfinance 拉新（yfinance 一定拉最新，会污染 cutoff）
-    if needs_update and as_of_date is None:
-        # B6 通用化：所有 symbol 走统一 yfinance 路径
+    # backtest 模式 yfinance 策略：
+    # - 实盘（as_of_date=None）：照常拉最新 5d
+    # - backtest cutoff < today - 30d：**安全放行** yfinance 拉 2y 历史
+    #   （即使拉到最新数据，as_of_date 过滤会截断，不会穿越；但能保证 DB 有
+    #   cutoff 之前的足够数据让 RSI/ATR 等指标算得出来）
+    # - backtest cutoff >= today - 30d：保守，仍 skip（防边界情况）
+    should_fetch_yf = False
+    if needs_update:
+        if as_of_date is None:
+            should_fetch_yf = True
+            fetch_period = "5d"
+        else:
+            from datetime import datetime as _dt, timedelta as _td
+            try:
+                cutoff_dt = _dt.strptime(as_of_date, "%Y-%m-%d").date()
+                today_dt = _dt.now().date()
+                if (today_dt - cutoff_dt) > _td(days=30):
+                    # cutoff 足够老，拉 2y 历史给 backtest 用
+                    should_fetch_yf = True
+                    fetch_period = "2y"
+            except ValueError:
+                pass  # 日期格式错误就不拉
+
+    if should_fetch_yf:
         try:
-            print(f"🔄 [yfinance] Refreshing {symbol}...")
+            print(f"🔄 [yfinance] Refreshing {symbol} (period={fetch_period})...")
             ticker = yf.Ticker(symbol)
-            df_yf = ticker.history(period="5d")
+            df_yf = ticker.history(period=fetch_period)
             if not df_yf.empty:
                 for idx, row in df_yf.iterrows():
                     _STORE.save_generic_price(

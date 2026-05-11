@@ -78,9 +78,14 @@ def sharpe_ratio(
         return 0.0
     daily_rf = risk_free_annual / trading_days_per_year
     excess = rets - daily_rf
-    if np.std(excess, ddof=1) == 0:
+    std = np.std(excess, ddof=1)
+    # 分母接近 0（账户全程没动 / 数据点太少）会爆掉
+    if std < 1e-9:
         return 0.0
-    sharpe = np.mean(excess) / np.std(excess, ddof=1) * math.sqrt(trading_days_per_year)
+    sharpe = np.mean(excess) / std * math.sqrt(trading_days_per_year)
+    # 保护性 clip，理论 Sharpe > 10 都极罕见
+    if abs(sharpe) > 100:
+        return 0.0
     return round(float(sharpe), 4)
 
 

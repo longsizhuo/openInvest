@@ -1144,7 +1144,7 @@ def _build_audit_meta(
         "started_at": _now_iso(),
         "commit_hash": _audit_commit_hash(),
         "python_version": _sys.version.split()[0],
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
         "model_temperature": float(os.getenv("INVEST_LLM_TEMPERATURE", "0.2")),
         "max_debate_rounds": max_rounds,
         "symbols": symbols if symbols else "(strategy.target_assets all)",
@@ -2203,7 +2203,7 @@ class LlmUsageRecord(BaseModel):
     asset: Optional[str] = None
     round: Optional[str] = None
     provider: str = "deepseek"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0

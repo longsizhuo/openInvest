@@ -128,6 +128,40 @@ updated: '2024-01-01T00:00:00+00:00'
     (workspace_memory / ".state" / "processed_emails.json").write_text("[]", encoding="utf-8")
 
 
+def _warmup_market_data(symbols: list) -> None:
+    """**重要**：跑 backtest 前预热 yfinance → DB，让 cutoff 过滤后还有足够历史数据
+    可算 RSI/ATR 等技术指标。
+
+    问题背景：阶段 1 防穿越让 backtest 模式跳过 yfinance；如果 DB 里没历史，
+    cutoff 过滤后只剩极少数据，LLM 看到"RSI 缺失/最大回撤 0"等空数据 →
+    Macro/Quant/Risk 全输出 neutral → LLM 只能 HOLD → backtest 全是 0% 收益。
+
+    解法：先用 yfinance 把 2 年历史灌入共享 DB（market_data.db），backtest
+    跑时按 as_of_date 过滤即可。yfinance 给的是"截至现在的 2 年"数据，
+    backtest 不会"穿越"——cutoff 过滤会截断到 decision_date 之前。
+    """
+    # 用 10y：yfinance 默认 2y 只回到 today-2y，无法 backtest 早于此的日期。
+    # 10y 给所有 symbol 都覆盖回 2016+，配合 _apply_cutoff 安全过滤。
+    print("🔥 预热 market_data：拉 10y 历史给 backtest 用...")
+    import yfinance as yf
+    from db.market_store import MarketStore
+    store = MarketStore()
+    macro_symbols = ["^VIX", "^TNX", "USDCNY=X", "AUDCNY=X"]
+    all_syms = list(set(symbols + macro_symbols))
+    for sym in all_syms:
+        try:
+            ticker = yf.Ticker(sym)
+            df = ticker.history(period="10y")
+            if df.empty:
+                print(f"  ⚠ {sym}: yfinance 返回空")
+                continue
+            for idx, row in df.iterrows():
+                store.save_generic_price(sym, idx.strftime("%Y-%m-%d"), row["Close"])
+            print(f"  ✓ {sym}: {len(df)} 行入库")
+        except Exception as e:
+            print(f"  ❌ {sym}: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -135,6 +169,8 @@ def main():
                         help=f"backtest 数据目录，默认 {DEFAULT_WORKSPACE}")
     parser.add_argument("--reset", action="store_true",
                         help="清空 workspace 后重新 seed（小心！会丢失已跑的 backtest 产物）")
+    parser.add_argument("--skip-warmup", action="store_true",
+                        help="跳过 yfinance 预热（DB 已有历史时用）")
     args, rest = parser.parse_known_args()
 
     workspace = Path(args.workspace)
@@ -148,7 +184,17 @@ def main():
     # 2. seed 初始持仓
     _seed_workspace_memory(workspace)
 
-    # 3. 转给 backtest_committee.main()
+    # 3. 预热 market_data DB —— 解决 LLM "数据缺失" 全 HOLD 问题
+    if not args.skip_warmup:
+        # 从 rest 里解析 --assets，确定预热哪些 symbol
+        import argparse as _ap
+        bt_parser = _ap.ArgumentParser(add_help=False)
+        bt_parser.add_argument("--assets", default="NDQ.AX,GC=F")
+        bt_args, _ = bt_parser.parse_known_args(rest)
+        asset_list = [s.strip() for s in bt_args.assets.split(",") if s.strip()]
+        _warmup_market_data(asset_list)
+
+    # 4. 转给 backtest_committee.main()
     sys.argv = ["backtest_committee"] + rest
     from scripts.backtest_committee import main as _bt_main
     _bt_main()

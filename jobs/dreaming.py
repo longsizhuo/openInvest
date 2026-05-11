@@ -306,7 +306,7 @@ def _llm_verify_candidates(
 
     api_key = os.getenv("DEEPSEEK_API_KEY")
     base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     if not api_key:
         log.warning("DEEPSEEK_API_KEY 未设，跳过 LLM 验伪 (全部 KEEP)")
         return [True] * len(candidates), []
@@ -314,6 +314,10 @@ def _llm_verify_candidates(
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url=base_url)
+        # v4-flash 默认 thinking 模式且不兼容 response_format，需 disable thinking
+        extra_body = {}
+        if "v4" in model.lower() or model == "deepseek-chat":
+            extra_body["thinking"] = {"type": "disabled"}
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -323,6 +327,7 @@ def _llm_verify_candidates(
             temperature=0.1,  # 验伪要稳定，不要发散
             timeout=60,
             response_format={"type": "json_object"},
+            extra_body=extra_body or None,
         )
         raw = response.choices[0].message.content or "{}"
         parsed = json.loads(raw)

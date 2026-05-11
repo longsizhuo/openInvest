@@ -13,7 +13,7 @@
   "asset": "NDQ.AX" | null,
   "round": "opening" | "rebuttal" | "macro" | "cio" | null,
   "provider": "deepseek" | "openai",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "input_tokens": int,
   "output_tokens": int,
   "total_tokens": int,
@@ -36,11 +36,16 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger(__name__)
 
-# DeepSeek 公开定价（截至 2026-05），单位 CNY / 1M tokens
-# https://platform.deepseek.com/api-docs/pricing
+# DeepSeek 公开定价（2026-05 v4 系列，单位 CNY / 1M tokens；按 1 USD ≈ 7.1 CNY 换算）
+# https://api-docs.deepseek.com/quick_start/pricing
+# v4-flash = 旧 deepseek-chat 非 thinking 模式；v4-pro = 旧 deepseek-reasoner thinking 模式
+# v4-pro 当前 75% 折扣，截止 2026-05-31，过期后回到全价（×4）
 PRICING_CNY_PER_M_TOKENS: Dict[str, Dict[str, float]] = {
-    "deepseek-chat": {"input": 0.5, "output": 1.5},
-    "deepseek-reasoner": {"input": 1.0, "output": 4.0},
+    "deepseek-v4-flash": {"input": 1.0, "output": 2.0},      # $0.14/$0.28 ≈ ¥1.0/¥2.0
+    "deepseek-v4-pro": {"input": 3.1, "output": 6.2},        # 折扣价 $0.435/$0.87 ≈ ¥3.1/¥6.2
+    # legacy 名（兼容旧 telemetry 日志，新调用走 v4-flash）
+    "deepseek-chat": {"input": 1.0, "output": 2.0},
+    "deepseek-reasoner": {"input": 3.1, "output": 6.2},
     # OpenAI 价格更贵，先用 gpt-4o 作为占位（如真用上要更新）
     "gpt-4o": {"input": 17.0, "output": 70.0},        # ~$2.5/$10 ≈ ¥17/¥70
     "gpt-4o-mini": {"input": 1.1, "output": 4.3},
@@ -58,7 +63,7 @@ class TelemetryMeta:
     asset: Optional[str] = None     # NDQ.AX / GC=F / null
     round: Optional[str] = None     # opening / rebuttal / macro / cio
     provider: str = "deepseek"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
