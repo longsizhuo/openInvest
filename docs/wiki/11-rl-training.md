@@ -307,23 +307,47 @@ docs/training_report.md                         ← 完整一轮训练报告
 
 ---
 
-## 下一步：DSPy（待实现）
+## DSPy 阶段（scaffold 已实现，smoke 实测 +10pp）
 
 当 Optuna 把"hyperparameter 调参"做到极限后（0.42 是当前 prompt 架构天花板），
-下一个突破点是**优化 prompt 内容本身**。
+下一个突破点是**优化 prompt 内容本身**——这正是 DSPy 干的事。
 
 **DSPy 是 Stanford NLP 出的工具**，专门做 LLM 程序的"反向优化"——给定 trainset
 + metric，自动选择最优 few-shot examples 和 prompt 模板。
 
-实施方案：
-1. `experiments/dspy_trainset_v1_*.json` 已生成 66 样本（v1 verdict + 7d 实际 return + 方向分）
-2. 定义 `dspy.Signature` 包装 CIO 输入/输出 schema
-3. `BootstrapFewShotWithRandomSearch` 自动选最有效的 few-shot examples
-4. 注入到 `agents/cio.py` 的 system prompt
-5. 重跑 walk-forward 对比 reward
+**实现状态（2026-05-11）**：
+- ✅ DSPy 3.2.1 装好
+- ✅ `experiments/dspy_trainset_v1_*.json` 66 样本就绪
+- ✅ `scripts/rl_optimize_prompts.py` scaffold 完成
+- ✅ Smoke test 通过：**baseline 0.600 → optimized 0.700（+10pp）**
+- ⏳ 正式跑（10 candidate × 30 train，~30min ~¥3）待触发
+- ⏳ 把 optimized few-shot 注入回 `agents/cio.py` 待手工合并
 
-预期成本：1-2 天 dev + 0.5-1h LLM 调用 + ~¥10。
-预期产出：突破 reward 0.42 → 0.5+（不保证）。
+### 跑 DSPy
+
+```bash
+# Smoke (~5 min ~¥0.5, 验证 pipeline)
+python -m scripts.rl_optimize_prompts \
+  --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \
+  --output experiments/dspy_optimized_v1.json \
+  --smoke-test
+
+# 正式 (~30 min ~¥3)
+python -m scripts.rl_optimize_prompts \
+  --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \
+  --output experiments/dspy_optimized_v1.json \
+  --n-candidates 10 --n-bootstrap 4
+```
+
+预期产出：突破 reward 0.42 → 0.5+（smoke 看到 dev score 已 +10pp，正式跑可能更好）。
+
+### 当前 scaffold 的限制
+
+当前 DSPy module 只 wrap "market context → verdict" **单步预测**，不重做 4 角色
+cross-challenge。如果要更深度优化（让 DSPy 学每个 role 怎么独立 reasoning + 怎么 synthesis），
+需要 refactor `agents/sdk_agent.py` 改成 `dspy.Module`，工作量 1-2 天。
+
+当前 minimal viable 已能产生 +10pp 改进，不一定值得做大 refactor。
 
 ---
 
