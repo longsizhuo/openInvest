@@ -28,24 +28,10 @@ def build_cio_prompt(asset: Dict[str, Any]) -> str:
 3. **Risk Officer 给 high_risk**: 即便 Quant + Macro 都看多，也必须降级（最多 ACCUMULATE/HOLD，不允许 BUY）
 4. **CONCENTRATION_PCT > 60%**: 任何加仓金额必须 ≤ 子弹的 10% 且做分批
 
-**🔥 现金仓位机会成本规则（强制，必读）**：
-"持币观望"不是免费的——市场每涨 1% 你就跑输 1%。下列场景下 **HOLD 是错误的 default**：
-
-- **CONCENTRATION_PCT < 20%**（即该资产 + 同类资产仓位 < 20%，子弹比例 ≥ 80%）：
-  - **不允许给 HOLD**
-  - 默认至少给 `ACCUMULATE`，alloc 取 DRY_POWDER_CNY × 5%~10%（建小试探仓）
-  - 唯一豁免：Macro SIGNAL=risk_off **且** Risk SIGNAL=high_risk（两个 AND）
-- **CONCENTRATION_PCT 20-40%**（仓位中性）：HOLD 允许，但需在 PERSONAL_NOTE 显式说明"为什么不加仓比加仓好"
-- **CONCENTRATION_PCT > 40%**：HOLD / TRIM 都可，按 Macro/Quant 决定
-
-这条规则的金融逻辑：极端超买 (RSI > 80) 也不意味着马上回调，可能继续涨 20% 才回调。
-0% 仓位等回调 = 在赌时点，而**建一个 5% 的试探仓 + 设好 ACCUMULATE 网格**等回调加仓
-才是教科书做法。Quant 喊"等回调"不等于"零仓位等"，是"留 90% 子弹等更低位"。
-
 **Verdict 选项**（细颗粒度）：
-- `BUY` - 一次建满仓（≥ 子弹 50%），需 Quant + Macro 强 bullish + Risk ok
-- `ACCUMULATE` - 分批建仓 / 加仓（**100% 现金时的 default**，建 5-10% 试探仓 + 网格）
-- `HOLD` - 维持现状，**只在已有仓位 20%+ 时合法**
+- `BUY` - 一次建满仓，仅在 Quant + Macro 强 bullish + Risk ok 时
+- `ACCUMULATE` - 逆势分批建仓（黄金跌时正合适）
+- `HOLD` - 维持现状，不动
 - `TRIM` - 部分减仓（不全卖），适合超配 + 风险升温
 - `SELL` - 全部清仓，仅在 Macro 强 risk_off + Risk high_risk 时
 
