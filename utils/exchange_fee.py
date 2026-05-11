@@ -115,20 +115,34 @@ class TransactionCostCalculator:
 # ==========================================
 # 1. 通用数据获取 (yfinance)
 # ==========================================
-def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
+def get_history_data(
+    symbol: str, period: str = "2y", as_of_date: Optional[str] = None
+) -> pd.DataFrame:
+    """拉行情历史数据。
+
+    Args:
+        symbol: yfinance ticker（如 NDQ.AX / GC=F / AAPL）
+        period: yfinance 的 period 参数（兼容老调用方）
+        as_of_date: **回测穿越防护**。如果给定 (ISO 'YYYY-MM-DD')，结果 df 会
+            过滤到该日期**之前**（不含当日），所有数据源（DB 缓存 + yfinance 拉新
+            + CSV 兜底）都受此约束。backtest_committee.py 的 _patch_tools_to_date
+            注入此参数；正常 daily_report / NapCat 不传 → 跟旧行为一致。
+
+            为什么需要：MarketStore DB 可能含 T+ 价格（之前 daily cron 写入），
+            backtest 调 decision_date=2024-05-01 时若不过滤，LLM 会"看到未来"。
+    """
     symbol = symbol.upper()
-    
-    # 1. 尝试从数据库获取
+
+    # 1. 从数据库获取
     df_db = _STORE.get_history_df(symbol)
-    
-    # 2. 判断是否需要更新 (如果今天还没更新过)
+
+    # 2. 判断是否需要更新（如今天还没更新过）
     today_str = datetime.now().strftime('%Y-%m-%d')
     needs_update = df_db.empty or df_db.index[-1].strftime('%Y-%m-%d') != today_str
 
-    if needs_update:
-        # B6 通用化：所有 symbol 走统一 yfinance 路径。
-        # NDQ.AX 之前有 BetaShares scraper 特殊分支，但其返回的 holdings/sectors
-        # 全仓零消费 + 站点长期 403 → 删除特殊路径让代码 generic。
+    # backtest 模式下不主动 yfinance 拉新（yfinance 一定拉最新，会污染 cutoff）
+    if needs_update and as_of_date is None:
+        # B6 通用化：所有 symbol 走统一 yfinance 路径
         try:
             print(f"🔄 [yfinance] Refreshing {symbol}...")
             ticker = yf.Ticker(symbol)
@@ -143,9 +157,9 @@ def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
             print(f"❌ yfinance sync failed for {symbol}: {e}")
 
     if not df_db.empty:
-        return df_db
+        return _apply_cutoff(df_db, as_of_date)
 
-    # 3. 最终保底：读取旧 CSV 缓存并同步至 DB
+    # 3. 兜底：读旧 CSV 缓存同步至 DB
     safe_symbol = symbol.replace("=", "").replace(".", "_").replace("/", "")
     csv_path = os.path.join(CACHE_DIR, f"{safe_symbol}_{period}.csv")
     if os.path.exists(csv_path):
@@ -155,10 +169,33 @@ def get_history_data(symbol: str, period: str = "2y") -> pd.DataFrame:
             if not df_csv.empty:
                 for idx, row in df_csv.iterrows():
                     _STORE.save_generic_price(symbol, idx.strftime('%Y-%m-%d'), row['Close'], source="legacy_csv")
-                return df_csv
-        except: pass
+                return _apply_cutoff(df_csv, as_of_date)
+        except Exception:
+            pass
 
     return pd.DataFrame()
+
+
+def _apply_cutoff(df: pd.DataFrame, as_of_date: Optional[str]) -> pd.DataFrame:
+    """把 df 截到 cutoff 当日（含）。
+
+    语义：T 日决策时**可以看 T 日的 close**（用户场景：晚间 cron 跑委员会 / 用户睡前
+    查 verdict，市场已收盘）。所以保留 `index <= cutoff` 数据，去掉 cutoff 之后所有
+    交易日（保证 LLM 看不到未来）。
+
+    跟 backtest_committee.py:_patch_tools_to_date 原有的 `df.index < next_day`
+    语义一致。
+    """
+    if as_of_date is None or df.empty:
+        return df
+    cutoff = pd.to_datetime(as_of_date)
+    # df.index 可能是 tz-aware（yfinance 默认带时区），cutoff 是 naive → 对齐
+    try:
+        if df.index.tz is not None:
+            cutoff = cutoff.tz_localize(df.index.tz)
+    except (AttributeError, TypeError):
+        pass
+    return df[df.index <= cutoff]
 
 
 # ==========================================

@@ -61,16 +61,14 @@ def _patch_tools_to_date(decision_date: str):
 
     stack = ExitStack()
 
-    # === 1. get_history_data：截断到 cutoff ===
+    # === 1. get_history_data：传 as_of_date 让底层 DB cache 也按 cutoff 过滤 ===
+    # 注：底层 _apply_cutoff 用 `df.index <= cutoff` (含当日)，跟旧逻辑等价
     import utils.exchange_fee as ef
     real_get_history = ef.get_history_data
 
-    def patched_get_history(symbol: str, period: str = "2y"):
-        df = real_get_history(symbol, period)
-        if df.empty:
-            return df
-        # 截到 cutoff 之前
-        return df[df.index < next_day]
+    def patched_get_history(symbol: str, period: str = "2y", as_of_date=None):
+        # 强制传 cutoff，忽略调用方意外的 as_of_date 参数
+        return real_get_history(symbol, period, as_of_date=decision_date)
 
     stack.enter_context(patch.object(ef, "get_history_data", patched_get_history))
 
@@ -183,6 +181,11 @@ def main():
                         help="逗号分隔，默认 NDQ.AX,GC=F")
     parser.add_argument("--step", type=int, default=1, help="日期步长（默认 1=每天）")
     parser.add_argument("--limit", type=int, help="最多跑 N 个日期（debug 用）")
+    parser.add_argument(
+        "--allow-lookahead", action="store_true",
+        help="（不推荐）允许 backtest 日期超过 DeepSeek 训练数据截止（约 2024-06-30）。"
+             "默认拒绝，因为模型已经'见过'那段历史，命中率会虚高、不可信。",
+    )
     args = parser.parse_args()
 
     # 解析时间范围
@@ -208,6 +211,22 @@ def main():
 
     if args.limit:
         dates = dates[:args.limit]
+
+    # 防 LLM 训练数据穿越：DeepSeek-Chat 训练数据估算截止 2024-06-30，
+    # 之后的 backtest 模型已经"见过"市场走势，命中率虚高不可信
+    LLM_TRAINING_CUTOFF = "2024-06-30"
+    if not args.allow_lookahead and dates:
+        too_late = [d for d in dates if d > LLM_TRAINING_CUTOFF]
+        if too_late:
+            print(
+                f"\n❌ Refused：{len(too_late)} 个日期 (e.g. {too_late[0]}) 超过 "
+                f"DeepSeek 训练数据截止 {LLM_TRAINING_CUTOFF}。\n"
+                f"   LLM 已经'见过'这段市场，命中率会虚高、不可信。\n"
+                f"   选项：\n"
+                f"   - 把 --end 改到 {LLM_TRAINING_CUTOFF} 之前（推荐）\n"
+                f"   - 加 --allow-lookahead flag 强制跑（仅作上限估计）"
+            )
+            return
 
     print(f"🔬 Backtest plan: {len(dates)} 个交易日 × {len(asset_symbols)} 资产 = "
           f"{len(dates) * len(asset_symbols)} 次 committee")

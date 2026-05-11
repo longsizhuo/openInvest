@@ -36,31 +36,34 @@ def _cache_set(quote: str, base: str, rate: float) -> None:
     _RATE_CACHE[(quote, base)] = (rate, time.time())
 
 
-def get_fx_rate(quote: str, base: str = "CNY") -> Optional[float]:
+def get_fx_rate(
+    quote: str, base: str = "CNY", as_of_date: Optional[str] = None,
+) -> Optional[float]:
     """拉 quote → base 汇率（1 单位 quote 等于多少单位 base）
 
-    例：get_fx_rate("USD", "CNY") ≈ 7.1（1 美元 ≈ 7.1 人民币）
-    例：get_fx_rate("AUD", "CNY") ≈ 4.9
+    例：get_fx_rate("USD", "CNY") ≈ 7.1
+    例：get_fx_rate("USD", "CNY", as_of_date="2024-03-15") = 2024-03-15 当天汇率
     例：get_fx_rate("CNY", "CNY") = 1.0
 
-    实现：
-    - quote == base → 恒等返回 1.0
-    - 否则尝试 quoteBASE=X yfinance symbol（如 USDCNY=X）
-    - cache 20 min 命中即返
-    - 失败返回 None（caller 决定是否用兜底值）
+    Args:
+        as_of_date: backtest / paper trading 模式必传。给定日期时，返回该日期
+            当天 close 汇率（用 ISO 'YYYY-MM-DD'）。**会绕过 20 分钟缓存**
+            （不同 as_of_date 的汇率不能复用 cache）。
     """
     quote = quote.upper().strip()
     base = base.upper().strip()
     if quote == base:
         return 1.0
 
-    cached = _cache_get(quote, base)
-    if cached is not None:
-        return cached
+    # 实盘模式才用 cache（backtest 每次 as_of_date 不同，cache 没意义）
+    if as_of_date is None:
+        cached = _cache_get(quote, base)
+        if cached is not None:
+            return cached
 
     symbol = f"{quote}{base}=X"
     try:
-        df = get_history_data(symbol, "5d")
+        df = get_history_data(symbol, "5d", as_of_date=as_of_date)
     except Exception as e:  # noqa: BLE001
         log.warning(f"fx {symbol} 拉取失败: {e}")
         return None
@@ -72,7 +75,8 @@ def get_fx_rate(quote: str, base: str = "CNY") -> Optional[float]:
     except Exception:  # noqa: BLE001
         return None
 
-    _cache_set(quote, base, rate)
+    if as_of_date is None:
+        _cache_set(quote, base, rate)
     return rate
 
 

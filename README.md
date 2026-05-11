@@ -113,6 +113,12 @@ LLM-driven 决策辅助工具。**不构成投资建议**。LLM 会出错、会�
 
 公开命中率数据 / PnL 曲线 / 跑赢事件均为作者本人账户历史记录，**过去表现不预示未来收益**。
 
+**回测局限**：`scripts/backtest_runner.py` 跑的 paper-trading walk-forward 默认拒绝
+decision_date > 2024-06-30 的回测（强制跑加 `--allow-lookahead`）。原因：
+DeepSeek-Chat 训练数据估算截止约 2024-06-30，模型已经"见过"那段时间的市场，
+对 2024 下半年的 backtest verdict 含 **LLM 训练数据 lookahead bias**——结果
+**仅作上限估计**，训练 / 调参信号请用 2024-06-30 之前的日期范围。
+
 ---
 
 ## 致谢

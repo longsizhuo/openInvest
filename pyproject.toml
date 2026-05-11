@@ -24,6 +24,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "croniter>=6.2.2",
     "openai>=1.45",  # SDKAgent 直接走 OpenAI 兼容客户端调 DeepSeek
+    "optuna>=4.0",   # 阶段 4 RL：Bayesian Optimization 搜参
 ]
 
 [dependency-groups]
