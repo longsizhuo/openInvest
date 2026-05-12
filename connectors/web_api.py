@@ -480,6 +480,103 @@ async def get_portfolio_total_value(
     )
 
 
+# ============ User profile + wealth_context ============
+
+class WealthContextRequest(BaseModel):
+    """PUT /api/user/wealth_context body — off-portfolio 财务背景
+
+    家族资金 / 应急金等 backup 信息。**铁律：这些金额永远不算"可投资资金"**——
+    只让 WealthContextOfficer 把"低 portfolio cash"消化掉，避免 Risk 误判
+    high_risk。详见 docs/wiki/12-verification.md 主张 7。
+
+    所有字段可选；全空表示用户没有 off-portfolio backup（走老逻辑）。
+    """
+    emergency_buffer_cny: Optional[float] = Field(
+        default=None, ge=0,
+        description="应急金 / 家族 backup 额度（CNY）。**不可作投资**，仅作风险兜底",
+    )
+    family_backup_available: Optional[bool] = Field(
+        default=None,
+        description="是否有家族经济支持（破产兜底）",
+    )
+    account_purpose: Optional[str] = Field(
+        default=None, max_length=64,
+        description='账户性质，如 "零花钱账户" / "长期投资账户" / "退休金"',
+    )
+    lifestyle_notes: Optional[str] = Field(
+        default=None, max_length=512,
+        description="自由文本说明，如 '家族资金 ¥4M 仅作破产兜底，不可作投资使用'",
+    )
+
+
+class UserProfileResponse(BaseModel):
+    """GET /api/user 返回 user.md frontmatter 全部字段"""
+    display_name: Optional[str] = None
+    risk_tolerance: Optional[str] = None
+    exchange_buffer_cny: float = 0.0
+    last_payday: Optional[str] = None
+    user_email: Optional[str] = None
+    wealth_context: Optional[Dict[str, Any]] = None
+
+
+@app.get("/api/user", response_model=UserProfileResponse, tags=["user"])
+async def get_user_profile() -> UserProfileResponse:
+    """读 user.md frontmatter（含 wealth_context 子对象）"""
+    from core.memory_store import MemoryStore
+    store = MemoryStore()
+    doc = store.read("user")
+    if doc is None:
+        raise HTTPException(status_code=404, detail="user.md 不存在，先跑 invest-setup")
+    meta = dict(doc.metadata)
+    return UserProfileResponse(
+        display_name=meta.get("display_name"),
+        risk_tolerance=meta.get("risk_tolerance"),
+        exchange_buffer_cny=float(meta.get("exchange_buffer_cny", 0) or 0),
+        last_payday=meta.get("last_payday"),
+        user_email=meta.get("user_email"),
+        wealth_context=meta.get("wealth_context"),
+    )
+
+
+@app.put("/api/user/wealth_context", response_model=UserProfileResponse, tags=["user"])
+async def update_wealth_context(body: WealthContextRequest = Body(...)) -> UserProfileResponse:
+    """更新 user.md 的 wealth_context 字段（原子写）。
+
+    传 null/缺省 = 不动该字段；传值 = 覆盖。要清空某字段传空字符串或 0。
+    """
+    from core.memory_store import MemoryStore
+    store = MemoryStore()
+
+    # 只取调用方真的有传的字段（不覆盖未填的）
+    new_ctx = body.model_dump(exclude_unset=True, exclude_none=False)
+
+    # 单锁 read-modify-write（避免 TOCTOU lost update）
+    doc = store.read("user")
+    if doc is None:
+        raise HTTPException(status_code=404, detail="user.md 不存在，先跑 invest-setup")
+
+    existing_ctx = dict(doc.metadata.get("wealth_context") or {})
+    existing_ctx.update(new_ctx)
+    # 删除明确传 None 的字段
+    for k, v in list(new_ctx.items()):
+        if v is None:
+            existing_ctx.pop(k, None)
+
+    updated = store.update_fields("user", wealth_context=existing_ctx)
+    if updated is None:
+        raise HTTPException(status_code=500, detail="update_fields 失败")
+
+    meta = dict(updated.metadata)
+    return UserProfileResponse(
+        display_name=meta.get("display_name"),
+        risk_tolerance=meta.get("risk_tolerance"),
+        exchange_buffer_cny=float(meta.get("exchange_buffer_cny", 0) or 0),
+        last_payday=meta.get("last_payday"),
+        user_email=meta.get("user_email"),
+        wealth_context=meta.get("wealth_context"),
+    )
+
+
 # ============ v2 通用 holdings CRUD ============
 
 class HoldingCreateRequest(BaseModel):

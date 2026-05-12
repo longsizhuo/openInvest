@@ -45,6 +45,7 @@ class CommitteeReport:
     """4 角色 + cross-challenge round 的完整输出"""
     asset: Dict[str, Any]
     macro_view: str = ""              # 跨资产共享
+    wealth_context_view: str = ""     # 跨资产共享 (off-portfolio 真实流动性)
     quant_view: str = ""              # Round 1: Quant 独立陈述
     risk_view: str = ""               # Round 1: Risk Officer 独立陈述
     quant_adjusted: str = ""          # Round 2: Quant 看到 Risk 后调整
@@ -59,6 +60,12 @@ class CommitteeReport:
         lines = [
             f"=== ASSET: {self.asset.get('display_name', self.asset.get('symbol'))} ===",
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
+        ]
+        if self.wealth_context_view:
+            lines.append(
+                f"\n=== WEALTH CONTEXT OFFICER (真实流动性，跨资产共享) ===\n{self.wealth_context_view}"
+            )
+        lines.extend([
             "\n=== ROUND 1 (独立陈述) ===",
             f"\n--- QUANT ---\n{self.quant_view}",
             f"\n--- RISK OFFICER ---\n{self.risk_view}",
@@ -66,7 +73,7 @@ class CommitteeReport:
             f"\n--- QUANT 调整 ---\n{self.quant_adjusted}",
             f"\n--- RISK 调整 ---\n{self.risk_adjusted}",
             f"\n=== USER PORTFOLIO CONTEXT ===\n{self.portfolio_summary}",
-        ]
+        ])
         if self.prior_insights:
             lines.append(f"\n=== LONG-TERM INSIGHTS (Dreaming) ===\n{self.prior_insights}")
         return "\n".join(lines)
@@ -289,6 +296,36 @@ def run_macro_view(macro_data_brief: str) -> str:
     return _ask(agent, f"# 当前宏观数据参考:\n{macro_data_brief}\n\n请按格式输出 Macro 评估。")
 
 
+def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
+                            portfolio_cash_cny: float) -> str:
+    """跨资产共享的 WealthContextOfficer 评估，跑一次后 Risk Officer + CIO 引用。
+
+    wealth_context 为 None / 空 → 直接返回 portfolio_only stub（不调 LLM，省成本）。
+    """
+    from agents.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
+
+    if not wealth_context:
+        return (
+            f"SOLVENCY_BUFFER_LEVEL: unknown\n"
+            f"PORTFOLIO_CASH_CNY: {portfolio_cash_cny:.2f}\n"
+            f"INVESTABLE_CASH_CNY: {portfolio_cash_cny:.2f}\n"
+            f"BACKUP_BUFFER_CNY: 0\n"
+            f"EXPLANATION_TO_RISK: user.md 没填 wealth_context，按 portfolio cash 判断流动性 + 风险。\n"
+            f"EXPLANATION_TO_CIO: 加仓决策受 portfolio cash 限制。"
+        )
+
+    agent = _create_agent(PROMPT_WEALTH_CONTEXT_OFFICER,
+                          role="wealth_context", round_label="wealth_context")
+    import json as _json
+    ctx_brief = (
+        f"# 用户 wealth_context（user.md frontmatter）：\n"
+        f"```json\n{_json.dumps(wealth_context, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"# Portfolio cash 现状：¥{portfolio_cash_cny:.2f} CNY\n\n"
+        f"请按格式输出真实流动性评估。"
+    )
+    return _ask(agent, ctx_brief)
+
+
 def _parallel_ask(pairs: List[Tuple[Optional[SDKAgent], str]]) -> List[str]:
     """并行跑多个 (agent, input)，返回结果列表（按入参顺序）
 
@@ -363,6 +400,7 @@ def run_committee(
     portfolio_summary: str,
     prior_insights: str = "",
     regime_brief: str = "",
+    wealth_context_view: str = "",
     *,
     persist_to_memory: bool = True,
     max_debate_rounds: int = 1,
@@ -395,6 +433,7 @@ def run_committee(
     report = CommitteeReport(
         asset=asset,
         macro_view=macro_view,
+        wealth_context_view=wealth_context_view,
         market_data=market_data,
         portfolio_summary=portfolio_summary,
         prior_insights=prior_insights,
@@ -416,11 +455,18 @@ def run_committee(
         f"# 市场数据 (技术指标 + 多周期):\n{market_data}\n\n"
         f"请按 Quant Analyst 格式输出技术信号。"
     )
+    wealth_section = (
+        f"# 用户真实流动性 (WealthContextOfficer):\n{wealth_context_view}\n\n"
+        if wealth_context_view else ""
+    )
     risk_input_r1 = (
         f"# 资产: {asset.get('display_name', sym)} ({sym})\n"
         f"# 用户当前持仓:\n{portfolio_summary}\n\n"
+        f"{wealth_section}"
         f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n"
         f"请按 Risk Officer 格式输出风险评估。"
+        f"**注意**：如果 WealthContextOfficer 报告 TRUE_LIQUIDITY=ample 或 moderate，"
+        f"不要因为 portfolio cash 低就喊 high_risk—— 看 EXPLANATION_TO_RISK。"
     )
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,

@@ -189,6 +189,18 @@ class UserData(BaseModel):
     last_payday: Optional[str] = None
     user_email: Optional[str] = None
 
+    # wealth_context = portfolio 之外的真实财务背景
+    # 让 WealthContextOfficer 把"真实 dry_powder"传给 Risk Officer，避免 Risk 把
+    # "portfolio cash 低"误判 high_risk（实际用户可能有家族 backup / 多账户分散）
+    # 留空 = 走老逻辑（portfolio cash = 全部可调资金）
+    wealth_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "off-portfolio 财务背景。可含 emergency_buffer_cny / "
+            "family_backup_available (bool) / lifestyle_notes 等任意字段"
+        ),
+    )
+
 
 # ============ helper：把 metadata dict 校验后转回 dict（写 md 用） ============
 
