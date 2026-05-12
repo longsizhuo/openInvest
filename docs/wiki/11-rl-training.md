@@ -354,9 +354,77 @@ cross-challenge。如果要更深度优化（让 DSPy 学每个 role 怎么独�
 
 ---
 
+## Prompt 组织：SKILL.md 模式（已落地）
+
+参考 [OpenClaw](https://github.com/openclaw/openclaw) 和
+[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 的
+prompt 组织模式，**已切到 SKILL.md**。
+
+### 目录结构
+
+```
+agents/
+├── skills/                          ← prompt 本体（markdown，跟代码解耦）
+│   ├── cio/SKILL.md
+│   ├── macro_strategist/SKILL.md
+│   ├── quant/
+│   │   ├── SKILL.md                 # round_label="opening"
+│   │   └── SKILL_rebuttal.md        # round_label="rebuttal"
+│   ├── risk_officer/
+│   │   ├── SKILL.md
+│   │   └── SKILL_rebuttal.md
+│   ├── wealth_context_officer/SKILL.md
+│   └── README.md
+├── skills_loader.py                 ← load_skill() + 占位符渲染（零依赖）
+├── cio.py                           ← 薄 wrapper：build_cio_prompt() = load_skill("cio", ...)
+├── macro_strategist.py
+├── quant.py
+├── risk_officer.py
+└── wealth_context_officer.py
+```
+
+### SKILL.md 格式
+
+```markdown
+---
+name: cio
+description: 综合 Macro/Quant/Risk 三人输出，给最终 verdict
+role: cio
+---
+
+你是首席投资官 (CIO)，刚听完 ... {{asset_name}} ({{asset_symbol}}) ...
+```
+
+运行时占位符（`{{asset_name}}` / `{{asset_symbol}}`）由 `skills_loader.load_skill()` 替换。
+
+### 改 prompt 的流程
+
+1. 直接编辑对应 `agents/skills/<role>/SKILL.md`
+2. 不动 `.py`（除非加新角色 / 新占位符）
+3. `pytest tests/test_skills_loader.py` 确认 frontmatter 解析无误
+4. commit 仅 .md diff —— **跟代码改动完全分离**
+
+### 跟 OpenClaw / Hermes 对比
+
+| 维度 | 当前 invest | OpenClaw / Hermes-Agent |
+|---|---|---|
+| 组织模式 | ✅ SKILL.md + frontmatter | ✅ SKILL.md + frontmatter |
+| 动态字段 | ✅ `{{var}}` 占位符（零依赖）| ⚠️ jinja2 / 各自实现 |
+| DSPy/GEPA 集成 | ⏳ 待对接（`SkillModule(dspy.Module)`）| ✅ 已有（`evolution/skills/skill_module.py`）|
+| 改 prompt 不碰代码 | ✅ | ✅ |
+
+### 下一步（plan 阶段 5）
+
+参考 `NousResearch/hermes-agent-self-evolution:evolution/skills/skill_module.py`，
+把 SKILL.md wrap 成 `dspy.Module`，让 `scripts/rl_optimize_prompts.py` 的 DSPy 优化
+**直接读写 .md 文件**（当前需要手工把 best demos 转 .py 注入）。
+
+---
+
 ## ADR 索引
 
 未来这些决策会写到 `adr/`：
 - ADR-008: 为什么用 Optuna 而非 PPO/DPO（LLM 离散非可微）
 - ADR-009: paper trade vs verdict-level evaluation（strategy-level 信噪比高 10x）
 - ADR-010: 训练数据 cutoff 选 2024-06-30（DeepSeek 自身训练数据）
+- ADR-011: 暂不切到 SKILL.md 模式（见上节"Prompt 组织"权衡）
