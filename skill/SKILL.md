@@ -1,7 +1,7 @@
 ---
 name: invest
-version: 0.8.0
-description: openInvest 多资产 AI 投资委员会。读取持仓 / 实时行情 / 策略 / 历史决议；用 4 角色 LLM（Macro + Quant + Risk Officer + CIO）做多轮 cross-challenge 辩论给出投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种（CNY / AUD / USD / ...）。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Cursor / Cline / Codex / DeepSeek-based / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**：用户问 "show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"现在 NDQ 多少钱 / current NDQ price"。后端 longsizhuo/openInvest，前端 longsizhuo/invest-gui。
+version: 0.9.0
+description: openInvest 多资产 AI 投资委员会 **日常使用**。读取持仓 / 实时行情 / 策略 / 历史决议 / 加减仓 / 跑 4 角色 LLM 委员会给投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Cursor / Cline / Codex / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**："show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"加仓 / 减仓 / 记一笔交易"。**首次安装走另一个 skill `invest-setup`**（doctor 返回 needs_setup 时切过去）。后端 longsizhuo/openInvest，前端 longsizhuo/invest-gui。
 ---
 
 # Invest Skill
@@ -25,8 +25,8 @@ verdict 可能不同（不同模型，cross-validation 用）。
 
 ```
 1. 跑 `run.sh doctor`                                ← 必跑第一步
-   ├─ status: "ready"        → 进 step 2
-   └─ status: "needs_setup"  → 读 references/onboarding.md，问用户 5 个问题
+   ├─ status: "ready"        → 进 step 2（继续用本 skill）
+   └─ status: "needs_setup"  → **切到 `invest-setup` skill**（不在本 skill 处理）
 
 2. 按用户意图选子命令：
 
@@ -122,12 +122,13 @@ GUI，他根本用不上。所以：
 | 命令 | 路径 | 用在 | 返回 |
 |------|------|------|------|
 | `doctor` | 通用 | 必跑第一步 | JSON，`status: "ready"` 或 `"needs_setup"` |
-| `init [--from-stdin] [--force]` | 通用 | 第一次配 / 重配 | JSON，`holdings_parse_note` 显示自然语言解析结果 |
+| `init [--from-stdin] [--force]` | 通用 | **不在本 skill 用**，首次安装走 `invest-setup` skill | — |
 | `status` | 通用 | 看持仓 | 现金 + holdings + 实时价 + P&L |
 | `strategy` | 通用 | 看策略 | target_assets + Dreaming insights |
 | `history [-n N]` | 通用 | 看流水 | 最近 N 笔交易 + 委员会决议 |
 | `live_prices` | 通用 | 背景行情 | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
 | `what_if [--symbol X --pct N \| --gold-pct N \| --ndq-pct N]` | 通用 | "X 跌 Y% 我亏多少" | 算术情景，无 LLM |
+| `correlate --symbols A,B[,C...] [--period 6mo] [--with-llm]` | "btw" 附带 | 用户**顺嘴问**"A 跟 B 像不像"（不写入 memory/.committee，纯查询返回）| pairwise 相关矩阵 + sector + macro 关联 |
 | `prepare_committee SYM` | Coordinator | 拿 brief 给 4 subagent | brief JSON + 6 段 prompts |
 | `save_committee SYM` | Coordinator | 落盘 transcript | stdin 4 段输出 → markdown |
 | `run_committee SYM [--force]` | Direct | 一键完整委员会 | verdict JSON + CIO memo |
@@ -199,11 +200,11 @@ Direct 路径的常见错误：
 
 | 文件 | 何时读 |
 |------|--------|
-| `references/onboarding.md` | doctor 返回 `needs_setup` |
 | `references/committee-protocol.md` | Coordinator 路径跑委员会（Claude Code 专用）|
 | `references/two-paths.md` | 想懂 Coordinator vs Direct 区别 / DeepSeek cron 触发 |
 | `references/adding-assets.md` | 用户想跟踪新 symbol |
 | `references/troubleshooting.md` | doctor 全绿但还是出错 |
+| `references/onboarding.md` | **首次安装去 `invest-setup` skill**；此文件保留作详细参考 |
 
 更深的架构上下文看项目 Wiki：
 [github.com/longsizhuo/openInvest/tree/main/docs/wiki](https://github.com/longsizhuo/openInvest/tree/main/docs/wiki)

@@ -1,37 +1,39 @@
 #!/bin/bash
-# 把仓库里的 skill/ 通过 symlink 装到 ~/.claude/skills/invest/。
+# 把仓库里的 skill/ + skill-setup/ 通过 symlink 装到 ~/.claude/skills/。
 # 改 skill 协议（SKILL.md / scripts/ / references/）只需在仓库里改 + commit + pull
 # 即生效，不用每次手动两边同步。
 #
 # 用法:
 #   cd $INVEST_HOME && bash skill/install.sh
 #
-# 幂等：再次运行会刷新 symlink 指向（如果之前是普通文件会先备份成 .bak.<ts>）。
+# 幂等：再次运行会刷新 symlink 指向。
 #
-# 结构（agent-skills 标准布局，参考 https://agentskills.io/skill-creation）:
-#   ~/.claude/skills/invest/
-#   ├── SKILL.md          → repo skill/SKILL.md         (level 2: 决策树，always loaded)
-#   ├── scripts/          → repo skill/scripts/         (level 3: 可执行入口)
-#   │   └── run.sh
-#   └── references/       → repo skill/references/      (level 3: 详细操作手册)
-#       └── *.md
+# 结构（按 OpenClaw convex-setup-auth 模式，setup 和日常使用拆开）:
+#   ~/.claude/skills/invest/          (日常使用：portfolio / committee / 买卖)
+#   │   ├── SKILL.md      → repo skill/SKILL.md
+#   │   ├── scripts/      → repo skill/scripts/
+#   │   └── references/   → repo skill/references/
+#   └── invest-setup/                 (一次性 onboarding)
+#       ├── SKILL.md      → repo skill-setup/SKILL.md
+#       ├── scripts/      → repo skill-setup/scripts/
+#       └── references/   → repo skill-setup/references/
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills/invest}"
+CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
 
-echo "📦 Installing invest skill"
-echo "   repo:        $REPO_ROOT"
-echo "   skill dir:   $SKILL_DIR"
-
-mkdir -p "$SKILL_DIR"
+echo "📦 Installing invest skills (日常 + setup)"
+echo "   repo:                $REPO_ROOT"
+echo "   claude skills dir:   $CLAUDE_SKILLS_DIR"
 
 link_one() {
-    # symlink a single file or directory from repo skill/ → ~/.claude/skills/invest/
-    local name="$1"
-    local target="$REPO_ROOT/skill/$name"
-    local link="$SKILL_DIR/$name"
+    # symlink a single file or directory from repo to ~/.claude/skills/<dst>/<name>
+    local repo_dir="$1"   # 仓库内目录（skill / skill-setup）
+    local dst="$2"        # ~/.claude/skills/<dst>/
+    local name="$3"       # SKILL.md / scripts / references
+    local target="$REPO_ROOT/$repo_dir/$name"
+    local link="$dst/$name"
 
     if [ ! -e "$target" ]; then
         echo "❌ missing in repo: $target" >&2
@@ -53,19 +55,35 @@ link_one() {
     echo "   🔗 linked $name → $target"
 }
 
-# 旧布局清理：以前 run.sh 直接在 SKILL_DIR 顶层。新版本移到 scripts/run.sh。
-# 如果发现旧的顶层 run.sh symlink，先备份。
-if [ -L "$SKILL_DIR/run.sh" ] || [ -f "$SKILL_DIR/run.sh" ]; then
-    backup="$SKILL_DIR/run.sh.legacy.$(date +%Y%m%d_%H%M%S)"
-    mv "$SKILL_DIR/run.sh" "$backup"
+# ---- 主 skill: ~/.claude/skills/invest/  (日常使用) ----
+INVEST_DIR="$CLAUDE_SKILLS_DIR/invest"
+mkdir -p "$INVEST_DIR"
+
+# 旧布局清理：以前 run.sh 直接在 invest/ 顶层。新版本移到 scripts/run.sh。
+if [ -L "$INVEST_DIR/run.sh" ] || [ -f "$INVEST_DIR/run.sh" ]; then
+    backup="$INVEST_DIR/run.sh.legacy.$(date +%Y%m%d_%H%M%S)"
+    mv "$INVEST_DIR/run.sh" "$backup"
     echo "   📦 detected legacy top-level run.sh → backed up to $backup"
-    echo "      新调用路径: $SKILL_DIR/scripts/run.sh"
 fi
 
-link_one SKILL.md
-link_one scripts
-link_one references
+echo
+echo "[1/2] invest (日常使用 skill)"
+link_one skill "$INVEST_DIR" SKILL.md
+link_one skill "$INVEST_DIR" scripts
+link_one skill "$INVEST_DIR" references
+
+# ---- 副 skill: ~/.claude/skills/invest-setup/  (一次性 onboarding) ----
+SETUP_DIR="$CLAUDE_SKILLS_DIR/invest-setup"
+mkdir -p "$SETUP_DIR"
+
+echo
+echo "[2/2] invest-setup (一次性 onboarding skill)"
+link_one skill-setup "$SETUP_DIR" SKILL.md
+link_one skill-setup "$SETUP_DIR" scripts
+link_one skill-setup "$SETUP_DIR" references
 
 echo
 echo "✅ Done. Restart Claude Code if it was running."
-echo "   Test with: $SKILL_DIR/scripts/run.sh doctor"
+echo
+echo "Daily usage:     $INVEST_DIR/scripts/run.sh doctor"
+echo "First-time setup: agent 自动加载 invest-setup skill 当 doctor 返回 needs_setup"
