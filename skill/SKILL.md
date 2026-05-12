@@ -31,6 +31,8 @@ verdict 可能不同（不同模型，cross-validation 用）。
 2. 按用户意图选子命令：
 
    "看持仓 / 我现在多少钱"          → run.sh status
+   "分析战况 / 风险 / 集中度"       → run.sh status + **`curl /api/user`** 拿
+                                       wealth_context（**必读**，避免 PWM 老逻辑误判）
    "我的策略是什么"                  → run.sh strategy
    "最近交易 / 流水"                 → run.sh history
    "现在大盘 / VIX 多少"             → run.sh live_prices
@@ -156,6 +158,8 @@ GUI，他根本用不上。所以：
 
 | 端点 | 用在 | body 简例 |
 |------|------|-----------|
+| `GET /api/user` | **分析战况前必读**，拿 wealth_context（家族 backup / 账户性质 / 应急金）—— 决定怎么解释集中度 + 低现金 | — |
+| `PUT /api/user/wealth_context` | 用户改家族 backup / 账户性质等（GUI 在 /settings 页填，agent 一般不调）| `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?}` |
 | `POST /api/trades/record` | **记一笔意向交易**（不连真实支付，只内部账本）| `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
 | `GET /api/trades?limit=N` | 看最近 N 笔意向 / 已成交 | — |
 | `PATCH /api/trades/{id}/status` | **标记成交**（status: "executed"）→ 自动同步 portfolio.md（更新 holdings + 扣 cash）| `{status: "executed"}` |
@@ -174,6 +178,16 @@ GUI，他根本用不上。所以：
 
 ## Constraints（守好别破坏）
 
+- **分析持仓 / 集中度 / 风险前必读 `GET /api/user` 拿 wealth_context**——
+  忘了这条就会犯 **2026-05-12 那个错**：用户填了家族 ¥4M backup，agent 跑完
+  `status` 没看 user，按 PWM 老逻辑喊"60% 集中度超配 → 建议 TRIM 减仓"。错。
+  正确做法：
+  - 没填 wealth_context → 按 portfolio cash 判流动性 + 25-35% 集中度警戒
+  - 填了 → 用 WealthContextOfficer 视角：
+    * 集中度 % 算 `portfolio_value / (portfolio + emergency_buffer_cny)` 不是仅 portfolio
+    * `family_backup_available=true` → 低 portfolio cash **不是** liquidity risk
+    * `account_purpose="零花钱账户"` → 容忍较大回撤；`"退休金"` → 倾向减仓
+  - 加仓金额上限**永远**= portfolio cash（**不能动 backup**），这条不变
 - **不要主动跑 `daily_report` cron**——除非用户明说 "跑深度分析" / "run full report"。
   那条路烧 DeepSeek token。Direct 路径单资产 `run_committee` 就够。
 - **不要编实时价**。永远走 `run.sh status` 或 `live_prices`。yfinance 可能返回
