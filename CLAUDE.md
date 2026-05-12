@@ -24,22 +24,6 @@ openInvest 有三个调用层，每层服务不同对象：
 - CLI 子命令缺写操作时，**优先补 CLI 子命令**而不是只让 agent 调 web API curl
 - 不要在 SKILL.md 写"CLI 只读 / 写操作走 web API"——这是反产品哲学的措辞
 
-## 不管用户怎么部署
-
-`invest.longsizhuo.com` 是作者本人 CF Access 锁住的私 GUI。**openInvest 项目代码 / 文档绝不教 fork 用户怎么部署**：
-
-- 不要在文档里提 Caddy / Cloudflare Access / systemd 配置
-- 不要在 doctor / hint 里加"配 CF Access 才能公开"这种部署引导
-- doctor 检测到 `INVEST_WEB_HOST=0.0.0.0` 时不要警告——用户怎么部署是他自己的事
-
-部署 = 用户自己的责任。openInvest = localhost 工具 + 共享底层 + agent 可用。
-
-## NapCat 是作者后门，不公开
-
-`connectors/napcat_bot.py` 后端代码保留作者私用。**前端 / SKILL 文档 / README 不出现 NapCat / QQ 推送相关任何字眼**。
-
-如果改 web_api.py 时看到 NapCat 相关 import，不动；如果在前端 / SKILL.md 里看到，删。
-
 ## 测试纪律
 
 - **CI 自动跑**（`.github/workflows/ci.yml`）—— pytest 全套 + smoke import + 脱敏字段 grep
