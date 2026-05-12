@@ -58,7 +58,7 @@ Quant 和 Risk（同样的 *角色*，新的 prompt）。
 **Direct 路径多资产实测**：2 资产收敛 = 1 + 5×2 = 11 calls；2 资产 max=4 不收敛 = 1 + 9×2 = 19 calls；
 journal 实证 16 calls 介于两者间。
 
-引用本图前先想清楚是哪条路径——Coordinator 文档（[skill/references/committee-protocol.md](https://github.com/longsizhuo/openInvest/blob/main/skill/references/committee-protocol.md)）按 Coordinator 路径写，本文按 Direct 路径写，**两份各自正确**但前提不同。
+引用本图前先想清楚是哪条路径——Coordinator 文档（[skills/invest/references/committee-protocol.md](https://github.com/longsizhuo/openInvest/blob/main/skills/invest/references/committee-protocol.md)）按 Coordinator 路径写，本文按 Direct 路径写，**两份各自正确**但前提不同。
 
 ---
 

@@ -73,7 +73,7 @@ Agent({...})  // cio 综合 transcript
 - ❌ 没有 SSE 直播，结果是一次性输出
 - ❌ Skill 跑完后状态不持久化到 invest memory（除非用户手动 fwd）
 
-详见 [skill/SKILL.md](../../skill/SKILL.md)。
+详见 [skills/invest/SKILL.md](../../skills/invest/SKILL.md)。
 
 ---
 

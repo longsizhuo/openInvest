@@ -1,1 +1,0 @@
-../../skill/scripts/run.sh

@@ -1,0 +1,1 @@
+../../invest/scripts/run.sh

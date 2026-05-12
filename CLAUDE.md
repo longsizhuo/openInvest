@@ -9,7 +9,7 @@ openInvest 有三个调用层，每层服务不同对象：
 | 层 | 服务对象 | 目的 |
 |----|---------|------|
 | **GUI**（invest-gui，挂 :8765 静态文件） | **小白用户** | 可视化看持仓 / 批量录入 / 系统状态 |
-| **CLI / Skill**（`scripts/skill.py` + `skill/scripts/run.sh`）| **AI agent**（Claude / Gemini / Cursor / Cline / Codex / 任意脚本）| Agent 跑全链路：查询 + 记账 + 改持仓 + 触发委员会 |
+| **CLI / Skill**（`scripts/skill.py` + `skills/invest/scripts/run.sh`）| **AI agent**（Claude / Gemini / Cursor / Cline / Codex / 任意脚本）| Agent 跑全链路：查询 + 记账 + 改持仓 + 触发委员会 |
 | **Web API**（`connectors/web_api.py`，挂 :8765 `/api/*`）| **共享底层** | GUI 和 CLI 都通过它写数据 |
 
 ### 关键原则
@@ -60,12 +60,12 @@ openInvest 有三个调用层，每层服务不同对象：
 - **Coordinator 路径**：Claude Code 用 `prepare_committee` + spawn 4 subagent。**不需要 DEEPSEEK_API_KEY**
 - **Direct 路径**：任意 agent（Gemini / Cursor / 普通脚本）用 `run_committee SYM` 一键 = 后端 DeepSeek 跑 4 角色辩论。**需要 DEEPSEEK_API_KEY**
 
-详见 `docs/wiki/04-execution-paths.md` + `skill/references/two-paths.md`。
+详见 `docs/wiki/04-execution-paths.md` + `skills/invest/references/two-paths.md`。
 
 ## 关键文件速查
 
 ```
-skill/SKILL.md             agent 触发指引（写"agent 怎么用"，不是"用户怎么用"）
+skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，不是"用户怎么用"）
 scripts/skill.py           CLI 入口（doctor/init/status/run_committee/...）
 connectors/web_api.py      FastAPI 端点（GUI + CLI 共享）
 core/portfolio_manager.py  持仓 façade，with_portfolio_tx fcntl 锁

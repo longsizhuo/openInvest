@@ -1081,7 +1081,7 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         "hint": (
             None if memory_ok else
             "向用户问以下信息后调 `run.sh init --from-stdin`（详细流程见 "
-            "skill/references/onboarding.md）：display_name, risk_tolerance "
+            "skills/invest/references/onboarding.md）：display_name, risk_tolerance "
             "(Conservative/Balanced/Aggressive), monthly_income_cny / "
             "monthly_expenses_cny / exchange_buffer_cny（都可填 0 跳过），"
             "holdings_description（自由描述持仓，例如 '510300 沪深300ETF "
@@ -1192,7 +1192,7 @@ def cmd_doctor(_: argparse.Namespace) -> None:
     # 5) GUI dist + 是否在跑
     # GUI 是面向**小白用户**的主入口（CLI/skill 是给 agent 和极客的）。
     # 设计原则：
-    #   - dist 在 bootstrap 阶段自动拉好（skill/scripts/run.sh 第一次跑就 sync）
+    #   - dist 在 bootstrap 阶段自动拉好（skills/invest/scripts/run.sh 第一次跑就 sync）
     #   - agent 必须主动告知用户 GUI 入口在哪，否则小白找不到
     #   - 但同一会话只在第一次回答提一次 URL，之后别复读
     # 高级用户（明确不想看 GUI 提示）可以 `INVEST_GUI_NUDGE=off`
