@@ -17,9 +17,10 @@ def temp_telemetry(tmp_path, monkeypatch):
 
 
 def test_estimate_cost_deepseek_chat():
-    """1M input + 1M output tokens → 0.5 + 1.5 = 2.0 元"""
+    """1M input + 1M output tokens → v4-flash 价格 1.0 + 2.0 = 3.0 元
+    (deepseek-chat 已 deprecated 映射到 v4-flash，pricing 同步)"""
     cost = t.estimate_cost_cny("deepseek-chat", 1_000_000, 1_000_000)
-    assert cost == pytest.approx(2.0)
+    assert cost == pytest.approx(3.0)
 
 
 def test_estimate_cost_unknown_model_zero():
@@ -39,8 +40,8 @@ def test_record_llm_call_writes_jsonl(temp_telemetry):
     assert rec["agent_role"] == "quant"
     assert rec["input_tokens"] == 1500
     assert rec["total_tokens"] == 1800
-    # 1500 in * 0.5/1M + 300 out * 1.5/1M = 0.00075 + 0.00045 = 0.0012
-    assert rec["cost_cny"] == pytest.approx(0.0012, abs=1e-5)
+    # v4-flash: 1500 in * 1.0/1M + 300 out * 2.0/1M = 0.0015 + 0.0006 = 0.0021
+    assert rec["cost_cny"] == pytest.approx(0.0021, abs=1e-5)
 
     # 文件真的写了
     lines = temp_telemetry.read_text(encoding="utf-8").splitlines()
@@ -80,8 +81,8 @@ def test_telemetry_summary_aggregates_by_role(temp_telemetry):
     assert s["by_role"]["quant"]["calls"] == 2
     assert s["by_role"]["macro"]["calls"] == 1
     assert s["by_role"]["cio"]["calls"] == 1
-    # 单次成本 1000 * 0.5/1M + 200 * 1.5/1M = 0.0005 + 0.0003 = 0.0008
-    assert s["by_role"]["quant"]["cost_cny"] == pytest.approx(0.0016, abs=1e-5)
+    # v4-flash: 1000 * 1.0/1M + 200 * 2.0/1M = 0.0014; × 2 quant calls = 0.0028
+    assert s["by_role"]["quant"]["cost_cny"] == pytest.approx(0.0028, abs=1e-5)
 
 
 def test_telemetry_summary_empty(temp_telemetry):
