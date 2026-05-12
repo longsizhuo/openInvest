@@ -307,6 +307,159 @@ def cmd_what_if(args: argparse.Namespace) -> None:
     })
 
 
+# ---------- correlate（通用市场分析，无金额建议） ----------
+
+def cmd_correlate(args: argparse.Namespace) -> None:
+    """跨资产关联分析 — 用户问"X 和 Y 有啥关联"、"X 趋势像 Y 吗"、"板块对比"
+
+    跟 run_committee 不同:
+    - 不需要 symbol 在 strategy.target_assets 里（任何 yfinance symbol 都行）
+    - 不需要用户已持有
+    - **不输出 BUY/SELL/alloc**（纯分析，无金额建议）
+    - 输出: 相关系数矩阵 + sector/industry + 跟 macro 的关联
+
+    示例:
+        skill correlate --symbols NDQ.AX,0700.HK,510300.SS
+        skill correlate --symbols AAPL,GOOGL,MSFT --period 1y --with-llm
+    """
+    import pandas as pd
+    import yfinance as yf
+
+    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    if len(symbols) < 2:
+        _print_json({"status": "error", "error": "至少 2 个 symbol 才能算相关性"})
+        sys.exit(1)
+    period = args.period or "6mo"
+
+    # 1. 拉每个 symbol 历史价（直接走 yfinance 拿真 period 长度数据）
+    closes: Dict[str, pd.Series] = {}
+    for sym in symbols:
+        df = yf.Ticker(sym).history(period=period)
+        if df is None or df.empty:
+            _print_json({"status": "error", "error": f"{sym} 拿不到历史数据"})
+            sys.exit(1)
+        closes[sym] = df["Close"]
+
+    # 2. 算 pairwise pearson correlation（基于日收益率，不是绝对价）
+    # 跨市场（港股 / A 股 / 美股）交易日对齐后会很多 NaN，所以归一化到日期（去掉时区）
+    # + 用 pd.DataFrame.corr() 自动按 pairwise 可用日期算（不要求所有 symbol 同时有值）
+    closes_normalized = {}
+    for sym, s in closes.items():
+        s2 = s.copy()
+        # 去掉时区（不同市场 tzinfo 不同）+ 归一化到日期
+        s2.index = pd.to_datetime(s2.index).tz_localize(None).normalize()
+        closes_normalized[sym] = s2.pct_change()
+
+    returns_df = pd.DataFrame(closes_normalized)
+    # corr() 自动按 pairwise non-NaN 算，min_periods 防小样本噪音
+    n_per_sym = {sym: int(returns_df[sym].notna().sum()) for sym in symbols}
+    min_pairwise = min(n_per_sym.values())
+    if min_pairwise < 20:
+        _print_json({
+            "status": "error",
+            "error": f"最少 symbol 只有 {min_pairwise} 天数据，样本太少",
+            "per_symbol_days": n_per_sym,
+        })
+        sys.exit(1)
+    corr_matrix = returns_df.corr(min_periods=20).round(3)
+
+    # 3. 拉 sector / industry（yfinance .info）
+    import yfinance as yf
+    sectors: Dict[str, Dict[str, Any]] = {}
+    for sym in symbols:
+        try:
+            info = yf.Ticker(sym).info
+            sectors[sym] = {
+                "sector": info.get("sector") or info.get("quoteType") or "—",
+                "industry": info.get("industry") or "—",
+                "name": info.get("longName") or info.get("shortName") or sym,
+            }
+        except Exception:
+            sectors[sym] = {"sector": "—", "industry": "—", "name": sym}
+
+    # 4. 跟 macro 因子的 correlation（VIX, TNX, USDCNY）
+    macro_corr: Dict[str, Dict[str, float]] = {}
+    for macro_sym, label in [("^VIX", "vix"), ("^TNX", "tnx"), ("USDCNY=X", "usdcny")]:
+        try:
+            macro_df = yf.Ticker(macro_sym).history(period=period)
+            if macro_df is None or macro_df.empty:
+                continue
+            macro_returns = macro_df["Close"].copy()
+            macro_returns.index = pd.to_datetime(macro_returns.index).tz_localize(None).normalize()
+            macro_returns = macro_returns.pct_change()
+            for sym in symbols:
+                sym_returns = returns_df[sym].dropna()
+                aligned = pd.concat([sym_returns, macro_returns], axis=1, join="inner").dropna()
+                if len(aligned) < 20:
+                    continue
+                c = float(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
+                macro_corr.setdefault(sym, {})[label] = round(c, 3)
+        except Exception:
+            continue
+
+    # 5. 找最强 pairwise 相关 + 共同 macro 因子
+    pairs: List[Tuple[str, str, float]] = []
+    for i, a in enumerate(symbols):
+        for b in symbols[i + 1:]:
+            pairs.append((a, b, float(corr_matrix.loc[a, b])))
+    pairs.sort(key=lambda x: -abs(x[2]))
+
+    out: Dict[str, Any] = {
+        "status": "ok",
+        "symbols": symbols,
+        "period": period,
+        "n_trading_days": len(returns_df),
+        "correlation_matrix": {a: {b: float(corr_matrix.loc[a, b]) for b in symbols} for a in symbols},
+        "strongest_pair": {
+            "a": pairs[0][0], "b": pairs[0][1], "correlation": pairs[0][2],
+        } if pairs else None,
+        "sector_industry": sectors,
+        "macro_correlation": macro_corr,
+        "interpretation_hint": (
+            "correlation > 0.7: 强正相关（同涨同跌）；0.3~0.7 中等；< 0.3 弱相关。"
+            "macro_correlation 正 = 跟该 macro 因子同向。**无金额建议**——用户没持有，"
+            "纯分析市场关系。"
+        ),
+    }
+
+    # 6. 可选 LLM 给一句话总结
+    if args.with_llm:
+        import os
+        if not os.getenv("DEEPSEEK_API_KEY"):
+            out["llm_summary"] = "(--with-llm 需要 DEEPSEEK_API_KEY)"
+        else:
+            try:
+                from openai import OpenAI
+                client = OpenAI(
+                    api_key=os.getenv("DEEPSEEK_API_KEY"),
+                    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+                )
+                ctx = json.dumps({
+                    "symbols": symbols, "corr": out["correlation_matrix"],
+                    "sectors": sectors, "macro_corr": macro_corr,
+                }, ensure_ascii=False)
+                resp = client.chat.completions.create(
+                    model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+                    messages=[
+                        {"role": "system", "content": (
+                            "你是金融关联分析师。给定多个资产的相关性矩阵 + sector + macro 关联，"
+                            "用 ≤100 字中文说明它们的关系。"
+                            "**禁止给买卖建议** —— 用户只问关联，没问该不该交易。"
+                            "重点：共同驱动因子是什么？什么时候联动？"
+                        )},
+                        {"role": "user", "content": ctx},
+                    ],
+                    temperature=0.2,
+                    timeout=30,
+                    extra_body={"thinking": {"type": "disabled"}} if "v4" in os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash") else None,
+                )
+                out["llm_summary"] = resp.choices[0].message.content
+            except Exception as e:
+                out["llm_summary"] = f"(LLM 失败: {e})"
+
+    _print_json(out)
+
+
 # ---------- live_prices ----------
 
 def cmd_live_prices(_: argparse.Namespace) -> None:
@@ -1589,6 +1742,17 @@ def main() -> None:
     p.add_argument("--ndq-pct", type=float, help="兼容旧参数：NDQ.AX 涨跌百分比")
     p.add_argument("--audcny", type=float, help="情景 AUDCNY 汇率")
     p.set_defaults(func=cmd_what_if)
+
+    p = sub.add_parser("correlate",
+        help="跨资产关联分析（任意 yfinance symbol，无金额建议）"
+             "—— 用户问'X 和 Y 有啥关联'、'X 趋势像 Y 吗'")
+    p.add_argument("--symbols", required=True,
+                   help="逗号分隔，至少 2 个，如 'NDQ.AX,0700.HK,510300.SS'")
+    p.add_argument("--period", default="6mo",
+                   help="yfinance period, e.g. 3mo/6mo/1y/2y，默认 6mo")
+    p.add_argument("--with-llm", action="store_true",
+                   help="可选：调 DeepSeek 给一句话中文总结（需要 DEEPSEEK_API_KEY）")
+    p.set_defaults(func=cmd_correlate)
 
     p = sub.add_parser("prepare_committee")
     p.add_argument("symbol")
