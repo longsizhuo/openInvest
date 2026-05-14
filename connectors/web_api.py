@@ -1160,6 +1160,14 @@ class CommitteeRunRequest(BaseModel):
         default=4, ge=1, le=8,
         description="cross-challenge 上限。1=旧行为；4=真讨论（推荐）",
     )
+    event_ids: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "事件层（event_watch）触发委员会时传入的事件 id 列表。仅用于审计 "
+            "（写 meta.json）+ 让 Macro 看到这些事件的结构化 brief；不影响 verdict "
+            "解析逻辑。其他 caller 不需要传。"
+        ),
+    )
 
 
 class CommitteeRunResponse(BaseModel):
@@ -1263,6 +1271,7 @@ async def _run_committee_task(
     task_id: str,
     symbols: Optional[List[str]],
     max_rounds: int,
+    event_ids: Optional[List[str]] = None,
 ) -> None:
     """v3 真并行：多资产同时跑，共享 macro_view，progress 实时推 status.json
 
@@ -1278,6 +1287,8 @@ async def _run_committee_task(
 
     # 审计 trail：runtime metadata 落 meta.json，永不被 progress 写覆盖
     audit_meta = _build_audit_meta(task_id, symbols, max_rounds)
+    if event_ids:
+        audit_meta["triggered_by_event_ids"] = event_ids
     try:
         meta_path = _committee_meta_path(task_id)
         meta_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1322,11 +1333,36 @@ async def _run_committee_task(
         except Exception as e:  # noqa: BLE001
             log.warning(f"macro_data 拉取失败: {e}")
             macro_data = {}
-        shared_macro = run_macro_view(str(macro_data))
+        # 事件层 trigger 路径：把 event_ids 翻译成结构化 brief，喂给共享 macro
+        event_brief_by_symbol: Dict[str, str] = {}
+        shared_event_brief = ""
+        if event_ids:
+            try:
+                from core.committee_runner import format_event_brief
+                from db.event_store import EventStore
+                from services.embeddings import DEFAULT_DIM
+                store = EventStore(embedding_dim=DEFAULT_DIM)
+                fetched = [store.get_event(eid) for eid in event_ids]
+                events_full: List[Dict[str, Any]] = []
+                for ev in fetched:
+                    if not ev:
+                        continue
+                    ev = dict(ev)
+                    ev["sources"] = store.get_sources(ev["event_id"])
+                    events_full.append(ev)
+                shared_event_brief = format_event_brief(events_full)
+                # 按 symbol 拆 brief —— Macro 共享版用整段，per-symbol 也用整段（事件少）
+                for sym in symbols:
+                    event_brief_by_symbol[sym] = shared_event_brief
+            except Exception as e:  # noqa: BLE001 事件层失败不能阻断委员会
+                log.warning(f"event brief 准备失败 task_id={task_id}: {e}")
+
+        shared_macro = run_macro_view(str(macro_data), event_brief=shared_event_brief)
         on_progress({
             "phase": "macro_done",
             "macro_preview": shared_macro[:240],
             "shared": True,
+            "event_brief_attached": bool(shared_event_brief),
         })
 
         # 2) 多资产并行跑 committee（每个内部 Round 1/2 已并行）
@@ -1338,6 +1374,7 @@ async def _run_committee_task(
                 max_debate_rounds=max_rounds,
                 progress_callback=on_progress,
                 shared_macro_view=shared_macro,
+                event_brief=event_brief_by_symbol.get(sym),
             )
 
         # 限 4 worker 防 LLM API 限流
@@ -1410,6 +1447,7 @@ async def committee_run(body: CommitteeRunRequest = Body(default=CommitteeRunReq
         task_id,
         symbols=body.symbols,
         max_rounds=body.max_debate_rounds,
+        event_ids=body.event_ids,
     ))
 
     return CommitteeRunResponse(
