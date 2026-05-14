@@ -411,11 +411,11 @@ def test_committee_run_and_status_done(client, monkeypatch):
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol",
                         lambda sym, **kw: fake_result)
     # macro_view 也 mock 掉（避免真调 LLM）
-    monkeypatch.setattr("connectors.web_api.run_macro_view", lambda data: "fake macro",
+    monkeypatch.setattr("connectors.web_api.run_macro_view", lambda data, **kw: "fake macro",
                         raising=False)
     # 直接 mock import 路径
     import core.committee
-    monkeypatch.setattr(core.committee, "run_macro_view", lambda data: "fake macro")
+    monkeypatch.setattr(core.committee, "run_macro_view", lambda data, **kw: "fake macro")
 
     r = client.post("/api/committee/run", json={"note": "smoke test", "symbols": ["NDQ.AX"]})
     assert r.status_code == 200
@@ -452,7 +452,7 @@ def test_committee_run_error_path(client, monkeypatch):
     import core.committee_runner as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", _boom)
     import core.committee
-    monkeypatch.setattr(core.committee, "run_macro_view", lambda data: "fake macro")
+    monkeypatch.setattr(core.committee, "run_macro_view", lambda data, **kw: "fake macro")
 
     r = client.post("/api/committee/run", json={"symbols": ["NDQ.AX"]})
     task_id = r.json()["task_id"]
