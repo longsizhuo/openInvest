@@ -90,11 +90,14 @@ bash ~/openInvest/skill/install.sh
 ```
 agents/    4 个角色的 prompt
 core/      Coordinator-Worker 编排 + memory store
-jobs/      APScheduler cron tasks
+jobs/      APScheduler cron tasks（含 event_watch 事件感知层）
 connectors/web_api.py + skill/ 两条调用入口
-db/        SQLite WAL（trades / insights / market data）
+services/  news_sources / event_normalizer / event_notifier / notifier
+db/        SQLite WAL（trades / insights / market data / events）
 docs/wiki/ 完整架构文档 + ADR
 ```
+
+**事件层（第一层）**（实现中，默认关）：盘中每 30 分钟扫多源新闻（DDGS + RSS + yfinance），flash 归一化成结构化事件落 `db/events.db`，命中用户持仓 / target_assets 则邮件通知 + 触发委员会重跑。开关：`jobs/event_watch.yml` 的 `enabled: true` + env `DEEPSEEK_API_KEY` + `EMAIL_SENDER`。详见 [ADR-006](docs/wiki/adr/006-event-layer.md)。
 
 详见：
 - [架构总览](docs/wiki/01-architecture.md) | [4 角色 prompt 解析](docs/wiki/02-agents.md) | [Dreaming](docs/wiki/03-dreaming.md)
