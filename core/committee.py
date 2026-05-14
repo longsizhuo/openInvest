@@ -290,10 +290,19 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
 # 主流程
 # ----------------------------------------------------------------------
 
-def run_macro_view(macro_data_brief: str) -> str:
-    """跨资产共享的 Macro 评估，跑一次后 CIO 各自引用"""
+def run_macro_view(macro_data_brief: str, *, event_brief: str = "") -> str:
+    """跨资产共享的 Macro 评估，跑一次后 CIO 各自引用
+
+    event_brief: 事件层（第一层）注入的盘中事件上下文（结构化文本，按时间排序，
+                 含 supersedes 标记）。空字符串 = 不注入，行为完全等价于现状。
+                 只有 Macro 看到（事件 RAG 严格隔离原则）。
+    """
     agent = _create_agent(PROMPT_MACRO_STRATEGIST, role="macro", round_label="macro")
-    return _ask(agent, f"# 当前宏观数据参考:\n{macro_data_brief}\n\n请按格式输出 Macro 评估。")
+    event_section = (
+        f"\n\n## 当前事件上下文（按时间排序，最新在前；可能含 supersedes 标记）\n{event_brief}\n"
+        if event_brief else ""
+    )
+    return _ask(agent, f"# 当前宏观数据参考:\n{macro_data_brief}{event_section}\n\n请按格式输出 Macro 评估。")
 
 
 def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
