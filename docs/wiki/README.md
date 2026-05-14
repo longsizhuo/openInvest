@@ -60,6 +60,9 @@
 | [001](adr/001-dual-execution-paths.md) | 委员会保留 Skill + Web/Cron 双路径 | ✅ 已采纳 |
 | [002](adr/002-no-claude-agent-sdk.md) | 暂不升级到 Claude Agent SDK | ✅ 已采纳 |
 | [003](adr/003-v2-data-model.md) | portfolio.md 升 v2 通用 schema | ✅ 已采纳 |
+| [004](adr/004-v1-fallback-retirement.md) | v1 fallback 正式退场 | ✅ 已采纳 |
+| [005](adr/005-daily-report-split.md) | daily_report 拆 builder/notifier | ✅ 已采纳 |
+| [006](adr/006-event-layer.md) | 事件感知层 + 轻量新闻 RAG | 🚧 实现中（feature flag 默认关）|
 
 ---
 

@@ -1,3 +1,35 @@
+"""DDG 财经新闻搜索 + trafilatura/readability 抓正文 + 反标题党规则评分
+
+⚠️ TODO — 孤儿代码警告（2026-05-12 发现）
+=========================================
+本模块当前**没有任何 caller**（grep "from services.news" 返回 0）。
+
+历史：
+- 原 caller 在 agents/agent.py 的 `finance_news` langchain tool
+- 被 commit 934ff7a (2026-05-08, "chore(deps): 删 langchain") 误伤
+  —— CR 当时只看到 agents/agent.py 是 langchain dead code 直接 git rm，
+  没注意里面包着的 finance_news tool 调的 services/news.py 跟 langchain 无关
+  （DDGS / trafilatura / readability 都不是 langchain 依赖）
+
+⚠️ 别再 cleanup 删本文件：
+- pyproject 里 ddgs / trafilatura / readability-lxml 依赖还在
+- 模块本身 import 测试通过（实测）
+- 待重新接入 Macro Strategist 当 `finance_news` tool（参考 agents/tools.py 模式）
+
+恢复路径（10 分钟）：
+1. agents/tools.py 加 `_impl_finance_news(query, max_items=4)` 包装本模块的
+   get_real_finance_news()
+2. agents/tools.py 的 TOOL_DEFINITIONS 加 finance_news 条目（OpenAI tool schema，
+   非 langchain @tool）
+3. agents/skills/macro_strategist/SKILL.md 加这个 tool（**专属 Macro 角色用**，
+   Quant/Risk/CIO/Wealth 不该看新闻）
+4. 跑 verdict 对比 4-6 周看 Macro KEY_HEADWIND/KEY_TAILWIND 是否真 ground 在事实
+
+为什么归 Macro：
+- Macro 看"利率/通胀/经济周期/地缘"——这些都是新闻
+- Quant 看技术面、Risk 看用户上下文，都不需要新闻
+"""
+
 from __future__ import annotations
 
 import re
