@@ -1,0 +1,21 @@
+# 默认 RSS feed 清单 —— 全部公开免费，无需 API key
+# 用户可 export INVEST_RSS_FEEDS_YML=/path/to/custom.yml 覆盖
+#
+# 加新源原则：
+# - 只加主流财经媒体（彭博/路透/FT/华尔街日报/财新 等），避免 SEO 噪声站
+# - 每个源单独一行，name 仅 [a-z0-9_]
+# - url 必须是真正的 RSS / Atom（不是网页）—— 用 feedparser 解析
+
+feeds:
+  - name: reuters_business
+    url: https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best
+  - name: bbc_business
+    url: https://feeds.bbci.co.uk/news/business/rss.xml
+  - name: ft_markets
+    url: https://www.ft.com/markets?format=rss
+  - name: yahoo_finance_headline
+    url: https://finance.yahoo.com/news/rssindex
+  - name: seeking_alpha_market
+    url: https://seekingalpha.com/market_currents.xml
+  - name: caixin_global
+    url: https://www.caixinglobal.com/feed/
