@@ -7,6 +7,7 @@ from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Optional
 
 import markdown
 from dotenv import load_dotenv
@@ -43,121 +44,124 @@ def _resolve_receiver(default_sender: str) -> str:
     return default_sender
 
 
-def send_gmail_notification(content: str) -> str:
-    """通过 Gmail SMTP 发邮件，自带 5 次指数退避重试。
+_DEFAULT_EMAIL_CSS = """
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+    h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 30px; }
+    h2 { color: #2980b9; margin-top: 25px; border-left: 4px solid #3498db; padding-left: 10px; }
+    h3 { color: #16a085; margin-top: 20px; }
+    p { margin-bottom: 15px; }
+    blockquote { border-left: 4px solid #ddd; padding: 10px 20px; color: #666; background: #f9f9f9; font-style: italic; margin: 20px 0; }
+    pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; border: 1px solid #ddd; }
+    code { font-family: Consolas, Monaco, 'Andale Mono', monospace; background: #f4f4f4; padding: 2px 5px; border-radius: 3px; color: #d63384; }
+    ul, ol { margin-bottom: 15px; padding-left: 25px; }
+    li { margin-bottom: 5px; }
+    table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+    th { background-color: #f8f9fa; color: #2c3e50; font-weight: bold; }
+    tr:nth-child(even) { background-color: #fcfcfc; }
+    hr { border: 0; border-top: 1px solid #eee; margin: 30px 0; }
+    .footer { font-size: 12px; color: #999; margin-top: 40px; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
+    .highlight { background-color: #fff3cd; padding: 2px 4px; border-radius: 4px; }
+"""
 
-    成功：返回收件人地址。
-    凭据缺失：返回空字符串（视为"故意 skip"，不算失败）。
-    重试耗尽：抛 EmailDeliveryError —— 让 scheduler runner 记 job 状态为 failed，
-    上层 job 也可以选择 catch 后继续。
 
-    Receiver 优先级（不再硬编码 longsizhuo@gmail.com）:
-    1. memory/user.md 的 email 字段
-    2. .env 的 DIGEST_EMAIL_TO
-    3. 发件人本身
-    """
-    sender = os.getenv("EMAIL_SENDER")
-    password = os.getenv("EMAIL_PASSWORD")  # Use Gmail App Password
-    if not sender or not password:
-        print("⚠️ Email credentials not found in .env. Skipping email notification.")
-        return ""
-    receiver = _resolve_receiver(default_sender=sender)
-
-    subject = f"Invest Agent Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
-
-    # Convert Markdown to HTML
-    html_content = markdown.markdown(content, extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'])
-
-    # Basic CSS for better email rendering (Keep your original CSS)
-    email_body = f"""
+def render_markdown_email(content_md: str, *, footer_label: str = "Invest Agent") -> str:
+    """Markdown → 完整 HTML body（含 CSS + footer），给 send_email_html 用"""
+    html_content = markdown.markdown(
+        content_md,
+        extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'],
+    )
+    return f"""
     <html>
-    <head>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
-            h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 30px; }}
-            h2 {{ color: #2980b9; margin-top: 25px; border-left: 4px solid #3498db; padding-left: 10px; }}
-            h3 {{ color: #16a085; margin-top: 20px; }}
-            p {{ margin-bottom: 15px; }}
-            blockquote {{ border-left: 4px solid #ddd; padding: 10px 20px; color: #666; background: #f9f9f9; font-style: italic; margin: 20px 0; }}
-            pre {{ background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; border: 1px solid #ddd; }}
-            code {{ font-family: Consolas, Monaco, 'Andale Mono', monospace; background: #f4f4f4; padding: 2px 5px; border-radius: 3px; color: #d63384; }}
-            ul, ol {{ margin-bottom: 15px; padding-left: 25px; }}
-            li {{ margin-bottom: 5px; }}
-            table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-            th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-            th {{ background-color: #f8f9fa; color: #2c3e50; font-weight: bold; }}
-            tr:nth-child(even) {{ background-color: #fcfcfc; }}
-            hr {{ border: 0; border-top: 1px solid #eee; margin: 30px 0; }}
-            .footer {{ font-size: 12px; color: #999; margin-top: 40px; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }}
-            .highlight {{ background-color: #fff3cd; padding: 2px 4px; border-radius: 4px; }}
-        </style>
-    </head>
+    <head><style>{_DEFAULT_EMAIL_CSS}</style></head>
     <body>
         {html_content}
         <div class="footer">
-            Generated by <b>Gemini Invest Agent</b> • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            Generated by <b>{footer_label}</b> • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         </div>
     </body>
     </html>
     """
 
+
+def send_email_html(
+    *,
+    subject: str,
+    html_body: str,
+    plain_body: str,
+    receiver: Optional[str] = None,
+    max_retries: int = 5,
+) -> str:
+    """SMTP 退避发邮件 —— event_notifier 和 daily_report 共用。
+
+    receiver 不传则按 _resolve_receiver 优先级解析。
+    成功返回 receiver；凭据缺失返回 ""；重试耗尽抛 EmailDeliveryError。
+    """
+    sender = os.getenv("EMAIL_SENDER")
+    password = os.getenv("EMAIL_PASSWORD")
+    if not sender or not password:
+        print("⚠️ Email credentials not found in .env. Skipping email notification.")
+        return ""
+    receiver = receiver or _resolve_receiver(default_sender=sender)
+
     msg = MIMEMultipart('alternative')
     msg['Subject'] = Header(subject, 'utf-8')
     msg['From'] = sender
     msg['To'] = receiver
+    msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
-    # Attach both plain text and HTML versions
-    part1 = MIMEText(content, 'plain', 'utf-8')
-    part2 = MIMEText(email_body, 'html', 'utf-8')
-
-    msg.attach(part1)
-    msg.attach(part2)
-
-    # --- 重试逻辑开始 ---
-    max_retries = 5  # 最大重试次数
-    retry_interval = 5  # 初始重试间隔（秒），失败后翻倍（指数退避）
+    retry_interval = 5  # 5s → 10s → 20s → 40s → 80s
     last_exc: Exception | None = None
-
     for attempt in range(1, max_retries + 1):
         try:
             print(f"🔄 [Attempt {attempt}/{max_retries}] 正在连接 SMTP 服务器...")
-
-            # 注：socket.setdefaulttimeout 是进程级副作用——会改 uvicorn / scheduler
-            # 同进程里所有 HTTP 请求的默认 timeout。SMTP 已经传 timeout=30 给
-            # smtplib.SMTP，per-call 已 cover，不需要全局兜底。
+            # 注：smtplib.SMTP timeout=30 已 cover per-call，不动 socket.setdefaulttimeout
             context = ssl.create_default_context()
-
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
                 server.ehlo()
-                server.starttls(context=context)  # TLS 握手
+                server.starttls(context=context)
                 server.ehlo()
-
                 print(f"🔑 [Attempt {attempt}/{max_retries}] 正在验证身份...")
                 server.login(sender, password)
-
                 print(f"📨 [Attempt {attempt}/{max_retries}] 正在发送数据...")
                 server.sendmail(sender, [receiver], msg.as_string())
-
-            # 成功
-            print(f"✅ Email report successfully sent to {receiver}")
+            print(f"✅ Email successfully sent to {receiver}")
             return receiver
-
         except (socket.timeout, smtplib.SMTPException, ConnectionError, OSError) as e:
             last_exc = e
             print(f"❌ [Attempt {attempt}/{max_retries}] 发送失败: {e}")
-
             if attempt < max_retries:
                 print(f"⏳ 等待 {retry_interval} 秒后进行下一次重试...")
                 time.sleep(retry_interval)
-                retry_interval *= 2  # 指数退避：5s → 10s → 20s → 40s → 80s
+                retry_interval *= 2
 
-    # 重试耗尽：必须抛异常让上层（scheduler runner）能感知到投递失败，
-    # 之前只 print 一行就静默 return，user 永远不知道日报没收到
     print("⛔️ 已达到最大重试次数，放弃发送。")
     raise EmailDeliveryError(
-        f"send_gmail_notification 重试 {max_retries} 次后仍失败: "
+        f"send_email_html 重试 {max_retries} 次后仍失败: "
         f"{type(last_exc).__name__}: {last_exc}"
     ) from last_exc
+
+
+def send_gmail_notification(content: str) -> str:
+    """通过 Gmail SMTP 发邮件（markdown 内容版本，给 daily_report 用）。
+
+    成功：返回收件人地址。
+    凭据缺失：返回空字符串（视为"故意 skip"，不算失败）。
+    重试耗尽：抛 EmailDeliveryError —— 让 scheduler runner 记 job 状态为 failed。
+
+    Receiver 优先级:
+    1. memory/user.md 的 email 字段
+    2. .env 的 DIGEST_EMAIL_TO
+    3. 发件人本身
+    """
+    subject = f"Invest Agent Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
+    html_body = render_markdown_email(content, footer_label="Gemini Invest Agent")
+    return send_email_html(
+        subject=subject,
+        html_body=html_body,
+        plain_body=content,
+    )
 
 
 if __name__ == "__main__":

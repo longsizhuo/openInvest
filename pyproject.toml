@@ -25,6 +25,8 @@ dependencies = [
     "croniter>=6.2.2",
     "openai>=1.45",  # SDKAgent 直接走 OpenAI 兼容客户端调 DeepSeek
     "optuna>=4.0",   # 阶段 4 RL：Bayesian Optimization 搜参
+    "feedparser>=6.0.10",  # 事件层 RSS 源（Reuters/BBC/FT/财新 免费 feed）
+    "sqlite-vec>=0.1.6",   # 事件层向量精排（SQLite 扩展，不需要独立向量库）
 ]
 
 [dependency-groups]
