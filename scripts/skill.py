@@ -1019,6 +1019,29 @@ def cmd_sell(args: argparse.Namespace) -> None:
     })
 
 
+def cmd_event_check(args: argparse.Namespace) -> None:
+    """CLI 入口：事件层端到端。
+
+    - 默认 dry-run：拉源 + 归一化 + 入库，不发邮件不触委员会
+    - --live：发邮件 + 触委员会
+    - --recall SYM：测 RAG 召回（不动新闻）
+    """
+    import json as _json
+
+    if args.recall:
+        from db.event_store import EventStore
+        from services.embeddings import DEFAULT_DIM, embed_text
+        store = EventStore(embedding_dim=DEFAULT_DIM)
+        q_embed = embed_text(args.recall) if store.vec_loaded else None
+        events = store.recall(args.recall, query_embedding=q_embed)
+        print(_json.dumps(events, ensure_ascii=False, indent=2, default=str))
+        return
+
+    from jobs.event_watch import run as event_watch_run
+    out = event_watch_run(dry_run=not args.live)
+    print(_json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 def cmd_delete_holding(args: argparse.Namespace) -> None:
     """删除持仓行（units 必须为 0，否则拒绝，让你先 sell 或 set 到 0）。
 
@@ -1809,6 +1832,18 @@ def main() -> None:
     p.add_argument("--symbol", required=True)
     p.add_argument("--force", action="store_true", help="units > 0 也强删")
     p.set_defaults(func=cmd_delete_holding)
+
+    p = sub.add_parser(
+        "event_check",
+        help="事件层（第一层）—— 拉多源新闻 / 归一化 / 入库 / 触发委员会 + 邮件。"
+             "默认 dry-run（只入库，不发邮件不触委员会）。"
+             "--live 才真发；--recall SYM 测 RAG 召回。",
+    )
+    p.add_argument("--live", action="store_true",
+                   help="真发邮件 + POST /api/committee/run。不加这个默认 dry-run。")
+    p.add_argument("--recall", metavar="SYMBOL",
+                   help="只测 event_store.recall(SYMBOL)，不抓新源")
+    p.set_defaults(func=cmd_event_check)
 
     args = parser.parse_args()
     args.func(args)
