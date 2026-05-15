@@ -168,6 +168,8 @@ GUI，他根本用不上。所以：
 | `POST /api/deposit` / `/api/withdraw` | 调 cash 现金 | `{currency: "CNY"\|"AUD"\|..., amount}` |
 | `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
 | `POST /api/strategy/asset` | 加 target_assets 条目 | `{symbol, channel?, max_single_invest_cny}` |
+| `GET /api/events/recent?hours=24&min_severity=low&limit=50` | 列最近 N 小时事件层感知的新闻（ADR-006）。debug / "系统现在感知到什么" | — |
+| `POST /api/events/check` | 手动跑一次 event_watch（拉新闻 + 归一化 + 入库 + 命中触发委员会）。同步 30-90s | — |
 
 **典型流程**：用户说"我打算..."/"刚买了 X"/"我的持仓多了 Y" → 用
 `POST /api/trades/record`（带 intended_date 区分计划 vs 已成交）→ 真实成交后用

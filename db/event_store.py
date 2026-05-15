@@ -316,6 +316,55 @@ class EventStore:
         cur.execute("SELECT * FROM sources WHERE event_id = ? ORDER BY fetched_at", (event_id,))
         return [dict(r) for r in cur.fetchall()]
 
+    def list_recent(
+        self,
+        *,
+        hours: int = 24,
+        min_severity: str = "low",
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """列最近 N 小时入库的事件（severity 倒序 + 时间倒序）。
+
+        给 GUI Events Tab + agent debug 用。跟 recall() 不一样：不按 symbol 过滤，
+        不做向量精排——纯时间序列扫描，看"系统现在感知到啥"。
+
+        Args:
+            hours: 时间窗（默认 24h）
+            min_severity: low / mid / high
+            limit: 最多返回多少条
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+        min_sev_int = _SEVERITY_INT.get(min_severity.lower(), 1)
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT * FROM events
+             WHERE ts >= ? AND severity >= ?
+             ORDER BY severity DESC, ts DESC
+             LIMIT ?
+            """,
+            (cutoff, min_sev_int, limit),
+        )
+        return [_row_to_event(r) for r in cur.fetchall()]
+
+    def count_recent(self, *, hours: int = 24) -> Dict[str, int]:
+        """汇总最近 N 小时事件数（按 severity 分桶）"""
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT severity, COUNT(*) AS n FROM events WHERE ts >= ? GROUP BY severity",
+            (cutoff,),
+        )
+        buckets = {1: 0, 2: 0, 3: 0}
+        for row in cur.fetchall():
+            buckets[row["severity"]] = row["n"]
+        return {
+            "low": buckets[1],
+            "mid": buckets[2],
+            "high": buckets[3],
+            "total": sum(buckets.values()),
+        }
+
     def recall(
         self,
         symbol: str,
