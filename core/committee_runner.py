@@ -24,14 +24,20 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
 
     优先级：
     1. caller 显式传 override（含空串） → 用 override
-    2. env INVEST_EVENT_RAG_ENABLED 非真 → 返回 ""（默认关，根因分析跑完再开）
+    2. env INVEST_EVENT_RAG_ENABLED 显式设 false → 返回 ""
     3. EventStore.recall(symbol) → format_event_brief
 
     任何异常都降级为 ""，不阻断 committee。
+
+    **默认行为 (2026-05-15 改 default-on)**：env 不设 / 设空 → 当作 true。
+    用户记不住 4 步开 RAG 流程，所以默认就让 Macro 看新闻；明确设
+    INVEST_EVENT_RAG_ENABLED=false 才关掉。安全保障：recall 任何失败
+    （DB 缺、key 缺、网络挂）都 graceful 退化空字符串。
     """
     if override is not None:
         return override
-    if os.getenv("INVEST_EVENT_RAG_ENABLED", "").lower() not in {"1", "true", "yes", "on"}:
+    flag = os.getenv("INVEST_EVENT_RAG_ENABLED", "true").lower()
+    if flag in {"0", "false", "no", "off"}:
         return ""
     try:
         from db.event_store import EventStore
