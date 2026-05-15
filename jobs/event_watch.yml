@@ -5,4 +5,5 @@ description: 每 30 分钟扫多源新闻 → flash 归一化 → 维度命中�
 schedule: "*/30 0-7 * * 1-5"
 timezone: Asia/Shanghai
 entry: jobs.event_watch:run
-enabled: false  # 默认关，用户配好 DEEPSEEK_API_KEY + EMAIL_SENDER 后改 true
+enabled: true  # 2026-05-15 default-on：用户记不住开关流程。无 DEEPSEEK_API_KEY 时
+               # normalizer 失败 → scheduler 记 job_runs failed，不影响其他 job
