@@ -19,8 +19,9 @@ from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from core.committee import load_wealth_context_view, run_committee, run_macro_view
-from core.committee_runner import resolve_event_brief_multi
+# 三路径统一架构（2026-05-16）：daily_report 不再直接 import core.committee 原语,
+# 全部走 core.committee_runner 的 service layer (run_committee_session)
+# 防漂移契约: tests/test_committee_contract.py:test_run_committee_session_*
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
 from db.market_store import MarketStore
@@ -93,18 +94,8 @@ def _format_staleness(label: str, age_days: Optional[int]) -> str:
     return format_staleness_warning(label, age_days, STALE_THRESHOLD_DAYS)
 
 
-def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
-    insights_dir = store.root / "insights"
-    if not insights_dir.exists():
-        return ""
-    sym = asset.get("symbol", "").lower().replace("=", "_")
-    matches = []
-    for f in sorted(insights_dir.glob("*.md")):
-        if sym in f.stem.lower() or any(
-            tok in f.stem.lower() for tok in ["gold", "ndq"] if tok in sym
-        ):
-            matches.append(f"## {f.stem}\n{f.read_text(encoding='utf-8')[:600]}")
-    return "\n\n".join(matches)
+# _gather_relevant_insights 已迁移到 core/committee_runner.py:load_prior_insights
+# (2026-05-16 三路径统一; 三 entry 不再各自实现一份)
 
 
 def _portfolio_summary(
@@ -333,68 +324,54 @@ def run() -> Dict[str, Any]:
     else:
         friction_report = "N/A (本期无需换汇)"
 
-    # 0.5) 跨资产 event RAG 召回（在 macro 之前跑，结果同时注入 macro + 各资产 committee）
-    # 修复 2026-05-16 漂移: cron 路径直接调 run_macro_view / run_committee 均未传 event_brief，
-    # 导致事件 RAG 只在 Skill/Web 路径生效，daily_report 完全绕过事件层。
-    print("📰 跨资产 event RAG 召回...")
-    all_symbols = [a["symbol"] for a in target_assets]
-    event_brief = resolve_event_brief_multi(all_symbols)
-    if event_brief:
-        print(f"  event_brief({len(event_brief)} chars): {event_brief[:120]}")
-    else:
-        print("  event_brief: 空（RAG 未开启或无近期事件）")
+    # 三路径统一架构：所有跨资产 prep (macro/wealth/event_brief multi 召回/regime/
+    # market_data/prior_insights) 全部委托给 run_committee_session 一处实现，跟
+    # Skill/Web 对齐。本函数只负责 cron-specific 后置: staleness 熔断、邮件渲染、
+    # Gemini 第二意见、Dreaming append_daily、邮件发送。
+    # 修复 2026-05-16 漂移: 此前 daily_report 自己手搓 multi-asset loop, 跟 Web 重复
+    # 实现; wealth_view / event_brief 漂移都在这条路径上出过事故
+    target_symbols_to_run = [
+        a["symbol"] for a in target_assets if a["symbol"] not in skipped_assets
+    ]
 
-    # 1) Macro Strategist 跑一次（跨资产共享）
-    print("🌍 Macro Strategist (1 次)...")
-    macro_data_report = get_macro_data()
-    macro_view = run_macro_view(macro_data_report, event_brief=event_brief)
-    print(f"  Macro: {macro_view[:120]}")
-
-    # 1.5) WealthContextOfficer 跑一次（跨资产共享）——读 user.md 的 wealth_context
-    # 修复 2026-05-15 漂移: 之前 daily_report 调 run_committee 没传 wealth_context_view,
-    # 用户填的家族 backup / 账户性质永远没进 Risk Officer prompt
-    print("💰 WealthContextOfficer (1 次)...")
-    wealth_view = load_wealth_context_view()
-    print(f"  Wealth: {wealth_view[:120]}")
-
-    # 2) 对每个资产跑 committee（数据完全缺失的资产直接跳过，不让 LLM 在 0 价上瞎编）
     asset_committees: Dict[str, Dict[str, Any]] = {}
-    for asset in target_assets:
-        sym = asset["symbol"]
-        if sym in skipped_assets:
-            print(f"⏭️  Skip committee for {sym}（价格数据缺失）")
-            continue
-        print(f"\n⚖️ Committee for {sym}...")
-        # 算 metrics + regime 一次，给 analyze_multi_timeframe（人类可读 brief）
-        # 和 format_regime_brief（Quant prompt 用的 REGIME 上下文）共用
-        from core.regime import format_regime_brief
-        from utils.market_metrics import compute_metrics
+    macro_view = ""
+    wealth_view = ""
+    event_brief = ""
 
-        df_asset = get_history_data(sym, "2y")
-        metrics = compute_metrics(df_asset)
-        market_data = analyze_multi_timeframe(
-            df_asset,
-            f"{asset.get('display_name', sym)} ({sym})",
+    if not target_symbols_to_run:
+        print("⛔ 所有 target_assets 都因 staleness 被 skip; session 不跑")
+    else:
+        from core.committee_runner import run_committee_session
+
+        print(f"⚖️  run_committee_session 跑 {len(target_symbols_to_run)} 资产...")
+        session = run_committee_session(
+            symbols=target_symbols_to_run,
+            max_debate_rounds=4,  # 三路径统一 4 轮 (cron 成本 ~¥2.5/月, 用户已确认)
+            portfolio_summary_override=portfolio_summary,  # 含 total_assets_cny + data_warnings
         )
-        regime_brief = format_regime_brief(metrics)
-        prior = _gather_relevant_insights(store, asset)
-        result = run_committee(
-            asset=asset,
-            market_data=market_data,
-            macro_view=macro_view,
-            portfolio_summary=portfolio_summary,
-            prior_insights=prior,
-            regime_brief=regime_brief,
-            wealth_context_view=wealth_view,
-            event_brief=event_brief,
-        )
-        asset_committees[sym] = result
-        v = result["verdict"]
-        print(
-            f"  ⚖️  {sym}: {v['verdict']} "
-            f"(conf {v['confidence']:.2f}, dom {v['dominant_view']}, "
-            f"alloc ¥{v['alloc_cny']})"
-        )
+        asset_committees = session["asset_committees"]
+        macro_view = session["macro_view"]
+        wealth_view = session["wealth_view"]
+        event_brief = session["event_brief"]
+
+        # 单资产 session 失败 → 合并到 skipped_assets, 防 cio_memos_combined /
+        # assemble_full_report 拿不到 report.cio_memo 抛 AttributeError
+        for sym, err in session.get("errors", {}).items():
+            print(f"  ⚠️  {sym} 在 session 内失败: {err}; 加入 skipped_assets")
+            skipped_assets.add(sym)
+            store.dream_event({"phase": "committee_failed", "symbol": sym,
+                               "error": err, "date": today})
+
+        for sym, result in asset_committees.items():
+            if sym in skipped_assets:
+                continue
+            v = result["verdict"]
+            print(
+                f"  ⚖️  {sym}: {v['verdict']} "
+                f"(conf {v['confidence']:.2f}, dom {v['dominant_view']}, "
+                f"alloc ¥{v['alloc_cny']})"
+            )
 
     # 3) Gemini 第二意见（综合所有资产 verdicts）
     cio_memos_combined = "\n\n".join([

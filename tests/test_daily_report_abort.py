@@ -107,12 +107,14 @@ def test_no_abort_when_one_asset_fresh(mock_pm, monkeypatch):
         lambda offset_pct=0.0: fake_snap,
     )
     # 后续流程会进入委员会调用——我们不关心结果，只关心是否触发熔断
-    # 在 run_committee 抛 sentinel 异常截断
+    # 三路径统一架构 (2026-05-16): daily_report 调 run_committee_session 不是 run_committee
+    # 直接 patch session 抛 sentinel 异常截断
     class _PastAbortSignal(Exception):
         pass
 
+    import core.committee_runner as cr_mod
     monkeypatch.setattr(
-        daily_report_mod, "run_committee",
+        cr_mod, "run_committee_session",
         lambda *a, **kw: (_ for _ in ()).throw(_PastAbortSignal()),
     )
     mock_pm.get_user_status = MagicMock(return_value=MagicMock(
