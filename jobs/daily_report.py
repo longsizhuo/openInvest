@@ -20,11 +20,13 @@ from typing import Any, Dict, Optional, Tuple
 from dotenv import load_dotenv
 
 from core.committee import load_wealth_context_view, run_committee, run_macro_view
+from core.committee_runner import resolve_event_brief_multi
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
 from db.market_store import MarketStore
 from jobs.daily_report_builder import (
     assemble_full_report,
+    build_gemini_prompt,
     classify_asset_freshness,
     format_staleness_warning,
     portfolio_summary_text,
@@ -331,10 +333,21 @@ def run() -> Dict[str, Any]:
     else:
         friction_report = "N/A (本期无需换汇)"
 
+    # 0.5) 跨资产 event RAG 召回（在 macro 之前跑，结果同时注入 macro + 各资产 committee）
+    # 修复 2026-05-16 漂移: cron 路径直接调 run_macro_view / run_committee 均未传 event_brief，
+    # 导致事件 RAG 只在 Skill/Web 路径生效，daily_report 完全绕过事件层。
+    print("📰 跨资产 event RAG 召回...")
+    all_symbols = [a["symbol"] for a in target_assets]
+    event_brief = resolve_event_brief_multi(all_symbols)
+    if event_brief:
+        print(f"  event_brief({len(event_brief)} chars): {event_brief[:120]}")
+    else:
+        print("  event_brief: 空（RAG 未开启或无近期事件）")
+
     # 1) Macro Strategist 跑一次（跨资产共享）
     print("🌍 Macro Strategist (1 次)...")
     macro_data_report = get_macro_data()
-    macro_view = run_macro_view(macro_data_report)
+    macro_view = run_macro_view(macro_data_report, event_brief=event_brief)
     print(f"  Macro: {macro_view[:120]}")
 
     # 1.5) WealthContextOfficer 跑一次（跨资产共享）——读 user.md 的 wealth_context
@@ -373,6 +386,7 @@ def run() -> Dict[str, Any]:
             prior_insights=prior,
             regime_brief=regime_brief,
             wealth_context_view=wealth_view,
+            event_brief=event_brief,
         )
         asset_committees[sym] = result
         v = result["verdict"]
@@ -390,27 +404,17 @@ def run() -> Dict[str, Any]:
         if a["symbol"] not in skipped_assets and a["symbol"] in asset_committees
     ])
     gold_snapshot_text = format_gold_report(snap) if snap else "黄金数据获取失败"
-    gemini_prompt = f"""
-今日 Investment Committee 给出以下决策（每个资产 4 角色 + CIO 综合）：
-
-# 用户上下文
-{portfolio_summary}
-
-# 宏观环境
-{macro_view}
-
-# 各资产 CIO 备忘
-{cio_memos_combined}
-
-# 黄金现货
-{gold_snapshot_text}
-
-# 摩擦成本
-{friction_report}
-
-请用搜索工具验证最新汇率/价格，对委员会的决策做独立 challenge。
-**必须中文回答，控制在 300 字以内**。给一个总结性的"我同意 / 我反对"判断。
-"""
+    # 修复 2026-05-16 漂移：Gemini prompt 委托给 builder 纯函数，
+    # wealth_view 和 event_brief 注入 Gemini，让独立 challenge 看到完整上下文
+    gemini_prompt = build_gemini_prompt(
+        portfolio_summary=portfolio_summary,
+        macro_view=macro_view,
+        cio_memos_combined=cio_memos_combined,
+        gold_snapshot_text=gold_snapshot_text,
+        friction_report=friction_report,
+        wealth_view=wealth_view,
+        event_brief=event_brief,
+    )
     final_decision_gemini = _run_gemini_cli_review(gemini_prompt)
 
     # 4) 拼报告（委托给 builder 的纯函数）
