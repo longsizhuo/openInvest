@@ -8,7 +8,7 @@ import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
 
-from core.committee import run_committee, run_macro_view
+from core.committee import load_wealth_context_view, run_committee, run_macro_view
 from core.portfolio_manager import PortfolioManager
 from core.regime import format_regime_brief
 from utils.exchange_fee import (
@@ -17,6 +17,33 @@ from utils.exchange_fee import (
 from utils.market_metrics import compute_metrics
 
 log = logging.getLogger(__name__)
+
+
+_EVENT_STORE_SINGLETON: Optional[Any] = None  # module-level cache
+
+
+def _get_event_store():
+    """Lazy module-level singleton.
+
+    PR #5 Copilot CR 修复: 旧版每次 _resolve_event_brief 调用都新建 EventStore
+    (开 sqlite + WAL pragmas + 试 load sqlite-vec + CREATE TABLE IF NOT EXISTS).
+    多资产 committee 时 N 资产跑 N 次, 浪费 fd + 启动开销.
+
+    fork-safety: sqlite WAL 单一 conn 跨 fork 不安全, 但 invest 不走多进程
+    fork, 所有 entry 都是单进程 / ThreadPoolExecutor; 安全.
+
+    任何初始化失败 → 返回 None, _resolve_event_brief 走异常降级返 "".
+    """
+    global _EVENT_STORE_SINGLETON
+    if _EVENT_STORE_SINGLETON is None:
+        try:
+            from db.event_store import EventStore
+            from services.embeddings import DEFAULT_DIM
+            _EVENT_STORE_SINGLETON = EventStore(embedding_dim=DEFAULT_DIM)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"_get_event_store init 失败: {type(e).__name__}: {e}")
+            return None
+    return _EVENT_STORE_SINGLETON
 
 
 def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
@@ -40,9 +67,10 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
     if flag in {"0", "false", "no", "off"}:
         return ""
     try:
-        from db.event_store import EventStore
-        from services.embeddings import DEFAULT_DIM, embed_text
-        store = EventStore(embedding_dim=DEFAULT_DIM)
+        from services.embeddings import embed_text
+        store = _get_event_store()
+        if store is None:
+            return ""
         q_embed = embed_text(symbol) if store.vec_loaded else None
         events = store.recall(
             symbol,
@@ -76,7 +104,11 @@ def format_event_brief(events: List[Dict[str, Any]]) -> str:
         stance = e.get("stance", "neutral")
         severity = e.get("severity", "low")
         affected = ", ".join(e.get("affected_symbols") or [])
-        sources = ", ".join({(s.get("src_name") or "").split(":")[0] for s in (e.get("sources") or [])})
+        # PR #5 Copilot CR: set comprehension 的迭代顺序非确定 → LLM 看到的
+        # source 顺序每次跑都不同，影响 token-level cache / replay 稳定性。
+        # 改用 dict.fromkeys 保留首次出现顺序 + sorted 兜底，全确定。
+        _source_names = [(s.get("src_name") or "").split(":")[0] for s in (e.get("sources") or [])]
+        sources = ", ".join(sorted(dict.fromkeys(_source_names)))
         src_part = f" (sources: {sources})" if sources else ""
         lines.append(
             f"[{ts}] [{stance}/{severity}] [{affected}]{src_part}\n"
@@ -183,6 +215,12 @@ def run_committee_for_symbol(
         + (f"，均价 {avg_cost} {cost_ccy}" if avg_cost else "（暂无持仓）")
     )
 
+    # 5.5. WealthContextOfficer view（修复 2026-05-15 漂移: 之前没读 user.md 的
+    # wealth_context, Risk Officer 永远按 portfolio cash 判风险）
+    wealth_view = load_wealth_context_view()
+    if wealth_view:
+        emit("wealth_context_loaded", preview=wealth_view[:240])
+
     # 6. 跑多轮辩论 + CIO
     return run_committee(
         target,
@@ -190,6 +228,7 @@ def run_committee_for_symbol(
         macro_view=macro_view,
         portfolio_summary=portfolio_summary,
         regime_brief=regime_brief,
+        wealth_context_view=wealth_view,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )

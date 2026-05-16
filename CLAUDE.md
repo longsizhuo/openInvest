@@ -46,6 +46,45 @@ openInvest 有三个调用层，每层服务不同对象：
 
 详见 `docs/wiki/04-execution-paths.md` + `skills/invest/references/two-paths.md`。
 
+## 分层契约（防漂移）
+
+跨 entry 漂移的根因：多个 entry 直接调 core 原语，各自负责"准备参数"，新加参数
+时漏 1 处。2026-05-15 wealth_context_view 漂移就是典型 — prompt 层接了 + e2e
+测试手动传了，但 daily_report / scripts.skill 没人准备 → 三个月没用到。
+
+### 强制 3 层
+
+| 层 | 文件 | 职责 | 禁止 |
+|---|---|---|---|
+| Entry | `jobs/`, `connectors/web_api.py`, `scripts/skill.py:cmd_*` | 触发 + 输出 + 调 shared input loaders | ❌ 直接读 user.md / portfolio.md 准备 LLM 输入（必经 loader）|
+| Service | `core/committee_runner.py` | 单资产端到端 prep + 调原语 | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
+| Primitive | `core/committee.py:run_committee` | 纯函数：prompt 编排 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
+
+### Shared Input Loaders（单一可信源）
+
+加新的 cross-entry 参数（如 `event_brief`, `wealth_context_view`）时：
+
+1. `core/committee.py:run_committee()` 加 explicit kwarg（默认 `""`）
+2. **同文件**加 `load_<name>()` helper（读 IO + graceful 退化空字符串）
+3. 所有 entry 在调 `run_committee` 之前调 `load_<name>()` 传进去
+4. `tests/test_committee_contract.py` 加测试，AST 扫每个 entry 是否真传了
+
+### 机器强制（不靠记忆）
+
+- **`uv run lint-imports`**（CI 跑）：禁止 `jobs/` / `connectors/` / `scripts/` 直接 `from core.committee import run_committee`，必须走 `committee_runner` 或显式接 loaders。例外在 `pyproject.toml [tool.importlinter]` allow list 维护
+- **`uv run pytest tests/test_committee_contract.py`**：AST 检查 entry 调用是否漏传必需参数
+- 想绕过 → CI 红 → 别合
+
+### 漂移历史
+
+| 时间 | 漂移 | 根因 | 防御 |
+|---|---|---|---|
+| 2026-05-15 | wealth_context_view 三个月没进 production | entry 各自 prep, 漏一处 | import-linter + contract test 上线 |
+
+新增漂移事故 → 在这表加一行 + 加新 contract test。
+
+---
+
 ## 关键文件速查
 
 ```

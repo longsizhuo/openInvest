@@ -53,14 +53,19 @@ def claim_to_event_id(claim: str) -> str:
 
     步骤：
     1. lower-case
-    2. 剥掉日期片段（2026-05-13 / Q1 2026 等容易因报道时差不一致）
+    2. 剥掉**精确日期戳**（2026-05-13 多家媒体报道同一事件 publish 日不同）
     3. 多空白压成单空格
     4. sha256[:16]
+
+    **不剥**：季度 (Q1/Q2/Q3/Q4) 和年份 (2025/2026)。
+    Why（2026-05-15 PR #5 Copilot CR 修复）：
+    旧版剥光 `\\bq[1-4]\\s*20\\d{2}\\b` 和 `\\b20\\d{2}\\b` →
+      "Nvidia Q1 2026 guidance miss" 和 "Nvidia Q2 2025 guidance miss" 算同一 event_id。
+    财报季度 / 年度 outlook 是事件本身的语义，必须保留。
     """
     s = (claim or "").lower()
+    # 剥精确 ISO 日期（同事件多家媒体 publish 日不同导致噪音）
     s = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "", s)
-    s = re.sub(r"\bq[1-4]\s*20\d{2}\b", "", s)
-    s = re.sub(r"\b20\d{2}\b", "", s)
     s = re.sub(r"\s+", " ", s).strip()
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
 
@@ -199,7 +204,10 @@ class EventStore:
 
         with self._lock:
             cur = self.conn.cursor()
-            cur.execute("SELECT id, severity FROM events WHERE event_id = ?", (eid,))
+            cur.execute(
+                "SELECT id, severity, affected_symbols_json, entities_json "
+                "FROM events WHERE event_id = ?", (eid,),
+            )
             row = cur.fetchone()
             was_new = row is None
 
@@ -229,8 +237,30 @@ class EventStore:
                         (new_id, _serialize_vec(embedding)),
                     )
             else:
-                # 已存在：只 bump severity 到 max（事件持续升级时）+ 覆盖 stance
+                # 已存在：merge 字段（不无脑覆盖）
+                # - severity bump 到 max（事件持续升级时）
+                # - affected_symbols / entities 做 union 合并（PR #5 Copilot CR 修复）
+                #   Why: 第一源列了 [NVDA, AAPL, MSFT]，第二源同事件只提 NVDA →
+                #   旧版覆盖后丢 AAPL/MSFT → 后续 recall(symbol="AAPL") 召不到
+                #   该事件。改为 union 保留所有提及过的关联实体。
+                # - stance 覆盖最新（语义上"事件态度"会随报道演化）
                 old_sev = row["severity"]
+                old_affected = json.loads(row["affected_symbols_json"] or "[]")
+                old_entities = json.loads(row["entities_json"] or "[]")
+
+                def _union_preserve_order(old_list, new_list):
+                    """union 但保留旧 list 的顺序（appended 新增项排后面）"""
+                    seen = set()
+                    out = []
+                    for item in old_list + new_list:
+                        if item not in seen:
+                            seen.add(item)
+                            out.append(item)
+                    return out
+
+                merged_affected = _union_preserve_order(old_affected, affected or [])
+                merged_entities = _union_preserve_order(old_entities, entities or [])
+
                 cur.execute("""
                     UPDATE events
                        SET severity = ?, stance = ?,
@@ -239,8 +269,8 @@ class EventStore:
                 """, (
                     max(old_sev, sev_int),
                     stance,
-                    json.dumps(affected, ensure_ascii=False),
-                    json.dumps(entities, ensure_ascii=False),
+                    json.dumps(merged_affected, ensure_ascii=False),
+                    json.dumps(merged_entities, ensure_ascii=False),
                     eid,
                 ))
             self.conn.commit()

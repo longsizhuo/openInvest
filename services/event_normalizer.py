@@ -24,11 +24,11 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 from core.llm_telemetry import TelemetryMeta, record_llm_call
-from services.embeddings import DEFAULT_DIM, embed_text
+from services.embeddings import embed_text
 from services.news_sources import RawNewsItem
 
 log = logging.getLogger(__name__)

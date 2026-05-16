@@ -21,7 +21,7 @@ import os
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from core.memory_store import MemoryStore
 

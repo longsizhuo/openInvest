@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -89,14 +89,28 @@ def fetch_all(
     all_items: List[RawNewsItem] = []
     with ThreadPoolExecutor(max_workers=min(8, len(tasks))) as pool:
         futures = {pool.submit(t["fn"], **t["kwargs"]): t["label"] for t in tasks}
-        for fut in as_completed(futures, timeout=timeout_sec):
-            label = futures[fut]
-            try:
-                items = fut.result()
-                all_items.extend(items)
-                log.info(f"[news_sources] {label} → {len(items)} items")
-            except Exception as e:
-                log.warning(f"[news_sources] {label} 失败: {type(e).__name__}: {e}")
+        # PR #5 Copilot CR 修复: as_completed(timeout=) 整体 wall-clock 用完后抛
+        # concurrent.futures.TimeoutError，原版没 catch → 一个 slow source 拖
+        # 整个 fetch_all 抛异常丢光其他源 result。改为 try/except + 把没完成的
+        # 那些 future cancel 掉，已收到的 result 保留返回。
+        try:
+            for fut in as_completed(futures, timeout=timeout_sec):
+                label = futures[fut]
+                try:
+                    items = fut.result()
+                    all_items.extend(items)
+                    log.info(f"[news_sources] {label} → {len(items)} items")
+                except Exception as e:
+                    log.warning(f"[news_sources] {label} 失败: {type(e).__name__}: {e}")
+        except FuturesTimeoutError:
+            unfinished = [futures[f] for f in futures if not f.done()]
+            log.warning(
+                f"[news_sources] fetch_all 超时 ({timeout_sec}s)，"
+                f"未完成 sources={unfinished}；保留已收到 {len(all_items)} 条继续",
+            )
+            for f in futures:
+                if not f.done():
+                    f.cancel()
 
     # 同 url 去重（保留先到的）
     seen_urls = set()
