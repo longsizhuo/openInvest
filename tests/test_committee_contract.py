@@ -197,78 +197,11 @@ def test_daily_report_passes_loaded_wealth_view_to_run_committee(monkeypatch, tm
         )
 
 
-def test_skill_cmd_run_committee_passes_loaded_wealth_view(monkeypatch, tmp_path):
-    """同上契约，但测 scripts.skill.cmd_run_committee Direct 路径（agent CLI）。
-
-    Direct 路径跟 daily_report 是两个独立 entry，都接 run_committee，都得通过
-    shared loader。两个 entry 都要测才能挡住漂移。
-    """
-    memory_dir = tmp_path / "memory"
-    memory_dir.mkdir()
-    _seed_minimal_memory(memory_dir)
-
-    from core import memory_store as ms
-    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-fake-key")  # cmd_run_committee guard
-
-    SENTINEL = "TEST_SENTINEL_SKILL_xyz456"
-    # cmd_run_committee 在函数内做 `from core.committee import load_wealth_context_view`，
-    # 每次执行重新查 core.committee.load_wealth_context_view —— patch 那里
-    monkeypatch.setattr(
-        "core.committee.load_wealth_context_view",
-        lambda: SENTINEL,
-    )
-
-    captured_kwargs_list: list[dict] = []
-
-    def fake_run_committee(**kwargs):
-        captured_kwargs_list.append(kwargs)
-        return {
-            "verdict": {
-                "verdict": "HOLD", "confidence": 0.5, "alloc_cny": 0,
-                "dominant_view": "macro",
-                "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5",
-            },
-            "report": None,
-        }
-
-    monkeypatch.setattr("core.committee.run_committee", fake_run_committee)
-    monkeypatch.setattr("core.committee.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
-
-    import pandas as pd
-    fake_df = pd.DataFrame(
-        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
-        index=pd.date_range("2024-05-10", periods=5),
-    )
-    # cmd_run_committee 通过 utils.exchange_fee 拉数据，patch 那里
-    monkeypatch.setattr("utils.exchange_fee.get_history_data", lambda *a, **kw: fake_df)
-    monkeypatch.setattr("utils.exchange_fee.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("utils.exchange_fee.analyze_multi_timeframe",
-                        lambda *a, **kw: "MOCK_MARKET")
-
-    # 跑 cmd_run_committee("TEST.AX")
-    import argparse
-    args = argparse.Namespace(symbol="TEST.AX", force=False, max_rounds=1)
-    from scripts import skill
-    try:
-        skill.cmd_run_committee(args)
-    except SystemExit:
-        pass  # cmd_run_committee 可能 sys.exit；只要 run_committee 被调了就够
-    except Exception as e:
-        if not captured_kwargs_list:
-            raise AssertionError(
-                f"cmd_run_committee 跑挂前 run_committee 没被调用。原始错误: {e}"
-            ) from e
-
-    assert captured_kwargs_list, (
-        "cmd_run_committee 没调到 run_committee — Direct 路径流程没走通"
-    )
-    for kwargs in captured_kwargs_list:
-        actual = kwargs.get("wealth_context_view")
-        assert actual == SENTINEL, (
-            f"❌ scripts.skill.cmd_run_committee 没把 loader 结果传给 run_committee!\n"
-            f"   期望 {SENTINEL!r}, 实际 {actual!r}"
-        )
+# 已删: test_skill_cmd_run_committee_passes_loaded_wealth_view
+# 历史: 守 skill.cmd_run_committee 直接调 run_committee 传 wealth_view 的契约
+# 2026-05-16 三路径统一架构后, skill 改走 run_committee_session 不再直调
+# run_committee, 该契约由 test_run_committee_session_passes_all_shared_inputs
+# 统一守护. 原代码可经 `git log -p tests/test_committee_contract.py` 查阅.
 
 
 # ============================================================================

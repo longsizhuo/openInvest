@@ -8,7 +8,13 @@ import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
 
-from core.committee import load_wealth_context_view, run_committee, run_macro_view
+from core.committee import (
+    load_wealth_context_view,
+    parse_cio_memo,  # re-export: 给 entry (scripts.skill cmd_save_committee) 用，
+                     # 避免 entry 直接 import core.committee 违反 lint-imports 契约
+    run_committee,
+    run_macro_view,
+)
 from core.portfolio_manager import PortfolioManager
 from core.regime import format_regime_brief
 from utils.exchange_fee import (

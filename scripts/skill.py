@@ -480,18 +480,8 @@ def cmd_live_prices(_: argparse.Namespace) -> None:
 
 # ---------- prepare_debate ----------
 
-def _gather_relevant_insights(store: MemoryStore, asset: Dict[str, Any]) -> str:
-    insights_dir = store.root / "insights"
-    if not insights_dir.exists():
-        return ""
-    sym = asset.get("symbol", "").lower().replace("=", "_")
-    matches = []
-    for f in sorted(insights_dir.glob("*.md")):
-        if sym in f.stem.lower() or any(
-            tok in f.stem.lower() for tok in ["gold", "ndq"] if tok in sym
-        ):
-            matches.append(f"## {f.stem}\n{f.read_text(encoding='utf-8')[:600]}")
-    return "\n\n".join(matches)
+# _gather_relevant_insights 已移到 core/committee_runner.py:load_prior_insights
+# 作为 shared loader (2026-05-16 三路径统一; 三 entry 不再各自实现一份)
 
 
 def cmd_prepare_committee(args: argparse.Namespace) -> None:
@@ -574,7 +564,9 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         f"  - **黄金 (浙商)**: {gold_grams:.4f}g, 均价 ¥{gold_cost:.2f}/g, "
         f"现价 ¥{gold_now:.2f}/g, 浮盈 {gold_pnl_pct:+.2f}%"
     )
-    insights = _gather_relevant_insights(pm.store, target)
+    # 用 shared loader (2026-05-16 三路径统一: 三 entry 不再各自重复实现)
+    from core.committee_runner import load_prior_insights
+    insights = load_prior_insights(target, pm)
 
     out = {
         "asset": target,
@@ -642,13 +634,8 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
         })
         sys.exit(1)
 
-    from core.committee import load_wealth_context_view, run_committee, run_macro_view
+    from core.committee_runner import run_committee_session
     from core.portfolio_manager import PortfolioManager
-    from core.regime import format_regime_brief
-    from utils.exchange_fee import (
-        analyze_multi_timeframe, get_history_data, get_macro_data,
-    )
-    from utils.market_metrics import compute_metrics
 
     pm = PortfolioManager()
     target = next(
@@ -663,7 +650,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
         })
         sys.exit(1)
 
-    # Stage 0：同日检查
+    # Stage 0：同日检查（Skill-only 行为，必须在调 session 之前）
     today = datetime.now().strftime("%Y-%m-%d")
     # 注意：backend core/committee.py:_persist_committee_to_memory 用 re.sub
     # 把 symbol 里的非 alnum 字符替换成 _（如 "GC=F" → "GC_F.md"）。这里必须
@@ -680,55 +667,27 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
         })
         return
 
-    # 1) Macro view（跨资产共享，但 Direct 单 symbol 调用就跑一次）
-    macro_view = run_macro_view(get_macro_data())
-
-    # 2) market data + regime
-    df = get_history_data(args.symbol, "2y")
-    metrics = compute_metrics(df)
-    market_data = analyze_multi_timeframe(
-        df, f"{target.get('display_name', args.symbol)} ({args.symbol})",
-    )
-    regime_brief = format_regime_brief(metrics, symbol=args.symbol)
-
-    # 3) portfolio_summary（复用 prepare_committee 的逻辑做精简版）
-    cash_cny = pm.cash_amount("CNY")
-    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
-    dry_powder = max(0.0, cash_cny - buffer_cny)
-    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
-    holdings_lines = []
-    for h in pm.holdings:
-        sym = h.get("symbol", "?")
-        units = h.get("units", 0)
-        avg = h.get("avg_cost", 0)
-        ccy = h.get("cost_currency", "CNY")
-        holdings_lines.append(f"  - {sym}: {units} @ avg {avg} {ccy}")
-    holdings_block = "\n".join(holdings_lines) if holdings_lines else "  - (无)"
-    portfolio_summary = (
-        f"用户风险偏好: {risk_level}\n"
-        f"CNY 现金: ¥{cash_cny:,.0f} (应急金 ¥{buffer_cny:,} 不可投)\n"
-        f"可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
-        f"持仓:\n{holdings_block}"
-    )
-    prior_insights = _gather_relevant_insights(pm.store, target)
-
-    # 4) 跑！persist_to_memory=True 让 backend 自动落盘 transcript
-    # wealth_context_view: 防漂移共享 input loader（防 2026-05-15 wealth_context 漂移再发）
-    wealth_view = load_wealth_context_view()
-    result = run_committee(
-        asset=target,
-        market_data=market_data,
-        macro_view=macro_view,
-        portfolio_summary=portfolio_summary,
-        prior_insights=prior_insights,
-        regime_brief=regime_brief,
-        wealth_context_view=wealth_view,
-        persist_to_memory=True,
+    # 三路径统一架构：所有 prep（macro/wealth/event_brief/regime/portfolio_summary/
+    # prior_insights）全部委托给 run_committee_session 一处实现，跟 Web/Cron 对齐。
+    # 修复 2026-05-16 漂移: 历史上 Skill 直接调 run_committee，自己手搓 prep,
+    # 没传 event_brief 给 macro / 没用 multi 召回 / portfolio_summary 是简化版
+    session = run_committee_session(
+        symbols=[args.symbol],
         max_debate_rounds=args.max_rounds,
+        progress_callback=None,  # CLI 不需要 SSE 进度
     )
 
-    verdict = result.get("verdict", {})
-    report = result.get("report")
+    asset_result = session["asset_committees"].get(args.symbol, {})
+    if "error" in asset_result:
+        _print_json({
+            "status": "error",
+            "error": asset_result["error"],
+            "hint": "session 内单资产失败，检查行情数据 / DEEPSEEK_API_KEY",
+        })
+        sys.exit(1)
+
+    verdict = asset_result.get("verdict", {})
+    report = asset_result.get("report")
     cio_memo = report.cio_memo if report is not None else ""
 
     # 检测用户是否配了 NapCat（白名单 QQ 不为 0）—— 没配的话别推 NapCat 命令，
@@ -800,8 +759,9 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
 
     cio_text = sections.get("CIO", raw if not sections else "")
 
-    # 解析 CIO 输出
-    from core.committee import parse_cio_memo
+    # 解析 CIO 输出（通过 committee_runner re-export, 不直接 import core.committee
+    # 以遵守 lint-imports 契约：entry 必经 service layer）
+    from core.committee_runner import parse_cio_memo
     verdict = parse_cio_memo(cio_text)
 
     store = MemoryStore()
