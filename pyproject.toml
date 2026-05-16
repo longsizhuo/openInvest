@@ -63,9 +63,8 @@ ignore_imports = [
     "jobs.daily_report -> core.committee",
     # backtest_committee 是研究用，跟 production 委员会不共享 service layer
     "scripts.backtest_committee -> core.committee",
-    # web_api 调 run_committee 是为了暴露 explicit 端点，已经走 _run_committee_task 内部经过 service layer
-    "connectors.web_api -> core.committee",
     # scripts.skill (cmd_run_committee Direct 路径) 已显式调 load_wealth_context_view + run_committee（不绕过 shared loaders）
+    # TODO commit 3: skill 改用 run_committee_session 后这条也删
     "scripts.skill -> core.committee",
 ]
 # 已删的孤儿 dep：
