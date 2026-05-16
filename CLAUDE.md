@@ -80,6 +80,7 @@ openInvest 有三个调用层，每层服务不同对象：
 | 时间 | 漂移 | 根因 | 防御 |
 |---|---|---|---|
 | 2026-05-15 | wealth_context_view 三个月没进 production | entry 各自 prep, 漏一处 | import-linter + contract test 上线 |
+| 2026-05-16 | daily_report cron 路径 event_brief 全漏（4 处）：run_macro_view / run_committee for-loop / Gemini prompt 均未注入 event_brief；Gemini prompt 也未注入 wealth_view | daily_report 直调原语，Gemini prompt 是硬编码 f-string，resolve_event_brief_multi 虽已存在但 cron 路径没调用 | resolve_event_brief_multi 调用注入 macro + committee；Gemini prompt 抽 build_gemini_prompt() 纯函数接 wealth_view/event_brief；4 处 SENTINEL 契约测试上线 |
 
 新增漂移事故 → 在这表加一行 + 加新 contract test。
 

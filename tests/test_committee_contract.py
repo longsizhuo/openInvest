@@ -326,3 +326,214 @@ def test_assemble_full_report_omits_wealth_section_when_view_empty():
     assert "WealthContextOfficer" not in md, (
         "空 wealth_context_view 不应渲染 section 标题（避免空 section 干扰用户）"
     )
+
+
+# ============================================================================
+# 契约 4: Gemini prompt 必须包含 wealth_view 和 event_brief
+# ============================================================================
+# 2026-05-16 漂移事故：Gemini prompt 是 daily_report.py 里的硬编码 f-string，
+# wealth_view 和 event_brief 均未注入，导致 Gemini 独立 challenge 时看不到
+# 真实流动性上下文和近期事件层，等价于这两层信息对 Gemini 不可见。
+#
+# 修复方案：把 prompt 组装抽到 build_gemini_prompt() 纯函数（daily_report_builder.py），
+# 接受 wealth_view 和 event_brief 参数，在 prompt 里加对应 section（非空时插入）。
+#
+# 4 个 SENTINEL 测试守卫：
+# a. test_gemini_prompt_includes_wealth_view — wealth_view SENTINEL 出现在 prompt
+# b. test_gemini_prompt_includes_event_brief — event_brief SENTINEL 出现在 prompt
+# c. test_gemini_prompt_omits_empty_sections — 两者为空时不出现对应空 section 标题
+# d. test_daily_report_passes_event_brief_to_run_committee_and_macro
+#    — monkeypatch resolve_event_brief_multi 返 SENTINEL，抓 run_macro_view + run_committee kwargs
+
+def test_gemini_prompt_includes_wealth_view():
+    """build_gemini_prompt 必须把 wealth_view 渲染进 prompt 正文
+
+    任何形式的硬编码 / 漏传都会让 SENTINEL 不出现在 prompt 里，测试立即红。
+    """
+    from jobs.daily_report_builder import build_gemini_prompt
+
+    SENTINEL = "WEALTH_VIEW_SENTINEL_gemini_abc"
+
+    prompt = build_gemini_prompt(
+        portfolio_summary="mock portfolio",
+        macro_view="mock macro",
+        cio_memos_combined="mock cio",
+        gold_snapshot_text="mock gold",
+        friction_report="mock friction",
+        wealth_view=SENTINEL,
+        event_brief="",
+    )
+
+    assert SENTINEL in prompt, (
+        "❌ build_gemini_prompt 没把 wealth_view 渲染进 prompt！\n"
+        "   Gemini 独立 challenge 时看不到用户真实流动性上下文。\n"
+        "   检查 jobs/daily_report_builder.py build_gemini_prompt() 的 wealth_section 插入逻辑。"
+    )
+
+
+def test_gemini_prompt_includes_event_brief():
+    """build_gemini_prompt 必须把 event_brief 渲染进 prompt 正文
+
+    任何形式的硬编码 / 漏传都会让 SENTINEL 不出现在 prompt 里，测试立即红。
+    """
+    from jobs.daily_report_builder import build_gemini_prompt
+
+    SENTINEL = "EVENT_BRIEF_SENTINEL_gemini_xyz"
+
+    prompt = build_gemini_prompt(
+        portfolio_summary="mock portfolio",
+        macro_view="mock macro",
+        cio_memos_combined="mock cio",
+        gold_snapshot_text="mock gold",
+        friction_report="mock friction",
+        wealth_view="",
+        event_brief=SENTINEL,
+    )
+
+    assert SENTINEL in prompt, (
+        "❌ build_gemini_prompt 没把 event_brief 渲染进 prompt！\n"
+        "   Gemini 独立 challenge 时看不到近期 RAG 召回的事件层上下文。\n"
+        "   检查 jobs/daily_report_builder.py build_gemini_prompt() 的 event_section 插入逻辑。"
+    )
+
+
+def test_gemini_prompt_omits_empty_sections():
+    """wealth_view="" 和 event_brief="" 时不出现对应空 section 标题
+
+    避免 Gemini 看到"# 用户真实流动性 (WealthContextOfficer)\n\n"这种无内容的空 section，
+    会让 Gemini 产生"为什么这里是空的"的困惑。
+    """
+    from jobs.daily_report_builder import build_gemini_prompt
+
+    prompt = build_gemini_prompt(
+        portfolio_summary="mock portfolio",
+        macro_view="mock macro",
+        cio_memos_combined="mock cio",
+        gold_snapshot_text="mock gold",
+        friction_report="mock friction",
+        wealth_view="",
+        event_brief="",
+    )
+
+    # 空时不应出现 section 标题
+    assert "WealthContextOfficer" not in prompt, (
+        "空 wealth_view 不应在 Gemini prompt 里出现 WealthContextOfficer section 标题"
+    )
+    assert "事件层" not in prompt, (
+        "空 event_brief 不应在 Gemini prompt 里出现事件层 section 标题"
+    )
+
+
+def test_daily_report_passes_event_brief_to_run_committee_and_macro(monkeypatch, tmp_path):
+    """**核心防漂移契约** — daily_report cron 路径必须真把跨资产 event_brief
+    同时注入 run_macro_view(event_brief=...) 和每个 run_committee(..., event_brief=...)。
+
+    用 SENTINEL 字符串通过 monkeypatch resolve_event_brief_multi 锚定。
+    任何形式的漏传 / 硬编码 / 字段名错都会让 captured != SENTINEL，测试红。
+    """
+    # 1. seed memory
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    # 2. monkeypatch resolve_event_brief_multi 返回 SENTINEL（验证 entry 真的把结果用了）
+    SENTINEL = "EVENT_BRIEF_SENTINEL_daily_report_cron_789"
+    monkeypatch.setattr(
+        "jobs.daily_report.resolve_event_brief_multi",
+        lambda symbols: SENTINEL,
+    )
+
+    # 3. 抓 run_macro_view 收到的 event_brief kwarg
+    captured_macro_kwargs: list[dict] = []
+
+    def fake_run_macro_view(*args, **kwargs):
+        captured_macro_kwargs.append(kwargs)
+        return "MOCK_MACRO"
+
+    monkeypatch.setattr("jobs.daily_report.run_macro_view", fake_run_macro_view)
+
+    # 4. 抓 run_committee 收到的 event_brief kwarg
+    captured_committee_kwargs: list[dict] = []
+
+    def fake_run_committee(**kwargs):
+        captured_committee_kwargs.append(kwargs)
+        return {
+            "verdict": {
+                "verdict": "HOLD",
+                "confidence": 0.5,
+                "alloc_cny": 0,
+                "dominant_view": "macro",
+                "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5",
+            },
+            "report": None,
+        }
+
+    monkeypatch.setattr("jobs.daily_report.run_committee", fake_run_committee)
+
+    # 5. mock 重 IO（yfinance / 邮件 / 价格快照），让 daily_report 能跑到 committee loop
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("jobs.daily_report.get_history_data", lambda *a, **kw: fake_df)
+    monkeypatch.setattr("jobs.daily_report.get_macro_data", lambda: "MOCK_DATA")
+    monkeypatch.setattr("jobs.daily_report.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+    monkeypatch.setattr("jobs.daily_report.send_gmail_notification",
+                        lambda *a, **kw: None)
+    # wealth_view 也 mock 掉，避免 load_wealth_context_view 读真实 memory 路径
+    monkeypatch.setattr(
+        "jobs.daily_report.load_wealth_context_view",
+        lambda: "MOCK_WEALTH_VIEW",
+    )
+
+    # 6. 跑 daily_report.run()
+    from jobs import daily_report
+    try:
+        daily_report.run()
+    except Exception as e:
+        # 邮件 send / 落盘等可能因测试环境抛错，但只要两边 mock 被调过了就有数据
+        if not captured_macro_kwargs and not captured_committee_kwargs:
+            raise AssertionError(
+                f"daily_report.run() 跑挂前 run_macro_view 和 run_committee 都没被调用。"
+                f"无法验证 event_brief 是否传对。原始错误: {e}"
+            ) from e
+
+    # 7. 契约 A：run_macro_view 必须收到 event_brief=SENTINEL
+    assert captured_macro_kwargs, (
+        "run_macro_view 没被调用 — daily_report 流程没走到 macro 阶段。"
+        "可能 target_assets 为空 / 数据 prep 阶段提前退出。"
+    )
+    macro_event_brief = captured_macro_kwargs[0].get("event_brief")
+    assert macro_event_brief == SENTINEL, (
+        f"❌ run_macro_view 没收到 resolve_event_brief_multi 的结果！\n"
+        f"   期望: {SENTINEL!r}（resolve_event_brief_multi 返回的 sentinel）\n"
+        f"   实际 event_brief = {macro_event_brief!r}\n"
+        f"\n"
+        f"   可能的漂移：\n"
+        f"   - daily_report 没把 event_brief 变量传给 run_macro_view\n"
+        f"   - 传了但用了不同的变量名（如传了另一个空字符串）\n"
+        f"   - resolve_event_brief_multi 调用在 run_macro_view 调用之后"
+    )
+
+    # 8. 契约 B：每次 run_committee 调用都必须收到 event_brief=SENTINEL
+    assert captured_committee_kwargs, (
+        "run_committee 没被调用 — daily_report 流程没走到 committee loop。"
+        "可能 target_assets 为空 / 数据 prep 阶段失败。"
+    )
+    for i, kwargs in enumerate(captured_committee_kwargs):
+        actual = kwargs.get("event_brief")
+        assert actual == SENTINEL, (
+            f"❌ 第 {i+1} 次 run_committee 调用没收到 resolve_event_brief_multi 的结果！\n"
+            f"   期望: {SENTINEL!r}（resolve_event_brief_multi 返回的 sentinel）\n"
+            f"   实际 event_brief = {actual!r}\n"
+            f"\n"
+            f"   可能的漂移：\n"
+            f"   - daily_report committee for-loop 没传 event_brief= kwarg\n"
+            f"   - 传了但用了硬编码空字符串\n"
+            f"   - resolve_event_brief_multi 的结果没存到 event_brief 变量"
+        )

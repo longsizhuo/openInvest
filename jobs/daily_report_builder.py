@@ -8,6 +8,7 @@ ADR-005：从 daily_report.py 拆分出"给定数据 → 组装 markdown"的纯�
 - format_staleness_warning()：给定 label + age_days，生成告警字符串
 - assemble_full_report()：给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 - classify_asset_freshness()：stateless 辅助函数（age_days → fresh/stale/very_stale）
+- build_gemini_prompt()：给定所有投资结果 + wealth_view + event_brief，组装 Gemini 第二意见 prompt
 
 不在本文件里的：
 - 价格拉取（get_history_data / get_gold_snapshot）
@@ -149,7 +150,76 @@ def portfolio_summary_text(
     return "\n".join(lines) + "\n"
 
 
-# ============ 4. 核心：完整报告拼接 ============
+# ============ 4. Gemini 第二意见 prompt 组装 ============
+
+def build_gemini_prompt(
+    portfolio_summary: str,
+    macro_view: str,
+    cio_memos_combined: str,
+    gold_snapshot_text: str,
+    friction_report: str,
+    wealth_view: str = "",
+    event_brief: str = "",
+) -> str:
+    """组装 Gemini 第二意见 prompt（纯函数，零 IO）
+
+    修复 2026-05-16 漂移：原来 Gemini prompt 是 daily_report.py 里的硬编码 f-string，
+    wealth_view 和 event_brief 均未注入，导致 Gemini 做独立 challenge 时
+    看不到真实流动性上下文和近期事件，等价于没有这两层信息。
+
+    # 事件层 和 # 用户真实流动性 两个 section 仅在非空时插入，避免出现空标题。
+    tests/test_committee_contract.py 有 SENTINEL 断言保护此处。
+
+    Args:
+        portfolio_summary: 用户上下文文本（现金/持仓/浮盈等）
+        macro_view: Macro Strategist 宏观分析文本
+        cio_memos_combined: 所有资产 CIO 备忘拼接文本
+        gold_snapshot_text: 黄金现货快照文本
+        friction_report: 换汇摩擦成本报告
+        wealth_view: WealthContextOfficer 真实流动性视图（可空）
+        event_brief: 跨资产 event RAG 召回的近期事件上下文（可空）
+
+    Returns:
+        发给 Gemini CLI 的完整 prompt 字符串
+    """
+    # 仅非空时插入各可选 section，避免出现空标题干扰 Gemini
+    wealth_section = (
+        f"\n# 用户真实流动性 (WealthContextOfficer)\n{wealth_view}\n"
+        if wealth_view.strip()
+        else ""
+    )
+    event_section = (
+        f"\n# 事件层（近期 RAG 召回）\n{event_brief}\n"
+        if event_brief.strip()
+        else ""
+    )
+
+    return (
+        "今日 Investment Committee 给出以下决策（每个资产 4 角色 + CIO 综合）：\n"
+        "\n"
+        "# 用户上下文\n"
+        f"{portfolio_summary}\n"
+        f"{wealth_section}"
+        "\n"
+        "# 宏观环境\n"
+        f"{macro_view}\n"
+        f"{event_section}"
+        "\n"
+        "# 各资产 CIO 备忘\n"
+        f"{cio_memos_combined}\n"
+        "\n"
+        "# 黄金现货\n"
+        f"{gold_snapshot_text}\n"
+        "\n"
+        "# 摩擦成本\n"
+        f"{friction_report}\n"
+        "\n"
+        "请用搜索工具验证最新汇率/价格，对委员会的决策做独立 challenge。\n"
+        "**必须中文回答，控制在 300 字以内**。给一个总结性的「我同意 / 我反对」判断。\n"
+    )
+
+
+# ============ 5. 核心：完整报告拼接 ============
 
 def assemble_full_report(
     today: str,

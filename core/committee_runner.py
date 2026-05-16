@@ -120,6 +120,52 @@ def format_event_brief(events: List[Dict[str, Any]]) -> str:
     return "\n".join(lines).strip()
 
 
+def resolve_event_brief_multi(symbols: List[str]) -> str:
+    """跨资产 event RAG 召回 + 去重，作为 daily_report cron 路径的共享 loader。
+
+    等价地位同 load_wealth_context_view：跑一次，结果同时注入
+    run_macro_view(event_brief=...) 和每个 run_committee(..., event_brief=...)。
+
+    去重策略：按 "ts|one_line_claim" 拆行后 dict 去重（保留首次出现顺序），
+    避免同一事件被多个 symbol 各自召回后重复出现在 Macro prompt 里。
+
+    任何单 symbol 召回失败都 graceful 跳过（_resolve_event_brief 内部也已 graceful）。
+    全部失败时返回 ""，不阻断 daily_report 主流程。
+
+    Args:
+        symbols: 所有 target_assets 的 symbol 列表（如 ["NDQ.AX", "GC=F"]）
+
+    Returns:
+        合并去重后的 event_brief 文本，空字符串表示无可用事件。
+    """
+    if not symbols:
+        return ""
+
+    # 按 symbol 逐个召回，汇总所有事件段落
+    # _resolve_event_brief(symbol, override=None) → 走内部 feature flag 召回逻辑
+    all_briefs: List[str] = []
+    for sym in symbols:
+        try:
+            brief = _resolve_event_brief(sym, override=None)
+            if brief:
+                all_briefs.append(brief)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"resolve_event_brief_multi: {sym} 召回失败（已跳过）: {type(e).__name__}: {e}")
+
+    if not all_briefs:
+        return ""
+
+    # 按"段落"去重：每个事件以两行为一块（ts/stance 行 + claim 行）
+    # 用首行（含 ts + claim）作为 key，保留首次出现顺序
+    # 实现：把所有 brief 拼起来再按段分割，用 dict.fromkeys 去重
+    combined = "\n\n".join(all_briefs)
+    # 段落以空行分隔；split("\n\n") 可能产生空串，filter 掉
+    paragraphs = [p.strip() for p in combined.split("\n\n") if p.strip()]
+    # 去重 key = 段落全文（完全相同才去重，避免同 ts 不同 claim 被错误合并）
+    deduped = list(dict.fromkeys(paragraphs))
+    return "\n\n".join(deduped)
+
+
 def run_committee_for_symbol(
     symbol: str,
     *,
