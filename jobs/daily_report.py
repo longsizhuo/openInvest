@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from core.committee import run_committee, run_macro_view
+from core.committee import load_wealth_context_view, run_committee, run_macro_view
 from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
 from db.market_store import MarketStore
@@ -337,6 +337,13 @@ def run() -> Dict[str, Any]:
     macro_view = run_macro_view(macro_data_report)
     print(f"  Macro: {macro_view[:120]}")
 
+    # 1.5) WealthContextOfficer 跑一次（跨资产共享）——读 user.md 的 wealth_context
+    # 修复 2026-05-15 漂移: 之前 daily_report 调 run_committee 没传 wealth_context_view,
+    # 用户填的家族 backup / 账户性质永远没进 Risk Officer prompt
+    print("💰 WealthContextOfficer (1 次)...")
+    wealth_view = load_wealth_context_view()
+    print(f"  Wealth: {wealth_view[:120]}")
+
     # 2) 对每个资产跑 committee（数据完全缺失的资产直接跳过，不让 LLM 在 0 价上瞎编）
     asset_committees: Dict[str, Dict[str, Any]] = {}
     for asset in target_assets:
@@ -365,6 +372,7 @@ def run() -> Dict[str, Any]:
             portfolio_summary=portfolio_summary,
             prior_insights=prior,
             regime_brief=regime_brief,
+            wealth_context_view=wealth_view,
         )
         asset_committees[sym] = result
         v = result["verdict"]

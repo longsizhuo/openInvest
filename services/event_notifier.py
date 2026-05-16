@@ -8,10 +8,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 from services.notifier import (
-    EmailDeliveryError,
     render_markdown_email,
     send_email_html,
 )

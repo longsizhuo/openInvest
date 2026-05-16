@@ -305,11 +305,53 @@ def run_macro_view(macro_data_brief: str, *, event_brief: str = "") -> str:
     return _ask(agent, f"# 当前宏观数据参考:\n{macro_data_brief}{event_section}\n\n请按格式输出 Macro 评估。")
 
 
+# ============================================================================
+# Shared Input Loaders — 所有 production entry 必经层
+# ============================================================================
+# 防漂移核心：所有"跨 entry 共享的输入"在这里统一定义。
+# daily_report / committee_runner / backtest_committee / web_api 全用这些 loader,
+# 永远不要在 entry 层重复读 user.md / portfolio.md / event_store。
+#
+# 加新的 cross-entry 参数（类似 wealth_context_view / event_brief）时：
+#   1. 在 run_committee() 加 explicit 参数（默认 ""）
+#   2. 在这里加一个 load_<name>() helper, graceful 退化空字符串
+#   3. **所有 entry 调用 run_committee 之前先调 load_<name>()**
+#   4. 加 e2e contract test 验证每个 entry 都传了
+#
+# 2026-05-15 漂移事故：wealth_context_view 只接了 prompt + 测试，没接调用链
+# → 三个月 user.md 的 wealth_context 没进入任何 production 决策。
+# Import rule（pyproject.toml）已禁止 entry 直接 import run_committee 跳过这层。
+# ============================================================================
+
+
+def load_wealth_context_view() -> str:
+    """读 user.md.wealth_context + portfolio cash → WealthContextOfficer view。
+
+    Graceful: 任何异常都返回空 str, 委员会照常跑（Risk Officer 退化为只看
+    portfolio cash 的老逻辑）。
+    """
+    try:
+        from core.memory_store import MemoryStore
+        from core.portfolio_manager import PortfolioManager
+        store = MemoryStore()
+        user_doc = store.read("user")
+        wealth_context = user_doc.metadata.get("wealth_context") if user_doc else None
+        pm = PortfolioManager()
+        portfolio_cash_cny = pm.cash_amount("CNY")
+        return run_wealth_context_view(wealth_context, portfolio_cash_cny)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_wealth_context_view graceful 退化 '': {type(e).__name__}: {e}")
+        return ""
+
+
 def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
                             portfolio_cash_cny: float) -> str:
     """跨资产共享的 WealthContextOfficer 评估，跑一次后 Risk Officer + CIO 引用。
 
     wealth_context 为 None / 空 → 直接返回 portfolio_only stub（不调 LLM，省成本）。
+
+    **production 调用方走 load_wealth_context_view()** —— 它会自动读 user.md
+    + portfolio cash 后调本函数. 本函数留 explicit 接口给测试 / backtest 注入用.
     """
     from agents.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
 

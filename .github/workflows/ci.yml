@@ -37,6 +37,12 @@ jobs:
           DEEPSEEK_API_KEY: test-fake-key
           INVEST_LLM_BASE_DELAY: "0.01"  # 加速测试
 
+      - name: Import rules (防 entry 直调 core primitives 漂移)
+        # 强制分层契约：jobs / connectors / scripts 不能直接 import core.committee
+        # 跳过 shared input loaders（如 load_wealth_context_view）。配置见 pyproject.toml
+        # [tool.importlinter]。允许 list 也在那里维护。
+        run: uv run lint-imports
+
       - name: Smoke import check
         # 确保关键模块没有 import 错误
         # v2 重构（2026-05）：_render_portfolio_body → _render_portfolio_body_v2 (cash dict + holdings list)

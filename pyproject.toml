@@ -33,6 +33,40 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
     "httpx>=0.27",
+    "import-linter>=2.0",   # 防 entry 层直调 core 原语漂移（见 ADR / CLAUDE.md "分层契约"）
+]
+
+# ============================================================================
+# Import Rules（防漂移）
+# ============================================================================
+# 强制分层：entry (jobs / connectors / scripts) 必须走 service layer
+# (core.committee_runner) 调委员会，不许直接 import core.committee 的 run_committee
+# 跳过 wealth_context_view / event_brief 等共享 input loader。
+#
+# 跑：  lint-imports
+# CI 已配（.github/workflows/ci.yml smoke section）
+# ============================================================================
+[tool.importlinter]
+root_packages = ["jobs", "connectors", "scripts", "core", "agents", "services", "db", "utils"]
+
+[[tool.importlinter.contracts]]
+name = "Entry 不直接调 run_committee（必经 service layer / shared loaders）"
+type = "forbidden"
+source_modules = ["jobs", "connectors", "scripts"]
+forbidden_modules = ["core.committee"]
+# 只查直接 import；committee_runner 作为 service layer 合法转手 import core.committee
+allow_indirect_imports = "true"
+# allow list: 这些是合法直调（用 shared loader, 或者 daily_report 已经显式 prep）
+ignore_imports = [
+    # daily_report 是历史 entry, 已在 PR fix/wealth-context-drift 接入 load_wealth_context_view
+    # 长期目标是改走 committee_runner.run_committee_for_symbol; 留 ignore 防 immediate breakage
+    "jobs.daily_report -> core.committee",
+    # backtest_committee 是研究用，跟 production 委员会不共享 service layer
+    "scripts.backtest_committee -> core.committee",
+    # web_api 调 run_committee 是为了暴露 explicit 端点，已经走 _run_committee_task 内部经过 service layer
+    "connectors.web_api -> core.committee",
+    # scripts.skill (cmd_run_committee Direct 路径) 已显式调 load_wealth_context_view + run_committee（不绕过 shared loaders）
+    "scripts.skill -> core.committee",
 ]
 # 已删的孤儿 dep：
 # - duckduckgo-search: 被 ddgs 取代

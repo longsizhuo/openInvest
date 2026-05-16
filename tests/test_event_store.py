@@ -24,12 +24,25 @@ def store():
         s.conn.close()
 
 
-def test_claim_to_event_id_strips_dates():
-    # 同一事件文本只是日期差，应该 hash 相同
+def test_claim_to_event_id_strips_iso_dates():
+    """精确 ISO 日期戳（多家媒体 publish 日不同）→ 应剥掉"""
+    a = claim_to_event_id("2026-05-15 Apple beats earnings")
+    b = claim_to_event_id("2026-05-16 Apple beats earnings")
+    assert a == b, "同事件不同 publish 日应同 id"
+
+
+def test_claim_to_event_id_preserves_quarters():
+    """季度 (Q1/Q2 ...) = 事件本身的语义 → 不应剥（PR #5 Copilot CR 修复）"""
     a = claim_to_event_id("Nvidia Q1 2026 guidance miss, futures down 3%")
-    b = claim_to_event_id("Nvidia Q2 2025 guidance miss, futures down 3%")
-    # 日期 / quarter 都被剥掉
-    assert a == b
+    b = claim_to_event_id("Nvidia Q2 2026 guidance miss, futures down 3%")
+    assert a != b, "Q1 / Q2 是不同事件，event_id 必须区分"
+
+
+def test_claim_to_event_id_preserves_year():
+    """年份也是语义信号（2025 outlook ≠ 2026 outlook）→ 不剥"""
+    a = claim_to_event_id("Fed projects 2025 rates stable")
+    b = claim_to_event_id("Fed projects 2026 rates stable")
+    assert a != b, "不同年份 outlook 应是不同事件"
 
 
 def test_upsert_new_then_dup_merges(store):

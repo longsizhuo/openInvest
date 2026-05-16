@@ -642,7 +642,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
         })
         sys.exit(1)
 
-    from core.committee import run_committee, run_macro_view
+    from core.committee import load_wealth_context_view, run_committee, run_macro_view
     from core.portfolio_manager import PortfolioManager
     from core.regime import format_regime_brief
     from utils.exchange_fee import (
@@ -713,6 +713,8 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     prior_insights = _gather_relevant_insights(pm.store, target)
 
     # 4) 跑！persist_to_memory=True 让 backend 自动落盘 transcript
+    # wealth_context_view: 防漂移共享 input loader（防 2026-05-15 wealth_context 漂移再发）
+    wealth_view = load_wealth_context_view()
     result = run_committee(
         asset=target,
         market_data=market_data,
@@ -720,6 +722,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
         portfolio_summary=portfolio_summary,
         prior_insights=prior_insights,
         regime_brief=regime_brief,
+        wealth_context_view=wealth_view,
         persist_to_memory=True,
         max_debate_rounds=args.max_rounds,
     )
