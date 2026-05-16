@@ -537,3 +537,227 @@ def test_daily_report_passes_event_brief_to_run_committee_and_macro(monkeypatch,
             f"   - 传了但用了硬编码空字符串\n"
             f"   - resolve_event_brief_multi 的结果没存到 event_brief 变量"
         )
+
+
+# ============================================================================
+# 契约 5: run_committee_session 三路径统一架构核心防漂
+# ============================================================================
+# 历史教训（2026-05-16）: 三路径（Skill/Web/Cron）各自调原语 run_committee，导致
+# 同样的"加跨 entry 参数"动作要在 3 处分别改，漏一处即漂移（连续 4 次事故）。
+# 抽出 run_committee_session 作为单一可信源后，本契约守护它：
+# - 任何 entry 调 session，最终 run_committee 必然收到 shared inputs（wealth +
+#   event_brief + macro_view）
+# - 单资产失败不阻断其他资产
+# - event_brief 三选一优先级（override > event_ids > multi_recall）严格执行
+
+def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
+    monkeypatch, tmp_path,
+):
+    """3 个 SENTINEL（wealth/event/macro）必须全部到达 run_committee kwargs."""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    SENTINEL_W = "WEALTH_SENTINEL_session_abc"
+    SENTINEL_E = "EVENT_SENTINEL_session_def"
+    SENTINEL_M = "MACRO_SENTINEL_session_ghi"
+
+    # 锚定 3 个 loader 的输出
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view",
+                        lambda: SENTINEL_W)
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: SENTINEL_E)
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: SENTINEL_M)
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+                        lambda *a, **kw: "")
+
+    # mock 行情，让 run_committee_for_symbol 能跑到 run_committee
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("core.committee_runner.get_history_data",
+                        lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+
+    from core.committee_runner import run_committee_session
+    result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    assert captured, "run_committee 未被调用 — session dispatch 失败"
+    kw = captured[0]
+    assert kw.get("wealth_context_view") == SENTINEL_W, (
+        f"wealth_view 漂移: 期望 {SENTINEL_W!r}, 实际 {kw.get('wealth_context_view')!r}"
+    )
+    assert kw.get("macro_view") == SENTINEL_M, (
+        f"macro_view 漂移: 期望 {SENTINEL_M!r}, 实际 {kw.get('macro_view')!r}"
+    )
+
+    # event_brief 通过 run_committee_for_symbol 流到 _resolve_event_brief（接受 override）
+    # 然后 service layer 没把它直接传给 run_committee（macro 在 prompt 里），
+    # 我们改测 session 返回值
+    assert result["wealth_view"] == SENTINEL_W
+    assert result["event_brief"] == SENTINEL_E
+    assert result["macro_view"] == SENTINEL_M
+
+
+def test_run_committee_session_continues_on_single_asset_error(
+    monkeypatch, tmp_path,
+):
+    """单资产抛异常 → errors map 含失败 symbol + 其他资产正常返回."""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+
+    # 一个资产成功一个抛异常
+    def fake_run_committee_for_symbol(symbol, **kw):
+        if symbol == "BAD.SYM":
+            raise RuntimeError("simulated 行情失败")
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee_for_symbol",
+                        fake_run_committee_for_symbol)
+
+    from core.committee_runner import run_committee_session
+    result = run_committee_session(
+        symbols=["GOOD.AX", "BAD.SYM"], max_debate_rounds=1,
+    )
+
+    assert "BAD.SYM" in result["errors"]
+    assert "simulated 行情失败" in result["errors"]["BAD.SYM"]
+    assert result["asset_committees"]["GOOD.AX"].get("verdict") is not None, (
+        "其他资产应正常返回 verdict，session 不能因单资产失败阻断"
+    )
+    assert "GOOD.AX" not in result["errors"]
+
+
+def test_run_committee_session_event_brief_override_takes_priority(
+    monkeypatch, tmp_path,
+):
+    """event_brief_override > event_ids > resolve_event_brief_multi（严格）."""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    SENTINEL_OVERRIDE = "OVERRIDE_BRIEF_xxx"
+    SENTINEL_MULTI = "MULTI_RECALL_BRIEF_yyy"
+
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: SENTINEL_MULTI)  # 不应被调
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: "M")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr(
+        "core.committee_runner.run_committee_for_symbol",
+        lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
+                                       "alloc_cny": 0, "dominant_view": "macro",
+                                       "raw": ""}, "report": None},
+    )
+
+    from core.committee_runner import run_committee_session
+    result = run_committee_session(
+        symbols=["TEST.AX"],
+        event_brief_override=SENTINEL_OVERRIDE,
+        max_debate_rounds=1,
+    )
+
+    assert result["event_brief"] == SENTINEL_OVERRIDE, (
+        "event_brief_override 必须优先于 multi_recall（严格优先级）"
+    )
+    assert result["audit"]["event_brief_source"] == "override"
+
+
+def test_run_committee_session_event_ids_translates_via_event_store(
+    monkeypatch, tmp_path,
+):
+    """event_ids=["ev_1"] → store.get_event + format_event_brief → 注入下游."""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: "M")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+
+    # multi_recall 不应被调（event_ids 优先于它）
+    multi_called = []
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: (multi_called.append(syms), "SHOULD_NOT_BE_USED")[1])
+
+    # 锚定 EventStore: 仅"ev_1" 反查得到
+    class FakeStore:
+        vec_loaded = False
+        def get_event(self, eid):
+            if eid == "ev_1":
+                return {"event_id": eid, "ts": "2026-05-15", "stance": "risk",
+                        "severity": "high", "affected_symbols": ["TEST.AX"],
+                        "one_line_claim": "Fake event for test", "entities": []}
+            return None
+        def get_sources(self, eid):
+            return [{"src_name": "reuters", "url": "http://x/y"}]
+    monkeypatch.setattr("core.committee_runner._get_event_store",
+                        lambda: FakeStore())
+
+    monkeypatch.setattr(
+        "core.committee_runner.run_committee_for_symbol",
+        lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
+                                       "alloc_cny": 0, "dominant_view": "macro",
+                                       "raw": ""}, "report": None},
+    )
+
+    from core.committee_runner import run_committee_session
+    result = run_committee_session(
+        symbols=["TEST.AX"],
+        event_ids=["ev_1"],
+        max_debate_rounds=1,
+    )
+
+    assert "Fake event for test" in result["event_brief"], (
+        "event_ids 没翻译成 brief 注入下游"
+    )
+    assert result["audit"]["event_brief_source"] == "event_ids"
+    assert multi_called == [], (
+        "event_ids 已传时不应再调 resolve_event_brief_multi（优先级被破）"
+    )
