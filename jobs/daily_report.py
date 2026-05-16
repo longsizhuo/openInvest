@@ -424,6 +424,7 @@ def run() -> Dict[str, Any]:
         skipped_assets=skipped_assets,
         total_assets_cny=total_assets_cny,
         final_decision_gemini=final_decision_gemini,
+        wealth_context_view=wealth_view,
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）

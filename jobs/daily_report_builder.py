@@ -161,6 +161,7 @@ def assemble_full_report(
     skipped_assets: set,
     total_assets_cny: float,
     final_decision_gemini: str,
+    wealth_context_view: str = "",
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -201,6 +202,16 @@ def assemble_full_report(
 
     n = len(active_assets)  # 活跃资产数，用于后续章节编号
 
+    # WealthContextOfficer 章节：仅当 wealth_view 非空时插入，避免无内容时还出现空 section
+    # 防漂移：assemble_full_report 必须把 wealth_view 渲染进邮件正文，否则 Risk Officer
+    # 用到的"家族真实资金/流动性"信息只进 transcript 不进用户邮箱。tests/test_committee_contract.py
+    # 有 SENTINEL 断言保护此处。
+    wealth_section = (
+        f"\n## 1.5. 真实流动性视图 (WealthContextOfficer)\n{wealth_context_view}\n\n---\n"
+        if wealth_context_view.strip()
+        else ""
+    )
+
     return f"""
 # 投资委员会日报 ({today})
 
@@ -208,7 +219,7 @@ def assemble_full_report(
 {macro_view}
 
 ---
-
+{wealth_section}
 ## 黄金现货快照
 ```
 {gold_snapshot_text}
