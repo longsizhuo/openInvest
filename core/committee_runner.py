@@ -166,6 +166,42 @@ def resolve_event_brief_multi(symbols: List[str]) -> str:
     return "\n\n".join(deduped)
 
 
+def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = None) -> str:
+    """读 memory/insights/*.md → Dreaming 长期行为模式
+
+    历史漂移背景（2026-05-16）: 这段代码原本在 jobs/daily_report.py:_gather_relevant_insights
+    和 scripts/skill.py:_gather_relevant_insights 各有一份完全相同的副本，且
+    run_committee_for_symbol（service layer）从来没调，导致 Web/GUI 路径的 LLM
+    永远看不到 Dreaming long-term insights。统一提到这里作为 shared loader 后，
+    三路径自动同步。
+
+    Args:
+        asset: strategy.target_assets 单项（dict 含 symbol/display_name 等）
+        pm: PortfolioManager 实例（不传则现 new 一个，复用 store.root 路径）
+
+    Returns:
+        所有匹配 insights 拼接的 markdown，空字符串表示无相关。
+    """
+    try:
+        if pm is None:
+            pm = PortfolioManager()
+        store = pm.store
+        insights_dir = store.root / "insights"
+        if not insights_dir.exists():
+            return ""
+        sym = asset.get("symbol", "").lower().replace("=", "_")
+        matches = []
+        for f in sorted(insights_dir.glob("*.md")):
+            if sym in f.stem.lower() or any(
+                tok in f.stem.lower() for tok in ["gold", "ndq"] if tok in sym
+            ):
+                matches.append(f"## {f.stem}\n{f.read_text(encoding='utf-8')[:600]}")
+        return "\n\n".join(matches)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_prior_insights graceful 退化 '': {type(e).__name__}: {e}")
+        return ""
+
+
 def run_committee_for_symbol(
     symbol: str,
     *,
@@ -173,6 +209,9 @@ def run_committee_for_symbol(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     shared_macro_view: Optional[str] = None,
     event_brief: Optional[str] = None,
+    wealth_context_view: Optional[str] = None,
+    portfolio_summary_override: Optional[str] = None,
+    prior_insights_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """端到端跑单资产 committee
 
@@ -183,6 +222,15 @@ def run_committee_for_symbol(
         event_brief: 事件层 RAG 召回的盘中事件上下文（结构化文本）。None / "" 都
             等价于"不召回 / 不注入"。caller 显式传则 override 内部默认召回。
             受 env INVEST_EVENT_RAG_ENABLED 总开关控制（默认 false）。
+        wealth_context_view: shared loader 结果 override。None → 内部调
+            load_wealth_context_view()（保持向后兼容）。Session orchestrator
+            一次性算好后传进来避免重复调用。
+        portfolio_summary_override: 给 cron daily_report 用——它拼了含 total_assets_cny
+            + data_warnings 的完整版 portfolio_summary，需要让 Risk Officer 看见。
+            None → 用内部精简版（默认）。
+        prior_insights_override: shared loader 结果 override。None → 内部调
+            load_prior_insights(asset, pm)（修复 2026-05-16 漂移：service layer
+            过去从不读 insights，导致 Web/GUI 路径 LLM 看不到 Dreaming）。
     """
     def emit(phase: str, **extra: Any) -> None:
         if progress_callback is None:
@@ -253,19 +301,37 @@ def run_committee_for_symbol(
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
     dry_powder = max(0.0, cash_cny - buffer_cny)
 
-    portfolio_summary = (
-        f"用户风险偏好: {risk_level}\n"
-        f"CNY 现金: ¥{cash_cny:,.0f}（应急金 ¥{buffer_cny:,.0f}，可投 ¥{dry_powder:,.0f}）\n"
-        f"AUD 现金: ${aud_cash:,.0f}\n"
-        f"目标资产 {symbol}: {units} 单位"
-        + (f"，均价 {avg_cost} {cost_ccy}" if avg_cost else "（暂无持仓）")
-    )
+    # portfolio_summary: 优先 caller override（daily_report 拼了含 total_assets_cny
+    # + data_warnings 的完整版），否则用 service 内精简版
+    if portfolio_summary_override is not None:
+        portfolio_summary = portfolio_summary_override
+    else:
+        portfolio_summary = (
+            f"用户风险偏好: {risk_level}\n"
+            f"CNY 现金: ¥{cash_cny:,.0f}（应急金 ¥{buffer_cny:,.0f}，可投 ¥{dry_powder:,.0f}）\n"
+            f"AUD 现金: ${aud_cash:,.0f}\n"
+            f"目标资产 {symbol}: {units} 单位"
+            + (f"，均价 {avg_cost} {cost_ccy}" if avg_cost else "（暂无持仓）")
+        )
 
     # 5.5. WealthContextOfficer view（修复 2026-05-15 漂移: 之前没读 user.md 的
     # wealth_context, Risk Officer 永远按 portfolio cash 判风险）
-    wealth_view = load_wealth_context_view()
+    # caller 已经算过就 override 进来避免重复调用 LLM；否则 fallback 自己调
+    if wealth_context_view is not None:
+        wealth_view = wealth_context_view
+    else:
+        wealth_view = load_wealth_context_view()
     if wealth_view:
         emit("wealth_context_loaded", preview=wealth_view[:240])
+
+    # 5.6. Prior insights / Dreaming long-term 行为模式（修复 2026-05-16 漂移:
+    # service layer 之前从不读 insights, Web/GUI 路径的 LLM 永远看不到长期模式）
+    if prior_insights_override is not None:
+        prior_insights = prior_insights_override
+    else:
+        prior_insights = load_prior_insights(target, pm)
+    if prior_insights:
+        emit("prior_insights_loaded", preview=prior_insights[:240])
 
     # 6. 跑多轮辩论 + CIO
     return run_committee(
@@ -273,8 +339,222 @@ def run_committee_for_symbol(
         market_data=market_data,
         macro_view=macro_view,
         portfolio_summary=portfolio_summary,
+        prior_insights=prior_insights,
         regime_brief=regime_brief,
         wealth_context_view=wealth_view,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )
+
+
+# ============================================================================
+# 主入口：run_committee_session — 三路径统一架构（防漂移单一可信源）
+# ============================================================================
+#
+# 历史背景（2026-05-16）: openInvest 有三个调用入口（Skill/Web/Cron），都跑同一套
+# "投资委员会"，但实现散在三处导致连续 4 次跨 entry 参数漂移事故（wealth_view /
+# 邮件 render / event_brief / Gemini prompt）。
+#
+# 本函数是三路径**共享的单一可信源**：所有"跨资产 macro 共享 / event 多 symbol
+# 召回 / wealth view 注入 / prior insights 加载 / 并行 dispatch"逻辑只在这一处实现。
+#
+# 三个 entry 只负责自己路径独有的事：
+#   - Skill: Stage 0 同日 cache 检查、--force flag、最终 JSON 输出、NapCat hint
+#   - Web/GUI: task_id 状态机、meta.json 审计、SSE 进度推送
+#   - Cron: staleness 熔断、邮件渲染、Gemini 第二意见、Dreaming append_daily
+#
+# 加新跨 entry 参数时**只改本函数**，三路径自动同步。CLAUDE.md 分层契约段 + 漂移
+# 历史表强制此契约。
+#
+# 测试: tests/test_committee_contract.py:test_run_committee_session_* 守护
+# ============================================================================
+
+def run_committee_session(
+    symbols: Optional[List[str]] = None,
+    *,
+    max_debate_rounds: int = 4,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    event_brief_override: Optional[str] = None,
+    event_ids: Optional[List[str]] = None,
+    macro_view_override: Optional[str] = None,
+    wealth_view_override: Optional[str] = None,
+    portfolio_summary_override: Optional[str] = None,
+    max_workers: int = 4,
+    on_asset_error: str = "continue",
+) -> Dict[str, Any]:
+    """跑一次"committee session"——跨资产 macro 共享 + event RAG + 并行 dispatch.
+
+    Args:
+        symbols: 要跑的 symbol 列表。None → 读 strategy.target_assets 全部
+        max_debate_rounds: Quant/Risk cross-challenge 轮数上限，默认 4（三路径对齐）
+        progress_callback: phase 事件推送（Web SSE 用；Skill/Cron 传 None）
+        event_brief_override: 优先级最高的 event_brief 注入。含空串等价"我不要事件"
+        event_ids: Web event-trigger 路径用。session 内部翻译成 brief。与 override
+            互斥（override 优先）
+        macro_view_override: 测试桩用，跳过 run_macro_view
+        wealth_view_override: 测试桩 / backtest 用，跳过 load_wealth_context_view
+        portfolio_summary_override: cron daily_report 拼了含 total_assets_cny 的
+            完整版，传进来让 Risk Officer 看见。其他路径不传走 service 默认精简版
+        max_workers: ThreadPoolExecutor 并发数，默认 4 防 LLM API 限流
+        on_asset_error: "continue"（单资产失败不阻断其他）或 "raise"（任一失败抛）
+
+    Returns:
+        {
+            "symbols": List[str],
+            "macro_view": str,
+            "wealth_view": str,
+            "event_brief": str,
+            "asset_committees": Dict[str, Dict],  # sym → result，或 {"error": str}
+            "errors": Dict[str, str],
+            "audit": {...},
+        }
+
+    Raises:
+        RuntimeError: symbols 解析为空 / 全部资产失败 / on_asset_error="raise" 时单资产失败
+    """
+    from datetime import datetime, timezone
+
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def emit(phase: str, **extra: Any) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback({"phase": phase, **extra})
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"session progress emit fail: {e}")
+
+    # ---- Step 1: 解析 symbols（None / 空 → strategy.target_assets）----
+    pm = PortfolioManager()
+    if not symbols:
+        symbols = [
+            str(a.get("symbol")) for a in pm.strategy.get("target_assets", [])
+            if a.get("symbol")
+        ]
+    if not symbols:
+        raise RuntimeError("run_committee_session: 没有可跑的 symbol "
+                           "（symbols 参数空 + strategy.target_assets 也空）")
+    emit("session_start", symbols=symbols, max_debate_rounds=max_debate_rounds)
+
+    # ---- Step 2: shared wealth_view ----
+    if wealth_view_override is not None:
+        wealth_view = wealth_view_override
+    else:
+        wealth_view = load_wealth_context_view()
+    if wealth_view:
+        emit("wealth_context_loaded", preview=wealth_view[:240])
+
+    # ---- Step 3: shared event_brief（三选一，严格优先级）----
+    event_brief_source: str
+    if event_brief_override is not None:
+        event_brief = event_brief_override
+        event_brief_source = "override"
+    elif event_ids:
+        # Web event-trigger 路径：caller 已知具体 event_ids，反查 + format
+        event_brief = ""
+        try:
+            store = _get_event_store()
+            if store is not None:
+                fetched: List[Dict[str, Any]] = []
+                for eid in event_ids:
+                    ev = store.get_event(eid)
+                    if not ev:
+                        continue
+                    ev = dict(ev)
+                    ev["sources"] = store.get_sources(ev["event_id"])
+                    fetched.append(ev)
+                event_brief = format_event_brief(fetched)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"event_ids 翻译失败 graceful 退化 '': {type(e).__name__}: {e}")
+        event_brief_source = "event_ids"
+    else:
+        # 默认：跨资产 multi 召回 + 去重
+        event_brief = resolve_event_brief_multi(symbols)
+        event_brief_source = "multi_recall" if event_brief else "disabled"
+    if event_brief:
+        emit("event_brief_loaded", source=event_brief_source,
+             preview=event_brief[:240])
+
+    # ---- Step 4: shared macro_view ----
+    if macro_view_override is not None:
+        macro_view = macro_view_override
+        emit("macro_done", macro_preview=macro_view[:240], shared=True,
+             from_override=True)
+    else:
+        emit("macro_start", symbols=symbols,
+             event_brief_attached=bool(event_brief))
+        try:
+            macro_data = get_macro_data()
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"get_macro_data 失败 graceful 退化空 dict: {e}")
+            macro_data = {}
+        macro_view = run_macro_view(str(macro_data), event_brief=event_brief)
+        emit("macro_done", macro_preview=macro_view[:240], shared=True)
+
+    # ---- Step 5: 并行 dispatch ----
+    from concurrent.futures import ThreadPoolExecutor
+
+    asset_committees: Dict[str, Dict[str, Any]] = {}
+    errors: Dict[str, str] = {}
+
+    def _run_one(sym: str) -> Dict[str, Any]:
+        return run_committee_for_symbol(
+            sym,
+            max_debate_rounds=max_debate_rounds,
+            progress_callback=progress_callback,
+            shared_macro_view=macro_view,
+            event_brief=event_brief,
+            wealth_context_view=wealth_view,
+            portfolio_summary_override=portfolio_summary_override,
+            # prior_insights_override 不传 → service 内 load_prior_insights(sym)
+            # 每个资产 insights 不同，session 不预加载
+        )
+
+    effective_workers = min(len(symbols), max_workers)
+    with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+        futures = {pool.submit(_run_one, sym): sym for sym in symbols}
+        for fut in futures:
+            sym = futures[fut]
+            try:
+                result = fut.result()
+                if isinstance(result, dict) and "error" in result:
+                    errors[sym] = result["error"]
+                    asset_committees[sym] = result
+                else:
+                    asset_committees[sym] = result
+            except Exception as e:  # noqa: BLE001
+                msg = f"{type(e).__name__}: {e}"
+                log.warning(f"session: {sym} 失败 ({on_asset_error}): {msg}")
+                errors[sym] = msg
+                asset_committees[sym] = {"error": msg}
+                if on_asset_error == "raise":
+                    raise
+
+    # 全部失败 → 抛（caller 没法拼报告）
+    if errors and len(errors) == len(symbols):
+        raise RuntimeError(
+            f"session: 全部 {len(symbols)} 个资产都失败: "
+            + ", ".join(f"{s}={e[:60]}" for s, e in errors.items())
+        )
+
+    ended_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    emit("session_done", ok=len(symbols) - len(errors), errors=len(errors))
+
+    return {
+        "symbols": symbols,
+        "macro_view": macro_view,
+        "wealth_view": wealth_view,
+        "event_brief": event_brief,
+        "asset_committees": asset_committees,
+        "errors": errors,
+        "audit": {
+            "shared_macro": True,
+            "event_brief_source": event_brief_source,
+            "event_brief_attached": bool(event_brief),
+            "wealth_view_attached": bool(wealth_view),
+            "max_debate_rounds": max_debate_rounds,
+            "max_workers": effective_workers,
+            "started_at": started_at,
+            "ended_at": ended_at,
+        },
+    }
