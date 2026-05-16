@@ -269,3 +269,60 @@ def test_skill_cmd_run_committee_passes_loaded_wealth_view(monkeypatch, tmp_path
             f"❌ scripts.skill.cmd_run_committee 没把 loader 结果传给 run_committee!\n"
             f"   期望 {SENTINEL!r}, 实际 {actual!r}"
         )
+
+
+# ============================================================================
+# 契约 3: 邮件 render 路径 — assemble_full_report 必须把 wealth_view 渲染进正文
+# ============================================================================
+# 历史教训（2026-05-15 第二次漂移事故）：load_wealth_context_view 修好了，
+# daily_report.run() 也把它传给了 run_committee（Risk Officer 用得上）—— 但
+# assemble_full_report 邮件模板里**没有 wealth section**，导致 LLM 用了视图却
+# 看不到结果进用户邮箱。本测验证 SENTINEL 字符串确实出现在最终邮件 markdown。
+
+def test_assemble_full_report_renders_wealth_section_when_view_nonempty():
+    """非空 wealth_context_view 必须出现在邮件 markdown 正文（而不是只进 transcript）"""
+    from jobs.daily_report_builder import assemble_full_report
+
+    SENTINEL = "WEALTH_SECTION_SENTINEL_abc123"
+
+    md = assemble_full_report(
+        today="2026-05-16",
+        macro_view="mock macro view",
+        gold_snapshot_text="mock gold snapshot",
+        friction_report="mock friction",
+        target_assets=[],
+        asset_committees={},
+        skipped_assets=set(),
+        total_assets_cny=100000.0,
+        final_decision_gemini="mock gemini",
+        wealth_context_view=SENTINEL,
+    )
+
+    assert SENTINEL in md, (
+        "❌ wealth_context_view 没渲染进邮件正文！\n"
+        "   assemble_full_report 收了 wealth_context_view 参数但邮件模板里没插 section，\n"
+        "   导致 WealthContextOfficer 视图只进 transcript / Risk Officer prompt，\n"
+        "   用户邮件看不到。检查 jobs/daily_report_builder.py 的 wealth_section 插入逻辑。"
+    )
+
+
+def test_assemble_full_report_omits_wealth_section_when_view_empty():
+    """空字符串（fork 用户没填 wealth_context）→ 不应出现空 section 标题"""
+    from jobs.daily_report_builder import assemble_full_report
+
+    md = assemble_full_report(
+        today="2026-05-16",
+        macro_view="mock macro view",
+        gold_snapshot_text="mock gold snapshot",
+        friction_report="mock friction",
+        target_assets=[],
+        asset_committees={},
+        skipped_assets=set(),
+        total_assets_cny=100000.0,
+        final_decision_gemini="mock gemini",
+        wealth_context_view="",
+    )
+
+    assert "WealthContextOfficer" not in md, (
+        "空 wealth_context_view 不应渲染 section 标题（避免空 section 干扰用户）"
+    )
