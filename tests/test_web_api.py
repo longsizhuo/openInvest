@@ -407,15 +407,17 @@ def test_committee_run_and_status_done(client, monkeypatch):
                    "quant_history": ["q1"], "risk_history": ["r1"]},
     }
     import core.committee_runner as cr_mod
-    import core.committee as cm_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol",
                         lambda sym, **kw: fake_result)
-    # macro_view 也 mock 掉（避免真调 LLM）
-    monkeypatch.setattr("connectors.web_api.run_macro_view", lambda data, **kw: "fake macro",
-                        raising=False)
-    # 直接 mock import 路径
-    import core.committee
-    monkeypatch.setattr(core.committee, "run_macro_view", lambda data, **kw: "fake macro")
+    # macro_view 也 mock（session 在 dispatch 之前调一次共享 macro，避免真 LLM）
+    # 三路径统一架构后，session 通过 core.committee_runner.run_macro_view 引用调用，
+    # 这是真正生效的 mock 点
+    monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
+    monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
+    # wealth_view loader 也 mock（避免读真 user.md / 触发 LLM）
+    monkeypatch.setattr(cr_mod, "load_wealth_context_view", lambda: "")
+    # event_brief multi 召回也 mock 掉（避免 EventStore init）
+    monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
 
     r = client.post("/api/committee/run", json={"note": "smoke test", "symbols": ["NDQ.AX"]})
     assert r.status_code == 200
@@ -451,8 +453,11 @@ def test_committee_run_error_path(client, monkeypatch):
 
     import core.committee_runner as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", _boom)
-    import core.committee
-    monkeypatch.setattr(core.committee, "run_macro_view", lambda data, **kw: "fake macro")
+    # session 共享 prep 也 mock（避免真 LLM）
+    monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
+    monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
+    monkeypatch.setattr(cr_mod, "load_wealth_context_view", lambda: "")
+    monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
 
     r = client.post("/api/committee/run", json={"symbols": ["NDQ.AX"]})
     task_id = r.json()["task_id"]

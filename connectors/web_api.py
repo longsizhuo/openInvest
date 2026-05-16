@@ -1310,78 +1310,25 @@ async def _run_committee_task(
         _write_committee_status(task_id, s)
 
     try:
-        from concurrent.futures import ThreadPoolExecutor
-        from core.committee_runner import run_committee_for_symbol
-        from core.committee import run_macro_view
-        from core.portfolio_manager import PortfolioManager
-        from utils.exchange_fee import get_macro_data
+        from core.committee_runner import run_committee_session
 
-        # 解析 symbols：空 → strategy 全部
-        pm = PortfolioManager()
-        if not symbols:
-            symbols = [
-                str(a.get("symbol")) for a in pm.strategy.get("target_assets", [])
-                if a.get("symbol")
-            ]
-        if not symbols:
-            raise RuntimeError("没有可跑的 symbol（strategy.target_assets 空）")
-
-        # 1) 共享 macro_view 跑一次（不进 thread pool 因为只有一个）
-        on_progress({"phase": "macro_start", "symbols": symbols})
-        try:
-            macro_data = get_macro_data()
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"macro_data 拉取失败: {e}")
-            macro_data = {}
-        # 事件层 trigger 路径：把 event_ids 翻译成结构化 brief，喂给共享 macro
-        event_brief_by_symbol: Dict[str, str] = {}
-        shared_event_brief = ""
-        if event_ids:
-            try:
-                from core.committee_runner import format_event_brief
-                from db.event_store import EventStore
-                from services.embeddings import DEFAULT_DIM
-                store = EventStore(embedding_dim=DEFAULT_DIM)
-                fetched = [store.get_event(eid) for eid in event_ids]
-                events_full: List[Dict[str, Any]] = []
-                for ev in fetched:
-                    if not ev:
-                        continue
-                    ev = dict(ev)
-                    ev["sources"] = store.get_sources(ev["event_id"])
-                    events_full.append(ev)
-                shared_event_brief = format_event_brief(events_full)
-                # 按 symbol 拆 brief —— Macro 共享版用整段，per-symbol 也用整段（事件少）
-                for sym in symbols:
-                    event_brief_by_symbol[sym] = shared_event_brief
-            except Exception as e:  # noqa: BLE001 事件层失败不能阻断委员会
-                log.warning(f"event brief 准备失败 task_id={task_id}: {e}")
-
-        shared_macro = run_macro_view(str(macro_data), event_brief=shared_event_brief)
-        on_progress({
-            "phase": "macro_done",
-            "macro_preview": shared_macro[:240],
-            "shared": True,
-            "event_brief_attached": bool(shared_event_brief),
-        })
-
-        # 2) 多资产并行跑 committee（每个内部 Round 1/2 已并行）
-        loop = asyncio.get_running_loop()
-
-        def _run_one(sym: str) -> Dict[str, Any]:
-            return run_committee_for_symbol(
-                sym,
-                max_debate_rounds=max_rounds,
-                progress_callback=on_progress,
-                shared_macro_view=shared_macro,
-                event_brief=event_brief_by_symbol.get(sym),
-            )
-
-        # 限 4 worker 防 LLM API 限流
-        max_workers = min(len(symbols), 4)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {sym: loop.run_in_executor(pool, _run_one, sym) for sym in symbols}
-            results = {sym: await fut for sym, fut in futures.items()}
+        # 三路径统一架构：所有跨资产 macro 共享 + event_brief 召回/翻译 + 并行
+        # dispatch 都在 run_committee_session 内部一处实现，避免跟 Cron/Skill 漂移。
+        # 历史：之前这里 90 行手搓的 orchestrator 跟 daily_report 复制了一份，
+        # 加新参数总漏一处。修复 2026-05-16: 整段迁移到 service 层。
+        # 同步调 session（session 内部已串行/并行 dispatch，本身处理跨资产）。
+        # TODO(并发): 单用户 web 当前 OK；多用户场景下 sync 调会阻塞 event loop。
+        # 已尝试 await loop.run_in_executor / asyncio.to_thread，在 anyio TestClient
+        # 嵌套 ThreadPool 下 future 不 resolve（详见 commit 历史）。后续 follow-up
+        # 用 threading.Thread + asyncio.Event 桥接重写为真异步背景任务
+        session = run_committee_session(
+            symbols=symbols,
+            max_debate_rounds=max_rounds,
+            progress_callback=on_progress,
+            event_ids=event_ids,
+        )
+        symbols = session["symbols"]
+        results = session["asset_committees"]
 
         # 提取 verdict 摘要（避免序列化整个 CommitteeReport 对象）
         summary = {}

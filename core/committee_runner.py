@@ -491,9 +491,10 @@ def run_committee_session(
         macro_view = run_macro_view(str(macro_data), event_brief=event_brief)
         emit("macro_done", macro_preview=macro_view[:240], shared=True)
 
-    # ---- Step 5: 并行 dispatch ----
-    from concurrent.futures import ThreadPoolExecutor
-
+    # ---- Step 5: dispatch（串行 or 并行）----
+    # 单资产 / max_workers<=1 → 走串行（避免 ThreadPoolExecutor 嵌套，外层 caller
+    # 如 web_api 的 background task 已经在 worker thread 里跑时，再嵌内层 pool
+    # 在 anyio TestClient 下会出现 future 不 resolve 的诡异问题）
     asset_committees: Dict[str, Dict[str, Any]] = {}
     errors: Dict[str, str] = {}
 
@@ -510,25 +511,42 @@ def run_committee_session(
             # 每个资产 insights 不同，session 不预加载
         )
 
+    def _record_result(sym: str, result: Any, err: Optional[str] = None) -> None:
+        if err is not None:
+            errors[sym] = err
+            asset_committees[sym] = {"error": err}
+            return
+        if isinstance(result, dict) and "error" in result:
+            errors[sym] = result["error"]
+        asset_committees[sym] = result
+
     effective_workers = min(len(symbols), max_workers)
-    with ThreadPoolExecutor(max_workers=effective_workers) as pool:
-        futures = {pool.submit(_run_one, sym): sym for sym in symbols}
-        for fut in futures:
-            sym = futures[fut]
+    if effective_workers <= 1 or len(symbols) <= 1:
+        # 串行：跟 cron daily_report 原行为一致；TestClient / 嵌套 thread 安全
+        for sym in symbols:
             try:
-                result = fut.result()
-                if isinstance(result, dict) and "error" in result:
-                    errors[sym] = result["error"]
-                    asset_committees[sym] = result
-                else:
-                    asset_committees[sym] = result
+                _record_result(sym, _run_one(sym))
             except Exception as e:  # noqa: BLE001
                 msg = f"{type(e).__name__}: {e}"
                 log.warning(f"session: {sym} 失败 ({on_asset_error}): {msg}")
-                errors[sym] = msg
-                asset_committees[sym] = {"error": msg}
+                _record_result(sym, None, err=msg)
                 if on_asset_error == "raise":
                     raise
+    else:
+        # 真并行：多资产用 ThreadPoolExecutor 提速
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+            futures = {pool.submit(_run_one, sym): sym for sym in symbols}
+            for fut in futures:
+                sym = futures[fut]
+                try:
+                    _record_result(sym, fut.result())
+                except Exception as e:  # noqa: BLE001
+                    msg = f"{type(e).__name__}: {e}"
+                    log.warning(f"session: {sym} 失败 ({on_asset_error}): {msg}")
+                    _record_result(sym, None, err=msg)
+                    if on_asset_error == "raise":
+                        raise
 
     # 全部失败 → 抛（caller 没法拼报告）
     if errors and len(errors) == len(symbols):
