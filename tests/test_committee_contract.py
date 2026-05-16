@@ -111,90 +111,11 @@ updated: '2024-05-15T00:00:00+00:00'
     (state_dir / "processed_emails.json").write_text("[]")
 
 
-def test_daily_report_passes_loaded_wealth_view_to_run_committee(monkeypatch, tmp_path):
-    """**核心防漂移契约** — daily_report 必须真把 load_wealth_context_view()
-    的结果传给 run_committee 的 wealth_context_view= 参数。
-
-    用 SENTINEL 字符串锚定。任何形式的硬编码 / 漏调 / 字段名错都会让 captured
-    不等于 SENTINEL，test 红。
-    """
-    # 1. seed memory
-    memory_dir = tmp_path / "memory"
-    memory_dir.mkdir()
-    _seed_minimal_memory(memory_dir)
-
-    from core import memory_store as ms
-    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
-
-    # 2. monkeypatch shared loader 返回 SENTINEL（验证 entry 真的把 loader 结果用了）
-    SENTINEL = "TEST_SENTINEL_WEALTH_VIEW_xyz789"
-    monkeypatch.setattr(
-        "jobs.daily_report.load_wealth_context_view",
-        lambda: SENTINEL,
-    )
-
-    # 3. monkeypatch run_committee 抓 kwargs（也避开真 LLM 调用）
-    captured_kwargs_list: list[dict] = []
-
-    def fake_run_committee(**kwargs):
-        captured_kwargs_list.append(kwargs)
-        return {
-            "verdict": {
-                "verdict": "HOLD",
-                "confidence": 0.5,
-                "alloc_cny": 0,
-                "dominant_view": "macro",
-                "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5",
-            },
-            "report": None,
-        }
-
-    monkeypatch.setattr("jobs.daily_report.run_committee", fake_run_committee)
-    monkeypatch.setattr("jobs.daily_report.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
-
-    # 4. mock 重 IO（yfinance / 邮件 / 价格快照），让 daily_report 能跑到 committee loop
-    import pandas as pd
-    fake_df = pd.DataFrame(
-        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
-        index=pd.date_range("2024-05-10", periods=5),
-    )
-    monkeypatch.setattr("jobs.daily_report.get_history_data", lambda *a, **kw: fake_df)
-    monkeypatch.setattr("jobs.daily_report.get_macro_data", lambda: "MOCK_DATA")
-    monkeypatch.setattr("jobs.daily_report.analyze_multi_timeframe",
-                        lambda *a, **kw: "MOCK_MARKET_DATA")
-    # 邮件 send 不能真跑（没 SMTP 凭据），mock 掉
-    monkeypatch.setattr("jobs.daily_report.send_gmail_notification",
-                        lambda *a, **kw: None)
-
-    # 5. 跑 daily_report.run()
-    from jobs import daily_report
-    try:
-        daily_report.run()
-    except Exception as e:
-        # 邮件 send / 落盘等可能因测试环境抛错，但只要 run_committee 被调过了我们就有数据
-        if not captured_kwargs_list:
-            raise AssertionError(
-                f"daily_report.run() 跑挂前 run_committee 没被调用。"
-                f"无法验证 wealth_context_view 是否传对。原始错误: {e}"
-            ) from e
-
-    # 6. 真正的契约：每次调 run_committee 都必须传 SENTINEL
-    assert captured_kwargs_list, (
-        "run_committee 没被调用 — daily_report 流程没走到 committee loop。"
-        "可能 target_assets 为空 / 数据 prep 阶段失败。"
-    )
-    for i, kwargs in enumerate(captured_kwargs_list):
-        actual = kwargs.get("wealth_context_view")
-        assert actual == SENTINEL, (
-            f"❌ 第 {i+1} 次 run_committee 调用没拿到 loader 结果！\n"
-            f"   期望: {SENTINEL!r}（load_wealth_context_view 返回的 sentinel）\n"
-            f"   实际 wealth_context_view = {actual!r}\n"
-            f"\n"
-            f"   可能的漂移：\n"
-            f"   - daily_report 写 `wealth_context_view=\"\"` 硬编码\n"
-            f"   - 漏调 load_wealth_context_view() 直接传空字符串\n"
-            f"   - 字段名拼错（如 wealth_view= 而非 wealth_context_view=）"
-        )
+# 已删: test_daily_report_passes_loaded_wealth_view_to_run_committee
+# 历史: 守 daily_report 直接调 run_committee 时传 wealth_view 的契约
+# 2026-05-16 三路径统一架构后, daily_report 改走 run_committee_session,
+# 不再直调 run_committee. 该契约由 test_run_committee_session_passes_all_shared_inputs
+# 统一守护. 原代码可经 `git log -p tests/test_committee_contract.py` 查阅.
 
 
 # 已删: test_skill_cmd_run_committee_passes_loaded_wealth_view
@@ -357,119 +278,12 @@ def test_gemini_prompt_omits_empty_sections():
     )
 
 
-def test_daily_report_passes_event_brief_to_run_committee_and_macro(monkeypatch, tmp_path):
-    """**核心防漂移契约** — daily_report cron 路径必须真把跨资产 event_brief
-    同时注入 run_macro_view(event_brief=...) 和每个 run_committee(..., event_brief=...)。
-
-    用 SENTINEL 字符串通过 monkeypatch resolve_event_brief_multi 锚定。
-    任何形式的漏传 / 硬编码 / 字段名错都会让 captured != SENTINEL，测试红。
-    """
-    # 1. seed memory
-    memory_dir = tmp_path / "memory"
-    memory_dir.mkdir()
-    _seed_minimal_memory(memory_dir)
-
-    from core import memory_store as ms
-    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
-
-    # 2. monkeypatch resolve_event_brief_multi 返回 SENTINEL（验证 entry 真的把结果用了）
-    SENTINEL = "EVENT_BRIEF_SENTINEL_daily_report_cron_789"
-    monkeypatch.setattr(
-        "jobs.daily_report.resolve_event_brief_multi",
-        lambda symbols: SENTINEL,
-    )
-
-    # 3. 抓 run_macro_view 收到的 event_brief kwarg
-    captured_macro_kwargs: list[dict] = []
-
-    def fake_run_macro_view(*args, **kwargs):
-        captured_macro_kwargs.append(kwargs)
-        return "MOCK_MACRO"
-
-    monkeypatch.setattr("jobs.daily_report.run_macro_view", fake_run_macro_view)
-
-    # 4. 抓 run_committee 收到的 event_brief kwarg
-    captured_committee_kwargs: list[dict] = []
-
-    def fake_run_committee(**kwargs):
-        captured_committee_kwargs.append(kwargs)
-        return {
-            "verdict": {
-                "verdict": "HOLD",
-                "confidence": 0.5,
-                "alloc_cny": 0,
-                "dominant_view": "macro",
-                "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5",
-            },
-            "report": None,
-        }
-
-    monkeypatch.setattr("jobs.daily_report.run_committee", fake_run_committee)
-
-    # 5. mock 重 IO（yfinance / 邮件 / 价格快照），让 daily_report 能跑到 committee loop
-    import pandas as pd
-    fake_df = pd.DataFrame(
-        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
-        index=pd.date_range("2024-05-10", periods=5),
-    )
-    monkeypatch.setattr("jobs.daily_report.get_history_data", lambda *a, **kw: fake_df)
-    monkeypatch.setattr("jobs.daily_report.get_macro_data", lambda: "MOCK_DATA")
-    monkeypatch.setattr("jobs.daily_report.analyze_multi_timeframe",
-                        lambda *a, **kw: "MOCK_MARKET_DATA")
-    monkeypatch.setattr("jobs.daily_report.send_gmail_notification",
-                        lambda *a, **kw: None)
-    # wealth_view 也 mock 掉，避免 load_wealth_context_view 读真实 memory 路径
-    monkeypatch.setattr(
-        "jobs.daily_report.load_wealth_context_view",
-        lambda: "MOCK_WEALTH_VIEW",
-    )
-
-    # 6. 跑 daily_report.run()
-    from jobs import daily_report
-    try:
-        daily_report.run()
-    except Exception as e:
-        # 邮件 send / 落盘等可能因测试环境抛错，但只要两边 mock 被调过了就有数据
-        if not captured_macro_kwargs and not captured_committee_kwargs:
-            raise AssertionError(
-                f"daily_report.run() 跑挂前 run_macro_view 和 run_committee 都没被调用。"
-                f"无法验证 event_brief 是否传对。原始错误: {e}"
-            ) from e
-
-    # 7. 契约 A：run_macro_view 必须收到 event_brief=SENTINEL
-    assert captured_macro_kwargs, (
-        "run_macro_view 没被调用 — daily_report 流程没走到 macro 阶段。"
-        "可能 target_assets 为空 / 数据 prep 阶段提前退出。"
-    )
-    macro_event_brief = captured_macro_kwargs[0].get("event_brief")
-    assert macro_event_brief == SENTINEL, (
-        f"❌ run_macro_view 没收到 resolve_event_brief_multi 的结果！\n"
-        f"   期望: {SENTINEL!r}（resolve_event_brief_multi 返回的 sentinel）\n"
-        f"   实际 event_brief = {macro_event_brief!r}\n"
-        f"\n"
-        f"   可能的漂移：\n"
-        f"   - daily_report 没把 event_brief 变量传给 run_macro_view\n"
-        f"   - 传了但用了不同的变量名（如传了另一个空字符串）\n"
-        f"   - resolve_event_brief_multi 调用在 run_macro_view 调用之后"
-    )
-
-    # 8. 契约 B：每次 run_committee 调用都必须收到 event_brief=SENTINEL
-    assert captured_committee_kwargs, (
-        "run_committee 没被调用 — daily_report 流程没走到 committee loop。"
-        "可能 target_assets 为空 / 数据 prep 阶段失败。"
-    )
-    for i, kwargs in enumerate(captured_committee_kwargs):
-        actual = kwargs.get("event_brief")
-        assert actual == SENTINEL, (
-            f"❌ 第 {i+1} 次 run_committee 调用没收到 resolve_event_brief_multi 的结果！\n"
-            f"   期望: {SENTINEL!r}（resolve_event_brief_multi 返回的 sentinel）\n"
-            f"   实际 event_brief = {actual!r}\n"
-            f"\n"
-            f"   可能的漂移：\n"
-            f"   - daily_report committee for-loop 没传 event_brief= kwarg\n"
-            f"   - 传了但用了硬编码空字符串\n"
-            f"   - resolve_event_brief_multi 的结果没存到 event_brief 变量"
-        )
+# 已删: test_daily_report_passes_event_brief_to_run_committee_and_macro
+# 历史: 守 daily_report 直接调 run_macro_view + run_committee 时传 event_brief 的契约
+# 2026-05-16 三路径统一架构后, daily_report 改走 run_committee_session,
+# 不再自己 multi 召回 + 注入 macro + 注入 committee. 这些都在 session 内一处完成,
+# 由 test_run_committee_session_passes_all_shared_inputs (event_brief 部分) 统一守护.
+# 原代码可经 `git log -p tests/test_committee_contract.py` 查阅.
 
 
 # ============================================================================

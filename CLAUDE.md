@@ -52,27 +52,30 @@ openInvest 有三个调用层，每层服务不同对象：
 时漏 1 处。2026-05-15 wealth_context_view 漂移就是典型 — prompt 层接了 + e2e
 测试手动传了，但 daily_report / scripts.skill 没人准备 → 三个月没用到。
 
-### 强制 3 层
+### 强制 4 层（2026-05-16 三路径统一架构）
 
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
-| Entry | `jobs/`, `connectors/web_api.py`, `scripts/skill.py:cmd_*` | 触发 + 输出 + 调 shared input loaders | ❌ 直接读 user.md / portfolio.md 准备 LLM 输入（必经 loader）|
-| Service | `core/committee_runner.py` | 单资产端到端 prep + 调原语 | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
-| Primitive | `core/committee.py:run_committee` | 纯函数：prompt 编排 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
+| **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee` | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
+| **Orchestrator** | `core/committee_runner.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ wealth view + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
+| **Service** | `core/committee_runner.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
+| **Primitive** | `core/committee.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
 
 ### Shared Input Loaders（单一可信源）
 
-加新的 cross-entry 参数（如 `event_brief`, `wealth_context_view`）时：
+加新的 cross-entry 参数（如 `event_brief`, `wealth_context_view`, `prior_insights`）时**只改 Orchestrator**：
 
-1. `core/committee.py:run_committee()` 加 explicit kwarg（默认 `""`）
-2. **同文件**加 `load_<name>()` helper（读 IO + graceful 退化空字符串）
-3. 所有 entry 在调 `run_committee` 之前调 `load_<name>()` 传进去
-4. `tests/test_committee_contract.py` 加测试，AST 扫每个 entry 是否真传了
+1. `core/committee_runner.py:run_committee_session()` 加内部步骤读 loader（或加 `<name>_override` kwarg）
+2. `core/committee_runner.py:load_<name>()` 实现 IO 读取 + graceful 退化空字符串
+3. `run_committee_for_symbol` 加 `<name>_override` kwarg，session 一次调好后传进来避免重复
+4. `tests/test_committee_contract.py:test_run_committee_session_*` 加 SENTINEL 测试守
+
+**三个 entry 不需要改任何代码** — session 改完三路径自动同步。
 
 ### 机器强制（不靠记忆）
 
-- **`uv run lint-imports`**（CI 跑）：禁止 `jobs/` / `connectors/` / `scripts/` 直接 `from core.committee import run_committee`，必须走 `committee_runner` 或显式接 loaders。例外在 `pyproject.toml [tool.importlinter]` allow list 维护
-- **`uv run pytest tests/test_committee_contract.py`**：AST 检查 entry 调用是否漏传必需参数
+- **`uv run lint-imports`**（CI 跑）：禁止 `jobs/` / `connectors/` / `scripts/` 直接 `from core.committee import ...`，必须走 `committee_runner`。例外只剩 `scripts.backtest_committee`（研究脚本，与 production 不共享 service layer）
+- **`uv run pytest tests/test_committee_contract.py`**：SENTINEL 契约测试守 session 内部 wealth/event/macro 真的注入 run_committee
 - 想绕过 → CI 红 → 别合
 
 ### 漂移历史
@@ -81,6 +84,7 @@ openInvest 有三个调用层，每层服务不同对象：
 |---|---|---|---|
 | 2026-05-15 | wealth_context_view 三个月没进 production | entry 各自 prep, 漏一处 | import-linter + contract test 上线 |
 | 2026-05-16 | daily_report cron 路径 event_brief 全漏（4 处）：run_macro_view / run_committee for-loop / Gemini prompt 均未注入 event_brief；Gemini prompt 也未注入 wealth_view | daily_report 直调原语，Gemini prompt 是硬编码 f-string，resolve_event_brief_multi 虽已存在但 cron 路径没调用 | resolve_event_brief_multi 调用注入 macro + committee；Gemini prompt 抽 build_gemini_prompt() 纯函数接 wealth_view/event_brief；4 处 SENTINEL 契约测试上线 |
+| 2026-05-16 | 三路径（Skill/Web/Cron）各自手搓 multi-asset orchestrator，3 个月连续 4 次跨 entry 参数漂移事故。**根治**: 抽 `run_committee_session` 作为三路径单一可信源；service layer `run_committee_for_symbol` 同时漏接 prior_insights（Web/GUI 永远看不到 Dreaming） | 缺少统一 orchestrator，每个 entry 自己重建 macro 共享 / event multi 召回 / wealth view 注入 | run_committee_session(symbols=, ...) 主入口；run_committee_for_symbol 加 portfolio_summary_override + prior_insights_override + wealth_context_view override kwargs；3 个 entry 全部改走 session；旧 entry-specific contract test 删除，统一 session 契约守 |
 
 新增漂移事故 → 在这表加一行 + 加新 contract test。
 

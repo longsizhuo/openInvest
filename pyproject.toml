@@ -58,9 +58,6 @@ forbidden_modules = ["core.committee"]
 allow_indirect_imports = "true"
 # allow list: 这些是合法直调（用 shared loader, 或者 daily_report 已经显式 prep）
 ignore_imports = [
-    # daily_report 是历史 entry, 已在 PR fix/wealth-context-drift 接入 load_wealth_context_view
-    # 长期目标是改走 committee_runner.run_committee_for_symbol; 留 ignore 防 immediate breakage
-    "jobs.daily_report -> core.committee",
     # backtest_committee 是研究用，跟 production 委员会不共享 service layer
     "scripts.backtest_committee -> core.committee",
 ]
