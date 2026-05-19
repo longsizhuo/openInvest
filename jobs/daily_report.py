@@ -188,12 +188,20 @@ def run() -> Dict[str, Any]:
     if rate_price is None:
         # 汇率拿不到比较罕见但仍要兜底——AUDCNY 的历史均值约 4.7 当作 sentinel
         # 避免直接抛异常让 daily_report 整体挂掉，但要明确告警 LLM
-        print("⚠️ AUDCNY=X 完全失败，使用历史均值 4.7 兜底")
+        #
+        # 2026-05-19 (A4 修复)：4.7 是 **AUD 专用** 历史均值。当前 fork 用户都
+        # 以 NDQ.AX(AUD) 为主要非 CNY 持仓，这条兜底只对他们生效。fork 用户主要
+        # 持有 USD/EUR 等其他币种时，他们的 cost_currency 走 utils.fx.to_base 自动
+        # 取汇率（USDCNY=X / EURCNY=X），跟这条 fallback 完全无关；total_assets_cny
+        # 那段已经用 to_base 而不是 current_rate 折算非 AUD 持仓。
+        # 不要把 4.7 推广成任意币种兜底——其他币种没汇率应直接 fail-loud 标 stale。
+        print("⚠️ AUDCNY=X 完全失败，使用历史均值 4.7 兜底（AUD-only fallback）")
         store.dream_event({"phase": "price_fetch_failed", "symbol": "AUDCNY=X", "date": today})
         current_rate = 4.7
         data_warnings.append(
-            "\n⚠️ **AUDCNY 汇率今日无法获取，使用历史均值 4.7 兜底**。汇率敏感的 AUD 估值"
-            "可能偏差 ±5%，请勿据此做换汇决策。"
+            "\n⚠️ **AUDCNY 汇率今日无法获取，使用历史均值 4.7 兜底（仅作 AUD 资产估值，"
+            "其他币种走 utils.fx 自动汇率）**。汇率敏感的 AUD 估值可能偏差 ±5%，"
+            "请勿据此做换汇决策。"
         )
     else:
         current_rate = rate_price
@@ -288,7 +296,25 @@ def run() -> Dict[str, Any]:
     if "GC=F" not in skipped_assets and gold_now > 0:
         current_prices["GC=F"] = gold_now
 
-    total_assets_cny = user_status.cash_cny + user_status.cash_aud * current_rate
+    # 2026-05-19: 用 utils.fx.to_base 替代硬编码 AUD 折算。支持任意币种持仓
+    # (USD/EUR/JPY/HKD 等)。之前 USD/EUR 持仓被漏算导致 total_assets_cny 偏低 →
+    # Risk Officer 算集中度虚高。
+    # 2026-05-19 (A3 续修): cash 也通用化遍历，之前只加 AUD，fork 用户的 USD/EUR
+    # 现金被漏算。注意这里不能直接用 utils.fx.total_portfolio_value_cny，因为这一段
+    # 需要按 skipped_assets 精确剔除（cron 路径的 staleness 兜底语义）。
+    from utils.fx import to_base
+    total_assets_cny = user_status.cash_cny
+    for ccy, amt in pm.cash.items():
+        if str(ccy).upper() == "CNY" or not amt:
+            continue  # CNY 已计入；空余额不算
+        ccy_in_cny = to_base(str(ccy).upper(), float(amt), "CNY")
+        if ccy_in_cny is not None:
+            total_assets_cny += ccy_in_cny
+        else:
+            data_warnings.append(
+                f"\n⚠️ **{ccy} 现金折算 CNY 失败**（汇率拉不到），"
+                f"total_assets_cny 漏算这部分。"
+            )
     for h in pm.holdings:
         if h.get("is_tracking_only"):
             continue
@@ -302,12 +328,15 @@ def run() -> Dict[str, Any]:
         cur = current_prices.get(sym)
         if cur is None:
             continue
-        # 折算到 CNY: CNY 直接加；AUD 走 AUDCNY 汇率；其他币种暂不折（v2 行为）
-        if ccy == "CNY":
-            total_assets_cny += units * cur
-        elif ccy == "AUD":
-            total_assets_cny += units * cur * current_rate
-        # USD/EUR 等暂不折算（已知缺口，v3 将引入 utils/fx 模块）
+        local_value = units * cur
+        value_cny = to_base(ccy, local_value, "CNY")
+        if value_cny is None:
+            data_warnings.append(
+                f"\n⚠️ **{sym} 持仓折算 CNY 失败**（{ccy}→CNY 汇率拉不到），"
+                f"total_assets_cny 漏算这部分，集中度会偏高，请勿做大额操作。"
+            )
+            continue
+        total_assets_cny += value_cny
 
     portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices)
     if data_warnings:
@@ -381,6 +410,10 @@ def run() -> Dict[str, Any]:
         if a["symbol"] not in skipped_assets and a["symbol"] in asset_committees
     ])
     gold_snapshot_text = format_gold_report(snap) if snap else "黄金数据获取失败"
+    # 2026-05-19 修复：market_snapshot 持久化段（line 455）引用 macro_data_report
+    # 但之前从未赋值，NameError。补一行从 get_macro_data() 拉，给 daily/<date>.md
+    # 的 market_snapshot section 用（跟 cron 邮件的 macro view 是同源数据）。
+    macro_data_report = get_macro_data()
     # 修复 2026-05-16 漂移：Gemini prompt 委托给 builder 纯函数，
     # wealth_view 和 event_brief 注入 Gemini，让独立 challenge 看到完整上下文
     gemini_prompt = build_gemini_prompt(

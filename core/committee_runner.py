@@ -208,6 +208,90 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
         return ""
 
 
+def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
+    """service layer 默认 portfolio_summary 拼装（含集中度 + 总资产 + 浮盈）
+
+    2026-05-19 修复：Direct 路径（scripts/skill.py:cmd_run_committee）调
+    run_committee_session 时**没传** portfolio_summary_override，service layer
+    之前自拼的简化版只 4 行，缺总资产 / 缺所有持仓 / 缺集中度数字。Risk Officer
+    自己算集中度连续 6 天错（真实 33.4% → 算成 81.6%），推荐错误"减仓"。
+
+    现在默认行为：
+    1. 遍历 pm.holdings 一次性拉所有实仓 current_prices（5d yfinance close）。
+       N 个资产 = N 次 get_history_data，多数用户 ≤5 个 holding，总耗时 < 5s。
+    2. 用 utils.fx.total_portfolio_value_cny 多币种折算总资产。
+    3. 调 utils.portfolio_summary.portfolio_summary_text 拼完整版（与 cron 路径
+       daily_report.py 用同一个 helper）。
+
+    cron 路径仍走 portfolio_summary_override（daily_report.py 自己拼的版本
+    包含 data_warnings 陈旧告警，service layer 拿不到那些）。
+
+    Args:
+        pm: PortfolioManager 实例
+
+    Returns:
+        portfolio_summary 完整文本（含集中度数字）。任何子步骤失败都 graceful
+        退化到旧版精简版，不阻断 committee 主流程。
+    """
+    try:
+        from utils.exchange_fee import get_history_data
+        from utils.fx import total_portfolio_value_cny
+        from utils.portfolio_summary import portfolio_summary_text
+
+        # 一次性拉所有实仓 current_prices。
+        # 黄金 GC=F 必须走 get_gold_snapshot 反推 spot_cny_per_gram（与持仓的
+        # unit=克、cost_currency=CNY 同口径）；直接用 get_history_data("GC=F")
+        # 返回的是 USD/oz，会让市值算错百倍。其他 yfinance symbol 走 5d close。
+        current_prices: Dict[str, float] = {}
+        for h in pm.holdings:
+            if h.get("is_tracking_only"):
+                continue
+            sym = str(h.get("symbol") or "")
+            if not sym:
+                continue
+            units = float(h.get("units", 0) or 0)
+            if units <= 0:
+                continue
+            try:
+                if sym == "GC=F":
+                    # 黄金：克价 in CNY（与持仓 cost_currency=CNY 同口径，
+                    # 避免 USD/oz × FX 算错百倍）
+                    from utils.gold_price import get_gold_snapshot
+                    snap = get_gold_snapshot(offset_pct=0.0)
+                    if snap is not None:
+                        current_prices[sym] = float(snap.spot_cny_per_gram)
+                else:
+                    df = get_history_data(sym, "5d")
+                    if df is not None and not df.empty:
+                        current_prices[sym] = float(df["Close"].iloc[-1])
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    f"_build_default_portfolio_summary: {sym} 价拉取失败已跳过: "
+                    f"{type(e).__name__}: {e}"
+                )
+
+        total_cny, _status = total_portfolio_value_cny(pm, current_prices, base="CNY")
+        return portfolio_summary_text(pm, total_cny, current_prices)
+    except Exception as e:  # noqa: BLE001
+        # 兜底：拉价/折算彻底失败 → 用历史简化版，至少 Risk Officer 还有点上下文
+        log.warning(
+            f"_build_default_portfolio_summary 失败，退化到精简版: "
+            f"{type(e).__name__}: {e}"
+        )
+        cash_cny = pm.cash_amount("CNY")
+        aud_cash = pm.cash_amount("AUD")
+        buffer_cny = float(pm.user.get("exchange_buffer_cny", 0) or 0)
+        risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
+        dry_powder = max(0.0, cash_cny - buffer_cny)
+        return (
+            f"用户风险偏好: {risk_level}\n"
+            f"CNY 现金: ¥{cash_cny:,.0f}（应急金 ¥{buffer_cny:,.0f}，"
+            f"可投 ¥{dry_powder:,.0f}）\n"
+            f"AUD 现金: ${aud_cash:,.0f}\n"
+            f"⚠️ portfolio_summary 完整版构建失败，请勿据此做集中度判断"
+        )
+
+
 def run_committee_for_symbol(
     symbol: str,
     *,
@@ -296,29 +380,18 @@ def run_committee_for_symbol(
         macro_view = run_macro_view(str(macro_data), event_brief=effective_event_brief)
         emit("macro_done", macro_preview=macro_view[:240])
 
-    # 5. Portfolio summary（v2 通用 holdings 接口读）
-    cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-    h = pm.holdings.find(symbol)
-    units = float(h.get("units", 0) or 0) if h else 0.0
-    avg_cost = float(h.get("avg_cost", 0) or 0) if h else 0.0
-    cost_ccy = h.get("cost_currency", "") if h else ""
-    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0) or 0)
-    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
-    dry_powder = max(0.0, cash_cny - buffer_cny)
-
-    # portfolio_summary: 优先 caller override（daily_report 拼了含 total_assets_cny
-    # + data_warnings 的完整版），否则用 service 内精简版
+    # 5. Portfolio summary
+    # 2026-05-19 修复 Direct 路径集中度漂移：之前 service layer 自拼简化版
+    # （只 4 行: 风险/CNY/AUD/目标资产单位），没有总资产、没有所有持仓、没有集中度
+    # 数字，Risk Officer 自己算集中度连续 6 天错算（NDQ 真实 33.4% → LLM 算成
+    # 81.6%）。现在默认走 utils.portfolio_summary.portfolio_summary_text 拼完整版
+    # （含每个 asset 的 concentration_pct + 总资产 + 浮盈），与 cron / Coordinator
+    # 路径对齐。caller override 仍优先（cron daily_report 已经自己拼好了 +
+    # data_warnings）。
     if portfolio_summary_override is not None:
         portfolio_summary = portfolio_summary_override
     else:
-        portfolio_summary = (
-            f"用户风险偏好: {risk_level}\n"
-            f"CNY 现金: ¥{cash_cny:,.0f}（应急金 ¥{buffer_cny:,.0f}，可投 ¥{dry_powder:,.0f}）\n"
-            f"AUD 现金: ${aud_cash:,.0f}\n"
-            f"目标资产 {symbol}: {units} 单位"
-            + (f"，均价 {avg_cost} {cost_ccy}" if avg_cost else "（暂无持仓）")
-        )
+        portfolio_summary = _build_default_portfolio_summary(pm)
 
     # 5.5. WealthContextOfficer view（修复 2026-05-15 漂移: 之前没读 user.md 的
     # wealth_context, Risk Officer 永远按 portfolio cash 判风险）
