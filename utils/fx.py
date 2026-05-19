@@ -107,3 +107,79 @@ def cash_total_in_base(
         if rate is not None:
             total += amt * rate
     return round(total, 2), rates
+
+
+def total_portfolio_value_cny(
+    pm,  # PortfolioManager（避免循环 import 不写类型）
+    current_prices: dict,
+    base: str = "CNY",
+    *,
+    as_of_date: Optional[str] = None,
+) -> tuple[float, dict]:
+    """通用化总资产估算：所有 cash 多币种 + 所有 holdings × current_prices × FX 折算到 base
+
+    替代 7 处 `if ccy == "AUD"` 风格硬编码。fork 用户持 USD/EUR/JPY/HKD 等任意币种
+    都能正确折算；缺价 / 缺汇率单独标 status 不计入 total（避免 0 兜底误导 Risk）。
+
+    Args:
+        pm: PortfolioManager 实例（只读 pm.cash + pm.holdings）
+        current_prices: {symbol: 当前价 in cost_currency} dict。任一资产价格
+            为 None 或缺 key 都视为"价拉不到"，不计入 total
+        base: 目标币种（默认 CNY）
+        as_of_date: backtest / paper trading 用，按当天 close 拉 FX；None=实盘
+
+    Returns:
+        (total_in_base, status_dict)
+            total_in_base: float, 折算后总额（拉不到价/汇率的 entry 不计入）
+            status_dict: {key: "ok" | "missing_price" | "missing_fx" | "tracking_only" |
+                              "zero_units"}
+                key 是 holding symbol 或 cash currency；调用方可以 grep
+                "missing_*" 给 LLM 兜底告警
+    """
+    status: dict = {}
+
+    # 1) cash 部分：多币种循环
+    cash_dict = dict(pm.cash) if hasattr(pm, "cash") else {}
+    total = 0.0
+    for ccy, amt in cash_dict.items():
+        if not amt:
+            status[ccy] = "ok"   # 0 余额视为 ok（不算 fx 漂移）
+            continue
+        converted = to_base(ccy, float(amt), base)
+        if converted is None:
+            status[ccy] = "missing_fx"
+        else:
+            total += converted
+            status[ccy] = "ok"
+
+    # 2) holdings 部分：units × current_prices[sym] × FX
+    holdings_iter = pm.holdings if hasattr(pm, "holdings") else []
+    for h in holdings_iter:
+        sym = str(h.get("symbol", "")) if isinstance(h, dict) else ""
+        if not sym:
+            continue
+        if h.get("is_tracking_only"):
+            status[sym] = "tracking_only"
+            continue
+        units = float(h.get("units", 0) or 0)
+        if units <= 0:
+            status[sym] = "zero_units"
+            continue
+        ccy = str(h.get("cost_currency", "CNY"))
+        price = current_prices.get(sym) if current_prices else None
+        if price is None:
+            # 缺价：用 cost 兜底（与 portfolio_manager.get_user_status 同口径）
+            avg = float(h.get("avg_cost", 0) or 0)
+            if avg <= 0:
+                status[sym] = "missing_price"
+                continue
+            price = avg
+        local_value = units * float(price)
+        value_in_base = to_base(ccy, local_value, base)
+        if value_in_base is None:
+            status[sym] = "missing_fx"
+            continue
+        total += value_in_base
+        status[sym] = "ok"
+
+    return round(total, 2), status

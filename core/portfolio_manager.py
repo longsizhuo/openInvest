@@ -150,7 +150,7 @@ class PortfolioManager:
     def get_user_status(
         self,
         current_prices: Optional[Dict[str, float]],
-        exchange_rate: float,
+        exchange_rate: Optional[float] = None,
     ) -> UserStatus:
         """汇总用户状态 → daily_report / committee 用
 
@@ -159,12 +159,20 @@ class PortfolioManager:
                 拉不到，**不要在 dict 里塞 0**——直接 omit key（用 cost 兜底）或
                 设为 None（剔除该 holding 不进总市值，避免 Risk Officer 把 0 误读成
                 "集中度爆表，建议清仓"）。传 None 表示全部资产没拉到价。
-            exchange_rate: AUD→CNY 汇率（用于 cost_currency=AUD 的 holding 折算）
+            exchange_rate: **已 deprecated** (2026-05-19 A2 fix)。历史上是 AUD→CNY
+                汇率的单参数硬编码，假设用户只持 AUD。现在内部走 utils.fx.to_base
+                自取所有币种汇率（USD/EUR/HKD/AUD/...）。若显式传入则仍作为 AUD→CNY
+                的覆盖值用（保留给 test_portfolio_manager.py 的 deterministic 测试），
+                不传则自动调 utils.fx.get_fx_rate("AUD", "CNY")。
 
         v2 通用化：之前是写死 NDQ.AX 一个分支接 current_stock_price，fork 用户持
         AAPL/510300 完全按 cost 兜底估值，市值偏差大。改成 dict 让所有 holding
         都能用最新价。
+        2026-05-19 (A1/A2 修复)：之前 portfolio_value 只支持 CNY/AUD 两条分支，
+        USD/HKD/EUR 等持仓被漏算 → Risk Officer 看到的总市值偏低 → 集中度判断错。
+        现在用 utils.fx.to_base 折算所有币种。
         """
+        from utils.fx import get_fx_rate, to_base
         cash_cny = self.cash_amount("CNY")
         cash_aud = self.cash_amount("AUD")
         exchange_buffer = float(self.user.get("exchange_buffer_cny", 0) or 0)
@@ -180,8 +188,35 @@ class PortfolioManager:
             max_single = float(self.strategy.get("max_single_invest_cny", 10000) or 10000)
             primary_asset = str(self.strategy.get("target_asset", ""))
 
-        # 总市值聚合：所有 holding 优先用 current_prices[sym]，没有就 cost 兜底
-        portfolio_value = cash_cny + cash_aud * exchange_rate
+        # 总市值聚合：cash 多币种（不只是 CNY/AUD）+ holdings 用 to_base 折算
+        # 显式传入 exchange_rate 时用它作 AUD→CNY 覆盖（保留 deterministic 测试兼容）；
+        # 否则走 utils.fx 自动拉。
+        def _aud_to_cny_rate() -> Optional[float]:
+            if exchange_rate is not None:
+                return float(exchange_rate)
+            return get_fx_rate("AUD", "CNY")
+
+        def _ccy_to_cny(amount: float, ccy: str) -> Optional[float]:
+            """折算到 CNY；AUD 优先用 exchange_rate 覆盖，其他走 to_base"""
+            if amount == 0:
+                return 0.0
+            if ccy == "CNY":
+                return amount
+            if ccy == "AUD" and exchange_rate is not None:
+                return amount * float(exchange_rate)
+            return to_base(ccy, amount, "CNY")
+
+        portfolio_value = cash_cny
+        # 多币种 cash 全部折算（不只 CNY/AUD）
+        for ccy, amt in self.cash.items():
+            ccy_u = str(ccy).upper()
+            if ccy_u == "CNY":
+                continue   # 已经计入 cash_cny
+            converted = _ccy_to_cny(float(amt or 0), ccy_u)
+            if converted is not None:
+                portfolio_value += converted
+            # 拉不到汇率的币种静默跳过（不引入 0 兜底）
+
         for h in self.holdings:
             if h.get("is_tracking_only"):
                 continue   # 追踪仓不计入资产
@@ -197,11 +232,10 @@ class PortfolioManager:
             else:
                 price = avg
             value_local = units * price
-            if ccy == "CNY":
-                portfolio_value += value_local
-            elif ccy == "AUD":
-                portfolio_value += value_local * exchange_rate
-            # 其他币种（USD/HKD 等）暂不折算 —— v3 加 multi-FX 时一起处理
+            value_cny = _ccy_to_cny(value_local, ccy)
+            if value_cny is not None:
+                portfolio_value += value_cny
+            # 拉不到汇率的 holding 静默跳过（缺口告警在 daily_report 那层做）
 
         available = max(0.0, cash_cny - exchange_buffer)
         disposable = min(available, max_single)
