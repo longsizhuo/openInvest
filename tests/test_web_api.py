@@ -741,3 +741,126 @@ def test_openapi_includes_strategy_writes(client):
     assert "post" in paths["/api/strategy/asset"]
     assert "put" in paths["/api/strategy/asset/{symbol}"]
     assert "delete" in paths["/api/strategy/asset/{symbol}"]
+
+
+# ============ GUI 同步链路回归测试 ============
+# 2026-05-19 用户反馈"GUI 不显示 NapCat 同步的持仓 / 决策回放空白"。
+# 后端本身没缓存（每请求 new PortfolioManager → 直接读 disk），但中间层
+# 可能缓存住 GET 响应。这一组测试守住三件事：
+#   1. 写 portfolio.md 后下一次 /api/holdings 立即拿到新数据
+#   2. 写一份委员会 transcript 后 /api/committee_sessions 立即列出
+#   3. /api/portfolio /api/holdings /api/committee_sessions 必须发
+#      `Cache-Control: no-store`（防 Caddy / CDN / 浏览器缓存住）
+
+
+def test_holdings_reads_disk_no_cache(client, tmp_store):
+    """模拟 NapCat 写 portfolio.md：下一次 /api/holdings 必须看到新增的资产"""
+    # 初始：tmp_store 已经种了 NDQ.AX + GC=F
+    r1 = client.get("/api/holdings")
+    syms_before = {h["symbol"] for h in r1.json()["holdings"]}
+    assert syms_before == {"NDQ.AX", "GC=F"}
+
+    # 模拟 NapCat 在锁内追加一个 AAPL 持仓（绕过 web_api 走 PortfolioManager 的写路径）
+    from core.portfolio_manager import PortfolioManager as _PM
+    pm = _PM(store=tmp_store)
+    with pm.with_portfolio_tx() as p:
+        holdings = list(p.get("holdings") or [])
+        holdings.append({
+            "symbol": "AAPL",
+            "kind": "equity",
+            "units": 10,
+            "unit_label": "股",
+            "avg_cost": 180.0,
+            "cost_currency": "USD",
+            "is_tracking_only": False,
+        })
+        p["holdings"] = holdings
+
+    # 关键断言：不能依赖时间间隔，下一次 GET 必须立即看到 AAPL
+    r2 = client.get("/api/holdings")
+    syms_after = {h["symbol"] for h in r2.json()["holdings"]}
+    assert "AAPL" in syms_after, "portfolio.md 写完后 /api/holdings 必须立刻反映"
+    # 同时验证 no-store header（防中间层缓存）
+    assert r2.headers.get("cache-control") == "no-store"
+
+
+def test_portfolio_endpoint_no_store_header(client):
+    """/api/portfolio 也必须发 no-store"""
+    r = client.get("/api/portfolio")
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "no-store"
+
+
+def test_portfolio_state_endpoint(client, tmp_store):
+    """轻量 mtime 探针端点：agent / GUI 可以靠这个判断是否需要拉全量"""
+    r = client.get("/api/portfolio/state")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["exists"] is True
+    assert body["mtime"] is not None
+    assert body["size"] > 0
+    assert body["holdings_count"] == 2  # NDQ.AX + GC=F
+    assert "CNY" in body["cash_currencies"]
+    assert r.headers.get("cache-control") == "no-store"
+
+
+def test_committee_sessions_reads_disk_after_first_run(client, tmp_store):
+    """模拟首次跑完委员会：transcript 写到 memory/.committee/<date>/<sym>.md
+    后，/api/committee_sessions 必须立刻能列出。
+
+    用户报告"决策回放看不到内容"，这条守住"写完 .md 后端确实能读到"。
+    """
+    # 初始：没跑过委员会 → 空列表
+    r0 = client.get("/api/committee_sessions")
+    assert r0.status_code == 200
+    assert r0.json()["count"] == 0
+    assert r0.headers.get("cache-control") == "no-store"
+
+    # 模拟 core/committee.py:_persist 落盘的格式
+    committee_dir = tmp_store.root / ".committee" / "2026-05-19"
+    committee_dir.mkdir(parents=True, exist_ok=True)
+    (committee_dir / "NDQ_AX.md").write_text(
+        "# Committee: BetaShares Nasdaq 100 ETF\n\n"
+        "**Date**: 2026-05-19\n"
+        "**Verdict**: HOLD (confidence 0.62)\n"
+        "**Dominant view**: macro\n"
+        "**Suggested allocation CNY**: 0\n\n"
+        "## Macro Strategist (shared)\n\nfoo\n",
+        encoding="utf-8",
+    )
+
+    # 立刻 GET 应该看到 1 条
+    r1 = client.get("/api/committee_sessions")
+    body = r1.json()
+    assert body["count"] == 1, "transcript 写完后 list 端点必须立刻看到"
+    s = body["sessions"][0]
+    assert s["date"] == "2026-05-19"
+    assert s["symbol"] == "NDQ_AX"
+    assert s["verdict"] == "HOLD"
+    assert s["confidence"] == 0.62
+    assert s["suggested_alloc_cny"] == 0.0
+
+    # 详情端点也必须能读到完整 markdown
+    r2 = client.get("/api/committee_sessions/2026-05-19/NDQ_AX")
+    assert r2.status_code == 200
+    assert "BetaShares" in r2.json()["content"]
+
+
+def test_committee_sessions_lists_multiple_dates_reverse_sorted(client, tmp_store):
+    """多天的 transcript 必须按日期倒序"""
+    base = tmp_store.root / ".committee"
+    for date in ["2026-05-17", "2026-05-18", "2026-05-19"]:
+        d = base / date
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "GC_F.md").write_text(
+            f"# Committee\n**Date**: {date}\n"
+            "**Verdict**: HOLD (confidence 0.5)\n"
+            "**Dominant view**: macro\n"
+            "**Suggested allocation CNY**: 0\n",
+            encoding="utf-8",
+        )
+
+    r = client.get("/api/committee_sessions?limit=10")
+    sessions = r.json()["sessions"]
+    dates = [s["date"] for s in sessions]
+    assert dates == ["2026-05-19", "2026-05-18", "2026-05-17"], "必须按日期倒序"

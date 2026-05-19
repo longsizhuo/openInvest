@@ -26,7 +26,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -64,6 +64,7 @@ def cmd_status(_: argparse.Namespace) -> None:
     """v2 通用化：从 cash dict + holdings list 读，对外保持原 JSON 结构兼容老 agent"""
     from utils.gold_price import get_gold_snapshot
     from core.portfolio_manager import PortfolioManager
+    from utils.fx import total_portfolio_value_cny
     pm = PortfolioManager()
 
     cash_cny = pm.cash_amount("CNY")
@@ -78,6 +79,22 @@ def cmd_status(_: argparse.Namespace) -> None:
     audcny = _safe_close("AUDCNY=X")
     snap = get_gold_snapshot(offset_pct=0.0)
     gold_now = snap.spot_cny_per_gram if snap else 0.0
+
+    # 2026-05-19 (A6 修复): total_assets_cny 之前写死 cash + aud*fx + ndq*price*fx +
+    # gold*price，fork 用户的 AAPL/0700.HK/BTC-USD 全漏算。改走 utils.fx.total_portfolio_value_cny
+    # 通用化遍历所有 holdings + 多币种 cash 折算到 CNY。
+    current_prices: Dict[str, float] = {}
+    for h in pm.holdings:
+        sym = str(h.get("symbol") or "")
+        if not sym or h.get("is_tracking_only"):
+            continue
+        if sym == "NDQ.AX":
+            current_prices[sym] = ndq_price
+        elif sym == "GC=F":
+            current_prices[sym] = gold_now
+        else:
+            current_prices[sym] = _safe_close(sym)
+    total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
 
     out = {
         "user": {
@@ -112,10 +129,7 @@ def cmd_status(_: argparse.Namespace) -> None:
             ) if k in h}
             for h in pm.holdings
         ],
-        "total_assets_cny": round(
-            cash_cny + aud_cash * audcny
-            + ndq_shares * ndq_price * audcny
-            + gold_grams * gold_now, 2),
+        "total_assets_cny": total_cny,
         "fx": {"audcny": round(audcny, 4)},
         "live_prices": {
             "gold_usd_per_oz": snap.gold_usd_per_oz if snap else None,
@@ -265,13 +279,23 @@ def cmd_what_if(args: argparse.Namespace) -> None:
     aud_cash = pm.cash_amount("AUD")
 
     def _value_in_cny(holding: Dict[str, Any], price: float, fx: float) -> float:
+        """折算 holding 当前情景下 CNY 市值。
+
+        2026-05-19 (A5 修复)：之前 if ccy == "AUD" 用 fx，其他币种当 1:1 → USD/EUR
+        持仓 what_if 少乘 ~7 倍 / ~7.7 倍。改成 utils.fx.to_base 折算所有币种。
+        AUD 特殊：caller 传入的 fx 是情景汇率（用户可指定 --audcny 模拟），优先
+        用这个覆盖；其他币种走实时汇率（情景模拟暂不支持多 FX 联动调）。
+        """
+        from utils.fx import to_base
         units = float(holding.get("units", 0) or 0)
         ccy = str(holding.get("cost_currency", "CNY"))
+        local_value = units * price
         if ccy == "CNY":
-            return units * price
+            return local_value
         if ccy == "AUD":
-            return units * price * fx
-        return units * price  # 其他币种暂当 1:1（v3 多币种再处理）
+            return local_value * fx   # 情景汇率覆盖
+        converted = to_base(ccy, local_value, "CNY")
+        return converted if converted is not None else local_value  # 拉不到汇率退化
 
     cur_total = cash_cny + aud_cash * cur_audcny
     new_total = cash_cny + aud_cash * new_audcny
@@ -424,22 +448,20 @@ def cmd_correlate(args: argparse.Namespace) -> None:
 
     # 6. 可选 LLM 给一句话总结
     if args.with_llm:
-        import os
-        if not os.getenv("DEEPSEEK_API_KEY"):
-            out["llm_summary"] = "(--with-llm 需要 DEEPSEEK_API_KEY)"
+        from utils.llm import get_llm_config_safe, needs_thinking_disabled
+        api_key, base_url, model_name, _provider = get_llm_config_safe()
+        if not api_key:
+            out["llm_summary"] = "(--with-llm 需要 LLM_API_KEY 或 DEEPSEEK_API_KEY)"
         else:
             try:
                 from openai import OpenAI
-                client = OpenAI(
-                    api_key=os.getenv("DEEPSEEK_API_KEY"),
-                    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-                )
+                client = OpenAI(api_key=api_key, base_url=base_url)
                 ctx = json.dumps({
                     "symbols": symbols, "corr": out["correlation_matrix"],
                     "sectors": sectors, "macro_corr": macro_corr,
                 }, ensure_ascii=False)
                 resp = client.chat.completions.create(
-                    model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+                    model=model_name,
                     messages=[
                         {"role": "system", "content": (
                             "你是金融关联分析师。给定多个资产的相关性矩阵 + sector + macro 关联，"
@@ -451,7 +473,8 @@ def cmd_correlate(args: argparse.Namespace) -> None:
                     ],
                     temperature=0.2,
                     timeout=30,
-                    extra_body={"thinking": {"type": "disabled"}} if "v4" in os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash") else None,
+                    # DeepSeek v4 需要 disable thinking；千问/智谱/OpenAI 不需要
+                    extra_body={"thinking": {"type": "disabled"}} if needs_thinking_disabled(model_name) else None,
                 )
                 out["llm_summary"] = resp.choices[0].message.content
             except Exception as e:
@@ -528,49 +551,42 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
     snap = get_gold_snapshot(offset_pct=0.0)
     gold_ctx = format_gold_report(snap) if (snap and target.get("type") == "metal") else ""
 
-    # 详细的 portfolio 上下文给 Risk Officer (v2 通用化读)
-    cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-    ndq_h = pm.holdings.find("NDQ.AX")
-    gold_h = pm.holdings.find("GC=F")
-    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
-    ndq_cost = float(ndq_h.get("avg_cost", 0) or 0) if ndq_h else 0.0
-    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
-    gold_cost = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
-    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
-    dry_powder = max(0.0, cash_cny - buffer_cny)
-    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
+    # 2026-05-19 (A7 修复): 之前手搓 portfolio_summary 写死 NDQ + 黄金，fork 用户的
+    # AAPL/0700.HK/BTC-USD 完全不进 Risk Officer 视野；total_cny 漏算非 NDQ/gold
+    # 持仓 → 集中度严重低估。改用 daily_report_builder.portfolio_summary_text +
+    # utils.fx.total_portfolio_value_cny，跟 cron 路径 (daily_report) 用同一套
+    # 通用化逻辑（动态遍历所有 holdings，多币种 to_base 折算）。
+    from jobs.daily_report_builder import portfolio_summary_text
+    from utils.fx import total_portfolio_value_cny
 
-    audcny = _safe_close("AUDCNY=X")
     gold_now = snap.spot_cny_per_gram if snap else 0.0
-    total_cny = (
-        cash_cny + aud_cash * audcny
-        + ndq_shares * _safe_close("NDQ.AX") * audcny
-        + gold_grams * gold_now
-    )
+    # 通用化 current_prices：所有 holdings 拉实时价，黄金特殊处理用 spot_cny_per_gram
+    current_prices: Dict[str, float] = {}
+    for h in pm.holdings:
+        sym = str(h.get("symbol") or "")
+        if not sym or h.get("is_tracking_only"):
+            continue
+        if sym == "GC=F":
+            current_prices[sym] = gold_now
+        else:
+            current_prices[sym] = _safe_close(sym)
 
-    ndq_now = _safe_close("NDQ.AX")
-    ndq_pnl_pct = ((ndq_now / ndq_cost) - 1) * 100 if ndq_cost > 0 else 0
-    gold_pnl_pct = ((gold_now / gold_cost) - 1) * 100 if gold_cost > 0 else 0
-
-    portfolio_summary = (
-        f"用户风险偏好: {risk_level}\n"
-        f"总资产估算: ¥{total_cny:,.0f}\n"
-        f"  - CNY 现金: ¥{cash_cny:,.0f} (应急金 ¥{buffer_cny:,} 不可投)\n"
-        f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}\n"
-        f"  - AUD 现金: ${aud_cash:,.0f}\n"
-        f"  - **NDQ.AX**: {ndq_shares} 股, 均价 ${ndq_cost:.4f}, 现价 ${ndq_now:.2f}, "
-        f"浮盈 {ndq_pnl_pct:+.2f}%\n"
-        f"  - **黄金 (浙商)**: {gold_grams:.4f}g, 均价 ¥{gold_cost:.2f}/g, "
-        f"现价 ¥{gold_now:.2f}/g, 浮盈 {gold_pnl_pct:+.2f}%"
-    )
+    total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
+    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices)
     # 用 shared loader (2026-05-16 三路径统一: 三 entry 不再各自重复实现)
     from core.committee_runner import load_prior_insights
     insights = load_prior_insights(target, pm)
 
+    # 2026-05-18 漂移修复: skill 路径之前没接 wealth_context_view，Risk Officer
+    # 永远看不到 family_backup / account_purpose，按 PWM 老逻辑误判超配。
+    # 现在和 session orchestrator 用同一份 loader。
+    from core.committee import load_wealth_context_view
+    wealth_view = load_wealth_context_view()
+
     out = {
         "asset": target,
         "portfolio_summary": portfolio_summary,
+        "wealth_context_view": wealth_view,  # Claude worker 必须把这个塞进 Risk Officer R1/R2 prompt
         "macro_data": macro_data,
         "market_data": market,
         "regime_brief": regime_brief,  # Claude worker 必须把这个塞进 Quant Round 1/2 prompt
@@ -592,11 +608,17 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             "  Round 1 - 独立陈述: Macro (跨资产共享) + Quant + Risk Officer 各自看自己的数据\n"
             "  Round 2 - 横向交流: Quant 看到 Risk 报告后调整 + Risk 看到 Quant 报告后调整\n"
             "  Round 3 - CIO 综合 4 份输出 + portfolio_summary，输出完整 memo\n"
-            "**重要**: 召唤 Quant Round 1 worker 时，必须把 regime_brief 字段塞进 prompt:\n"
+            "**Quant 必须塞 regime_brief**: 召唤 Quant Round 1/2 worker 时，prompt 模板:\n"
             '  "<paste prompts.quant_round1>\\n\\n# 市场 Regime:\\n<paste regime_brief>'
             '\\n\\n# 市场数据:\\n<paste market_data>"\n'
-            "Quant Round 2 worker 同样把 regime_brief 重新塞一次，确保它在 cross-challenge 时\n"
-            "仍然受 REGIME 硬保护规则约束（防止震荡市底部被 Risk 带跑改 SIGNAL）。\n"
+            "  确保 REGIME 硬保护规则约束（防震荡市底部被 Risk 带跑改 SIGNAL）。\n"
+            "**Risk Officer 必须塞 wealth_context_view**（2026-05-18 漂移修复）:\n"
+            '  "<paste prompts.risk_round1>\\n\\n# 用户持仓:\\n<paste portfolio_summary>'
+            '\\n\\n# Wealth Context (off-portfolio 真实流动性):\\n<paste wealth_context_view>'
+            '\\n\\n# 长期模式:\\n<paste prior_insights>"\n'
+            "  确保 Risk Officer 能拿到 SOLVENCY_BUFFER_LEVEL（family_backup_available\n"
+            "  + account_purpose 折算后的真实流动性等级），不按 PWM 老逻辑误判超配。\n"
+            "  Round 2 Risk 同样塞，让升级判断仍基于正确的 buffer level。\n"
             "请依次扮演 6 段输出，用以下分隔符：\n"
             "=== MACRO ===\n=== QUANT_R1 ===\n=== RISK_R1 ===\n"
             "=== QUANT_R2 ===\n=== RISK_R2 ===\n=== CIO ===\n"
@@ -623,13 +645,15 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     """
     import os
 
-    if not os.getenv("DEEPSEEK_API_KEY"):
+    # LLM_API_KEY（通用）或 DEEPSEEK_API_KEY（向后兼容）都接受
+    if not (os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY")):
         _print_json({
             "status": "error",
-            "error": "DEEPSEEK_API_KEY 未设。Direct 路径必须有 DeepSeek key。",
+            "error": "LLM_API_KEY / DEEPSEEK_API_KEY 未设。Direct 路径必须有 LLM key。",
             "hint": (
                 "走 Coordinator 路径（在 Claude Code 里用 prepare_committee + spawn"
-                " subagent）不需要 key。或在 .env 里加 DEEPSEEK_API_KEY 后重试。"
+                " subagent）不需要 key。或在 .env 里加 LLM_API_KEY（推荐）或"
+                " DEEPSEEK_API_KEY 后重试。"
             ),
         })
         sys.exit(1)
@@ -1079,7 +1103,8 @@ def cmd_doctor(_: argparse.Namespace) -> None:
 
     # 2) .env 凭据
     env_path = ROOT / ".env"
-    has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY"))
+    # LLM_API_KEY 优先；兼容老 fork 用户的 DEEPSEEK_API_KEY
+    has_deepseek = bool(os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY"))
     has_email_sender = bool(os.getenv("EMAIL_SENDER"))
     has_email_pass = bool(os.getenv("EMAIL_PASSWORD"))
     checks.append({
@@ -1095,7 +1120,10 @@ def cmd_doctor(_: argparse.Namespace) -> None:
     checks.append({
         "name": "deepseek_key",
         "status": "ok" if has_deepseek else "missing",
-        "detail": "DEEPSEEK_API_KEY 已设" if has_deepseek else "DEEPSEEK_API_KEY 缺失",
+        "detail": (
+            "LLM_API_KEY / DEEPSEEK_API_KEY 已设" if has_deepseek
+            else "LLM_API_KEY / DEEPSEEK_API_KEY 均缺失"
+        ),
         "hint": (
             None if has_deepseek else
             "向用户引导：去 https://platform.deepseek.com 注册 → API keys 页面创建 "
@@ -1119,30 +1147,35 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         ),
     })
 
-    # 3) DeepSeek key 实测可达（audit PM Major: 失败前置）
+    # 3) LLM key 实测可达（audit PM Major: 失败前置）
+    # 用统一的 utils.llm 读 base_url/key，支持 LLM_* 切千问/智谱
     deepseek_reachable = "skipped"
-    deepseek_detail = "DEEPSEEK_API_KEY 未设，跳过实测"
+    deepseek_detail = "LLM_API_KEY / DEEPSEEK_API_KEY 未设，跳过实测"
     if has_deepseek:
         try:
             import requests
-            base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+            from utils.llm import get_llm_config_safe
+            _llm_key, _llm_base, _llm_model, _llm_provider = get_llm_config_safe()
+            # base_url 可能已含 /v1（如 MiMo Token Plan），也可能不含（如 DeepSeek 默认）
+            _base_clean = _llm_base.rstrip("/")
+            _models_path = "/models" if _base_clean.endswith("/v1") else "/v1/models"
             r = requests.get(
-                f"{base_url}/v1/models",
-                headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+                f"{_base_clean}{_models_path}",
+                headers={"Authorization": f"Bearer {_llm_key}"},
                 timeout=8,
             )
             if r.status_code == 200:
                 deepseek_reachable = "ok"
-                deepseek_detail = "DeepSeek API 响应 200，key 有效"
+                deepseek_detail = f"LLM API ({_llm_base}) 响应 200，key 有效"
             elif r.status_code == 401:
                 deepseek_reachable = "auth_failed"
-                deepseek_detail = "DeepSeek 返回 401，key 无效或已过期"
+                deepseek_detail = f"LLM API ({_llm_base}) 返回 401，key 无效或已过期"
             else:
                 deepseek_reachable = "unreachable"
-                deepseek_detail = f"DeepSeek 返回 HTTP {r.status_code}"
+                deepseek_detail = f"LLM API ({_llm_base}) 返回 HTTP {r.status_code}"
         except Exception as e:
             deepseek_reachable = "network_error"
-            deepseek_detail = f"无法连接 DeepSeek: {type(e).__name__}: {e}"
+            deepseek_detail = f"无法连接 LLM API: {type(e).__name__}: {e}"
     checks.append({
         "name": "deepseek_reachable",
         "status": deepseek_reachable if deepseek_reachable in ("ok", "skipped") else "missing",
@@ -1306,20 +1339,29 @@ Symbol 映射规则：
 
 
 def _parse_holdings_with_llm(
-    description: str, api_key: str, base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-v4-flash",
+    description: str,
+    api_key: str,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """调 DeepSeek 把"510300 ETF 3000股 4.2元 + 余额宝 5万"这种自然语言转成 v2 持仓 JSON。
+    """调 LLM（默认 DeepSeek，可换千问/智谱）把"510300 ETF 3000股 4.2元 + 余额宝 5万"
+    这种自然语言转成 v2 持仓 JSON。
 
     返回 {"cash": {...}, "holdings": [...]}.
     出错时抛异常，让 cmd_init 决定回退策略（不阻塞 onboarding）。
+
+    base_url / model 不传 → 走 utils.llm 默认值（LLM_*，fallback DEEPSEEK_*）
     """
     from openai import OpenAI
+    from utils.llm import get_llm_config_safe, needs_thinking_disabled
+    _ak, _bu, _m, _p = get_llm_config_safe()
+    base_url = base_url or _bu
+    model = model or _m
 
     client = OpenAI(api_key=api_key, base_url=base_url)
-    # v4-flash 默认 thinking 模式，关掉走旧 chat 行为
+    # DeepSeek v4 默认 thinking 模式，关掉走旧 chat 行为；千问/智谱不需要
     extra_body = {}
-    if "v4" in model.lower() or model == "deepseek-chat":
+    if needs_thinking_disabled(model):
         extra_body["thinking"] = {"type": "disabled"}
     resp = client.chat.completions.create(
         model=model,
@@ -1522,22 +1564,30 @@ def cmd_init(args: argparse.Namespace) -> None:
     holdings_parse_note: str = ""
 
     if not holdings_v2 and holdings_text:
-        api_key = env_data.get("DEEPSEEK_API_KEY", "").strip()
+        # 优先 LLM_API_KEY（通用），兼容 DEEPSEEK_API_KEY（fork 用户老 env）
+        api_key = (
+            env_data.get("LLM_API_KEY", "").strip()
+            or env_data.get("DEEPSEEK_API_KEY", "").strip()
+        )
         if api_key:
             try:
+                # base_url 同样优先 LLM_BASE_URL，兜底 DEEPSEEK_BASE_URL，再兜底 utils.llm 默认
+                base_url = (
+                    env_data.get("LLM_BASE_URL")
+                    or env_data.get("DEEPSEEK_BASE_URL")
+                    or "https://api.deepseek.com"
+                )
                 holdings_v2 = _parse_holdings_with_llm(
                     holdings_text,
                     api_key=api_key,
-                    base_url=env_data.get(
-                        "DEEPSEEK_BASE_URL", "https://api.deepseek.com",
-                    ),
+                    base_url=base_url,
                 )
-                holdings_parse_note = "parsed via DeepSeek"
+                holdings_parse_note = "parsed via LLM"
             except Exception as exc:  # noqa: BLE001 LLM 失败不阻塞 onboarding
                 holdings_parse_note = f"LLM parse failed ({exc!s}); fell back to v1 fields"
         else:
             holdings_parse_note = (
-                "holdings_description 提供了，但 DEEPSEEK_API_KEY 缺失 —— "
+                "holdings_description 提供了，但 LLM_API_KEY / DEEPSEEK_API_KEY 缺失 —— "
                 "已回退到 v1 cash/ndq_shares 字段。配 key 后跑 init --force 重做。"
             )
 
@@ -1552,8 +1602,12 @@ def cmd_init(args: argparse.Namespace) -> None:
             holdings_parse_note += f"; v2 write failed: {exc!s}"
 
     # 4) 第一次 init 后跑 doctor 让 Claude 知道还差什么
+    # LLM_API_KEY 或 DEEPSEEK_API_KEY 都算"配齐了"
+    _has_llm_key = bool(
+        env_data.get("LLM_API_KEY") or env_data.get("DEEPSEEK_API_KEY")
+    )
     final_checks_status = "completed_full" if (
-        env_data.get("DEEPSEEK_API_KEY") and env_data.get("EMAIL_SENDER")
+        _has_llm_key and env_data.get("EMAIL_SENDER")
     ) else "completed_partial"
 
     # ---------- next_step 话术组装 ----------
@@ -1563,7 +1617,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     #   3. completed_full → 正常 onboarding 完成话术
     #   4. completed_partial（无 holdings_description 场景）→ 告知凭据不完整
     _holdings_desc_given_no_key = (
-        bool(holdings_text) and not env_data.get("DEEPSEEK_API_KEY", "").strip()
+        bool(holdings_text)
+        and not env_data.get("LLM_API_KEY", "").strip()
+        and not env_data.get("DEEPSEEK_API_KEY", "").strip()
     )
 
     if _holdings_desc_given_no_key:
@@ -1632,8 +1688,12 @@ def _interactive_prompt() -> Dict[str, Any]:
         v = input(f"{prompt}{suffix}: ").strip()
         return v or default
 
-    # DeepSeek key 先问 —— 决定后面持仓走自然语言还是手动字段
-    deepseek_key = ask("DeepSeek API Key (sk-... 可留空跳过)", "")
+    # LLM key 先问 —— 决定后面持仓走自然语言还是手动字段
+    # 兼容老用户：变量名仍叫 deepseek_key（写到 .env 也仍是 DEEPSEEK_API_KEY），
+    # 但提示语已松绑为"任意 OpenAI 兼容 API"
+    deepseek_key = ask(
+        "LLM API Key (DeepSeek sk-xxx / 千问 sk-xxx / 智谱 xxx，可留空跳过)", "",
+    )
 
     profile: Dict[str, Any] = {
         "name": ask("姓名 / display name", "Anonymous"),
