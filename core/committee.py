@@ -102,13 +102,16 @@ def _create_agent(
     保留 Hybrid 设计：caller 仍传 baseline brief 做最低保障，LLM 主动 tool
     call 是补充查询；DeepSeek tool calling 弱时能 graceful 降级。
     """
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+    # 统一从 utils.llm 读 LLM 配置（默认 DeepSeek，支持 LLM_* env 切换千问/智谱/Kimi）
+    from utils.llm import get_llm_config_safe
+    api_key, base_url, model_name, provider_litellm = get_llm_config_safe()
     if not api_key:
-        print("❌ DEEPSEEK_API_KEY 缺失")
+        print("❌ LLM_API_KEY 或 DEEPSEEK_API_KEY 缺失")
         return None
     # v3 透明化：把 role/asset/round 传进 telemetry meta，让 LLM 调用记录可按维度切片
     from core.llm_telemetry import TelemetryMeta
-    model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    # SDKAgent.provider 目前只支持 "deepseek" / "openai"（决定客户端怎么造）；
+    # 千问 / 智谱 / Kimi 都走 OpenAI 兼容协议，沿用 "deepseek" 分支即可（传 api_key+base_url）
     meta = TelemetryMeta(
         agent_role=role,
         asset=asset,
@@ -120,7 +123,7 @@ def _create_agent(
         system_prompt=system_prompt,
         model=model_name,
         api_key=api_key,
-        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        base_url=base_url,
         temperature=temperature,
         enable_tools=search_enabled,
         max_tool_iterations=4,

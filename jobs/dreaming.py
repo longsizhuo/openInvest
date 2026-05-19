@@ -304,19 +304,20 @@ def _llm_verify_candidates(
         f"候选 JSON:\n{json.dumps(minimal, ensure_ascii=False, indent=2)}"
     )
 
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    # 统一从 utils.llm 读 LLM 配置（默认 DeepSeek，可通过 LLM_* env 换千问/智谱）
+    from utils.llm import get_llm_config_safe, needs_thinking_disabled
+    api_key, base_url, model, _provider = get_llm_config_safe()
     if not api_key:
-        log.warning("DEEPSEEK_API_KEY 未设，跳过 LLM 验伪 (全部 KEEP)")
+        log.warning("LLM_API_KEY / DEEPSEEK_API_KEY 未设，跳过 LLM 验伪 (全部 KEEP)")
         return [True] * len(candidates), []
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url=base_url)
-        # v4-flash 默认 thinking 模式且不兼容 response_format，需 disable thinking
+        # DeepSeek v4 默认 thinking 模式且不兼容 response_format，需 disable thinking；
+        # 千问/智谱/OpenAI 等不需要这个 extra_body
         extra_body = {}
-        if "v4" in model.lower() or model == "deepseek-chat":
+        if needs_thinking_disabled(model):
             extra_body["thinking"] = {"type": "disabled"}
         response = client.chat.completions.create(
             model=model,

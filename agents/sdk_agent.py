@@ -23,6 +23,7 @@ from openai import OpenAI
 
 from agents.tools import TOOL_DEFINITIONS, execute_tool_call
 from core.llm_telemetry import TelemetryMeta, record_llm_call, record_tool_call
+from utils.llm import get_thinking_disable_kwargs
 
 
 @dataclass
@@ -49,7 +50,7 @@ class SDKAgent:
         self,
         *,
         system_prompt: str,
-        model: str = "deepseek-v4-flash",
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         temperature: float = 0.2,
@@ -58,6 +59,10 @@ class SDKAgent:
         provider: str = "deepseek",
         telemetry_meta: Optional[TelemetryMeta] = None,
     ):
+        # caller 不传 model → 走 utils.llm.get_llm_config（默认 DeepSeek，可通过 LLM_MODEL 换千问/智谱）
+        if model is None:
+            from utils.llm import get_llm_config_safe
+            _api_key, _base, model, _provider = get_llm_config_safe()
         self.system_prompt = system_prompt
         self.model = model
         self.temperature = temperature
@@ -74,10 +79,13 @@ class SDKAgent:
         self.telemetry_meta.model = model
 
         if provider == "deepseek":
-            self.client = OpenAI(
-                api_key=api_key or os.getenv("DEEPSEEK_API_KEY"),
-                base_url=base_url or os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-            )
+            # 默认走通用 LLM_* 配置（fallback 到 DEEPSEEK_*），兼容 DeepSeek / 千问 / 智谱 / Kimi 等 OpenAI 兼容 API
+            if api_key is None or base_url is None:
+                from utils.llm import get_llm_config_safe
+                _ak, _bu, _m, _p = get_llm_config_safe()
+                api_key = api_key or _ak
+                base_url = base_url or _bu
+            self.client = OpenAI(api_key=api_key, base_url=base_url)
         elif provider == "openai":
             self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
         else:
@@ -136,11 +144,10 @@ class SDKAgent:
             "messages": messages,
             "temperature": self.temperature,
         }
-        # v4-flash 默认 thinking 模式，multi-turn 需要把 reasoning_content 回传；
-        # 我们的 tool-loop 没传 → 报 "reasoning_content must be passed back"。
-        # 关掉 thinking → 跟旧 deepseek-chat 行为完全一致（fast / non-thinking）
-        if "v4" in self.model.lower() or self.model == "deepseek-chat":
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        # DeepSeek v4 / MiMo v2.5 系列默认 thinking 模式 → committee 场景 disable 走 fast 路径
+        # （MiMo CIO long prompt 下 thinking 会吃完 max_tokens 导致 content 为空）。
+        # 不同 provider 的 extra_body 格式不同（DeepSeek 用 dict，MiMo 用 string），helper 统一处理。
+        kwargs.update(get_thinking_disable_kwargs(self.model))
         if self.enable_tools:
             kwargs["tools"] = TOOL_DEFINITIONS
             kwargs["tool_choice"] = "auto"
@@ -156,7 +163,7 @@ class SDKAgent:
                 return msg.content or ""
 
             # 把 assistant message（含 tool_calls）塞回 messages，准备喂 tool 结果
-            messages.append({
+            assistant_msg: Dict[str, Any] = {
                 "role": "assistant",
                 "content": msg.content or "",
                 "tool_calls": [
@@ -170,7 +177,16 @@ class SDKAgent:
                     }
                     for tc in tool_calls
                 ],
-            })
+            }
+            # Response-driven reasoning carry：上一轮 API response 含 reasoning_content
+            # 就 carry 回 next-turn。不靠 model name 嗅探：
+            #   - MiMo / DeepSeek-R1 / 未来 reasoning model 自动 work（API 强制要求 carry）
+            #   - 千问 / 智谱 / GPT 不返回该字段 → 啥都不 carry，零侵入
+            #   - OpenAI spec 规定 unknown fields 应被 ignore，所以 carry 给不需要的 provider 也无害
+            reasoning_content = getattr(msg, "reasoning_content", None)
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            messages.append(assistant_msg)
 
             # 执行每个 tool call（含耗时记录给 GUI 透明化）
             for tc in tool_calls:

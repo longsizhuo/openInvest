@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -278,9 +278,50 @@ def _build_portfolio_response(pm: PortfolioManager) -> PortfolioResponse:
 
 
 @app.get("/api/portfolio", response_model=PortfolioResponse, tags=["read"])
-async def get_portfolio() -> PortfolioResponse:
-    """完整持仓快照（v1 兼容输出，前端无感）：现金 CNY/AUD + 黄金 + NDQ.AX"""
+async def get_portfolio(response: Response) -> PortfolioResponse:
+    """完整持仓快照（v1 兼容输出，前端无感）：现金 CNY/AUD + 黄金 + NDQ.AX
+
+    no-store：fork 用户报告"GUI 不同步"——常见原因是反向代理 / 浏览器把这条
+    GET 缓存住，NapCat 写完 portfolio.md 后 SWR 拿到的还是旧响应。后端每次
+    都直接读 disk（PortfolioManager 不缓存），所以靠 no-store 让中间层别截。
+    """
+    response.headers["Cache-Control"] = "no-store"
     return _build_portfolio_response(_new_pm())
+
+
+@app.get("/api/portfolio/state", tags=["read"])
+async def get_portfolio_state(response: Response) -> Dict[str, Any]:
+    """轻量同步信号：返回 portfolio.md 的 mtime + size + 一句概要。
+
+    GUI / agent 可以用这条做 polling 探针——比 /api/portfolio 便宜，且只要
+    NapCat / CLI 写过盘 mtime 就会跳。比单纯靠 60s SWR 刷新更精准。
+
+    用法（curl 端）：
+        curl -s http://127.0.0.1:8765/api/portfolio/state
+        → {"mtime": 1715823491.2, "size": 1005, "exists": true, ...}
+    """
+    response.headers["Cache-Control"] = "no-store"
+    store = MemoryStore()
+    path = store.path_of("portfolio")
+    if not path.exists():
+        return {"exists": False, "mtime": None, "size": 0,
+                "hint": "memory/portfolio.md 不存在，先跑 `python -m scripts.skill init`"}
+    st = path.stat()
+    # 顺便给一个 holdings 数 + cash 币种数，前端可不拉全量就知道有没有数据
+    try:
+        pm = _new_pm()
+        holdings_count = sum(1 for _ in pm.holdings)
+        cash_currencies = list(pm.cash.keys())
+    except HTTPException:
+        holdings_count = 0
+        cash_currencies = []
+    return {
+        "exists": True,
+        "mtime": st.st_mtime,
+        "size": st.st_size,
+        "holdings_count": holdings_count,
+        "cash_currencies": cash_currencies,
+    }
 
 
 # ============ v2 通用持仓 ============
@@ -366,8 +407,13 @@ def _build_holding_v2(h: Dict[str, Any]) -> HoldingV2:
 
 
 @app.get("/api/holdings", response_model=HoldingsListResponse, tags=["read"])
-async def get_holdings() -> HoldingsListResponse:
-    """v2 通用持仓列表：cash dict + holdings 数组（含实时 quote + 计算 P&L）"""
+async def get_holdings(response: Response) -> HoldingsListResponse:
+    """v2 通用持仓列表：cash dict + holdings 数组（含实时 quote + 计算 P&L）
+
+    no-store：参见 /api/portfolio 同步链路注释——防中间层缓存住，NapCat 写完
+    portfolio.md 后下次 SWR refresh 必须拿到新数据。
+    """
+    response.headers["Cache-Control"] = "no-store"
     pm = _new_pm()
     holdings = [_build_holding_v2(h) for h in pm.holdings]
     return HoldingsListResponse(cash=pm.cash, holdings=holdings)
@@ -1244,17 +1290,20 @@ def _build_audit_meta(
     - python_version: 运行时
     - symbols: 这次跑了哪些资产
     """
+    # 走 utils.llm 拿当前 model（向后兼容 DEEPSEEK_MODEL；支持 LLM_MODEL 切千问/智谱）
+    from utils.llm import get_llm_config_safe
+    _ak, _bu, _model, _provider = get_llm_config_safe()
     return {
         "task_id": task_id,
         "started_at": _now_iso(),
         "commit_hash": _audit_commit_hash(),
         "python_version": _sys.version.split()[0],
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+        "model": _model,
         "model_temperature": float(os.getenv("INVEST_LLM_TEMPERATURE", "0.2")),
         "max_debate_rounds": max_rounds,
         "symbols": symbols if symbols else "(strategy.target_assets all)",
         "executor": "core.committee_runner.run_committee_for_symbol",
-        "provider": "deepseek (Web/Cron path)",
+        "provider": "deepseek (Web/Cron path)",  # 物理通道：OpenAI 兼容协议；具体模型见 model 字段
     }
 
 
@@ -2307,9 +2356,16 @@ async def get_outperform_events(
 
 @app.get("/api/committee_sessions", response_model=CommitteeSessionsResponse, tags=["system"])
 async def list_committee_sessions(
+    response: Response,
     limit: int = Query(50, ge=1, le=500),
 ) -> CommitteeSessionsResponse:
-    """历史委员会决议列表（memory/.committee/<date>/<symbol>.md），按时间倒序"""
+    """历史委员会决议列表（memory/.committee/<date>/<symbol>.md），按时间倒序
+
+    no-store：决策回放页"看不到内容"的常见误诊——SWR 拿到的是中间层缓存的
+    空列表。每跑一次委员会都会新增 .md，必须保证下一次 GET 拿到的是 disk
+    实际状态。
+    """
+    response.headers["Cache-Control"] = "no-store"
     store = MemoryStore()
     base = store.root / ".committee"
     sessions: List[CommitteeSessionSummary] = []
