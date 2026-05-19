@@ -34,3 +34,8 @@ docs/verdict_accuracy.md
 
 # 前端 GUI dist 通过 scripts/sync_gui_dist 拉 invest-gui release，不入 git
 static/
+
+# DSPy v2/v3 trainset 大文件（3-4MB），用 scripts/build_dspy_trainset_v*.py 重建
+experiments/dspy_trainset_v2.json
+experiments/dspy_trainset_v2.2.json
+experiments/dspy_trainset_v3.json

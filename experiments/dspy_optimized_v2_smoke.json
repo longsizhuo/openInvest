@@ -1,0 +1,85 @@
+{
+  "predict.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "macro_context": "VIX 12.0 / TNX 4.42 / DXY 104.4 / USDCNY 7.22",
+        "market_context": "REGIME: uptrend\nRSI 73.0\nMA20=5151.64 > MA120=4971.04\nprice_quantile_2y=1.00\n1m_return=+5.8%",
+        "portfolio_state": "cash 0%, ^GSPC 100% (concentration 100%, PnL_since_entry -6.0%), solvency_buffer=unknown",
+        "reasoning": "Market overbought at 2-year high, portfolio fully invested with loss; reduce risk by trimming 15%.",
+        "verdict": "TRIM",
+        "alloc_pct_of_dry_powder": -0.15
+      },
+      {
+        "augmented": true,
+        "macro_context": "VIX 28.5 / TNX 4.39 / DXY 99.8 / USDCNY 7.31",
+        "market_context": "REGIME: crash\nRSI 42.3\nMA20=201.87 < MA120=228.26\nprice_quantile_2y=0.43\n1m_return=-7.3%",
+        "portfolio_state": "cash 0%, AAPL 100% (concentration 100%, PnL_since_entry +16.0%), solvency_buffer=strong",
+        "reasoning": "Crash regime with VIX 28.5 signals extreme fear; fully concentrated AAPL position with +16% profit is vulnerable; trim to lock in gains and raise cash for better entry.",
+        "verdict": "TRIM",
+        "alloc_pct_of_dry_powder": -0.3
+      },
+      {
+        "macro_context": "VIX 14.5 / TNX 4.55 / DXY 104.7 / USDCNY 7.25",
+        "market_context": "REGIME: uptrend\nRSI 46.7\nMA20=40.86 > MA120=38.55\nprice_quantile_2y=0.80\n1m_return=+3.0%",
+        "portfolio_state": "cash 100%, no EEM position, solvency_buffer=unknown",
+        "verdict": "ACCUMULATE",
+        "alloc_pct_of_dry_powder": 0.1,
+        "reasoning": "",
+        "forward_30d_return_pct": 5.081,
+        "asset_pct": 0.0,
+        "decision_date": "2024-05-30"
+      },
+      {
+        "macro_context": "VIX 18.4 / TNX 4.46 / DXY 101.8 / USDCNY 7.24",
+        "market_context": "REGIME: range_bound\nRSI 70.8\nMA20=97212.85 > MA120=91937.30\nprice_quantile_2y=0.95\n1m_return=+17.5%",
+        "portfolio_state": "cash 75%, BTC-USD 25% (concentration 25%, PnL_since_entry +0.5%), solvency_buffer=strong",
+        "verdict": "ACCUMULATE",
+        "alloc_pct_of_dry_powder": 0.1,
+        "reasoning": "",
+        "forward_30d_return_pct": 5.713,
+        "asset_pct": 0.0,
+        "decision_date": "2025-05-12"
+      }
+    ],
+    "signature": {
+      "instructions": "你是一位经验丰富的首席投资官（CIO）。根据以下宏观环境、市场技术面和用户持仓状态，给出投资建议。\n\nverdict 必须从以下 5 选 1：\n  - BUY: 一次建满仓（强 bullish + 低估 + 低仓位）\n  - ACCUMULATE: 分批建仓 / 加仓（趋势好 + 有空间）\n  - HOLD: 维持现状（仓位与机会匹配，等待更好信号）\n  - TRIM: 部分减仓（超配 + 风险升温）\n  - SELL: 全部清仓（极端 risk_off + 重仓）\n\nalloc_pct_of_dry_powder: -1.0 ~ +1.0\n  - 正数 = 加仓占子弹百分比（如 0.1 = 10% 子弹）\n  - 负数 = 减仓占持仓百分比（如 -0.15 = 减 15% 持仓）\n  - 0 = HOLD\n\n请先给出推理理由，然后给出 verdict 和 alloc_pct_of_dry_powder。",
+      "fields": [
+        {
+          "prefix": "Macro Context:",
+          "description": "VIX/TNX/DXY/USDCNY 4 个宏观指标"
+        },
+        {
+          "prefix": "Market Context:",
+          "description": "REGIME/RSI/MA/分位/动量"
+        },
+        {
+          "prefix": "Portfolio State:",
+          "description": "cash% + asset% + concentration% + PnL% + solvency_buffer level"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "一句话理由，含 verdict 与 portfolio_state 的关系"
+        },
+        {
+          "prefix": "Verdict:",
+          "description": "BUY | ACCUMULATE | HOLD | TRIM | SELL"
+        },
+        {
+          "prefix": "Alloc Pct Of Dry Powder:",
+          "description": "-1.0 ~ +1.0"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

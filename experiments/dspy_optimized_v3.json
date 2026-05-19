@@ -1,0 +1,44 @@
+{
+  "predict.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "根据提供的宏观环境（VIX/TNX/DXY/USDCNY）、市场技术面（REGIME、RSI、MA、价格分位、近期收益）和用户持仓状态（现金比例、持仓集中度、盈亏、偿付缓冲等级），通过链式推理（chain-of-thought）生成一个完整的投资建议。输出包括：（1）一句话推理理由，清晰说明 verdict 和 alloc_pct 与输入因素的关系；（2）verdict，从以下5个选项中选一：\n  - BUY: 强烈看涨且低估时，低仓位全额买入（分配正数，最大1.0）\n  - ACCUMULATE: 趋势向好且有加仓空间时，分批加仓（分配较小的正数，如0.1-0.3）\n  - HOLD: 仓位与机会匹配，等待更好信号（分配0.0）\n  - TRIM: 超配或风险升温时，部分减仓（分配负数，绝对值表示减仓比例）\n  - SELL: 极端风险规避且重仓时，全部清仓（分配-1.0）\n（3）alloc_pct_of_dry_powder：-1.0至+1.0之间的浮点数，正数表示动用子弹的百分比加仓，负数表示减少持仓的百分比减仓，0表示维持不变。请确保推理逻辑连贯，verdict和分配比例相互印证，尤其要结合持仓集中度、偿付缓冲强弱、市场分位和动量等指标。",
+      "fields": [
+        {
+          "prefix": "Macro Context:",
+          "description": "VIX/TNX/DXY/USDCNY 4 个宏观指标"
+        },
+        {
+          "prefix": "Market Context:",
+          "description": "REGIME/RSI/MA/分位/动量"
+        },
+        {
+          "prefix": "Portfolio State:",
+          "description": "cash% + asset% + concentration% + PnL% + solvency_buffer level"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "一句话理由，含 verdict 与 portfolio_state 的关系"
+        },
+        {
+          "prefix": "Verdict:",
+          "description": "BUY | ACCUMULATE | HOLD | TRIM | SELL"
+        },
+        {
+          "prefix": "Alloc Pct Of Dry Powder:",
+          "description": "-1.0 ~ +1.0"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

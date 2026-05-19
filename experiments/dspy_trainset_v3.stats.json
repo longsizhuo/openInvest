@@ -1,0 +1,88 @@
+{
+  "total_samples": 5565,
+  "source_trainset": "dspy_trainset_v2.json",
+  "mapping_version": "v3_path_c_alpha_based",
+  "alloc_mapping": {
+    "BUY": 1.0,
+    "ACCUMULATE": 0.5,
+    "HOLD": 0.0,
+    "TRIM": -0.1,
+    "SELL": -0.3
+  },
+  "design": "oracle 标 verdict = 使 forward-30d portfolio terminal value 最大的 verdict （per-sample optimum，考虑 starting state asset_pct）。HOLD 是 tiebreaker。",
+  "verdict_distribution": {
+    "BUY": 2900,
+    "HOLD": 1113,
+    "SELL": 1552
+  },
+  "verdict_distribution_pct": {
+    "BUY": 52.11,
+    "ACCUMULATE": 0.0,
+    "HOLD": 20.0,
+    "TRIM": 0.0,
+    "SELL": 27.89
+  },
+  "v22_verdict_distribution": {
+    "BUY": 114,
+    "ACCUMULATE": 1230,
+    "HOLD": 3687,
+    "TRIM": 249,
+    "SELL": 285
+  },
+  "migration_matrix_old_to_new": {
+    "BUY": {
+      "BUY": 114
+    },
+    "ACCUMULATE": {
+      "BUY": 1230
+    },
+    "HOLD": {
+      "BUY": 1556,
+      "HOLD": 1113,
+      "SELL": 1018
+    },
+    "TRIM": {
+      "SELL": 249
+    },
+    "SELL": {
+      "SELL": 285
+    }
+  },
+  "oracle_alpha_stats": {
+    "mean": 2.783,
+    "median": 1.0871,
+    "stdev": 5.0571,
+    "min": 0.0,
+    "max": 85.967,
+    "pct_positive": 80.0,
+    "pct_zero": 20.0
+  },
+  "fwd_30d_return_by_new_verdict": {
+    "BUY": {
+      "n": 2900,
+      "mean": 7.6092,
+      "median": 5.359
+    },
+    "ACCUMULATE": {
+      "n": 0,
+      "mean": 0.0,
+      "median": 0.0
+    },
+    "HOLD": {
+      "n": 1113,
+      "mean": 2.925,
+      "median": 2.437
+    },
+    "TRIM": {
+      "n": 0,
+      "mean": 0.0,
+      "median": 0.0
+    },
+    "SELL": {
+      "n": 1552,
+      "mean": -5.8278,
+      "median": -3.47
+    }
+  },
+  "note": "v3 用 path c (alpha-based oracle)。非 verdict/alloc/oracle_alpha_pct 字段全部从 v2 trainset 原样复用。"
+}

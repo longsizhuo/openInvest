@@ -1,0 +1,47 @@
+{
+  "total_samples": 5565,
+  "verdict_distribution": {
+    "BUY": 114,
+    "ACCUMULATE": 1230,
+    "HOLD": 3687,
+    "TRIM": 249,
+    "SELL": 285
+  },
+  "symbol_distribution": {
+    "NDQ.AX": 535,
+    "GC=F": 530,
+    "^GSPC": 530,
+    "QQQ": 530,
+    "AAPL": 530,
+    "TSLA": 530,
+    "BTC-USD": 790,
+    "TLT": 530,
+    "IWM": 530,
+    "EEM": 530
+  },
+  "reward_stats": {
+    "mean": 1.196,
+    "std": 2.7973,
+    "min": -8.0421,
+    "max": 11.0142
+  },
+  "config": {
+    "symbols": [
+      "NDQ.AX",
+      "GC=F",
+      "^GSPC",
+      "QQQ",
+      "AAPL",
+      "TSLA",
+      "BTC-USD",
+      "TLT",
+      "IWM",
+      "EEM"
+    ],
+    "start": "2024-05-01",
+    "end": "2026-05-01",
+    "sample_every_n_trading_days": 4,
+    "portfolio_states_per_date": 5,
+    "seed": 42
+  }
+}

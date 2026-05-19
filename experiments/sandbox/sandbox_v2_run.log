@@ -1,0 +1,108 @@
+trainset_v3: 5565 样本
+  train_pool (2025-11-01- 之前): 4940
+  eval_pool  (2025-11-01+ 之后): 625
+eval_set: 200 个
+   by symbol: {'QQQ': 20, 'NDQ.AX': 20, 'EEM': 20, 'AAPL': 20, 'IWM': 20, '^GSPC': 20, 'TSLA': 20, 'TLT': 20, 'GC=F': 20, 'BTC-USD': 20}
+   by verdict: {'SELL': 59, 'HOLD': 70, 'BUY': 71}
+[92m08:28:22 - LiteLLM:WARNING[0m: common_utils.py:979 - litellm: could not pre-load bedrock-runtime response stream shape — Bedrock event-stream decoding will be unavailable. Error: No module named 'botocore'
+[92m08:28:22 - LiteLLM:WARNING[0m: common_utils.py:24 - litellm: could not pre-load sagemaker-runtime response stream shape — SageMaker event-stream decoding will be unavailable. Error: No module named 'botocore'
+DSPy 配 deepseek-v4-flash @ https://api.deepseek.com  max_tokens=1500
+arm_1 v3 random demos: 6 个
+   verdicts: Counter({'BUY': 2, 'HOLD': 2, 'SELL': 2})
+arm_2 加载 dspy_optimized_v3.json
+
+[arm_0_zero_shot] 跑 200 个 sample (threads=8)...
+2026/05/18 08:28:57 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_0_zero_shot] 25/200  errors=0  rate=0.6/s  ETA=310s
+   [arm_0_zero_shot] 50/200  errors=0  rate=0.7/s  ETA=228s
+   [arm_0_zero_shot] 75/200  errors=0  rate=0.7/s  ETA=184s
+   [arm_0_zero_shot] 100/200  errors=0  rate=0.7/s  ETA=144s
+   [arm_0_zero_shot] 125/200  errors=0  rate=0.7/s  ETA=105s
+   [arm_0_zero_shot] 150/200  errors=0  rate=0.7/s  ETA=71s
+   [arm_0_zero_shot] 175/200  errors=0  rate=0.7/s  ETA=36s
+   [arm_0_zero_shot] 200/200  errors=0  rate=0.7/s  ETA=0s
+   [arm_0_zero_shot] done in 293.1s  errors=0
+
+[arm_1_v3_random_demos] 跑 200 个 sample (threads=8)...
+   [arm_1_v3_random_demos] 25/200  errors=0  rate=0.7/s  ETA=257s
+2026/05/18 08:34:21 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_1_v3_random_demos] 50/200  errors=0  rate=0.7/s  ETA=211s
+   [arm_1_v3_random_demos] 75/200  errors=0  rate=0.7/s  ETA=170s
+   [arm_1_v3_random_demos] 100/200  errors=0  rate=0.8/s  ETA=129s
+   [arm_1_v3_random_demos] 125/200  errors=0  rate=0.8/s  ETA=96s
+   [arm_1_v3_random_demos] 150/200  errors=0  rate=0.8/s  ETA=64s
+   [arm_1_v3_random_demos] 175/200  errors=0  rate=0.8/s  ETA=32s
+   [arm_1_v3_random_demos] 200/200  errors=0  rate=0.8/s  ETA=0s
+   [arm_1_v3_random_demos] done in 254.3s  errors=0
+
+[arm_2_v3_dspy_optimized] 跑 200 个 sample (threads=8)...
+2026/05/18 08:38:16 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:38:16 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:38:17 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 25/200  errors=0  rate=0.4/s  ETA=433s
+2026/05/18 08:38:34 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:39:04 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:39:20 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:39:27 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 50/200  errors=0  rate=0.4/s  ETA=357s
+2026/05/18 08:39:54 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 75/200  errors=0  rate=0.4/s  ETA=278s
+2026/05/18 08:40:18 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 100/200  errors=0  rate=0.5/s  ETA=208s
+2026/05/18 08:41:35 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 125/200  errors=0  rate=0.5/s  ETA=151s
+2026/05/18 08:42:20 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:42:30 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 150/200  errors=0  rate=0.5/s  ETA=103s
+2026/05/18 08:42:44 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 175/200  errors=0  rate=0.5/s  ETA=52s
+2026/05/18 08:43:33 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:43:35 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:43:37 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:43:44 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:43:45 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:43:47 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:44:29 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:44:31 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+2026/05/18 08:44:34 WARNING dspy.clients.lm: LM response was truncated due to exceeding max_tokens=1500. You can inspect the latest LM interactions with `dspy.inspect_history()`. To avoid truncation, consider passing a larger max_tokens when setting up dspy.LM. You may also consider increasing the temperature (currently 0.2)  if the reason for truncation is repetition.
+   [arm_2_v3_dspy_optimized] 200/200  errors=0  rate=0.5/s  ETA=0s
+   [arm_2_v3_dspy_optimized] done in 429.3s  errors=0
+
+  → /home/ubuntu/projects-review/invest/experiments/sandbox/sandbox_v2_results.json
+
+============================================================================================
+  SANDBOX v2 RESULTS  (n=200, period=2025-11-03 to 2026-02-12, model=deepseek-v4-flash, mt=1500)
+============================================================================================
+  metric                                  arm_0_zero   arm_1_v3_rand   arm_2_v3_dspy
+  ------------------------------------------------------------------------------------------
+  verdict_accuracy_pos_pct                    0.2800          0.3200          0.2700
+  avg_oracle_score [-1,+1]                    0.0250          0.0650         -0.0100
+  simulated_mean_return_pct                  -0.1776          0.0687         -0.1594
+  bah_mean_return_pct                         0.6571          0.6571          0.6571
+  alpha_vs_bah_pct                           -0.8347         -0.5884         -0.8165
+  reasoning_avg_length                            77             115              95
+  mentions_regime_pct                         0.7450          0.0750          0.7850
+  mentions_portfolio_pct                      0.5050          0.8450          0.6300
+  pct_outside_trainset (ACC+TRIM)             0.8400          0.6450          0.7650
+  n_errors                                         0               0               0
+  ------------------------------------------------------------------------------------------
+  verdict distribution (LLM 输出，含 v3 trainset 没教的 ACC/TRIM):
+      BUY                                        0.005           0.050           0.005
+      ACCUMULATE                                 0.435           0.355           0.330
+      HOLD                                       0.150           0.280           0.225
+      TRIM                                       0.405           0.290           0.435
+      SELL                                       0.005           0.025           0.005
+============================================================================================
+  Δ accuracy arm_1 - arm_0 (random demos vs zero-shot): +4.00pp
+  Δ accuracy arm_2 - arm_0 (DSPy optimized vs zero-shot): -1.00pp  (threshold +5pp)
+  Δ accuracy arm_2 - arm_1 (DSPy optimized vs random demos): -5.00pp
+  Δ alpha    arm_2 - arm_0: +0.02pp
+  Δ alpha    arm_2 - arm_1: -0.23pp
+
+  Q1 (arm_2 accuracy 显著 > arm_0 +5pp?): NO  (Δ=-1.00pp)
+  Q2 (arm_2 vs arm_1 MIPROv2 优化值得?): RANDOM_BETTER_OR_SIMILAR (Δacc=-5.00pp, Δalpha=-0.23pp)
+  Q3 (LLM 是否输出 v3 没教的 ACC/TRIM?): YES, demos 没 lock 词汇 → ACC/TRIM 仍泄漏 (arm_0=84.0%, arm_1=64.5%, arm_2=76.5%)
+  Q4 (arm_2 alpha > arm_0 alpha?): YES  (Δ=+0.02pp)
+
+  接入 production 推荐：保留 zero-shot：arm_2 没显著优势，省 demos token & 训练成本
+============================================================================================
