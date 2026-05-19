@@ -1,0 +1,32 @@
+name: release-please
+
+# 读 conventional commits 自动开 Release PR（3 条独立线）：
+#   - 根目录 Python 后端     → tag v0.1.x       + CHANGELOG.md
+#   - skills/invest          → tag invest-skill-v0.9.x        + skills/invest/CHANGELOG.md
+#   - skills/invest-setup    → tag invest-setup-skill-v0.1.x  + skills/invest-setup/CHANGELOG.md
+#
+# 分流靠 commit 改的文件路径 —— 一次 commit 跨多组件会触发多个 Release PR。
+# merge PR 后自动打 tag + 建 GitHub Release，并把 SKILL.md 的 `version:` 字段
+# 同步到 manifest（靠 `# x-release-please-version` 注释锚定）。
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
