@@ -4,11 +4,15 @@ ADR-005：从 daily_report.py 拆分出"给定数据 → 组装 markdown"的纯�
 让调度/采集与报告渲染解耦，并且让单测不需要 mock yfinance/LLM 就能跑。
 
 职责（本文件）：
-- portfolio_summary_text()：给定 pm + 价格 + 总资产，生成 Risk Officer 上下文文本
 - format_staleness_warning()：给定 label + age_days，生成告警字符串
 - assemble_full_report()：给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 - classify_asset_freshness()：stateless 辅助函数（age_days → fresh/stale/very_stale）
 - build_gemini_prompt()：给定所有投资结果 + wealth_view + event_brief，组装 Gemini 第二意见 prompt
+
+re-export（向后兼容，2026-05-19）：
+- portfolio_summary_text()：搬到 utils/portfolio_summary.py 以便 core/ service layer
+  也能用（不破坏分层契约）。外部 `from jobs.daily_report_builder import
+  portfolio_summary_text` 仍可用。
 
 不在本文件里的：
 - 价格拉取（get_history_data / get_gold_snapshot）
@@ -22,6 +26,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from core.portfolio_manager import PortfolioManager
+# re-export 给 jobs/daily_report.py + scripts/skill.py:cmd_prepare_committee 用
+# （保留旧 import path 的向后兼容）
+from utils.portfolio_summary import portfolio_summary_text  # noqa: F401
 
 # ============ 常量（可被 daily_report.py 的 env 读取覆盖后传入，无默认值依赖） ============
 
@@ -73,81 +80,9 @@ def format_staleness_warning(label: str, age_days: Optional[int], stale_threshol
     )
 
 
-# ============ 3. 核心：portfolio summary 文本生成 ============
-
-def portfolio_summary_text(
-    pm: PortfolioManager,
-    total_assets_cny: float,
-    current_prices: Dict[str, float],
-) -> str:
-    """详细的用户上下文，给 Risk Officer 压力测试用（含当前市价 + 浮盈）
-
-    v3 通用化：动态遍历用户实际 holdings，不再写死 NDQ.AX/GC=F。fork 用户
-    持仓 510300.SS / AAPL / BTC-USD 等任何 yfinance symbol 都能正确显示。
-
-    Args:
-        pm: PortfolioManager 实例（只读，不触发任何写）
-        total_assets_cny: 已经计算好的总资产（CNY 折算）
-        current_prices: {symbol: 当前价} dict（per asset 币种）
-
-    Returns:
-        多行字符串，结尾带 \\n
-    """
-    cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
-    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
-    dry_powder = max(0.0, cash_cny - buffer_cny)
-
-    # 现金部分（多币种通用）
-    lines = [
-        f"用户风险偏好: {risk_level}",
-        f"总资产估算: ¥{total_assets_cny:,.0f}",
-        f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)",
-        f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}",
-    ]
-    if aud_cash > 0:
-        lines.append(f"  - AUD 现金: ${aud_cash:,.0f}")
-
-    # 持仓部分：遍历实际 holdings，按 unit_label / cost_currency 通用化展示
-    real_holdings = [
-        h for h in pm.holdings
-        if not h.get("is_tracking_only") and float(h.get("units", 0) or 0) > 0
-    ]
-    if not real_holdings:
-        lines.append("  - **当前无实仓持仓**（onboarding 后请通过 GUI/NapCat 添加）")
-
-    for h in real_holdings:
-        sym = str(h.get("symbol", ""))
-        units = float(h.get("units", 0) or 0)
-        cost = float(h.get("avg_cost", 0) or 0)
-        unit_label = str(h.get("unit_label", "份"))
-        ccy = str(h.get("cost_currency", "CNY"))
-        display = h.get("display_name") or sym
-        channel = h.get("channel") or ""
-        channel_str = f" ({channel})" if channel else ""
-
-        cur = current_prices.get(sym)
-        if cur is None or cost <= 0:
-            # 缺价 / 无成本时仅显示持仓量
-            lines.append(
-                f"  - **{display}** ({sym}){channel_str}: "
-                f"{units:.4f} {unit_label}, 均价 {cost:.2f} {ccy}/{unit_label}",
-            )
-            continue
-
-        pnl_pct = ((cur / cost) - 1) * 100
-        pnl_local = (cur - cost) * units
-        ccy_symbol = "¥" if ccy == "CNY" else ("$" if ccy in ("USD", "AUD") else "")
-        lines.append(
-            f"  - **{display}** ({sym}){channel_str}: "
-            f"{units:.4f} {unit_label}, "
-            f"均价 {ccy_symbol}{cost:.2f}, "
-            f"现价 {ccy_symbol}{cur:.2f}, "
-            f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})",
-        )
-
-    return "\n".join(lines) + "\n"
+# ============ 3. portfolio_summary_text 已搬至 utils/portfolio_summary.py ============
+# 2026-05-19: 为支持 core/committee_runner.py service layer 调用（不破坏分层契约），
+# 函数实体搬到 utils/，本文件顶部 re-export 保持向后兼容。
 
 
 # ============ 4. Gemini 第二意见 prompt 组装 ============
