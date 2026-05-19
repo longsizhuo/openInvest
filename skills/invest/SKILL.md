@@ -6,6 +6,10 @@ description: openInvest 多资产 AI 投资委员会 **日常使用**。读取�
 
 # Invest Skill
 
+**新手 fork 用户**：先跑 `invest-setup` skill 初始化。Web GUI 是 beta，
+主流程走本 skill（通过 AI agent 调 CLI 看持仓 / 跑委员会 / 查决策回放）。
+代码迭代频繁，定期 `cd ~/openInvest && git pull` 拉最新。
+
 openInvest 多资产 AI 投资委员会。**这个 skill 不是 Claude 专属**——任何能跑
 shell 命令的 agent 都能用，看下面 "选路径"。
 

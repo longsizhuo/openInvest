@@ -18,6 +18,17 @@
 
 ---
 
+## ⚠️ Beta 状态须知
+
+- **Web GUI 是 beta**——主面板 / 决策回放 / 实时同步可能不工作。
+  推荐入口：通过 Claude Code / Cursor / Cline 等 AI agent 跑 `invest` skill，
+  让 AI 带你看持仓、跑委员会、查决策。GUI 只做辅助调试。
+- **代码更新频繁**：每次使用前请 `cd ~/openInvest && git pull` 拉最新。
+  GUI bug / oracle 修复经常发版没有 release tag。
+- **fork 用户已知问题**：[GitHub Issues](https://github.com/longsizhuo/openInvest/issues)
+
+---
+
 ## 它在做什么
 
 每天早上，4 个独立 LLM 各自看不同维度，互相 challenge 后给出建议：
@@ -54,6 +65,36 @@ bash ~/openInvest/skill/install.sh
 > 想后台自动跑（cron 日报 / 任意非 Claude agent 调用）才需要注册。
 
 **其他装法**（Docker / 手动 Python / 自带 GUI）：见 [QUICK_START.md](docs/QUICK_START.md)。
+
+---
+
+## 配置其他 LLM Provider
+
+默认用 DeepSeek。要换千问 / 智谱 / Kimi 等任何 OpenAI 兼容接口，改 `.env`：
+
+```env
+# === DeepSeek（默认） ===
+LLM_API_KEY=sk-xxx
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+
+# === 千问（Aliyun DashScope） ===
+LLM_API_KEY=sk-xxx
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode
+LLM_MODEL=qwen-max
+
+# === 智谱 AI ===
+LLM_API_KEY=xxx
+LLM_BASE_URL=https://open.bigmodel.cn/api/paas
+LLM_MODEL=glm-4-flash
+```
+
+注意：**model name 必须改**（不是只改 API key + base_url），否则会 400
+"model not found"。每家 provider 的 model 名都不一样（`qwen-max` / `glm-4-flash` /
+`moonshot-v1-8k` 等），上对应官网查。
+
+`LLM_*` 系列变量是新的通用配置（推荐）；老的 `DEEPSEEK_*` 保留向后兼容，
+现存 `.env` 不需要迁移。两组都没设时 `LLM_API_KEY` 会自动回落到 `DEEPSEEK_API_KEY`。
 
 ---
 
