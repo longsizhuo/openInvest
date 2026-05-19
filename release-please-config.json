@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "$comment": "Monorepo 模式：3 条独立版本线。按文件路径分流 commit 到对应 component；改 core/ 触发后端发版，改 skills/invest/ 触发 invest-skill 发版。",
+  "release-type": "python",
+  "include-v-in-tag": true,
+  "separate-pull-requests": true,
+  "bootstrap-sha": "763e62c6690eb5a36958277b7f54a8bde41bbe1e",
+  "pull-request-title-pattern": "chore${scope}: release ${version}",
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "refactor", "section": "Refactor" },
+    { "type": "docs", "section": "Docs", "hidden": false },
+    { "type": "chore", "section": "Chore", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "build", "section": "Build", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "invest",
+      "include-component-in-tag": false,
+      "extra-files": []
+    },
+    "skills/invest": {
+      "release-type": "simple",
+      "component": "invest-skill",
+      "package-name": "invest-skill",
+      "extra-files": [
+        { "type": "generic", "path": "SKILL.md" }
+      ]
+    },
+    "skills/invest-setup": {
+      "release-type": "simple",
+      "component": "invest-setup-skill",
+      "package-name": "invest-setup-skill",
+      "extra-files": [
+        { "type": "generic", "path": "SKILL.md" }
+      ]
+    }
+  }
+}

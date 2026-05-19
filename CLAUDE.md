@@ -90,6 +90,44 @@ openInvest 有三个调用层，每层服务不同对象：
 
 ---
 
+## 发版（release-please）
+
+**3 条独立版本线，靠 commit 改的路径自动分流**：
+
+| Component | Tag 格式 | 控制文件 | 触发路径 |
+|---|---|---|---|
+| 后端 | `v0.1.x` | `pyproject.toml` `version` | 改 `core/` / `agents/` / `jobs/` / `connectors/` / `services/` / `scripts/` 等根目录代码 |
+| invest skill | `invest-skill-v0.9.x` | `skills/invest/SKILL.md` `version:` | 改 `skills/invest/**` |
+| invest-setup skill | `invest-setup-skill-v0.1.x` | `skills/invest-setup/SKILL.md` `version:` | 改 `skills/invest-setup/**` |
+
+**改代码时不需要做任何事**——`release-please.yml` 监听 `main` push，自动开 Release PR、生成 `CHANGELOG.md`、merge 后打 tag。
+
+### 唯一要守的纪律：commit message 严格 conventional commits
+
+| 想要 | commit 怎么写 | bump |
+|---|---|---|
+| 新功能 → minor bump | `feat(scope): ...` | 0.1.0 → 0.2.0 |
+| Bug fix → patch bump | `fix(scope): ...` | 0.1.0 → 0.1.1 |
+| 破坏性变更 → major | `feat(scope)!: ...` 或 footer 加 `BREAKING CHANGE:` | 0.1.0 → 1.0.0 |
+| 不进 CHANGELOG | `chore:` / `test:` / `ci:` / `build:` | 不 bump |
+| 进 CHANGELOG 但不 bump | `docs:` / `refactor:` / `perf:` | 取决于类型 |
+
+**误用 `feat:` 写琐碎改动 = 假版本跳跃**。fix 一个 typo 别 `feat:`。
+
+### 一次 commit 跨组件（推荐拆开）
+
+`feat(skill+web-api): ...` 这种 commit 触摸了 `skills/invest/` 和 `connectors/`——会同时触发 invest-skill 和后端两个 Release PR，但 CHANGELOG 文案是同一条。**推荐拆成两个 commit**，scope 清晰，CHANGELOG 也清晰。
+
+### SKILL.md 的 version 字段是 release-please 管的
+
+不要手改 `skills/invest/SKILL.md` 第 3 行的 `version: 0.9.0 # x-release-please-version`——release-please 靠那个注释锚定位置，merge Release PR 时会自动同步。手改了下次发版会被覆盖。
+
+### 第一次发版会怎样
+
+`main` 第一次 push 后，release-please 会扫所有历史 commit，开 3 个巨大的 Release PR（CHANGELOG 含全部历史 `feat`/`fix`）。可以在 PR 里手动编辑 `CHANGELOG.md` 截到合理起点再 merge。或者先 `bootstrap-sha: <current-main-HEAD>` 跳过历史——见 [release-please 文档](https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md#bootstrapping)。
+
+---
+
 ## 关键文件速查
 
 ```
