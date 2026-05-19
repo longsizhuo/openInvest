@@ -1,0 +1,156 @@
+{
+  "analysis_1_state_verdict_distribution": {
+    "bucket_100pct_cash_0pct_asset": {
+      "BUY": 57,
+      "ACCUMULATE": 391,
+      "HOLD": 665
+    },
+    "bucket_75pct_cash_25pct_asset": {
+      "BUY": 57,
+      "ACCUMULATE": 391,
+      "HOLD": 665
+    },
+    "bucket_50pct_cash_50pct_asset": {
+      "ACCUMULATE": 448,
+      "HOLD": 487,
+      "TRIM": 83,
+      "SELL": 95
+    },
+    "bucket_25pct_cash_75pct_asset": {
+      "HOLD": 935,
+      "TRIM": 83,
+      "SELL": 95
+    },
+    "bucket_0pct_cash_100pct_asset": {
+      "HOLD": 935,
+      "TRIM": 83,
+      "SELL": 95
+    },
+    "unknown_portfolio_state_format": 0,
+    "violations": []
+  },
+  "analysis_2_consistency": {
+    "total_unique_date_symbol_pairs": 1113,
+    "state_count_not_5": 0,
+    "fwd_return_inconsistent_pairs": 0,
+    "fwd_return_inconsistent_examples": [],
+    "extreme_up_fwd_ge_5pct_all_HOLD_count": 0,
+    "extreme_up_examples": [],
+    "extreme_down_fwd_le_neg5pct_all_HOLD_count": 0,
+    "extreme_down_examples": []
+  },
+  "analysis_3_verdict_return_alignment": {
+    "BUY": {
+      "n": 114,
+      "mean": 12.1365,
+      "std": 5.0498,
+      "min": 8.031,
+      "p10": 8.2749,
+      "p50": 10.052,
+      "p90": 19.2829,
+      "max": 31.485
+    },
+    "ACCUMULATE": {
+      "n": 1230,
+      "mean": 10.9623,
+      "std": 9.7411,
+      "min": 4.021,
+      "p10": 4.6527,
+      "p50": 7.562,
+      "p90": 22.367,
+      "max": 85.967
+    },
+    "HOLD": {
+      "n": 3687,
+      "mean": 1.928,
+      "std": 8.1494,
+      "min": -41.941,
+      "p10": -3.897,
+      "p50": 1.41,
+      "p90": 9.009,
+      "max": 85.967
+    },
+    "TRIM": {
+      "n": 249,
+      "mean": -5.9379,
+      "std": 1.2633,
+      "min": -7.913,
+      "p10": -7.652,
+      "p50": -5.996,
+      "p90": -4.111,
+      "max": -4.004
+    },
+    "SELL": {
+      "n": 285,
+      "mean": -14.8068,
+      "std": 7.0918,
+      "min": -41.941,
+      "p10": -24.296,
+      "p50": -12.157,
+      "p90": -8.587,
+      "max": -8.047
+    },
+    "_means_in_order": {
+      "BUY": 12.1365,
+      "ACCUMULATE": 10.9623,
+      "HOLD": 1.928,
+      "TRIM": -5.9379,
+      "SELL": -14.8068
+    },
+    "alignment_check": "PASS"
+  },
+  "analysis_4_reward_per_verdict": {
+    "BUY": {
+      "n": 114,
+      "mean": 6.1567,
+      "std": 1.3891,
+      "min": 3.3072,
+      "p10": 4.4163,
+      "p50": 6.1451,
+      "p90": 7.752,
+      "max": 11.0142
+    },
+    "ACCUMULATE": {
+      "n": 1230,
+      "mean": 3.5492,
+      "std": 1.4789,
+      "min": 0.811,
+      "p10": 1.7218,
+      "p50": 3.3861,
+      "p90": 5.5276,
+      "max": 11.0142
+    },
+    "HOLD": {
+      "n": 3687,
+      "mean": 0.8521,
+      "std": 2.3401,
+      "min": -8.0421,
+      "p10": -1.6961,
+      "p50": 0.671,
+      "p90": 3.9727,
+      "max": 11.0142
+    },
+    "TRIM": {
+      "n": 249,
+      "mean": -2.2744,
+      "std": 1.2972,
+      "min": -5.7903,
+      "p10": -3.9971,
+      "p50": -1.9236,
+      "p90": -0.8384,
+      "max": -0.157
+    },
+    "SELL": {
+      "n": 285,
+      "mean": -3.4637,
+      "std": 1.6511,
+      "min": -8.0421,
+      "p10": -5.677,
+      "p50": -3.2631,
+      "p90": -1.5605,
+      "max": -0.592
+    },
+    "note": "reward = market-side forward Sharpe-MDD, NOT verdict-conditioned. A SELL verdict in a falling market still gets negative reward (market Sharpe is negative), not a positive 'you-were-right' bonus. Same reward is shared across all 5 portfolio_state samples for one (date, symbol), regardless of their verdicts. Implication: BUY/ACCUMULATE rewards should correlate positively with forward outcomes, but TRIM/SELL rewards are inverted relative to verdict correctness."
+  },
+  "overall_assessment": "CLEAN"
+}

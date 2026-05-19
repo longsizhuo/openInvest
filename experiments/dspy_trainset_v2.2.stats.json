@@ -1,0 +1,110 @@
+{
+  "total_samples": 5565,
+  "source_trainset": "dspy_trainset_v2.json",
+  "mapping_version": "v2.2",
+  "mapping_change": {
+    "BUY": {
+      "v2": 0.5,
+      "v2.2": 1.0
+    },
+    "ACCUMULATE": {
+      "v2": 0.1,
+      "v2.2": 0.5
+    },
+    "HOLD": {
+      "v2": 0.0,
+      "v2.2": 0.0
+    },
+    "TRIM": {
+      "v2": -0.15,
+      "v2.2": -0.1
+    },
+    "SELL": {
+      "v2": -0.5,
+      "v2.2": -0.3
+    }
+  },
+  "verdict_distribution": {
+    "BUY": 114,
+    "ACCUMULATE": 1230,
+    "HOLD": 3687,
+    "TRIM": 249,
+    "SELL": 285
+  },
+  "symbol_distribution": {
+    "NDQ.AX": 535,
+    "GC=F": 530,
+    "^GSPC": 530,
+    "QQQ": 530,
+    "AAPL": 530,
+    "TSLA": 530,
+    "BTC-USD": 790,
+    "TLT": 530,
+    "IWM": 530,
+    "EEM": 530
+  },
+  "alloc_comparison_by_verdict": {
+    "BUY": {
+      "count": 114,
+      "old_alloc_mean": 0.5,
+      "new_alloc_mean": 1.0,
+      "old_alloc_unique": [
+        0.5
+      ],
+      "new_alloc_unique": [
+        1.0
+      ]
+    },
+    "ACCUMULATE": {
+      "count": 1230,
+      "old_alloc_mean": 0.1,
+      "new_alloc_mean": 0.5,
+      "old_alloc_unique": [
+        0.1
+      ],
+      "new_alloc_unique": [
+        0.5
+      ]
+    },
+    "HOLD": {
+      "count": 3687,
+      "old_alloc_mean": 0.0,
+      "new_alloc_mean": 0.0,
+      "old_alloc_unique": [
+        0.0
+      ],
+      "new_alloc_unique": [
+        0.0
+      ]
+    },
+    "TRIM": {
+      "count": 249,
+      "old_alloc_mean": -0.15,
+      "new_alloc_mean": -0.1,
+      "old_alloc_unique": [
+        -0.15
+      ],
+      "new_alloc_unique": [
+        -0.1
+      ]
+    },
+    "SELL": {
+      "count": 285,
+      "old_alloc_mean": -0.5,
+      "new_alloc_mean": -0.3,
+      "old_alloc_unique": [
+        -0.5
+      ],
+      "new_alloc_unique": [
+        -0.3
+      ]
+    }
+  },
+  "reward_stats": {
+    "mean": 1.196,
+    "std": 2.7973,
+    "min": -8.0421,
+    "max": 11.0142
+  },
+  "note": "verdict 触发规则不变（仅 alloc 数字调整），所有其他字段（macro_context / market_context / portfolio_state / forward_*）从 v2 原样复用"
+}

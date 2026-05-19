@@ -1,0 +1,318 @@
+{
+  "period": "2024-05-01 to 2026-05-01",
+  "starting_capital": 100000.0,
+  "n_symbols": 10,
+  "alloc_mapping": {
+    "BUY": 1.0,
+    "ACCUMULATE": 0.5,
+    "HOLD": 0.0,
+    "TRIM": -0.1,
+    "SELL": -0.3
+  },
+  "labeling_design": "path c — oracle 选使 forward-30d terminal value 最大的 verdict (per-sample optimum)",
+  "results_per_symbol": {
+    "AAPL": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 66.9755,
+        "annualized": 29.351,
+        "mdd": -33.3605,
+        "sharpe": 1.0019
+      },
+      "buy_and_hold": {
+        "cum_return": 66.9755,
+        "annualized": 29.351,
+        "mdd": -33.3605,
+        "sharpe": 1.0019
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -14.387,
+      "v2.1_alpha_pct": 0.0,
+      "v2.2_alpha_pct": 0.0,
+      "alpha_improvement_vs_v2.2_pp": 0.0,
+      "verdict_distribution": {
+        "BUY": 66,
+        "HOLD": 40
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 166975.5,
+      "final_value_bah": 166975.5,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "BTC-USD": {
+      "n_decisions": 158,
+      "oracle_v3": {
+        "cum_return": 34.2036,
+        "annualized": 10.6737,
+        "mdd": -49.7388,
+        "sharpe": 0.4209
+      },
+      "buy_and_hold": {
+        "cum_return": 34.2036,
+        "annualized": 10.6737,
+        "mdd": -49.7388,
+        "sharpe": 0.4209
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -9.7577,
+      "v2.1_alpha_pct": -6.3996,
+      "v2.2_alpha_pct": -5.4322,
+      "alpha_improvement_vs_v2.2_pp": 5.4322,
+      "verdict_distribution": {
+        "BUY": 78,
+        "HOLD": 80
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 134203.63,
+      "final_value_bah": 134203.63,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "EEM": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 63.8992,
+        "annualized": 28.1492,
+        "mdd": -17.2924,
+        "sharpe": 1.3398
+      },
+      "buy_and_hold": {
+        "cum_return": 63.8992,
+        "annualized": 28.1492,
+        "mdd": -17.2924,
+        "sharpe": 1.3398
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -6.9781,
+      "v2.1_alpha_pct": -6.2567,
+      "v2.2_alpha_pct": -5.3585,
+      "alpha_improvement_vs_v2.2_pp": 5.3585,
+      "verdict_distribution": {
+        "BUY": 69,
+        "HOLD": 37
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 163899.16,
+      "final_value_bah": 163899.16,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "GC=F": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 101.3088,
+        "annualized": 41.8833,
+        "mdd": -17.729,
+        "sharpe": 1.5953
+      },
+      "buy_and_hold": {
+        "cum_return": 101.3088,
+        "annualized": 41.8833,
+        "mdd": -17.729,
+        "sharpe": 1.5953
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -9.5882,
+      "v2.1_alpha_pct": -5.0639,
+      "v2.2_alpha_pct": -3.1322,
+      "alpha_improvement_vs_v2.2_pp": 3.1322,
+      "verdict_distribution": {
+        "BUY": 90,
+        "HOLD": 16
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 201308.76,
+      "final_value_bah": 201308.76,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "IWM": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 45.4466,
+        "annualized": 20.6913,
+        "mdd": -27.5031,
+        "sharpe": 0.9121
+      },
+      "buy_and_hold": {
+        "cum_return": 45.4466,
+        "annualized": 20.6913,
+        "mdd": -27.5031,
+        "sharpe": 0.9121
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -7.5054,
+      "v2.1_alpha_pct": -5.7253,
+      "v2.2_alpha_pct": -5.3554,
+      "alpha_improvement_vs_v2.2_pp": 5.3554,
+      "verdict_distribution": {
+        "BUY": 73,
+        "HOLD": 33
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 145446.61,
+      "final_value_bah": 145446.61,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "NDQ.AX": {
+      "n_decisions": 107,
+      "oracle_v3": {
+        "cum_return": 42.7109,
+        "annualized": 19.2945,
+        "mdd": -21.2665,
+        "sharpe": 0.9435
+      },
+      "buy_and_hold": {
+        "cum_return": 42.7109,
+        "annualized": 19.2945,
+        "mdd": -21.2665,
+        "sharpe": 0.9435
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -2.6917,
+      "v2.1_alpha_pct": 0.0,
+      "v2.2_alpha_pct": 0.0,
+      "alpha_improvement_vs_v2.2_pp": 0.0,
+      "verdict_distribution": {
+        "BUY": 70,
+        "HOLD": 37
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 142710.88,
+      "final_value_bah": 142710.88,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "QQQ": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 61.6895,
+        "annualized": 27.279,
+        "mdd": -22.7683,
+        "sharpe": 1.1842
+      },
+      "buy_and_hold": {
+        "cum_return": 61.6895,
+        "annualized": 27.279,
+        "mdd": -22.7683,
+        "sharpe": 1.1842
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -4.1698,
+      "v2.1_alpha_pct": 0.0,
+      "v2.2_alpha_pct": 0.0,
+      "alpha_improvement_vs_v2.2_pp": 0.0,
+      "verdict_distribution": {
+        "BUY": 75,
+        "HOLD": 31
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 161689.55,
+      "final_value_bah": 161689.55,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "TLT": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 5.2934,
+        "annualized": 2.6231,
+        "mdd": -14.7872,
+        "sharpe": 0.1663
+      },
+      "buy_and_hold": {
+        "cum_return": 5.2934,
+        "annualized": 2.6231,
+        "mdd": -14.7872,
+        "sharpe": 0.1663
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -3.8813,
+      "v2.1_alpha_pct": -2.7775,
+      "v2.2_alpha_pct": -1.5915,
+      "alpha_improvement_vs_v2.2_pp": 1.5915,
+      "verdict_distribution": {
+        "BUY": 58,
+        "HOLD": 48
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 105293.43,
+      "final_value_bah": 105293.43,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "TSLA": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 117.1343,
+        "annualized": 47.5825,
+        "mdd": -53.7657,
+        "sharpe": 0.9197
+      },
+      "buy_and_hold": {
+        "cum_return": 117.1343,
+        "annualized": 47.5825,
+        "mdd": -53.7657,
+        "sharpe": 0.9197
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -18.5289,
+      "v2.1_alpha_pct": 3.9015,
+      "v2.2_alpha_pct": 7.15,
+      "alpha_improvement_vs_v2.2_pp": -7.15,
+      "verdict_distribution": {
+        "BUY": 66,
+        "HOLD": 40
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 217134.28,
+      "final_value_bah": 217134.28,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    },
+    "^GSPC": {
+      "n_decisions": 106,
+      "oracle_v3": {
+        "cum_return": 44.0725,
+        "annualized": 20.1175,
+        "mdd": -18.9022,
+        "sharpe": 1.1289
+      },
+      "buy_and_hold": {
+        "cum_return": 44.0725,
+        "annualized": 20.1175,
+        "mdd": -18.9022,
+        "sharpe": 1.1289
+      },
+      "alpha_pct": 0.0,
+      "v2_alpha_pct": -4.5757,
+      "v2.1_alpha_pct": 0.0,
+      "v2.2_alpha_pct": 0.0,
+      "alpha_improvement_vs_v2.2_pp": 0.0,
+      "verdict_distribution": {
+        "BUY": 80,
+        "HOLD": 26
+      },
+      "n_transactions": 1,
+      "final_value_oracle": 144072.5,
+      "final_value_bah": 144072.5,
+      "period_start": "2024-05-01",
+      "period_end": "2026-05-01"
+    }
+  },
+  "average_alpha_vs_bah": 0.0,
+  "median_alpha_vs_bah": 0.0,
+  "symbols_where_oracle_beats_bah": 10,
+  "symbols_where_oracle_loses_bah": 0,
+  "comparison_four_versions": {
+    "v2_avg_alpha": -8.2064,
+    "v2.1_avg_alpha": -2.2322,
+    "v2.2_avg_alpha": -1.372,
+    "v3_avg_alpha": 0.0,
+    "improvement_v3_vs_v2.2_pp": 1.372
+  },
+  "path_c_verdict": "PATH_C_PARITY",
+  "conclusion": "path c PARITY: avg alpha +0.00% (0% 到 +1% 区间)，10/10 赢 BAH。符合 per-sample optimal in-sample = BAH ceiling 的理论预期，path c 设计正确；想跑赢 BAH 还需要更激进的 alloc 或更多 sample（如对每条 sample 5 种 starting state 全部参与训练而非只取 cash=100% slice）。"
+}

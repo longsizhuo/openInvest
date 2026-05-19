@@ -1,0 +1,41 @@
+{
+  "n_train": 4451,
+  "n_dev": 250,
+  "optimizer": "MIPROv2",
+  "auto_level": "light",
+  "num_threads": 4,
+  "baseline_avg_score": 0.67,
+  "optimized_avg_score": 0.67,
+  "improvement_pp": 0.0,
+  "per_verdict_breakdown": {
+    "BUY": {
+      "n_dev": 23,
+      "baseline_acc": 0.6521739130434783,
+      "optimized_acc": 0.6521739130434783
+    },
+    "ACCUMULATE": {
+      "n_dev": 60,
+      "baseline_acc": 0.7583333333333333,
+      "optimized_acc": 0.7583333333333333
+    },
+    "HOLD": {
+      "n_dev": 60,
+      "baseline_acc": 0.5083333333333333,
+      "optimized_acc": 0.5083333333333333
+    },
+    "TRIM": {
+      "n_dev": 50,
+      "baseline_acc": 0.79,
+      "optimized_acc": 0.79
+    },
+    "SELL": {
+      "n_dev": 57,
+      "baseline_acc": 0.6491228070175439,
+      "optimized_acc": 0.6491228070175439
+    }
+  },
+  "smoke_test": false,
+  "trainset_path": "experiments/dspy_trainset_v2.2.json",
+  "output_path": "experiments/dspy_optimized_v2_2.json",
+  "timestamp": "2026-05-18T06:04:14.913446+00:00"
+}

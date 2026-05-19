@@ -1,0 +1,74 @@
+{
+  "schema_version": "sandbox_v1",
+  "generated_at_utc": "2026-05-18T05:22:51Z",
+  "model": "deepseek-v4-flash",
+  "eval_set_size": 200,
+  "eval_period": "2025-11-03 to 2026-02-12",
+  "eval_symbol_distribution": {
+    "EEM": 20,
+    "AAPL": 20,
+    "QQQ": 19,
+    "IWM": 20,
+    "^GSPC": 20,
+    "NDQ.AX": 20,
+    "TLT": 20,
+    "TSLA": 20,
+    "GC=F": 20,
+    "BTC-USD": 21
+  },
+  "eval_verdict_distribution": {
+    "HOLD": 110,
+    "TRIM": 22,
+    "ACCUMULATE": 46,
+    "SELL": 20,
+    "BUY": 2
+  },
+  "n_demos_random": 6,
+  "arm_0_zero_shot": {
+    "n_eval": 200,
+    "n_success": 179,
+    "n_errors": 21,
+    "verdict_accuracy_pos_pct": 0.4469,
+    "verdict_accuracy_avg_oracle_score": 0.2235,
+    "verdict_distribution": {
+      "BUY": 0.0056,
+      "ACCUMULATE": 0.419,
+      "HOLD": 0.2346,
+      "TRIM": 0.3408,
+      "SELL": 0.0
+    },
+    "simulated_mean_return_pct": 0.5536,
+    "bah_mean_return_pct": 0.5619,
+    "simulated_avg_alpha_vs_bah_pct": -0.0083,
+    "reasoning_avg_length": 82.5,
+    "reasoning_mentions_regime_pct": 0.6425,
+    "reasoning_mentions_portfolio_pct": 0.6369,
+    "n_llm_calls": 200,
+    "avg_latency_ms": 10988.6
+  },
+  "arm_1_random_demos": {
+    "n_eval": 200,
+    "n_success": 169,
+    "n_errors": 31,
+    "verdict_accuracy_pos_pct": 0.4379,
+    "verdict_accuracy_avg_oracle_score": 0.2189,
+    "verdict_distribution": {
+      "BUY": 0.0059,
+      "ACCUMULATE": 0.2899,
+      "HOLD": 0.1775,
+      "TRIM": 0.5207,
+      "SELL": 0.0059
+    },
+    "simulated_mean_return_pct": 0.4108,
+    "bah_mean_return_pct": 0.6026,
+    "simulated_avg_alpha_vs_bah_pct": -0.1918,
+    "reasoning_avg_length": 94.2,
+    "reasoning_mentions_regime_pct": 0.0178,
+    "reasoning_mentions_portfolio_pct": 0.8402,
+    "n_llm_calls": 200,
+    "avg_latency_ms": 10252.6
+  },
+  "arm_2_dspy_optimized": {
+    "status": "training_not_ready"
+  }
+}

@@ -1,0 +1,388 @@
+{
+  "audited_samples": 5565,
+  "bug1_lookahead_leak": {
+    "samples_checked": 5,
+    "mismatches": 0,
+    "max_relative_error_pct": 1.662,
+    "details": [
+      {
+        "symbol": "BTC-USD",
+        "decision_date": "2024-07-24",
+        "n_rows": 275,
+        "last_date_in_df": "2024-07-24",
+        "compares": {
+          "rsi14": {
+            "expected": 73.5,
+            "actual": 73.4964,
+            "rel_err_pct": 0.005
+          },
+          "ma20": {
+            "expected": 61875.48,
+            "actual": 61875.4756,
+            "rel_err_pct": 0.0
+          },
+          "ma120": {
+            "expected": 65061.05,
+            "actual": 65061.0453,
+            "rel_err_pct": 0.0
+          },
+          "price_quantile_2y": {
+            "expected": 0.8,
+            "actual": 0.8032,
+            "rel_err_pct": 0.399
+          },
+          "1m_return": {
+            "expected": 8.6,
+            "actual": 8.6386,
+            "rel_err_pct": 0.449
+          }
+        },
+        "max_rel_err_pct": 0.449
+      },
+      {
+        "symbol": "AAPL",
+        "decision_date": "2025-12-22",
+        "n_rows": 543,
+        "last_date_in_df": "2025-12-22",
+        "compares": {
+          "rsi14": {
+            "expected": 17.7,
+            "actual": 17.7269,
+            "rel_err_pct": 0.152
+          },
+          "ma20": {
+            "expected": 276.97,
+            "actual": 276.9734,
+            "rel_err_pct": 0.001
+          },
+          "ma120": {
+            "expected": 245.82,
+            "actual": 245.823,
+            "rel_err_pct": 0.001
+          },
+          "price_quantile_2y": {
+            "expected": 0.88,
+            "actual": 0.8758,
+            "rel_err_pct": 0.479
+          },
+          "1m_return": {
+            "expected": 1.8,
+            "actual": 1.7728,
+            "rel_err_pct": 1.513
+          }
+        },
+        "max_rel_err_pct": 1.513
+      },
+      {
+        "symbol": "TSLA",
+        "decision_date": "2025-07-02",
+        "n_rows": 423,
+        "last_date_in_df": "2025-07-02",
+        "compares": {
+          "rsi14": {
+            "expected": 45.7,
+            "actual": 45.7004,
+            "rel_err_pct": 0.001
+          },
+          "ma20": {
+            "expected": 320.36,
+            "actual": 320.3615,
+            "rel_err_pct": 0.0
+          },
+          "ma120": {
+            "expected": 314.13,
+            "actual": 314.1344,
+            "rel_err_pct": 0.001
+          },
+          "price_quantile_2y": {
+            "expected": 0.51,
+            "actual": 0.5139,
+            "rel_err_pct": 0.764
+          },
+          "1m_return": {
+            "expected": -7.9,
+            "actual": -7.8905,
+            "rel_err_pct": 0.12
+          }
+        },
+        "max_rel_err_pct": 0.764
+      },
+      {
+        "symbol": "TLT",
+        "decision_date": "2025-08-28",
+        "n_rows": 463,
+        "last_date_in_df": "2025-08-28",
+        "compares": {
+          "rsi14": {
+            "expected": 49.4,
+            "actual": 49.3646,
+            "rel_err_pct": 0.072
+          },
+          "ma20": {
+            "expected": 84.31,
+            "actual": 84.3067,
+            "rel_err_pct": 0.004
+          },
+          "ma120": {
+            "expected": 83.83,
+            "actual": 83.8268,
+            "rel_err_pct": 0.004
+          },
+          "price_quantile_2y": {
+            "expected": 0.49,
+            "actual": 0.4901,
+            "rel_err_pct": 0.018
+          },
+          "1m_return": {
+            "expected": 0.8,
+            "actual": 0.7867,
+            "rel_err_pct": 1.662
+          }
+        },
+        "max_rel_err_pct": 1.662
+      },
+      {
+        "symbol": "^GSPC",
+        "decision_date": "2025-02-19",
+        "n_rows": 331,
+        "last_date_in_df": "2025-02-19",
+        "compares": {
+          "rsi14": {
+            "expected": 62.9,
+            "actual": 62.8752,
+            "rel_err_pct": 0.039
+          },
+          "ma20": {
+            "expected": 6071.56,
+            "actual": 6071.557,
+            "rel_err_pct": 0.0
+          },
+          "ma120": {
+            "expected": 5878.49,
+            "actual": 5878.487,
+            "rel_err_pct": 0.0
+          },
+          "price_quantile_2y": {
+            "expected": 1.0,
+            "actual": 1.0,
+            "rel_err_pct": 0.0
+          },
+          "1m_return": {
+            "expected": 2.5,
+            "actual": 2.4595,
+            "rel_err_pct": 1.619
+          }
+        },
+        "max_rel_err_pct": 1.619
+      }
+    ],
+    "verdict": "PASS",
+    "note": "1m_return \u7528 21 trading days\uff1bprice_quantile_2y \u7528 t_idx \u4e4b\u524d\u6240\u6709\u7a97\u53e3\uff08\u4e0d\u662f\u56fa\u5b9a 2y\uff0c\u8ddf builder \u4e00\u81f4\uff09"
+  },
+  "bug2_forward_window": {
+    "samples_checked": 10,
+    "mismatches": 0,
+    "max_relative_error_pct": 0.107,
+    "details": [
+      {
+        "symbol": "NDQ.AX",
+        "decision_date": "2024-10-01",
+        "t_close": 42.557,
+        "t+30_close": 47.3978,
+        "expected_30d_ret": 11.375,
+        "recomputed_30d_ret": 11.3747,
+        "rel_err_pct": 0.002
+      },
+      {
+        "symbol": "AAPL",
+        "decision_date": "2024-10-22",
+        "t_close": 234.1051,
+        "t+30_close": 241.4673,
+        "expected_30d_ret": 3.145,
+        "recomputed_30d_ret": 3.1448,
+        "rel_err_pct": 0.006
+      },
+      {
+        "symbol": "NDQ.AX",
+        "decision_date": "2024-07-31",
+        "t_close": 43.1213,
+        "t+30_close": 41.4087,
+        "expected_30d_ret": -3.972,
+        "recomputed_30d_ret": -3.9715,
+        "rel_err_pct": 0.012
+      },
+      {
+        "symbol": "IWM",
+        "decision_date": "2025-05-05",
+        "t_close": 196.819,
+        "t+30_close": 206.897,
+        "expected_30d_ret": 5.12,
+        "recomputed_30d_ret": 5.1205,
+        "rel_err_pct": 0.009
+      },
+      {
+        "symbol": "QQQ",
+        "decision_date": "2024-08-02",
+        "t_close": 444.5807,
+        "t+30_close": 468.8432,
+        "expected_30d_ret": 5.457,
+        "recomputed_30d_ret": 5.4574,
+        "rel_err_pct": 0.007
+      },
+      {
+        "symbol": "GC=F",
+        "decision_date": "2025-06-12",
+        "t_close": 3380.8999,
+        "t+30_close": 3334.0,
+        "expected_30d_ret": -1.387,
+        "recomputed_30d_ret": -1.3872,
+        "rel_err_pct": 0.015
+      },
+      {
+        "symbol": "EEM",
+        "decision_date": "2024-12-18",
+        "t_close": 40.9711,
+        "t+30_close": 42.1526,
+        "expected_30d_ret": 2.884,
+        "recomputed_30d_ret": 2.8837,
+        "rel_err_pct": 0.01
+      },
+      {
+        "symbol": "TSLA",
+        "decision_date": "2024-07-29",
+        "t_close": 232.1,
+        "t+30_close": 226.17,
+        "expected_30d_ret": -2.555,
+        "recomputed_30d_ret": -2.5549,
+        "rel_err_pct": 0.002
+      },
+      {
+        "symbol": "NDQ.AX",
+        "decision_date": "2024-10-11",
+        "t_close": 44.1805,
+        "t+30_close": 46.9721,
+        "expected_30d_ret": 6.319,
+        "recomputed_30d_ret": 6.3186,
+        "rel_err_pct": 0.006
+      },
+      {
+        "symbol": "IWM",
+        "decision_date": "2025-09-26",
+        "t_close": 240.1063,
+        "t+30_close": 240.3749,
+        "expected_30d_ret": 0.112,
+        "recomputed_30d_ret": 0.1119,
+        "rel_err_pct": 0.107
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "bug3_macro_alignment": {
+    "samples_checked": 5,
+    "mismatches": 0,
+    "max_relative_error_pct": 0.215,
+    "details": [
+      {
+        "decision_date": "2024-11-07",
+        "compares": {
+          "VIX": {
+            "expected": 15.2,
+            "actual": 15.2,
+            "rel_err_pct": 0.0,
+            "yf_last_date": "2024-11-07"
+          },
+          "TNX": {
+            "expected": 4.34,
+            "actual": 4.341,
+            "rel_err_pct": 0.023,
+            "yf_last_date": "2024-11-07"
+          }
+        },
+        "max_rel_err_pct": 0.023
+      },
+      {
+        "decision_date": "2025-08-12",
+        "compares": {
+          "VIX": {
+            "expected": 14.7,
+            "actual": 14.73,
+            "rel_err_pct": 0.204,
+            "yf_last_date": "2025-08-12"
+          },
+          "TNX": {
+            "expected": 4.29,
+            "actual": 4.293,
+            "rel_err_pct": 0.07,
+            "yf_last_date": "2025-08-12"
+          }
+        },
+        "max_rel_err_pct": 0.204
+      },
+      {
+        "decision_date": "2025-10-24",
+        "compares": {
+          "VIX": {
+            "expected": 16.4,
+            "actual": 16.37,
+            "rel_err_pct": 0.183,
+            "yf_last_date": "2025-10-24"
+          },
+          "TNX": {
+            "expected": 4.0,
+            "actual": 3.997,
+            "rel_err_pct": 0.075,
+            "yf_last_date": "2025-10-24"
+          }
+        },
+        "max_rel_err_pct": 0.183
+      },
+      {
+        "decision_date": "2025-12-04",
+        "compares": {
+          "VIX": {
+            "expected": 15.8,
+            "actual": 15.78,
+            "rel_err_pct": 0.127,
+            "yf_last_date": "2025-12-04"
+          },
+          "TNX": {
+            "expected": 4.11,
+            "actual": 4.108,
+            "rel_err_pct": 0.049,
+            "yf_last_date": "2025-12-04"
+          }
+        },
+        "max_rel_err_pct": 0.127
+      },
+      {
+        "decision_date": "2025-11-25",
+        "compares": {
+          "VIX": {
+            "expected": 18.6,
+            "actual": 18.56,
+            "rel_err_pct": 0.215,
+            "yf_last_date": "2025-11-25"
+          },
+          "TNX": {
+            "expected": 4.0,
+            "actual": 4.002,
+            "rel_err_pct": 0.05,
+            "yf_last_date": "2025-11-25"
+          }
+        },
+        "max_rel_err_pct": 0.215
+      }
+    ],
+    "verdict": "PASS",
+    "note": "\u53ea\u6bd4\u5bf9 VIX / TNX\uff1bDXY / USDCNY \u8df3\u8fc7\uff08yfinance \u7ecf\u5e38\u8fd4\u7a7a\uff09"
+  },
+  "bug4_oracle_consistency": {
+    "samples_checked": 5565,
+    "parse_failures": 0,
+    "mismatches": 0,
+    "mismatch_rate_pct": 0.0,
+    "mismatch_samples": [],
+    "verdict": "PASS"
+  },
+  "overall_verdict": "PASS"
+}
