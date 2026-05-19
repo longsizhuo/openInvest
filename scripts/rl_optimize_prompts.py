@@ -40,19 +40,11 @@ sys.path.insert(0, "/home/ubuntu/projects-review/invest")
 
 
 def _configure_dspy():
-    """配 DSPy 用 DeepSeek（OpenAI 兼容）"""
+    """配 DSPy 用任意 OpenAI 兼容 LLM（默认 DeepSeek，可换千问/智谱/Kimi）"""
     import dspy
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise SystemExit("❌ DEEPSEEK_API_KEY 未设")
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    lm = dspy.LM(
-        f"openai/{model}",
-        api_key=api_key,
-        api_base=base_url + "/v1" if not base_url.endswith("/v1") else base_url,
-        temperature=0.2,
-    )
+    from utils.llm import get_dspy_lm, get_llm_config
+    _api_key, base_url, model, _provider = get_llm_config()
+    lm = get_dspy_lm(temperature=0.2)
     dspy.configure(lm=lm)
     print(f"✓ DSPy 配 {model} @ {base_url}")
 

@@ -127,14 +127,14 @@ def _append_attribution(rec: Dict[str, Any]) -> None:
 
 def annotate_auto(misses: List[Dict[str, Any]], existing: Dict[str, str]) -> List[Dict[str, Any]]:
     """LLM 自动标注（v4-flash，无 ground truth 只能粗略归因）"""
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+    # 统一从 utils.llm 读 LLM 配置（默认 DeepSeek，可通过 LLM_* env 换千问/智谱）
+    from utils.llm import get_llm_config_safe
+    api_key, base_url, model, _provider = get_llm_config_safe()
     if not api_key:
-        print("❌ --auto 需要 DEEPSEEK_API_KEY，跳过")
+        print("❌ --auto 需要 LLM_API_KEY 或 DEEPSEEK_API_KEY，跳过")
         return []
     from openai import OpenAI
-    client = OpenAI(api_key=api_key,
-                    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
     results = []
     for i, m in enumerate(misses, 1):

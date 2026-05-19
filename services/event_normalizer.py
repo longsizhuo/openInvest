@@ -78,12 +78,15 @@ def normalize(
     base_url: Optional[str] = None,
     skip_embedding: bool = False,
 ) -> List[NormalizedEvent]:
-    """批量归一化。空 items 返回 []，缺 DEEPSEEK_API_KEY 返回 []。"""
+    """批量归一化。空 items 返回 []，缺 LLM key 返回 []。"""
     if not items:
         return []
-    api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+    # 统一从 utils.llm 读 LLM 配置，向后兼容 DEEPSEEK_*
+    from utils.llm import get_llm_config_safe
+    _ak, _bu, _m, _p = get_llm_config_safe(default_model=DEFAULT_MODEL)
+    api_key = api_key or _ak
     if not api_key:
-        log.warning("DEEPSEEK_API_KEY 缺失，event_normalizer 跳过")
+        log.warning("LLM_API_KEY / DEEPSEEK_API_KEY 缺失，event_normalizer 跳过")
         return []
 
     results: List[NormalizedEvent] = []
@@ -94,9 +97,9 @@ def normalize(
             batch_events = _call_flash_batch(
                 batch,
                 start_idx=i,
-                model=model or os.getenv("DEEPSEEK_MODEL", DEFAULT_MODEL),
+                model=model or _m,
                 api_key=api_key,
-                base_url=base_url or os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+                base_url=base_url or _bu,
             )
         except Exception as e:
             log.warning(f"normalize batch starting idx={i} 失败: {type(e).__name__}: {e}")
