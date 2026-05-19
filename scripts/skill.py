@@ -579,8 +579,9 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
 
     # 2026-05-18 漂移修复: skill 路径之前没接 wealth_context_view，Risk Officer
     # 永远看不到 family_backup / account_purpose，按 PWM 老逻辑误判超配。
-    # 现在和 session orchestrator 用同一份 loader。
-    from core.committee import load_wealth_context_view
+    # 现在和 session orchestrator 用同一份 loader（通过 committee_runner re-export
+    # 走 service layer，符合 import-linter 契约: entry 不直接调 core.committee）。
+    from core.committee_runner import load_wealth_context_view
     wealth_view = load_wealth_context_view()
 
     out = {
