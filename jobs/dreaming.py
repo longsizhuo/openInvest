@@ -399,7 +399,7 @@ def _llm_verify_candidates(
         {
             "id": i,
             "asset": c["asset"],
-            "action": c["action"],
+            "action": _label(c),  # 候选存的是 "verdict" 键，无 "action"；_label 兼容两者
             "regime": c["regime"],
             "window_days": c["window_days"],
             "count": c["count"],

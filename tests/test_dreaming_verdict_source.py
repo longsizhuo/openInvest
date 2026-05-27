@@ -169,3 +169,23 @@ def test_verdict_review_serializes_regime_marker():
     )
     d = asdict(rv)
     assert d["regime_at_decision"] == "crash"
+
+
+def test_llm_verify_payload_uses_verdict_key(monkeypatch):
+    """回归：候选字典存的是 "verdict" 键，无 "action"；_llm_verify_candidates
+    构造 payload 时必须走 _label(c) 兼容，否则一开验伪就 KeyError。
+
+    这条路径默认关闭（INVEST_DREAMING_LLM_VERIFY=0），上线以来从没被跑过，
+    2026-05-27 首次开启即崩 KeyError('action')。锁住别再回归。
+    """
+    # 无 key → 走 fallback 全 KEEP，不发真请求；只验 payload 构造不炸
+    monkeypatch.setattr(
+        "utils.llm.get_llm_config_safe", lambda: (None, None, None, None)
+    )
+    cand = [{
+        "asset": "NDQ.AX", "verdict": "ACCUMULATE", "regime": ["downtrend"],
+        "window_days": 30, "count": 13, "hit_rate": 0.85,
+        "avg_return_pct": 7.69, "score": 0.89,
+    }]
+    mask, verdicts = dreaming._llm_verify_candidates(cand)  # 不应抛 KeyError
+    assert mask == [True]  # 无 key fallback 全 KEEP
