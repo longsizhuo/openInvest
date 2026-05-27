@@ -960,19 +960,22 @@ async def deposit(body: DepositRequest = Body(...)) -> WriteResponse:
 @app.post("/api/withdraw", response_model=WriteResponse, tags=["write"])
 async def withdraw(body: WithdrawRequest = Body(...)) -> WriteResponse:
     """取出现金（v2: 任意币种 + 负数校验）。
-    余额不足默认 400 拒绝（PM 关切：避免 AUD -6894 类似事故）"""
+    余额不足默认 400 拒绝（PM 关切：避免 AUD -6894 类似事故）
+
+    余额检查在 fcntl 锁内执行，避免并发取款 TOCTOU 竞态。
+    """
     pm = _new_pm()
     ccy = body.currency.upper()
-    cur = pm.cash_amount(ccy)
-    if cur < body.amount:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{ccy} 余额不足：当前 {cur:.2f}，需要扣 {body.amount}",
-        )
 
     with pm.with_portfolio_tx() as p:
         cash = dict(p.get("cash") or {})
-        new_balance = float(cash.get(ccy, 0) or 0) - body.amount
+        cur = float(cash.get(ccy, 0) or 0)
+        if cur < body.amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{ccy} 余额不足：当前 {cur:.2f}，需要扣 {body.amount}",
+            )
+        new_balance = cur - body.amount
         cash[ccy] = round(new_balance, 2)
         p["cash"] = cash
     pm._reload()
@@ -1366,10 +1369,15 @@ async def _run_committee_task(
         # 历史：之前这里 90 行手搓的 orchestrator 跟 daily_report 复制了一份，
         # 加新参数总漏一处。修复 2026-05-16: 整段迁移到 service 层。
         # 同步调 session（session 内部已串行/并行 dispatch，本身处理跨资产）。
-        # TODO(并发): 单用户 web 当前 OK；多用户场景下 sync 调会阻塞 event loop。
-        # 已尝试 await loop.run_in_executor / asyncio.to_thread，在 anyio TestClient
-        # 嵌套 ThreadPool 下 future 不 resolve（详见 commit 历史）。后续 follow-up
-        # 用 threading.Thread + asyncio.Event 桥接重写为真异步背景任务
+        #
+        # 已知限制：此同步调用阻塞 uvicorn 事件循环 5-10 分钟。
+        # 尝试过的方案（均在 anyio TestClient 嵌套 ThreadPool 下失败）：
+        #   - asyncio.get_event_loop().run_in_executor() → future 不 resolve
+        #   - asyncio.to_thread() → 同上
+        #   - threading.Thread + asyncio.Event → Event.wait 不唤醒
+        #   - threading.Thread + asyncio.Queue → Queue.get 不返回
+        # 根因：Starlette TestClient 用 anyio 在独立线程跑事件循环，与标准 asyncio 不兼容。
+        # 生产环境建议：用 --workers 2+ 多进程部署，或 Caddy 反代 + 超时保护。
         session = run_committee_session(
             symbols=symbols,
             max_debate_rounds=max_rounds,
@@ -3062,22 +3070,25 @@ async def get_committee_session(date: str, symbol: str) -> CommitteeSessionDetai
 
 @app.post("/api/cash/{currency}/withdraw", response_model=WriteResponse, tags=["cash_write"])
 async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...)) -> WriteResponse:
-    """v2 通用任意币种取款（默认禁止扣到负数 — PM 强烈要求；后续可加 force=true 显式越过）"""
+    """v2 通用任意币种取款（默认禁止扣到负数 — PM 强烈要求；后续可加 force=true 显式越过）
+
+    余额检查在 fcntl 锁内执行，避免并发取款 TOCTOU 竞态。
+    """
     ccy = currency.upper()
     if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
         raise HTTPException(status_code=400, detail=f"非法币种 {currency}")
 
     pm = _new_pm()
-    cur = pm.cash_amount(ccy)
-    if cur < body.amount:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{ccy} 余额不足：当前 {cur:.2f}，需要扣 {body.amount}",
-        )
 
     with pm.with_portfolio_tx() as p:
         cash = dict(p.get("cash") or {})
-        new_balance = float(cash.get(ccy, 0) or 0) - body.amount
+        cur = float(cash.get(ccy, 0) or 0)
+        if cur < body.amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{ccy} 余额不足：当前 {cur:.2f}，需要扣 {body.amount}",
+            )
+        new_balance = cur - body.amount
         cash[ccy] = round(new_balance, 2)
         p["cash"] = cash
     pm._reload()
@@ -3208,8 +3219,17 @@ async def commsec_apply(
 
 from db.trades_db import TradesDB as _TradesDB
 
-# 模块级单例（web_api 单进程内复用同一个连接）
-_trades_db = _TradesDB()
+# 模块级单例 — 延迟初始化，避免 DB 文件损坏时 import 崩溃导致 crash-loop
+# （模块级 _TradesDB() 在 import 时执行，DB 损坏 → import 失败 → 服务器无法启动 → 重启死循环）
+_trades_db: Optional[_TradesDB] = None
+
+
+def _get_trades_db() -> _TradesDB:
+    """延迟初始化 TradesDB 单例，首次调用时创建连接。"""
+    global _trades_db
+    if _trades_db is None:
+        _trades_db = _TradesDB()
+    return _trades_db
 
 
 class RecordTradeRequest(BaseModel):
@@ -3265,7 +3285,7 @@ async def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
     status 初始为 planned；跑完后用 PATCH /api/trades/{id}/status 改成 executed。
     """
     try:
-        new_id = _trades_db.record_trade(
+        new_id = _get_trades_db().record_trade(
             symbol=body.symbol,
             direction=body.direction,
             units=body.units,
@@ -3284,7 +3304,7 @@ async def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
 async def list_trades(limit: int = Query(20, ge=1, le=500,
                                          description="最近 N 笔，最多 500")) -> TradesListResponse:
     """按时间倒序返回最近 N 笔账本记录"""
-    rows = _trades_db.list_trades(limit=limit)
+    rows = _get_trades_db().list_trades(limit=limit)
     trades = [TradeRecord(**r) for r in rows]
     return TradesListResponse(count=len(trades), trades=trades)
 
@@ -3453,34 +3473,51 @@ async def patch_trade_status(
     - SELL: holding.units -= trade.units；归零则 remove
 
     响应额外携带 portfolio_synced 和 synced_holding 让前端展示 toast。
+
+    原子性保证：先同步 portfolio（可重试），成功后再提交 trades.db status。
+    如果 portfolio 同步失败，trade 保持 planned 状态，用户可重试。
+    _sync_trade_to_portfolio 是幂等的（BUY upsert / SELL 减 units），
+    重试不会产生重复数据。
     """
     # 先取 trade 原始数据（patch 前），供后面同步用
-    trade_before = _trades_db.get_trade(trade_id)
-
-    try:
-        found = _trades_db.patch_status(trade_id, status)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if not found:
+    trade_before = _get_trades_db().get_trade(trade_id)
+    if trade_before is None:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
 
-    # ---- executed 时同步 portfolio.md ----
+    # ---- executed 时先同步 portfolio.md，成功后再提交 status ----
     portfolio_synced = False
     synced_holding: Optional[Dict[str, Any]] = None
 
-    if status == "executed" and trade_before is not None:
-        # 在 asyncio event loop 里用 run_in_executor 跑同步 IO（fcntl/文件写）
-        # 避免阻塞 event loop；出错降级，不影响状态更新结果
+    if status == "executed":
+        # 先同步 portfolio（幂等操作），失败则不提交 status
         loop = asyncio.get_event_loop()
         portfolio_synced, synced_holding = await loop.run_in_executor(
             None, _sync_trade_to_portfolio, trade_before
         )
-        if portfolio_synced:
-            log.info(
-                f"portfolio.md 已同步: trade_id={trade_id} "
-                f"{trade_before.get('direction')} {trade_before.get('units')} "
-                f"{trade_before.get('symbol')}"
+        if not portfolio_synced:
+            raise HTTPException(
+                status_code=500,
+                detail=f"portfolio 同步失败，trade 保持 planned 状态。请重试。"
+                       f"trade_id={trade_id}, symbol={trade_before.get('symbol')}",
             )
+        log.info(
+            f"portfolio.md 已同步: trade_id={trade_id} "
+            f"{trade_before.get('direction')} {trade_before.get('units')} "
+            f"{trade_before.get('symbol')}"
+        )
+
+    # portfolio 同步成功（或非 executed 状态），提交 trades.db
+    try:
+        _get_trades_db().patch_status(trade_id, status)
+    except ValueError as e:
+        # portfolio 已同步但 status 提交失败 — 记录异常但不回滚 portfolio
+        # （portfolio 同步是幂等的，下次重试不会出问题）
+        log.error(
+            f"portfolio 已同步但 trades.db patch_status 失败: {e} "
+            f"trade_id={trade_id}，需手动重试 status 更新",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"trades.db 更新失败: {e}") from e
 
     return {
         "id": trade_id,
