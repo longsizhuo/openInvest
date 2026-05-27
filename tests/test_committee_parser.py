@@ -120,3 +120,26 @@ def test_config_override_changes_alloc_ceiling():
     set_config_override({"verdict": {"alloc_cny_ceiling": 20000}})
     r2 = parse_cio_memo(text)
     assert r2["alloc_cny"] == 20000
+
+
+# ---------- CIO prompt TRIM 约束条件注入 ----------
+
+def test_cio_prompt_trim_constraint_disabled_by_default():
+    """默认阈值 0 → TRIM 约束段不出现在 prompt 里"""
+    from agents.cio import build_cio_prompt
+    prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
+    assert "TRIM 约束" not in prompt
+    assert "不允许 TRIM" not in prompt
+
+
+def test_cio_prompt_trim_constraint_enabled_via_override():
+    """set_config_override 注入阈值 > 0 → TRIM 约束段出现"""
+    set_config_override({"verdict": {
+        "trim_no_trim_loss_pct": 5.0,
+        "trim_caution_loss_pct": 10.0,
+    }})
+    from agents.cio import build_cio_prompt
+    prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
+    assert "TRIM 约束" in prompt
+    assert "5.0%" in prompt
+    assert "10.0%" in prompt
