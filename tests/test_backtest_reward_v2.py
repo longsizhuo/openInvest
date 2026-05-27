@@ -5,7 +5,22 @@
 """
 from __future__ import annotations
 
-from core.backtest_reward import forward_window_reward, verdict_oracle_accuracy
+import pytest
+
+from core.backtest_reward import (
+    compute_strategy_reward,
+    forward_window_reward,
+    verdict_oracle_accuracy,
+)
+from core.config import reset_config, set_config_override
+
+
+@pytest.fixture(autouse=True)
+def _reset_config():
+    """每个 test 重置 config 隔离状态。"""
+    reset_config()
+    yield
+    reset_config()
 
 
 # ---------------------------------------------------------------------------
@@ -94,3 +109,61 @@ def test_verdict_oracle_accuracy_unknown_verdict():
     """未知 verdict 安全返回 0（不抛异常）"""
     assert verdict_oracle_accuracy("INVEST", 10.0) == 0
     assert verdict_oracle_accuracy("", 10.0) == 0
+
+
+# ---------- config override 实时生效 ----------
+
+def test_oracle_config_override_changes_buy_threshold():
+    """set_config_override() 改 buy_positive 影响 verdict_oracle_accuracy"""
+    # 默认 buy_positive=5.0，return=4.0 → 0
+    assert verdict_oracle_accuracy("BUY", 4.0) == 0
+
+    # 把 buy_positive 降到 3.0，4.0 现在是 +1
+    set_config_override({"oracle_accuracy": {"buy_positive": 3.0}})
+    assert verdict_oracle_accuracy("BUY", 4.0) == 1
+
+
+def test_oracle_config_override_changes_hold_neutral():
+    """set_config_override() 改 hold_neutral 影响 HOLD 判定"""
+    # 默认 hold_neutral=3.0，|5.0| = 5 → 0（中间地带）
+    assert verdict_oracle_accuracy("HOLD", 5.0) == 0
+
+    # 把 hold_neutral 提到 6.0，|5.0| ≤ 6 → +1
+    set_config_override({"oracle_accuracy": {"hold_neutral": 6.0}})
+    assert verdict_oracle_accuracy("HOLD", 5.0) == 1
+
+
+def test_reward_config_override_changes_weights():
+    """set_config_override() 改 reward 权重影响 compute_strategy_reward"""
+    metrics = {
+        "annualized_return_pct": 10.0,
+        "max_drawdown_pct": 10.0,
+        "sharpe_ratio": 1.5,
+        "vs_benchmarks": {"余额宝": {"alpha_pct": 8.0}},
+    }
+    # 默认权重算一次
+    r_default = compute_strategy_reward(metrics)
+
+    # 改成全 0 权重（除了 annualized=1）→ reward = annualized = 0.1
+    set_config_override({"reward": {
+        "weight_annualized_return": 1.0,
+        "weight_max_drawdown": 0.0,
+        "weight_alpha_vs_yuebao": 0.0,
+        "weight_sharpe_bonus": 0.0,
+    }})
+    r_override = compute_strategy_reward(metrics)
+
+    assert r_default != r_override, "override 权重应改变 reward"
+    assert abs(r_override - 0.1) < 1e-4, f"全 0 + annualized=1 → reward≈0.1, 实际 {r_override}"
+
+
+def test_forward_window_reward_config_override_lam_mdd():
+    """set_config_override() 改 lam_mdd 影响 forward_window_reward"""
+    # 默认 lam_mdd=1.0
+    r_default = forward_window_reward(fwd_sharpe=1.0, fwd_mdd_pct=-10.0)
+
+    # 把 lam_mdd 提到 5.0 → 惩罚更重
+    set_config_override({"reward": {"lam_mdd": 5.0}})
+    r_override = forward_window_reward(fwd_sharpe=1.0, fwd_mdd_pct=-10.0)
+
+    assert r_override < r_default, "lam_mdd 更大 → 惩罚更重 → reward 更低"

@@ -40,10 +40,14 @@ def run_holdout(
     print(f"   train reward: {best.value:.4f}")
     print(f"   params: {best.params}")
 
-    # 2. monkey-patch + env vars
-    import core.regime as regime
-    regime.THRESHOLDS["trend_ma_spread_pct"] = best.params["regime_uptrend"]
-    regime.THRESHOLDS["crash_atr_pct_min"] = best.params["regime_atr"]
+    # 2. config override + env vars
+    from core.config import set_config_override
+    set_config_override({
+        "regime": {
+            "trend_ma_spread_pct": best.params["regime_uptrend"],
+            "crash_atr_pct_min": best.params["regime_atr"],
+        },
+    })
     os.environ["INVEST_MAX_DEBATE_ROUNDS"] = str(best.params["max_rounds"])
     os.environ["INVEST_CIO_CONFIDENCE_CAP"] = str(best.params["cio_confidence_cap"])
     os.environ["INVEST_ALLOC_AGGRESSIVENESS"] = str(best.params["alloc_aggressiveness"])

@@ -26,6 +26,18 @@ __all__ = [
 ]
 
 
+def _get_reward_config():
+    """读 reward tunable config（实时，支持 set_config_override）。"""
+    from core.config import load_config
+    return load_config().reward
+
+
+def _get_oracle_config():
+    """读 oracle accuracy tunable config（实时，支持 set_config_override）。"""
+    from core.config import load_config
+    return load_config().oracle_accuracy
+
+
 def compute_strategy_reward(metrics: Dict[str, Any]) -> float:
     """从 strategy_metrics 算 reward。
 
@@ -42,6 +54,7 @@ def compute_strategy_reward(metrics: Dict[str, Any]) -> float:
 
     Optuna direction="maximize"。
     """
+    cfg = _get_reward_config()
     # 都是百分比（如 12.5 = 12.5%），转成小数
     annualized = metrics.get("annualized_return_pct", 0) / 100
     max_dd = metrics.get("max_drawdown_pct", 0) / 100  # 已是绝对值
@@ -52,10 +65,10 @@ def compute_strategy_reward(metrics: Dict[str, Any]) -> float:
     alpha_yuebao = vs.get("alpha_pct", 0) / 100
 
     reward = (
-        annualized
-        - 0.5 * max_dd
-        + 0.5 * alpha_yuebao
-        + 0.2 * max(0, sharpe - 1.0)
+        cfg.weight_annualized_return * annualized
+        + cfg.weight_max_drawdown * max_dd
+        + cfg.weight_alpha_vs_yuebao * alpha_yuebao
+        + cfg.weight_sharpe_bonus * max(0, sharpe - cfg.sharpe_bonus_threshold)
     )
 
     return round(reward, 6)
@@ -63,6 +76,7 @@ def compute_strategy_reward(metrics: Dict[str, Any]) -> float:
 
 def explain_reward(metrics: Dict[str, Any]) -> str:
     """人类可读的 reward 分解（debug / 训练报告用）"""
+    cfg = _get_reward_config()
     annualized = metrics.get("annualized_return_pct", 0)
     max_dd = metrics.get("max_drawdown_pct", 0)
     sharpe = metrics.get("sharpe_ratio", 0)
@@ -73,10 +87,10 @@ def explain_reward(metrics: Dict[str, Any]) -> str:
 
     return (
         f"reward = {reward:.4f}\n"
-        f"  ├─ 年化收益: {annualized:+.2f}%  →  +{annualized/100:.4f}\n"
-        f"  ├─ 最大回撤: {max_dd:.2f}%   →  -{0.5 * max_dd/100:.4f}\n"
-        f"  ├─ vs 余额宝: {alpha_yuebao:+.2f}%  →  +{0.5 * alpha_yuebao/100:.4f}\n"
-        f"  └─ Sharpe ratio: {sharpe:.2f}  →  +{0.2 * max(0, sharpe-1.0):.4f}"
+        f"  ├─ 年化收益: {annualized:+.2f}%  →  +{cfg.weight_annualized_return * annualized/100:.4f}\n"
+        f"  ├─ 最大回撤: {max_dd:.2f}%   →  {cfg.weight_max_drawdown * max_dd/100:.4f}\n"
+        f"  ├─ vs 余额宝: {alpha_yuebao:+.2f}%  →  +{cfg.weight_alpha_vs_yuebao * alpha_yuebao/100:.4f}\n"
+        f"  └─ Sharpe ratio: {sharpe:.2f}  →  +{cfg.weight_sharpe_bonus * max(0, sharpe-cfg.sharpe_bonus_threshold):.4f}"
     )
 
 
@@ -88,8 +102,8 @@ def forward_window_reward(
     fwd_sharpe: float,
     fwd_mdd_pct: float,
     fwd_return_pct: float = 0.0,
-    lam_mdd: float = 1.0,
-    lam_return: float = 0.05,
+    lam_mdd: float | None = None,
+    lam_return: float | None = None,
 ) -> float:
     """v2 per-sample reward — forward window Sharpe penalty by MDD + small return weight
 
@@ -107,15 +121,18 @@ def forward_window_reward(
         fwd_sharpe: annualized Sharpe 在 forward window 上，无量纲
         fwd_mdd_pct: max drawdown 百分比，负数（如 -8.5 表示 -8.5%）
         fwd_return_pct: 累计 return 百分比，可正可负
-        lam_mdd: MDD 惩罚权重，默认 1.0
-        lam_return: 累计 return 加成权重（小权重防双计 Sharpe），默认 0.05
+        lam_mdd: MDD 惩罚权重，None 时从 config 读（默认 1.0）
+        lam_return: 累计 return 加成权重（小权重防双计 Sharpe），None 时从 config 读（默认 0.05）
 
     Returns:
         float, 通常范围 [-2.0, +2.5]
     """
+    cfg = _get_reward_config()
+    effective_lam_mdd = lam_mdd if lam_mdd is not None else cfg.lam_mdd
+    effective_lam_return = lam_return if lam_return is not None else cfg.lam_return
     # abs() 防止用户传 +5 / -5 两种风格（MDD 语义上一律是惩罚项）
-    mdd_penalty = lam_mdd * abs(fwd_mdd_pct) / 100.0
-    return_bonus = lam_return * fwd_return_pct / 100.0
+    mdd_penalty = effective_lam_mdd * abs(fwd_mdd_pct) / 100.0
+    return_bonus = effective_lam_return * fwd_return_pct / 100.0
     # 不 round —— 保留精度给训练（DSPy / Optuna 梯度近似需要）
     return float(fwd_sharpe) - mdd_penalty + return_bonus
 
@@ -143,37 +160,38 @@ def verdict_oracle_accuracy(verdict: str, fwd_return_pct: float, asset_pct: floa
     Returns:
         int in {-1, 0, +1}；未知 verdict 返回 0
     """
+    cfg = _get_oracle_config()
     v = (verdict or "").strip().upper()
     r = float(fwd_return_pct)
 
     if v == "BUY":
-        if r >= 5.0:
+        if r >= cfg.buy_positive:
             return 1
-        if r <= -3.0:
+        if r <= cfg.buy_negative:
             return -1
         return 0
     if v == "ACCUMULATE":
-        if r >= 3.0:
+        if r >= cfg.accumulate_positive:
             return 1
-        if r <= -3.0:
+        if r <= cfg.accumulate_negative:
             return -1
         return 0
     if v == "HOLD":
-        if abs(r) <= 3.0:
+        if abs(r) <= cfg.hold_neutral:
             return 1
-        if abs(r) >= 8.0:
+        if abs(r) >= cfg.hold_wrong:
             return -1
         return 0
     if v == "TRIM":
-        if r <= -3.0:
+        if r <= cfg.trim_positive:
             return 1
-        if r >= 5.0:
+        if r >= cfg.trim_negative:
             return -1
         return 0
     if v == "SELL":
-        if r <= -5.0:
+        if r <= cfg.sell_positive:
             return 1
-        if r >= 3.0:
+        if r >= cfg.sell_negative:
             return -1
         return 0
     # 未知 verdict 安全退化

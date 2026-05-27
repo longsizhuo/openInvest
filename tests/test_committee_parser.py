@@ -1,10 +1,21 @@
 """parse_cio_memo 的 sanity check 测试 — 防 LLM 过度自信 / prompt injection。"""
 from __future__ import annotations
 
+import pytest
+
+from core.config import reset_config, set_config_override
 from core.committee import (
     AGENT_UNAVAILABLE_MARKER,
     parse_cio_memo,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_config():
+    """每个 test 重置 config 隔离状态。"""
+    reset_config()
+    yield
+    reset_config()
 
 
 def test_parse_basic():
@@ -80,3 +91,32 @@ def test_unclear_verdict_when_missing():
     r = parse_cio_memo(text)
     assert r["verdict"] == "UNCLEAR"
     assert r["confidence"] == 0.5
+
+
+# ---------- config override 实时生效 ----------
+
+def test_config_override_changes_overdrive_threshold():
+    """set_config_override() 改变 buy_confidence_overdrive 阈值"""
+    # 默认阈值 0.95，confidence=0.93 不触发降级
+    text = "VERDICT: BUY\nCONFIDENCE: 0.93\nSUGGESTED_ALLOC_CNY: 5000"
+    r1 = parse_cio_memo(text)
+    assert r1["verdict"] == "BUY"
+
+    # 把阈值降到 0.90，0.93 现在触发降级
+    set_config_override({"verdict": {"buy_confidence_overdrive": 0.90}})
+    r2 = parse_cio_memo(text)
+    assert r2["verdict"] == "ACCUMULATE"
+    assert r2["confidence"] == 0.6
+
+
+def test_config_override_changes_alloc_ceiling():
+    """set_config_override() 改变 alloc_cny_ceiling"""
+    # 默认 ceiling ¥100k，¥50k 不 clamp
+    text = "VERDICT: BUY\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 50000"
+    r1 = parse_cio_memo(text)
+    assert r1["alloc_cny"] == 50000
+
+    # 把 ceiling 降到 ¥20k，¥50k 被 clamp
+    set_config_override({"verdict": {"alloc_cny_ceiling": 20000}})
+    r2 = parse_cio_memo(text)
+    assert r2["alloc_cny"] == 20000

@@ -199,25 +199,24 @@ ALLOC_RE = re.compile(r"SUGGESTED_ALLOC_CNY:\s*(-?\d+)")
 # 否则未来无法判断该改还是不该改。
 #
 # 调参流程：
-#   1. 改这里
+#   1. 改 core/config/defaults.yaml（或 set_config_override()）
 #   2. 同步 docs/wiki/02-agents.md "CIO Sanity Check" 表
 #   3. tests/test_committee_parser.py 跑一遍
 #
-THRESHOLDS = {
-    # confidence ≥ 此值 + BUY 几乎一定是 LLM hallucination（60 天 sample size
-    # 信号统计上不显著，>0.95 的 BUY 历史命中率反而低于 0.7-0.8 区间）
-    "buy_confidence_overdrive": 0.95,
-    # 触发降级后用的保守 confidence（不用 0.85 因为我们要表达"原 LLM 过度自信"
-    # 而非"现在仍较自信"）
-    "buy_confidence_downgrade_to": 0.6,
+# Step 3a: 从 config 读取，向后兼容保留 dict 形式
+def _build_thresholds_from_config() -> Dict[str, float]:
+    """从 config 构建 THRESHOLDS dict。"""
+    from core.config import load_config
+    cfg = load_config().verdict
+    return {
+        "buy_confidence_overdrive": cfg.buy_confidence_overdrive,
+        "buy_confidence_downgrade_to": cfg.buy_confidence_downgrade_to,
+        "alloc_cny_ceiling": cfg.alloc_cny_ceiling,
+        "worker_unavailable_confidence_floor": cfg.worker_unavailable_confidence_floor,
+    }
 
-    # alloc_cny 单笔上限（CNY）。来源：用户每月可投 ~¥10k，单笔超 10x 月度
-    # 节余几乎一定是 LLM 单位错乱（把 10 万写成 100 万）或 prompt injection
-    "alloc_cny_ceiling": 100_000,
 
-    # worker 失败时的最低 confidence floor（worker 不全 → 决议证据不足）
-    "worker_unavailable_confidence_floor": 0.4,
-}
+THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 
 
 def parse_cio_memo(text: str) -> Dict[str, Any]:
@@ -243,8 +242,11 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
             pass
 
     # Sanity check 1: 防 prompt injection / LLM 过度自信
-    confidence_threshold = THRESHOLDS["buy_confidence_overdrive"]
-    confidence_downgrade = THRESHOLDS["buy_confidence_downgrade_to"]
+    # 从 config 读取（set_config_override() 实时生效）
+    from core.config import load_config
+    _verdict_cfg = load_config().verdict
+    confidence_threshold = _verdict_cfg.buy_confidence_overdrive
+    confidence_downgrade = _verdict_cfg.buy_confidence_downgrade_to
     if out["verdict"] == "BUY" and out["confidence"] >= confidence_threshold:
         out["_original_verdict"] = "BUY"
         out["_original_confidence"] = out["confidence"]
@@ -259,7 +261,7 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
     # INVEST_ALLOC_AGGRESSIVENESS（Optuna 训练参数，0.05~0.30）会按 baseline ¥100k
     # 收紧 ceiling 到 100_000 × agg。例如 agg=0.10 → 单笔 ≤ ¥10k，避免 LLM 给
     # ¥50k alloc 导致 simulator 大量 SKIP。
-    alloc_ceiling = THRESHOLDS["alloc_cny_ceiling"]
+    alloc_ceiling = _verdict_cfg.alloc_cny_ceiling
     agg_env = os.getenv("INVEST_ALLOC_AGGRESSIVENESS")
     if agg_env:
         try:
@@ -277,7 +279,7 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
     # Sanity check 3（audit algo M4）: worker 输入失败时 confidence 降级
     # 上游传来的 raw 是 brief，含 macro/quant/risk 内容；如果 brief 里出现 worker
     # unavailable 哨兵，CIO 大概率是在 garbage 上综合
-    floor = THRESHOLDS["worker_unavailable_confidence_floor"]
+    floor = _verdict_cfg.worker_unavailable_confidence_floor
     if "[WORKER_UNAVAILABLE]" in text:
         if out["confidence"] > floor:
             out["_original_confidence_unavailable"] = out["confidence"]

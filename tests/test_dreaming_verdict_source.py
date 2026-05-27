@@ -9,8 +9,17 @@ import json
 
 import pytest
 
+from core.config import reset_config, set_config_override
 from core.memory_store import MemoryStore
 from jobs import dreaming
+
+
+@pytest.fixture(autouse=True)
+def _reset_config():
+    """每个 test 重置 config 隔离状态。"""
+    reset_config()
+    yield
+    reset_config()
 
 
 @pytest.fixture
@@ -189,3 +198,63 @@ def test_llm_verify_payload_uses_verdict_key(monkeypatch):
     }]
     mask, verdicts = dreaming._llm_verify_candidates(cand)  # 不应抛 KeyError
     assert mask == [True]  # 无 key fallback 全 KEEP
+
+
+# ---------- config override 实时生效 ----------
+
+def test_config_override_changes_classify_regime_vix():
+    """set_config_override() 改 macro_buckets.vix_low 影响 _classify_regime"""
+    # 默认 vix_low=18.0，vix=19 → vix_mid
+    tags_default = dreaming._classify_regime({"vix": 19.0, "tnx": 4.0})
+    assert "vix_mid" in tags_default
+
+    # 把 vix_low 提到 20，19 现在是 vix_low
+    set_config_override({"macro_buckets": {"vix_low": 20.0}})
+    tags_overridden = dreaming._classify_regime({"vix": 19.0, "tnx": 4.0})
+    assert "vix_low" in tags_overridden
+
+
+def test_config_override_changes_classify_regime_tnx():
+    """set_config_override() 改 macro_buckets.tnx_high 影响 _classify_regime"""
+    # 默认 tnx_high=4.5，tnx=4.3 → tnx_mid
+    tags_default = dreaming._classify_regime({"tnx": 4.3})
+    assert "tnx_mid" in tags_default
+
+    # 把 tnx_high 降到 4.2，4.3 现在是 tnx_high
+    set_config_override({"macro_buckets": {"tnx_high": 4.2}})
+    tags_overridden = dreaming._classify_regime({"tnx": 4.3})
+    assert "tnx_high" in tags_overridden
+
+
+def test_config_override_changes_min_recall(store):
+    """set_config_override() 改 dreaming.min_recall 影响 rem_sleep 候选过滤"""
+    # 默认 min_recall=3，3 条刚好够
+    rows = [_review("NDQ.AX", "HOLD", True, 0.01) for _ in range(3)]
+    _write_reviews(store, rows)
+    signals = dreaming.light_sleep(store)
+    candidates = dreaming.rem_sleep(store, signals)
+    hold7 = [c for c in candidates if c["verdict"] == "HOLD" and c["window_days"] == 7]
+    assert hold7, "3 条默认 min_recall=3 应产生候选"
+
+    # 把 min_recall 提到 5，3 条不够了
+    set_config_override({"dreaming": {"min_recall": 5}})
+    candidates2 = dreaming.rem_sleep(store, signals)
+    hold7_2 = [c for c in candidates2 if c["verdict"] == "HOLD" and c["window_days"] == 7]
+    assert not hold7_2, "min_recall=5 时 3 条不应产生候选"
+
+
+def test_config_override_changes_windows(store):
+    """set_config_override() 改 dreaming.windows 影响 rem_sleep 候选窗口"""
+    # 默认 windows=(7,30)，应有 7d 和 30d 两个窗口
+    rows = [_review("NDQ.AX", "HOLD", True, 0.01) for _ in range(5)]
+    _write_reviews(store, rows)
+    signals = dreaming.light_sleep(store)
+    candidates = dreaming.rem_sleep(store, signals)
+    windows = {c["window_days"] for c in candidates}
+    assert 7 in windows and 30 in windows
+
+    # 改成只有 7d 窗口 → 30d 候选消失
+    set_config_override({"dreaming": {"windows": [7]}})
+    candidates2 = dreaming.rem_sleep(store, signals)
+    windows2 = {c["window_days"] for c in candidates2}
+    assert 7 in windows2 and 30 not in windows2

@@ -12,25 +12,39 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.config import reset_config, set_config_override
 import jobs.dreaming as dreaming_mod
 
 
-def _make_candidate(asset="GC=F", action="bought", regime=("vix_low",),
-                    window=7, count=10, hit_rate=0.95, avg_return=4.0):
+@pytest.fixture(autouse=True)
+def _reset_config():
+    """每个 test 重置 config 隔离状态。"""
+    reset_config()
+    yield
+    reset_config()
+
+
+def _make_candidate(asset="GC=F", action="bought", verdict=None,
+                    regime=("vix_low",), window=7, count=10,
+                    hit_rate=0.95, avg_return=4.0):
     """生产一个会通过 score≥0.8 阈值的 candidate
 
     score = hit*0.5 + min(|ret|/5, 1)*0.3 + min(count/10, 1)*0.2
     默认 0.95*0.5 + 0.8*0.3 + 1.0*0.2 = 0.915 ≥ 0.8 ✓
     """
-    return {
+    c = {
         "asset": asset,
-        "action": action,
         "regime": list(regime),
         "window_days": window,
         "count": count,
         "hit_rate": hit_rate,
         "avg_return_pct": avg_return,
     }
+    if verdict:
+        c["verdict"] = verdict
+    else:
+        c["action"] = action
+    return c
 
 
 @pytest.fixture
@@ -172,3 +186,70 @@ def test_empty_candidates_no_llm_call(store, monkeypatch):
         mock_llm.assert_not_called()
 
     assert accepted == []
+
+
+# ---------- prompt 内容验证 ----------
+
+def test_llm_verify_prompt_uses_config_values(store, monkeypatch):
+    """验证 prompt 里 MIN_RECALL/MIN_SCORE 从 config/locked 读，dict key 是 verdict 非 action"""
+    monkeypatch.setenv("INVEST_DREAMING_LLM_VERIFY", "1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key-for-test")
+
+    # 捕获 OpenAI 调用的 messages
+    captured_messages = []
+    fake_openai = MagicMock()
+    fake_response = MagicMock()
+    fake_response.choices = [MagicMock()]
+    fake_response.choices[0].message.content = '{"verdicts": [{"id": 0, "decision": "KEEP", "reason": "ok"}]}'
+    fake_openai.chat.completions.create.return_value = fake_response
+
+    def capture_create(**kwargs):
+        captured_messages.extend(kwargs.get("messages", []))
+        return fake_response
+
+    fake_openai.chat.completions.create.side_effect = capture_create
+
+    cand = [_make_candidate(verdict="ACCUMULATE")]
+
+    with patch("openai.OpenAI", return_value=fake_openai):
+        dreaming_mod.deep_sleep(store, cand)
+
+    # 找 user payload
+    user_msg = next(m for m in captured_messages if m["role"] == "user")
+    payload = user_msg["content"]
+
+    # 默认值: MIN_RECALL=3, MIN_SCORE=0.8
+    assert "count≥3" in payload, f"MIN_RECALL=3 不在 payload: {payload[:200]}"
+    assert "score≥0.8" in payload, f"MIN_SCORE=0.8 不在 payload: {payload[:200]}"
+    # _label() 把 verdict 值映射到 "action" key，值本身保留（2026-05-27 KeyError 回归锁）
+    assert '"action": "ACCUMULATE"' in payload, f"verdict 值 ACCUMULATE 未正确映射: {payload[:300]}"
+
+
+def test_llm_verify_prompt_override_min_recall(store, monkeypatch):
+    """set_config_override 改 min_recall 后 prompt 里的 count≥N 跟着变"""
+    monkeypatch.setenv("INVEST_DREAMING_LLM_VERIFY", "1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key-for-test")
+
+    set_config_override({"dreaming": {"min_recall": 7}})
+
+    captured_messages = []
+    fake_openai = MagicMock()
+    fake_response = MagicMock()
+    fake_response.choices = [MagicMock()]
+    fake_response.choices[0].message.content = '{"verdicts": [{"id": 0, "decision": "KEEP", "reason": "ok"}]}'
+
+    def capture_create(**kwargs):
+        captured_messages.extend(kwargs.get("messages", []))
+        return fake_response
+
+    fake_openai.chat.completions.create.side_effect = capture_create
+
+    cand = [_make_candidate()]
+
+    with patch("openai.OpenAI", return_value=fake_openai):
+        dreaming_mod.deep_sleep(store, cand)
+
+    user_msg = next(m for m in captured_messages if m["role"] == "user")
+    payload = user_msg["content"]
+
+    assert "count≥7" in payload, f"min_recall=7 override 未生效: {payload[:200]}"

@@ -37,6 +37,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
+from core.config.tunable import RewardConfig
+
 
 @dataclass(frozen=True)
 class ParamRange:
@@ -53,16 +55,6 @@ class ParamRange:
         if self.type == "int":
             return trial.suggest_int(name, int(self.low), int(self.high))
         return trial.suggest_float(name, self.low, self.high)
-
-
-@dataclass
-class RewardConfig:
-    """reward function 权重 —— 改这里改'什么算赢'"""
-    weight_annualized_return: float = 1.0     # 主信号
-    weight_max_drawdown: float = -0.5         # 罚回撤
-    weight_alpha_vs_yuebao: float = 0.5       # 奖跑赢躺平
-    weight_sharpe_bonus: float = 0.2          # 奖 Sharpe > 1
-    sharpe_bonus_threshold: float = 1.0
 
 
 @dataclass
