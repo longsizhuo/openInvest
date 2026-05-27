@@ -16,12 +16,16 @@ from agents.skills_loader import load_skill
 
 
 def build_cio_prompt(asset: Dict[str, Any]) -> str:
-    """渲染 CIO prompt（含 asset 占位符替换）"""
+    """渲染 CIO prompt（含 asset 占位符 + config 阈值注入）"""
+    from core.config import load_config
     asset_name = asset.get("display_name", asset.get("symbol"))
+    verdict_cfg = load_config().verdict
     return load_skill(
         "cio",
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
+        trim_no_trim_loss_pct=verdict_cfg.trim_no_trim_loss_pct,
+        trim_caution_loss_pct=verdict_cfg.trim_caution_loss_pct,
     )
 
 

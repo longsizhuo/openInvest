@@ -49,6 +49,9 @@ class VerdictConfig:
     buy_confidence_downgrade_to: float = 0.6
     alloc_cny_ceiling: float = 100_000
     worker_unavailable_confidence_floor: float = 0.4
+    # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
+    trim_no_trim_loss_pct: float = 5.0   # 浮亏 < 此值禁止 TRIM
+    trim_caution_loss_pct: float = 10.0  # 浮亏 < 此值倾向 HOLD（Macro 非强 risk_off）
 
 
 @dataclass(frozen=True)

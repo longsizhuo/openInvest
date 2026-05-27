@@ -22,6 +22,9 @@ verdict:
   buy_confidence_downgrade_to: 0.6
   alloc_cny_ceiling: 100000
   worker_unavailable_confidence_floor: 0.4
+  # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
+  trim_no_trim_loss_pct: 5.0   # 浮亏 < 此值禁止 TRIM
+  trim_caution_loss_pct: 10.0  # 浮亏 < 此值倾向 HOLD（Macro 非强 risk_off）
 
 dreaming:
   min_recall: 3
