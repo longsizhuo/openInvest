@@ -76,3 +76,10 @@ PERSONAL_NOTE:
 - 如果用户浮亏 > 5% 且 Macro risk_off：考虑 TRIM
 - 如果用户浮盈 > 10% 且 Quant bearish：考虑 TRIM 锁定利润
 - 不允许"待观察"——必须明确 verdict + 数字
+
+**🔥 零花钱账户 + 强破产兜底时的 TRIM 约束（强制）**：
+当 Wealth Context 显示 SOLVENCY_BUFFER=strong 且 account_purpose 含"零花钱"或类似表述时：
+- **浮亏 < 5% 不允许 TRIM** — 卖出坐实亏损，而用户无流动性压力，应 HOLD 等修复
+- **浮亏 5-10% 且 Macro 非强 risk_off：倾向 HOLD** — 零花钱账户的资金久期长，短期波动不是卖出理由
+- 只有浮亏 > 10% 或 Macro 强 risk_off + Risk high_risk 双触发时，才考虑 TRIM
+- 金融逻辑：有 ¥4M 家族 backup 的零花钱账户，-3% 浮亏 ≈ 一个月零花钱波动，不值得交易
