@@ -1,0 +1,30 @@
+{
+  "total_samples": 605,
+  "verdict_distribution": {
+    "HOLD": 458,
+    "ACCUMULATE": 117,
+    "TRIM": 6,
+    "BUY": 24
+  },
+  "symbol_distribution": {
+    "NDQ.AX": 300,
+    "GC=F": 305
+  },
+  "reward_stats": {
+    "mean": 1.8746,
+    "std": 2.7233,
+    "min": -4.9483,
+    "max": 9.401
+  },
+  "config": {
+    "symbols": [
+      "NDQ.AX",
+      "GC=F"
+    ],
+    "start": "2023-07-01",
+    "end": "2024-06-30",
+    "sample_every_n_trading_days": 4,
+    "portfolio_states_per_date": 5,
+    "seed": 42
+  }
+}
