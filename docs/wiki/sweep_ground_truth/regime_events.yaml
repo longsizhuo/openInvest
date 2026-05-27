@@ -1,0 +1,54 @@
+# 纯算术 sweep 的 ground truth 事件清单。
+#
+# 这个文件必须 commit 早于 sweep 运行（git timestamp 强制校验）。
+# sweep 运行后不能追加/修改事件 — 要加事件，新开文件（如 regime_events_v2.yaml）。
+#
+# schema:
+#   events[].name:          事件名称
+#   events[].start:         起始日期 (YYYY-MM-DD)
+#   events[].end:           结束日期 (YYYY-MM-DD)
+#   events[].expected_regime: 期望 regime 分类 (crash/downtrend/recovery/uptrend/range_bound)
+#   events[].severity:      严重程度 (extreme/high/moderate/low)
+#   events[].notes:         人话备注
+
+metadata:
+  version: 1
+  created: "2026-05-27"
+  description: "已知历史市场事件，用于 regime 阈值 sweep 的 ground truth 验证"
+  lock_note: "此文件在 sweep 运行后不可修改。要加事件，新开文件（如 regime_events_v2.yaml）"
+
+events:
+  - name: "COVID crash"
+    start: "2020-02-19"
+    end: "2020-03-23"
+    expected_regime: "crash"
+    severity: "extreme"
+    notes: "S&P 500 -34%，VIX 飙升至 82"
+
+  - name: "2022 rate hike cycle"
+    start: "2022-01-03"
+    end: "2022-10-12"
+    expected_regime: "downtrend"
+    severity: "high"
+    notes: "Fed 连续加息，纳指 -33%"
+
+  - name: "2022-10 bottom to 2023 recovery"
+    start: "2022-10-13"
+    end: "2023-12-31"
+    expected_regime: "recovery"
+    severity: "moderate"
+    notes: "从底部反弹，但价格仍在低位"
+
+  - name: "2024 H1 uptrend"
+    start: "2024-01-02"
+    end: "2024-07-15"
+    expected_regime: "uptrend"
+    severity: "moderate"
+    notes: "AI 牛市，NDQ 新高"
+
+  - name: "2026-04 tariff shock"
+    start: "2026-04-02"
+    end: "2026-04-09"
+    expected_regime: "crash"
+    severity: "high"
+    notes: "关税冲击，急跌后 V 反弹"
