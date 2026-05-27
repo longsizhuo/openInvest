@@ -528,6 +528,33 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]+", "_", text).strip("_").lower()
 
 
+def _prune_rejected_from_candidates(
+    store: MemoryStore, rejected: List[Dict[str, Any]],
+) -> None:
+    """从 candidates.json 移除被 LLM 验伪 REJECT 的条目。
+
+    用 (asset, verdict, regime, window_days) 作为 identity key 匹配。
+    """
+    pool = store.read_dream_state("candidates")
+    if not pool or "candidates" not in pool:
+        return
+
+    # 构建 rejected 的 identity set
+    def _key(c: Dict[str, Any]) -> tuple:
+        return (c.get("asset"), c.get("verdict"),
+                tuple(c.get("regime", [])), c.get("window_days"))
+
+    rejected_keys = {_key(c) for c in rejected}
+    original_count = len(pool["candidates"])
+    pool["candidates"] = [
+        c for c in pool["candidates"] if _key(c) not in rejected_keys
+    ]
+    pruned = original_count - len(pool["candidates"])
+    if pruned > 0:
+        store.write_dream_state("candidates", pool)
+        log.info(f"candidates.json: 移除 {pruned} 条 LLM REJECT 条目")
+
+
 def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """阈值门通过的写 insights/*.md + 更新 MEMORY.md + 追加 DREAMS.md
 
@@ -553,7 +580,8 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
     if os.getenv("INVEST_DREAMING_LLM_VERIFY", "0") == "1":
         keep_mask, verdicts = _llm_verify_candidates(accepted)
         kept = [c for c, k in zip(accepted, keep_mask) if k]
-        rejected_count = sum(1 for k in keep_mask if not k)
+        rejected = [c for c, k in zip(accepted, keep_mask) if not k]
+        rejected_count = len(rejected)
         store.dream_event({
             "phase": "deep_sleep_llm_verify",
             "input_count": len(accepted),
@@ -565,6 +593,9 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
             f"Dreaming LLM 验伪: {len(accepted)} 候选 → "
             f"KEEP {len(kept)} / REJECT {rejected_count}",
         )
+        # 从 candidates.json 移除 REJECT 条目，防止下次 deep_sleep 重复评估
+        if rejected:
+            _prune_rejected_from_candidates(store, rejected)
         accepted = kept
         if not accepted:
             store.dream_event({"phase": "deep_sleep", "accepted": 0,

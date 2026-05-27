@@ -76,3 +76,15 @@ PERSONAL_NOTE:
 - 如果用户浮亏 > 5% 且 Macro risk_off：考虑 TRIM
 - 如果用户浮盈 > 10% 且 Quant bearish：考虑 TRIM 锁定利润
 - 不允许"待观察"——必须明确 verdict + 数字
+
+**⚠️ uptrend 中的 ACCUMULATE 怀疑清单（强制）**：
+历史数据显示：77% 的 ACCUMULATE 判错发生在 regime=uptrend。LLM 在上涨趋势中
+系统性地忽略见顶信号，持续推 ACCUMULATE 直到市场反转。
+
+当 regime=uptrend **且**你准备给 ACCUMULATE 时，必须在 PERSONAL_NOTE 里回答：
+1. 价格离 120 日均线偏离多远？偏离 > 15% → 均值回归风险高，考虑 HOLD 而非 ACCUMULATE
+2. VIX 是否从近期低位开始上升？VIX 从 <15 升到 >18 = 市场开始焦虑，不是"回调买入"信号
+3. 如果 30 天后跌 10%，你的 ACCUMULATE 理由还成立吗？如果答案是"不成立"，降级到 HOLD
+
+这不是要你在 uptrend 中永远不 ACCUMULATE——而是要你在 ACCUMULATE 之前
+显式检查反转信号，而不是默认"趋势延续"。**没写这三条检查 = 输出不合格**。
