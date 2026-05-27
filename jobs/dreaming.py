@@ -61,9 +61,24 @@ from utils.market_metrics import compute_metrics
 # Light Sleep 摄入最近 N 天的 verdict。生产默认 90（只学近期行为）；跑历史 backtest
 # 训练集（如 Phase 1.5 的 2023-2024 leak-free 窗口）时，数据比 wall-clock"现在"老得多，
 # 需用 INVEST_DREAMING_LOOKBACK_DAYS 调大（如 99999）把整个历史窗口纳入，否则全被滤掉。
+#
+# Step 3b: 从 config 读取，set_config_override() 实时生效。
+# 模块级变量保留向后兼容，但函数内每次调用读 config。
 LOOKBACK_DAYS = int(os.getenv("INVEST_DREAMING_LOOKBACK_DAYS", "90"))
 WINDOWS = [7, 30]         # 回看交易后 N 天的市场表现
 MIN_RECALL = 3            # 一个 pattern 至少出现 3 次
+
+
+def _get_dreaming_config():
+    """读 dreaming tunable config（实时，支持 set_config_override）。"""
+    from core.config import load_config
+    return load_config().dreaming
+
+
+def _get_macro_buckets():
+    """读 macro bucket 分桶阈值（实时，支持 set_config_override）。"""
+    from core.config import load_config
+    return load_config().macro_buckets
 MIN_SCORE = 0.8           # Deep Sleep 阈值（OpenClaw 同款）
 # caution lift-based 评分参数（2026-05-27 ADR 008，原理正确修正，非 reward hacking）：
 # - CAUTION_MIN_BASE_DOWN：该 regime 的 30d 真实下行基率必须 ≥ 此值，否则"踏空"只是
@@ -170,7 +185,7 @@ def light_sleep(store: MemoryStore) -> List[Dict[str, Any]]:
     黄金 CNY/克 + forward window 成熟度过滤）。
     """
     path = store.root / ".dreams" / "verdict_review.jsonl"
-    cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now() - timedelta(days=_get_dreaming_config().lookback_days)).strftime("%Y-%m-%d")
     signals: List[Dict[str, Any]] = []
 
     if not path.exists():
@@ -221,19 +236,23 @@ def light_sleep(store: MemoryStore) -> List[Dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 def _classify_regime(ctx: Dict[str, float]) -> Tuple[str, ...]:
-    """把上下文离散化为 regime tag（用于聚合）"""
+    """把上下文离散化为 regime tag（用于聚合）
+
+    VIX/TNX 分桶阈值从 config 读取，set_config_override() 实时生效。
+    """
+    buckets = _get_macro_buckets()
     tags = []
     if "vix" in ctx:
-        if ctx["vix"] < 18:
+        if ctx["vix"] < buckets.vix_low:
             tags.append("vix_low")
-        elif ctx["vix"] < 25:
+        elif ctx["vix"] < buckets.vix_high:
             tags.append("vix_mid")
         else:
             tags.append("vix_high")
     if "tnx" in ctx:
-        if ctx["tnx"] < 4.0:
+        if ctx["tnx"] < buckets.tnx_low:
             tags.append("tnx_low")
-        elif ctx["tnx"] < 4.5:
+        elif ctx["tnx"] < buckets.tnx_high:
             tags.append("tnx_mid")
         else:
             tags.append("tnx_high")
@@ -282,7 +301,7 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
         if not s.get("verdict") or s.get("regime_crash"):
             continue
         reg_t = tuple(sorted(s.get("regime", [])))
-        for window in WINDOWS:
+        for window in _get_dreaming_config().windows:
             d = (s.get("directions") or {}).get(f"{window}d")
             if d is None:
                 continue
@@ -295,17 +314,17 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
 
     candidates: List[Dict[str, Any]] = []
     for (asset, verdict, regime), items in buckets.items():
-        if len(items) < MIN_RECALL:
+        if len(items) < _get_dreaming_config().min_recall:
             continue
         is_hold = verdict.upper() == "HOLD"
-        for window in WINDOWS:
+        for window in _get_dreaming_config().windows:
             wk = f"{window}d"
             pairs = [
                 (i["hits"].get(wk), i["outcomes"].get(wk))
                 for i in items
                 if wk in i.get("hits", {}) and i["hits"].get(wk) is not None
             ]
-            if len(pairs) < MIN_RECALL:
+            if len(pairs) < _get_dreaming_config().min_recall:
                 continue
             n = len(pairs)
             hit_rate = sum(1 for h, _ in pairs if h) / n
@@ -410,8 +429,12 @@ def _llm_verify_candidates(
         for i, c in enumerate(candidates)
     ]
 
+    from core.config import get_locked
+    min_recall = _get_dreaming_config().min_recall
+    _, locked_dreaming, _, _ = get_locked()
+    min_score = locked_dreaming.min_score
     user_payload = (
-        f"统计阈值: hit_rate≥0.5 隐含; count≥{MIN_RECALL}; score≥{MIN_SCORE}\n"
+        f"统计阈值: hit_rate≥0.5 隐含; count≥{min_recall}; score≥{min_score}\n"
         f"候选数: {len(candidates)}\n"
         f"候选 JSON:\n{json.dumps(minimal, ensure_ascii=False, indent=2)}"
     )
@@ -513,7 +536,7 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
     accepted: List[Dict[str, Any]] = []
     for c in candidates:
         score = _score(c)
-        if score < MIN_SCORE or c["count"] < MIN_RECALL:
+        if score < MIN_SCORE or c["count"] < _get_dreaming_config().min_recall:
             continue
         c["score"] = score
         accepted.append(c)

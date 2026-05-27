@@ -55,17 +55,18 @@ def _build_objective(
         cio_confidence_cap = _cfg.cio_confidence_cap.suggest(trial, "cio_confidence_cap")
         alloc_aggressiveness = _cfg.alloc_aggressiveness.suggest(trial, "alloc_aggressiveness")
 
-        # === apply 参数到代码（monkey-patch 全局常量）===
-        # 注：实际 regime.THRESHOLDS 的 key 是 trend_ma_spread_pct / crash_atr_pct_min，
-        # 不是 uptrend_trend_score / uptrend_atr_pct（之前写错了 silent fail）
-        import core.regime as regime
-        regime.THRESHOLDS["trend_ma_spread_pct"] = regime_uptrend
-        regime.THRESHOLDS["crash_atr_pct_min"] = regime_atr
+        # === apply 参数到代码（config override 替代 monkey-patch）===
+        from core.config import set_config_override
+        set_config_override({
+            "regime": {
+                "trend_ma_spread_pct": regime_uptrend,
+                "crash_atr_pct_min": regime_atr,
+            },
+        })
 
-        # max_rounds 通过环境或参数传给 run_walk_forward（暂用 env）
+        # max_rounds / cio_confidence_cap / alloc_aggressiveness 通过 env 透传
         import os
         os.environ["INVEST_MAX_DEBATE_ROUNDS"] = str(max_rounds)
-        # cio_confidence_cap / alloc_aggressiveness 也通过 env 透传给 agents
         os.environ["INVEST_CIO_CONFIDENCE_CAP"] = str(cio_confidence_cap)
         os.environ["INVEST_ALLOC_AGGRESSIVENESS"] = str(alloc_aggressiveness)
 

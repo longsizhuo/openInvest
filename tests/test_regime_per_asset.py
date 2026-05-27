@@ -5,9 +5,14 @@
 - NDQ.AX: trend_ma_spread_pct 4.0
 - BTC-USD: trend_ma_spread_pct 8.0, crash_atr_pct_min 8.0
 - 其他 symbol: 用默认值
+
+Step 2: _per_asset_thresholds() 从 config 读取，set_config_override() 实时生效。
 """
 from __future__ import annotations
 
+import pytest
+
+from core.config import reset_config, set_config_override
 from core.regime import (
     ASSET_OVERRIDES,
     THRESHOLDS,
@@ -15,6 +20,14 @@ from core.regime import (
     classify_regime,
     format_regime_brief,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_config():
+    """每个 test 重置 config 隔离状态。"""
+    reset_config()
+    yield
+    reset_config()
 
 
 # ---------- _per_asset_thresholds ----------
@@ -227,3 +240,48 @@ def test_all_overrides_use_known_keys():
                 f"ASSET_OVERRIDES[{symbol}] 含未知 key '{k}'。"
                 f"合法 key: {valid_keys}"
             )
+
+
+# ---------- config override 实时生效 ----------
+
+def test_config_override_affects_per_asset_thresholds():
+    """set_config_override() 注入后 _per_asset_thresholds() 实时读到新值"""
+    # 默认 trend_ma_spread_pct = 3.0
+    t_default = _per_asset_thresholds(None)
+    assert t_default["trend_ma_spread_pct"] == 3.0
+
+    # 注入 override
+    set_config_override({"regime": {"trend_ma_spread_pct": 6.0}})
+
+    # _per_asset_thresholds 应该读到新值
+    t_new = _per_asset_thresholds(None)
+    assert t_new["trend_ma_spread_pct"] == 6.0
+    # 其他字段不变
+    assert t_new["crash_atr_pct_min"] == 5.0
+
+
+def test_config_override_affects_classify_regime():
+    """set_config_override() 改变 classify_regime() 行为"""
+    m = _metrics(ma20=832, ma120=800, atr_pct=1.0)  # 4% spread
+
+    # 默认阈值 3% → uptrend
+    r1 = classify_regime(m)
+    assert r1["regime"] == "uptrend"
+
+    # 把阈值拉高到 5% → range_bound
+    set_config_override({"regime": {"trend_ma_spread_pct": 5.0}})
+    r2 = classify_regime(m)
+    assert r2["regime"] == "range_bound"
+
+
+def test_config_override_per_asset():
+    """set_config_override() 可以注入 per-asset 覆盖"""
+    set_config_override({
+        "regime_per_asset": {
+            "TEST.SYM": {"trend_ma_spread_pct": 10.0},
+        },
+    })
+    t = _per_asset_thresholds("TEST.SYM")
+    assert t["trend_ma_spread_pct"] == 10.0
+    # 其他字段用默认
+    assert t["crash_atr_pct_min"] == 5.0

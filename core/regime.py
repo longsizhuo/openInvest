@@ -16,89 +16,88 @@
 - jobs/dreaming.py（REM sleep）：聚合时按 regime 分桶
 - 任何下游想加新阈值 → 改这里的 THRESHOLDS，不要在自己代码里硬编码
 
-Per-asset 阈值（P1-2）:
-- 不同资产波动结构不同：黄金 ATR ~1%、纳指 ~1.8%、加密 ~3%。
-  统一用 5% 当 crash 触发线对黄金太松（永远不触发）；用 3% 当
-  trend spread 阈值对黄金偏紧（黄金趋势更连贯）。
-- ASSET_OVERRIDES 按 symbol 局部覆盖 THRESHOLDS。无 override 的资产
-  fallback 到 default。改 default 影响所有资产；改 override 仅影响该资产。
+参数来源（Step 2 config 注入）:
+- 阈值从 core.config.load_config().regime 读取
+- Per-asset 覆盖从 core.config.load_config().regime_per_asset 读取
+- THRESHOLDS / ASSET_OVERRIDES 模块级 dict 保留向后兼容（从 config 构建）
+- sweep runner 用 set_config_override() 注入新参数，函数实时生效
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Dict, Literal, Optional
 
 # Regime 类型枚举（任何下游引用必须用这个）
 RegimeType = Literal["uptrend", "downtrend", "range_bound", "crash", "recovery", "unknown"]
 ALL_REGIMES = ("uptrend", "downtrend", "range_bound", "crash", "recovery", "unknown")
 
-# 默认阈值 — 应用在所有未在 ASSET_OVERRIDES 中显式声明的资产上
-THRESHOLDS: Dict[str, float] = {
-    # MA20 vs MA120 偏离 ≥ 3% 视为有趋势（MA120 比 MA60 慢，所以阈值高一点）
-    "trend_ma_spread_pct": 3.0,
-    # crash 波动腿：14 日 ATR 占当前价 ≥ 5% 视为异常高波动
-    "crash_atr_pct_min": 5.0,
-    # crash 路径一（急跌）跌幅腿：过去 30 交易日累计跌幅 ≥ 20%（return_30d ≤ -0.20），
-    # 与波动腿 AND 组合。
-    "crash_drawdown_30d_pct": 20.0,
-    # crash 路径二（深跌）：过去 30 交易日累计跌幅 ≥ 30%（return_30d ≤ -0.30），
-    # **不看波动**单独触发。2026-05-26 双触发器：解决 AND 逻辑挡掉"慢阴跌"
-    # （跌够但波动不剧烈）的问题 —— 深跌本身就是 crash，无需高 ATR 佐证。
-    "crash_deep_drawdown_30d_pct": 30.0,
-    # recovery：从近 30 日低点反弹 ≥ 10%（rebound_off_30d_low ≥ 0.10）
-    "recovery_rebound_pct": 10.0,
-    # recovery：且价格仍在低位（2y 真百分位 < 50%）
-    "recovery_quantile_max": 0.50,
-    # 价格 2 年分位 ≤ 20% 视为"低位"，配合 range_bound 触发"震荡市底部"提示
-    "low_quantile_threshold": 0.20,
-    # 价格 2 年分位 ≥ 80% 视为"高位"
-    "high_quantile_threshold": 0.80,
-}
 
-# 单资产覆盖（per-asset overrides）—— P1-2
-# 仅声明跟默认不同的 key；其余 key fallback 到 THRESHOLDS。
-#
-# 来源依据：
-# - GC=F (黄金): 长期 ATR_pct 均值 ~1.0%，5% 永远不触发。改 3.5%
-#               让真正的剧烈日内波动（俄乌、美联储意外）能被识别。
-#               MA spread 放宽到 5% — 黄金趋势更连贯，3% 太敏感。
-# - NDQ.AX (纳指 ETF): ATR_pct 均值 ~1.8%，5% crash 阈值合理保留。
-#               MA spread 放宽到 4% — ETF 比单股更平滑。
-# - BTC-USD (加密): ATR_pct 均值 ~3-5%，crash 阈值上调到 8% 防误报。
-#
-# 加新资产覆盖：直接往 dict 里加。schema 见 _per_asset_thresholds()。
-ASSET_OVERRIDES: Dict[str, Dict[str, float]] = {
-    "GC=F": {
-        "trend_ma_spread_pct": 5.0,
-        "crash_atr_pct_min": 3.5,
-    },
-    "NDQ.AX": {
-        "trend_ma_spread_pct": 4.0,
-    },
-    "BTC-USD": {
-        "trend_ma_spread_pct": 8.0,
-        "crash_atr_pct_min": 8.0,
-    },
-    "ETH-USD": {
-        "trend_ma_spread_pct": 8.0,
-        "crash_atr_pct_min": 8.0,
-    },
-}
+def _build_thresholds_from_config() -> Dict[str, float]:
+    """从 config 构建 THRESHOLDS dict（排除 per_asset 子键）。"""
+    from core.config import load_config
+    cfg = load_config().regime
+    return {
+        "trend_ma_spread_pct": cfg.trend_ma_spread_pct,
+        "crash_atr_pct_min": cfg.crash_atr_pct_min,
+        "crash_drawdown_30d_pct": cfg.crash_drawdown_30d_pct,
+        "crash_deep_drawdown_30d_pct": cfg.crash_deep_drawdown_30d_pct,
+        "recovery_rebound_pct": cfg.recovery_rebound_pct,
+        "recovery_quantile_max": cfg.recovery_quantile_max,
+        "low_quantile_threshold": cfg.low_quantile_threshold,
+        "high_quantile_threshold": cfg.high_quantile_threshold,
+    }
+
+
+def _build_asset_overrides_from_config() -> Dict[str, Dict[str, float]]:
+    """从 config 构建 ASSET_OVERRIDES dict。"""
+    from core.config import load_config
+    per_asset = load_config().regime_per_asset
+    result = {}
+    for symbol, pa_cfg in per_asset.items():
+        override = {}
+        if pa_cfg.trend_ma_spread_pct is not None:
+            override["trend_ma_spread_pct"] = pa_cfg.trend_ma_spread_pct
+        if pa_cfg.crash_atr_pct_min is not None:
+            override["crash_atr_pct_min"] = pa_cfg.crash_atr_pct_min
+        if override:
+            result[symbol] = override
+    return result
+
+
+# 模块级 dict — 从 config 构建，保留向后兼容（旧代码直接 import THRESHOLDS / ASSET_OVERRIDES）
+THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
+ASSET_OVERRIDES: Dict[str, Dict[str, float]] = _build_asset_overrides_from_config()
 
 
 def _per_asset_thresholds(symbol: Optional[str]) -> Dict[str, float]:
-    """把默认 THRESHOLDS 与该资产的 override 合并。
+    """把默认阈值与该资产的 override 合并。
 
-    没传 symbol 或 symbol 不在 ASSET_OVERRIDES → 完全用默认值。
+    每次调用从 config 实时读取，set_config_override() 注入后立即生效。
+    没传 symbol 或 symbol 无 override → 完全用默认值。
     传了 → 用 override 字段覆盖默认值。
     """
+    from core.config import load_config
+    cfg = load_config()
+    base = {
+        "trend_ma_spread_pct": cfg.regime.trend_ma_spread_pct,
+        "crash_atr_pct_min": cfg.regime.crash_atr_pct_min,
+        "crash_drawdown_30d_pct": cfg.regime.crash_drawdown_30d_pct,
+        "crash_deep_drawdown_30d_pct": cfg.regime.crash_deep_drawdown_30d_pct,
+        "recovery_rebound_pct": cfg.regime.recovery_rebound_pct,
+        "recovery_quantile_max": cfg.regime.recovery_quantile_max,
+        "low_quantile_threshold": cfg.regime.low_quantile_threshold,
+        "high_quantile_threshold": cfg.regime.high_quantile_threshold,
+    }
     if not symbol:
-        return dict(THRESHOLDS)
-    override = ASSET_OVERRIDES.get(symbol, {})
-    if not override:
-        return dict(THRESHOLDS)
-    merged = dict(THRESHOLDS)
-    merged.update(override)
-    return merged
+        return base
+    pa = cfg.regime_per_asset.get(symbol)
+    if pa is None:
+        return base
+    if pa.trend_ma_spread_pct is not None:
+        base["trend_ma_spread_pct"] = pa.trend_ma_spread_pct
+    if pa.crash_atr_pct_min is not None:
+        base["crash_atr_pct_min"] = pa.crash_atr_pct_min
+    return base
 
 
 def classify_regime(
@@ -330,7 +329,8 @@ def format_regime_brief(
     )
 
     # 标记是否用了 per-asset 覆盖，让 LLM 看到"这个阈值不是默认值"
-    has_override = bool(symbol and ASSET_OVERRIDES.get(symbol))
+    from core.config import load_config
+    has_override = bool(symbol and load_config().regime_per_asset.get(symbol))
     threshold_label = f" (per-asset {symbol})" if has_override else ""
     threshold_str = ", ".join(
         f"{k}={v:.2f}" for k, v in thresholds_used.items()

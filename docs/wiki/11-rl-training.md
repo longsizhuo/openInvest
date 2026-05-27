@@ -2,6 +2,8 @@
 
 > 想优化你的委员会"水平"？这章讲清楚我们怎么验证 + 优化的，**绝不是真 ML 训练**。
 
+**See also**: [13 — 参数调优可行性诊断](13-param-tuning-feasibility.md) — 50+ 硬编码常数完整清单 + 耦合分析 + Do-Not-Tune 列表 + Optuna 回顾 + sweep 策略
+
 ---
 
 ## TL;DR：我们做的根本不是"训练"
