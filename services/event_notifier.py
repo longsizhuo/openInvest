@@ -136,3 +136,58 @@ def _build_markdown(
         "改 `jobs/event_watch.yml`。_"
     )
     return "\n".join(lines)
+
+
+def send_committee_verdict_email(
+    *,
+    task_id: str,
+    symbols: List[str],
+    by_asset: Dict[str, Any],
+    event_ids: Optional[List[str]] = None,
+    api_base_url: Optional[str] = None,
+) -> str:
+    """事件触发的委员会重跑完成后，发一封 verdict 结果邮件。
+
+    补 event_watch → 委员会 → verdict 邮件链路的最后一环：此前 web 路径
+    (_run_committee_task) 跑完不发任何邮件，event 预警里"verdict 邮件将随后送达"
+    成了空头支票（委员会其实跑了，结果只进 status.json，用户看不到）。
+    这里在委员会 done 后渲染 verdict 摘要并投递。
+
+    Args:
+        by_asset: {sym: {"verdict": {verdict/confidence/dominant_view/alloc_cny}, "error": ...}}
+    Returns:
+        receiver 邮箱；凭据缺失 → ""；投递失败抛 EmailDeliveryError。
+    """
+    api_base_url = api_base_url or os.getenv("INVEST_API_BASE_URL", "http://localhost:8765")
+    lines = ["# 📊 事件触发的委员会重跑结果\n"]
+    if event_ids:
+        lines.append(f"触发事件: `{', '.join(event_ids[:6])}`")
+    lines.append(f"任务: `{task_id}` · {datetime.now():%Y-%m-%d %H:%M}\n")
+    for sym in symbols:
+        a = by_asset.get(sym) or {}
+        if a.get("error"):
+            lines.append(f"## {sym}\n- ⚠️ 运行失败: {a['error']}")
+            continue
+        v = a.get("verdict") or {}
+        lines.append(f"## {sym} — **{v.get('verdict', 'UNCLEAR')}**")
+        bits = []
+        if v.get("confidence") is not None:
+            bits.append(f"confidence {v['confidence']:.2f}")
+        if v.get("dominant_view"):
+            bits.append(f"主导视角 {v['dominant_view']}")
+        if v.get("alloc_cny") is not None:
+            bits.append(f"建议金额 {v['alloc_cny']:+d} CNY")
+        if bits:
+            lines.append("- " + " · ".join(bits))
+    lines.append(f"\n详情 / transcript: {api_base_url.rstrip('/')}/committee/{task_id}")
+    lines.append(
+        "\n---\n_这封是事件预警自动触发的委员会 verdict（补齐了 event_watch → 委员会 → "
+        "邮件之前断掉的最后一环）。_"
+    )
+    md = "\n".join(lines)
+    subject = "📊 委员会重跑 verdict: " + " / ".join(
+        f"{s} {(by_asset.get(s, {}).get('verdict') or {}).get('verdict', '?')}"
+        for s in symbols[:3]
+    )
+    html = render_markdown_email(md, footer_label="Invest Event Watch · Committee")
+    return send_email_html(subject=subject, html_body=html, plain_body=md)

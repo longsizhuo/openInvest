@@ -1405,6 +1405,24 @@ async def _run_committee_task(
             },
         })
         _write_committee_status(task_id, s)
+
+        # 事件触发的委员会跑完 → 补发 verdict 邮件（修复 event_watch → 委员会 →
+        # verdict 邮件断链：web 路径本身不发邮件，event 预警里"verdict 邮件随后送达"
+        # 之前是空头支票。GUI 手动触发 event_ids 为空 → 不发，不打扰）。
+        if event_ids:
+            try:
+                from services.event_notifier import send_committee_verdict_email
+                send_committee_verdict_email(
+                    task_id=task_id,
+                    symbols=symbols or [],
+                    by_asset=summary,
+                    event_ids=event_ids,
+                )
+                log.info(f"committee {task_id} 事件触发 → verdict 邮件已发")
+            except Exception as e:  # noqa: BLE001  邮件失败不能阻断任务/状态
+                log.warning(
+                    f"committee {task_id} verdict 邮件发送失败: {type(e).__name__}: {e}"
+                )
     except Exception as e:  # noqa: BLE001
         log.exception(f"committee task {task_id} 失败")
         err = _read_committee_status(task_id) or {}
