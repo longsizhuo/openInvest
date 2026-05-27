@@ -16,16 +16,28 @@ from agents.skills_loader import load_skill
 
 
 def build_cio_prompt(asset: Dict[str, Any]) -> str:
-    """渲染 CIO prompt（含 asset 占位符 + config 阈值注入）"""
+    """渲染 CIO prompt（含 asset 占位符 + config 阈值条件注入）"""
     from core.config import load_config
     asset_name = asset.get("display_name", asset.get("symbol"))
     verdict_cfg = load_config().verdict
+
+    # TRIM 约束：阈值 > 0 时注入（sweep 出 OOS 验证结果后才启用，遵守 ADR-010 rule 4）
+    trim_constraint = ""
+    if verdict_cfg.trim_no_trim_loss_pct > 0 and verdict_cfg.trim_caution_loss_pct > 0:
+        trim_constraint = (
+            f"**🔥 零花钱账户 + 强破产兜底时的 TRIM 约束（强制）**：\n"
+            f"当 Wealth Context 显示 SOLVENCY_BUFFER=strong 且 account_purpose 含\"零花钱\"或类似表述时：\n"
+            f"- **浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 不允许 TRIM** — 卖出坐实亏损，而用户无流动性压力，应 HOLD 等修复\n"
+            f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro 非强 risk_off：倾向 HOLD** — 零花钱账户的资金久期长，短期波动不是卖出理由\n"
+            f"- 只有浮亏 > {verdict_cfg.trim_caution_loss_pct}% 或 Macro 强 risk_off + Risk high_risk 双触发时，才考虑 TRIM\n"
+            f"- 金融逻辑：零花钱账户 + 强破产兜底，小额浮亏不值得交易"
+        )
+
     return load_skill(
         "cio",
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
-        trim_no_trim_loss_pct=verdict_cfg.trim_no_trim_loss_pct,
-        trim_caution_loss_pct=verdict_cfg.trim_caution_loss_pct,
+        TRIM_CONSTRAINT=trim_constraint,
     )
 
 

@@ -50,8 +50,9 @@ class VerdictConfig:
     alloc_cny_ceiling: float = 100_000
     worker_unavailable_confidence_floor: float = 0.4
     # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
-    trim_no_trim_loss_pct: float = 5.0   # 浮亏 < 此值禁止 TRIM
-    trim_caution_loss_pct: float = 10.0  # 浮亏 < 此值倾向 HOLD（Macro 非强 risk_off）
+    # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
+    trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
+    trim_caution_loss_pct: float = 0.0   # 浮亏 < 此值倾向 HOLD；0 = 不启用
 
 
 @dataclass(frozen=True)
