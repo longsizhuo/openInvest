@@ -435,6 +435,77 @@ def _check_convergence(
     return _stable(qa, qb) and _stable(ra, rb)
 
 
+def _extract_concentration_from_summary(
+    portfolio_summary: str, sym: str,
+) -> Optional[float]:
+    """从 portfolio_summary 文本里提取指定 asset 的集中度数字（百分比，float）
+
+    portfolio_summary 由 utils.portfolio_summary 拼装，含每行 asset 字面写出：
+      - **<display_name>** (SYM) (channel): ..., **集中度 33.6%** (CNY 市值 ...)
+
+    抓不到（asset 不在 summary / 格式异常）返回 None，让上层不做覆写。
+    """
+    if not portfolio_summary or not sym:
+        return None
+    # 同一行：(SYM) ... **集中度 N%**
+    pattern = re.compile(
+        rf"\({re.escape(sym)}\)[^\n]*?\*\*集中度\s+([\d.]+)\s*%\*\*",
+    )
+    m = pattern.search(portfolio_summary)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except (ValueError, IndexError):
+        return None
+
+
+# Risk Officer 输出里的集中度行匹配（容忍 % 缺失、空白变化）
+_RISK_CONCENTRATION_RE = re.compile(
+    r"^(\s*CONCENTRATION_PCT\s*:\s*)([\d.]+)\s*%?",
+    re.MULTILINE,
+)
+
+
+def _override_concentration_in_risk_output(
+    risk_output: str, true_pct: Optional[float],
+) -> str:
+    """把 Risk Officer 输出里的 CONCENTRATION_PCT 强制覆写为 portfolio_summary 字面值
+
+    背景（2026-05-20 漂移修复）：portfolio_summary 已显式喂入"**集中度 33.6%**"，
+    但 Risk Officer LLM（provider 无关，当前 MiMo / 历史 DeepSeek 都见过）仍偶发
+    hallucinate 编成 70.2%（同 prompt 前一日还能输出 33.4%）。Prompt 强约束 +
+    service layer 覆写形成双层防御——LLM 不听话也能保证 CIO 看到真数。
+
+    true_pct=None（portfolio_summary 也没给）时不动；
+    Risk 没输出该字段时不补救（避免凭空注入）。
+    """
+    if true_pct is None or not risk_output:
+        return risk_output
+    formatted = f"{true_pct:.1f}%"
+
+    def _sub(m: "re.Match[str]") -> str:
+        llm_val = m.group(2)
+        try:
+            llm_float = float(llm_val)
+        except ValueError:
+            llm_float = -1.0
+        # 容差 0.3% 内视为一致，不覆写（避免把 33.4 / 33.6 这种正常浮点 rounding
+        # 误差当 hallucination 误改；33.6 - 33.4 在 IEEE 754 下 = 0.2000000...284，
+        # 用 0.2 会卡边界，0.3 留余量但仍远低于真实 hallucination 量级 30%+）
+        if abs(llm_float - true_pct) <= 0.3:
+            return m.group(0)
+        log.warning(
+            "Risk Officer 集中度 hallucination 已覆写: LLM=%s%% → 真实=%s "
+            "(portfolio_summary 字面值)",
+            llm_val, formatted,
+        )
+        return f"{m.group(1)}{formatted}"
+
+    new_output, _n = _RISK_CONCENTRATION_RE.subn(_sub, risk_output)
+    return new_output
+
+
 def _format_debate_history(
     quant_history: List[str], risk_history: List[str],
 ) -> str:
@@ -534,6 +605,10 @@ def run_committee(
         (quant_agent_r1, quant_input_r1),
         (risk_agent_r1, risk_input_r1),
     ])
+    # SENTINEL 覆写：portfolio_summary 字面给了集中度数字，LLM 仍偶发 hallucinate
+    # (2026-05-20 NDQ 真实 33.6% 编成 70.2%)。这里强制改回真值。
+    _true_conc = _extract_concentration_from_summary(portfolio_summary, sym)
+    risk_r1 = _override_concentration_in_risk_output(risk_r1, _true_conc)
     quant_history.append(quant_r1)
     risk_history.append(risk_r1)
     report.quant_view = quant_r1
@@ -584,6 +659,8 @@ def run_committee(
             (quant_agent_rN, quant_input_rN),
             (risk_agent_rN, risk_input_rN),
         ])
+        # SENTINEL 覆写：Round 2+ 同样保护，防 LLM 在 rebuttal 里又编出新的集中度
+        risk_rN = _override_concentration_in_risk_output(risk_rN, _true_conc)
         quant_history.append(quant_rN)
         risk_history.append(risk_rN)
         final_round = round_idx
@@ -703,6 +780,9 @@ def _persist(report: CommitteeReport, verdict: Dict[str, Any],
     lines = [
         f"# Committee: {report.asset.get('display_name', report.asset.get('symbol'))}",
         f"\n**Date**: {today}",
+        # 真实 yfinance symbol（机器可读）。文件名 safe_sym 转义有损（GC=F→GC_F、
+        # NDQ.AX→NDQ_AX），verdict_review 事后复盘要靠这行拿回原 symbol 才能拉对行情。
+        f"**Symbol**: {report.asset.get('symbol', '')}",
         f"**Verdict**: {verdict['verdict']} (confidence {verdict['confidence']:.2f})",
         f"**Dominant view**: {verdict['dominant_view']}",
         f"**Suggested allocation CNY**: {verdict['alloc_cny']}",

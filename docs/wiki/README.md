@@ -63,6 +63,8 @@
 | [004](adr/004-v1-fallback-retirement.md) | v1 fallback 正式退场 | ✅ 已采纳 |
 | [005](adr/005-daily-report-split.md) | daily_report 拆 builder/notifier | ✅ 已采纳 |
 | [006](adr/006-event-layer.md) | 事件感知层 + 轻量新闻 RAG | 🚧 实现中（feature flag 默认关）|
+| [007](adr/007-few-shot-retirement.md) | few-shot (v1-v4) 退役，CIO 保持 zero-shot，反保守走 Dreaming | ✅ 已采纳 |
+| [008](adr/008-caution-insight-deferred.md) | caution 改 lift-based 评分（试金石验证非 reward hacking）；现有数据下休眠；"过度保守"假设缺证据 | ✅ 已采纳 |
 
 ---
 

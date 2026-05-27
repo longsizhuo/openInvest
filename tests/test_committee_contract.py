@@ -508,3 +508,182 @@ def test_run_committee_session_event_ids_translates_via_event_store(
     assert multi_called == [], (
         "event_ids 已传时不应再调 resolve_event_brief_multi（优先级被破）"
     )
+
+
+# ============================================================================
+# 契约 6: Risk Officer 集中度 SENTINEL 覆写（2026-05-20 NDQ.AX 漂移修复）
+# ============================================================================
+# 历史教训：portfolio_summary 字面写"**集中度 33.6%**"喂给 Risk Officer，但
+# DeepSeek 仍偶发 hallucinate 编成 70.2%（前一日同 prompt 输出 33.4% 正确）。
+# CIO 据此误喊 TRIM ¥15,000。修复方案：service layer 在 Risk Officer 输出后
+# 用 portfolio_summary 字面值强制覆写 CONCENTRATION_PCT 行。
+#
+# 本测验证 helper 真把脏数字改回，不是只在 prompt 里讲讲。
+
+
+def test_extract_concentration_from_summary_picks_correct_asset():
+    """portfolio_summary 含多个 asset 时按 (SYM) 锚定，不混淆"""
+    from core.committee import _extract_concentration_from_summary
+
+    summary = (
+        "用户风险偏好: Aggressive\n"
+        "总资产估算: ¥220,371\n"
+        "  - **BetaShares Nasdaq 100 ETF** (NDQ.AX) (CommSec): 256.0000 股, "
+        "均价 $53.86, 现价 $59.82, 浮盈 +11.06%, "
+        "**集中度 33.6%** (CNY 市值 ¥74,060 / 总资产 ¥220,371)\n"
+        "  - **伦敦金 (浙商积存金)** (GC=F) (浙商积存金): 133.8842 克, "
+        "均价 ¥1008.34, 现价 ¥976.97, 浮盈 -3.11%, "
+        "**集中度 59.4%** (CNY 市值 ¥130,800 / 总资产 ¥220,371)\n"
+    )
+
+    assert _extract_concentration_from_summary(summary, "NDQ.AX") == 33.6
+    assert _extract_concentration_from_summary(summary, "GC=F") == 59.4
+    # 不在 summary 里的 asset
+    assert _extract_concentration_from_summary(summary, "ASIA.AX") is None
+    # 空输入容忍
+    assert _extract_concentration_from_summary("", "NDQ.AX") is None
+    assert _extract_concentration_from_summary(summary, "") is None
+
+
+def test_override_concentration_rewrites_hallucinated_value():
+    """LLM 输出 70.2% 但真实 33.6% → 强制改回 33.6%"""
+    from core.committee import _override_concentration_in_risk_output
+
+    risk_output = (
+        "SIGNAL: high_risk\n"
+        "STRENGTH: 8\n"
+        "CONCENTRATION_PCT: 70.2%\n"
+        "DRY_POWDER_CNY: ¥0\n"
+        "PNL_PCT: +11.06%\n"
+        "ONE_LINER: NDQ集中度70%远超上限...\n"
+    )
+
+    fixed = _override_concentration_in_risk_output(risk_output, 33.6)
+
+    assert "CONCENTRATION_PCT: 33.6%" in fixed, (
+        "覆写失败: LLM hallucinate 70.2% 没被改回真实 33.6%。\n"
+        f"实际输出:\n{fixed}"
+    )
+    assert "70.2" not in fixed.split("ONE_LINER")[0], (
+        "覆写不完整: CONCENTRATION_PCT 行之前仍存留 70.2"
+    )
+    # ONE_LINER 里的描述性 "70%" 不动（那是 LLM 的措辞，CIO 看得到原文）
+    assert "NDQ集中度70%" in fixed
+
+
+def test_override_concentration_noop_when_within_tolerance():
+    """LLM 输出 33.4% 真实 33.6% → 0.2% 容差内不动（正常浮动）"""
+    from core.committee import _override_concentration_in_risk_output
+
+    risk_output = "CONCENTRATION_PCT: 33.4%\nSIGNAL: ok\n"
+    fixed = _override_concentration_in_risk_output(risk_output, 33.6)
+    assert "CONCENTRATION_PCT: 33.4%" in fixed, (
+        "0.2% 容差内不应覆写（避免把正常 rounding 改没）"
+    )
+
+
+def test_override_concentration_noop_when_true_pct_none():
+    """portfolio_summary 没给数字（None）→ 不动 LLM 输出"""
+    from core.committee import _override_concentration_in_risk_output
+
+    risk_output = "CONCENTRATION_PCT: 70.2%\n"
+    fixed = _override_concentration_in_risk_output(risk_output, None)
+    assert fixed == risk_output, "true_pct=None 时不应做任何修改"
+
+
+def test_override_concentration_noop_when_field_missing():
+    """LLM 完全没输出该字段 → 不凭空注入（避免脏数据）"""
+    from core.committee import _override_concentration_in_risk_output
+
+    risk_output = "SIGNAL: ok\nSTRENGTH: 3\nONE_LINER: 无风险\n"
+    fixed = _override_concentration_in_risk_output(risk_output, 33.6)
+    assert fixed == risk_output, (
+        "LLM 没输出 CONCENTRATION_PCT 时不应凭空注入字段"
+    )
+
+
+def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
+    """端到端：mock LLM 让 Risk Officer 故意编 70.2%，验证最终 risk_view 是 33.6%
+
+    这是真正的 SENTINEL 守卫——如果未来有人删了 _override 调用，本测会红。
+    """
+    from core import committee as cmt
+
+    # 构造典型 portfolio_summary（与 utils.portfolio_summary 输出格式一致）
+    fake_summary = (
+        "用户风险偏好: Aggressive\n"
+        "总资产估算: ¥220,371\n"
+        "  - **BetaShares Nasdaq 100 ETF** (NDQ.AX) (CommSec): 256 股, "
+        "均价 $53.86, 现价 $59.82, 浮盈 +11.06%, "
+        "**集中度 33.6%** (CNY 市值 ¥74,060 / 总资产 ¥220,371)\n"
+    )
+
+    # mock _create_agent → 返回一个会输出固定字符串的假 agent
+    # _ask() 走 agent.run(context)，所以 FakeAgent 必须实现 .run()
+    class FakeAgent:
+        def __init__(self, fixed_reply: str):
+            self._reply = fixed_reply
+        def run(self, _ctx: str) -> str:
+            return self._reply
+
+    HALLUCINATED_RISK = (
+        "SIGNAL: high_risk\n"
+        "STRENGTH: 8\n"
+        "CONCENTRATION_PCT: 70.2%\n"  # ← LLM 编的
+        "DRY_POWDER_CNY: ¥0\n"
+        "PNL_PCT: +11.06%\n"
+        "ONE_LINER: 集中度过高\n"
+    )
+    FAKE_QUANT = (
+        "REGIME: uptrend\n"
+        "SIGNAL: neutral\n"
+        "STRENGTH: 4\n"
+        "ONE_LINER: 等待回调\n"
+    )
+    FAKE_CIO = (
+        "VERDICT: HOLD\n"
+        "CONFIDENCE: 0.5\n"
+        "DOMINANT_VIEW: risk\n"
+        "SUGGESTED_ALLOC_CNY: 0\n"
+        "EXECUTION_PLAN:\n  mode: none\n  first_tranche_cny: 0\n  add_levels:\n    - N/A\n"
+        "RISK_PLAN:\n  stop_loss_trigger: N/A\n  what_if_wrong:\n    "
+        "worst_case_pnl_cny: 0\n    recovery_estimate: N/A\n"
+        "PERSONAL_NOTE:\n  - N/A\n  - N/A\n  - N/A\n"
+    )
+
+    def fake_create_agent(_prompt, **kwargs):
+        role = kwargs.get("role")
+        if role == "risk":
+            return FakeAgent(HALLUCINATED_RISK)
+        if role == "quant":
+            return FakeAgent(FAKE_QUANT)
+        if role == "cio":
+            return FakeAgent(FAKE_CIO)
+        return FakeAgent("")
+
+    monkeypatch.setattr(cmt, "_create_agent", fake_create_agent)
+    # 跳过 persist（写文件 + DB）—— 单测不关心
+    monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+
+    result = cmt.run_committee(
+        asset={"symbol": "NDQ.AX", "display_name": "BetaShares Nasdaq 100 ETF"},
+        market_data="fake market",
+        macro_view="fake macro",
+        portfolio_summary=fake_summary,
+        prior_insights="",
+        regime_brief="REGIME: uptrend",
+        wealth_context_view="",
+        max_debate_rounds=1,
+    )
+
+    # 关键断言：risk_view 应该被覆写
+    risk_view = result.get("report").risk_view if result.get("report") else ""
+    assert "CONCENTRATION_PCT: 33.6%" in risk_view, (
+        "❌ SENTINEL 覆写失效！\n"
+        f"   LLM hallucinate 输出 70.2%，但 service layer 没覆写回 33.6%。\n"
+        f"   实际 risk_view:\n{risk_view}\n"
+        "   检查 core/committee.py 的 _override_concentration_in_risk_output 调用是否还在。"
+    )
+    assert "CONCENTRATION_PCT: 70.2%" not in risk_view, (
+        "覆写不彻底，hallucinated 70.2% 仍在 risk_view"
+    )

@@ -67,8 +67,22 @@ def _patch_tools_to_date(decision_date: str):
     real_get_history = ef.get_history_data
 
     def patched_get_history(symbol: str, period: str = "2y", as_of_date=None):
-        # 强制传 cutoff，忽略调用方意外的 as_of_date 参数
-        return real_get_history(symbol, period, as_of_date=decision_date)
+        # 强制传 cutoff，忽略调用方意外的 as_of_date 参数。
+        #
+        # 第二个 bug 修复（验证时发现）：底层 get_history_data 是先 get_history_df
+        # 的 tail(730)（取最新到今天的 730 行）再 _apply_cutoff，对历史决议日只剩
+        # cutoff 之前落在"最新 730 行窗口"里的那部分（2024-04-02 只剩 ~186 行）
+        # → MA250 永远 None、早期日 MA120 也 None → regime 退化 unknown。
+        # 这里按正确顺序重算：取全历史 → 按 decision_date 截断 → 再 tail(730)，
+        # 保证 cutoff 之前有 ≥250 根可算 MA250。仅作用于 backtest 路径，不动 live
+        # get_history_data 逻辑。DB 已回填历史（含 OHLC），直接读 store 即可。
+        import pandas as _pd
+        df = ef._STORE.get_history_df(symbol, days=100000)
+        if df is None or df.empty:
+            # 兜底：DB 没数据时退回原实现（含 yfinance/CSV 兜底）
+            return real_get_history(symbol, period, as_of_date=decision_date)
+        df = df[df.index <= _pd.to_datetime(decision_date)]
+        return df.tail(730)
 
     stack.enter_context(patch.object(ef, "get_history_data", patched_get_history))
 
@@ -110,7 +124,15 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
     from core.committee import (
         run_macro_view, run_committee, parse_cio_memo, _persist
     )
-    from utils.exchange_fee import get_macro_data, analyze_multi_timeframe, get_history_data
+    # 必须用模块属性引用（ef.xxx），不能 `from utils.exchange_fee import get_history_data`。
+    # 后者在 with _patch_tools_to_date 之前就把局部名绑到原始未 patch 函数，导致
+    # cutoff patch 逃逸 → 每个决议日都拿最新数据（未来函数泄漏）。走 ef.get_history_data
+    # 在调用时按模块属性查找，命中 patch.object(ef, "get_history_data", ...) 的替换。
+    import utils.exchange_fee as ef
+    # 确定性 regime（与 live 路径同款 classify_regime）。纯函数，从已按 decision_date
+    # 截断的 df 算，无穿越。
+    from core.regime import format_regime_brief
+    from utils.market_metrics import compute_metrics
 
     store = MemoryStore()
     out_dir_base = store.root / ".backtest" / decision_date
@@ -123,7 +145,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
     with _patch_tools_to_date(decision_date):
         # Macro 一次跨资产共享
         try:
-            macro_data = get_macro_data()
+            macro_data = ef.get_macro_data()
             macro_view = run_macro_view(macro_data)
         except Exception as e:
             macro_view = f"[backtest macro failed: {e}]"
@@ -135,8 +157,12 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
                 "currency": "AUD" if symbol == "NDQ.AX" else "CNY",
             }
             try:
-                df = get_history_data(symbol, "2y")
-                market_data = analyze_multi_timeframe(df, symbol) if not df.empty else "(no data)"
+                df = ef.get_history_data(symbol, "2y")
+                market_data = ef.analyze_multi_timeframe(df, symbol) if not df.empty else "(no data)"
+
+                # 确定性 regime brief（双触发器 crash / recovery / per-asset 阈值），
+                # 用同一份已截断的 df 算 → 与 live 路径一致，注入委员会，不再让 LLM 瞎猜 REGIME。
+                regime_brief = format_regime_brief(compute_metrics(df), symbol=symbol) if not df.empty else ""
 
                 # 极简 portfolio_summary（backtest 不知道当时用户持仓）
                 portfolio_summary = (
@@ -154,6 +180,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
                     macro_view=macro_view,
                     portfolio_summary=portfolio_summary,
                     prior_insights="",  # backtest 不用 insights 防穿越
+                    regime_brief=regime_brief,  # 注入确定性 regime（与 live 一致）
                     persist_to_memory=False,  # 我们手动 persist 到 .backtest/
                     max_debate_rounds=max_rounds,
                 )

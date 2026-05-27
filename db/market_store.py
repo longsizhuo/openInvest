@@ -36,10 +36,11 @@ class MarketStore:
 
     def _init_db(self):
         cursor = self.conn.cursor()
-        # 1. 价格历史
+        # 1. 价格历史（含 OHLCV：high/low 给真 TR/ATR 用，volume 给 RVOL 用）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_prices (
                 symbol TEXT, date TEXT, close REAL, source TEXT,
+                high REAL, low REAL, volume REAL,
                 PRIMARY KEY (symbol, date)
             )""")
         # 2. ETF 持仓详情 (Top 10)
@@ -61,11 +62,37 @@ class MarketStore:
                 PRIMARY KEY (symbol, date, key)
             )""")
         self.conn.commit()
+        # 兼容迁移：给老库的 daily_prices 补 high/low/volume 列
+        self._migrate_ohlcv_columns()
+
+    def _migrate_ohlcv_columns(self):
+        """向后兼容迁移：旧 daily_prices 只有 close，给它补 high/low/volume 列。
+
+        ALTER TABLE ADD COLUMN 的默认值是 NULL —— 旧行读出来 high/low/volume = None，
+        市场指标层的 ATR 会对这些行退化为收盘价差（不报错），回填后才走真 TR。
+        幂等：列已存在就跳过，重复启动安全。
+        """
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("PRAGMA table_info(daily_prices)")
+            existing = {row[1] for row in cursor.fetchall()}
+            for col in ("high", "low", "volume"):
+                if col not in existing:
+                    cursor.execute(
+                        f"ALTER TABLE daily_prices ADD COLUMN {col} REAL"
+                    )
+            self.conn.commit()
 
     def save_ndq_snapshot(self, date_str, nav, stats, holdings, sectors):
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO daily_prices VALUES (?, ?, ?, ?)", ("NDQ.AX", date_str, nav, "betashares_scraper"))
+            # 列名显式写出（表已扩 OHLCV 列，positional VALUES 会列数不匹配报错）。
+            # betashares NAV 只有收盘，high/low/volume 留 NULL；NDQ.AX 的 OHLC 由
+            # get_history_data 的 yfinance 刷新填（同 PK INSERT OR REPLACE，后写者赢）。
+            cursor.execute(
+                "INSERT OR REPLACE INTO daily_prices (symbol, date, close, source) VALUES (?, ?, ?, ?)",
+                ("NDQ.AX", date_str, nav, "betashares_scraper"),
+            )
             for k, v in stats.items():
                 cursor.execute("INSERT OR REPLACE INTO etf_stats VALUES (?, ?, ?, ?)", ("NDQ.AX", date_str, k, v))
             for name, weight in holdings:
@@ -94,20 +121,83 @@ class MarketStore:
             return row[0] if row else None
 
     def get_history_df(self, symbol, days=730):
-        """返回 Pandas DataFrame 格式的历史数据"""
+        """返回 Pandas DataFrame 格式的历史数据（含 OHLCV）。
+
+        SELECT 出 high/low/volume，让 DataFrame 真正带 High/Low/Volume → 市场指标
+        层的真 TR / RVOL 分支才能活。**全列为 NaN 的 OHLCV 列会被丢弃**，保持
+        "列存在 ⟺ 有数据" 的契约（未回填的老 symbol 不会误触发真 TR 分支）。
+        """
         import pandas as pd
         with self._lock:
-            query = "SELECT date as Date, close as Close FROM daily_prices WHERE symbol = ? ORDER BY date ASC"
+            query = (
+                "SELECT date as Date, close as Close, high as High, "
+                "low as Low, volume as Volume FROM daily_prices "
+                "WHERE symbol = ? ORDER BY date ASC"
+            )
             df = pd.read_sql_query(query, self.conn, params=(symbol,))
         if not df.empty:
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.set_index('Date')
+            # 丢弃全 NaN 的 OHLCV 列（老库未回填时 high/low/volume 全空）
+            for col in ("High", "Low", "Volume"):
+                if col in df.columns and df[col].isna().all():
+                    df = df.drop(columns=[col])
         return df.tail(days)
 
-    def save_generic_price(self, symbol, date_str, close, source="yfinance"):
-        """存储通用价格（汇率、收益率等）"""
+    def backfill_ohlcv_row(self, symbol, date_str, close, high, low, volume,
+                           source="yfinance_backfill"):
+        """回填一日 OHLCV（非破坏式）：
+
+        - (symbol, date) 已存在：只补 high/low/volume，**不动既有 close/source**
+          （保留 betashares NAV 等权威收盘价，避免回填顺手改写历史决策依据）。
+        - 不存在：整行 INSERT，close 用 yfinance。
+
+        返回 "updated" | "inserted"。
+        """
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO daily_prices (symbol, date, close, source) VALUES (?, ?, ?, ?)",
-                           (symbol, date_str, close, source))
+            cursor.execute(
+                "SELECT 1 FROM daily_prices WHERE symbol = ? AND date = ?",
+                (symbol, date_str),
+            )
+            exists = cursor.fetchone() is not None
+            if exists:
+                cursor.execute(
+                    "UPDATE daily_prices SET high = ?, low = ?, volume = ? "
+                    "WHERE symbol = ? AND date = ?",
+                    (high, low, volume, symbol, date_str),
+                )
+                result = "updated"
+            else:
+                cursor.execute(
+                    "INSERT INTO daily_prices "
+                    "(symbol, date, close, source, high, low, volume) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (symbol, date_str, close, source, high, low, volume),
+                )
+                result = "inserted"
+            self.conn.commit()
+            return result
+
+    def distinct_symbols(self):
+        """daily_prices 里出现过的所有 symbol（回填脚本枚举用）"""
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT DISTINCT symbol FROM daily_prices ORDER BY symbol")
+            return [r[0] for r in cursor.fetchall()]
+
+    def save_generic_price(self, symbol, date_str, close, source="yfinance",
+                           high=None, low=None, volume=None):
+        """存储一日行情。close 必填；high/low/volume 可选（OHLCV 回填 / 日常刷新用）。
+
+        向后兼容：只传 close 的老调用方行为不变（high/low/volume 落 NULL）。
+        """
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO daily_prices "
+                "(symbol, date, close, source, high, low, volume) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (symbol, date_str, close, source, high, low, volume),
+            )
             self.conn.commit()

@@ -138,11 +138,11 @@ python scripts/import_commsec.py --lookback 30 --apply
 
 `jobs/dreaming.py` 每天 03:00 跑三阶段（实际实现见 `jobs/dreaming.py`）：
 
-1. **Light Sleep** — 读 `memory/portfolio_history.jsonl` 最近 90 天交易（`LOOKBACK_DAYS=90`），结合多 symbol 的 2y 行情上下文（`CONTEXT_SYMBOLS`）提取信号 + 各 window 事后收益 → `.dreams/short-term-recall.json`
-2. **REM Sleep** — 找跨时间重复模式，输出 `.dreams/candidates.json`
+1. **Light Sleep** — 读 `memory/.dreams/verdict_review.jsonl`（委员会 verdict + 事后行情，由 `jobs/verdict_review.py` 产），每条补决议日 regime → `.dreams/short-term-recall.json`。**2026-05-26 换源**：从学"用户成交"改成学"委员会自己的 verdict vs 实际盘"（交易量小学不到东西）
+2. **REM Sleep** — 按 `(asset, verdict, regime)` 聚合事后命中率；HOLD 用波动率感知阈值 + 机会成本方向区分（踏空 vs 躲跌）→ `.dreams/candidates.json`
 3. **Deep Sleep** — 阈值门 `score≥0.8 / count≥3` 通过的 → 写 `insights/*.md` + 更新 `MEMORY.md` 索引
 
-> 后续如果改为消费 `daily/*.md` 或调整 LOOKBACK_DAYS / 阈值门，请同步更新本节，避免文档与实现脱节。
+> 完整设计见 [docs/wiki/03-dreaming.md](wiki/03-dreaming.md)。改源/阈值/窗口请同步更新该文档，避免脱节。
 
 详见 [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)。
 

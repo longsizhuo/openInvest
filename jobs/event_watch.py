@@ -76,10 +76,17 @@ def _load_user_context() -> Dict[str, Any]:
 
 
 def _holdings_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    """给邮件正文用：每个受影响 symbol 当前 units / 现价 / pnl"""
+    """给邮件正文用：每个受影响 symbol 当前 units / 现价 / pnl
+
+    现价必须经 get_quote(holding) 拿——它按 holding 的 proxy_kind/cost_currency
+    把行情换算成与 avg_cost 同币种、同单位的价格（如黄金积存金 GC=F USD/oz
+    经 /31.1035*USDCNY 反推成 CNY/克）。早期直接用 get_history_data 拿原始
+    GC=F 价（USD/oz≈4523），跟 CNY/克 成本（≈1008）相除，把真实浮亏 -1% 算成
+    了 +348%——币种/单位错配 bug，统一走 get_quote 后根除。
+    """
     try:
         from core.portfolio_manager import PortfolioManager
-        from utils.exchange_fee import get_history_data
+        from utils.quotes import get_quote
         pm = PortfolioManager()
     except Exception:
         return {}
@@ -91,19 +98,20 @@ def _holdings_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             continue
         units = float(h.get("units", 0) or 0)
         avg_cost = float(h.get("avg_cost", 0) or 0)
-        price = None
         try:
-            df = get_history_data(sym, "5d")
-            if df is not None and not df.empty:
-                price = float(df["Close"].iloc[-1])
+            quote = get_quote(h)
         except Exception:
-            price = None
+            quote = None
         entry: Dict[str, Any] = {"units": units}
-        if price is not None:
-            entry["price"] = price
-            entry["mv"] = price * units
-            if avg_cost > 0:
-                entry["pnl_pct"] = (price / avg_cost) - 1.0
+        if quote is not None:
+            # price 与 avg_cost 现在保证同币种同单位，相除才有意义
+            entry["price"] = round(quote.price, 2)
+            entry["currency"] = quote.currency
+            # 追踪仓 / 无成本不算 P&L，只报现价（对齐 web_api._build_holding_v2）
+            if not h.get("is_tracking_only") and units > 0:
+                entry["mv"] = quote.price * units
+                if avg_cost > 0:
+                    entry["pnl_pct"] = (quote.price / avg_cost) - 1.0
         snap[sym] = entry
     return snap
 

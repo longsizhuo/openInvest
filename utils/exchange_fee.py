@@ -16,6 +16,18 @@ CACHE_DIR = "cache_data"
 _STORE = MarketStore()
 
 
+def _nan_to_none(v):
+    """yfinance 行里的 NaN / 缺失值转 None（落库为 NULL）。
+
+    FX (USDCNY=X) / 部分指数没有真实成交量，Volume 会是 NaN；High/Low 缺失同理。
+    """
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if np.isnan(fv) else fv
+
+
 # ==========================================
 # 0. 数据结构定义
 # ==========================================
@@ -170,8 +182,13 @@ def get_history_data(
             df_yf = ticker.history(period=fetch_period)
             if not df_yf.empty:
                 for idx, row in df_yf.iterrows():
+                    # 一并落 OHLCV：High/Low 给真 TR/ATR，Volume 给 RVOL。
+                    # NaN（如 FX/指数无成交量）转 None，落 NULL。
                     _STORE.save_generic_price(
                         symbol, idx.strftime('%Y-%m-%d'), row['Close'],
+                        high=_nan_to_none(row.get('High')),
+                        low=_nan_to_none(row.get('Low')),
+                        volume=_nan_to_none(row.get('Volume')),
                     )
                 df_db = _STORE.get_history_df(symbol)
         except Exception as e:
@@ -282,6 +299,7 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
     ma_250 = metrics["ma250"]
     rsi_14 = metrics["rsi14"]
     pos = metrics["price_quantile_2y"]
+    rvol = metrics.get("rvol")
 
     slices = {
         "1-Week": hist.tail(5),
@@ -294,11 +312,18 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
     rsi_str = f"{rsi_14:.2f}" if rsi_14 is not None else "N/A"
     report_lines = [
         f"--- {title} ANALYSIS ---",
-        f"Current Price: {current_price:.4f} | RSI(14): {rsi_str}",
+        # RSI(14) 为 Wilder 平滑（与 TradingView/券商口径一致）
+        f"Current Price: {current_price:.4f} | RSI(14, Wilder): {rsi_str}",
     ]
 
     if pos is not None:
-        report_lines.append(f"Price Rank (2y): {pos:.0%} (0%=Low, 100%=High)")
+        # 真百分位排名：历史 X% 的交易日收盘价 ≤ 当前价（不是区间归一位置）
+        report_lines.append(
+            f"Price Percentile (2y): {pos:.0%} (历史 {pos:.0%} 交易日收盘价 ≤ 当前价)"
+        )
+    if rvol is not None:
+        # 相对成交量：> 1 放量，< 1 缩量（依赖 DB 补存 Volume）
+        report_lines.append(f"RVOL(20): {rvol:.2f}x (当日量 / 前 20 日均量)")
 
     report_lines.append("**Timeframe Performance:**")
     for label, df_slice in slices.items():

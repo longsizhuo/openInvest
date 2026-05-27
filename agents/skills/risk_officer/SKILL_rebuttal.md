@@ -42,8 +42,11 @@ Quant 给 neutral（REGIME=uptrend 锁死不能 bearish），但 Risk R2 看到"
 ## 降级 SIGNAL 的合理理由
 
 - Quant 给的 strength ≤ 3 → 技术面无明显信号 → 风险等级回归 baseline
-- Round 1 用了错误的集中度分母（例如只算 asset + cash）→ 修正后实际集中度低于
-  Round 1 报的数 → 可降级
+- ⚠️ **禁止**：不要"重新评估集中度分母"。集中度数字由 portfolio_summary
+  字面给出（service layer 已 SENTINEL 覆写防 hallucination），你只能引用
+  不能自算。如果 Round 1 输出的集中度数字与 portfolio_summary 不符，那是
+  Round 1 LLM 编了，Round 2 引用 portfolio_summary 的字面值即可（不构成
+  "重新发现"的降级理由）。
 
 ## 输出要求
 

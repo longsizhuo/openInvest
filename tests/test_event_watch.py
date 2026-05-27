@@ -151,3 +151,45 @@ def test_run_skips_duplicated_urls(tmp_event_db, monkeypatch):
     second = event_watch.run()
     assert second["triggered"] == 0
     normalize_spy.assert_not_called()
+
+
+def test_holdings_snapshot_pnl_uses_quote_currency(monkeypatch):
+    """回归：黄金积存金 PnL 必须用 get_quote 换算后的 CNY/克 价，不能直接拿原始 GC=F USD/oz。
+
+    历史 bug：_holdings_snapshot 直接用 get_history_data 拿 GC=F 原始价（USD/oz≈4523），
+    跟 CNY/克 成本（≈1008）相除，把真实浮亏 -1% 算成了 +348%。
+    现在统一走 get_quote(holding)，price 保证与 avg_cost 同币种同单位。
+    """
+    from utils.quotes import QuoteSnapshot
+
+    gold = {
+        "symbol": "GC=F",
+        "units": 133.8853,
+        "avg_cost": 1008.33,          # CNY/克
+        "cost_currency": "CNY",
+        "unit_label": "克",
+        "proxy_kind": "gold_cny_per_gram",
+    }
+
+    fake_pm = MagicMock()
+    fake_pm.holdings.find.side_effect = lambda s: gold if s == "GC=F" else None
+    monkeypatch.setattr(
+        "core.portfolio_manager.PortfolioManager", lambda *a, **kw: fake_pm,
+    )
+    # get_quote 返回换算后的 CNY/克 现价（不是原始 4523 USD/oz）
+    monkeypatch.setattr(
+        "utils.quotes.get_quote",
+        lambda h: QuoteSnapshot(
+            symbol="GC=F", price=1000.28, currency="CNY", unit="克",
+        ),
+    )
+
+    snap = event_watch._holdings_snapshot(["GC=F"])
+    entry = snap["GC=F"]
+
+    assert entry["price"] == pytest.approx(1000.28, abs=0.01)
+    assert entry["currency"] == "CNY"
+    # 真实浮亏约 -0.8%，绝不该是 +348%
+    assert entry["pnl_pct"] == pytest.approx(1000.28 / 1008.33 - 1.0, abs=1e-6)
+    assert entry["pnl_pct"] < 0
+    assert abs(entry["pnl_pct"]) < 0.05

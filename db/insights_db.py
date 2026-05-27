@@ -105,8 +105,8 @@ class InsightsDB:
 
         candidate 形如 deep_sleep() 产出的 dict，包含 asset/hit_rate/count/score 等字段。
         """
-        # 自动生成 title："{asset} {action} @ {regime} → {hit_rate*100:.0f}%"
-        action = candidate.get("action", "")
+        # 自动生成 title："{asset} {verdict/action} @ {regime} → {hit_rate*100:.0f}%"
+        action = candidate.get("verdict") or candidate.get("action", "")
         regime_tag = "_".join(candidate.get("regime", [])) or "any"
         hit_rate = candidate.get("hit_rate")
         title = (

@@ -28,15 +28,26 @@ from __future__ import annotations
 from typing import Any, Dict, Literal, Optional
 
 # Regime 类型枚举（任何下游引用必须用这个）
-RegimeType = Literal["uptrend", "downtrend", "range_bound", "crash", "unknown"]
-ALL_REGIMES = ("uptrend", "downtrend", "range_bound", "crash", "unknown")
+RegimeType = Literal["uptrend", "downtrend", "range_bound", "crash", "recovery", "unknown"]
+ALL_REGIMES = ("uptrend", "downtrend", "range_bound", "crash", "recovery", "unknown")
 
 # 默认阈值 — 应用在所有未在 ASSET_OVERRIDES 中显式声明的资产上
 THRESHOLDS: Dict[str, float] = {
     # MA20 vs MA120 偏离 ≥ 3% 视为有趋势（MA120 比 MA60 慢，所以阈值高一点）
     "trend_ma_spread_pct": 3.0,
-    # 14 日 ATR 占当前价 ≥ 5% 视为崩盘期（异常高波动）
+    # crash 波动腿：14 日 ATR 占当前价 ≥ 5% 视为异常高波动
     "crash_atr_pct_min": 5.0,
+    # crash 路径一（急跌）跌幅腿：过去 30 交易日累计跌幅 ≥ 20%（return_30d ≤ -0.20），
+    # 与波动腿 AND 组合。
+    "crash_drawdown_30d_pct": 20.0,
+    # crash 路径二（深跌）：过去 30 交易日累计跌幅 ≥ 30%（return_30d ≤ -0.30），
+    # **不看波动**单独触发。2026-05-26 双触发器：解决 AND 逻辑挡掉"慢阴跌"
+    # （跌够但波动不剧烈）的问题 —— 深跌本身就是 crash，无需高 ATR 佐证。
+    "crash_deep_drawdown_30d_pct": 30.0,
+    # recovery：从近 30 日低点反弹 ≥ 10%（rebound_off_30d_low ≥ 0.10）
+    "recovery_rebound_pct": 10.0,
+    # recovery：且价格仍在低位（2y 真百分位 < 50%）
+    "recovery_quantile_max": 0.50,
     # 价格 2 年分位 ≤ 20% 视为"低位"，配合 range_bound 触发"震荡市底部"提示
     "low_quantile_threshold": 0.20,
     # 价格 2 年分位 ≥ 80% 视为"高位"
@@ -111,17 +122,23 @@ def classify_regime(
         }
 
     判定优先级:
-        1. crash      — atr_pct ≥ thresholds["crash_atr_pct_min"]（最高优先级）
-        2. uptrend    — (ma20 - ma120) / ma120 ≥ +trend_ma_spread_pct%
-        3. downtrend  — (ma20 - ma120) / ma120 ≤ -trend_ma_spread_pct%
-        4. range_bound — 默认（MA 纠缠 + 波动正常）
-        5. unknown    — 缺关键数据
+        1. crash      — 双触发器（满足任一即 crash，最高优先级）：
+                        · 路径一急跌：atr_pct ≥ crash_atr_pct_min **且** return_30d ≤ -crash_drawdown_30d_pct%
+                        · 路径二深跌：return_30d ≤ -crash_deep_drawdown_30d_pct%（不看波动）
+        2. recovery   — crash 未触发 + 从近 30 日低点反弹 ≥ recovery_rebound_pct%
+                        + 价格仍在低位（分位 < recovery_quantile_max）
+        3. uptrend    — (ma20 - ma120) / ma120 ≥ +trend_ma_spread_pct%
+        4. downtrend  — (ma20 - ma120) / ma120 ≤ -trend_ma_spread_pct%
+        5. range_bound — 默认（MA 纠缠 + 波动正常）
+        6. unknown    — 缺关键数据
     """
     thresholds = _per_asset_thresholds(symbol)
     ma20 = metrics.get("ma20")
     ma120 = metrics.get("ma120")
     atr_pct = metrics.get("atr_pct")
     quantile = metrics.get("price_quantile_2y")
+    return_30d = metrics.get("return_30d")
+    rebound = metrics.get("rebound_off_30d_low")
 
     # 透明 audit：把判断用的输入回写
     inputs_used = {
@@ -129,6 +146,8 @@ def classify_regime(
         "ma120": ma120,
         "atr_pct": atr_pct,
         "price_quantile_2y": quantile,
+        "return_30d": return_30d,
+        "rebound_off_30d_low": rebound,
     }
 
     # 缺数据 → unknown，让下游决定怎么处理（保守起见 = 不动）
@@ -140,16 +159,58 @@ def classify_regime(
             "thresholds_used": thresholds,
         }
 
-    # 1. Crash 优先：异常高波动期间不管趋势先标 crash
-    if atr_pct >= thresholds["crash_atr_pct_min"]:
+    # 1. Crash 优先（双触发器，满足任一路径即 crash）：
+    #    路径一（急跌）：波动腿 AND 跌幅腿（高 ATR + 30 日跌 ≥ 20%）
+    #    路径二（深跌）：return_30d ≤ -30%，**不看波动**（慢阴跌也算 crash）
+    #    跌幅相关腿都需要 return_30d；数据不足（None）时该腿视为不满足（保守）。
+    vol_leg = atr_pct >= thresholds["crash_atr_pct_min"]
+    drawdown_threshold = thresholds["crash_drawdown_30d_pct"] / 100.0
+    deep_threshold = thresholds["crash_deep_drawdown_30d_pct"] / 100.0
+    has_return = return_30d is not None
+    drawdown_leg = has_return and return_30d <= -drawdown_threshold
+    deep_leg = has_return and return_30d <= -deep_threshold
+    if deep_leg:
+        # 路径二优先描述（深跌本身已足够，无论波动）
         return {
             "regime": "crash",
-            "reason": f"ATR {atr_pct:.2f}% ≥ {thresholds['crash_atr_pct_min']}% 极高波动",
+            "reason": (
+                f"深跌：30 日跌 {return_30d * 100:.1f}% ≤ "
+                f"-{thresholds['crash_deep_drawdown_30d_pct']:.0f}%（不看波动单独触发）"
+            ),
+            "inputs_used": inputs_used,
+            "thresholds_used": thresholds,
+        }
+    if vol_leg and drawdown_leg:
+        return {
+            "regime": "crash",
+            "reason": (
+                f"急跌：ATR {atr_pct:.2f}% ≥ {thresholds['crash_atr_pct_min']}% 高波动 "
+                f"且 30 日跌 {return_30d * 100:.1f}% ≤ -{thresholds['crash_drawdown_30d_pct']:.0f}%"
+            ),
             "inputs_used": inputs_used,
             "thresholds_used": thresholds,
         }
 
-    # 2 + 3. 趋势判断：MA20 vs MA120 偏离度
+    # 2. Recovery：crash 已解除（上面双条件未同时满足）后，从低点反弹 + 仍在低位。
+    #    无状态实现：用"已从近 30 日低点反弹 ≥ 10%"近似"刚从 crash 走出"，
+    #    并要求分位 < 0.5 确保仍处低位（避免在健康高位牛市里误判 recovery）。
+    rebound_threshold = thresholds["recovery_rebound_pct"] / 100.0
+    quantile_max = thresholds["recovery_quantile_max"]
+    if (rebound is not None and quantile is not None
+            and rebound >= rebound_threshold
+            and quantile < quantile_max):
+        return {
+            "regime": "recovery",
+            "reason": (
+                f"从近 30 日低点反弹 {rebound * 100:.1f}% "
+                f"(≥ {thresholds['recovery_rebound_pct']:.0f}%) 且分位 {quantile * 100:.0f}% "
+                f"(< {quantile_max * 100:.0f}%) 仍在低位"
+            ),
+            "inputs_used": inputs_used,
+            "thresholds_used": thresholds,
+        }
+
+    # 3 + 4. 趋势判断：MA20 vs MA120 偏离度
     if ma120 == 0:
         # 防御：理论上不会发生（价格 = 0 不可能）
         return {
@@ -181,7 +242,7 @@ def classify_regime(
             "thresholds_used": thresholds,
         }
 
-    # 4. 默认震荡
+    # 5. 默认震荡
     return {
         "regime": "range_bound",
         "reason": f"MA 纠缠 ({ma_spread_pct:+.2f}%) 且 ATR {atr_pct:.2f}% 正常，无明确趋势",
@@ -226,6 +287,11 @@ def regime_strategy_hint(
         return f"震荡市中段 — 2 年分位 {price_quantile_2y * 100:.0f}%，无明显边缘信号，建议不动"
     if regime == "crash":
         return "崩盘 — 离场观望，等波动率回归正常 (ATR < 3%) 再说"
+    if regime == "recovery":
+        return (
+            "复苏 — 从低位反弹，允许谨慎看多 (cautious bullish)：小仓试探、确认"
+            "站稳再加，止损放在反弹起点下方；不要一把梭，反弹失败可能二次探底"
+        )
     return "状态未知 — 数据不足，维持原计划"
 
 

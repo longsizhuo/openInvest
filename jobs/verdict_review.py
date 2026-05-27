@@ -62,6 +62,8 @@ class VerdictReview:
     actual_returns: Dict[str, float] = field(default_factory=dict)  # {"1d": 0.012, "7d": -0.034, ...}
     hits: Dict[str, bool] = field(default_factory=dict)  # 同上 key
     macro_shock: Dict[str, Any] = field(default_factory=dict)  # 事后 macro 突变标记
+    regime_at_decision: Optional[str] = None  # 决议日 regime（crash 样本供下游免责，留痕不删）
+    directions: Dict[str, str] = field(default_factory=dict)  # 每窗口原始市场方向 up/down/flat（verdict 无关；给 Dreaming 算 regime 基率 + caution lift）
     source: str = "live"  # "live" 或 "backtest"
 
 
@@ -82,40 +84,88 @@ def _parse_committee_file(path: Path) -> Optional[Dict[str, Any]]:
             macro = json.loads(macro_m.group(1))
         except json.JSONDecodeError:
             pass
+    # 新文件带 `**Symbol**: GC=F`（真实 yfinance symbol）。旧文件没有 → None，
+    # 由 review_all 用 holdings 转义名映射兜底。
+    sym_m = re.search(r"\*\*Symbol\*\*:\s*(\S+)", text)
     return {
         "verdict": verdict_m.group(1).upper(),
         "confidence": float(verdict_m.group(2)),
         "macro_at_decision": macro,
+        "symbol": sym_m.group(1) if sym_m else None,
     }
 
 
 # ---------- 事后涨跌 ----------
 
-def _get_actual_return(symbol: str, decision_date: str, window_days: int) -> Optional[float]:
-    """从 yfinance 拉 D 和 D+window 的收盘价，算累计涨跌 %"""
+# 计价口径 = CNY/克 的代理资产（symbol 是 USD/oz 的 GC=F，但用户持的是积存金）
+_GOLD_PROXY_KINDS = {"gold_cny_per_gram"}
+
+
+def _closes(symbol: str):
+    """拉 symbol 近 1 年日线（DataFrame，index=日期）。失败/空返回 None。"""
     from utils.exchange_fee import get_history_data
     try:
-        d = datetime.strptime(decision_date, "%Y-%m-%d").date()
-        end = d + timedelta(days=window_days + 5)  # 给 5 天 buffer 处理周末
-        # 需要拉到 end 那天的数据，period 不能精确控制，用够长的窗口
         df = get_history_data(symbol, "1y")
-        if df.empty:
+        if df is None or df.empty:
             return None
-        # 找 D 当天或最近的下一交易日
-        df_after_d = df[df.index.date >= d]
-        if df_after_d.empty:
-            return None
-        anchor_close = float(df_after_d["Close"].iloc[0])
-        # 找 D+window 当天或之前最近交易日
-        target_date = d + timedelta(days=window_days)
-        df_at_window = df[df.index.date <= target_date]
-        if df_at_window.empty or len(df_at_window) < 1:
-            return None
-        last_close = float(df_at_window["Close"].iloc[-1])
-        return (last_close / anchor_close) - 1.0
+        return df
     except Exception as e:
-        print(f"⚠️ get_actual_return({symbol}, {decision_date}, {window_days}d) 失败: {e}")
+        print(f"⚠️ _closes({symbol}) 失败: {e}")
         return None
+
+
+def _close_on_or_after(df, day) -> Optional[float]:
+    """取 index 日期 >= day 的第一根 Close。
+
+    决议日锚点：day=决议日 → 拿"决议日或下一交易日"收盘。
+    窗口到期点：day=决议日+window → 拿"到期日或之后第一交易日"收盘。
+    **关键**：若 day 落在未来（行情还没到那天），>= 过滤后为空 → 返回 None，
+    自动过滤未成熟窗口。旧 bug 用 `<= target 的最后一根` 在 target 未来时
+    会塌缩成"今天的收盘"，把只过了 3 天的样本标成 30d 收益。
+    """
+    sub = df[df.index.date >= day]
+    if sub.empty:
+        return None
+    return float(sub["Close"].iloc[0])
+
+
+def _window_return(
+    symbol: str, holding: Optional[Dict[str, Any]], decision_date: str, window_days: int,
+) -> Optional[float]:
+    """决议日 → D+window 累计涨跌，**按 holding 的计价口径**算。
+
+    - gold_cny_per_gram（积存金，symbol=GC=F 是 USD/oz 代理）：用户真实收益 =
+      CNY/克收益 = (GC=F × USDCNY) 的比值。直接拿 GC=F USD/oz 会漏掉人民币
+      汇率漂移，系统性偏置黄金命中率信号（与 Event Watch 邮件同一类单位错配）。
+    - 其余（NDQ.AX 原生 AUD 等）：原生币种比值即用户体验收益，无需换算。
+
+    成熟度：D+window 落在未来 → 任一端 _close_on_or_after 返回 None → 整体 None。
+    """
+    try:
+        d = datetime.strptime(decision_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    target = d + timedelta(days=window_days)
+    proxy_kind = (holding or {}).get("proxy_kind", "direct")
+
+    if proxy_kind in _GOLD_PROXY_KINDS:
+        gc = _closes(symbol)         # GC=F USD/oz
+        fx = _closes("USDCNY=X")     # 人民币汇率
+        if gc is None or fx is None:
+            return None
+        gc_s, gc_e = _close_on_or_after(gc, d), _close_on_or_after(gc, target)
+        fx_s, fx_e = _close_on_or_after(fx, d), _close_on_or_after(fx, target)
+        if None in (gc_s, gc_e, fx_s, fx_e) or gc_s * fx_s <= 0:
+            return None
+        return (gc_e * fx_e) / (gc_s * fx_s) - 1.0
+
+    df = _closes(symbol)
+    if df is None:
+        return None
+    start, end = _close_on_or_after(df, d), _close_on_or_after(df, target)
+    if start is None or end is None or start <= 0:
+        return None
+    return (end / start) - 1.0
 
 
 # ---------- 宏观突变检测 ----------
@@ -125,7 +175,13 @@ def _detect_macro_shock(
     decision_date: str,
     window_days: int,
 ) -> Dict[str, Any]:
-    """对比决议时和 D+window 后的 macro 快照，标记是否发生突变"""
+    """对比决议时和 D+window 后的 macro 快照，标记是否发生突变。
+
+    ⚠️ 2026-05-27：本检测结果**已不再用于 Dreaming 免责**（rem_sleep 只按
+    regime==crash 免责）。原因：VIX/TNX/USDCNY 的 abs 阈值在低波动牛市里误报
+    ~20%，且 `abs()` 双向连"VIX 下行/市场转好"也误杀。函数与 macro_shock 字段
+    保留，仅作历史/参考（verdict_review 报告里仍统计展示），不参与样本剔除。
+    """
     from utils.exchange_fee import get_history_data
     shock: Dict[str, Any] = {"detected": False, "drivers": []}
 
@@ -177,31 +233,165 @@ def _detect_macro_shock(
 
 # ---------- hit 判定 ----------
 
-def _is_hit(verdict: str, return_pct: float) -> bool:
+# HOLD "没动" 的判定阈值 = K_FLAT × 资产日波动(atr_pct) × sqrt(窗口天数)，再封顶。
+# 设计（2026-05-26，与用户讨论后定）：
+# - 不写死 3%——黄金一周波动 ~1%、纳指 ~1.8%、加密 ~3-5%，统一阈值对黄金太松、
+#   对加密太紧。改成"小于该资产平时这段时间正常会动的幅度"才算 HOLD 命中。
+# - 适应的是**测量值**（atr_pct 实时从行情算），固定的是**规则**（K_FLAT 常数）——
+#   绝不让系统自学习这把"给自己打分的尺子"，否则会 reward hacking（把及格线挪低）。
+# - sqrt(天数) 是随机游走的标准波动随时间缩放（日波动 → 窗口波动）。
+# - 封顶 FLAT_CEILING_PCT 防 atr 异常时尺子失控。
+K_FLAT = 1.0
+FLAT_CEILING_PCT = 8.0
+DEFAULT_DAILY_VOL_PCT = 2.0  # atr_pct 拉取失败时的兜底日波动
+
+
+def _atr_pct(symbol: str) -> float:
+    """资产的 14 日 ATR 占价格百分比（日波动幅度的度量）。拉不到 → 兜底。"""
+    df = _closes(symbol)
+    if df is None:
+        return DEFAULT_DAILY_VOL_PCT
+    try:
+        from utils.market_metrics import compute_metrics
+        atr = compute_metrics(df).get("atr_pct")
+        return float(atr) if atr and atr > 0 else DEFAULT_DAILY_VOL_PCT
+    except Exception:
+        return DEFAULT_DAILY_VOL_PCT
+
+
+# regime 计算复用一个 MarketStore 连接（避免每条 review 新开 sqlite 连接）
+_REGIME_STORE = None
+
+
+def _decision_regime(symbol: str, decision_date: str) -> Optional[str]:
+    """决议日（截断到当天，防穿越）的市场 regime —— committee 同款 core.regime。
+
+    给样本打 regime_at_decision 标记：crash 期间市场脱离基本面乱跳，事后涨跌不该
+    归因到委员会判断质量，下游（Dreaming rem_sleep / v4 训练集）据此免责剔除。
+    拿不到 → None（不打标）。
+
+    **窗口口径（2026-05-27 修）**：直接读 DB 全历史 → 按 decision_date 截断 → 再
+    tail(730)，**不调 live get_history_data**（它 tail(730) 在 cutoff 之前，对历史
+    决议日窗口被锚死在最近 730 行、cutoff 后只剩 ~半年 → MA120/MA250 算不出 →
+    一半样本误标 unknown，污染 jsonl 并可能让真 crash 日被错标 unknown 而漏掉免责）。
+    与 backtest patch 的窗口逻辑一致，保证 committee 看到的 regime == 这里复盘的 regime。
+    """
+    global _REGIME_STORE
+    try:
+        import pandas as pd
+        from utils.market_metrics import compute_metrics
+        from core.regime import classify_regime
+        if _REGIME_STORE is None:
+            from db.market_store import MarketStore
+            _REGIME_STORE = MarketStore()
+        df = _REGIME_STORE.get_history_df(symbol, days=100000)  # 全历史
+        if df is None or df.empty:
+            return None
+        df = df[df.index <= pd.to_datetime(decision_date)].tail(730)
+        if len(df) < 30:
+            return None
+        regime = classify_regime(compute_metrics(df), symbol=symbol).get("regime")
+        return regime if regime and regime != "unknown" else None
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ _decision_regime({symbol},{decision_date}) → None: {e}")
+        return None
+
+
+_ATR_CACHE: Dict[str, float] = {}
+
+
+def _atr_pct_cached(symbol: str) -> float:
+    """_atr_pct 的进程内缓存（atr 用当前 1y 数据算，同 symbol 全程不变，避免每条 review 重拉行情）。"""
+    if symbol not in _ATR_CACHE:
+        _ATR_CACHE[symbol] = _atr_pct(symbol)
+    return _ATR_CACHE[symbol]
+
+
+def _flat_band(atr_pct: float, window_days: int) -> float:
+    """HOLD "没动" 的阈值，返回小数（如 0.026 = 2.6%）。"""
+    import math
+    band_pct = min(K_FLAT * atr_pct * math.sqrt(window_days), FLAT_CEILING_PCT)
+    return band_pct / 100.0
+
+
+def _is_hit(verdict: str, return_pct: float, flat_threshold: float = 0.03) -> bool:
+    """verdict 方向是否被事后行情验证。
+
+    flat_threshold: HOLD "没动" 的阈值（小数）。默认 0.03 仅作回退；正常由
+    review_one 按资产波动率传入 _flat_band 的结果。
+    """
     direction = EXPECTED_DIRECTION.get(verdict, "flat")
     if direction == "up":
         return return_pct > 0
     elif direction == "down":
         return return_pct < 0
     elif direction == "flat":
-        return abs(return_pct) < 0.03  # |涨跌| < 3% 算 HOLD 命中
+        return abs(return_pct) < flat_threshold  # |涨跌| < 该资产窗口波动 = HOLD 命中
     return False
+
+
+# ---------- symbol 反转义 ----------
+
+def _sanitize(symbol: str) -> str:
+    """与 core/committee.py 写文件时一致的转义（= / . → _）。"""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+
+
+def _build_symbol_resolver() -> Dict[str, Dict[str, Any]]:
+    """建 {转义文件名 → holding dict} 映射，给旧文件（无 **Symbol** 行）兜底。
+
+    committee 文件名做了有损转义（GC=F→GC_F、NDQ.AX→NDQ_AX），无法反推。
+    用 PortfolioManager 全量持仓（含 tracking-only）建映射拿回真实 symbol +
+    proxy_kind（决定事后收益按 USD/oz 还是 CNY/克算）。
+    """
+    try:
+        from core.portfolio_manager import PortfolioManager
+        pm = PortfolioManager()
+        return {_sanitize(h["symbol"]): h for h in pm.holdings.all() if h.get("symbol")}
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ _build_symbol_resolver 退化空: {type(e).__name__}: {e}")
+        return {}
 
 
 # ---------- 主流程 ----------
 
-def review_one(committee_dir: Path, asset_symbol: str) -> Optional[VerdictReview]:
-    """对单个 verdict 文件做事后 review"""
+def review_one(
+    committee_dir: Path,
+    stem: str,
+    resolver: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[VerdictReview]:
+    """对单个 verdict 文件做事后 review。
+
+    stem: committee 文件名去掉 .md（可能是转义名 GC_F，也可能是 NDQ.AX）。
+    resolver: 转义名 → holding 映射，用于旧文件拿回真实 symbol + proxy_kind。
+    """
     decision_date = committee_dir.name  # YYYY-MM-DD
-    safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", asset_symbol)
-    path = committee_dir / f"{safe_sym}.md"
+    path = committee_dir / f"{stem}.md"
     parsed = _parse_committee_file(path)
     if not parsed:
         return None
 
+    resolver = resolver if resolver is not None else _build_symbol_resolver()
+    holding = resolver.get(stem)
+    # 真实 symbol 优先级：文件内 **Symbol** 行 > holdings 映射 > 转义还原启发式
+    real_symbol = parsed.get("symbol") or (holding.get("symbol") if holding else None)
+    if not real_symbol and "_" in stem:
+        # 已不持有的历史资产（如卖掉的 ASIA.AX）：试把 _ 还原成 .（最常见的
+        # 交易所后缀转义），用 yfinance 验证确有数据才采用，否则继续放弃——
+        # 宁可跳过也不瞎猜出脏 symbol 污染学习信号。
+        candidate = stem.replace("_", ".")
+        if _closes(candidate) is not None:
+            real_symbol = candidate
+    if not real_symbol:
+        print(f"⚠️ review_one 跳过：无法解析真实 symbol（stem={stem}, dir={decision_date}）")
+        return None
+    # holding 没在映射里但文件给了真实 symbol → 再按真实 symbol 查一次（拿 proxy_kind）
+    if holding is None and resolver:
+        holding = next((h for h in resolver.values() if h.get("symbol") == real_symbol), None)
+
     rv = VerdictReview(
         date=decision_date,
-        asset=asset_symbol,
+        asset=real_symbol,
         verdict=parsed["verdict"],
         confidence=parsed["confidence"],
         expected_direction=EXPECTED_DIRECTION.get(parsed["verdict"], "flat"),
@@ -209,16 +399,29 @@ def review_one(committee_dir: Path, asset_symbol: str) -> Optional[VerdictReview
         source="backtest" if "backtest" in str(committee_dir) else "live",
     )
 
+    # 波动率阈值按资产定（HOLD 的"没动"判定 + 方向分类共用同一个 flat band）。
+    # 改为对所有 verdict 都算 atr（带缓存）：directions 是 verdict 无关的"市场到底涨没涨"，
+    # 必须和 HOLD 用同一条 flat band 才能让下游 regime 基率与 missed_up/avoided_down 口径一致。
+    atr = _atr_pct_cached(real_symbol)
     for window in HIT_WINDOWS:
-        ret = _get_actual_return(asset_symbol, decision_date, window)
+        ret = _window_return(real_symbol, holding, decision_date, window)
         if ret is not None:
             rv.actual_returns[f"{window}d"] = round(ret, 4)
-            rv.hits[f"{window}d"] = _is_hit(parsed["verdict"], ret)
+            flat_th = _flat_band(atr, window) if atr is not None else 0.03
+            rv.hits[f"{window}d"] = _is_hit(parsed["verdict"], ret, flat_th)
+            # 原始市场方向（verdict 无关）：给 Dreaming 算 regime 基率
+            rv.directions[f"{window}d"] = (
+                "up" if ret > flat_th else ("down" if ret < -flat_th else "flat")
+            )
 
-    # 30 天窗口的宏观突变检测（只对最长窗口算，节省时间）
-    rv.macro_shock = _detect_macro_shock(
-        parsed["macro_at_decision"], decision_date, window_days=30
-    )
+    # 宏观突变检测只在 30d 窗口已成熟时算（否则会拿今天的 macro 冒充 D+30）
+    if "30d" in rv.actual_returns:
+        rv.macro_shock = _detect_macro_shock(
+            parsed["macro_at_decision"], decision_date, window_days=30
+        )
+
+    # 决议日 regime 标记（crash 样本留痕但下游免责）。截断到决议日，无穿越。
+    rv.regime_at_decision = _decision_regime(real_symbol, decision_date)
 
     return rv
 
@@ -234,18 +437,23 @@ def review_all(*, include_backtest: bool = True, include_live: bool = True) -> L
     if include_backtest and (store.root / ".backtest").exists():
         sources.extend(sorted((store.root / ".backtest").iterdir()))
 
-    # 旧（写死 ["NDQ.AX", "GC=F", "GC_F"] 三个 symbol，fork 用户持有 AAPL/510300
-    # 跑 review_all 永远扫不到自己的 verdict）：
-    # 新：每个日期目录里 glob 出实际存在的 *.md 当 asset symbol，文件名就是 symbol。
-    # 顺带兼容 GC=F → 文件名可能写成 GC_F（路径不允许 = 时的转义）
+    # glob 出每个日期目录里实际存在的 *.md。stem 可能是转义名（GC_F），靠 review_one
+    # 内部用文件里的 **Symbol** 行 + holdings 映射拿回真实 symbol（GC=F）再拉行情。
+    # 旧 bug：直接拿 stem（GC_F/NDQ_AX）喂 yfinance → 全 404 → actual_returns 全空。
+    resolver = _build_symbol_resolver()
+    seen: set = set()  # (date, real_symbol) 去重，防同一 verdict 因转义产生双份
     for date_dir in sources:
         if not date_dir.is_dir():
             continue
         for md_file in date_dir.glob("*.md"):
-            asset = md_file.stem  # GC_F.md → "GC_F"; NDQ.AX.md → "NDQ.AX"
-            rv = review_one(date_dir, asset)
-            if rv:
-                reviews.append(rv)
+            rv = review_one(date_dir, md_file.stem, resolver)
+            if not rv:
+                continue
+            dedup_key = (rv.date, rv.asset, rv.source)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            reviews.append(rv)
     return reviews
 
 
@@ -287,6 +495,14 @@ def summarize(reviews: List[VerdictReview]) -> Dict[str, Any]:
                     )
 
     summary["macro_shock_count"] = sum(1 for r in reviews if r.macro_shock.get("detected"))
+    # 决议日 regime 分布 + crash 计数（crash 样本下游免责剔除，但此处留痕统计）
+    summary["regime_crash_count"] = sum(1 for r in reviews if r.regime_at_decision == "crash")
+    summary["regime_recovery_count"] = sum(1 for r in reviews if r.regime_at_decision == "recovery")
+    regime_dist: Dict[str, int] = {}
+    for r in reviews:
+        reg = r.regime_at_decision or "unknown"
+        regime_dist[reg] = regime_dist.get(reg, 0) + 1
+    summary["regime_distribution"] = regime_dist
     summary["live_count"] = sum(1 for r in reviews if r.source == "live")
     summary["backtest_count"] = sum(1 for r in reviews if r.source == "backtest")
     return summary

@@ -47,24 +47,28 @@ def test_btc_override():
 
 # ---------- classify_regime with symbol ----------
 
-def _metrics(ma20, ma120, atr_pct, quantile=0.5):
+def _metrics(ma20, ma120, atr_pct, quantile=0.5, return_30d=None, rebound=None):
     return {
         "ma20": ma20,
         "ma120": ma120,
         "atr_pct": atr_pct,
         "price_quantile_2y": quantile,
+        "return_30d": return_30d,
+        "rebound_off_30d_low": rebound,
     }
 
 
 def test_gold_atr_4pct_is_crash_under_override_but_not_default():
-    """ATR=4% 对黄金来说算 crash（阈值 3.5），对默认来说不算（阈值 5.0）"""
-    m = _metrics(ma20=800, ma120=800, atr_pct=4.0)
+    """双条件 crash：ATR=4% + 30 日跌 25%。
+    黄金 ATR 阈值 3.5 → 波动腿满足 → crash；默认阈值 5.0 → 波动腿不满足 → 非 crash。"""
+    # 跌幅腿满足（-25% ≤ -20%），差异只在波动腿的 per-asset 阈值
+    m = _metrics(ma20=800, ma120=800, atr_pct=4.0, return_30d=-0.25)
 
-    # 默认阈值 → range_bound（4 < 5）
+    # 默认阈值 → 波动腿 4 < 5 不满足 → 非 crash → range_bound
     r_default = classify_regime(m)
     assert r_default["regime"] == "range_bound", r_default
 
-    # 黄金 → crash（4 ≥ 3.5）
+    # 黄金 → 波动腿 4 ≥ 3.5 + 跌幅腿 -25% → crash
     r_gold = classify_regime(m, symbol="GC=F")
     assert r_gold["regime"] == "crash", r_gold
 
@@ -82,17 +86,101 @@ def test_gold_ma_spread_4pct_not_uptrend_under_override():
 
 
 def test_btc_atr_6pct_not_crash():
-    """加密 ATR=6% 不应触发 crash（阈值 8）"""
-    m = _metrics(ma20=50000, ma120=50000, atr_pct=6.0)
+    """加密 ATR=6% 不应触发 crash（波动腿阈值 8 不满足，跌 25% 也没到深跌 30%）"""
+    m = _metrics(ma20=50000, ma120=50000, atr_pct=6.0, return_30d=-0.25)
     r = classify_regime(m, symbol="BTC-USD")
-    # 6% < 8% 不 crash；MA spread 0% < 8% 不 trend → range_bound
+    # 6% < 8% 波动腿不满足 + 25% < 30% 非深跌 → range_bound
     assert r["regime"] == "range_bound", r
 
 
 def test_btc_atr_10pct_is_crash():
-    m = _metrics(ma20=50000, ma120=50000, atr_pct=10.0)
+    """加密急跌路径：波动腿 10≥8 + 跌幅腿 -25%（≥20% 但 <30%）→ crash"""
+    m = _metrics(ma20=50000, ma120=50000, atr_pct=10.0, return_30d=-0.25)
     r = classify_regime(m, symbol="BTC-USD")
     assert r["regime"] == "crash"
+
+
+# ---------- crash 双条件 ----------
+
+def test_crash_needs_both_legs_vol_only_is_not_crash():
+    """只有波动腿（高 ATR）但跌幅腿不满足（仅跌 5%）→ 不是 crash（避免光震荡误触发）"""
+    m = _metrics(ma20=100, ma120=100, atr_pct=12.0, return_30d=-0.05)
+    r = classify_regime(m)  # 默认 atr 阈值 5
+    assert r["regime"] == "range_bound", r
+
+
+def test_crash_deep_drawdown_low_vol_is_crash():
+    """双触发器路径二（深跌）：30 日跌 30% + 低波动 ATR 2% → 判 crash（慢阴跌）。
+
+    这是从旧 AND 逻辑修正过来的：深跌本身就是 crash，无需高 ATR 佐证。"""
+    m = _metrics(ma20=90, ma120=100, atr_pct=2.0, return_30d=-0.30)
+    r = classify_regime(m)
+    assert r["regime"] == "crash", r
+    assert "深跌" in r["reason"]
+
+
+def test_crash_25pct_low_vol_is_not_crash():
+    """跌 25% + 低波动：没到深跌门槛(30%)、也没急跌(低 ATR) → 不判 crash"""
+    m = _metrics(ma20=90, ma120=100, atr_pct=2.0, return_30d=-0.25)
+    r = classify_regime(m)
+    assert r["regime"] != "crash", r
+
+
+def test_crash_fast_path_both_legs():
+    """双触发器路径一（急跌）：高 ATR 7% + 30 日跌 25%（≥20% 但 <30%）→ crash"""
+    m = _metrics(ma20=90, ma120=100, atr_pct=7.0, return_30d=-0.25)
+    r = classify_regime(m)
+    assert r["regime"] == "crash", r
+    assert "急跌" in r["reason"]
+
+
+def test_crash_missing_return_30d_does_not_crash():
+    """return_30d 缺失（数据不足）时跌幅腿视为不满足 → 保守不判 crash"""
+    m = _metrics(ma20=100, ma120=100, atr_pct=12.0, return_30d=None)
+    r = classify_regime(m)
+    assert r["regime"] != "crash", r
+
+
+# ---------- recovery ----------
+
+def test_recovery_basic():
+    """从低点反弹 15% + 分位 30%（<50%）→ recovery，且优先于 downtrend"""
+    # ma 偏离是 downtrend（-10%），但 recovery 在趋势判断之前 → recovery 胜出
+    m = _metrics(ma20=90, ma120=100, atr_pct=2.0, quantile=0.30,
+                 return_30d=-0.05, rebound=0.15)
+    r = classify_regime(m)
+    assert r["regime"] == "recovery", r
+
+
+def test_recovery_needs_low_quantile():
+    """反弹够（15%）但分位高（70% ≥ 50%）→ 不是 recovery，回落到趋势判断（downtrend）"""
+    m = _metrics(ma20=90, ma120=100, atr_pct=2.0, quantile=0.70,
+                 return_30d=-0.05, rebound=0.15)
+    r = classify_regime(m)
+    assert r["regime"] == "downtrend", r
+
+
+def test_recovery_needs_enough_rebound():
+    """反弹不够（5% < 10%）→ 不是 recovery"""
+    m = _metrics(ma20=90, ma120=100, atr_pct=2.0, quantile=0.30,
+                 return_30d=-0.05, rebound=0.05)
+    r = classify_regime(m)
+    assert r["regime"] != "recovery", r
+
+
+def test_crash_preempts_recovery():
+    """crash 双条件满足时，即便反弹+低分位也判 crash（crash 优先级最高）"""
+    m = _metrics(ma20=90, ma120=100, atr_pct=8.0, quantile=0.30,
+                 return_30d=-0.25, rebound=0.15)
+    r = classify_regime(m)
+    assert r["regime"] == "crash", r
+
+
+def test_recovery_in_strategy_hint():
+    """recovery 的策略提示包含 cautious bullish 措辞"""
+    from core.regime import regime_strategy_hint
+    hint = regime_strategy_hint("recovery", 0.3)
+    assert "谨慎看多" in hint or "cautious" in hint.lower()
 
 
 def test_thresholds_used_returned_in_classification():

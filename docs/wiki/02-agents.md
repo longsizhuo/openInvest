@@ -11,12 +11,13 @@
 
 | Role | 能看到 | 被屏蔽 | 输出格式 | 文件 |
 |------|--------|--------|----------|------|
-| **Macro Strategist** | VIX / TNX / USDCNY / 全球宏观 brief | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `agents/macro_strategist.py` |
-| **Quant Analyst** | 技术指标（RSI/MA/分位）+ REGIME 硬约束表 | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `agents/quant.py` |
-| **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights | 技术指标、Macro view | 风险等级 + 集中度评分 | `agents/risk_officer.py` |
-| **CIO** | 三人完整 transcript + 用户 risk_level | — | 5 选 1 verdict + confidence + alloc | `agents/cio.py` |
+| **Macro Strategist** | VIX / TNX / 全球宏观 brief + **盘中事件上下文 event_brief（仅 Macro 看得到，事件 RAG 严格隔离）** | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `agents/macro_strategist.py` |
+| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 硬约束表 | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `agents/quant.py` |
+| **Wealth Context Officer**（第 5 角色，跨资产共享） | user.md 的 wealth_context（家族 backup / 应急金 / 账户性质）+ portfolio cash | 技术指标、Macro view、个股持仓明细 | 真实流动性评级（给 Risk + CIO 用） | `agents/wealth_context_officer.py` |
+| **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights + **Wealth Context Officer 真实流动性视角** | 技术指标、Macro view | 风险等级 + 集中度评分 | `agents/risk_officer.py` |
+| **CIO** | 三人完整 transcript + Wealth Context 视角 + 用户 risk_level（含在 portfolio_summary 文本里） | — | 5 选 1 verdict + confidence + alloc | `agents/cio.py` |
 
-**信息隔离的目的**：避免 LLM 在同一 context 里相互污染观点。Quant 不知道用户亏了多少（不会偏向"赶紧补仓"），Risk Officer 不知道 RSI（不会被技术信号牵着鼻子走）。
+**信息隔离的目的**：避免 LLM 在同一 context 里相互污染观点。Quant 不知道用户亏了多少（不会偏向"赶紧补仓"），Risk Officer 不知道 RSI（不会被技术信号牵着鼻子走）。**注意这种"物理隔离"只在 Round 1 严格成立**——见下文 [Cross-Challenge 协议](#cross-challenge-协议) 的轮次说明。
 
 ---
 
@@ -66,17 +67,23 @@ journal 实证 16 calls 介于两者间。
 
 **为什么需要硬约束**：LLM 在牛市顶部还能 hallucinate 出 "BUY"。把可确定性算法的部分（趋势 / 分位）从 LLM 里拿出来，写成确定性规则喂给 LLM 当**强制前置**。
 
-### 5 类 regime + 5 阈值
+### 6 类 regime（uptrend / downtrend / range_bound / crash / recovery / unknown）
 
-源：`core/regime.py:THRESHOLDS`
+源：`core/regime.py:THRESHOLDS`（默认阈值 + `ASSET_OVERRIDES` per-asset 覆盖）
 
 | Regime | 触发条件 | 对 Quant 的硬约束 |
 |--------|---------|-------------------|
-| `uptrend` | MA20 > MA50 > MA200 + 价格分位 ≥ 60% | **禁** bearish 信号 |
-| `downtrend` | MA20 < MA50 < MA200 + 价格分位 ≤ 40% | **禁** bullish 信号 |
-| `range_bound` | MA 多空胶着 + 分位 20-80% | 跟随分位：≤20% 偏 bullish，≥80% 偏 bearish |
-| `crash` | 30 日跌幅 ≥ 20% + ATR > 2× 历史中位数 | **强制 neutral**（任何方向不可执行） |
-| `recovery` | 从 crash 反弹 ≥ 10% + 分位 < 50% | 允许 cautious bullish |
+| `uptrend` | `(MA20 − MA120) / MA120 ≥ +trend_ma_spread_pct%`（默认 3%，per-asset 覆盖：金 5% / 纳指 4% / 加密 8%） | **禁** bearish 信号 |
+| `downtrend` | `(MA20 − MA120) / MA120 ≤ −trend_ma_spread_pct%` | **禁** bullish 信号 |
+| `range_bound` | MA 纠缠（spread 在 ±阈值内）+ 波动正常 | 跟随分位：≤20% 偏 bullish，≥80% 偏 bearish |
+| `crash` | **双触发器（任一即触发）**：① 急跌 `atr_pct ≥ crash_atr_pct_min`（per-asset）**且** `return_30d ≤ −20%`；② 深跌 `return_30d ≤ −30%`（不看波动） | **强制 neutral**（任何方向不可执行） |
+| `recovery` | crash 未触发 + 从近 30 日低点反弹 ≥ 10% + 价格仍在低位（真百分位 < 50%） | 允许 cautious bullish（谨慎看多） |
+
+> 说明（与 `core/regime.py` 实现对齐，2026-05-26）：
+> - 趋势判断用的是 **MA20 对 MA120 的偏离度**（单一 spread 阈值），**不是** MA20>MA50>MA200 三线多头排列；代码里只算 MA20/MA120/MA250，没有 MA50/MA200。
+> - `crash` 是 **双触发器（OR）**：路径一急跌（波动腿 AND 20% 跌幅腿）+ 路径二深跌（30 日跌 ≥ 30%，不看波动）。路径二专门抓"低波动慢阴跌"——深跌本身即 crash，无需高 ATR 佐证。
+> - `recovery` 为无状态实现：用"已从近 30 日低点反弹 ≥ 10% 且分位 < 50%"近似"刚走出 crash"。
+> - 优先级：`crash`（最高）→ `recovery` → `uptrend`/`downtrend` → `range_bound` → `unknown`（缺数据）。
 
 REGIME brief 在 Quant 的 prompt 里以**最高优先级**呈现（开头第一段）。
 
@@ -103,10 +110,10 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 ```
 # 资产: BetaShares Nasdaq 100 ETF (NDQ.AX)
 # 市场 Regime（确定性算出，必须遵循）：
-  uptrend · MA20>MA50>MA200 · 价格分位 78%
+  uptrend · MA20 高于 MA120 +8.5% (≥ 4%) · 价格百分位 78%
   → 禁 bearish 信号
 # 市场数据（技术指标 + 多周期）：
-  RSI: 67, MA20: 35.2, MA50: 33.8, ...
+  RSI(14, Wilder): 67, MA120: 33.8, MA250: 30.1, 价格百分位(2y): 78%, RVOL(20): 0.9x, ...
 请按 Quant Analyst 格式输出技术信号。
 ```
 
@@ -115,12 +122,19 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 # 资产: BetaShares Nasdaq 100 ETF (NDQ.AX)
 # 用户当前持仓：
   CNY: ¥50,000 / AUD: $1,000 / NDQ.AX 50 股 @ A$38.50（浮盈 +12%）
-# 长期行为模式（Dreaming）：
-  历史在 RSI>70 时加仓，事后 30 天平均 -3.2%（4/5 次）
+# 长期模式（Dreaming，学委员会自己的 verdict vs 实际盘）：
+  ⚠️ downtrend 里对 NDQ.AX 反复 HOLD，30 天后 100% 踏空（平均 +12%，n=11）→ 降低 HOLD 倾向
 请按 Risk Officer 格式输出风险评估。
 ```
 
 注意：**Quant 不知道用户持仓**，**Risk 不知道 RSI**。这是物理隔离。
+
+> ⚠️ **轮次 nuance（重要）**：物理隔离**只在 Round 1 成立**。进入 Round 2+ 的
+> cross-challenge 后，每个 agent 会看到对方**上一轮的完整 transcript**（见下一节），
+> 因此 Risk 的持仓数字会经 Risk 的发言进入 Quant 的 context、Quant 的技术数字会经
+> Quant 的发言进入 Risk 的 context——**R2+ 不再是物理隔离，靠 prompt 约束兜底**：
+> `quant/SKILL_rebuttal.md` 和 `risk_officer/SKILL_rebuttal.md` 明确规定"只引用对方的
+> *结论*（SIGNAL/STRENGTH），不要拿对方的原始数字（RSI/分位/集中度）再算一遍"。
 
 ### Round 2..N 输入（cross-challenge）
 
