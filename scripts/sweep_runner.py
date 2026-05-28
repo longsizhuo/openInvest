@@ -114,6 +114,26 @@ def _validate_ground_truth(ground_truth_path: Path) -> List[Dict[str, Any]]:
             f"ground truth 必须在 sweep 之前 commit，防止事后追加事件。"
         )
 
+    # 工作区干净校验：防止未提交修改绕过 git timestamp 检查
+    import subprocess
+    rel_path = str(ground_truth_path.resolve())
+    try:
+        repo_root = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        rel_path = str(ground_truth_path.resolve().relative_to(repo_root))
+    except (subprocess.CalledProcessError, ValueError):
+        pass
+    diff_rc = subprocess.call(
+        ["git", "diff", "--quiet", "--", rel_path],
+        stderr=subprocess.DEVNULL,
+    )
+    if diff_rc != 0:
+        raise ValueError(
+            f"ground truth 文件有未提交修改: {ground_truth_path}\n"
+            f"请先 commit 再运行 sweep，防止事后篡改。"
+        )
+
     return events
 
 
@@ -126,6 +146,7 @@ def _evaluate_event(
     event: Dict[str, Any],
     train_start: str,
     train_end: str,
+    df_cache: dict[str, Any] | None = None,
 ) -> EventResult:
     """评估单个 asset 在单个 ground truth 事件上的 regime 分类准确率。"""
     from core.config import load_config
@@ -137,8 +158,13 @@ def _evaluate_event(
     event_start = event["start"]
     event_end = event["end"]
 
-    # 拉全量数据（compute_metrics 需要 120 天 MA 窗口）
-    df = get_history_data(asset, "10y")
+    # 拉全量数据（compute_metrics 需要 120 天 MA 窗口），per-asset 缓存避免重复 IO
+    if df_cache is not None and asset in df_cache:
+        df = df_cache[asset]
+    else:
+        df = get_history_data(asset, "10y")
+        if df_cache is not None:
+            df_cache[asset] = df
     if df is None or df.empty:
         return EventResult(
             name=event["name"], expected_regime=expected,
@@ -205,6 +231,7 @@ def run_arithmetic_sweep(
     section, key = parts
 
     results: List[TrialResult] = []
+    df_cache: dict[str, Any] = {}  # per-asset 历史数据缓存，避免重复 yfinance IO
     for value in values:
         # 注入参数（同时覆盖全局 + 所有 per-asset，确保 sweep 生效）
         override = {section: {key: value}}
@@ -222,7 +249,7 @@ def run_arithmetic_sweep(
         trial = TrialResult(value=value)
         for event in events:
             for asset in assets:
-                er = _evaluate_event(asset, event, train_start, train_end)
+                er = _evaluate_event(asset, event, train_start, train_end, df_cache=df_cache)
                 trial.event_results.append(er)
 
         # 整体匹配率 = 所有事件所有 asset 的加权平均

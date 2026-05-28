@@ -79,7 +79,7 @@ def _get_macro_buckets():
     """读 macro bucket 分桶阈值（实时，支持 set_config_override）。"""
     from core.config import load_config
     return load_config().macro_buckets
-MIN_SCORE = 0.8           # Deep Sleep 阈值（OpenClaw 同款）
+MIN_SCORE = 0.8           # Deep Sleep 阈值（OpenClaw 同款）— 仅供文档，实际从 locked config 读取
 # caution lift-based 评分参数（2026-05-27 ADR 008，原理正确修正，非 reward hacking）：
 # - CAUTION_MIN_BASE_DOWN：该 regime 的 30d 真实下行基率必须 ≥ 此值，否则"踏空"只是
 #   单向上涨基率假象（Phase1.5 牛市 / post-cutoff 急跌后 V 反弹都是 base_down≈0）。
@@ -560,10 +560,12 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
 
     P1-3: 阈值门后再加一道可选 LLM 验伪（INVEST_DREAMING_LLM_VERIFY=1 启用）。
     """
+    from core.config import get_locked
+    _, locked_dreaming, _, _ = get_locked()
     accepted: List[Dict[str, Any]] = []
     for c in candidates:
         score = _score(c)
-        if score < MIN_SCORE or c["count"] < _get_dreaming_config().min_recall:
+        if score < locked_dreaming.min_score or c["count"] < _get_dreaming_config().min_recall:
             continue
         c["score"] = score
         accepted.append(c)

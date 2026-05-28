@@ -2934,7 +2934,7 @@ async def get_regime_rules() -> RegimeRulesResponse:
     - CIO sanity check 清单
     - 5 个可被 LLM 调用的 tool
     """
-    from core.regime import THRESHOLDS
+    from core.regime import get_thresholds
     from agents.macro_strategist import PROMPT_MACRO_STRATEGIST
     from agents.quant import build_quant_prompt
     from agents.risk_officer import build_risk_officer_prompt
@@ -3006,7 +3006,7 @@ async def get_regime_rules() -> RegimeRulesResponse:
     ]
 
     return RegimeRulesResponse(
-        regime_thresholds=dict(THRESHOLDS),
+        regime_thresholds=get_thresholds(),
         regime_types=["crash", "uptrend", "downtrend", "range_bound", "unknown"],
         regime_priority=[
             "1. crash (ATR% ≥ 5% → 任何方向都强制 neutral)",
@@ -3508,7 +3508,9 @@ async def patch_trade_status(
 
     # portfolio 同步成功（或非 executed 状态），提交 trades.db
     try:
-        _get_trades_db().patch_status(trade_id, status)
+        patched = _get_trades_db().patch_status(trade_id, status)
+        if not patched:
+            raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
     except ValueError as e:
         # portfolio 已同步但 status 提交失败 — 记录异常但不回滚 portfolio
         # （portfolio 同步是幂等的，下次重试不会出问题）
