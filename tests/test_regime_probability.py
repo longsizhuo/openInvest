@@ -285,7 +285,29 @@ def test_make_regime_probability_aggregation():
     assert rp.p_flat == 0.6
     assert rp.median_return == 1.0          # sorted [-10,-1,1,5,10] → 1
     assert rp.mean_return == 1.0            # (10-10+1-1+5)/5
-    assert rp.low_confidence is True        # n=5 < MIN_CONFIDENT_N(10)
+    assert rp.effective_n == 5              # window_days=1 默认（非重叠）→ effective_n = n
+    assert rp.low_confidence is True        # effective_n=5 < MIN_CONFIDENT_N(10)
+
+
+def test_effective_n_overlapping_window_downweights_confidence():
+    """重叠窗口：effective_n = n//window_days，low_confidence 用 effective_n 判定。
+
+    守住 CR 🔴#1：原始 n=200 的重叠日度样本会被误判为高置信；按 30d 窗口折算后
+    独立样本仅 6 → 应标 low_confidence。
+    """
+    from core.regime_probability import _make_regime_probability
+
+    rp_hi = _make_regime_probability("X", "uptrend", [1.0] * 300, 5.0, window_days=30)
+    assert rp_hi.n == 300
+    assert rp_hi.effective_n == 10          # 300 // 30
+    assert rp_hi.low_confidence is False     # 10 not < 10
+
+    rp_lo = _make_regime_probability("X", "uptrend", [1.0] * 200, 5.0, window_days=30)
+    assert rp_lo.n == 200
+    assert rp_lo.effective_n == 6           # 200 // 30
+    assert rp_lo.low_confidence is True      # 6 < 10 —— 原始 n=200 不会标，effective_n 会
+    # 文案标注重叠窗口独立样本
+    assert "重叠窗口独立≈6" in rp_lo.summary_line()
 
 
 def test_build_probability_table_from_ohlc_stubbed(monkeypatch):
@@ -313,5 +335,55 @@ def test_build_probability_table_from_ohlc_stubbed(monkeypatch):
         assert isinstance(rp, RegimeProbability)
         assert rp.n > 0
         assert 0.0 <= rp.p_up <= 1.0 and 0.0 <= rp.p_down <= 1.0
+        # 重叠窗口折算：effective_n = n // 30，且 ≤ n
+        assert rp.effective_n == max(1, rp.n // 30)
+        assert rp.effective_n <= rp.n
     # 稳步上行 → 应分出 uptrend 桶
     assert any(r == "uptrend" for (_, r) in table)
+    # 至少一个桶的独立样本明显小于原始 n（重叠折算确实生效）
+    assert any(rp.effective_n < rp.n for rp in table.values())
+
+
+def test_ohlc_forward_returns_values_exact(monkeypatch):
+    """_ohlc_forward_returns：stub MarketStore，返回值必须等于手算 forward return(%)。
+
+    守 CR 🔴#2 + searchsorted 日期对齐：forward return 不能错位一天，regime 过滤后
+    不丢样本/不重复，symbol 接线走 .upper()。
+    """
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import _ohlc_forward_returns, compute_regime_return_frame
+
+    # n 要够长：ma120 需 120 行 warmup，非 unknown 的行还得有 30d lookahead，故用 300
+    n = 300
+    idx = pd.date_range("2020-01-01", periods=n, freq="D")
+    close = 100.0 + np.arange(n)
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    captured = {}
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            captured["symbol"] = symbol
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+
+    # 手算：fwd_30d[i] = close[i+30]/close[i]-1，×100 转百分比（freq=D → date+30 = 第 i+30 行）
+    expected = {round((close[i + 30] / close[i] - 1) * 100, 9) for i in range(n - 30)}
+
+    frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
+    regimes = [r for r in frame["regime"].unique() if r != "unknown"]
+    assert regimes
+    got = []
+    for rg in regimes:
+        got += _ohlc_forward_returns("test", rg, "30d")  # 传小写验证 .upper() 接线
+    assert captured["symbol"] == "TEST"
+    assert got
+    # 每个返回值都精确等于手算 forward return（无错位一天）
+    assert all(round(v, 9) in expected for v in got)
+    # 覆盖完整：取到的样本数 = 非 unknown 且 fwd 非 NaN 的行数（无丢/无重复）
+    valid = frame.dropna(subset=["fwd_30d"])
+    valid = valid[valid["regime"] != "unknown"]
+    assert len(got) == len(valid)
