@@ -20,7 +20,7 @@ from core.portfolio_manager import PortfolioManager
 from core.regime import format_regime_brief
 from core.regime_probability import (
     RegimeProbability,
-    build_probability_table,
+    build_probability_table_from_ohlc,
     get_regime_probability,
 )
 from utils.exchange_fee import (
@@ -621,11 +621,12 @@ def run_committee_session(
         emit("macro_done", macro_preview=macro_view[:240], shared=True)
 
     # ---- Step 4.5: 构建概率表（共享，只读一次）----
+    # 数据源 = 几十年 OHLC 直算（纯算术，0 LLM token），不再用 verdict_review 276 条。
+    # 原因：regime→forward return 全是算术，样本量 (asset,regime) 16~80 → 900~4150。
+    # verdict_review 源保留给命中率/confidence 校准（那些需要 LLM 真实输出）。
     prob_table: Dict[tuple, RegimeProbability] = {}
     try:
-        from core.memory_store import MemoryStore
-        jsonl_path = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
-        prob_table = build_probability_table(jsonl_path)
+        prob_table = build_probability_table_from_ohlc(symbols)
         if prob_table:
             emit("probability_table_loaded", groups=len(prob_table))
     except Exception as e:  # noqa: BLE001
