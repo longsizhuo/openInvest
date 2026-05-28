@@ -17,6 +17,11 @@ from core.committee import (
 )
 from core.portfolio_manager import PortfolioManager
 from core.regime import format_regime_brief
+from core.regime_probability import (
+    RegimeProbability,
+    build_probability_table,
+    get_regime_probability,
+)
 from utils.exchange_fee import (
     analyze_multi_timeframe, get_history_data, get_macro_data,
 )
@@ -292,6 +297,14 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
         )
 
 
+def _extract_regime_label(regime_brief: str) -> str:
+    """从 format_regime_brief 输出提取 regime label（第一行 'REGIME: xxx'）"""
+    for line in regime_brief.splitlines():
+        if line.startswith("REGIME:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
 def run_committee_for_symbol(
     symbol: str,
     *,
@@ -302,6 +315,7 @@ def run_committee_for_symbol(
     wealth_context_view: Optional[str] = None,
     portfolio_summary_override: Optional[str] = None,
     prior_insights_override: Optional[str] = None,
+    probability_table: Optional[Dict[tuple, RegimeProbability]] = None,
 ) -> Dict[str, Any]:
     """端到端跑单资产 committee
 
@@ -413,7 +427,7 @@ def run_committee_for_symbol(
         emit("prior_insights_loaded", preview=prior_insights[:240])
 
     # 6. 跑多轮辩论 + CIO
-    return run_committee(
+    result = run_committee(
         target,
         market_data=market_data,
         macro_view=macro_view,
@@ -424,6 +438,20 @@ def run_committee_for_symbol(
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )
+
+    # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
+    if probability_table is not None:
+        regime_label = _extract_regime_label(regime_brief)
+        prob = get_regime_probability(
+            symbol, regime_label, table=probability_table,
+        )
+        if prob is not None:
+            result["regime_probability"] = prob
+            emit("regime_probability",
+                 asset=symbol, regime=regime_label,
+                 summary=prob.summary_line())
+
+    return result
 
 
 # ============================================================================
@@ -570,6 +598,17 @@ def run_committee_session(
         macro_view = run_macro_view(str(macro_data), event_brief=event_brief)
         emit("macro_done", macro_preview=macro_view[:240], shared=True)
 
+    # ---- Step 4.5: 构建概率表（共享，只读一次）----
+    prob_table: Dict[tuple, RegimeProbability] = {}
+    try:
+        from core.memory_store import MemoryStore
+        jsonl_path = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
+        prob_table = build_probability_table(jsonl_path)
+        if prob_table:
+            emit("probability_table_loaded", groups=len(prob_table))
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"概率表构建失败 graceful 退化空 dict: {e}")
+
     # ---- Step 5: dispatch（串行 or 并行）----
     # 单资产 / max_workers<=1 → 走串行（避免 ThreadPoolExecutor 嵌套，外层 caller
     # 如 web_api 的 background task 已经在 worker thread 里跑时，再嵌内层 pool
@@ -586,6 +625,7 @@ def run_committee_session(
             event_brief=event_brief,
             wealth_context_view=wealth_view,
             portfolio_summary_override=portfolio_summary_override,
+            probability_table=prob_table,
             # prior_insights_override 不传 → service 内 load_prior_insights(sym)
             # 每个资产 insights 不同，session 不预加载
         )

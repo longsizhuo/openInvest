@@ -191,18 +191,30 @@ def assemble_full_report(
     active_assets = [a for a in target_assets if a["symbol"] not in skipped_assets
                      and a["symbol"] in asset_committees]
 
+    def _asset_block(idx: int, a: dict) -> str:
+        sym = a["symbol"]
+        c = asset_committees[sym]
+        v = c["verdict"]
+        lines = [
+            f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n",
+            f"**裁决**: {v['verdict']} | 置信度 {v['confidence']:.2f} | "
+            f"主导方 {v['dominant_view']} | 建议金额 ¥{v['alloc_cny']}\n\n",
+        ]
+        # 概率分布（regime 概率表）
+        prob = c.get("regime_probability")
+        if prob is not None:
+            lines.append(f"**历史参考**: {prob.summary_line()}\n\n")
+        lines.extend([
+            f"### CIO 备忘\n```\n{c['report'].cio_memo}\n```\n\n",
+            f"<details><summary>📜 三个 analyst 详细意见</summary>\n\n",
+            f"**Quant**:\n{c['report'].quant_view}\n\n",
+            f"**Risk Officer**:\n{c['report'].risk_view}\n\n",
+            f"</details>",
+        ])
+        return "".join(lines)
+
     asset_section = "\n\n---\n\n".join([
-        f"## {idx+2}. {a.get('display_name', a['symbol'])} ({a['symbol']})\n\n"
-        f"**裁决**: {asset_committees[a['symbol']]['verdict']['verdict']} | "
-        f"置信度 {asset_committees[a['symbol']]['verdict']['confidence']:.2f} | "
-        f"主导方 {asset_committees[a['symbol']]['verdict']['dominant_view']} | "
-        f"建议金额 ¥{asset_committees[a['symbol']]['verdict']['alloc_cny']}\n\n"
-        f"### CIO 备忘\n```\n{asset_committees[a['symbol']]['report'].cio_memo}\n```\n\n"
-        f"<details><summary>📜 三个 analyst 详细意见</summary>\n\n"
-        f"**Quant**:\n{asset_committees[a['symbol']]['report'].quant_view}\n\n"
-        f"**Risk Officer**:\n{asset_committees[a['symbol']]['report'].risk_view}\n\n"
-        f"</details>"
-        for idx, a in enumerate(active_assets)
+        _asset_block(idx, a) for idx, a in enumerate(active_assets)
     ]) if active_assets else "_（所有资产数据不可用，跳过委员会）_"
 
     n = len(active_assets)  # 活跃资产数，用于后续章节编号
