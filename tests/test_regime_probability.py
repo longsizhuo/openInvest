@@ -175,7 +175,7 @@ def test_get_reentry_estimate_basic(tmp_path):
     ]
     p = _write_reviews(tmp_path, recs)
     est = get_reentry_estimate("GC=F", "range_bound", 1000.0,
-                               window="30d", jsonl_path=p)
+                               window="30d", source="verdict_review", jsonl_path=p)
     assert est is not None
     assert est.n == 12
     assert est.has_downside is True          # 低分位为负
@@ -190,7 +190,8 @@ def test_get_reentry_estimate_unavailable_window_returns_none(tmp_path):
              "actual_returns": {"30d": -0.05}}]
     p = _write_reviews(tmp_path, recs)
     assert get_reentry_estimate("GC=F", "range_bound", 1000.0,
-                                window="90d", jsonl_path=p) is None
+                                window="90d", source="verdict_review",
+                                jsonl_path=p) is None
 
 
 def test_get_reentry_estimate_no_price_returns_none(tmp_path):
@@ -198,7 +199,8 @@ def test_get_reentry_estimate_no_price_returns_none(tmp_path):
     p = _write_reviews(tmp_path, [{"asset": "GC=F",
                                    "regime_at_decision": "range_bound",
                                    "actual_returns": {"30d": -0.05}}])
-    assert get_reentry_estimate("GC=F", "range_bound", None, jsonl_path=p) is None
+    assert get_reentry_estimate("GC=F", "range_bound", None,
+                                source="verdict_review", jsonl_path=p) is None
 
 
 def test_build_reentry_reference_text_marks_unavailable(tmp_path):
@@ -209,6 +211,36 @@ def test_build_reentry_reference_text_marks_unavailable(tmp_path):
         for r in (-10, -5, -2, 0, 3, 8)
     ]
     p = _write_reviews(tmp_path, recs)
-    txt = build_reentry_reference_text("GC=F", "range_bound", 1000.0, jsonl_path=p)
+    txt = build_reentry_reference_text("GC=F", "range_bound", 1000.0,
+                                       source="verdict_review", jsonl_path=p)
     assert "30d" in txt
     assert "90d: 历史样本不足 / unavailable" in txt
+
+
+# ---------- OHLC 直算源（无 DB 依赖，纯函数）----------
+
+def test_compute_regime_return_frame_synthetic():
+    """compute_regime_return_frame 在合成 OHLC 上产出 regime + forward return"""
+    import numpy as np
+    import pandas as pd
+    from core.regime_probability import compute_regime_return_frame
+
+    # 300 天稳步上行 + 噪声 → 应出现 uptrend，且 forward return 多为正
+    idx = pd.date_range("2015-01-01", periods=300, freq="D")
+    base = np.linspace(100, 200, 300)
+    close = base + np.sin(np.arange(300) / 5) * 2
+    df = pd.DataFrame({"Close": close, "High": close * 1.01, "Low": close * 0.99},
+                      index=idx)
+    frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
+    assert not frame.empty
+    assert "regime" in frame.columns and "fwd_30d" in frame.columns
+    # warmup 后应能分出非 unknown 的 regime
+    assert (frame["regime"] != "unknown").sum() > 100
+    # 上行序列：uptrend 应占可观比例
+    assert (frame["regime"] == "uptrend").sum() > 50
+
+
+def test_compute_regime_return_frame_empty():
+    import pandas as pd
+    from core.regime_probability import compute_regime_return_frame
+    assert compute_regime_return_frame(pd.DataFrame(), "TEST").empty
