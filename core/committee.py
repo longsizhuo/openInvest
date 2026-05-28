@@ -363,6 +363,7 @@ def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
     if not wealth_context:
         return (
             f"SOLVENCY_BUFFER_LEVEL: unknown\n"
+            f"ACCOUNT_PURPOSE: N/A\n"
             f"PORTFOLIO_CASH_CNY: {portfolio_cash_cny:.2f}\n"
             f"INVESTABLE_CASH_CNY: {portfolio_cash_cny:.2f}\n"
             f"BACKUP_BUFFER_CNY: 0\n"

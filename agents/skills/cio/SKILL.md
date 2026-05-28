@@ -76,3 +76,5 @@ PERSONAL_NOTE:
 - 如果用户浮亏 > 5% 且 Macro risk_off：考虑 TRIM
 - 如果用户浮盈 > 10% 且 Quant bearish：考虑 TRIM 锁定利润
 - 不允许"待观察"——必须明确 verdict + 数字
+
+{{TRIM_CONSTRAINT}}
