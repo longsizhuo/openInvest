@@ -1,0 +1,70 @@
+# ADR-013: SOLVENCY=strong 时集中度不触发 TRIM（确定性后处理）
+
+## 状态
+
+Accepted — 2026-05-28
+
+## 背景
+
+2026-05-28 黄金 GC=F 委员会输出 TRIM，原因是 Risk Officer 报集中度 > 60%。
+但实际上用户有 ¥4M 家族 backup（SOLVENCY_BUFFER_LEVEL=strong），投资账户
+归零不影响生存。集中度高只意味着"账户内偏科"，不意味着"真实财富风险"。
+
+PR #14（已合入）在 CIO prompt 层加了"零花钱账户 TRIM 约束"，但这是纯 prompt
+约束——LLM 可能忽略。本次改用确定性后处理兜底。
+
+## 决策
+
+### 核心原则
+
+当 SOLVENCY_BUFFER_LEVEL=strong（真实财富兜底充足，投资账户归零不影响生存）时：
+- "账户内集中度高" **不应触发减仓（TRIM）**，只应 **限制加仓（BUY/ACCUMULATE）**
+- 减仓的理由是真实财富风险；兜底充足时真实财富风险不存在
+- 但账户太偏单一资产时，不该再往里加
+
+### 实现方式：确定性后处理（不依赖 prompt）
+
+1. **CIO prompt** 加格式要求：TRIM 时必须输出 `TRIM_REASON: concentration | stop_loss | bearish`
+2. **`parse_cio_memo()`** 新增 `TRIM_REASON` 提取 + Sanity check 4：
+   ```
+   if SOLVENCY=strong and verdict=TRIM and TRIM_REASON=concentration:
+       → 强制改写 HOLD + 记录 override 原因
+   ```
+3. **`portfolio_summary_text()`** 加 `backup_cny` 参数，附注真实财富占比
+4. 跟现有的 BUY→ACCUMULATE（Sanity 1）、WORKER→HOLD（Sanity 3）同款机制
+
+### 与 PR #14 的关系
+
+PR #14 在 prompt 层加了"零花钱账户 + 浮亏 < 5% 不允许 TRIM"约束。本次的
+Sanity check 4 是后处理兜底，两者不冲突：
+- PR #14 的约束依赖 LLM 遵守（可能失败）
+- Sanity check 4 是确定性的（LLM 输出 TRIM + concentration 就会被覆盖）
+- 两者可以共存：PR #14 拦浮亏 < 5% 的 TRIM，Sanity 4 拦 SOLVENCY=strong 的 concentration TRIM
+
+### 不改的部分
+
+- SOLVENCY=weak/unknown 时的逻辑不变（账户可能就是全部身家，集中度该触发减仓）
+- stop_loss / bearish 原因的 TRIM 不受影响（这些是真实风险信号）
+
+## 待办：TRIM 路径化（概率表升级）
+
+TRIM 信号当前是纯静态快照决策，缺"卖出后预期路径 / 买回点"：
+- CIO 输出 schema 无 TRIM 专属的 re-entry 字段
+- `parse_cio_memo()` 不提取 `EXECUTION_PLAN`（全丢弃）
+- 回测/复盘只看事后价格方向，不评估"是否在合适价位买回"
+- 全库搜索 `buy.?back` / `re.?entry` / `price.?path` 等零结果
+
+现有概率表是 30 天单点分布（`(asset, regime)` → P(涨>5%) / P(跌>5%)），
+需升级成 **路径分布**（多时间步联合分布）才能支撑"卖出后 X 天内有 Y% 概率
+跌到 Z 价位"的路径化决策。这是大工程，以后做。
+
+## 相关文件
+
+| 文件 | 改动 |
+|---|---|
+| `utils/portfolio_summary.py` | `backup_cny` 参数 + 真实财富占比附注 |
+| `agents/skills/cio/SKILL.md` | `TRIM_REASON` 输出字段 |
+| `core/committee.py` | `parse_cio_memo()` TRIM_REASON 提取 + Sanity 4 |
+| `core/committee_runner.py` | wealth_view 提前加载 + 传 backup_cny |
+| `jobs/daily_report.py` | cron 路径传 backup_cny |
+| `scripts/skill.py` | skill 路径传 solventy_strong + backup_cny |

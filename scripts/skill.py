@@ -572,7 +572,16 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             current_prices[sym] = _safe_close(sym)
 
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices)
+    # 提取 backup_cny 用于 portfolio summary 的真实财富占比注释
+    _backup_cny = 0.0
+    try:
+        _user_doc = store.read("user")
+        _wc = _user_doc.metadata.get("wealth_context") if _user_doc else None
+        if _wc:
+            _backup_cny = float(_wc.get("backup_amount_cny", 0) or 0)
+    except Exception:
+        pass
+    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices, backup_cny=_backup_cny)
     # 用 shared loader (2026-05-16 三路径统一: 三 entry 不再各自重复实现)
     from core.committee_runner import load_prior_insights
     insights = load_prior_insights(target, pm)
@@ -787,7 +796,9 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
     # 解析 CIO 输出（通过 committee_runner re-export, 不直接 import core.committee
     # 以遵守 lint-imports 契约：entry 必经 service layer）
     from core.committee_runner import parse_cio_memo
-    verdict = parse_cio_memo(cio_text)
+    # 从 transcript 提取 SOLVENCY_BUFFER_LEVEL 用于 sanity check 4
+    _solventy_strong = "SOLVENCY_BUFFER_LEVEL: strong" in raw
+    verdict = parse_cio_memo(cio_text, solventy_strong=_solventy_strong)
 
     store = MemoryStore()
     today = datetime.now().strftime("%Y-%m-%d")

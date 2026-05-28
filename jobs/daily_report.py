@@ -102,9 +102,11 @@ def _portfolio_summary(
     pm: PortfolioManager,
     total_assets_cny: float,
     current_prices: Dict[str, float],
+    *,
+    backup_cny: float = 0.0,
 ) -> str:
     """用户上下文文本，委托给 daily_report_builder（见 ADR-005）"""
-    return portfolio_summary_text(pm, total_assets_cny, current_prices)
+    return portfolio_summary_text(pm, total_assets_cny, current_prices, backup_cny=backup_cny)
 
 
 def _run_gemini_cli_review(prompt: str) -> str:
@@ -338,7 +340,17 @@ def run() -> Dict[str, Any]:
             continue
         total_assets_cny += value_cny
 
-    portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices)
+    # 提取 backup_cny 用于 portfolio summary 的真实财富占比注释
+    _backup_cny = 0.0
+    try:
+        _store = MemoryStore()
+        _user_doc = _store.read("user")
+        _wc = _user_doc.metadata.get("wealth_context") if _user_doc else None
+        if _wc:
+            _backup_cny = float(_wc.get("backup_amount_cny", 0) or 0)
+    except Exception:
+        pass
+    portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices, backup_cny=_backup_cny)
     if data_warnings:
         portfolio_summary += "\n\n=== 数据可信度告警 ===" + "".join(data_warnings)
 

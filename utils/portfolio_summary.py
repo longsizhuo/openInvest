@@ -29,6 +29,8 @@ def portfolio_summary_text(
     pm: "PortfolioManager",
     total_assets_cny: float,
     current_prices: Dict[str, float],
+    *,
+    backup_cny: float = 0.0,
 ) -> str:
     """详细的用户上下文，给 Risk Officer 压力测试用（含当前市价 + 浮盈 + 集中度）
 
@@ -117,6 +119,17 @@ def portfolio_summary_text(
             f"现价 {ccy_symbol}{cur:.2f}, "
             f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy}), "
             f"**集中度 {conc_pct:.1f}%** (CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})",
+        )
+
+    # 真实总财富占比注释（当有兜底 backup 时附注，给 Risk Officer / CIO 参考）
+    if backup_cny > 0:
+        real_total = total_assets_cny + backup_cny
+        account_ratio = (total_assets_cny / real_total * 100) if real_total > 0 else 0.0
+        lines.append(
+            f"  [兜底注释] 账户总资产 ¥{total_assets_cny:,.0f} 占真实总财富 "
+            f"¥{real_total:,.0f} 的 {account_ratio:.1f}%，"
+            f"BACKUP ¥{backup_cny:,.0f} 仅作风险兜底不可投资。"
+            f"账户归零不影响生存。"
         )
 
     return "\n".join(lines) + "\n"

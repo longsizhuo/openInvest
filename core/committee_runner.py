@@ -213,7 +213,7 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
         return ""
 
 
-def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
+def _build_default_portfolio_summary(pm: PortfolioManager, wealth_context_view: str = "") -> str:
     """service layer 默认 portfolio_summary 拼装（含集中度 + 总资产 + 浮盈）
 
     2026-05-19 修复：Direct 路径（scripts/skill.py:cmd_run_committee）调
@@ -276,7 +276,14 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
                 )
 
         total_cny, _status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-        return portfolio_summary_text(pm, total_cny, current_prices)
+        # 从 wealth_context_view 提取 BACKUP_BUFFER_CNY 用于真实财富占比注释
+        backup_cny = 0.0
+        if wealth_context_view:
+            import re
+            m = re.search(r"BACKUP_BUFFER_CNY:\s*([\d.]+)", wealth_context_view)
+            if m:
+                backup_cny = float(m.group(1))
+        return portfolio_summary_text(pm, total_cny, current_prices, backup_cny=backup_cny)
     except Exception as e:  # noqa: BLE001
         # 兜底：拉价/折算彻底失败 → 用历史简化版，至少 Risk Officer 还有点上下文
         log.warning(
@@ -394,7 +401,19 @@ def run_committee_for_symbol(
         macro_view = run_macro_view(str(macro_data), event_brief=effective_event_brief)
         emit("macro_done", macro_preview=macro_view[:240])
 
-    # 5. Portfolio summary
+    # 5. WealthContextOfficer view（修复 2026-05-15 漂移: 之前没读 user.md 的
+    # wealth_context, Risk Officer 永远按 portfolio cash 判风险）
+    # caller 已经算过就 override 进来避免重复调用 LLM；否则 fallback 自己调
+    # 先于 portfolio summary 加载，因为 portfolio_summary_text 需要 backup_cny
+    # 来附注真实财富占比
+    if wealth_context_view is not None:
+        wealth_view = wealth_context_view
+    else:
+        wealth_view = load_wealth_context_view()
+    if wealth_view:
+        emit("wealth_context_loaded", preview=wealth_view[:240])
+
+    # 5.1. Portfolio summary
     # 2026-05-19 修复 Direct 路径集中度漂移：之前 service layer 自拼简化版
     # （只 4 行: 风险/CNY/AUD/目标资产单位），没有总资产、没有所有持仓、没有集中度
     # 数字，Risk Officer 自己算集中度连续 6 天错算（NDQ 真实 33.4% → LLM 算成
@@ -405,17 +424,7 @@ def run_committee_for_symbol(
     if portfolio_summary_override is not None:
         portfolio_summary = portfolio_summary_override
     else:
-        portfolio_summary = _build_default_portfolio_summary(pm)
-
-    # 5.5. WealthContextOfficer view（修复 2026-05-15 漂移: 之前没读 user.md 的
-    # wealth_context, Risk Officer 永远按 portfolio cash 判风险）
-    # caller 已经算过就 override 进来避免重复调用 LLM；否则 fallback 自己调
-    if wealth_context_view is not None:
-        wealth_view = wealth_context_view
-    else:
-        wealth_view = load_wealth_context_view()
-    if wealth_view:
-        emit("wealth_context_loaded", preview=wealth_view[:240])
+        portfolio_summary = _build_default_portfolio_summary(pm, wealth_context_view=wealth_view)
 
     # 5.6. Prior insights / Dreaming long-term 行为模式（修复 2026-05-16 漂移:
     # service layer 之前从不读 insights, Web/GUI 路径的 LLM 永远看不到长期模式）

@@ -51,6 +51,7 @@ VERDICT: BUY | ACCUMULATE | HOLD | TRIM | SELL
 CONFIDENCE: 0.0-1.0
 DOMINANT_VIEW: quant | macro | risk
 SUGGESTED_ALLOC_CNY: <具体金额, 如果是 SELL/TRIM 用负数表示减仓>
+TRIM_REASON: <VERDICT=TRIM 时必填：concentration | stop_loss | bearish；非 TRIM 时写 N/A>
 
 EXECUTION_PLAN:
   mode: lump-sum | pyramid | grid | none

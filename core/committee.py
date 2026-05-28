@@ -191,6 +191,7 @@ VERDICT_RE = re.compile(r"VERDICT:\s*(BUY|ACCUMULATE|HOLD|TRIM|SELL)", re.I)
 CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
 DOMINANT_RE = re.compile(r"DOMINANT_VIEW:\s*(quant|macro|risk)", re.I)
 ALLOC_RE = re.compile(r"SUGGESTED_ALLOC_CNY:\s*(-?\d+)")
+TRIM_REASON_RE = re.compile(r"TRIM_REASON:\s*(concentration|stop_loss|bearish)", re.I)
 
 
 # ============ Sanity-check 阈值（单点维护，便于调参）============
@@ -219,7 +220,7 @@ def _build_thresholds_from_config() -> Dict[str, float]:
 THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 
 
-def parse_cio_memo(text: str) -> Dict[str, Any]:
+def parse_cio_memo(text: str, *, solventy_strong: bool = False) -> Dict[str, Any]:
     out: Dict[str, Any] = {"raw": text}
     m = VERDICT_RE.search(text)
     out["verdict"] = m.group(1).upper() if m else "UNCLEAR"
@@ -229,6 +230,8 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
     out["dominant_view"] = m.group(1).lower() if m else "tie"
     m = ALLOC_RE.search(text)
     out["alloc_cny"] = int(m.group(1)) if m else 0
+    m = TRIM_REASON_RE.search(text)
+    out["trim_reason"] = m.group(1).lower() if m else None
 
     # Sanity check 0: INVEST_CIO_CONFIDENCE_CAP（Optuna 训练参数）clamp confidence 上限
     cap_env = os.getenv("INVEST_CIO_CONFIDENCE_CAP")
@@ -287,6 +290,19 @@ def parse_cio_memo(text: str) -> Dict[str, Any]:
             out["verdict"] = "HOLD"
             print("⚠️ parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
                   "强制 verdict=HOLD + confidence≤0.4")
+
+    # Sanity check 4: SOLVENCY=strong + TRIM + TRIM_REASON=concentration → 强制 HOLD
+    # 兜底充足时，"账户内集中度高"不应触发减仓（真实财富风险不存在），
+    # 只应限制加仓。确定性后处理，不依赖 prompt。
+    if (solventy_strong
+            and out["verdict"] == "TRIM"
+            and out.get("trim_reason") == "concentration"):
+        out["_original_verdict"] = "TRIM"
+        out["_original_trim_reason"] = "concentration"
+        out["verdict"] = "HOLD"
+        out["trim_reason"] = None
+        print("⚠️ parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
+              "强制 HOLD（兜底充足，集中度不触发减仓）")
 
     return out
 
@@ -708,7 +724,12 @@ def run_committee(
     emit("cio_done",
          memo_preview=report.cio_memo[:240])
 
-    cio_parsed = parse_cio_memo(report.cio_memo)
+    # 从 wealth_context_view 提取 SOLVENCY_BUFFER_LEVEL 用于 sanity check 4
+    _solventy_strong = bool(
+        wealth_context_view
+        and "SOLVENCY_BUFFER_LEVEL: strong" in wealth_context_view
+    )
+    cio_parsed = parse_cio_memo(report.cio_memo, solventy_strong=_solventy_strong)
 
     debate_meta = {
         "max_rounds": max_debate_rounds,
