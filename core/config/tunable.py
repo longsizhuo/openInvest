@@ -49,6 +49,9 @@ class VerdictConfig:
     buy_confidence_downgrade_to: float = 0.6
     alloc_cny_ceiling: float = 100_000
     worker_unavailable_confidence_floor: float = 0.4
+    # force-HOLD 时统一的 confidence 上限（Sanity 4：兜底充足覆盖集中度减仓用）。
+    # 与 worker_unavailable_confidence_floor 同默认但语义独立，便于分别 tune。
+    forced_hold_confidence_ceiling: float = 0.4
     # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
     # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
     trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
