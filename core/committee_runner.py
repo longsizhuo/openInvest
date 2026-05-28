@@ -9,6 +9,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 from core.committee import (
+    load_backup_cny,  # re-export: entry (daily_report / skill) 走 service layer
     load_wealth_context_view,
     parse_cio_memo,  # re-export: 给 entry (scripts.skill cmd_save_committee) 用，
                      # 避免 entry 直接 import core.committee 违反 lint-imports 契约
@@ -213,7 +214,7 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
         return ""
 
 
-def _build_default_portfolio_summary(pm: PortfolioManager, wealth_context_view: str = "") -> str:
+def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
     """service layer 默认 portfolio_summary 拼装（含集中度 + 总资产 + 浮盈）
 
     2026-05-19 修复：Direct 路径（scripts/skill.py:cmd_run_committee）调
@@ -276,13 +277,8 @@ def _build_default_portfolio_summary(pm: PortfolioManager, wealth_context_view: 
                 )
 
         total_cny, _status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-        # 从 wealth_context_view 提取 BACKUP_BUFFER_CNY 用于真实财富占比注释
-        backup_cny = 0.0
-        if wealth_context_view:
-            import re
-            m = re.search(r"BACKUP_BUFFER_CNY:\s*([\d.]+)", wealth_context_view)
-            if m:
-                backup_cny = float(m.group(1))
+        # backup_cny（off-portfolio 兜底）走单一可信源 loader，三路径一致
+        backup_cny = load_backup_cny(pm)
         return portfolio_summary_text(pm, total_cny, current_prices, backup_cny=backup_cny)
     except Exception as e:  # noqa: BLE001
         # 兜底：拉价/折算彻底失败 → 用历史简化版，至少 Risk Officer 还有点上下文
@@ -424,7 +420,7 @@ def run_committee_for_symbol(
     if portfolio_summary_override is not None:
         portfolio_summary = portfolio_summary_override
     else:
-        portfolio_summary = _build_default_portfolio_summary(pm, wealth_context_view=wealth_view)
+        portfolio_summary = _build_default_portfolio_summary(pm)
 
     # 5.6. Prior insights / Dreaming long-term 行为模式（修复 2026-05-16 漂移:
     # service layer 之前从不读 insights, Web/GUI 路径的 LLM 永远看不到长期模式）

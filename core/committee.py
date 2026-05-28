@@ -224,6 +224,19 @@ def _build_thresholds_from_config() -> Dict[str, float]:
 THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 
 
+def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
+    """统一 force-HOLD 后处理：verdict→HOLD、confidence 压到 ≤ ceiling、alloc_cny→0。
+
+    多个 sanity check（worker 输入失败 / 兜底充足覆盖集中度减仓）最终都要把裁决
+    钉成"HOLD 且不带方向性信号强度"。集中到一处，避免每个 check 各自手抄时漏步
+    —— Sanity 3 历史上 force HOLD 却没归零 alloc_cny，导致 HOLD 仍带建议金额。
+    调用方负责记录各自的 _original_* 溯源（语义不同，不放进这里）。
+    """
+    out["verdict"] = "HOLD"
+    out["confidence"] = min(out["confidence"], confidence_ceiling)
+    out["alloc_cny"] = 0
+
+
 def parse_cio_memo(
     text: str,
     *,
@@ -302,13 +315,11 @@ def parse_cio_memo(
     # 上游传来的 raw 是 brief，含 macro/quant/risk 内容；如果 brief 里出现 worker
     # unavailable 哨兵，CIO 大概率是在 garbage 上综合
     floor = _verdict_cfg.worker_unavailable_confidence_floor
-    if "[WORKER_UNAVAILABLE]" in text:
-        if out["confidence"] > floor:
-            out["_original_confidence_unavailable"] = out["confidence"]
-            out["confidence"] = floor
-            out["verdict"] = "HOLD"
-            print("⚠️ parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
-                  "强制 verdict=HOLD + confidence≤0.4")
+    if "[WORKER_UNAVAILABLE]" in text and out["confidence"] > floor:
+        out["_original_confidence_unavailable"] = out["confidence"]
+        _force_hold(out, confidence_ceiling=floor)
+        print("⚠️ parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
+              "强制 verdict=HOLD + confidence≤floor + alloc=0")
 
     # Sanity check 4: SOLVENCY=strong + TRIM + TRIM_REASON=concentration → 强制 HOLD
     # 兜底充足时，"账户内集中度高"不应触发减仓（真实财富风险不存在），
@@ -318,12 +329,12 @@ def parse_cio_memo(
             and out.get("trim_reason") == "concentration"):
         out["_original_verdict"] = "TRIM"
         out["_original_trim_reason"] = "concentration"
-        out["_original_confidence"] = out["confidence"]
-        out["_original_alloc"] = out["alloc_cny"]
-        out["verdict"] = "HOLD"
+        # setdefault: 若 Sanity 1/2 已记录更早的原值（如 Sanity 2 的 pre-clamp
+        # alloc），不要被这里覆盖丢掉真正的原始值。
+        out.setdefault("_original_confidence", out["confidence"])
+        out.setdefault("_original_alloc", out["alloc_cny"])
         out["trim_reason"] = None
-        out["confidence"] = min(out["confidence"], 0.4)
-        out["alloc_cny"] = 0
+        _force_hold(out, confidence_ceiling=_verdict_cfg.forced_hold_confidence_ceiling)
         print("⚠️ parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
               "强制 HOLD（兜底充足，集中度不触发减仓）")
 
@@ -406,6 +417,33 @@ def load_wealth_context_view() -> str:
     except Exception as e:  # noqa: BLE001
         log.warning(f"load_wealth_context_view graceful 退化 '': {type(e).__name__}: {e}")
         return ""
+
+
+def load_backup_cny(pm: Optional[Any] = None) -> float:
+    """读 user.md.wealth_context.emergency_buffer_cny → off-portfolio 兜底金额（CNY）。
+
+    用于 portfolio_summary_text 的"真实总财富占比"注释，三路径（cron / skill /
+    service）单一可信源。正式字段是 `emergency_buffer_cny`（WealthContextRequest /
+    invest-setup / GUI 写入）；历史上 daily_report / skill 误读不存在的
+    `backup_amount_cny`，导致 backup_cny 恒为 0、注释从不渲染 —— 本 loader 修掉这个
+    key 漂移并消除三处重复。
+
+    Graceful: 读不到 / 异常 → 0.0（退化到"无兜底"逻辑，不阻断主流程）。
+
+    Args:
+        pm: 复用已有 PortfolioManager 的 store（避免重复 new MemoryStore）；
+            None 时自建 MemoryStore() 读 user.md。
+    """
+    try:
+        store = pm.store if pm is not None else MemoryStore()
+        user_doc = store.read("user")
+        wealth_context = user_doc.metadata.get("wealth_context") if user_doc else None
+        if not wealth_context:
+            return 0.0
+        return float(wealth_context.get("emergency_buffer_cny", 0) or 0)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_backup_cny graceful 退化 0.0: {type(e).__name__}: {e}")
+        return 0.0
 
 
 def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],

@@ -196,6 +196,42 @@ class TestPortfolioSummaryText:
         assert "兜底注释" not in text
 
 
+# ============ load_backup_cny：守 emergency_buffer_cny key 漂移回归 ============
+
+class TestLoadBackupCny:
+    """load_backup_cny 是 backup_cny 的单一可信源（cron / skill / service 三路径共用）。
+
+    历史 bug：daily_report / skill 误读不存在的 backup_amount_cny → 恒为 0、注释从不
+    渲染。renderer 单测（上面那两个）直接传 backup_cny=400000 绕过了 key 提取，守不住
+    这个漂移；这一组直接走 loader 的 metadata 提取来守。
+    """
+
+    def _pm_with_wealth(self, tmp_path, wealth_context):
+        pm = _make_pm(tmp_path)
+        pm.store.write("user", "user", {
+            "display_name": "TestUser",
+            "risk_tolerance": "Balanced",
+            "wealth_context": wealth_context,
+        }, "")
+        return pm
+
+    def test_reads_emergency_buffer_cny(self, tmp_path):
+        from core.committee_runner import load_backup_cny
+        pm = self._pm_with_wealth(tmp_path, {"emergency_buffer_cny": 400000.0})
+        assert load_backup_cny(pm) == 400000.0
+
+    def test_missing_wealth_context_returns_zero(self, tmp_path):
+        from core.committee_runner import load_backup_cny
+        pm = _make_pm(tmp_path)  # 无 wealth_context
+        assert load_backup_cny(pm) == 0.0
+
+    def test_legacy_wrong_key_returns_zero(self, tmp_path):
+        """历史误用的 backup_amount_cny 已废弃；只认 emergency_buffer_cny"""
+        from core.committee_runner import load_backup_cny
+        pm = self._pm_with_wealth(tmp_path, {"backup_amount_cny": 999999.0})
+        assert load_backup_cny(pm) == 0.0
+
+
 # ============ 任务 3d：assemble_full_report ============
 
 @dataclass
