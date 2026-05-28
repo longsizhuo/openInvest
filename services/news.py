@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -44,6 +45,8 @@ from ddgs import DDGS
 from readability import Document
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+log = logging.getLogger(__name__)
 
 
 # -----------------------------
@@ -219,13 +222,13 @@ def _extract_main_text(url: str, timeout: int = 15) -> str:
         # 策略 1: Trafilatura (Precision)
         text = trafilatura.extract(html, include_comments=False, include_tables=False, favor_precision=True)
         if text:
-            print(f"  [Extraction] Success using: Trafilatura (Precision)")
+            log.info("[Extraction] Success using: Trafilatura (Precision)")
             return re.sub(r"\s+\n", "\n", text).strip()
 
         # 策略 2: Trafilatura (Recall / Default)
         text = trafilatura.extract(html, include_comments=False, include_tables=False, favor_recall=True)
         if text:
-            print(f"  [Extraction] Success using: Trafilatura (Recall)")
+            log.info("[Extraction] Success using: Trafilatura (Recall)")
             return re.sub(r"\s+\n", "\n", text).strip()
 
         # 策略 3: Readability 兜底
@@ -235,14 +238,14 @@ def _extract_main_text(url: str, timeout: int = 15) -> str:
                 summary_html = doc.summary()
                 text = trafilatura.extract(summary_html, include_comments=False, include_tables=False)
                 if text:
-                    print(f"  [Extraction] Success using: Readability + Trafilatura")
+                    log.info("[Extraction] Success using: Readability + Trafilatura")
                     return re.sub(r"\s+\n", "\n", text).strip()
             except Exception:
                 pass
 
         return ""
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        log.warning("Error fetching %s: %s", url, e)
         return ""
 
 
@@ -321,7 +324,7 @@ def get_real_finance_news(
     # 但实际上直接搜 topic_query 效果往往最好，因为 DDG 的 news tab 本身就是新闻。
     final_query = topic_query
 
-    print(f"DEBUG: Executing DDGS query: {final_query}")
+    log.debug("Executing DDGS query: %s", final_query)
 
     raw_items: List[NewsItem] = []
 
@@ -355,7 +358,7 @@ def get_real_finance_news(
                         )
                     )
     except Exception as e:
-        print(f"Error: Search failed for query '{final_query}': {e}")
+        log.warning("Search failed for query '%s': %s", final_query, e)
         # 如果连基础查询都挂了，那就返回空结构
         return {"query": final_query, "trusted": [], "review": [], "filtered": []}
 

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass, asdict, field
@@ -27,6 +28,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
+
+log = logging.getLogger(__name__)
 
 from core.memory_store import MemoryStore  # noqa: E402
 
@@ -110,7 +113,7 @@ def _closes(symbol: str):
             return None
         return df
     except Exception as e:
-        print(f"⚠️ _closes({symbol}) 失败: {e}")
+        log.warning("_closes(%s) 失败: %s", symbol, e)
         return None
 
 
@@ -293,7 +296,7 @@ def _decision_regime(symbol: str, decision_date: str) -> Optional[str]:
         regime = classify_regime(compute_metrics(df), symbol=symbol).get("regime")
         return regime if regime and regime != "unknown" else None
     except Exception as e:  # noqa: BLE001
-        print(f"⚠️ _decision_regime({symbol},{decision_date}) → None: {e}")
+        log.warning("_decision_regime(%s,%s) → None: %s", symbol, decision_date, e)
         return None
 
 
@@ -349,7 +352,7 @@ def _build_symbol_resolver() -> Dict[str, Dict[str, Any]]:
         pm = PortfolioManager()
         return {_sanitize(h["symbol"]): h for h in pm.holdings.all() if h.get("symbol")}
     except Exception as e:  # noqa: BLE001
-        print(f"⚠️ _build_symbol_resolver 退化空: {type(e).__name__}: {e}")
+        log.warning("_build_symbol_resolver 退化空: %s: %s", type(e).__name__, e)
         return {}
 
 
@@ -383,7 +386,7 @@ def review_one(
         if _closes(candidate) is not None:
             real_symbol = candidate
     if not real_symbol:
-        print(f"⚠️ review_one 跳过：无法解析真实 symbol（stem={stem}, dir={decision_date}）")
+        log.warning("review_one 跳过：无法解析真实 symbol（stem=%s, dir=%s）", stem, decision_date)
         return None
     # holding 没在映射里但文件给了真实 symbol → 再按真实 symbol 查一次（拿 proxy_kind）
     if holding is None and resolver:

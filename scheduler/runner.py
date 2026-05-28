@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import logging
+import logging.handlers
 import os
 import signal
 import sqlite3
@@ -36,6 +37,8 @@ JOBS_DIR = ROOT / "jobs"
 DB_DIR = ROOT / "db"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 RUN_LOG_DB = DB_DIR / "jobs.sqlite"
+LOG_DIR = ROOT / "logs"
+LOG_DIR.mkdir(exist_ok=True)
 # 不再用 SQLAlchemyJobStore 持久化 APScheduler job：YAML 是唯一事实来源，
 # 启动时 register_jobs 会带 replace_existing=True 全量重建。早期版本试图
 # 持久化 _wrap_job 的闭包，pickle 报错导致 daemon 启动直接崩 —— 这是用户
@@ -45,6 +48,15 @@ RUN_LOG_DB = DB_DIR / "jobs.sqlite"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stderr),
+        logging.handlers.RotatingFileHandler(
+            LOG_DIR / "invest.log",
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=5,
+            encoding="utf-8",
+        ),
+    ],
 )
 log = logging.getLogger("scheduler.runner")
 
