@@ -12,12 +12,15 @@ LLM 调用次数: 1 (macro) + 3 * N (asset committee)
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
+
+log = logging.getLogger(__name__)
 
 # 三路径统一架构（2026-05-16）：daily_report 不再直接 import core.committee 原语,
 # 全部走 core.committee_runner 的 service layer (run_committee_session)
@@ -70,7 +73,7 @@ def _get_last_close(
     if df.empty:
         df = get_history_data(symbol, "5d")
     if df.empty:
-        print(f"⚠️ {label} 数据缺失: {symbol}")
+        log.warning("%s 数据缺失: %s", label, symbol)
         return None, None
 
     price = float(df["Close"].iloc[-1])
@@ -109,7 +112,7 @@ def _portfolio_summary(
 
 
 def _run_gemini_cli_review(prompt: str) -> str:
-    print("🤖 [Gemini CLI] 正在生成第二意见...")
+    log.info("[Gemini CLI] 正在生成第二意见...")
     # PATH 上找 gemini，避免硬编码 nvm 路径（每升级 node 版本就失效）
     import shutil
     gemini_cmd = shutil.which("gemini")
@@ -173,7 +176,7 @@ def run() -> Dict[str, Any]:
         price, age = _get_last_close(sym, sym)
         asset_freshness[sym] = _classify_freshness(price, age)
         if price is None:
-            print(f"⛔ {sym} 价格获取完全失败，跳过 committee")
+            log.error("%s 价格获取完全失败，跳过 committee", sym)
             store.dream_event({"phase": "price_fetch_failed", "symbol": sym, "date": today})
             skipped_assets.add(sym)
             continue
@@ -196,7 +199,7 @@ def run() -> Dict[str, Any]:
         # 取汇率（USDCNY=X / EURCNY=X），跟这条 fallback 完全无关；total_assets_cny
         # 那段已经用 to_base 而不是 current_rate 折算非 AUD 持仓。
         # 不要把 4.7 推广成任意币种兜底——其他币种没汇率应直接 fail-loud 标 stale。
-        print("⚠️ AUDCNY=X 完全失败，使用历史均值 4.7 兜底（AUD-only fallback）")
+        log.warning("AUDCNY=X 完全失败，使用历史均值 4.7 兜底（AUD-only fallback）")
         store.dream_event({"phase": "price_fetch_failed", "symbol": "AUDCNY=X", "date": today})
         current_rate = 4.7
         data_warnings.append(
@@ -270,7 +273,7 @@ def run() -> Dict[str, Any]:
             f"所有 {len(rated_assets)} 个目标资产数据全废："
             + ", ".join(f"{s}={asset_freshness[s]}" for s in rated_assets)
         )
-        print(f"⛔ STALE DATA HARD ABORT: {msg}")
+        log.error("STALE DATA HARD ABORT: %s", msg)
         store.dream_event({
             "phase": "daily_report_aborted_stale",
             "reason": "all_assets_unusable",
@@ -373,11 +376,11 @@ def run() -> Dict[str, Any]:
     event_brief = ""
 
     if not target_symbols_to_run:
-        print("⛔ 所有 target_assets 都因 staleness 被 skip; session 不跑")
+        log.error("所有 target_assets 都因 staleness 被 skip; session 不跑")
     else:
         from core.committee_runner import run_committee_session
 
-        print(f"⚖️  run_committee_session 跑 {len(target_symbols_to_run)} 资产...")
+        log.info("run_committee_session 跑 %d 资产...", len(target_symbols_to_run))
         session = run_committee_session(
             symbols=target_symbols_to_run,
             max_debate_rounds=4,  # 三路径统一 4 轮 (cron 成本 ~¥2.5/月, 用户已确认)
@@ -391,7 +394,7 @@ def run() -> Dict[str, Any]:
         # 单资产 session 失败 → 合并到 skipped_assets, 防 cio_memos_combined /
         # assemble_full_report 拿不到 report.cio_memo 抛 AttributeError
         for sym, err in session.get("errors", {}).items():
-            print(f"  ⚠️  {sym} 在 session 内失败: {err}; 加入 skipped_assets")
+            log.warning("%s 在 session 内失败: %s; 加入 skipped_assets", sym, err)
             skipped_assets.add(sym)
             store.dream_event({"phase": "committee_failed", "symbol": sym,
                                "error": err, "date": today})
@@ -400,10 +403,9 @@ def run() -> Dict[str, Any]:
             if sym in skipped_assets:
                 continue
             v = result["verdict"]
-            print(
-                f"  ⚖️  {sym}: {v['verdict']} "
-                f"(conf {v['confidence']:.2f}, dom {v['dominant_view']}, "
-                f"alloc ¥{v['alloc_cny']})"
+            log.info(
+                "  %s: %s (conf %.2f, dom %s, alloc ¥%s)",
+                sym, v["verdict"], v["confidence"], v["dominant_view"], v["alloc_cny"],
             )
 
     # 3) Gemini 第二意见（综合所有资产 verdicts）
@@ -479,7 +481,7 @@ def run() -> Dict[str, Any]:
         }
     except EmailDeliveryError as e:
         email_status = {"sent": False, "receiver": "", "error": str(e), "skipped": False}
-        print(f"⛔ Email delivery failed (committee 已落盘，job 仍标 success): {e}")
+        log.error("Email delivery failed (committee 已落盘，job 仍标 success): %s", e)
         store.dream_event({
             "phase": "email_delivery_failed",
             "date": today,

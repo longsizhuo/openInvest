@@ -106,7 +106,7 @@ def _create_agent(
     from utils.llm import get_llm_config_safe
     api_key, base_url, model_name, provider_litellm = get_llm_config_safe()
     if not api_key:
-        print("❌ LLM_API_KEY 或 DEEPSEEK_API_KEY 缺失")
+        log.error("LLM_API_KEY 或 DEEPSEEK_API_KEY 缺失")
         return None
     # v3 透明化：把 role/asset/round 传进 telemetry meta，让 LLM 调用记录可按维度切片
     from core.llm_telemetry import TelemetryMeta
@@ -171,9 +171,9 @@ def _ask(agent: Optional[SDKAgent], context: str) -> str:
             # 指数退避 + jitter（避免多个并发 agent 同时撞重试窗口）
             delay = min(LLM_BASE_DELAY * (2 ** (attempt - 1)), LLM_MAX_DELAY)
             delay *= 0.5 + random.random()  # 0.5x ~ 1.5x jitter
-            print(
-                f"⚠️ Agent retry {attempt}/{LLM_MAX_ATTEMPTS - 1}: "
-                f"{type(e).__name__}: {e} → sleep {delay:.1f}s"
+            log.warning(
+                "Agent retry %d/%d: %s: %s → sleep %.1fs",
+                attempt, LLM_MAX_ATTEMPTS - 1, type(e).__name__, e, delay,
             )
             time.sleep(delay)
     return (
@@ -287,9 +287,9 @@ def parse_cio_memo(
         out["_original_confidence"] = out["confidence"]
         out["verdict"] = "ACCUMULATE"
         out["confidence"] = confidence_downgrade
-        print(
-            f"⚠️ parse_cio_memo: 降级 BUY({out['_original_confidence']}) → "
-            f"ACCUMULATE({confidence_downgrade}) — 防 LLM 过度自信 / prompt injection",
+        log.warning(
+            "parse_cio_memo: 降级 BUY(%s) → ACCUMULATE(%s) — 防 LLM 过度自信 / prompt injection",
+            out["_original_confidence"], confidence_downgrade,
         )
 
     # Sanity check 2: alloc_cny 合理性 clamp
@@ -304,9 +304,9 @@ def parse_cio_memo(
         except ValueError:
             pass
     if abs(out["alloc_cny"]) > alloc_ceiling:
-        print(
-            f"⚠️ parse_cio_memo: alloc_cny={out['alloc_cny']} 超出合理区间，"
-            f"clamp 到 ±{alloc_ceiling}",
+        log.warning(
+            "parse_cio_memo: alloc_cny=%s 超出合理区间，clamp 到 ±%s",
+            out["alloc_cny"], alloc_ceiling,
         )
         out["_original_alloc"] = out["alloc_cny"]
         out["alloc_cny"] = max(-alloc_ceiling, min(alloc_ceiling, out["alloc_cny"]))
@@ -318,8 +318,8 @@ def parse_cio_memo(
     if "[WORKER_UNAVAILABLE]" in text and out["confidence"] > floor:
         out["_original_confidence_unavailable"] = out["confidence"]
         _force_hold(out, confidence_ceiling=floor)
-        print("⚠️ parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
-              "强制 verdict=HOLD + confidence≤floor + alloc=0")
+        log.warning("parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
+                    "强制 verdict=HOLD + confidence≤floor + alloc=0")
 
     # Sanity check 4: SOLVENCY=strong + TRIM + TRIM_REASON=concentration → 强制 HOLD
     # 兜底充足时，"账户内集中度高"不应触发减仓（真实财富风险不存在），
@@ -335,8 +335,8 @@ def parse_cio_memo(
         out.setdefault("_original_alloc", out["alloc_cny"])
         out["trim_reason"] = None
         _force_hold(out, confidence_ceiling=_verdict_cfg.forced_hold_confidence_ceiling)
-        print("⚠️ parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
-              "强制 HOLD（兜底充足，集中度不触发减仓）")
+        log.warning("parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
+                    "强制 HOLD（兜底充足，集中度不触发减仓）")
 
     # Sanity check 5: TRIM 必须给出"低于现价的买回点"，否则降级 HOLD
     # 卖出后买回点缺失 or 不低于现价 = 卖了高价大概率接回 = 纯亏，TRIM 不成立。
@@ -352,10 +352,9 @@ def parse_cio_memo(
             )
             out["_current_price"] = current_price
             out["verdict"] = "HOLD"
-            print(
-                f"⚠️ parse_cio_memo: TRIM 但买回点"
-                f"{'缺失' if rp is None else f'¥{rp} ≥ 现价 ¥{current_price}'} → "
-                f"强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）"
+            log.warning(
+                "parse_cio_memo: TRIM 但买回点%s → 强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）",
+                "缺失" if rp is None else f"¥{rp} ≥ 现价 ¥{current_price}",
             )
 
     return out
