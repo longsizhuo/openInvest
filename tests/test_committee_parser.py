@@ -196,3 +196,56 @@ def test_sanity4_trim_reason_extraction():
     )
     assert r2["trim_reason"] is None
     assert r2["verdict"] == "HOLD"
+
+
+# ---------- Sanity check 5: TRIM 必须给低于现价的买回点，否则降级 HOLD ----------
+
+def _trim_reentry_text(reentry_price="950", reason="bearish") -> str:
+    rp = f"REENTRY_PRICE: {reentry_price}\n" if reentry_price is not None else ""
+    return (
+        "VERDICT: TRIM\n"
+        "CONFIDENCE: 0.8\n"
+        "DOMINANT_VIEW: quant\n"
+        "SUGGESTED_ALLOC_CNY: -5000\n"
+        f"TRIM_REASON: {reason}\n"
+        f"{rp}"
+        "REENTRY_CONDITION: 价格跌至 ¥950 且 RSI<40\n"
+        "EXPECTED_PATH: range_bound 顶部，30d 内 55% 概率跌破现价\n"
+    )
+
+
+def test_sanity5_reentry_below_current_keeps_trim():
+    """买回点 ¥950 < 现价 ¥1000 → TRIM 成立，保留"""
+    r = parse_cio_memo(_trim_reentry_text("950"), current_price=1000.0)
+    assert r["verdict"] == "TRIM"
+    assert r["reentry_price"] == 950.0
+    assert r["reentry_condition"] and r["expected_path"]
+
+
+def test_sanity5_reentry_at_or_above_current_forces_hold():
+    """买回点 ≥ 现价 → 卖了高价接回 = 纯亏 → 降级 HOLD"""
+    r = parse_cio_memo(_trim_reentry_text("1050"), current_price=1000.0)
+    assert r["verdict"] == "HOLD"
+    assert r["_original_verdict"] == "TRIM"
+    assert r["_sanity5_reason"] == "reentry_not_below_current"
+
+
+def test_sanity5_reentry_missing_forces_hold():
+    """TRIM 但没给 REENTRY_PRICE → 降级 HOLD"""
+    r = parse_cio_memo(_trim_reentry_text(None), current_price=1000.0)
+    assert r["verdict"] == "HOLD"
+    assert r["_sanity5_reason"] == "reentry_missing"
+
+
+def test_sanity5_skipped_without_current_price():
+    """current_price 未知（如存档 re-parse）→ Sanity5 不强制，保留原 verdict"""
+    r = parse_cio_memo(_trim_reentry_text("1050"), current_price=None)
+    assert r["verdict"] == "TRIM"
+
+
+def test_sanity5_reentry_price_parses_currency_and_commas():
+    """REENTRY_PRICE 支持 ¥ 和千分位"""
+    txt = _trim_reentry_text("¥1,234.56")
+    r = parse_cio_memo(txt, current_price=2000.0)
+    assert r["reentry_price"] == 1234.56
+    assert r["verdict"] == "TRIM"

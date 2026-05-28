@@ -281,3 +281,55 @@ class TestAssembleFullReport:
         )
         # 不应崩溃；应有占位文字
         assert "2026-05-10" in report
+
+    # ---------- TRIM 路径化展示三分支 ----------
+
+    def _report_with_verdict(self, verdict: dict) -> str:
+        return assemble_full_report(
+            today="2026-05-10",
+            macro_view="",
+            gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "GC=F", "display_name": "黄金"}],
+            asset_committees={
+                "GC=F": {"verdict": verdict, "report": _FakeReport(cio_memo="memo")}
+            },
+            skipped_assets=set(),
+            total_assets_cny=100000.0,
+            final_decision_gemini="",
+        )
+
+    def test_trim_shows_reentry_plan(self):
+        """verdict=TRIM → 展示减仓路径 + 买回点"""
+        report = self._report_with_verdict({
+            "verdict": "TRIM", "confidence": 0.8, "dominant_view": "risk",
+            "alloc_cny": -5000, "reentry_price": 950.0,
+            "reentry_condition": "跌至 ¥950 且 RSI<40", "expected_path": "30d 55% 跌破现价",
+        })
+        assert "减仓路径" in report
+        assert "¥950" in report
+
+    def test_sanity5_downgrade_shows_rejected(self):
+        """Sanity5 降级（买回点不低于现价）→ 展示减仓被否"""
+        report = self._report_with_verdict({
+            "verdict": "HOLD", "confidence": 0.6, "dominant_view": "quant",
+            "alloc_cny": 0, "_original_verdict": "TRIM",
+            "_sanity5_reason": "reentry_not_below_current",
+        })
+        assert "减仓被否" in report
+
+    def test_sanity4_downgrade_shows_system_path_expectation(self):
+        """Sanity4 降级（concentration）→ 展示"系统路径预期 vs 持有决定"，措辞非减仓计划"""
+        report = self._report_with_verdict({
+            "verdict": "HOLD", "confidence": 0.75, "dominant_view": "risk",
+            "alloc_cny": -20000, "_original_verdict": "TRIM",
+            "_original_trim_reason": "concentration",
+            "reentry_price": 938.0,
+            "expected_path": "range_bound 历史30天跌破现价概率100%，中位→¥947、20分位→¥938",
+        })
+        assert "系统路径预期" in report
+        assert "自行权衡" in report
+        assert "¥947" in report and "¥938" in report
+        # 措辞区分：不是减仓计划
+        assert "减仓路径" not in report
+        assert "减仓被否" not in report

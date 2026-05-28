@@ -192,6 +192,10 @@ CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
 DOMINANT_RE = re.compile(r"DOMINANT_VIEW:\s*(quant|macro|risk)", re.I)
 ALLOC_RE = re.compile(r"SUGGESTED_ALLOC_CNY:\s*(-?\d+)")
 TRIM_REASON_RE = re.compile(r"TRIM_REASON:\s*(concentration|stop_loss|bearish)", re.I)
+# TRIM 路径化：买回点 + 预期路径（EXECUTION_PLAN/RISK_PLAN 仍丢弃，只解析这三个）
+REENTRY_PRICE_RE = re.compile(r"REENTRY_PRICE:\s*[¥$]?\s*(-?[\d,]+(?:\.\d+)?)", re.I)
+REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
+EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
 
 
 # ============ Sanity-check 阈值（单点维护，便于调参）============
@@ -220,7 +224,12 @@ def _build_thresholds_from_config() -> Dict[str, float]:
 THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 
 
-def parse_cio_memo(text: str, *, solventy_strong: bool = False) -> Dict[str, Any]:
+def parse_cio_memo(
+    text: str,
+    *,
+    solventy_strong: bool = False,
+    current_price: Optional[float] = None,
+) -> Dict[str, Any]:
     out: Dict[str, Any] = {"raw": text}
     m = VERDICT_RE.search(text)
     out["verdict"] = m.group(1).upper() if m else "UNCLEAR"
@@ -232,6 +241,16 @@ def parse_cio_memo(text: str, *, solventy_strong: bool = False) -> Dict[str, Any
     out["alloc_cny"] = int(m.group(1)) if m else 0
     m = TRIM_REASON_RE.search(text)
     out["trim_reason"] = m.group(1).lower() if m else None
+
+    # TRIM 路径化字段：买回价 / 买回条件 / 预期路径（真正解析并保留，不再全丢）
+    m = REENTRY_PRICE_RE.search(text)
+    out["reentry_price"] = float(m.group(1).replace(",", "")) if m else None
+    m = REENTRY_CONDITION_RE.search(text)
+    rc = m.group(1).strip() if m else None
+    out["reentry_condition"] = rc if (rc and rc.upper() != "N/A") else None
+    m = EXPECTED_PATH_RE.search(text)
+    ep = m.group(1).strip() if m else None
+    out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
     # Sanity check 0: INVEST_CIO_CONFIDENCE_CAP（Optuna 训练参数）clamp confidence 上限
     cap_env = os.getenv("INVEST_CIO_CONFIDENCE_CAP")
@@ -303,6 +322,26 @@ def parse_cio_memo(text: str, *, solventy_strong: bool = False) -> Dict[str, Any
         out["trim_reason"] = None
         print("⚠️ parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
               "强制 HOLD（兜底充足，集中度不触发减仓）")
+
+    # Sanity check 5: TRIM 必须给出"低于现价的买回点"，否则降级 HOLD
+    # 卖出后买回点缺失 or 不低于现价 = 卖了高价大概率接回 = 纯亏，TRIM 不成立。
+    # 只在拿得到 current_price 的 live 路径校验（re-parse 存档时 current_price=None 跳过）。
+    if (current_price is not None
+            and current_price > 0
+            and out["verdict"] == "TRIM"):
+        rp = out.get("reentry_price")
+        if rp is None or rp >= current_price:
+            out["_original_verdict"] = "TRIM"
+            out["_sanity5_reason"] = (
+                "reentry_missing" if rp is None else "reentry_not_below_current"
+            )
+            out["_current_price"] = current_price
+            out["verdict"] = "HOLD"
+            print(
+                f"⚠️ parse_cio_memo: TRIM 但买回点"
+                f"{'缺失' if rp is None else f'¥{rp} ≥ 现价 ¥{current_price}'} → "
+                f"强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）"
+            )
 
     return out
 
@@ -545,6 +584,8 @@ def run_committee(
     prior_insights: str = "",
     regime_brief: str = "",
     wealth_context_view: str = "",
+    reentry_reference: str = "",
+    current_price: Optional[float] = None,
     *,
     persist_to_memory: bool = True,
     max_debate_rounds: int = 1,
@@ -720,6 +761,8 @@ def run_committee(
             f"实际跑了 {final_round} 轮，"
             f"{'已收敛（连续 2 轮意见稳定）' if converged else '未收敛（达到上限）'}。"
         )
+    if reentry_reference:
+        cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{reentry_reference}"
     report.cio_memo = _ask(cio_agent, cio_brief)
     emit("cio_done",
          memo_preview=report.cio_memo[:240])
@@ -729,7 +772,11 @@ def run_committee(
         wealth_context_view
         and "SOLVENCY_BUFFER_LEVEL: strong" in wealth_context_view
     )
-    cio_parsed = parse_cio_memo(report.cio_memo, solventy_strong=_solventy_strong)
+    cio_parsed = parse_cio_memo(
+        report.cio_memo,
+        solventy_strong=_solventy_strong,
+        current_price=current_price,
+    )
 
     debate_meta = {
         "max_rounds": max_debate_rounds,

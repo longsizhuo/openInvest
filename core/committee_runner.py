@@ -435,6 +435,21 @@ def run_committee_for_symbol(
     if prior_insights:
         emit("prior_insights_loaded", preview=prior_insights[:240])
 
+    # 5.7. 卖出后路径 / 买回点参考（给 CIO 出 TRIM 时填 REENTRY_PRICE 的数据依据）
+    # current_price 同时给 parse_cio_memo 的 Sanity check 5 做"买回点必须低于现价"校验
+    current_price = metrics.get("current_price")
+    regime_label = _extract_regime_label(regime_brief)
+    reentry_reference = ""
+    try:
+        from core.regime_probability import build_reentry_reference_text
+        reentry_reference = build_reentry_reference_text(
+            symbol, regime_label, current_price,
+        )
+        if reentry_reference:
+            emit("reentry_reference_loaded", asset=symbol, regime=regime_label)
+    except Exception as e:  # noqa: BLE001  概率表读失败不能阻断委员会
+        log.warning(f"reentry reference 构建失败 graceful 退化空: {e}")
+
     # 6. 跑多轮辩论 + CIO
     result = run_committee(
         target,
@@ -444,6 +459,8 @@ def run_committee_for_symbol(
         prior_insights=prior_insights,
         regime_brief=regime_brief,
         wealth_context_view=wealth_view,
+        reentry_reference=reentry_reference,
+        current_price=current_price,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )

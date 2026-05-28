@@ -153,3 +153,62 @@ def test_multiple_assets_and_regimes():
         assert table[("NDQ.AX", "uptrend")].n == 5
         assert table[("NDQ.AX", "downtrend")].n == 5
         assert table[("GC=F", "uptrend")].n == 5
+
+
+# ---------- 买回点估计 get_reentry_estimate ----------
+
+def _write_reviews(tmp_path, recs):
+    import json
+    p = tmp_path / "verdict_review.jsonl"
+    with open(p, "w", encoding="utf-8") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+    return p
+
+
+def test_get_reentry_estimate_basic(tmp_path):
+    from core.regime_probability import get_reentry_estimate
+    recs = [
+        {"asset": "GC=F", "regime_at_decision": "range_bound",
+         "actual_returns": {"30d": r / 100}}
+        for r in (-12, -8, -5, -3, -1, 0, 2, 4, 6, 10, -7, -2)
+    ]
+    p = _write_reviews(tmp_path, recs)
+    est = get_reentry_estimate("GC=F", "range_bound", 1000.0,
+                               window="30d", jsonl_path=p)
+    assert est is not None
+    assert est.n == 12
+    assert est.has_downside is True          # 低分位为负
+    assert est.downside_price < 1000.0
+    assert 0.0 < est.p_below_current <= 1.0
+
+
+def test_get_reentry_estimate_unavailable_window_returns_none(tmp_path):
+    """90d 窗口无样本 → None（unavailable）"""
+    from core.regime_probability import get_reentry_estimate
+    recs = [{"asset": "GC=F", "regime_at_decision": "range_bound",
+             "actual_returns": {"30d": -0.05}}]
+    p = _write_reviews(tmp_path, recs)
+    assert get_reentry_estimate("GC=F", "range_bound", 1000.0,
+                                window="90d", jsonl_path=p) is None
+
+
+def test_get_reentry_estimate_no_price_returns_none(tmp_path):
+    from core.regime_probability import get_reentry_estimate
+    p = _write_reviews(tmp_path, [{"asset": "GC=F",
+                                   "regime_at_decision": "range_bound",
+                                   "actual_returns": {"30d": -0.05}}])
+    assert get_reentry_estimate("GC=F", "range_bound", None, jsonl_path=p) is None
+
+
+def test_build_reentry_reference_text_marks_unavailable(tmp_path):
+    from core.regime_probability import build_reentry_reference_text
+    recs = [
+        {"asset": "GC=F", "regime_at_decision": "range_bound",
+         "actual_returns": {"30d": r / 100}}
+        for r in (-10, -5, -2, 0, 3, 8)
+    ]
+    p = _write_reviews(tmp_path, recs)
+    txt = build_reentry_reference_text("GC=F", "range_bound", 1000.0, jsonl_path=p)
+    assert "30d" in txt
+    assert "90d: 历史样本不足 / unavailable" in txt

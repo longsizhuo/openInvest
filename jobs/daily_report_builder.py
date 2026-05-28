@@ -200,6 +200,34 @@ def assemble_full_report(
             f"**裁决**: {v['verdict']} | 置信度 {v['confidence']:.2f} | "
             f"主导方 {v['dominant_view']} | 建议金额 ¥{v['alloc_cny']}\n\n",
         ]
+        # TRIM 路径化：展示买回点 + 预期路径（让用户能判断"卖出是赚是亏"）
+        if v.get("verdict") == "TRIM":
+            rp = v.get("reentry_price")
+            rp_txt = f"¥{rp:,.2f}" if rp is not None else "未给出"
+            cond = v.get("reentry_condition") or "未给出"
+            path = v.get("expected_path") or "未给出"
+            lines.append(
+                f"**减仓路径**: 预期路径 {path} → 买回点 {rp_txt}"
+                f"（触发条件：{cond}）| 不达买回点则继续持有\n\n"
+            )
+        # 被 Sanity check 5 从 TRIM 降级成 HOLD 的，留痕给用户看为什么没减
+        elif v.get("_original_verdict") == "TRIM" and v.get("_sanity5_reason"):
+            why = ("没给买回点" if v["_sanity5_reason"] == "reentry_missing"
+                   else "买回点不低于现价（卖了高价接回 = 纯亏）")
+            lines.append(f"**减仓被否**: CIO 想 TRIM，但{why} → 系统降级 HOLD\n\n")
+        # 被 Sanity check 4 从 TRIM(concentration) 降级成 HOLD 的：决定是持有，但 CIO
+        # 当初给的"卖出后路径预期"是系统对未来的判断，不只是减仓计划——即便 HOLD，
+        # 这个预期对用户判断"信不信自己的看法"有参考价值，摆出来不藏。
+        # 措辞刻意区分：不是"减仓计划"，是"系统路径预期 vs 你的持有决定"。
+        elif (v.get("_original_verdict") == "TRIM"
+              and v.get("_original_trim_reason") == "concentration"
+              and v.get("expected_path")):
+            lines.append(
+                "**系统路径预期**: 裁决 HOLD（集中度不构成真实风险，兜底充足）。"
+                f"但系统对未来路径的预期：{v['expected_path']}"
+                "（供你对照：系统预期偏空，你若有不同判断自行权衡）\n\n"
+            )
+
         # 概率分布（regime 概率表）
         prob = c.get("regime_probability")
         if prob is not None:
