@@ -572,16 +572,9 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             current_prices[sym] = _safe_close(sym)
 
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-    # 提取 backup_cny 用于 portfolio summary 的真实财富占比注释
-    _backup_cny = 0.0
-    try:
-        _store = MemoryStore()
-        _user_doc = _store.read("user")
-        _wc = _user_doc.metadata.get("wealth_context") if _user_doc else None
-        if _wc:
-            _backup_cny = float(_wc.get("backup_amount_cny", 0) or 0)
-    except Exception as e:
-        print(f"⚠️ backup_cny 提取失败，默认 0: {e}")
+    # backup_cny（off-portfolio 兜底）走单一可信源 loader（service layer re-export）
+    from core.committee_runner import load_backup_cny
+    _backup_cny = load_backup_cny(pm)
     portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices, backup_cny=_backup_cny)
     # 用 shared loader (2026-05-16 三路径统一: 三 entry 不再各自重复实现)
     from core.committee_runner import load_prior_insights

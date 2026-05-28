@@ -76,6 +76,7 @@ SUGGESTED_ALLOC_CNY: 8000
     r = parse_cio_memo(text)
     assert r["verdict"] == "HOLD"
     assert r["confidence"] == 0.4
+    assert r["alloc_cny"] == 0  # force-HOLD 同时归零方向性信号（不留 SUGGESTED_ALLOC 8000）
 
 
 def test_multiple_sanity_checks_can_combine():
@@ -84,6 +85,7 @@ def test_multiple_sanity_checks_can_combine():
     r = parse_cio_memo(text)
     assert r["verdict"] == "HOLD"
     assert r["confidence"] == 0.4
+    assert r["alloc_cny"] == 0
 
 
 def test_unclear_verdict_when_missing():
@@ -172,6 +174,9 @@ def test_sanity4_solvency_strong_trim_stop_loss_not_overridden():
     r = parse_cio_memo(_trim_text("stop_loss"), solvency_strong=True)
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "stop_loss"
+    # 未触发 Sanity 4 → confidence / alloc 不应被 force-HOLD 副作用改动
+    assert r["confidence"] == 0.7
+    assert r["alloc_cny"] == -5000
 
 
 def test_sanity4_solvency_strong_trim_bearish_not_overridden():
@@ -179,6 +184,8 @@ def test_sanity4_solvency_strong_trim_bearish_not_overridden():
     r = parse_cio_memo(_trim_text("bearish"), solvency_strong=True)
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "bearish"
+    assert r["confidence"] == 0.7
+    assert r["alloc_cny"] == -5000
 
 
 def test_sanity4_solvency_weak_trim_concentration_not_overridden():
@@ -186,6 +193,8 @@ def test_sanity4_solvency_weak_trim_concentration_not_overridden():
     r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "concentration"
+    assert r["confidence"] == 0.7
+    assert r["alloc_cny"] == -5000
 
 
 def test_sanity4_trim_reason_extraction():

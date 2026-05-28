@@ -22,7 +22,6 @@ from dotenv import load_dotenv
 # 三路径统一架构（2026-05-16）：daily_report 不再直接 import core.committee 原语,
 # 全部走 core.committee_runner 的 service layer (run_committee_session)
 # 防漂移契约: tests/test_committee_contract.py:test_run_committee_session_*
-from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager
 from db.market_store import MarketStore
 from jobs.daily_report_builder import (
@@ -340,16 +339,9 @@ def run() -> Dict[str, Any]:
             continue
         total_assets_cny += value_cny
 
-    # 提取 backup_cny 用于 portfolio summary 的真实财富占比注释
-    _backup_cny = 0.0
-    try:
-        _store = MemoryStore()
-        _user_doc = _store.read("user")
-        _wc = _user_doc.metadata.get("wealth_context") if _user_doc else None
-        if _wc:
-            _backup_cny = float(_wc.get("backup_amount_cny", 0) or 0)
-    except Exception as e:
-        print(f"⚠️ backup_cny 提取失败，默认 0: {e}")
+    # backup_cny（off-portfolio 兜底）走单一可信源 loader（service layer re-export）
+    from core.committee_runner import load_backup_cny
+    _backup_cny = load_backup_cny(pm)
     portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices, backup_cny=_backup_cny)
     if data_warnings:
         portfolio_summary += "\n\n=== 数据可信度告警 ===" + "".join(data_warnings)

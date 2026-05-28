@@ -73,6 +73,7 @@ class TestDefaultsMatchHardcoded:
         assert cfg.buy_confidence_downgrade_to == 0.6
         assert cfg.alloc_cny_ceiling == 100_000
         assert cfg.worker_unavailable_confidence_floor == 0.4
+        assert cfg.forced_hold_confidence_ceiling == 0.4
 
     def test_dreaming_defaults(self):
         """DreamingTunableConfig 默认值 = jobs/dreaming.py:64-66"""
