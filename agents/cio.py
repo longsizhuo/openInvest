@@ -25,11 +25,11 @@ def build_cio_prompt(asset: Dict[str, Any]) -> str:
     trim_constraint = ""
     if verdict_cfg.trim_no_trim_loss_pct > 0 and verdict_cfg.trim_caution_loss_pct > 0:
         trim_constraint = (
-            f"**🔥 零花钱账户 + 强破产兜底时的 TRIM 约束（强制）**：\n"
-            f"当 Wealth Context 显示 SOLVENCY_BUFFER=strong 且 account_purpose 含\"零花钱\"或类似表述时：\n"
+            f"**🔥 零花钱账户 + 强破产兜底时的 TRIM 约束（强制，覆盖通用 TRIM 规则）**：\n"
+            f"当 Wealth Context 显示 SOLVENCY_BUFFER_LEVEL=strong 且 ACCOUNT_PURPOSE 含\"零花钱\"或类似表述时，本约束覆盖上方通用 TRIM 规则：\n"
             f"- **浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 不允许 TRIM** — 卖出坐实亏损，而用户无流动性压力，应 HOLD 等修复\n"
-            f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro 非强 risk_off：倾向 HOLD** — 零花钱账户的资金久期长，短期波动不是卖出理由\n"
-            f"- 只有浮亏 > {verdict_cfg.trim_caution_loss_pct}% 或 Macro 强 risk_off + Risk high_risk 双触发时，才考虑 TRIM\n"
+            f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro SIGNAL 非 risk_off：倾向 HOLD** — 零花钱账户的资金久期长，短期波动不是卖出理由\n"
+            f"- 只有浮亏 > {verdict_cfg.trim_caution_loss_pct}% 或 Macro SIGNAL=risk_off + Risk SIGNAL=high_risk 双触发时，才考虑 TRIM\n"
             f"- 金融逻辑：零花钱账户 + 强破产兜底，小额浮亏不值得交易"
         )
 
