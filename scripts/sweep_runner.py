@@ -151,18 +151,20 @@ def _evaluate_event(
     """评估单个 asset 在单个 ground truth 事件上的 regime 分类准确率。"""
     from core.config import load_config
     from core.regime import classify_regime
-    from utils.exchange_fee import get_history_data
+    from db.market_store import MarketStore
     from utils.market_metrics import compute_metrics
 
     expected = event["expected_regime"]
     event_start = event["start"]
     event_end = event["end"]
 
-    # 拉全量数据（compute_metrics 需要 120 天 MA 窗口），per-asset 缓存避免重复 IO
+    # 全量历史（不走 get_history_data 的 730 天 cap）——sweep 必须看到 2008/2020/2022
+    # 真危机窗口才能验证 regime（尤其 crash）阈值。纯读已 backfill 的 DB，不触发 yfinance。
+    # per-asset 缓存避免重复 IO。
     if df_cache is not None and asset in df_cache:
         df = df_cache[asset]
     else:
-        df = get_history_data(asset, "10y")
+        df = MarketStore().get_history_df(asset, days=100_000)
         if df_cache is not None:
             df_cache[asset] = df
     if df is None or df.empty:

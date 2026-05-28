@@ -208,41 +208,47 @@ def get_reentry_estimate(
     current_price: Optional[float],
     *,
     window: str = "30d",
+    source: str = "ohlc",
     jsonl_path: Optional[Path] = None,
     records: Optional[List[Dict[str, Any]]] = None,
     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
+    days: int = 100000,
 ) -> Optional[ReentryEstimate]:
     """基于历史 forward return 分布给出卖出后买回点参考。
 
     Args:
         asset / regime: 分组键
         current_price: 现价（cost currency）。None / <=0 → 返回 None（无法折算价格）
-        window: forward return 窗口，"30d" / "90d"。该窗口在历史数据里无样本
-            （如 90d 尚未回填）→ 返回 None（标 unavailable，由调用方处理）
-        records: 预读的 verdict_review 记录；None 则读 jsonl_path
+        window: forward return 窗口，"30d" / "90d"。该窗口无样本 → 返回 None
+        source: "ohlc"（默认，几十年 OHLC 直算，0 token）| "verdict_review"（旧源，保留）
+        records / jsonl_path: 仅 source="verdict_review" 时用
 
     Returns:
         ReentryEstimate 或 None（无现价 / 该 window 无历史样本）
     """
     if current_price is None or current_price <= 0:
         return None
-    if records is None:
-        if jsonl_path is None:
-            from core.memory_store import MemoryStore
-            jsonl_path = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
-        records = _load_reviews(jsonl_path)
 
-    returns: List[float] = []
-    for r in records:
-        if r.get("asset") != asset or r.get("regime_at_decision") != regime:
-            continue
-        ret = (r.get("actual_returns") or {}).get(window)
-        if ret is None:
-            continue
-        returns.append(ret * 100)  # 转百分比
+    if source == "ohlc":
+        returns = _ohlc_forward_returns(asset, regime, window, days=days)
+    else:
+        # verdict_review 源（保留：命中率/校准仍用；这里只在显式指定时走）
+        if records is None:
+            if jsonl_path is None:
+                from core.memory_store import MemoryStore
+                jsonl_path = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
+            records = _load_reviews(jsonl_path)
+        returns = []
+        for r in records:
+            if r.get("asset") != asset or r.get("regime_at_decision") != regime:
+                continue
+            ret = (r.get("actual_returns") or {}).get(window)
+            if ret is None:
+                continue
+            returns.append(ret * 100)  # 转百分比
 
     if not returns:
-        # 该 window 在历史里无样本（如 90d 未回填）→ unavailable
+        # 该 window 在历史里无样本（如 90d verdict_review 未回填）→ unavailable
         return None
 
     n = len(returns)
@@ -270,14 +276,18 @@ def build_reentry_reference_text(
     regime: str,
     current_price: Optional[float],
     *,
+    source: str = "ohlc",
     jsonl_path: Optional[Path] = None,
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "90d"),
 ) -> str:
-    """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。"""
+    """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。
+
+    source: "ohlc"（默认，几十年 OHLC 直算）| "verdict_review"（旧源，保留）。
+    """
     if current_price is None or current_price <= 0:
         return ""
-    if records is None:
+    if source == "verdict_review" and records is None:
         if jsonl_path is None:
             from core.memory_store import MemoryStore
             jsonl_path = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
@@ -287,7 +297,8 @@ def build_reentry_reference_text(
     any_data = False
     for w in windows:
         est = get_reentry_estimate(
-            asset, regime, current_price, window=w, records=records,
+            asset, regime, current_price,
+            window=w, source=source, records=records,
         )
         if est is None:
             lines.append(f"- {w}: 历史样本不足 / unavailable")
@@ -302,3 +313,170 @@ def build_reentry_reference_text(
         + "\n".join(lines)
         + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM）"
     )
+
+
+# ============================================================================
+# OHLC 直算数据源（纯算术，0 LLM token）—— 几十年历史 regime → forward return 分布
+# ============================================================================
+#
+# 为什么换：概率表核心是 (regime → forward return)，regime 用 MA/ATR/分位算、return
+# 用价格算，**全是算术**，不需要 committee 跑过。旧源 verdict_review.jsonl 只有 276 条
+# （受 committee 实际跑过的次数限制），把样本量卡死在几十/几百。改用 MarketStore 里
+# 几十年 OHLC 对历史每一天直算，样本量 → 数千，且复用 production 的 classify_regime
+# 保证 regime 口径一致。
+
+# price_quantile_2y 的滚动窗口（≈2 年交易日），对齐 compute_metrics 传 "2y" 数据的口径
+_TRADING_DAYS_2Y = 504
+
+
+def _percentile_rank(window):  # window: np.ndarray
+    cur = window[-1]
+    return float((window <= cur).sum() / len(window))
+
+
+def _make_regime_probability(
+    asset: str, regime: str, returns_pct: List[float], threshold_pct: float,
+) -> RegimeProbability:
+    """从一组 forward return(%) 聚合出 RegimeProbability（verdict_review / OHLC 共用）。"""
+    n = len(returns_pct)
+    p_up = sum(1 for r in returns_pct if r > threshold_pct) / n
+    p_down = sum(1 for r in returns_pct if r < -threshold_pct) / n
+    return RegimeProbability(
+        asset=asset, regime=regime, n=n,
+        p_up=round(p_up, 4), p_down=round(p_down, 4),
+        p_flat=round(1.0 - p_up - p_down, 4),
+        median_return=round(statistics.median(returns_pct), 2),
+        mean_return=round(statistics.mean(returns_pct), 2),
+        threshold_pct=threshold_pct,
+        low_confidence=n < MIN_CONFIDENT_N,
+    )
+
+
+def compute_regime_return_frame(
+    df, symbol: Optional[str] = None, *, windows: Tuple[str, ...] = ("30d", "90d"),
+):
+    """对历史每一天算 regime + forward return（纯算术，复用 production classify_regime）。
+
+    Args:
+        df: OHLC DataFrame（index=DatetimeIndex，必有 Close，有 High/Low 走真 TR）
+        symbol: 传则用 per-asset regime 阈值
+        windows: forward return 窗口（"30d"/"90d"，按**日历日**前看）
+
+    Returns:
+        DataFrame：index=date，列 = ["regime", "fwd_30d", "fwd_90d", ...]。
+        指标 warmup 不足的头部 regime=unknown；lookahead 不足的尾部 fwd_*=NaN。
+        空输入返回空 DataFrame。
+    """
+    import numpy as np
+    import pandas as pd
+    from core.regime import classify_regime
+
+    if df is None or df.empty or "Close" not in df.columns:
+        return pd.DataFrame()
+
+    close = df["Close"].astype(float)
+    n = len(close)
+
+    ma20 = close.rolling(20).mean()
+    ma120 = close.rolling(120).mean()
+    ret30 = close / close.shift(30) - 1.0
+    rebound = close / close.rolling(30).min() - 1.0
+    quantile = close.rolling(_TRADING_DAYS_2Y, min_periods=20).apply(
+        _percentile_rank, raw=True,
+    )
+
+    # ATR%（Wilder RMA，真 TR 含跳空）—— 复刻 utils.market_metrics._calc_atr_pct 口径，
+    # 但保留为全序列（原函数只返回末值）
+    has_hl = (
+        "High" in df.columns and "Low" in df.columns
+        and not df["High"].isna().all() and not df["Low"].isna().all()
+    )
+    if has_hl:
+        high, low = df["High"].astype(float), df["Low"].astype(float)
+        prev_close = close.shift(1)
+        tr = pd.concat([
+            (high - low).abs(),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+    else:
+        tr = close.diff().abs()
+    atr_pct = tr.ewm(alpha=1.0 / 14, adjust=False).mean() / close * 100.0
+
+    def _v(x):
+        return None if pd.isna(x) else float(x)
+
+    regimes = []
+    for i in range(n):
+        regimes.append(classify_regime({
+            "ma20": _v(ma20.iat[i]),
+            "ma120": _v(ma120.iat[i]),
+            "atr_pct": _v(atr_pct.iat[i]),
+            "price_quantile_2y": _v(quantile.iat[i]),
+            "return_30d": _v(ret30.iat[i]),
+            "rebound_off_30d_low": _v(rebound.iat[i]),
+        }, symbol=symbol)["regime"])
+
+    out = pd.DataFrame({"regime": regimes}, index=df.index)
+
+    # forward return（日历日）：找 date + Nd 当天或之后第一个收盘
+    idx = df.index
+    vals = close.values
+    arange = np.arange(n)
+    for w in windows:
+        days = int(w.rstrip("d"))
+        pos = idx.searchsorted(idx + pd.Timedelta(days=days), side="left")
+        fwd = np.full(n, np.nan)
+        valid = pos < n
+        fwd[valid] = vals[pos[valid]] / vals[arange[valid]] - 1.0
+        out[f"fwd_{w}"] = fwd
+
+    return out
+
+
+def _ohlc_forward_returns(
+    asset: str, regime: str, window: str, *, days: int = 100000,
+) -> List[float]:
+    """从几十年 OHLC 取 (asset, regime) 在 window 的 forward return(%) 列表（0 token）。"""
+    from db.market_store import MarketStore
+    df = MarketStore().get_history_df(asset.upper(), days=days)
+    frame = compute_regime_return_frame(df, asset.upper(), windows=(window,))
+    col = f"fwd_{window}"
+    if frame.empty or col not in frame.columns:
+        return []
+    sub = frame[frame["regime"] == regime].dropna(subset=[col])
+    return (sub[col] * 100).tolist()
+
+
+def build_probability_table_from_ohlc(
+    symbols: List[str],
+    *,
+    window: str = "30d",
+    threshold_pct: float = DEFAULT_THRESHOLD_PCT,
+    days: int = 100000,
+) -> Dict[Tuple[str, str], RegimeProbability]:
+    """从 MarketStore 几十年 OHLC 直算 (asset, regime) → 概率分布（0 LLM token）。
+
+    与 build_probability_table（verdict_review 源）返回同型 dict，可直接替换。
+    """
+    from db.market_store import MarketStore
+    store = MarketStore()
+    table: Dict[Tuple[str, str], RegimeProbability] = {}
+    col = f"fwd_{window}"
+    for sym in symbols:
+        sym = sym.upper()
+        df = store.get_history_df(sym, days=days)
+        frame = compute_regime_return_frame(df, sym, windows=(window,))
+        if frame.empty or col not in frame.columns:
+            continue
+        frame = frame.dropna(subset=[col])
+        for regime in frame["regime"].unique():
+            if regime == "unknown":
+                continue
+            rets = (frame.loc[frame["regime"] == regime, col] * 100).tolist()
+            if not rets:
+                continue
+            table[(sym, regime)] = _make_regime_probability(
+                sym, regime, rets, threshold_pct,
+            )
+    return table
