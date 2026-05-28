@@ -244,3 +244,74 @@ def test_compute_regime_return_frame_empty():
     import pandas as pd
     from core.regime_probability import compute_regime_return_frame
     assert compute_regime_return_frame(pd.DataFrame(), "TEST").empty
+
+
+def test_compute_regime_return_frame_forward_return_exact():
+    """forward return 数值正确性：日历日对齐 + 尾部 lookahead 不足 → NaN。
+
+    守 `searchsorted(side="left")` 的对齐逻辑（本 PR 最易错的一块，原来只有 smoke 测试）。
+    close[i]=100+i、freq=D → date[i]+30 天恰好 = date[i+30]，
+    所以 fwd_30d[i] = close[i+30]/close[i]-1 = 30/(100+i)。
+    """
+    import numpy as np
+    import pandas as pd
+    from core.regime_probability import compute_regime_return_frame
+
+    n = 120
+    idx = pd.date_range("2020-01-01", periods=n, freq="D")
+    close = 100.0 + np.arange(n)
+    df = pd.DataFrame({"Close": close}, index=idx)  # 仅 Close（走 ATR fallback，regime 无关）
+
+    frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
+    fwd = frame["fwd_30d"]
+
+    # 前 n-30 行有"30 日历日后"的样本，尾部 30 行 lookahead 不足 → NaN
+    assert fwd.notna().sum() == n - 30
+    assert fwd.iloc[n - 30:].isna().all()
+    # 精确值
+    assert abs(fwd.iloc[0] - 30 / 100) < 1e-9    # (130/100)-1
+    assert abs(fwd.iloc[50] - 30 / 150) < 1e-9   # close[50]=150, close[80]=180
+
+
+def test_make_regime_probability_aggregation():
+    """p_up/p_down/p_flat/median/mean 聚合正确性（verdict_review 与 OHLC 共用）。"""
+    from core.regime_probability import _make_regime_probability
+
+    # 阈值 5%：>5 只有 10 → p_up=1/5；<-5 只有 -10 → p_down=1/5；其余 flat
+    rp = _make_regime_probability("X", "uptrend", [10.0, -10.0, 1.0, -1.0, 5.0], 5.0)
+    assert rp.n == 5
+    assert rp.p_up == 0.2
+    assert rp.p_down == 0.2
+    assert rp.p_flat == 0.6
+    assert rp.median_return == 1.0          # sorted [-10,-1,1,5,10] → 1
+    assert rp.mean_return == 1.0            # (10-10+1-1+5)/5
+    assert rp.low_confidence is True        # n=5 < MIN_CONFIDENT_N(10)
+
+
+def test_build_probability_table_from_ohlc_stubbed(monkeypatch):
+    """生产默认路径 build_probability_table_from_ohlc（原零覆盖）：stub MarketStore。"""
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import build_probability_table_from_ohlc, RegimeProbability
+
+    idx = pd.date_range("2015-01-01", periods=400, freq="D")
+    close = np.linspace(100, 260, 400)  # 稳步上行
+    df = pd.DataFrame({"Close": close, "High": close * 1.01, "Low": close * 0.99}, index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+
+    table = build_probability_table_from_ohlc(["TEST"], window="30d")
+    assert table  # 非空
+    # key = (TEST, regime)，regime 非 unknown，value 是合法 RegimeProbability
+    assert all(s == "TEST" and r != "unknown" for (s, r) in table)
+    for rp in table.values():
+        assert isinstance(rp, RegimeProbability)
+        assert rp.n > 0
+        assert 0.0 <= rp.p_up <= 1.0 and 0.0 <= rp.p_down <= 1.0
+    # 稳步上行 → 应分出 uptrend 桶
+    assert any(r == "uptrend" for (_, r) in table)
