@@ -12,8 +12,7 @@ services:
       - ./memory:/app/memory
       - ./db:/app/db
       - ./cache_data:/app/cache_data
-      # 可选：如果需要在容器外查看日志文件
-      # - ./logs:/app/logs
+      - ./logs:/app/logs
     # 时区设置 (确保定时任务准确)
     environment:
       - TZ=Asia/Shanghai

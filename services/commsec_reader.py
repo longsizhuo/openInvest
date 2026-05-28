@@ -1,10 +1,13 @@
 import imaplib
 import email
+import logging
 import re
 import os
 import datetime
 from email.header import decode_header
 from typing import List, Dict, Optional
+
+log = logging.getLogger(__name__)
 
 class CommSecReader:
     def __init__(self, email_user: str, email_pass: str):
@@ -18,7 +21,7 @@ class CommSecReader:
             self.mail.login(self.email_user, self.email_pass)
             return True
         except Exception as e:
-            print(f"❌ IMAP Connection failed: {e}")
+            log.error("IMAP Connection failed: %s", e)
             return False
 
     def close(self):
@@ -39,13 +42,13 @@ class CommSecReader:
         
         status, messages = self.mail.search(None, search_criteria)
         if status != "OK" or not messages[0]:
-            print(f"⚠️ No CommSec emails found since {date_since}")
+            log.warning("No CommSec emails found since %s", date_since)
             return []
 
         trades = []
         email_ids = messages[0].split()
 
-        print(f"🔎 Found {len(email_ids)} emails from CommSec. Scanning for trades...")
+        log.info("Found %d emails from CommSec. Scanning for trades...", len(email_ids))
 
         for e_id in email_ids:
             e_id_str = e_id.decode()
@@ -68,9 +71,9 @@ class CommSecReader:
                             trade_data['email_id'] = e_id_str
                             trade_data['date_processed'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             trades.append(trade_data)
-                            print(f"✅ Found Trade: {trade_data['action']} {trade_data['units']} {trade_data['symbol']}")
+                            log.info("Found Trade: %s %s %s", trade_data['action'], trade_data['units'], trade_data['symbol'])
             except Exception as e:
-                print(f"⚠️ Error parsing email {e_id_str}: {e}")
+                log.warning("Error parsing email %s: %s", e_id_str, e)
 
         return trades
 
