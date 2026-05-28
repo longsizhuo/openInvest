@@ -348,8 +348,8 @@ def run() -> Dict[str, Any]:
         _wc = _user_doc.metadata.get("wealth_context") if _user_doc else None
         if _wc:
             _backup_cny = float(_wc.get("backup_amount_cny", 0) or 0)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ backup_cny 提取失败，默认 0: {e}")
     portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices, backup_cny=_backup_cny)
     if data_warnings:
         portfolio_summary += "\n\n=== 数据可信度告警 ===" + "".join(data_warnings)

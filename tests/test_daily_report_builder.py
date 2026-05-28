@@ -180,6 +180,21 @@ class TestPortfolioSummaryText:
         text = portfolio_summary_text(pm, total_assets_cny=50000.0, current_prices={})
         assert "Balanced" in text
 
+    def test_backup_cny_annotation_shown(self, tmp_path):
+        """backup_cny > 0 时输出真实总财富占比注释"""
+        pm = _make_pm(tmp_path, cash={"CNY": 20000.0}, holdings=[])
+        text = portfolio_summary_text(pm, total_assets_cny=20000.0,
+                                       current_prices={}, backup_cny=400000.0)
+        assert "兜底注释" in text
+        assert "420,000" in text  # real_total = 20000 + 400000
+        assert "4.8%" in text     # 20000 / 420000 ≈ 4.76%, rounded to 4.8%
+
+    def test_backup_cny_zero_no_annotation(self, tmp_path):
+        """backup_cny=0（默认）时不出注释"""
+        pm = _make_pm(tmp_path, cash={"CNY": 20000.0}, holdings=[])
+        text = portfolio_summary_text(pm, total_assets_cny=20000.0, current_prices={})
+        assert "兜底注释" not in text
+
 
 # ============ 任务 3d：assemble_full_report ============
 
