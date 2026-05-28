@@ -157,42 +157,44 @@ def _trim_text(reason: str = "concentration") -> str:
     )
 
 
-def test_sanity4_solventy_strong_trim_concentration_forces_hold():
+def test_sanity4_solvency_strong_trim_concentration_forces_hold():
     """SOLVENCY=strong + TRIM + concentration → 强制 HOLD"""
-    r = parse_cio_memo(_trim_text("concentration"), solventy_strong=True)
+    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=True)
     assert r["verdict"] == "HOLD"
     assert r["_original_verdict"] == "TRIM"
     assert r["trim_reason"] is None
+    assert r["confidence"] <= 0.4
+    assert r["alloc_cny"] == 0
 
 
-def test_sanity4_solventy_strong_trim_stop_loss_not_overridden():
+def test_sanity4_solvency_strong_trim_stop_loss_not_overridden():
     """SOLVENCY=strong + TRIM + stop_loss → 不覆盖（stop_loss 是真实风险）"""
-    r = parse_cio_memo(_trim_text("stop_loss"), solventy_strong=True)
+    r = parse_cio_memo(_trim_text("stop_loss"), solvency_strong=True)
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "stop_loss"
 
 
-def test_sanity4_solventy_strong_trim_bearish_not_overridden():
+def test_sanity4_solvency_strong_trim_bearish_not_overridden():
     """SOLVENCY=strong + TRIM + bearish → 不覆盖"""
-    r = parse_cio_memo(_trim_text("bearish"), solventy_strong=True)
+    r = parse_cio_memo(_trim_text("bearish"), solvency_strong=True)
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "bearish"
 
 
-def test_sanity4_solventy_weak_trim_concentration_not_overridden():
+def test_sanity4_solvency_weak_trim_concentration_not_overridden():
     """SOLVENCY≠strong + TRIM + concentration → 不覆盖"""
-    r = parse_cio_memo(_trim_text("concentration"), solventy_strong=False)
+    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "concentration"
 
 
 def test_sanity4_trim_reason_extraction():
     """TRIM_REASON 正确提取"""
-    r = parse_cio_memo(_trim_text("bearish"), solventy_strong=False)
+    r = parse_cio_memo(_trim_text("bearish"), solvency_strong=False)
     assert r["trim_reason"] == "bearish"
     r2 = parse_cio_memo(
         "VERDICT: HOLD\nCONFIDENCE: 0.5\nTRIM_REASON: N/A\n",
-        solventy_strong=True,
+        solvency_strong=True,
     )
     assert r2["trim_reason"] is None
     assert r2["verdict"] == "HOLD"

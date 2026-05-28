@@ -227,7 +227,7 @@ THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 def parse_cio_memo(
     text: str,
     *,
-    solventy_strong: bool = False,
+    solvency_strong: bool = False,
     current_price: Optional[float] = None,
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {"raw": text}
@@ -313,13 +313,17 @@ def parse_cio_memo(
     # Sanity check 4: SOLVENCY=strong + TRIM + TRIM_REASON=concentration → 强制 HOLD
     # 兜底充足时，"账户内集中度高"不应触发减仓（真实财富风险不存在），
     # 只应限制加仓。确定性后处理，不依赖 prompt。
-    if (solventy_strong
+    if (solvency_strong
             and out["verdict"] == "TRIM"
             and out.get("trim_reason") == "concentration"):
         out["_original_verdict"] = "TRIM"
         out["_original_trim_reason"] = "concentration"
+        out["_original_confidence"] = out["confidence"]
+        out["_original_alloc"] = out["alloc_cny"]
         out["verdict"] = "HOLD"
         out["trim_reason"] = None
+        out["confidence"] = min(out["confidence"], 0.4)
+        out["alloc_cny"] = 0
         print("⚠️ parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
               "强制 HOLD（兜底充足，集中度不触发减仓）")
 
@@ -768,13 +772,13 @@ def run_committee(
          memo_preview=report.cio_memo[:240])
 
     # 从 wealth_context_view 提取 SOLVENCY_BUFFER_LEVEL 用于 sanity check 4
-    _solventy_strong = bool(
+    _solvency_strong = bool(
         wealth_context_view
         and "SOLVENCY_BUFFER_LEVEL: strong" in wealth_context_view
     )
     cio_parsed = parse_cio_memo(
         report.cio_memo,
-        solventy_strong=_solventy_strong,
+        solvency_strong=_solvency_strong,
         current_price=current_price,
     )
 
