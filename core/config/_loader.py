@@ -68,6 +68,13 @@ def _read_env_overrides() -> dict[str, Any]:
     prefix = "INVEST_"
     overrides: dict[str, Any] = {}
 
+    # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
+    _KNOWN_SECTIONS = sorted(
+        ["regime_per_asset", "oracle_accuracy", "macro_buckets", "regime", "verdict", "dreaming", "reward"],
+        key=len,
+        reverse=True,
+    )
+
     # 已知的 env → config 映射（处理不符合命名规则的旧变量）
     _LEGACY_MAP = {
         "INVEST_DREAMING_LOOKBACK_DAYS": "dreaming.lookback_days",
@@ -81,14 +88,28 @@ def _read_env_overrides() -> dict[str, Any]:
         if key in _LEGACY_MAP:
             dotted = _LEGACY_MAP[key]
         else:
-            # INVEST_REGIME_CRASH_ATR_PCT_MIN → regime.crash_atr_pct_min
-            suffix = key[len(prefix):]
-            parts = suffix.split("_", 1)
-            if len(parts) < 2:
-                continue
-            section = parts[0].lower()
-            field = parts[1].lower()
-            dotted = f"{section}.{field}"
+            suffix = key[len(prefix):].lower()
+
+            # 特殊处理: INVEST_REGIME_PER_ASSET_<SYMBOL>_<KEY>
+            if suffix.startswith("regime_per_asset_"):
+                rest = suffix[len("regime_per_asset_"):]
+                parts = rest.split("_", 1)
+                if len(parts) == 2:
+                    symbol, field_name = parts
+                    dotted = f"regime_per_asset.{symbol.upper()}.{field_name}"
+                else:
+                    continue
+            else:
+                # 匹配最长已知 section 前缀
+                matched = False
+                for section in _KNOWN_SECTIONS:
+                    if suffix.startswith(section + "_"):
+                        field_name = suffix[len(section) + 1:]
+                        dotted = f"{section}.{field_name}"
+                        matched = True
+                        break
+                if not matched:
+                    continue
 
         # 类型转换
         try:

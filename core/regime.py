@@ -24,7 +24,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any, Dict, Literal, Optional
 
 # Regime 类型枚举（任何下游引用必须用这个）
@@ -64,9 +63,20 @@ def _build_asset_overrides_from_config() -> Dict[str, Dict[str, float]]:
     return result
 
 
-# 模块级 dict — 从 config 构建，保留向后兼容（旧代码直接 import THRESHOLDS / ASSET_OVERRIDES）
+# 向后兼容：旧代码 import THRESHOLDS / ASSET_OVERRIDES 仍可用
+# 但推荐用 get_thresholds() / get_asset_overrides() 实时读取（set_config_override 后生效）
 THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 ASSET_OVERRIDES: Dict[str, Dict[str, float]] = _build_asset_overrides_from_config()
+
+
+def get_thresholds() -> Dict[str, float]:
+    """实时从 config 读取 regime 阈值（set_config_override 后立即生效）。"""
+    return _build_thresholds_from_config()
+
+
+def get_asset_overrides() -> Dict[str, Dict[str, float]]:
+    """实时从 config 读取 per-asset 覆盖（set_config_override 后立即生效）。"""
+    return _build_asset_overrides_from_config()
 
 
 def _per_asset_thresholds(symbol: Optional[str]) -> Dict[str, float]:
