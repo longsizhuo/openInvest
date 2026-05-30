@@ -60,6 +60,8 @@ allow_indirect_imports = "true"
 ignore_imports = [
     # backtest_committee 是研究用，跟 production 委员会不共享 service layer
     "scripts.backtest_committee -> core.committee",
+    # full_validation 是开卷下限验证（研究用），需 patch core.committee._persist 防污染
+    "scripts.full_validation -> core.committee",
 ]
 # 已删的孤儿 dep：
 # - duckduckgo-search: 被 ddgs 取代
