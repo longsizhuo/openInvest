@@ -6,8 +6,6 @@
 ### Features
 
 * **logging:** ADR-014 生产代码 print→log 迁移 + RotatingFileHandler ([#21](https://github.com/longsizhuo/openInvest/issues/21)) ([b93a42c](https://github.com/longsizhuo/openInvest/commit/b93a42cd5eab758af80cb0f24efab056fc0d15cc))
-* **regime:** OHLC 直算概率表源 + sweep 全量历史 → main ([471cd17](https://github.com/longsizhuo/openInvest/commit/471cd17a30f9d51fb81dd83636b26777cdc89a12))
-* **regime:** 概率表/买回点数据源换成几十年 OHLC 直算（替代 verdict_review 276 条） ([9958f41](https://github.com/longsizhuo/openInvest/commit/9958f41c7e0256e42481322c0232480736582143))
 * **regime:** 概率表/买回点数据源换成几十年 OHLC 直算（替代 verdict_review 276 条） ([d187faf](https://github.com/longsizhuo/openInvest/commit/d187fafe5dc233cb66e20f96572f71e6b2792884))
 
 
