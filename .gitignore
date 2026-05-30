@@ -39,3 +39,6 @@ static/
 experiments/dspy_trainset_v2.json
 experiments/dspy_trainset_v2.2.json
 experiments/dspy_trainset_v3.json
+
+# AI 工具本地目录（Qwen Code review 等），不入库
+.qwen/
