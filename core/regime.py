@@ -260,53 +260,73 @@ def classify_regime(
     }
 
 
+def _regime_data_hint(
+    price_quantile_2y: float | None,
+    prob_hint: Optional[Dict[str, Any]],
+) -> str:
+    """uptrend / downtrend / range_bound / recovery 共用的中性提示：引用该 regime 的
+    OHLC 概率口径 + 当前分位，方向判断交回 LLM + 数据，不给方向预设。"""
+    q = (
+        f"当前 2 年分位 {price_quantile_2y * 100:.0f}%；"
+        if price_quantile_2y is not None else ""
+    )
+    if not prob_hint:
+        # 调用方没传概率口径（OHLC 读失败 / 非 committee caller）→ 退化无数字版，
+        # 仍中性、仍指向数据，不预设方向。
+        return (
+            f"{q}该 regime 的历史 30d forward return 分布（中位 / 跌破现价概率 / 样本数）"
+            "见 brief 概率表口径。结合分位 / RSI / 浮亏自行判断方向，不预设方向"
+        )
+    med = prob_hint.get("median_pct")
+    pb = prob_hint.get("p_below")
+    n = prob_hint.get("n")
+    eff = prob_hint.get("effective_n") or n
+    overlap = f"（重叠窗口独立≈{eff}）" if (eff and n and eff != n) else ""
+    return (
+        f"该 regime 历史 30d forward return：中位 {med:+.1f}%、"
+        f"跌破现价概率 {pb * 100:.0f}%、样本 n={n}{overlap}。"
+        f"{q}结合分位 / RSI / 浮亏自行判断方向，不预设方向"
+    )
+
+
 def regime_strategy_hint(
     regime: RegimeType,
     price_quantile_2y: float | None,
     symbol: Optional[str] = None,
+    *,
+    prob_hint: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """把 regime 翻译成给 Quant prompt 用的策略提示。
+    """把 regime 翻译成给 Quant prompt 用的 REGIME 上下文提示。
 
-    Quant 角色看到这个提示后，必须遵循对应的方向偏好。
-    特别是 range_bound + 低分位的情况，硬规则要求 Quant 不允许在 Round 2
-    被 Risk Officer 逼着改 SIGNAL（这是老系统的核心 bug）。
+    2026-05-31（REGIME→方向链第一刀）：去掉人手写、无数据背书的方向预设
+    （顺势可加 / 不抄底 / 高抛低吸 / 逢高减 / 谨慎看多）——它们会和系统自己的
+    OHLC 概率表打架、干扰 LLM。uptrend / downtrend / range_bound / recovery 改成
+    中性引用该 (symbol, regime) 的 30d forward return 概率口径（中位 / 跌破现价
+    概率 / 样本数），方向判断交回 LLM + 数据。
 
-    symbol 只用来取 per-asset 的 quantile 阈值（高低位线）。
+    crash / unknown 保留（不是方向预测）：
+    - crash「离场观望」是可执行性语义（崩盘期波动极高，任何方向都难理性执行）；
+    - unknown「维持原计划」是缺数据时的保守默认。
+
+    prob_hint: 调用方用 core.regime_probability.get_regime_forward_summary 算好的
+    概率口径 dict {median_pct, p_below, n, effective_n}；None → 退化无数字中性版。
+    （本模块不能 import regime_probability —— 后者依赖本模块 classify_regime，循环依赖，
+    所以概率数据由调用方注入。）symbol 保留作签名兼容（本函数已不再用）。
     """
-    thresholds = _per_asset_thresholds(symbol)
-    if regime == "uptrend":
-        return "顺势 — 回调可加，止损放宽到趋势线下方，不要被短期回调吓出去"
-    if regime == "downtrend":
-        return "止损 — 不抄底，等趋势确认反转（MA20 重新站上 MA120）后再考虑"
-    if regime == "range_bound":
-        if price_quantile_2y is None:
-            return "震荡市 — 高抛低吸，避免追涨杀跌"
-        if price_quantile_2y <= thresholds["low_quantile_threshold"]:
-            return (
-                "震荡市底部 — 当前 2 年分位 "
-                f"{price_quantile_2y * 100:.0f}% (≤ {thresholds['low_quantile_threshold'] * 100:.0f}%)，"
-                "逢低分批是首选；禁止因 Risk 集中度警告就在底部止损卖飞"
-            )
-        if price_quantile_2y >= thresholds["high_quantile_threshold"]:
-            return (
-                "震荡市顶部 — 当前 2 年分位 "
-                f"{price_quantile_2y * 100:.0f}% (≥ {thresholds['high_quantile_threshold'] * 100:.0f}%)，"
-                "逢高减仓，落袋为安"
-            )
-        return f"震荡市中段 — 2 年分位 {price_quantile_2y * 100:.0f}%，无明显边缘信号，建议不动"
     if regime == "crash":
-        return "崩盘 — 离场观望，等波动率回归正常 (ATR < 3%) 再说"
-    if regime == "recovery":
-        return (
-            "复苏 — 从低位反弹，允许谨慎看多 (cautious bullish)：小仓试探、确认"
-            "站稳再加，止损放在反弹起点下方；不要一把梭，反弹失败可能二次探底"
-        )
-    return "状态未知 — 数据不足，维持原计划"
+        # 可执行性护栏（非方向预测）：崩盘期波动极高，任何方向都难以理性执行
+        return "崩盘 — 波动率极高，任何方向都难以理性执行；等波动率回归正常 (ATR < 3%) 再评估"
+    if regime == "unknown":
+        return "状态未知 — 数据不足，维持原计划"
+    # uptrend / downtrend / range_bound / recovery：中性引用概率口径，不预设方向
+    return _regime_data_hint(price_quantile_2y, prob_hint)
 
 
 def format_regime_brief(
     metrics: Dict[str, Any],
     symbol: Optional[str] = None,
+    *,
+    prob_hint: Optional[Dict[str, Any]] = None,
 ) -> str:
     """从 metrics dict 生成给 Quant prompt 用的 REGIME 上下文片段。
 
@@ -330,7 +350,7 @@ def format_regime_brief(
     inputs = classification["inputs_used"]
     thresholds_used = classification["thresholds_used"]
     hint = regime_strategy_hint(
-        regime, metrics.get("price_quantile_2y"), symbol=symbol,
+        regime, metrics.get("price_quantile_2y"), symbol=symbol, prob_hint=prob_hint,
     )
 
     inputs_str = ", ".join(

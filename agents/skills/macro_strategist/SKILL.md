@@ -30,12 +30,13 @@ STRENGTH: 0-10  # 信号强度
 SCORE: -5 到 +5  # 宏观情绪评分（负数 = 危险，正数 = 健康）
 KEY_HEADWIND: <一句话最大利空>
 KEY_TAILWIND: <一句话最大利好>
-ONE_LINER: <一句话宏观结论，明确给"加仓 / 减仓 / 维持"倾向>
+ONE_LINER: <一句话宏观环境结论（risk_on/off 程度 + 主要驱动），不下达仓位指令>
 ```
 
-**判定原则**：
-- SCORE < -2: 强烈 risk_off，所有资产偏向减仓
+**判定原则**（你只评宏观环境，不预设仓位方向）：
+- SCORE < -2: 强烈 risk_off（宏观环境偏险）
 - -2 ≤ SCORE ≤ 2: neutral
-- SCORE > 2: risk_on，可加仓
+- SCORE > 2: risk_on（宏观环境偏健康）
 
+加仓 / 减仓由 CIO 综合宏观环境 + 个资产历史 forward return 概率分布决定，不在这里预设。
 不允许"待观察"。

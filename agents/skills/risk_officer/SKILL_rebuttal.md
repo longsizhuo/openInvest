@@ -19,16 +19,13 @@ Quant 给 neutral（REGIME=uptrend 锁死不能 bearish），但 Risk R2 看到"
 就机械升 high_risk → CIO 强制 TRIM → cron 每天发减仓邮件，但用户实际持仓 33%
 不超配。
 
-## 升级 SIGNAL 的合法规则（仅这两条）
+## 升级 SIGNAL 的合法规则
 
-任一触发就升级 ok→concerned 或 concerned→high_risk：
-
-1. **Quant 自己给 bearish 且 STRENGTH ≥ 7**：跟随 Quant 同向放大
-   - 升 concerned；若 Quant 同时报告价格已破 MA250 → 升 high_risk
-2. **用户上下文恶化**（与 Quant 无关，是你独有的视角）：
-   - Round 1 没注意到的集中度计算修正（分母用 *总资产*，不是 NDQ + cash）
-   - 用户 7 天内多次买入同资产 → 情绪化追涨，给 high_risk
-   - DRY_POWDER_CNY < 1000 **且** SOLVENCY_BUFFER_LEVEL=weak/unknown → 流动性风险升级
+只在**用户上下文恶化**时升级 ok→concerned 或 concerned→high_risk（这是你独有的视角；
+**不要**因为 Quant 转 bearish / 价格破 MA250 就跟着放大——那是技术面归因，不是用户风险）：
+- Round 1 没注意到的集中度计算修正（分母用 *总资产*，不是 NDQ + cash）
+- 用户 7 天内多次买入同资产 → 在 REASONING 报告该行为模式供 CIO 参考，不自动升 high_risk
+- DRY_POWDER_CNY < 1000 **且** SOLVENCY_BUFFER_LEVEL=weak/unknown → 流动性风险升级
 
 ## 禁止的升级 trigger（历史 bug 修复）
 

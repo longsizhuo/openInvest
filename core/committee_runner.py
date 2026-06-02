@@ -17,7 +17,7 @@ from core.committee import (
     run_macro_view,
 )
 from core.portfolio_manager import PortfolioManager
-from core.regime import format_regime_brief
+from core.regime import classify_regime, format_regime_brief
 from core.regime_probability import (
     RegimeProbability,
     build_probability_table_from_ohlc,
@@ -375,7 +375,19 @@ def run_committee_for_symbol(
         df, f"{target.get('display_name', symbol)} ({symbol})",
     )
     # P1-2: 传 symbol 让 regime 用 per-asset 阈值（黄金/纳指/加密各异）
-    regime_brief = format_regime_brief(metrics, symbol=symbol)
+    # 2026-05-31: STRATEGY_HINT 不再给人写方向预设，改成中性引用该 regime 的 OHLC
+    # 概率口径（中位 forward return / 跌破现价概率 / n）。先算好概率口径传进去，
+    # 让 Quant 基于数据判断方向，不是凭空判断。读失败 graceful 退化无数字中性版。
+    _regime_for_hint = classify_regime(metrics, symbol=symbol)["regime"]
+    _prob_hint = None
+    try:
+        from core.regime_probability import get_regime_forward_summary
+        _prob_hint = get_regime_forward_summary(
+            symbol, _regime_for_hint, metrics.get("current_price"),
+        )
+    except Exception as e:  # noqa: BLE001  概率口径读失败不阻断委员会
+        log.warning(f"regime forward summary 取失败，STRATEGY_HINT 退化无数字版: {e}")
+    regime_brief = format_regime_brief(metrics, symbol=symbol, prob_hint=_prob_hint)
     emit("data_ready", regime_brief=regime_brief[:240])
 
     # 3. 事件 RAG 召回（事件层第二条腿；env feature flag 默认关）

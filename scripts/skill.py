@@ -546,7 +546,19 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         f"{target.get('display_name', target['symbol'])} ({target['symbol']})",
     )
     # P1-2: 传 symbol 让 regime 用 per-asset 阈值
-    regime_brief = format_regime_brief(metrics, symbol=target["symbol"])
+    # 2026-05-31: STRATEGY_HINT 改中性引用 OHLC 概率口径（同 committee_runner），
+    # 不再给人写方向预设。算好概率口径传进去；读失败退化无数字中性版。
+    from core.regime import classify_regime
+    _regime_for_hint = classify_regime(metrics, symbol=target["symbol"])["regime"]
+    _prob_hint = None
+    try:
+        from core.regime_probability import get_regime_forward_summary
+        _prob_hint = get_regime_forward_summary(
+            target["symbol"], _regime_for_hint, metrics.get("current_price"),
+        )
+    except Exception:  # noqa: BLE001  概率口径读失败不阻断
+        pass
+    regime_brief = format_regime_brief(metrics, symbol=target["symbol"], prob_hint=_prob_hint)
     macro_data = get_macro_data()
     snap = get_gold_snapshot(offset_pct=0.0)
     gold_ctx = format_gold_report(snap) if (snap and target.get("type") == "metal") else ""
@@ -615,7 +627,7 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             "**Quant 必须塞 regime_brief**: 召唤 Quant Round 1/2 worker 时，prompt 模板:\n"
             '  "<paste prompts.quant_round1>\\n\\n# 市场 Regime:\\n<paste regime_brief>'
             '\\n\\n# 市场数据:\\n<paste market_data>"\n'
-            "  确保 REGIME 硬保护规则约束（防震荡市底部被 Risk 带跑改 SIGNAL）。\n"
+            "  Quant 基于 regime 概率口径 + 当前指标自行判断 SIGNAL（无方向硬锁；集中度归 Risk 管）。\n"
             "**Risk Officer 必须塞 wealth_context_view**（2026-05-18 漂移修复）:\n"
             '  "<paste prompts.risk_round1>\\n\\n# 用户持仓:\\n<paste portfolio_summary>'
             '\\n\\n# Wealth Context (off-portfolio 真实流动性):\\n<paste wealth_context_view>'

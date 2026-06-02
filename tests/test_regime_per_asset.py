@@ -189,11 +189,40 @@ def test_crash_preempts_recovery():
     assert r["regime"] == "crash", r
 
 
-def test_recovery_in_strategy_hint():
-    """recovery 的策略提示包含 cautious bullish 措辞"""
+def test_recovery_strategy_hint_is_neutral():
+    """2026-05-31: recovery 不再给"谨慎看多"方向预设，改中性引用概率口径。
+
+    无 prob_hint → 退化无数字中性版：指向概率口径 + "自行判断方向"，不含方向词。
+    """
     from core.regime import regime_strategy_hint
     hint = regime_strategy_hint("recovery", 0.3)
-    assert "谨慎看多" in hint or "cautious" in hint.lower()
+    assert "谨慎看多" not in hint and "cautious" not in hint.lower()
+    assert "自行判断方向" in hint
+    assert "forward return" in hint
+
+
+def test_strategy_hint_cites_prob_table_when_given():
+    """给了 prob_hint 时，uptrend/downtrend/range_bound/recovery 引用中位/跌破概率/n。"""
+    from core.regime import regime_strategy_hint
+    ph = {"median_pct": 1.8, "p_below": 0.37, "n": 1200, "effective_n": 40}
+    for regime in ("uptrend", "downtrend", "range_bound", "recovery"):
+        hint = regime_strategy_hint(regime, 0.5, prob_hint=ph)
+        assert "中位 +1.8%" in hint
+        assert "跌破现价概率 37%" in hint
+        assert "n=1200" in hint
+        assert "不预设方向" in hint
+        # 不再有方向预设词
+        for word in ("不抄底", "逢高减仓", "高抛低吸", "谨慎看多", "顺势"):
+            assert word not in hint
+
+
+def test_crash_unknown_hint_are_executability_not_direction():
+    """crash 改为纯可执行性措辞（去掉"离场观望"方向词）；unknown 保留缺数据默认。"""
+    from core.regime import regime_strategy_hint
+    crash = regime_strategy_hint("crash", 0.1)
+    assert "任何方向都难以理性执行" in crash
+    assert "离场观望" not in crash          # 方向预设已去掉
+    assert "维持原计划" in regime_strategy_hint("unknown", None)
 
 
 def test_thresholds_used_returned_in_classification():

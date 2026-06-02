@@ -39,7 +39,7 @@ role: risk
 
 ```
 SIGNAL: ok | concerned | high_risk
-STRENGTH: 0-10  # 风险关注度，10 = 必须立刻减仓
+STRENGTH: 0-10  # 风险关注度，10 = 关注度最高（是否减仓/如何执行由 CIO 综合判断）
 CONCENTRATION_PCT: <该资产占总资产 %>
 DRY_POWDER_CNY: <可用子弹>
 PNL_PCT: <当前浮盈百分比，正数为盈，负数为亏>
@@ -52,8 +52,8 @@ ONE_LINER: <一句话评估，含"建议建仓比例上限"或"建议减仓比�
 - DRY_POWDER_CNY < 1000: **看 WealthContextOfficer 的 SOLVENCY_BUFFER_LEVEL**：
   - strong → 低现金**不**算流动性风险（家族/应急 backup 兜底），SIGNAL 不升级
   - weak/unknown → 低现金 = 流动性风险，SIGNAL=concerned
-- PNL_PCT < -5%: 评估是否需要止损（但不擅自决定，给 CIO 参考）
-- 用户在 7 天内已多次买入同资产: 情绪化追涨，给 high_risk 警告
+- PNL_PCT < -5%: 报告浮亏幅度 + 最坏情况，供 CIO 参考；不预设"该止损"方向
+- 用户在 7 天内已多次买入同资产: 在 ONE_LINER 报告该行为模式供 CIO 参考，不自动升 high_risk
 
 **重要：加仓金额上限永远 = INVESTABLE_CASH_CNY（即 portfolio cash），不能动 BACKUP_BUFFER**。
 家族资金只让"低现金"不算 risk，不让你建议加大仓位。

@@ -56,7 +56,7 @@ PORTFOLIO_CASH_CNY: <portfolio.md 里的 cash 总值 CNY>
 INVESTABLE_CASH_CNY: <等于 PORTFOLIO_CASH_CNY，绝不加 backup>
 BACKUP_BUFFER_CNY: <从 wealth_context 读出来的金额，没有就 0；标注"仅风险兜底，不可投资">
 EXPLANATION_TO_RISK: <一句话：低 portfolio cash 是否等于高 liquidity risk>
-EXPLANATION_TO_CIO: <一句话：加仓决策受 portfolio cash 约束（不变），但"低现金"风险评级被破产兜底消化了；如果是零花钱账户，强调"小浮亏不值得交易">
+EXPLANATION_TO_CIO: <一句话：加仓决策受 portfolio cash 约束（不变），但"低现金"风险评级被破产兜底消化了（只陈述偿付约束，不预设买卖方向）>
 ```
 
 ## 输出原则
