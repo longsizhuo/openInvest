@@ -683,7 +683,7 @@ def run_committee(
     quant_history: List[str] = []   # Round 1, 2, ..., N
     risk_history: List[str] = []
     regime_section = (
-        f"# 市场 Regime (确定性算出，必须遵循):\n{regime_brief}\n\n"
+        f"# 市场 Regime (事实背景 + 历史概率参考):\n{regime_brief}\n\n"
         if regime_brief else ""
     )
 
@@ -760,7 +760,7 @@ def run_committee(
             + debate_block
             + "\n\n# 任务\n"
             + "请基于完整辩论历史调整或维持你的 SIGNAL/STRENGTH。"
-            + "严格遵守 REGIME 硬保护规则（详见 system prompt）。"
+            + "REGIME 历史概率分布见 system prompt，作为背景数据参考（无方向硬锁）。"
             + "如果你认为意见已经稳定，重申当前判断即可。"
         )
         risk_input_rN = (
