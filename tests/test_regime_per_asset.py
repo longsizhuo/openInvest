@@ -190,10 +190,34 @@ def test_crash_preempts_recovery():
 
 
 def test_recovery_in_strategy_hint():
-    """recovery 的策略提示包含 cautious bullish 措辞"""
+    """拆方向锁后：recovery 的提示是中性数据口径，不含方向预设措辞"""
     from core.regime import regime_strategy_hint
     hint = regime_strategy_hint("recovery", 0.3)
-    assert "谨慎看多" in hint or "cautious" in hint.lower()
+    # 不再有人写方向预设（谨慎看多/顺势/不抄底…），改成引用概率口径 + 当前分位
+    assert "不预设方向" in hint
+    assert "30%" in hint  # 当前分位仍要出现
+    for banned in ("谨慎看多", "顺势", "不抄底", "高抛低吸"):
+        assert banned not in hint
+
+
+def test_strategy_hint_with_prob_hint_numbers():
+    """传入 prob_hint 时，提示里出现概率口径数字（中位/跌破概率/样本数）"""
+    from core.regime import regime_strategy_hint
+    hint = regime_strategy_hint(
+        "uptrend", 0.5,
+        prob_hint={"median_pct": 1.4, "p_below": 0.42, "n": 1423, "effective_n": 47},
+    )
+    assert "+1.4%" in hint
+    assert "42%" in hint
+    assert "n=1423" in hint
+    assert "47" in hint  # 重叠窗口独立样本提示
+
+
+def test_crash_and_unknown_hints_kept():
+    """crash（可执行性）/ unknown（保守默认）两条非方向约束保留"""
+    from core.regime import regime_strategy_hint
+    assert "离场观望" in regime_strategy_hint("crash", 0.3)
+    assert "维持原计划" in regime_strategy_hint("unknown", None)
 
 
 def test_thresholds_used_returned_in_classification():

@@ -286,6 +286,36 @@ def get_reentry_estimate(
     )
 
 
+def get_regime_forward_summary(
+    asset: str,
+    regime: str,
+    current_price: Optional[float],
+    *,
+    window: str = "30d",
+) -> Optional[Dict[str, Any]]:
+    """给 regime_brief 的 STRATEGY_HINT 用的中性概率口径。
+
+    返回 {median_pct, p_below, n, effective_n, window} 或 None（无现价 / 该
+    regime+window 无 OHLC 样本）。调用方（committee_runner / skill.py）算好后
+    传进 format_regime_brief —— core.regime 不能直接 import 本模块（本模块依赖
+    core.regime.classify_regime，会构成循环依赖），所以数据由调用方注入。
+
+    2026-05-31: 用于把"人写方向预设"（不抄底/逢高减/谨慎看多…）换成中性的
+    "该 regime 历史 30d forward return：中位X%、跌破现价概率Y%、样本n"，让 LLM
+    基于数据判断方向。源走 OHLC（0 token，与概率表同源）。
+    """
+    est = get_reentry_estimate(asset, regime, current_price, window=window, source="ohlc")
+    if est is None:
+        return None
+    return {
+        "median_pct": est.median_return_pct,
+        "p_below": est.p_below_current,
+        "n": est.n,
+        "effective_n": est.effective_n,
+        "window": window,
+    }
+
+
 def build_reentry_reference_text(
     asset: str,
     regime: str,
