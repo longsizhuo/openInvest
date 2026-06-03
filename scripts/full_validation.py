@@ -186,6 +186,12 @@ def _pin_to_date_and_isolate(decision_date: str):
     with ExitStack() as stack:
         # 1. 行情/技术/macro 钉到 D
         stack.enter_context(patch.object(ef, "get_history_data", patched_get_history))
+        # 1a. committee_runner 在模块顶部 `from utils.exchange_fee import get_history_data`
+        #     直接绑定了原函数，patch ef.get_history_data 到不了它 —— 必须同时 patch 它自己的
+        #     绑定。否则它走原函数：_STORE.get_history_df() 默认只取最近 ~730 天，再被
+        #     MarketStore patch 截到 <=D；当 D 比"最近 730 天窗口"还老（如 2022）→ 交集为空
+        #     → "无行情数据" 全 failed。patched_get_history 读全历史再截，老日期才有数据。
+        stack.enter_context(patch.object(cr, "get_history_data", patched_get_history))
         # 1b. 概率表 + 买回点参考钉到 D（look-ahead 修复：闭卷段不从概率表后门看未来）
         stack.enter_context(patch.object(ms.MarketStore, "get_history_df", patched_get_history_df))
         # 2. 绝不持久化到 memory/.committee/
