@@ -602,6 +602,201 @@ def test_override_concentration_noop_when_field_missing():
     )
 
 
+# ============================================================================
+# 契约 7: 新维度（sentiment_brief / valuation_brief）— 确定性事实块防漂
+# ============================================================================
+# 对齐 TradingAgents 补的基本面 + 情绪维度。做成确定性 shared 块（像 wealth_view /
+# event_brief），必须真的从 loader 流到 run_committee，否则就是"算了但没人看"的漂移。
+#
+# - graceful: 两个 loader 任何失败都退化 ""（不阻断 committee）
+# - SENTINEL: session→for_symbol→run_committee 链路真的把 loader 结果传到 run_committee
+# - 渲染: to_cio_brief 把两段事实渲染进 CIO 输入（CIO 必须能看到）
+
+
+def test_load_sentiment_brief_graceful_on_failure(monkeypatch):
+    """build_sentiment_brief 抛异常 → load_sentiment_brief 退化 ""，不抛"""
+    import utils.sentiment as st
+
+    def boom(*a, **k):
+        raise RuntimeError("VIX source down")
+    monkeypatch.setattr(st, "build_sentiment_brief", boom)
+
+    from core.committee_runner import load_sentiment_brief
+    assert load_sentiment_brief("") == ""
+
+
+def test_load_valuation_brief_graceful_on_failure(monkeypatch):
+    """build_valuation_brief 抛异常 → load_valuation_brief 退化 ""，不抛"""
+    import utils.valuation as val
+
+    def boom(*a, **k):
+        raise RuntimeError("yfinance .info down")
+    monkeypatch.setattr(val, "build_valuation_brief", boom)
+
+    from core.committee_runner import load_valuation_brief
+    assert load_valuation_brief("NDQ.AX", 0.5) == ""
+
+
+def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
+    monkeypatch, tmp_path,
+):
+    """SENTINEL: sentiment_brief（session 共享）+ valuation_brief（per-asset）必须
+    全部到达 run_committee kwargs。
+
+    漂移会被抓：
+    - session 算了 sentiment 但没传 for_symbol → captured.sentiment_brief != SENTINEL
+    - for_symbol 没调 load_valuation_brief / 没传 run_committee → != SENTINEL
+    """
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    SENTINEL_SENT = "SENTIMENT_SENTINEL_xyz"
+    SENTINEL_VAL = "VALUATION_SENTINEL_abc"
+
+    # 锚定新 loader 的输出
+    monkeypatch.setattr("core.committee_runner.load_sentiment_brief",
+                        lambda *a, **k: SENTINEL_SENT)
+    monkeypatch.setattr("core.committee_runner.load_valuation_brief",
+                        lambda *a, **k: SENTINEL_VAL)
+    # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+                        lambda *a, **kw: "")
+
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("core.committee_runner.get_history_data",
+                        lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+
+    from core.committee_runner import run_committee_session
+    result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    assert captured, "run_committee 未被调用 — session dispatch 失败"
+    kw = captured[0]
+    assert kw.get("sentiment_brief") == SENTINEL_SENT, (
+        f"sentiment_brief 漂移: 期望 {SENTINEL_SENT!r}, 实际 {kw.get('sentiment_brief')!r}\n"
+        "  → session 共享 sentiment 没流到 run_committee（检查 _run_one 是否传了 sentiment_brief）"
+    )
+    assert kw.get("valuation_brief") == SENTINEL_VAL, (
+        f"valuation_brief 漂移: 期望 {SENTINEL_VAL!r}, 实际 {kw.get('valuation_brief')!r}\n"
+        "  → for_symbol 没调 load_valuation_brief 或没传 run_committee"
+    )
+    assert result["sentiment_brief"] == SENTINEL_SENT
+    assert result["audit"]["sentiment_brief_attached"] is True
+
+
+def test_to_cio_brief_renders_sentiment_and_valuation():
+    """to_cio_brief 必须把 sentiment_brief + valuation_brief 渲染进 CIO 输入"""
+    from core.committee import CommitteeReport
+
+    SENTINEL_SENT = "SENT_CIO_SENTINEL_111"
+    SENTINEL_VAL = "VAL_CIO_SENTINEL_222"
+
+    report = CommitteeReport(
+        asset={"symbol": "NDQ.AX", "display_name": "Test"},
+        macro_view="m", quant_view="q", risk_view="r",
+        sentiment_brief=SENTINEL_SENT, valuation_brief=SENTINEL_VAL,
+    )
+    brief = report.to_cio_brief()
+    assert SENTINEL_SENT in brief, "sentiment_brief 没渲染进 CIO 输入"
+    assert SENTINEL_VAL in brief, "valuation_brief 没渲染进 CIO 输入"
+
+
+def test_to_cio_brief_omits_empty_new_dimensions():
+    """空 sentiment/valuation → 不出现对应 section 标题（避免空 section 干扰）"""
+    from core.committee import CommitteeReport
+
+    report = CommitteeReport(
+        asset={"symbol": "GC=F", "display_name": "Gold"},
+        macro_view="m", quant_view="q", risk_view="r",
+        sentiment_brief="", valuation_brief="",
+    )
+    brief = report.to_cio_brief()
+    assert "VALUATION" not in brief
+    assert "MARKET SENTIMENT" not in brief
+
+
+def test_run_committee_injects_sentiment_and_valuation_into_agents(monkeypatch):
+    """端到端：run_committee 把 sentiment_brief 注入 Quant 输入，sentiment+valuation 注入 CIO。
+
+    SENTINEL 守卫：未来有人删了 quant_input/cio_brief 的注入，本测立即红。
+    """
+    from core import committee as cmt
+
+    SENT = "SENT_E2E_SENTINEL_777"
+    VAL = "VAL_E2E_SENTINEL_888"
+    captured: dict[str, str] = {}
+
+    class RecordingAgent:
+        def __init__(self, role):
+            self._role = role
+        def run(self, ctx):
+            # 记录每个角色最后看到的 context
+            captured[self._role] = ctx
+            if self._role == "quant":
+                return "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 4\nONE_LINER: x\n"
+            if self._role == "risk":
+                return "SIGNAL: ok\nSTRENGTH: 3\nONE_LINER: x\n"
+            if self._role == "cio":
+                return (
+                    "VERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\n"
+                    "SUGGESTED_ALLOC_CNY: 0\nTRIM_REASON: N/A\nREENTRY_PRICE: N/A\n"
+                    "REENTRY_CONDITION: N/A\nEXPECTED_PATH: N/A\n"
+                    "EXECUTION_PLAN:\n  mode: none\n  first_tranche_cny: 0\n  add_levels:\n    - N/A\n"
+                    "RISK_PLAN:\n  stop_loss_trigger: N/A\n  what_if_wrong:\n    "
+                    "worst_case_pnl_cny: 0\n    recovery_estimate: N/A\n"
+                    "PERSONAL_NOTE:\n  - N/A\n  - N/A\n  - N/A\n"
+                )
+            return ""
+
+    monkeypatch.setattr(cmt, "_create_agent",
+                        lambda _p, **kw: RecordingAgent(kw.get("role")))
+    monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+
+    cmt.run_committee(
+        asset={"symbol": "NDQ.AX", "display_name": "Test"},
+        market_data="fake market",
+        macro_view="fake macro",
+        portfolio_summary="用户风险偏好: Balanced\n",
+        regime_brief="REGIME: uptrend",
+        sentiment_brief=SENT,
+        valuation_brief=VAL,
+        max_debate_rounds=1,
+    )
+
+    assert SENT in captured.get("quant", ""), "sentiment_brief 没注入 Quant 输入"
+    assert VAL in captured.get("quant", ""), "valuation_brief 没注入 Quant 输入"
+    assert SENT in captured.get("cio", ""), "sentiment_brief 没注入 CIO 输入"
+    assert VAL in captured.get("cio", ""), "valuation_brief 没注入 CIO 输入"
+
+
 def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
     """端到端：mock LLM 让 Risk Officer 故意编 70.2%，验证最终 risk_view 是 33.6%
 

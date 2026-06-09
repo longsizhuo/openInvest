@@ -344,6 +344,19 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
 # ==========================================
 # 3. 对外接口
 # ==========================================
+def _safe_last_change(symbol: str) -> tuple[Optional[float], Optional[float]]:
+    """拉 1mo 行情，返回 (last_close, MoM_change)；无数据返回 (None, None)。graceful。"""
+    try:
+        df = get_history_data(symbol, "1mo")
+    except Exception:
+        return None, None
+    if df is None or df.empty or "Close" not in df:
+        return None, None
+    last = float(df["Close"].iloc[-1])
+    change = _calc_change(float(df["Close"].iloc[0]), last)
+    return last, change
+
+
 def get_macro_data() -> str:
     try:
         tnx = get_history_data("^TNX", "1mo")
@@ -355,7 +368,7 @@ def get_macro_data() -> str:
         vix_last = vix['Close'].iloc[-1] if not vix.empty else 0.0
         vix_change = _calc_change(vix['Close'].iloc[0], vix_last) if not vix.empty else 0.0
 
-        return f"""
+        report = f"""
 --- MACRO INDICATORS (Reference) ---
 1. US 10Y Treasury Yield (^TNX): {tnx_last:.2f}% (MoM: {tnx_change:+.2%})
    *Note: Rising yields often hurt tech stock valuations.*
@@ -363,6 +376,26 @@ def get_macro_data() -> str:
 2. CBOE Volatility Index (^VIX): {vix_last:.2f} (MoM: {vix_change:+.2%})
    *Note: VIX > 20 indicates fear; VIX < 15 indicates complacency.*
 """
+
+        # 货币因素（黄金/商品类资产的"基本面"）—— 逐项 graceful，缺一项不影响其余。
+        # DX-Y.NYB = ICE 美元指数（DX=F 已被 Yahoo 下架，必须用 DX-Y.NYB）。
+        dxy_last, dxy_change = _safe_last_change("DX-Y.NYB")
+        if dxy_last is not None:
+            report += (
+                f"\n3. US Dollar Index (DXY, DX-Y.NYB): {dxy_last:.2f} (MoM: {dxy_change:+.2%})\n"
+                f"   *Note: Strong/rising USD pressures gold & commodities; weak USD is a tailwind.*\n"
+            )
+        # 实际利率代理：TIP = iShares TIPS Bond ETF。TIP 价涨 = 实际利率走低 = 利好黄金；
+        # TIP 价跌 = 实际利率走高 = 利空黄金。yahoo 内可达，绕开 FRED DFII10 的网络不稳。
+        _tip_last, tip_change = _safe_last_change("TIP")
+        if tip_change is not None:
+            _dir = "falling (gold tailwind)" if tip_change > 0 else "rising (gold headwind)"
+            report += (
+                f"\n4. Real-rate proxy (TIPS ETF TIP, MoM): {tip_change:+.2%} → real yields {_dir}\n"
+                f"   *Note: TIP up = real yields down = bullish gold; TIP down = real yields up = bearish gold.*\n"
+            )
+
+        return report
     except Exception as e:
         return f"Error fetching macro data: {e}"
 
