@@ -54,6 +54,8 @@ class CommitteeReport:
     market_data: str = ""
     portfolio_summary: str = ""
     prior_insights: str = ""
+    sentiment_brief: str = ""         # 市场情绪表盘（确定性：VIX 分位 + CNN F&G，跨资产共享）
+    valuation_brief: str = ""         # 估值（确定性：trailing PE + 价格分位，仅权益类，per-asset）
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
@@ -64,6 +66,15 @@ class CommitteeReport:
         if self.wealth_context_view:
             lines.append(
                 f"\n=== WEALTH CONTEXT OFFICER (真实流动性，跨资产共享) ===\n{self.wealth_context_view}"
+            )
+        # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
+        if self.valuation_brief:
+            lines.append(
+                f"\n=== VALUATION (确定性事实，必须纳入'贵不贵'判断) ===\n{self.valuation_brief}"
+            )
+        if self.sentiment_brief:
+            lines.append(
+                f"\n=== MARKET SENTIMENT 表盘 (确定性事实，必须纳入) ===\n{self.sentiment_brief}"
             )
         lines.extend([
             "\n=== ROUND 1 (独立陈述) ===",
@@ -627,6 +638,8 @@ def run_committee(
     wealth_context_view: str = "",
     reentry_reference: str = "",
     current_price: Optional[float] = None,
+    sentiment_brief: str = "",
+    valuation_brief: str = "",
     *,
     persist_to_memory: bool = True,
     max_debate_rounds: int = 1,
@@ -663,6 +676,8 @@ def run_committee(
         market_data=market_data,
         portfolio_summary=portfolio_summary,
         prior_insights=prior_insights,
+        sentiment_brief=sentiment_brief,
+        valuation_brief=valuation_brief,
     )
 
     quant_history: List[str] = []   # Round 1, 2, ..., N
@@ -675,10 +690,20 @@ def run_committee(
     # ===== Round 1: Quant 和 Risk 独立陈述（信息分隔 + 真并行）=====
     emit("round_1_start", round=1, mode="independent")
 
+    valuation_section = (
+        f"# 估值 (确定性事实，必须纳入'贵不贵'判断):\n{valuation_brief}\n\n"
+        if valuation_brief else ""
+    )
+    sentiment_section = (
+        f"# 市场情绪表盘 (确定性事实，必须纳入):\n{sentiment_brief}\n\n"
+        if sentiment_brief else ""
+    )
     quant_input_r1 = (
         f"# 资产: {asset.get('display_name', sym)} ({sym})\n"
         f"{regime_section}"
         f"# 市场数据 (技术指标 + 多周期):\n{market_data}\n\n"
+        f"{valuation_section}"
+        f"{sentiment_section}"
         f"请按 Quant Analyst 格式输出技术信号。"
     )
     wealth_section = (
@@ -920,6 +945,15 @@ def _persist(report: CommitteeReport, verdict: Dict[str, Any],
     if report.wealth_context_view:
         lines.append(
             f"\n\n---\n\n## Wealth Context Officer (real liquidity)\n{report.wealth_context_view}"
+        )
+    # 确定性事实块落盘（审计 + verdict_review 事后归因 + GUI 展示）
+    if report.valuation_brief:
+        lines.append(
+            f"\n\n---\n\n## Valuation (deterministic)\n{report.valuation_brief}"
+        )
+    if report.sentiment_brief:
+        lines.append(
+            f"\n\n---\n\n## Market Sentiment (deterministic)\n{report.sentiment_brief}"
         )
     lines.extend([
         "\n\n---\n\n## Round 1 — Independent Briefs\n",

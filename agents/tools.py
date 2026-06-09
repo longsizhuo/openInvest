@@ -76,7 +76,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "name": "get_macro_snapshot",
             "description": (
                 "返回当前宏观指标快照：VIX (恐慌指数) / TNX (10 年期国债收益率) / "
-                "USDCNY / AUDCNY。Macro Strategist 的核心数据来源。"
+                "USDCNY / AUDCNY / DXY (美元指数) / TIP_1mo_pct (TIPS ETF 近月涨跌，"
+                "实际利率方向代理：TIP 涨=实际利率降=利好黄金)。Macro Strategist 的核心数据来源；"
+                "分析黄金/商品类资产时 DXY 与实际利率方向是关键货币因素。"
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -160,13 +162,25 @@ def _impl_analyze_multi_timeframe(symbol: str, label: Optional[str] = None) -> s
 def _impl_get_macro_snapshot() -> Dict[str, Any]:
     from utils.exchange_fee import get_history_data
     out: Dict[str, Any] = {"as_of": datetime.now().isoformat(timespec="seconds")}
+    # DX-Y.NYB = ICE 美元指数（DX=F 已被 Yahoo 下架）
     for sym, label in [("^VIX", "vix"), ("^TNX", "tnx"),
-                       ("USDCNY=X", "usdcny"), ("AUDCNY=X", "audcny")]:
+                       ("USDCNY=X", "usdcny"), ("AUDCNY=X", "audcny"),
+                       ("DX-Y.NYB", "dxy")]:
         df = get_history_data(sym, "5d")
-        if not df.empty:
+        if df is not None and not df.empty:
             out[label] = round(float(df["Close"].iloc[-1]), 4)
         else:
             out[label] = None
+    # 实际利率方向代理：TIP（TIPS ETF）近 1 月涨跌。TIP 涨=实际利率降=利好黄金。
+    try:
+        tip = get_history_data("TIP", "1mo")
+        if tip is not None and not tip.empty:
+            first, last = float(tip["Close"].iloc[0]), float(tip["Close"].iloc[-1])
+            out["tip_1mo_pct"] = round((last / first - 1) * 100, 2) if first else None
+        else:
+            out["tip_1mo_pct"] = None
+    except Exception:
+        out["tip_1mo_pct"] = None
     return out
 
 

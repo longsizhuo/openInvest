@@ -34,6 +34,14 @@ STRATEGY_HINT: <对应 regime 下的策略偏好>
 baseline brief 已经在 prompt 里给了基础数据，**如果你需要更深的视角主动调 tool**。
 不要不调——一个负责的分析师会去查多周期对照。
 
+**你可能在 user message 里收到两段确定性事实（系统算的，不是你的判断，但你必须纳入）**：
+- `# 估值`（VALUATION / PRICE_QUANTILE_2Y）：trailing PE + 价格分位。trailing_PE 偏贵
+  或 PRICE_QUANTILE_2Y ≥ 70% → 在 KEY_DATA 里点出"估值偏高"，bullish 需更谨慎。
+- `# 市场情绪表盘`（FEAR_GREED_GAUGE / INDEP_DEFENSE_FLAG）：VIX 分位 + 恐慌贪婪。
+  **INDEP_DEFENSE_FLAG=on**（VIX 处近2年高位）时，即使 REGIME=uptrend 也要在
+  KEY_DATA 里报告"市场恐慌升温"——这是独立于 MA regime 的快速崩盘信号，别只看趋势。
+收到这两段时**必须在 KEY_DATA 至少各引用一条**；没收到（空）就忽略。
+
 **输出要求**：
 - 必须中文回复
 - 严格按下列格式，总长度 ≤180 字

@@ -214,6 +214,38 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
         return ""
 
 
+def load_sentiment_brief(event_brief: str = "") -> str:
+    """市场情绪表盘 shared loader（确定性：VIX 分位保底 + CNN 锦上添花）。
+
+    地位同 load_wealth_context_view：session 跑一次（VIX/CNN 是市场级、跨资产相同），
+    结果注入每个 run_committee(..., sentiment_brief=...)。
+
+    任何失败 graceful 退化空字符串，不阻断 committee。CNN 不可达时 VIX 分位照常输出
+    （绝不单点故障，见 utils/sentiment.py 设计红线）。
+    """
+    try:
+        from utils.sentiment import build_sentiment_brief
+        return build_sentiment_brief(event_brief)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_sentiment_brief graceful 退化 '': {type(e).__name__}: {e}")
+        return ""
+
+
+def load_valuation_brief(
+    symbol: str, price_quantile_2y: Optional[float] = None,
+) -> str:
+    """估值 shared loader（确定性：trailing PE + 价格分位，仅权益类，per-asset）。
+
+    黄金/商品类返回 ""（它们的"基本面"=货币因素走 Macro）。任何失败 graceful 退化 ""。
+    """
+    try:
+        from utils.valuation import build_valuation_brief
+        return build_valuation_brief(symbol, price_quantile_2y)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_valuation_brief graceful 退化 '': {type(e).__name__}: {e}")
+        return ""
+
+
 def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
     """service layer 默认 portfolio_summary 拼装（含集中度 + 总资产 + 浮盈）
 
@@ -318,6 +350,8 @@ def run_committee_for_symbol(
     wealth_context_view: Optional[str] = None,
     portfolio_summary_override: Optional[str] = None,
     prior_insights_override: Optional[str] = None,
+    sentiment_brief: Optional[str] = None,
+    valuation_brief_override: Optional[str] = None,
     probability_table: Optional[Dict[tuple, RegimeProbability]] = None,
 ) -> Dict[str, Any]:
     """端到端跑单资产 committee
@@ -338,6 +372,10 @@ def run_committee_for_symbol(
         prior_insights_override: shared loader 结果 override。None → 内部调
             load_prior_insights(asset, pm)（修复 2026-05-16 漂移：service layer
             过去从不读 insights，导致 Web/GUI 路径 LLM 看不到 Dreaming）。
+        sentiment_brief: 市场情绪表盘（VIX 分位 + CNN）。市场级跨资产相同，session
+            一次性算好传进来；None → 内部调 load_sentiment_brief() fallback。
+        valuation_brief_override: 估值（仅权益类）。per-asset，None → 内部调
+            load_valuation_brief(symbol, price_quantile_2y)。
     """
     def emit(phase: str, **extra: Any) -> None:
         if progress_callback is None:
@@ -446,6 +484,24 @@ def run_committee_for_symbol(
     except Exception as e:  # noqa: BLE001  概率表读失败不能阻断委员会
         log.warning(f"reentry reference 构建失败 graceful 退化空: {e}")
 
+    # 5.8. 确定性事实块（对齐 TradingAgents 维度，非投票 agent）
+    # 情绪表盘：市场级，session 已算好就 override；否则 per-asset fallback
+    if sentiment_brief is not None:
+        effective_sentiment_brief = sentiment_brief
+    else:
+        effective_sentiment_brief = load_sentiment_brief(effective_event_brief)
+    if effective_sentiment_brief:
+        emit("sentiment_brief_loaded", preview=effective_sentiment_brief[:240])
+    # 估值：per-asset，仅权益类出（黄金/商品走 Macro 货币因素返 ""）
+    if valuation_brief_override is not None:
+        effective_valuation_brief = valuation_brief_override
+    else:
+        effective_valuation_brief = load_valuation_brief(
+            symbol, metrics.get("price_quantile_2y"),
+        )
+    if effective_valuation_brief:
+        emit("valuation_brief_loaded", preview=effective_valuation_brief[:240])
+
     # 6. 跑多轮辩论 + CIO
     result = run_committee(
         target,
@@ -457,6 +513,8 @@ def run_committee_for_symbol(
         wealth_context_view=wealth_view,
         reentry_reference=reentry_reference,
         current_price=current_price,
+        sentiment_brief=effective_sentiment_brief,
+        valuation_brief=effective_valuation_brief,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )
@@ -508,6 +566,7 @@ def run_committee_session(
     macro_view_override: Optional[str] = None,
     wealth_view_override: Optional[str] = None,
     portfolio_summary_override: Optional[str] = None,
+    sentiment_brief_override: Optional[str] = None,
     max_workers: int = 4,
     on_asset_error: str = "continue",
 ) -> Dict[str, Any]:
@@ -620,6 +679,16 @@ def run_committee_session(
         macro_view = run_macro_view(str(macro_data), event_brief=event_brief)
         emit("macro_done", macro_preview=macro_view[:240], shared=True)
 
+    # ---- Step 4.4: shared sentiment_brief（市场级情绪表盘，跨资产相同，跑一次）----
+    # VIX 分位 + CNN F&G 是市场级指标，N 资产共享一份，避免每个资产各拉一次 VIX/CNN。
+    # event_brief 已在上面 resolve，传进去给净情绪聚合行（纯计数，无新 IO）。
+    if sentiment_brief_override is not None:
+        sentiment_brief = sentiment_brief_override
+    else:
+        sentiment_brief = load_sentiment_brief(event_brief)
+    if sentiment_brief:
+        emit("sentiment_brief_loaded", preview=sentiment_brief[:240])
+
     # ---- Step 4.5: 构建概率表（共享，只读一次）----
     # 数据源 = 几十年 OHLC 直算（纯算术，0 LLM token），不再用 verdict_review 276 条。
     # 原因：regime→forward return 全是算术，样本量 (asset,regime) 16~80 → 900~4150。
@@ -648,9 +717,12 @@ def run_committee_session(
             event_brief=event_brief,
             wealth_context_view=wealth_view,
             portfolio_summary_override=portfolio_summary_override,
+            sentiment_brief=sentiment_brief,  # 市场级共享，避免每资产各拉 VIX/CNN
             probability_table=prob_table,
             # prior_insights_override 不传 → service 内 load_prior_insights(sym)
             # 每个资产 insights 不同，session 不预加载
+            # valuation_brief_override 不传 → service 内 load_valuation_brief(sym)
+            # 估值 per-asset（不同资产 PE 不同），session 不预加载
         )
 
     def _record_result(sym: str, result: Any, err: Optional[str] = None) -> None:
@@ -705,6 +777,7 @@ def run_committee_session(
         "macro_view": macro_view,
         "wealth_view": wealth_view,
         "event_brief": event_brief,
+        "sentiment_brief": sentiment_brief,
         "asset_committees": asset_committees,
         "errors": errors,
         "audit": {
@@ -712,6 +785,7 @@ def run_committee_session(
             "event_brief_source": event_brief_source,
             "event_brief_attached": bool(event_brief),
             "wealth_view_attached": bool(wealth_view),
+            "sentiment_brief_attached": bool(sentiment_brief),
             "max_debate_rounds": max_debate_rounds,
             "max_workers": effective_workers,
             "started_at": started_at,
