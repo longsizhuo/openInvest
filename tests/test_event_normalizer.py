@@ -83,7 +83,11 @@ def test_normalize_calls_llm_and_attaches_raw_items(monkeypatch):
 
 
 def test_normalize_skips_when_no_api_key(monkeypatch):
+    # normalize() 经 utils.llm.get_llm_config_safe 读 LLM_API_KEY 或 DEEPSEEK_API_KEY
+    # （LLM 配置重构后兼容两者）。两个都删才是真"无 key"，否则全量里 .env 的
+    # LLM_API_KEY 被某模块 load_dotenv 灌进 os.environ → 泄漏 → 本测顺序敏感地红。
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     items = [RawNewsItem(src_name="x", title="t", url="u", snippet="s")]
     assert normalize(items) == []
 
