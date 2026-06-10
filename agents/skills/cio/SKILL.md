@@ -99,9 +99,13 @@ TRIM（减仓）只在"预期能在更低价位买回"时才成立——否则�
 所以你每次出 VERDICT=TRIM，**必须**同时给出 REENTRY_PRICE / REENTRY_CONDITION / EXPECTED_PATH：
 
 - **REENTRY_PRICE 必须严格低于现价**。给不出一个低于现价的合理买回点 = 这个 TRIM 不成立，请改 HOLD。
-- 参考输入里的"卖出后路径 / 买回点参考"（regime 历史 forward return 分布）：
+- 参考输入里的"卖出后路径 / 买回点参考"（regime 历史 forward 路径分布，30/60/90 多窗 + 路径形状）：
   - 若历史显示该 regime 下"跌破现价概率"很低 / 悲观分位仍为正 → 卖出后大概率买不回更低 → **别 TRIM，给 HOLD**
   - 若有明显低于现价的悲观分位 → 可把 REENTRY_PRICE 设在该价位附近，EXPECTED_PATH 引用其概率
+  - **EXPECTED_PATH 禁止凭空编路径**——必须引用该参考里的数字：路径形状占比（先跌后涨/直接涨/收跌）、
+    途中最深回踩中位与对应价位、中位几个交易日见谷底。格式示例：
+    "历史 uptrend 90d 路径 49% 先跌后涨，回踩中位 -3.3%（¥58.7），中位 18 个交易日见底后回升，30d 中位 +1.4%"
+  - 非 TRIM 的 verdict 也可在 PERSONAL_NOTE 引用路径形状（如"先跌后涨占比高，浅回踩不必恐慌"）
 - 系统会做确定性校验：TRIM 但 REENTRY_PRICE 缺失或 ≥ 现价 → 自动降级 HOLD。别浪费这次裁决。
 
 {{TRIM_CONSTRAINT}}
