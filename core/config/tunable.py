@@ -56,6 +56,12 @@ class VerdictConfig:
     # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
     trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
     trim_caution_loss_pct: float = 0.0   # 浮亏 < 此值倾向 HOLD；0 = 不启用
+    # 风险档（2026-06 regime 方向锁消融结论的显式化）：
+    # - steady（默认）= 无方向锁（B 链）：Sharpe 最优、回撤最浅、熊市稳
+    # - aggressive = uptrend 顺势加仓杠杆：HOLD→ACCUMULATE（消融证明 = 纯杠杆，
+    #   牛市 +CR 但 −Sharpe + 深 MaxDD + 熊市更亏；是风险偏好，不是 alpha）
+    # env: INVEST_VERDICT_RISK_PROFILE=aggressive
+    risk_profile: str = "steady"
 
 
 @dataclass(frozen=True)

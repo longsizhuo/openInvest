@@ -882,3 +882,90 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
     assert "CONCENTRATION_PCT: 70.2%" not in risk_view, (
         "覆写不彻底，hallucinated 70.2% 仍在 risk_view"
     )
+
+
+# ---------------------------------------------------------------------------
+# 契约 8: risk_profile 风险档 — run_committee 真把 regime/防御哨兵传进 parse_cio_memo
+# ---------------------------------------------------------------------------
+# 2026-06 拆 regime 方向锁后，uptrend 杠杆保留为显式 config 开关（默认 steady）。
+# 本契约守：aggressive 档下 run_committee 端到端真的会把 HOLD 升级 ACCUMULATE
+# （即 regime_brief 标签 + sentiment_brief 防御哨兵真的接进了 parse_cio_memo）。
+
+def _make_hold_cio_agent_factory(captured: dict):
+    class FakeAgent:
+        def __init__(self, role):
+            self._role = role
+
+        def run(self, ctx):
+            captured[self._role] = ctx
+            if self._role == "quant":
+                return "REGIME: uptrend\nSIGNAL: neutral\nSTRENGTH: 4\nONE_LINER: x\n"
+            if self._role == "risk":
+                return "SIGNAL: ok\nSTRENGTH: 3\nONE_LINER: x\n"
+            if self._role == "cio":
+                return (
+                    "VERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\n"
+                    "SUGGESTED_ALLOC_CNY: 0\n"
+                )
+            return ""
+    return lambda _p, **kw: FakeAgent(kw.get("role"))
+
+
+def test_run_committee_applies_aggressive_risk_profile(monkeypatch):
+    """aggressive + uptrend regime_brief → 最终 verdict 升级 ACCUMULATE（端到端）"""
+    from core import committee as cmt
+    from core.config import reset_config, set_config_override
+
+    reset_config()
+    set_config_override({"verdict": {"risk_profile": "aggressive"}})
+    try:
+        captured: dict = {}
+        monkeypatch.setattr(cmt, "_create_agent", _make_hold_cio_agent_factory(captured))
+        monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+        result = cmt.run_committee(
+            asset={"symbol": "NDQ.AX", "display_name": "Test"},
+            market_data="fake market",
+            macro_view="fake macro",
+            portfolio_summary="用户风险偏好: Balanced\n",
+            regime_brief="REGIME: uptrend\nREASON: x\nSTRATEGY_HINT: x",
+            max_debate_rounds=1,
+        )
+        assert result["verdict"]["verdict"] == "ACCUMULATE", (
+            "aggressive 档下 uptrend+HOLD 没升级 — regime 标签没接进 parse_cio_memo？"
+        )
+        assert result["verdict"]["_risk_profile_applied"] == (
+            "aggressive_uptrend_hold_to_accumulate"
+        )
+    finally:
+        reset_config()
+
+
+def test_run_committee_defense_flag_blocks_aggressive(monkeypatch):
+    """sentiment_brief 含 INDEP_DEFENSE_FLAG: on → aggressive 杠杆被哨兵拦下（端到端）"""
+    from core import committee as cmt
+    from core.config import reset_config, set_config_override
+
+    reset_config()
+    set_config_override({"verdict": {"risk_profile": "aggressive"}})
+    try:
+        captured: dict = {}
+        monkeypatch.setattr(cmt, "_create_agent", _make_hold_cio_agent_factory(captured))
+        monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+        result = cmt.run_committee(
+            asset={"symbol": "NDQ.AX", "display_name": "Test"},
+            market_data="fake market",
+            macro_view="fake macro",
+            portfolio_summary="用户风险偏好: Balanced\n",
+            regime_brief="REGIME: uptrend\nREASON: x\nSTRATEGY_HINT: x",
+            sentiment_brief=(
+                "FEAR_GREED_GAUGE: VIX=35.0 (近2年分位 99%) → extreme_fear\n"
+                "INDEP_DEFENSE_FLAG: on  # 快崩哨兵"
+            ),
+            max_debate_rounds=1,
+        )
+        assert result["verdict"]["verdict"] == "HOLD", (
+            "防御哨兵 on 时 aggressive 杠杆必须被拦下 — defense_flag_on 没接进 parse_cio_memo？"
+        )
+        assert "_risk_profile_applied" not in result["verdict"]
+    finally:
+        reset_config()

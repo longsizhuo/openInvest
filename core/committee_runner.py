@@ -13,6 +13,7 @@ from core.committee import (
     load_wealth_context_view,
     parse_cio_memo,  # re-export: 给 entry (scripts.skill cmd_save_committee) 用，
                      # 避免 entry 直接 import core.committee 违反 lint-imports 契约
+    regime_label_from_text,  # re-export: 同上，cmd_save_committee 提 regime 标签用
     run_committee,
     run_macro_view,
 )
