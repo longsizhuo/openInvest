@@ -209,6 +209,9 @@ REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
 EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
 # regime 标签（format_regime_brief 输出首行 / coordinator transcript 里的同款行）
 REGIME_LABEL_RE = re.compile(r"^REGIME:\s*([a-z_]+)\s*$", re.MULTILINE)
+# 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS/THRESHOLDS 行提取
+ATR_PCT_RE = re.compile(r"\batr_pct=([\d.]+)")
+ATR_CRASH_THRESHOLD_RE = re.compile(r"\bcrash_atr_pct_min=([\d.]+)")
 
 
 def regime_label_from_text(text: str) -> Optional[str]:
@@ -219,6 +222,24 @@ def regime_label_from_text(text: str) -> Optional[str]:
     """
     m = REGIME_LABEL_RE.search(text or "")
     return m.group(1) if m else None
+
+
+def atr_defense_from_text(text: str) -> bool:
+    """从 coordinator transcript 判断独立快崩防御的 ATR 腿是否触发。
+
+    transcript 里粘有 format_regime_brief 的确定性输出：
+    `INPUTS: ..., atr_pct=6.0000, ...` + `THRESHOLDS...: ..., crash_atr_pct_min=5.00`。
+    两个值都在（且 atr_pct ≥ 阈值）才触发；缺任一 → False（graceful，不阻断解析）。
+    direct 路径不走这里——run_committee_for_symbol 直接从 metrics 算。
+    """
+    m_atr = ATR_PCT_RE.search(text or "")
+    m_thr = ATR_CRASH_THRESHOLD_RE.search(text or "")
+    if not (m_atr and m_thr):
+        return False
+    try:
+        return float(m_atr.group(1)) >= float(m_thr.group(1))
+    except ValueError:
+        return False
 
 
 # ============ Sanity-check 阈值（单点维护，便于调参）============
@@ -381,6 +402,27 @@ def parse_cio_memo(
                 "parse_cio_memo: TRIM 但买回点%s → 强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）",
                 "缺失" if rp is None else f"¥{rp} ≥ 现价 ¥{current_price}",
             )
+
+    # 独立快崩防御（Defense check）: VIX 哨兵（市场级）/ ATR 飙升（资产级）任一
+    # 触发 → 确定性降级买侧 verdict。把 CIO SKILL 里的降级规则从 prompt 搬进代码强制。
+    # 背景：MA120 regime 看不见快速崩盘（COVID 全程被分类 uptrend），原 crash 锁因
+    # 双条件（ATR + 30d 回撤确认）永不触发——防御必须独立于 regime、只取快腿。
+    # 只拦"往快崩里加仓"，不强制卖出：VIX/ATR 飙升常在恐慌底部，确定性强制卖出
+    # 反而高买低卖；卖出判断留给委员会。
+    if defense_flag_on and out["verdict"] in ("BUY", "ACCUMULATE"):
+        out.setdefault("_original_verdict", out["verdict"])
+        if out["verdict"] == "BUY":
+            out["_defense_downgrade"] = "buy_to_accumulate"
+            out["verdict"] = "ACCUMULATE"
+        else:
+            out["_defense_downgrade"] = "accumulate_to_hold"
+            out.setdefault("_original_alloc", out["alloc_cny"])
+            out["verdict"] = "HOLD"
+            out["alloc_cny"] = 0
+        log.warning(
+            "parse_cio_memo: 快崩防御触发（VIX 哨兵/ATR 飙升）→ %s（确定性降级，独立于 regime）",
+            out["_defense_downgrade"],
+        )
 
     # 风险档 aggressive: uptrend 顺势加仓杠杆（显式风险偏好，不是 regime 智能）。
     # 2026-06 消融结论：原 prompt 层 uptrend 方向锁 = 纯杠杆（牛市 +CR，代价
@@ -674,6 +716,7 @@ def run_committee(
     sentiment_brief: str = "",
     valuation_brief: str = "",
     *,
+    atr_defense_on: bool = False,
     persist_to_memory: bool = True,
     max_debate_rounds: int = 1,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -682,6 +725,10 @@ def run_committee(
 
     Args:
         regime_brief: core.regime.format_regime_brief 的输出
+        atr_defense_on: 独立快崩防御的 ATR 腿（资产级，atr_pct ≥ per-asset
+            crash_atr_pct_min，调用方 run_committee_for_symbol 算好传入）。
+            与 sentiment_brief 里的 VIX 哨兵（市场级）OR 后进 parse_cio_memo
+            做确定性买侧降级。
         max_debate_rounds: cross-challenge 轮数上限。
             - 1 = 旧行为（仅 1 轮 Round 2 cross-challenge），daily_report 用
             - 4 = 真讨论模式（live 端点用），允许 4 轮拉锯，收敛后提前退出
@@ -875,10 +922,12 @@ def run_committee(
         report.cio_memo,
         solvency_strong=_solvency_strong,
         current_price=current_price,
-        # risk_profile 后处理输入：regime 标签来自确定性 regime_brief 首行；
-        # 防御哨兵来自确定性 sentiment_brief（INDEP_DEFENSE_FLAG）
+        # risk_profile / 快崩防御 后处理输入：regime 标签来自确定性 regime_brief
+        # 首行；防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 腿（资产级, 调用方算好）
         regime=regime_label_from_text(regime_brief),
-        defense_flag_on="INDEP_DEFENSE_FLAG: on" in sentiment_brief,
+        defense_flag_on=(
+            "INDEP_DEFENSE_FLAG: on" in sentiment_brief or atr_defense_on
+        ),
     )
 
     debate_meta = {
@@ -1030,4 +1079,5 @@ __all__ = [
     "run_committee",
     "parse_cio_memo",
     "regime_label_from_text",
+    "atr_defense_from_text",
 ]
