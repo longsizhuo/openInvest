@@ -599,6 +599,25 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
     from core.committee_runner import load_wealth_context_view
     wealth_view = load_wealth_context_view()
 
+    # 2026-06-11 漂移修复（coordinator 防御链对齐）: direct 路径在 service layer
+    # 加载的确定性事实块，coordinator 路径此前没产出 —— CIO 看不到 VALUATION/
+    # MARKET SENTIMENT（INDEP_DEFENSE_FLAG 不进 transcript → save_committee 的
+    # 确定性防御降级永不触发）、EXPECTED_PATH 没有路径参考可引用。
+    # 与 run_committee_for_symbol step 5.8 同源 loader（graceful 退化空串）。
+    from core.committee_runner import load_sentiment_brief, load_valuation_brief
+    sentiment_brief = load_sentiment_brief()
+    valuation_brief = load_valuation_brief(
+        target["symbol"], metrics.get("price_quantile_2y"),
+    )
+    reentry_reference = ""
+    try:
+        from core.regime_probability import build_reentry_reference_text
+        reentry_reference = build_reentry_reference_text(
+            target["symbol"], _regime_for_hint, metrics.get("current_price"),
+        )
+    except Exception:  # noqa: BLE001  路径参考读失败不阻断 prepare
+        pass
+
     out = {
         "asset": target,
         "portfolio_summary": portfolio_summary,
@@ -606,6 +625,12 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
         "macro_data": macro_data,
         "market_data": market,
         "regime_brief": regime_brief,  # Claude worker 必须把这个塞进 Quant Round 1/2 prompt
+        # 确定性事实块（2026-06）: sentiment 进 Quant+CIO（INDEP_DEFENSE_FLAG 必须
+        # 原样进 transcript，save_committee 靠它做防御降级）；valuation 仅权益类非空
+        "sentiment_brief": sentiment_brief,
+        "valuation_brief": valuation_brief,
+        # CIO 的"卖出后路径/买回点参考"（30/60/90 多窗+路径形状），EXPECTED_PATH 必须引用
+        "reentry_reference": reentry_reference,
         "gold_snapshot": gold_ctx,
         "prior_insights": insights,
         "prompts": {
@@ -624,10 +649,13 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             "  Round 1 - 独立陈述: Macro (跨资产共享) + Quant + Risk Officer 各自看自己的数据\n"
             "  Round 2 - 横向交流: Quant 看到 Risk 报告后调整 + Risk 看到 Quant 报告后调整\n"
             "  Round 3 - CIO 综合 4 份输出 + portfolio_summary，输出完整 memo\n"
-            "**Quant 必须塞 regime_brief**: 召唤 Quant Round 1/2 worker 时，prompt 模板:\n"
+            "**Quant 必须塞 regime_brief + 确定性事实块**: 召唤 Quant Round 1/2 worker 时，prompt 模板:\n"
             '  "<paste prompts.quant_round1>\\n\\n# 市场 Regime:\\n<paste regime_brief>'
+            '\\n\\n# 估值 (确定性事实):\\n<paste valuation_brief>'
+            '\\n\\n# 市场情绪表盘 (确定性事实):\\n<paste sentiment_brief>'
             '\\n\\n# 市场数据:\\n<paste market_data>"\n'
             "  Quant 基于 regime 概率口径 + 当前指标自行判断 SIGNAL（无方向硬锁；集中度归 Risk 管）。\n"
+            "  valuation_brief 为空串=非权益类（黄金等走 Macro 货币因素），该段跳过。\n"
             "**Risk Officer 必须塞 wealth_context_view**（2026-05-18 漂移修复）:\n"
             '  "<paste prompts.risk_round1>\\n\\n# 用户持仓:\\n<paste portfolio_summary>'
             '\\n\\n# Wealth Context (off-portfolio 真实流动性):\\n<paste wealth_context_view>'
@@ -635,6 +663,13 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
             "  确保 Risk Officer 能拿到 SOLVENCY_BUFFER_LEVEL（family_backup_available\n"
             "  + account_purpose 折算后的真实流动性等级），不按 PWM 老逻辑误判超配。\n"
             "  Round 2 Risk 同样塞，让升级判断仍基于正确的 buffer level。\n"
+            "**CIO 必须塞确定性事实块 + 路径参考**（2026-06 防御链/路径化）: CIO prompt 末尾追加:\n"
+            '  "\\n\\n=== VALUATION (确定性事实，必须纳入) ===\\n<paste valuation_brief>'
+            '\\n\\n=== MARKET SENTIMENT 表盘 (确定性事实，必须纳入) ===\\n<paste sentiment_brief>'
+            '\\n\\n=== 卖出后路径 / 买回点参考 ===\\n<paste reentry_reference>"\n'
+            "  ⚠️ sentiment_brief 的 INDEP_DEFENSE_FLAG 行和 regime_brief 的 INPUTS 行\n"
+            "  （含 atr_spike_ratio）必须**原样**进最终 transcript —— save_committee 靠\n"
+            "  这些确定性行做防御降级/风险档后处理，缺了整条防御链失效。\n"
             "请依次扮演 6 段输出，用以下分隔符：\n"
             "=== MACRO ===\n=== QUANT_R1 ===\n=== RISK_R1 ===\n"
             "=== QUANT_R2 ===\n=== RISK_R2 ===\n=== CIO ===\n"
