@@ -1086,3 +1086,130 @@ def test_run_committee_atr_defense_downgrades_accumulate(monkeypatch):
     )
     assert v["_defense_downgrade"] == "accumulate_to_hold"
     assert v["alloc_cny"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 契约 10: per-asset EVENT_STANCE 行 — Service 层真把该资产的事件净情绪附进 sentiment
+# ---------------------------------------------------------------------------
+# 驱动标的来自 strategy.target_assets 动态解析（无硬编码持仓标的——本测试故意用
+# 虚构 TEST.AX：若链路任何地方写死真实持仓，此测试必红）。
+
+def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
+    """event_brief 含 [TEST.AX] 头行 → run_committee 收到的 sentiment_brief
+    同时含市场级基座 SENTINEL 和 EVENT_STANCE(TEST.AX) 行"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    SENTINEL_SENT = "SENTIMENT_BASE_SENTINEL_qqq"
+    FAKE_BRIEF = (
+        "[2026-06-10T08:00:00+00:00] [risk/high] [TEST.AX] (sources: reuters)\n"
+        "fake bad news\n\n"
+        "[2026-06-09T08:00:00+00:00] [opportunity/mid] [UNRELATED=F]\n"
+        "irrelevant good news\n"
+    )
+
+    monkeypatch.setattr("core.committee_runner.load_sentiment_brief",
+                        lambda *a, **k: SENTINEL_SENT)
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: FAKE_BRIEF)
+    monkeypatch.setattr("core.committee_runner.load_valuation_brief",
+                        lambda *a, **k: "")
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+                        lambda *a, **kw: "")
+
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("core.committee_runner.get_history_data",
+                        lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+
+    from core.committee_runner import run_committee_session
+    run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    assert captured, "run_committee 未被调用"
+    sb = captured[0].get("sentiment_brief") or ""
+    assert SENTINEL_SENT in sb, "市场级 sentiment 基座丢了"
+    assert "EVENT_STANCE(TEST.AX): net risk" in sb, (
+        "per-asset EVENT_STANCE 行没附上 — 检查 run_committee_for_symbol step 5.8"
+    )
+    assert "UNRELATED" not in sb.split("EVENT_STANCE(TEST.AX)")[1], (
+        "per-asset 行混入了无关资产的事件"
+    )
+
+
+def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
+    """sentiment 基座为空（VIX 拿不到整块降级）→ 不附 per-asset 行（守降级红线）"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    FAKE_BRIEF = "[2026-06-10T08:00:00+00:00] [risk/high] [TEST.AX]\nbad\n"
+    monkeypatch.setattr("core.committee_runner.load_sentiment_brief",
+                        lambda *a, **k: "")
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+                        lambda syms: FAKE_BRIEF)
+    monkeypatch.setattr("core.committee_runner.load_valuation_brief",
+                        lambda *a, **k: "")
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view",
+                        lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+                        lambda *a, **kw: "")
+
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("core.committee_runner.get_history_data",
+                        lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+
+    from core.committee_runner import run_committee_session
+    run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    assert captured
+    assert (captured[0].get("sentiment_brief") or "") == "", (
+        "基座空时不许附 per-asset 行（VIX 降级红线）"
+    )

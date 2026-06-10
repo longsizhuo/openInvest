@@ -152,3 +152,122 @@ def test_vix_thresholds_come_from_config(monkeypatch):
         assert "fear" in brief2
     finally:
         reset_config()
+
+
+# ---------- EVENT_STANCE 升级（默认=纯计数等价；加权/衰减经验证前禁用） ----------
+
+def _stance_cfg(**kw):
+    from core.config import set_config_override
+    set_config_override({"sentiment": kw})
+
+
+@pytest.fixture(autouse=True)
+def _reset_cfg():
+    from core.config import reset_config
+    reset_config()
+    yield
+    reset_config()
+
+
+BRIEF_3 = (
+    "[2026-05-13T14:32:00+00:00] [risk/high] [FAKE.AX, NVDA] (sources: reuters)\n"
+    "bad news\n\n"
+    "[2026-05-12T08:00:00Z] [risk/mid] [OTHER=F]\nmore risk\n\n"
+    "[2026-05-11T08:00:00Z] [opportunity/mid] [OTHER=F]\ngood news\n"
+)
+
+
+def test_event_stance_default_config_identical_to_legacy_counting():
+    """等价性守门：默认配置（等权+无衰减+band 0）输出与旧纯计数版逐字一致。
+
+    谁要改 defaults.yaml 的 event_stance_* 而没过 eval_event_stance.py 验证，
+    本测试红给他看。
+    """
+    from utils.sentiment import _event_stance_line
+
+    line = _event_stance_line(BRIEF_3)
+    # 旧实现的逐字输出
+    assert line == "EVENT_STANCE: net risk (risk=2 opportunity=1, 来自近期事件层)"
+
+
+def test_event_stance_severity_weight_overrides_count():
+    """开加权（w 1/2/3）后：1 条 risk/high 压过 2 条 opportunity/low"""
+    from utils.sentiment import _event_stance_line
+
+    _stance_cfg(event_stance_w_low=1.0, event_stance_w_mid=2.0, event_stance_w_high=3.0)
+    brief = (
+        "[2026-05-13T00:00:00Z] [risk/high] [A]\nx\n\n"
+        "[2026-05-12T00:00:00Z] [opportunity/low] [A]\nx\n\n"
+        "[2026-05-11T00:00:00Z] [opportunity/low] [A]\nx\n"
+    )
+    line = _event_stance_line(brief)
+    # score = -3 + 1 + 1 = -1 → net risk（纯计数会给 opportunity）
+    assert "net risk" in line
+    assert "score=-1.0" in line  # 加权开启后显示 score
+
+
+def test_event_stance_decay_flips_net(monkeypatch):
+    """开衰减后：3 条旧 opportunity 衰减殆尽，1 条新 risk 主导"""
+    from datetime import datetime, timezone
+    import utils.sentiment as st
+
+    fresh = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    brief = (
+        f"[2026-06-10T11:00:00+00:00] [risk/mid] [A]\nfresh risk\n\n"
+        f"[2026-05-25T00:00:00+00:00] [opportunity/mid] [A]\nold\n\n"
+        f"[2026-05-24T00:00:00+00:00] [opportunity/mid] [A]\nold\n\n"
+        f"[2026-05-23T00:00:00+00:00] [opportunity/mid] [A]\nold\n"
+    )
+    entries = st._parse_event_brief_entries(brief)
+
+    # 默认（无衰减）：3 opp vs 1 risk → net opportunity
+    score, risk, opp = st._stance_score(entries, now=fresh)
+    assert (risk, opp) == (1, 3) and score > 0
+
+    # half_life=24h：16 天前的 opportunity 衰减到 ~0 → net risk
+    _stance_cfg(event_stance_half_life_hours=24.0)
+    score2, _, _ = st._stance_score(entries, now=fresh)
+    assert score2 < 0
+
+
+def test_event_stance_unparseable_ts_no_crash():
+    """ts 烂掉（空/非 ISO）不抛异常，按无衰减计"""
+    from utils.sentiment import _event_stance_line
+
+    _stance_cfg(event_stance_half_life_hours=24.0)  # 衰减开着也不能炸
+    brief = (
+        "[] [risk/mid] [A]\nno ts\n\n"
+        "[not-a-date] [opportunity/low] [B]\nbad ts\n"
+    )
+    line = _event_stance_line(brief)
+    assert line is not None and "risk=1 opportunity=1" in line
+
+
+def test_event_stance_nonstandard_text_falls_back_to_counting():
+    """非标准 override 文本（无完整头行）→ 退化旧纯计数，不丢行为"""
+    from utils.sentiment import _event_stance_line
+
+    line = _event_stance_line("自由文本提到 [risk/high] 和 [risk/mid] 没有头行结构")
+    assert line == "EVENT_STANCE: net risk (risk=2 opportunity=0, 来自近期事件层)"
+
+
+def test_event_stance_line_for_symbol_filters():
+    """per-asset 行：只统计 [syms] 含该 symbol 的事件；任意虚构 ticker 通用"""
+    from utils.sentiment import event_stance_line_for_symbol
+
+    line_fake = event_stance_line_for_symbol(BRIEF_3, "FAKE.AX")
+    assert line_fake is not None
+    assert line_fake.startswith("EVENT_STANCE(FAKE.AX): net risk")
+    assert "risk=1 opportunity=0" in line_fake
+
+    line_other = event_stance_line_for_symbol(BRIEF_3, "OTHER=F")
+    assert "net neutral" in line_other  # 1 risk vs 1 opportunity 打平
+    assert "risk=1 opportunity=1" in line_other
+
+
+def test_event_stance_line_for_symbol_no_match_returns_none():
+    from utils.sentiment import event_stance_line_for_symbol
+
+    assert event_stance_line_for_symbol(BRIEF_3, "MISSING.SYM") is None
+    assert event_stance_line_for_symbol("", "FAKE.AX") is None
+    assert event_stance_line_for_symbol(BRIEF_3, "") is None
