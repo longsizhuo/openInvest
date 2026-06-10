@@ -140,3 +140,49 @@ def test_normalize_continues_on_batch_failure(monkeypatch):
         out = normalize(items, skip_embedding=True)
     assert len(out) == 1
     assert out[0].raw_idx == 25
+
+
+# ---------- 确定性 entity→symbol 兜底映射（黄金事件覆盖，待办5） ----------
+
+def test_sanitize_gold_entity_maps_to_gcf():
+    """entities 含 gold/central_bank_gold + affected 为空 → 兜底补 GC=F"""
+    ne = _sanitize_event({
+        "idx": 0, "one_line_claim": "PBoC adds 30 tonnes of gold to reserves",
+        "stance": "opportunity", "severity": "mid",
+        "entities": ["pboc", "central_bank_gold", "gold"],
+        "affected_symbols": [],
+    }, offset=0)
+    assert ne is not None
+    assert "GC=F" in ne.event["affected_symbols"]
+
+
+def test_sanitize_gold_already_present_no_duplicate():
+    ne = _sanitize_event({
+        "idx": 0, "one_line_claim": "gold ETF inflows hit record",
+        "stance": "opportunity", "severity": "mid",
+        "entities": ["gold_etf_flows", "gold"],
+        "affected_symbols": ["GC=F"],
+    }, offset=0)
+    assert ne.event["affected_symbols"].count("GC=F") == 1
+
+
+def test_sanitize_goldman_sachs_not_mapped():
+    """词边界守门：goldman 含子串 gold 但 \\bgold\\b 不命中 → 不映射到金价"""
+    ne = _sanitize_event({
+        "idx": 0, "one_line_claim": "Goldman Sachs beats earnings estimates",
+        "stance": "opportunity", "severity": "mid",
+        "entities": ["goldman sachs", "banks"],
+        "affected_symbols": ["GS"],
+    }, offset=0)
+    assert "GC=F" not in ne.event["affected_symbols"]
+    assert ne.event["affected_symbols"] == ["GS"]
+
+
+def test_sanitize_bullion_and_xau_map():
+    for ent in ("bullion", "xau"):
+        ne = _sanitize_event({
+            "idx": 0, "one_line_claim": "x",
+            "stance": "neutral", "severity": "low",
+            "entities": [ent], "affected_symbols": [],
+        }, offset=0)
+        assert "GC=F" in ne.event["affected_symbols"], ent

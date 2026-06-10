@@ -193,3 +193,47 @@ def test_holdings_snapshot_pnl_uses_quote_currency(monkeypatch):
     assert entry["pnl_pct"] == pytest.approx(1000.28 / 1008.33 - 1.0, abs=1e-6)
     assert entry["pnl_pct"] < 0
     assert abs(entry["pnl_pct"]) < 0.05
+
+
+# ---------- 黄金常驻 queries（待办5）：持金才追加，持仓列表动态读 PM ----------
+
+class _FakeHoldings:
+    def __init__(self, symbols):
+        self._symbols = symbols
+
+    def all(self):
+        return [{"symbol": s} for s in self._symbols]
+
+
+class _FakePM:
+    def __init__(self, holdings=(), watching=()):
+        self.holdings = _FakeHoldings(list(holdings))
+        self.strategy = {"target_assets": [{"symbol": s} for s in watching]}
+        self.user = {"wealth_context": {}}
+
+
+def test_gold_standing_queries_added_when_holding_gold(monkeypatch):
+    import core.portfolio_manager as pm_mod
+    monkeypatch.setattr(pm_mod, "PortfolioManager", lambda: _FakePM(holdings=["GC=F"]))
+    ctx = event_watch._load_user_context()
+    for q in event_watch._GOLD_STANDING_QUERIES:
+        assert q in ctx["queries"], q
+
+
+def test_gold_standing_queries_added_for_gold_etf_watcher(monkeypatch):
+    """关注（未必持有）金 ETF 代理（如 GLD）也算持金语义"""
+    import core.portfolio_manager as pm_mod
+    monkeypatch.setattr(pm_mod, "PortfolioManager",
+                        lambda: _FakePM(watching=["GLD", "AAPL"]))
+    ctx = event_watch._load_user_context()
+    assert "central bank gold purchases" in ctx["queries"]
+
+
+def test_gold_standing_queries_absent_without_gold(monkeypatch):
+    """不持金的用户不抓金新闻（anti-noise）"""
+    import core.portfolio_manager as pm_mod
+    monkeypatch.setattr(pm_mod, "PortfolioManager",
+                        lambda: _FakePM(holdings=["AAPL"], watching=["NVDA"]))
+    ctx = event_watch._load_user_context()
+    for q in event_watch._GOLD_STANDING_QUERIES:
+        assert q not in ctx["queries"], q
