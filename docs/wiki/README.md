@@ -27,7 +27,8 @@
 4. [11-rl-training.md](11-rl-training.md) —— Optuna + paper trade + 训练 pipeline（**澄清：不是 GPU 训练**）
 5. [12-verification.md](12-verification.md) —— 实测数据 / "科学证据" / negative results
 6. [13-param-tuning-feasibility.md](13-param-tuning-feasibility.md) —— 参数调优可行性诊断 + [补充文档](13-param-tuning-feasibility-addendum.md)
-7. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
+7. [15-path-probability.md](15-path-probability.md) —— 概率表路径化：多窗分布 + 四类路径形状（卖出时机的核心读数）
+8. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
 ### 🎨 我是设计师 / 前端，想改 GUI
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA

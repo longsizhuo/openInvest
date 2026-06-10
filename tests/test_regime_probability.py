@@ -403,14 +403,23 @@ def test_compute_regime_return_frame_path_columns_exact():
     df = pd.DataFrame({"Close": close}, index=idx)
 
     frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
-    for col in ("min_30d", "tmin_30d", "atr_pct"):
+    for col in ("min_30d", "tmin_30d", "max_30d", "tmax_30d",
+                "persist_30d", "wdays_30d", "atr_pct"):
         assert col in frame.columns, col
 
     i = 150  # warmup 后、lookahead 充足的行
     assert abs(frame["min_30d"].iat[i] - (close[i + 1] / close[i] - 1)) < 1e-12
     assert frame["tmin_30d"].iat[i] == 1
+    # 严格递增：窗内最高点 = 窗末（freq=D → date+30 天 = 第 i+30 行）
+    assert abs(frame["max_30d"].iat[i] - (close[i + 30] / close[i] - 1)) < 1e-12
+    assert frame["tmax_30d"].iat[i] == 30
+    # 单调序列 regime 不切换 → persist == 窗内交易日数（含当日 = 31）
+    assert frame["wdays_30d"].iat[i] == 31
+    assert frame["persist_30d"].iat[i] == 31
     # 尾部 lookahead 不足 → NaN（与 fwd 同口径）
     assert pd.isna(frame["min_30d"].iat[n - 1])
+    assert pd.isna(frame["max_30d"].iat[n - 1])
+    assert pd.isna(frame["persist_30d"].iat[n - 1])
 
 
 def test_get_path_profile_multi_window_and_shape(monkeypatch):
@@ -448,11 +457,16 @@ def test_get_path_profile_multi_window_and_shape(monkeypatch):
         assert st["effective_n"] == max(1, st["n"] // int(w.rstrip("d")))
     shape = p["shape"]
     assert shape is not None and shape["window"] == "90d"
-    total = shape["pct_dip_then_up"] + shape["pct_up_no_dip"] + shape["pct_down"]
+    total = (shape["pct_dip_then_up"] + shape["pct_up_no_dip"]
+             + shape["pct_pop_then_down"] + shape["pct_down_no_pop"])
     # 各占比独立四位小数舍入 → 和的容差放到 1e-3
-    assert abs(total - 1.0) < 1e-3, "三种路径形状必须构成完备分布"
+    assert abs(total - 1.0) < 1e-3, "四种路径形状必须构成完备分布"
     assert shape["dip_p25_pct"] <= shape["dip_median_pct"]  # 深四分位更悲观
+    assert shape["pop_p75_pct"] >= shape["pop_median_pct"]  # 高四分位更乐观
     assert shape["days_to_trough_median"] >= 1
+    assert shape["days_to_peak_median"] >= 1
+    # 窗内 regime 持续不可能超过窗长
+    assert 1 <= shape["regime_persist_median_days"] <= shape["window_median_days"]
 
 
 def test_get_path_profile_straight_up_no_dip(monkeypatch):
@@ -477,7 +491,54 @@ def test_get_path_profile_straight_up_no_dip(monkeypatch):
     assert p is not None and p["shape"] is not None
     assert p["shape"]["pct_up_no_dip"] == 1.0
     assert p["shape"]["pct_dip_then_up"] == 0.0
-    assert p["shape"]["pct_down"] == 0.0
+    assert p["shape"]["pct_pop_then_down"] == 0.0
+    assert p["shape"]["pct_down_no_pop"] == 0.0
+    # 单边上行 regime 全程不切换 → persist == 窗长
+    assert p["shape"]["regime_persist_median_days"] == p["shape"]["window_median_days"]
+
+
+def test_get_path_profile_pop_then_down(monkeypatch):
+    """合成冲高回落：每个窗内先涨 ~8% 再跌穿起点 → 冲高回落占比主导。
+
+    这是卖出时机的核心读数——min 轴看不见它（途中没怎么跌），必须靠 max 轴。
+    """
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import get_path_profile
+
+    # 锯齿：60 个交易日一个周期，前 25 天 +8%、后 35 天 −12%（期末低于起点），
+    # 叠加在缓慢下行的大趋势上 → 多数 90d 窗"先给高点再收跌"
+    n = 720
+    idx = pd.date_range("2015-01-01", periods=n, freq="D")
+    cycle = np.concatenate([
+        np.linspace(0, 0.08, 25), np.linspace(0.08, -0.04, 35),
+    ])
+    waves = np.tile(cycle, n // 60 + 1)[:n]
+    close = 100.0 * (1 + waves) * (0.9995 ** np.arange(n))
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+
+    from core.regime_probability import compute_regime_return_frame
+    frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
+    regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
+
+    p = get_path_profile("TEST", regime)
+    assert p is not None and p["shape"] is not None
+    sh = p["shape"]
+    # 收跌的窗里，绝大多数途中给过显著高点（冲高回落 >> 一路收跌）
+    down_total = sh["pct_pop_then_down"] + sh["pct_down_no_pop"]
+    assert down_total > 0.3, f"锯齿+下行应有大量收跌窗，实际 {down_total}"
+    assert sh["pct_pop_then_down"] > sh["pct_down_no_pop"], (
+        f"冲高回落应主导收跌支：pop_then_down={sh['pct_pop_then_down']} "
+        f"vs down_no_pop={sh['pct_down_no_pop']}"
+    )
+    assert sh["pop_median_pct"] > 0  # 途中冲高中位为正
 
 
 def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
@@ -507,5 +568,7 @@ def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
     assert "30d" in txt and "60d" in txt and "90d" in txt
     assert "路径形状" in txt
     assert "先跌后涨" in txt
-    assert "见谷底" in txt
+    assert "冲高回落" in txt and "一路收跌" in txt  # 四类（卖出时机靠 max 轴）
+    assert "见谷底" in txt and "见顶" in txt
+    assert "regime 中位持续" in txt  # 持续中位标注（防形状混 regime 切换误读）
     assert "¥1,000.00" in txt  # 现价行
