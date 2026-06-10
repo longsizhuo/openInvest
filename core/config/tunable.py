@@ -18,6 +18,10 @@ class RegimeConfig:
     crash_atr_pct_min: float = 5.0
     crash_drawdown_30d_pct: float = 20.0
     crash_deep_drawdown_30d_pct: float = 30.0
+    # 独立快崩防御的 ATR 腿（与 crash 分类解耦：分类不读它，调防御灵敏度
+    # 不影响 regime 判定）。默认 = crash_atr_pct_min 现值，行为不变；
+    # 调优走 scripts/tune_defense_thresholds.py 的确定性 sweep。
+    defense_atr_pct_min: float = 5.0
     # 簇 2: Trend 趋势（半独立）
     trend_ma_spread_pct: float = 3.0
     # 簇 3: Recovery 判定（紧密耦合）
@@ -37,6 +41,7 @@ class RegimePerAssetConfig:
     """
     trend_ma_spread_pct: float | None = None
     crash_atr_pct_min: float | None = None
+    defense_atr_pct_min: float | None = None
 
 
 @dataclass(frozen=True)

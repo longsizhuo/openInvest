@@ -6,16 +6,18 @@ regime:
   crash_atr_pct_min: 5.0
   crash_drawdown_30d_pct: 20.0
   crash_deep_drawdown_30d_pct: 30.0
+  # 独立快崩防御 ATR 腿（与 crash 分类解耦，分类不读它）
+  defense_atr_pct_min: 5.0
   trend_ma_spread_pct: 3.0
   recovery_rebound_pct: 10.0
   recovery_quantile_max: 0.50
   low_quantile_threshold: 0.20
   high_quantile_threshold: 0.80
   per_asset:
-    GC=F: { trend_ma_spread_pct: 5.0, crash_atr_pct_min: 3.5 }
+    GC=F: { trend_ma_spread_pct: 5.0, crash_atr_pct_min: 3.5, defense_atr_pct_min: 3.5 }
     NDQ.AX: { trend_ma_spread_pct: 4.0 }
-    BTC-USD: { trend_ma_spread_pct: 8.0, crash_atr_pct_min: 8.0 }
-    ETH-USD: { trend_ma_spread_pct: 8.0, crash_atr_pct_min: 8.0 }
+    BTC-USD: { trend_ma_spread_pct: 8.0, crash_atr_pct_min: 8.0, defense_atr_pct_min: 8.0 }
+    ETH-USD: { trend_ma_spread_pct: 8.0, crash_atr_pct_min: 8.0, defense_atr_pct_min: 8.0 }
 
 verdict:
   buy_confidence_overdrive: 0.95

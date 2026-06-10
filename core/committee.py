@@ -209,9 +209,8 @@ REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
 EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
 # regime 标签（format_regime_brief 输出首行 / coordinator transcript 里的同款行）
 REGIME_LABEL_RE = re.compile(r"^REGIME:\s*([a-z_]+)\s*$", re.MULTILINE)
-# 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS/THRESHOLDS 行提取
+# 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS 行提取 atr_pct
 ATR_PCT_RE = re.compile(r"\batr_pct=([\d.]+)")
-ATR_CRASH_THRESHOLD_RE = re.compile(r"\bcrash_atr_pct_min=([\d.]+)")
 
 
 def regime_label_from_text(text: str) -> Optional[str]:
@@ -224,20 +223,21 @@ def regime_label_from_text(text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def atr_defense_from_text(text: str) -> bool:
+def atr_defense_from_text(text: str, symbol: Optional[str] = None) -> bool:
     """从 coordinator transcript 判断独立快崩防御的 ATR 腿是否触发。
 
-    transcript 里粘有 format_regime_brief 的确定性输出：
-    `INPUTS: ..., atr_pct=6.0000, ...` + `THRESHOLDS...: ..., crash_atr_pct_min=5.00`。
-    两个值都在（且 atr_pct ≥ 阈值）才触发；缺任一 → False（graceful，不阻断解析）。
-    direct 路径不走这里——run_committee_for_symbol 直接从 metrics 算。
+    atr_pct 从 transcript 里粘贴的 format_regime_brief 确定性 INPUTS 行提取
+    （`INPUTS: ..., atr_pct=6.0000, ...`）；阈值不从文本解析——与 direct 路径
+    同源走 core.regime.defense_atr_threshold(symbol)（per-asset 的
+    defense_atr_pct_min，与 crash 分类解耦），保证两路径用同一条防御线。
+    缺 atr_pct → False（graceful，不阻断解析）。
     """
     m_atr = ATR_PCT_RE.search(text or "")
-    m_thr = ATR_CRASH_THRESHOLD_RE.search(text or "")
-    if not (m_atr and m_thr):
+    if not m_atr:
         return False
     try:
-        return float(m_atr.group(1)) >= float(m_thr.group(1))
+        from core.regime import defense_atr_threshold
+        return float(m_atr.group(1)) >= defense_atr_threshold(symbol)
     except ValueError:
         return False
 
