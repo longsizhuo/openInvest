@@ -123,3 +123,32 @@ def test_fetch_cnn_never_raises(monkeypatch):
         raise OSError("DNS fail")
     monkeypatch.setattr(st.urllib.request, "urlopen", boom)
     assert st.fetch_cnn_fear_greed(timeout=1) is None
+
+
+def test_vix_thresholds_come_from_config(monkeypatch):
+    """阈值走 config (sentiment 节)：抬高 vix_defense_quantile 后同一数据哨兵转 off。
+
+    守"magic number 必须在 core/config 统一维护"——有人把阈值改回模块常量本测会红。
+    """
+    from core.config import reset_config, set_config_override
+    import utils.exchange_fee as ef
+    from utils.sentiment import build_sentiment_brief
+
+    # 当前分位 ≈ 90%（50 个点里排第 45）
+    values = list(range(10, 60))
+    values[-1] = 54.5
+    monkeypatch.setattr(ef, "get_history_data", lambda *a, **k: _fake_vix_df(values))
+
+    reset_config()
+    try:
+        brief = build_sentiment_brief(cnn_enabled=False)
+        assert "INDEP_DEFENSE_FLAG: on" in brief  # 默认 0.85 < 90% → on
+
+        set_config_override({"sentiment": {"vix_defense_quantile": 0.99,
+                                           "vix_extreme_fear_q": 0.95}})
+        brief2 = build_sentiment_brief(cnn_enabled=False)
+        assert "INDEP_DEFENSE_FLAG: off" in brief2   # 抬线后同数据 → off
+        assert "extreme_fear" not in brief2          # 分档线同样生效 → fear
+        assert "fear" in brief2
+    finally:
+        reset_config()

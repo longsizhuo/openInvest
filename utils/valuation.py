@@ -22,14 +22,16 @@ log = logging.getLogger(__name__)
 
 # yfinance quoteType 属于这些 → 视为权益类，出估值 brief
 EQUITY_QUOTE_TYPES = {"ETF", "EQUITY", "MUTUALFUND", "INDEX"}
-PE_EXPENSIVE = 30.0   # trailing PE ≥ 此值判"偏贵"（纳指类成长股的经验阈值）
-PE_CHEAP = 18.0       # trailing PE < 此值判"中性偏低"
+# PE 分档阈值 → core/config (valuation 节)，defaults.yaml 可调，
+# env INVEST_VALUATION_<KEY> 可覆盖
 
 
 def _pe_level(pe: float) -> str:
-    if pe >= PE_EXPENSIVE:
+    from core.config import load_config
+    cfg = load_config().valuation
+    if pe >= cfg.pe_expensive:
         return "偏贵"
-    if pe < PE_CHEAP:
+    if pe < cfg.pe_cheap:
         return "中性偏低"
     return "中性"
 
@@ -61,9 +63,11 @@ def build_valuation_brief(
     lines = []
     pe = info.get("trailingPE")
     if isinstance(pe, (int, float)) and not isinstance(pe, bool) and pe > 0:
+        from core.config import load_config
+        _pe_expensive = load_config().valuation.pe_expensive
         lines.append(
             f"VALUATION: trailing_PE={float(pe):.1f} "
-            f"(绝对水平: {_pe_level(float(pe))}, 阈值 >30=偏贵)"
+            f"(绝对水平: {_pe_level(float(pe))}, 阈值 >{_pe_expensive:g}=偏贵)"
         )
 
     if price_quantile_2y is not None:

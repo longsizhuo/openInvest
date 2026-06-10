@@ -24,14 +24,9 @@ from typing import Optional, Tuple
 
 log = logging.getLogger(__name__)
 
-VIX_PERIOD = "2y"
-# VIX 自身近 2 年分位的恐慌/贪婪分档（高 VIX = 恐慌）
-VIX_EXTREME_FEAR_Q = 0.85
-VIX_FEAR_Q = 0.65
-VIX_GREED_Q = 0.35
-VIX_EXTREME_GREED_Q = 0.15
-# VIX 分位 ≥ 此值 → 独立于 regime 的快速崩盘哨兵置 on
-VIX_DEFENSE_QUANTILE = 0.85
+VIX_PERIOD = "2y"  # 数据窗口定义（与 brief 文案"近2年分位"/price_quantile_2y 口径一致，非调参项）
+# 恐慌/贪婪分档 + 快崩哨兵线 → core/config (sentiment 节)，defaults.yaml 可调，
+# env INVEST_SENTIMENT_<KEY> 可覆盖
 
 CNN_FNG_URL = "https://production.dataviz.cnn.com/index/fearandgreed/graphdata"
 CNN_TIMEOUT_S = float(os.getenv("INVEST_SENTIMENT_CNN_TIMEOUT_S", "4"))
@@ -59,14 +54,16 @@ def _vix_percentile() -> Optional[Tuple[float, float]]:
 
 
 def _vix_label(pct: float) -> str:
-    """VIX 自身分位 → 恐慌贪婪标签（高 VIX = 恐慌）"""
-    if pct >= VIX_EXTREME_FEAR_Q:
+    """VIX 自身分位 → 恐慌贪婪标签（高 VIX = 恐慌）。阈值走 config (sentiment 节)。"""
+    from core.config import load_config
+    cfg = load_config().sentiment
+    if pct >= cfg.vix_extreme_fear_q:
         return "extreme_fear"
-    if pct >= VIX_FEAR_Q:
+    if pct >= cfg.vix_fear_q:
         return "fear"
-    if pct <= VIX_EXTREME_GREED_Q:
+    if pct <= cfg.vix_extreme_greed_q:
         return "extreme_greed"
-    if pct <= VIX_GREED_Q:
+    if pct <= cfg.vix_greed_q:
         return "greed"
     return "neutral"
 
@@ -146,7 +143,8 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
     if stance:
         lines.append(stance)
 
-    if pct >= VIX_DEFENSE_QUANTILE:
+    from core.config import load_config
+    if pct >= load_config().sentiment.vix_defense_quantile:
         lines.append(
             "INDEP_DEFENSE_FLAG: on  "
             "# VIX 处近2年高位=市场恐慌，独立于 MA regime 的快速崩盘哨兵；"

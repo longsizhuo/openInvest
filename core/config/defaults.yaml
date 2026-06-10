@@ -36,6 +36,19 @@ macro_buckets:
   tnx_low: 4.0
   tnx_high: 4.5
 
+sentiment:
+  # VIX 近2年分位的恐慌/贪婪分档（高 VIX = 恐慌）
+  vix_extreme_fear_q: 0.85
+  vix_fear_q: 0.65
+  vix_greed_q: 0.35
+  vix_extreme_greed_q: 0.15
+  # 快崩哨兵线: 分位 ≥ 此值 → INDEP_DEFENSE_FLAG=on（确定性买侧降级触发）
+  vix_defense_quantile: 0.85
+
+valuation:
+  pe_expensive: 30.0   # trailing PE ≥ 此值判"偏贵"
+  pe_cheap: 18.0       # trailing PE < 此值判"中性偏低"
+
 oracle_accuracy:
   buy_positive: 5.0
   buy_negative: -3.0
