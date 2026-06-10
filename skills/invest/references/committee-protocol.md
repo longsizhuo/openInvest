@@ -57,7 +57,8 @@ ls "$INVEST_HOME/memory/.committee/$(date +%F)/<SYMBOL>.md" 2>/dev/null
 | `instructions` | 单资产 orchestration tip（**读它**！）|
 
 **⚠ regime_brief 警告**：这是 Python 算出来的市场 regime（uptrend / downtrend /
-range_bound / crash / recovery）+ REGIME 硬约束（如 "uptrend 禁 bearish"）。
+range_bound / crash / recovery）+ 该 regime 的中性概率口径（30d forward return
+中位 / 跌破现价概率 / 样本数——方向判断交回 Quant 基于数据自决，无方向硬锁）。
 **忘了塞给 Quant，就会回退到老 bug 路径**——Quant 在 range_bound 底部乱喊
 bearish。Round 1 + Round 2 Quant prompt **都要原样塞**进去。
 
