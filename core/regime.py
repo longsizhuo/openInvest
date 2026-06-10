@@ -40,7 +40,6 @@ def _build_thresholds_from_config() -> Dict[str, float]:
         "crash_atr_pct_min": cfg.crash_atr_pct_min,
         "crash_drawdown_30d_pct": cfg.crash_drawdown_30d_pct,
         "crash_deep_drawdown_30d_pct": cfg.crash_deep_drawdown_30d_pct,
-        "defense_atr_pct_min": cfg.defense_atr_pct_min,
         "recovery_rebound_pct": cfg.recovery_rebound_pct,
         "recovery_quantile_max": cfg.recovery_quantile_max,
         "low_quantile_threshold": cfg.low_quantile_threshold,
@@ -94,7 +93,6 @@ def _per_asset_thresholds(symbol: Optional[str]) -> Dict[str, float]:
         "crash_atr_pct_min": cfg.regime.crash_atr_pct_min,
         "crash_drawdown_30d_pct": cfg.regime.crash_drawdown_30d_pct,
         "crash_deep_drawdown_30d_pct": cfg.regime.crash_deep_drawdown_30d_pct,
-        "defense_atr_pct_min": cfg.regime.defense_atr_pct_min,
         "recovery_rebound_pct": cfg.regime.recovery_rebound_pct,
         "recovery_quantile_max": cfg.regime.recovery_quantile_max,
         "low_quantile_threshold": cfg.regime.low_quantile_threshold,
@@ -109,19 +107,7 @@ def _per_asset_thresholds(symbol: Optional[str]) -> Dict[str, float]:
         base["trend_ma_spread_pct"] = pa.trend_ma_spread_pct
     if pa.crash_atr_pct_min is not None:
         base["crash_atr_pct_min"] = pa.crash_atr_pct_min
-    if pa.defense_atr_pct_min is not None:
-        base["defense_atr_pct_min"] = pa.defense_atr_pct_min
     return base
-
-
-def defense_atr_threshold(symbol: Optional[str]) -> float:
-    """独立快崩防御 ATR 腿的 per-asset 阈值（与 crash 分类解耦）。
-
-    classify_regime 不读 defense_atr_pct_min——调防御灵敏度不影响 regime 判定。
-    direct 路径（committee_runner）和 coordinator 路径（skill.cmd_save_committee
-    经 atr_defense_from_text）都从这里取，单一可信源。
-    """
-    return _per_asset_thresholds(symbol)["defense_atr_pct_min"]
 
 
 def classify_regime(
@@ -164,10 +150,13 @@ def classify_regime(
     rebound = metrics.get("rebound_off_30d_low")
 
     # 透明 audit：把判断用的输入回写
+    # atr_spike_ratio 不参与分类，但回写进 inputs_used → format_regime_brief 的
+    # INPUTS 行 → coordinator transcript，让 atr_defense_from_text 两路径同源
     inputs_used = {
         "ma20": ma20,
         "ma120": ma120,
         "atr_pct": atr_pct,
+        "atr_spike_ratio": metrics.get("atr_spike_ratio"),
         "price_quantile_2y": quantile,
         "return_30d": return_30d,
         "rebound_off_30d_low": rebound,
@@ -394,7 +383,6 @@ __all__ = [
     "THRESHOLDS",
     "ASSET_OVERRIDES",
     "classify_regime",
-    "defense_atr_threshold",
     "regime_strategy_hint",
     "format_regime_brief",
 ]

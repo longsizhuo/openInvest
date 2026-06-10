@@ -18,10 +18,6 @@ class RegimeConfig:
     crash_atr_pct_min: float = 5.0
     crash_drawdown_30d_pct: float = 20.0
     crash_deep_drawdown_30d_pct: float = 30.0
-    # 独立快崩防御的 ATR 腿（与 crash 分类解耦：分类不读它，调防御灵敏度
-    # 不影响 regime 判定）。默认 = crash_atr_pct_min 现值，行为不变；
-    # 调优走 scripts/tune_defense_thresholds.py 的确定性 sweep。
-    defense_atr_pct_min: float = 5.0
     # 簇 2: Trend 趋势（半独立）
     trend_ma_spread_pct: float = 3.0
     # 簇 3: Recovery 判定（紧密耦合）
@@ -41,7 +37,6 @@ class RegimePerAssetConfig:
     """
     trend_ma_spread_pct: float | None = None
     crash_atr_pct_min: float | None = None
-    defense_atr_pct_min: float | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +102,12 @@ class SentimentConfig:
     # 触发 parse_cio_memo 确定性买侧降级）。注意低波动期的"高分位"也会触发
     # （如 VIX=21 站上 2y 87% 分位）——嫌敏感就抬这条线。
     vix_defense_quantile: float = 0.85
+    # 独立快崩防御 ATR 腿（资产级，通用口径）：当日 ATR% / 自身近 1 年滚动中位
+    # ATR% ≥ 此比值 → 触发。尺度无关（任何资产自校准，无 per-asset magic number），
+    # 对历史尖峰稳健（分位制会被窗内旧尖峰脱敏，中位基线不受尾部影响）。
+    # 2.0 = 波动较自身常态翻倍。确定性 sweep 依据见 scripts/tune_defense_thresholds.py：
+    # OR 组合 capture NDQ 3/3、GC 13/16，ATR 腿独立 on_rate 3.6%/3.7%。
+    atr_defense_spike_ratio: float = 2.0
 
 
 @dataclass(frozen=True)

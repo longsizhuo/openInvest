@@ -209,8 +209,8 @@ REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
 EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
 # regime 标签（format_regime_brief 输出首行 / coordinator transcript 里的同款行）
 REGIME_LABEL_RE = re.compile(r"^REGIME:\s*([a-z_]+)\s*$", re.MULTILINE)
-# 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS 行提取 atr_pct
-ATR_PCT_RE = re.compile(r"\batr_pct=([\d.]+)")
+# 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS 行提取波动突变比
+ATR_SPIKE_RE = re.compile(r"\batr_spike_ratio=([\d.]+)")
 
 
 def regime_label_from_text(text: str) -> Optional[str]:
@@ -223,21 +223,21 @@ def regime_label_from_text(text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def atr_defense_from_text(text: str, symbol: Optional[str] = None) -> bool:
+def atr_defense_from_text(text: str) -> bool:
     """从 coordinator transcript 判断独立快崩防御的 ATR 腿是否触发。
 
-    atr_pct 从 transcript 里粘贴的 format_regime_brief 确定性 INPUTS 行提取
-    （`INPUTS: ..., atr_pct=6.0000, ...`）；阈值不从文本解析——与 direct 路径
-    同源走 core.regime.defense_atr_threshold(symbol)（per-asset 的
-    defense_atr_pct_min，与 crash 分类解耦），保证两路径用同一条防御线。
-    缺 atr_pct → False（graceful，不阻断解析）。
+    波动突变比从 transcript 里粘贴的 format_regime_brief 确定性 INPUTS 行提取
+    （`INPUTS: ..., atr_spike_ratio=2.3456, ...`），与
+    sentiment.atr_defense_spike_ratio（通用口径，尺度无关，无 per-asset 数字）
+    比较——与 direct 路径（committee_runner 从 metrics 直读）同一条线。
+    缺字段 / 值为 None → False（graceful，不阻断解析）。
     """
-    m_atr = ATR_PCT_RE.search(text or "")
-    if not m_atr:
+    m = ATR_SPIKE_RE.search(text or "")
+    if not m:
         return False
     try:
-        from core.regime import defense_atr_threshold
-        return float(m_atr.group(1)) >= defense_atr_threshold(symbol)
+        from core.config import load_config
+        return float(m.group(1)) >= load_config().sentiment.atr_defense_spike_ratio
     except ValueError:
         return False
 
