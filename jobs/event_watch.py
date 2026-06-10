@@ -39,6 +39,14 @@ log = logging.getLogger(__name__)
 
 _SEVERITY_RANK = {"low": 1, "mid": 2, "high": 3}
 
+# "是否持金"语义白名单（合理常量，不是用户持仓硬编码——持仓列表始终动态读 PM）：
+# 金期货 / 美澳中各地金 ETF。命中任一才追加黄金常驻 queries（anti-noise：
+# 不持金的用户不抓金新闻）。
+_GOLD_PROXY_SYMBOLS = {"GC=F", "GLD", "IAU", "PMGOLD.AX", "518880.SS"}
+# 黄金常驻 queries（待办5）：央行购金 / ETF 流向是金价"基本面"，但属低频宏观事件，
+# 普通 per-symbol query 抓不到，需要显式关键词
+_GOLD_STANDING_QUERIES = ["central bank gold purchases", "gold ETF flows"]
+
 
 def _load_user_context() -> Dict[str, Any]:
     """从 PortfolioManager 抓 holdings / target_assets / wealth_context tags
@@ -66,6 +74,9 @@ def _load_user_context() -> Dict[str, Any]:
     queries.extend([f"{tag} markets" for tag in macro_tags])
     if not any("fed" in q.lower() for q in queries):
         queries.append("Fed rate decision")  # 默认抓宏观
+    # 持金/关注金 → 追加黄金常驻 queries（央行购金等低频宏观事件靠关键词才抓得到）
+    if (set(holdings) | set(watching)) & _GOLD_PROXY_SYMBOLS:
+        queries.extend(_GOLD_STANDING_QUERIES)
 
     return {
         "holdings": holdings,

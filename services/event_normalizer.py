@@ -25,7 +25,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.llm_telemetry import TelemetryMeta, record_llm_call
 from services.embeddings import embed_text
@@ -65,6 +65,9 @@ Rules:
 - "neutral" means routine reporting (e.g. analyst restate, generic market summary). Use it liberally — most news is neutral.
 - Severity reflects MAGNITUDE of expected price impact, not news drama.
 - If a headline is pure clickbait (no concrete entity / event), set severity="low", stance="neutral".
+- Gold/commodity mapping: central bank gold purchases, gold ETF in/outflows, and real-rate / USD moves
+  that materially affect gold -> entities must include "gold" (plus the specific tag, e.g.
+  "central_bank_gold" or "gold_etf_flows"), and affected_symbols must include "GC=F".
 
 Return STRICT JSON: an object with one key "events" whose value is the list. No prose, no markdown.
 """
@@ -208,6 +211,27 @@ def _parse_events_json(raw_text: str, *, expected_size: int, offset: int) -> Lis
     return out
 
 
+# 确定性 entity→symbol 兜底映射（黄金事件覆盖，2026-06 待办5）：
+# LLM 偶尔只给 entities 不给 affected_symbols（央行购金类宏观事件尤其常见），
+# 这里用词边界正则兜底补上。**必须 \b 词边界**——"goldman sachs" 含子串 gold，
+# 子串匹配会把高盛新闻错误映射到金价（\bgold\b 后接 "man" 不命中，安全）。
+# 这是语义映射数据（同 rss_feeds.yml 性质），不是可 sweep 的标量，不进 tunable config。
+_ENTITY_SYMBOL_FALLBACK: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r"\bgold\b|\bbullion\b|\bxau\b"), "GC=F"),
+]
+
+
+def _apply_entity_symbol_fallback(
+    entities: List[str], affected: List[str],
+) -> List[str]:
+    """entities 命中映射且 symbol 不在 affected → append（保序去重）。纯代码规则，零 LLM。"""
+    joined = " ".join(entities)
+    for pattern, symbol in _ENTITY_SYMBOL_FALLBACK:
+        if pattern.search(joined) and symbol not in affected:
+            affected = [*affected, symbol]
+    return affected
+
+
 def _sanitize_event(raw: Dict[str, Any], *, offset: int) -> Optional[NormalizedEvent]:
     """字段校验 + 归一化。缺关键字段返回 None"""
     idx = raw.get("idx")
@@ -228,6 +252,7 @@ def _sanitize_event(raw: Dict[str, Any], *, offset: int) -> Optional[NormalizedE
     entities = [str(e).lower().strip() for e in entities_raw if str(e).strip()][:10]
     affected_raw = raw.get("affected_symbols") or []
     affected = [str(s).strip() for s in affected_raw if str(s).strip()][:10]
+    affected = _apply_entity_symbol_fallback(entities, affected)
 
     event = {
         "one_line_claim": claim[:240],
