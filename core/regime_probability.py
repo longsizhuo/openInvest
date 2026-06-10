@@ -324,7 +324,7 @@ def build_reentry_reference_text(
     source: str = "ohlc",
     jsonl_path: Optional[Path] = None,
     records: Optional[List[Dict[str, Any]]] = None,
-    windows: Tuple[str, ...] = ("30d", "90d"),
+    windows: Tuple[str, ...] = ("30d", "60d", "90d"),
 ) -> str:
     """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。
 
@@ -338,13 +338,40 @@ def build_reentry_reference_text(
             jsonl_path = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
         records = _load_reviews(jsonl_path)
 
+    # OHLC 源：一次 get_path_profile 算完多窗 + 路径形状（单次行情加载），
+    # 再组装成与 verdict_review 源同款的 ReentryEstimate 行。
+    profile: Optional[Dict[str, Any]] = None
+    if source == "ohlc":
+        try:
+            profile = get_path_profile(asset, regime, windows=windows)
+        except Exception:  # noqa: BLE001  概率表读失败不阻断（外层还有 graceful）
+            profile = None
+
     lines: List[str] = []
     any_data = False
     for w in windows:
-        est = get_reentry_estimate(
-            asset, regime, current_price,
-            window=w, source=source, records=records,
-        )
+        if source == "ohlc":
+            st = (profile or {}).get("windows", {}).get(w)
+            est = None
+            if st is not None:
+                downside_price = round(current_price * (1 + st["downside_pct"] / 100), 4)
+                est = ReentryEstimate(
+                    asset=asset, regime=regime, window=w,
+                    n=st["n"], current_price=current_price,
+                    threshold_pct=DEFAULT_THRESHOLD_PCT,
+                    p_below_current=st["p_below"], p_down=st["p_down"],
+                    median_return_pct=st["median_pct"],
+                    downside_pct=st["downside_pct"],
+                    downside_price=downside_price,
+                    has_downside=downside_price < current_price,
+                    low_confidence=st["low_confidence"],
+                    effective_n=st["effective_n"],
+                )
+        else:
+            est = get_reentry_estimate(
+                asset, regime, current_price,
+                window=w, source=source, records=records,
+            )
         if est is None:
             lines.append(f"- {w}: 历史样本不足 / unavailable")
         else:
@@ -352,11 +379,41 @@ def build_reentry_reference_text(
             lines.append(f"- {est.summary_line()}")
     if not any_data:
         return ""
+
+    # 路径形状（概率表路径化，2026-06）：仅 OHLC 源有逐日路径可算。
+    # 回答"先跌后涨 vs 持续跌 vs 直接涨"占比 + 回踩深度/时点 → 带路径的预测。
+    shape_lines: List[str] = []
+    if source == "ohlc":
+        try:
+            shape = (profile or {}).get("shape")
+            if shape:
+                dip_med_price = current_price * (1 + shape["dip_median_pct"] / 100)
+                dip_p25_price = current_price * (1 + shape["dip_p25_pct"] / 100)
+                shape_lines = [
+                    (
+                        f"- {shape['window']} 路径形状（n={shape['n']}，"
+                        f"重叠窗口独立≈{shape['effective_n']}）: "
+                        f"先跌后涨 {shape['pct_dip_then_up'] * 100:.0f}% / "
+                        f"直接涨(无显著回踩) {shape['pct_up_no_dip'] * 100:.0f}% / "
+                        f"期末收跌 {shape['pct_down'] * 100:.0f}%"
+                        f"（\"显著回踩\"=途中跌幅 ≥1×当日ATR）"
+                    ),
+                    (
+                        f"- {shape['window']} 途中最深回踩: 中位 {shape['dip_median_pct']:+.1f}%"
+                        f"（→ ¥{dip_med_price:,.2f}），"
+                        f"深四分位 {shape['dip_p25_pct']:+.1f}%（→ ¥{dip_p25_price:,.2f}）；"
+                        f"中位 {shape['days_to_trough_median']} 个交易日见谷底"
+                    ),
+                ]
+        except Exception:  # noqa: BLE001  路径形状取失败不影响多窗分布主体
+            shape_lines = []
+
     return (
-        f"# 卖出后路径参考（regime={regime} 历史 forward return 分布，仅供 TRIM 决策）：\n"
+        f"# 路径参考（regime={regime} 历史 forward 路径分布；TRIM 买回点 + 持有路径预期）：\n"
         f"- 现价: ¥{current_price:,.2f}\n"
-        + "\n".join(lines)
-        + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM）"
+        + "\n".join(lines + shape_lines)
+        + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
+        "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"
     )
 
 
@@ -417,8 +474,13 @@ def compute_regime_return_frame(
         windows: forward return 窗口（"30d"/"90d"，按**日历日**前看）
 
     Returns:
-        DataFrame：index=date，列 = ["regime", "fwd_30d", "fwd_90d", ...]。
-        指标 warmup 不足的头部 regime=unknown；lookahead 不足的尾部 fwd_*=NaN。
+        DataFrame：index=date，列 =
+          - "regime"
+          - "fwd_<w>"   窗口期末 forward return（小数）
+          - "min_<w>"   窗口内**途中最深回踩**（相对当日收盘的最低点收益，小数，≤0 或小正）
+          - "tmin_<w>"  到达谷底的交易日数（路径时序："什么时候跌"）
+          - "atr_pct"   当日 ATR%（路径形状判定的自校准单位，"回踩显著"=跌幅 ≥1×当日ATR）
+        指标 warmup 不足的头部 regime=unknown；lookahead 不足的尾部 fwd_*/min_*/tmin_*=NaN。
         空输入返回空 DataFrame。
     """
     import numpy as np
@@ -484,8 +546,111 @@ def compute_regime_return_frame(
         valid = pos < n
         fwd[valid] = vals[pos[valid]] / vals[arange[valid]] - 1.0
         out[f"fwd_{w}"] = fwd
+        # 路径化（2026-06）：窗口内途中最深回踩 + 到谷底的交易日数。
+        # 只在 lookahead 完整（valid）的行算，与 fwd 同口径。
+        mins = np.full(n, np.nan)
+        tmins = np.full(n, np.nan)
+        for i in np.flatnonzero(valid):
+            seg = vals[i + 1: pos[i] + 1]
+            if seg.size:
+                j = int(np.argmin(seg))
+                mins[i] = seg[j] / vals[i] - 1.0
+                tmins[i] = j + 1  # 交易日数（t+1 起算）
+        out[f"min_{w}"] = mins
+        out[f"tmin_{w}"] = tmins
+
+    # 当日 ATR%：路径形状的自校准"显著回踩"单位（无绝对百分比 magic number）
+    out["atr_pct"] = atr_pct.values
 
     return out
+
+
+def get_path_profile(
+    asset: str,
+    regime: str,
+    *,
+    windows: Tuple[str, ...] = ("30d", "60d", "90d"),
+    shape_window: str = "90d",
+    days: int = 100000,
+) -> Optional[Dict[str, Any]]:
+    """(asset, regime) 的多窗路径画像（纯 OHLC 算术，0 token）。
+
+    概率表路径化（2026-06）：从"30 天单点分布"升级成"30/60/90 多窗分布 +
+    路径形状"，直接回答"卖出/持有后什么时候跌、什么时候涨、途中给不给低吸点"。
+
+    Returns:
+        {
+          "asset", "regime",
+          "windows": { "30d": {n, effective_n, median_pct, p_below, p10_pct,
+                                p90_pct, low_confidence}, ... },
+          "shape": {   # 基于 shape_window（默认 90d）的路径形状分布
+            "window", "n", "effective_n",
+            "pct_dip_then_up",   # 先跌后涨：途中回踩 ≥1×当日ATR 且期末收正
+            "pct_up_no_dip",     # 直接涨：期末收正且无显著回踩（没给低吸点）
+            "pct_down",          # 收跌：期末低于现价
+            "dip_median_pct",    # 途中最深回踩中位（全样本）
+            "dip_p25_pct",       # 深四分位（更悲观的回踩深度）
+            "days_to_trough_median",  # 中位多少个交易日见谷底（"什么时候跌"）
+          } | None,
+        }
+        或 None（无数据 / 该 regime 无样本）。
+    "显著回踩"单位 = 当日 ATR%（自校准，无绝对百分比阈值）。
+    """
+    from db.market_store import MarketStore
+    df = MarketStore().get_history_df(asset.upper(), days=days)
+    all_windows = tuple(dict.fromkeys((*windows, shape_window)))
+    frame = compute_regime_return_frame(df, asset.upper(), windows=all_windows)
+    if frame.empty:
+        return None
+    sub = frame[frame["regime"] == regime]
+    if sub.empty:
+        return None
+
+    out: Dict[str, Any] = {"asset": asset, "regime": regime, "windows": {}, "shape": None}
+    for w in windows:
+        col = f"fwd_{w}"
+        if col not in sub.columns:
+            continue
+        rets = (sub[col].dropna() * 100)
+        if rets.empty:
+            continue
+        n = len(rets)
+        eff = max(1, n // int(w.rstrip("d")))
+        out["windows"][w] = {
+            "n": n,
+            "effective_n": eff,
+            "median_pct": round(float(rets.median()), 2),
+            "p_below": round(float((rets < 0).mean()), 4),
+            "p_down": round(float((rets < -DEFAULT_THRESHOLD_PCT).mean()), 4),
+            "p10_pct": round(float(rets.quantile(0.10)), 2),
+            "p90_pct": round(float(rets.quantile(0.90)), 2),
+            # 悲观情形低分位（与 get_reentry_estimate 的 downside 同口径）
+            "downside_pct": round(float(rets.quantile(REENTRY_DOWNSIDE_QUANTILE)), 2),
+            "low_confidence": eff < MIN_CONFIDENT_N,
+        }
+
+    sw = shape_window
+    cols = [f"fwd_{sw}", f"min_{sw}", f"tmin_{sw}", "atr_pct"]
+    if all(c in sub.columns for c in cols):
+        s = sub.dropna(subset=cols)
+        if not s.empty:
+            end = s[f"fwd_{sw}"] * 100
+            dip = s[f"min_{sw}"] * 100
+            dipped = dip <= -s["atr_pct"]   # 回踩 ≥1×当日ATR 才算"给过低吸点"
+            up = end > 0
+            n = len(s)
+            out["shape"] = {
+                "window": sw,
+                "n": n,
+                "effective_n": max(1, n // int(sw.rstrip("d"))),
+                "pct_dip_then_up": round(float((dipped & up).mean()), 4),
+                "pct_up_no_dip": round(float((~dipped & up).mean()), 4),
+                "pct_down": round(float((~up).mean()), 4),
+                "dip_median_pct": round(float(dip.median()), 2),
+                "dip_p25_pct": round(float(dip.quantile(0.25)), 2),
+                "days_to_trough_median": int(s[f"tmin_{sw}"].median()),
+            }
+    return out if out["windows"] else None
 
 
 def _ohlc_forward_returns(

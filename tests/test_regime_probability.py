@@ -387,3 +387,125 @@ def test_ohlc_forward_returns_values_exact(monkeypatch):
     valid = frame.dropna(subset=["fwd_30d"])
     valid = valid[valid["regime"] != "unknown"]
     assert len(got) == len(valid)
+
+
+# ---------- 概率表路径化（2026-06）：多窗 + 路径形状 ----------
+
+def test_compute_regime_return_frame_path_columns_exact():
+    """min_/tmin_/atr_pct 列数值正确：严格递增序列 → 窗口内最低点=次日，tmin=1"""
+    import numpy as np
+    import pandas as pd
+    from core.regime_probability import compute_regime_return_frame
+
+    n = 200
+    idx = pd.date_range("2020-01-01", periods=n, freq="D")
+    close = 100.0 + np.arange(n)
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
+    for col in ("min_30d", "tmin_30d", "atr_pct"):
+        assert col in frame.columns, col
+
+    i = 150  # warmup 后、lookahead 充足的行
+    assert abs(frame["min_30d"].iat[i] - (close[i + 1] / close[i] - 1)) < 1e-12
+    assert frame["tmin_30d"].iat[i] == 1
+    # 尾部 lookahead 不足 → NaN（与 fwd 同口径）
+    assert pd.isna(frame["min_30d"].iat[n - 1])
+
+
+def test_get_path_profile_multi_window_and_shape(monkeypatch):
+    """get_path_profile：多窗分布齐全 + 形状占比构成完备分布（和=1）"""
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import get_path_profile
+
+    n = 600
+    idx = pd.date_range("2015-01-01", periods=n, freq="D")
+    rng = np.random.default_rng(11)
+    close = 100 * np.cumprod(1 + rng.normal(0.001, 0.01, n))  # 缓涨 + 噪声
+    df = pd.DataFrame({"Close": close, "High": close * 1.01, "Low": close * 0.99},
+                      index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+
+    # 找一个有样本的 regime
+    from core.regime_probability import compute_regime_return_frame
+    frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
+    regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
+
+    p = get_path_profile("TEST", regime)
+    assert p is not None
+    for w in ("30d", "60d", "90d"):
+        st = p["windows"][w]
+        assert st["n"] > 0
+        assert 0.0 <= st["p_below"] <= 1.0
+        assert st["p10_pct"] <= st["median_pct"] <= st["p90_pct"]
+        assert st["effective_n"] == max(1, st["n"] // int(w.rstrip("d")))
+    shape = p["shape"]
+    assert shape is not None and shape["window"] == "90d"
+    total = shape["pct_dip_then_up"] + shape["pct_up_no_dip"] + shape["pct_down"]
+    # 各占比独立四位小数舍入 → 和的容差放到 1e-3
+    assert abs(total - 1.0) < 1e-3, "三种路径形状必须构成完备分布"
+    assert shape["dip_p25_pct"] <= shape["dip_median_pct"]  # 深四分位更悲观
+    assert shape["days_to_trough_median"] >= 1
+
+
+def test_get_path_profile_straight_up_no_dip(monkeypatch):
+    """严格单边上行（无任何回踩）→ 直接涨=100%，先跌后涨=0，收跌=0"""
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import get_path_profile
+
+    n = 400
+    idx = pd.date_range("2018-01-01", periods=n, freq="D")
+    close = 100.0 * (1.002 ** np.arange(n))  # 每天 +0.2%，永不回头
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+
+    p = get_path_profile("TEST", "uptrend")
+    assert p is not None and p["shape"] is not None
+    assert p["shape"]["pct_up_no_dip"] == 1.0
+    assert p["shape"]["pct_dip_then_up"] == 0.0
+    assert p["shape"]["pct_down"] == 0.0
+
+
+def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
+    """OHLC 源路径参考：30/60/90 三窗都出 + 路径形状/回踩深度/见底时点行"""
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import build_reentry_reference_text
+
+    n = 600
+    idx = pd.date_range("2015-01-01", periods=n, freq="D")
+    rng = np.random.default_rng(3)
+    close = 100 * np.cumprod(1 + rng.normal(0.0008, 0.012, n))
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+
+    from core.regime_probability import compute_regime_return_frame
+    frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
+    regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
+
+    txt = build_reentry_reference_text("TEST", regime, 1000.0)
+    assert "30d" in txt and "60d" in txt and "90d" in txt
+    assert "路径形状" in txt
+    assert "先跌后涨" in txt
+    assert "见谷底" in txt
+    assert "¥1,000.00" in txt  # 现价行
