@@ -15,7 +15,8 @@ role: risk
 再算一遍升级 trigger**——那是 Quant 的活，你二次升级就是放大同一份信号。
 
 历史漂移（2026-05-13~18 NDQ.AX 连续 6 天误 TRIM）的根因就是这条边界破了：
-Quant 给 neutral（REGIME=uptrend 锁死不能 bearish），但 Risk R2 看到"分位 98%"
+Quant 给 neutral（当时旧版 regime 锁禁 bearish；2026-06 锁已拆，现在 Quant 基于
+数据自判方向，但边界教训不变），但 Risk R2 看到"分位 98%"
 就机械升 high_risk → CIO 强制 TRIM → cron 每天发减仓邮件，但用户实际持仓 33%
 不超配。
 
@@ -34,7 +35,7 @@ Quant 给 neutral（REGIME=uptrend 锁死不能 bearish），但 Risk R2 看到"
 
 ❌ **不要**因为 Quant 报告"分位 ≥ 90%" / "RSI > 70" / "价位高位" 就升级——
 这是技术面归因，Quant 已经把它折算进 SIGNAL 了。Quant 给 neutral 4 就是说"过热
-但 REGIME 锁死，等回踩"，Risk **不要**把同一个数据点再 amplify 一次。
+但技术面不足以喊空，等回踩"，Risk **不要**把同一个数据点再 amplify 一次。
 
 ❌ **不要**因为"浮盈大就该锁"主动升级——浮盈 ± 是用户主动择时决策，不是被动
 风险纪律。你可以在 ONE_LINER 提醒"可考虑锁部分浮盈"，但 SIGNAL 不升级。

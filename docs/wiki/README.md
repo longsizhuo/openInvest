@@ -21,7 +21,7 @@
 5. [08-deployment.md](08-deployment.md) —— Caddy + CF Access + systemd
 
 ### 🧠 我是研究者，想懂"为什么这么设计"
-1. [02-agents.md](02-agents.md) —— 4 LLM 角色 + cross-challenge + REGIME 硬约束
+1. [02-agents.md](02-agents.md) —— 4 LLM 角色 + cross-challenge + REGIME 中性概率口径
 2. [03-dreaming.md](03-dreaming.md) —— OpenClaw 风格的三阶段记忆整合
 3. [04-execution-paths.md](04-execution-paths.md) —— Skill vs Web/Cron 双路径
 4. [11-rl-training.md](11-rl-training.md) —— Optuna + paper trade + 训练 pipeline（**澄清：不是 GPU 训练**）
@@ -53,6 +53,8 @@
 | 11 | [RL 训练 / Backtest](11-rl-training.md) | Optuna 调参 + paper trade simulation + DSPy（不是真 ML 训练）|
 | 12 | [Verification 实测验证](12-verification.md) | 7 个核心主张的实测数据 + negative results + 复现命令 |
 | 13 | [参数调优可行性诊断](13-param-tuning-feasibility.md) | 50+ 硬编码常数清单 + 耦合分析 + Optuna 回顾 + sweep 策略 |
+| 14 | [Sweep Runner](14-sweep-runner.md) | 参数 sweep 工具链 |
+| 15 | [概率表路径化](15-path-probability.md) | 30/60/90 多窗分布 + 四类路径形状 + regime 持续标注 |
 
 ## 架构决策记录 (ADR)
 
