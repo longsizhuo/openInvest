@@ -1,6 +1,6 @@
 # 4 角色委员会
 
-> 4 个独立 LLM session，信息隔离 + cross-challenge 多轮辩论 + REGIME 硬约束。
+> 4 个独立 LLM session，信息隔离 + cross-challenge 多轮辩论 + REGIME 中性概率口径（仅 crash/unknown 保留约束）。
 > 这一章解释**他们各自看到什么、被什么约束、怎么互相挑战**。
 
 [← 01-architecture](01-architecture.md) · [Wiki 索引](README.md) · [03-dreaming →](03-dreaming.md)
@@ -12,7 +12,7 @@
 | Role | 能看到 | 被屏蔽 | 输出格式 | 文件 |
 |------|--------|--------|----------|------|
 | **Macro Strategist** | VIX / TNX / 全球宏观 brief + **盘中事件上下文 event_brief（仅 Macro 看得到，事件 RAG 严格隔离）** | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `agents/macro_strategist.py` |
-| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 硬约束表 | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `agents/quant.py` |
+| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 中性概率口径 + 确定性事实块（估值/情绪） | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `agents/quant.py` |
 | **Wealth Context Officer**（第 5 角色，跨资产共享） | user.md 的 wealth_context（家族 backup / 应急金 / 账户性质）+ portfolio cash | 技术指标、Macro view、个股持仓明细 | 真实流动性评级（给 Risk + CIO 用） | `agents/wealth_context_officer.py` |
 | **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights + **Wealth Context Officer 真实流动性视角** | 技术指标、Macro view | 风险等级 + 集中度评分 | `agents/risk_officer.py` |
 | **CIO** | 三人完整 transcript + Wealth Context 视角 + 用户 risk_level（含在 portfolio_summary 文本里） | — | 5 选 1 verdict + confidence + alloc | `agents/cio.py` |
@@ -63,21 +63,27 @@ journal 实证 16 calls 介于两者间。
 
 ---
 
-## REGIME 硬约束
+## REGIME 分类与中性概率口径
 
-**为什么需要硬约束**：LLM 在牛市顶部还能 hallucinate 出 "BUY"。把可确定性算法的部分（趋势 / 分位）从 LLM 里拿出来，写成确定性规则喂给 LLM 当**强制前置**。
+**演进（2026-05-31 拆方向锁）**：旧版把 regime 翻译成方向预设喂给 Quant（"uptrend
+禁 bearish / 不抄底 / 逢高减"）。同源 draw 消融证明：**整个方向锁层 = 1 个杠杆旋钮
+（uptrend 锁）+ 2 个摆设（downtrend 锁回测 no-op、crash 锁永不触发）**，不是 alpha。
+现版 regime 是**事实背景**：STRATEGY_HINT 中性引用该 (asset, regime) 的 OHLC 30d
+forward return 概率口径（中位 / 跌破现价概率 / 样本数），方向判断交回 LLM + 数据。
+uptrend 杠杆效应保留为显式 `verdict.risk_profile=aggressive` 开关（默认 steady 不开）。
+快崩防御独立于 regime（VIX 哨兵 + ATR 波动突变比 → parse_cio_memo 确定性买侧降级）。
 
 ### 6 类 regime（uptrend / downtrend / range_bound / crash / recovery / unknown）
 
 源：`core/regime.py:THRESHOLDS`（默认阈值 + `ASSET_OVERRIDES` per-asset 覆盖）
 
-| Regime | 触发条件 | 对 Quant 的硬约束 |
+| Regime | 触发条件 | 给 Quant 的口径 |
 |--------|---------|-------------------|
-| `uptrend` | `(MA20 − MA120) / MA120 ≥ +trend_ma_spread_pct%`（默认 3%，per-asset 覆盖：金 5% / 纳指 4% / 加密 8%） | **禁** bearish 信号 |
-| `downtrend` | `(MA20 − MA120) / MA120 ≤ −trend_ma_spread_pct%` | **禁** bullish 信号 |
-| `range_bound` | MA 纠缠（spread 在 ±阈值内）+ 波动正常 | 跟随分位：≤20% 偏 bullish，≥80% 偏 bearish |
-| `crash` | **双触发器（任一即触发）**：① 急跌 `atr_pct ≥ crash_atr_pct_min`（per-asset）**且** `return_30d ≤ −20%`；② 深跌 `return_30d ≤ −30%`（不看波动） | **强制 neutral**（任何方向不可执行） |
-| `recovery` | crash 未触发 + 从近 30 日低点反弹 ≥ 10% + 价格仍在低位（真百分位 < 50%） | 允许 cautious bullish（谨慎看多） |
+| `uptrend` | `(MA20 − MA120) / MA120 ≥ +trend_ma_spread_pct%`（默认 3%，per-asset 覆盖：金 5% / 纳指 4% / 加密 8%） | 中性概率口径（30d 中位/跌破概率/n），方向自决 |
+| `downtrend` | `(MA20 − MA120) / MA120 ≤ −trend_ma_spread_pct%` | 中性概率口径，方向自决 |
+| `range_bound` | MA 纠缠（spread 在 ±阈值内）+ 波动正常 | 中性概率口径 + 当前分位，方向自决 |
+| `crash` | **双触发器（任一即触发）**：① 急跌 `atr_pct ≥ crash_atr_pct_min`（per-asset）**且** `return_30d ≤ −20%`；② 深跌 `return_30d ≤ −30%`（不看波动） | **强制 neutral**（可执行性约束：崩盘期任何方向都难理性执行） |
+| `recovery` | crash 未触发 + 从近 30 日低点反弹 ≥ 10% + 价格仍在低位（真百分位 < 50%） | 中性概率口径，方向自决 |
 
 > 说明（与 `core/regime.py` 实现对齐，2026-05-26）：
 > - 趋势判断用的是 **MA20 对 MA120 的偏离度**（单一 spread 阈值），**不是** MA20>MA50>MA200 三线多头排列；代码里只算 MA20/MA120/MA250，没有 MA50/MA200。
@@ -93,12 +99,15 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 
 | 异常 | 自动纠正 |
 |------|----------|
-| `confidence ≥ 0.95` 且 alloc 不是 ¥0 | 降到 0.85（防 LLM 过度自信）|
-| `alloc_cny > 100_000` | clamp 到 100_000（防 LLM 报天文数字）|
-| verdict=`BUY` 但 regime=`crash` | 降到 `HOLD`（硬约束打架，REGIME 优先）|
-| confidence < 0.3 | 视为"无效决议"，触发 retry |
+| `BUY` 且 `confidence ≥ buy_confidence_overdrive`(0.95) | 降级 ACCUMULATE + conf 0.6（防过度自信 / prompt injection）|
+| `alloc_cny` 超 ceiling | clamp（防 LLM 报天文数字）|
+| brief 含 `[WORKER_UNAVAILABLE]` | 强制 HOLD + conf 封顶（garbage in 不出高置信决议）|
+| SOLVENCY=strong + TRIM(concentration) | 强制 HOLD（兜底充足，集中度不触发减仓）|
+| TRIM 但买回点缺失 / ≥ 现价 | 降级 HOLD（卖了买不回更低 = 纯亏）|
+| 快崩防御触发（VIX 哨兵 OR ATR 突变比）| BUY→ACCUMULATE / ACCUMULATE→HOLD（确定性买侧降级，独立于 regime）|
+| `risk_profile=aggressive` + uptrend + HOLD | 升级 ACCUMULATE（显式杠杆档，默认 steady 不动）|
 
-源：`core/committee.py:parse_cio_memo` + `_sanity_check`。
+源：`core/committee.py:parse_cio_memo`（Sanity 0-5 + Defense + risk_profile，全部确定性后处理）。
 
 ---
 
@@ -109,9 +118,10 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 **Quant 看到的**：
 ```
 # 资产: BetaShares Nasdaq 100 ETF (NDQ.AX)
-# 市场 Regime（确定性算出，必须遵循）：
+# 市场 Regime（事实背景 + 历史概率参考）：
   uptrend · MA20 高于 MA120 +8.5% (≥ 4%) · 价格百分位 78%
-  → 禁 bearish 信号
+  → 该 regime 历史 30d forward return：中位 +1.4%、跌破现价概率 35%、n=1423
+    （结合分位 / RSI 自行判断方向，不预设方向）
 # 市场数据（技术指标 + 多周期）：
   RSI(14, Wilder): 67, MA120: 33.8, MA250: 30.1, 价格百分位(2y): 78%, RVOL(20): 0.9x, ...
 请按 Quant Analyst 格式输出技术信号。

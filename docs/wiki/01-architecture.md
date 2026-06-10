@@ -64,7 +64,7 @@
 | Role | 看得到 | 看不到 | 输出 |
 |------|--------|--------|------|
 | Macro Strategist | VIX / TNX / USDCNY / 全球宏观 | 用户持仓、技术指标 | SIGNAL + STRENGTH + SCORE |
-| Quant Analyst | 技术指标（RSI/MA/分位）+ REGIME 硬约束 | 用户持仓 | 看涨/看跌 + 信号强度 |
+| Quant Analyst | 技术指标（RSI/MA/分位）+ REGIME 概率口径 + 估值/情绪事实块 | 用户持仓 | 看涨/看跌 + 信号强度 |
 | Risk Officer | 持仓集中度 / 浮盈缓冲 / Dreaming insights | 技术指标 | 风险等级 + 集中度评分 |
 | CIO | 三人完整 transcript | — | BUY/ACCUMULATE/HOLD/TRIM/SELL + confidence |
 
@@ -113,21 +113,26 @@ Pydantic v2 强 schema，写入前必过：
 - `holdings[].symbol` 必须非空
 - 任何不满足 → ValidationError，写不进 memory
 
-### 3.4 REGIME 硬约束：`core/regime.py`
+### 3.4 REGIME 分类与概率口径：`core/regime.py` + `core/regime_probability.py`
 
-5 阈值 + 5 类 regime，**确定性算法不走 LLM**，喂给 quant agent 当硬约束：
+6 类 regime（uptrend/downtrend/range_bound/crash/recovery/unknown），**确定性算法
+不走 LLM**。2026-05-31 起 regime 不再翻译成方向锁（消融证明方向锁层=1 个杠杆+2 个
+摆设），改为**中性概率口径**喂给 Quant：
 
 ```
-uptrend     → 禁 bearish 信号
-downtrend   → 禁 bullish 信号
-range_bound + price_quantile≤20%  → 偏 bullish（底部逢低）
-range_bound + price_quantile≥80%  → 偏 bearish（顶部减仓）
-crash       → 强制 neutral
+uptrend / downtrend / range_bound / recovery
+            → 该 (asset, regime) 的 OHLC 30d forward return 概率口径
+              （中位 / 跌破现价概率 / 样本数），方向判断交回 LLM + 数据
+crash       → 强制 neutral（可执行性约束，非方向预测）
+unknown     → 维持原计划（缺数据保守默认）
 ```
 
-LLM 不能违反 REGIME，CIO sanity check 会校验 verdict 与 REGIME 不冲突，冲突自动降级。
+确定性的方向干预走 `parse_cio_memo` 后处理：快崩防御（VIX 哨兵 OR ATR 波动突变比
+→ 买侧降级）与显式风险档（`risk_profile=aggressive` 的 uptrend 杠杆，默认关）。
+概率表还提供 30/60/90 多窗分布 + 四类路径形状（见
+[15-path-probability.md](15-path-probability.md)）。
 
-详见 [02-agents.md#regime-硬约束](02-agents.md#regime-硬约束)。
+详见 [02-agents.md#regime-分类与中性概率口径](02-agents.md#regime-分类与中性概率口径)。
 
 ---
 

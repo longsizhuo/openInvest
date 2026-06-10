@@ -17,8 +17,8 @@
 | `crash_deep_drawdown_30d_pct` | `core/regime.py:46` | 30.0% | 30 日跌 ≥30% 单独触发 crash（不看波动）。2026-05-26 新增，有 commit 记录 | 同上 |
 | `recovery_rebound_pct` | `core/regime.py:48` | 10.0% | 从 30 日低点反弹 ≥10% + 仍在低位 = recovery。无 ADR | Quant prompt "复苏"策略提示 |
 | `recovery_quantile_max` | `core/regime.py:50` | 0.50 | 价格 2y 分位 <50% 才算"仍在低位"。无依据 | 同上 |
-| `low_quantile_threshold` | `core/regime.py:52` | 0.20 | 2y 分位 ≤20% = "低位"。无依据 | Quant prompt "逢低分批"提示 |
-| `high_quantile_threshold` | `core/regime.py:54` | 0.80 | 2y 分位 ≥80% = "高位"。无依据 | Quant prompt "逢高减仓"提示 |
+| `low_quantile_threshold` | `core/regime.py:52` | 0.20 | 2y 分位 ≤20% = "低位"。无依据 | **已停用**（2026-06 拆方向锁后 strategy hint 不再读；键位保留兼容） |
+| `high_quantile_threshold` | `core/regime.py:54` | 0.80 | 2y 分位 ≥80% = "高位"。无依据 | **已停用**（同上） |
 
 **Per-asset overrides** (`core/regime.py:69-85`):
 
