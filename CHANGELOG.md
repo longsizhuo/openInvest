@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/longsizhuo/openInvest/compare/v0.6.0...v0.7.0) (2026-06-10)
+
+
+### Features
+
+* **probability:** 路径形状三类→四类（加 max 轴）+ regime 持续中位标注 + 算法落 wiki ([641eb1e](https://github.com/longsizhuo/openInvest/commit/641eb1eccf26b36b3a3c43845d4e0deb87149cda))
+
 ## [0.6.0](https://github.com/longsizhuo/openInvest/compare/v0.5.0...v0.6.0) (2026-06-10)
 
 
