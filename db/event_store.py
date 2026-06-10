@@ -404,10 +404,13 @@ class EventStore:
         top_k: int = 8,
         query_embedding: Optional[List[float]] = None,
         extra_tags: Optional[List[str]] = None,
+        aliases: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """按维度召回 + 向量精排 + 时效冲突标注。
 
-        - hard filter: 时间窗 + min_severity + (symbol 在 affected_symbols 或 entity tag 命中)
+        - hard filter: 时间窗 + min_severity + (symbol/aliases 在 affected_symbols 或 entity tag 命中)
+        - aliases: 代理匹配集合（issue #26，services/symbol_map.proxy_symbols_for——
+          持 NDQ.AX 也命中标 ^NDX 的指数事件）；None → 仅 symbol 本身
         - rerank: 如果 query_embedding 非空且 sqlite-vec 加载成功，按 cosine 距离精排
                  否则就按 ts DESC 返回
         - supersedes: 后处理 —— 同实体的两条事件按时间排序，新事件 .supersedes = 旧 event_id
@@ -431,12 +434,12 @@ class EventStore:
         )
         rows = cur.fetchall()
 
-        sym_lower = symbol.lower()
+        match_syms = {symbol.lower()} | {str(a).lower() for a in (aliases or [])}
         candidates: List[Dict[str, Any]] = []
         for r in rows:
             affected = [s.lower() for s in json.loads(r["affected_symbols_json"] or "[]")]
             ents = [s.lower() for s in json.loads(r["entities_json"] or "[]")]
-            if sym_lower in affected or any(t in ents for t in tags):
+            if match_syms.intersection(affected) or any(t in ents for t in tags):
                 candidates.append(_row_to_event(r))
         if not candidates:
             return []
