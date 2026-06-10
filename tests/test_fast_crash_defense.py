@@ -71,58 +71,82 @@ def test_defense_stacks_with_sanity1_overconfident_buy():
 
 
 # ---------- atr_defense_from_text（coordinator transcript 路径） ----------
-# 阈值与 direct 路径同源：core.regime.defense_atr_threshold(symbol)
-# （regime.defense_atr_pct_min，per-asset，与 crash 分类解耦）
+# 通用口径（无 per-asset 数字）：波动突变比 atr_spike_ratio（当日 ATR% / 自身
+# 近 1 年滚动中位）≥ sentiment.atr_defense_spike_ratio（默认 2.0=波动翻倍）
 
 BRIEF_TRIGGERED = (
     "REGIME: uptrend\n"
     "REASON: MA20 高于 MA120 4%（快崩中 MA 滞后仍显示 uptrend）\n"
-    "INPUTS: ma20=100.0000, ma120=96.0000, atr_pct=6.2000, price_quantile_2y=0.9000\n"
+    "INPUTS: ma20=100.0000, ma120=96.0000, atr_pct=6.2000, "
+    "atr_spike_ratio=2.5000, price_quantile_2y=0.9000\n"
     "THRESHOLDS: trend_ma_spread_pct=3.00, crash_atr_pct_min=5.00\n"
     "STRATEGY_HINT: ..."
 )
 
 
 def test_atr_defense_from_text_triggers():
-    """默认防御线 5.0：atr 6.2% → 触发"""
+    """突变比 2.5 ≥ 默认线 2.0 → 触发"""
     assert atr_defense_from_text(BRIEF_TRIGGERED) is True
 
 
 def test_atr_defense_from_text_below_threshold():
-    calm = BRIEF_TRIGGERED.replace("atr_pct=6.2000", "atr_pct=1.2000")
+    calm = BRIEF_TRIGGERED.replace("atr_spike_ratio=2.5000", "atr_spike_ratio=1.1000")
     assert atr_defense_from_text(calm) is False
 
 
-def test_atr_defense_from_text_per_asset_threshold():
-    """per-asset 防御线（sweep 调优后 GC=F/NDQ.AX=2.0）：2.5% 对两者触发、对默认资产(5.0)不触发"""
-    text = "INPUTS: ma20=4600.0, ma120=4500.0, atr_pct=2.5000"
-    assert atr_defense_from_text(text, "GC=F") is True
-    assert atr_defense_from_text(text, "NDQ.AX") is True
-    assert atr_defense_from_text(text, "AAPL") is False  # 无 override → 默认线 5.0
+def test_atr_defense_from_text_threshold_from_config():
+    """防御线走 config（sentiment.atr_defense_spike_ratio），抬线后同文本不触发"""
+    from core.config import set_config_override
+    set_config_override({"sentiment": {"atr_defense_spike_ratio": 3.0}})
+    assert atr_defense_from_text(BRIEF_TRIGGERED) is False  # 2.5 < 3.0
 
 
 def test_atr_defense_from_text_missing_graceful():
     assert atr_defense_from_text("") is False
     assert atr_defense_from_text("no regime data") is False
+    # 老 transcript 只有 atr_pct 没有 atr_spike_ratio → 不触发（graceful）
+    assert atr_defense_from_text("INPUTS: atr_pct=9.0000") is False
+    # atr_spike_ratio=None（样本不足）打进 INPUTS 行 → 正则不匹配数字 → 不触发
+    assert atr_defense_from_text("INPUTS: atr_spike_ratio=None") is False
 
 
-# ---------- 防御线与 crash 分类解耦 ----------
+# ---------- 防御线与 crash 分类解耦（通用口径下结构性成立） ----------
 
-def test_defense_atr_threshold_decoupled_from_crash_classification():
-    """调 defense_atr_pct_min 不影响 classify_regime（分类只读 crash_atr_pct_min）"""
+def test_defense_spike_ratio_decoupled_from_crash_classification():
+    """调 sentiment.atr_defense_spike_ratio 不影响 classify_regime"""
     from core.config import set_config_override
-    from core.regime import classify_regime, defense_atr_threshold
+    from core.regime import classify_regime
 
     metrics = {
-        "ma20": 100.0, "ma120": 96.0, "atr_pct": 2.0,
+        "ma20": 100.0, "ma120": 96.0, "atr_pct": 2.0, "atr_spike_ratio": 2.4,
         "price_quantile_2y": 0.5, "return_30d": -0.05,
         "rebound_off_30d_low": None,
     }
     before = classify_regime(metrics, symbol="NDQ.AX")["regime"]
-
-    # 防御线压到 0.5（atr 2.0 会触发防御），crash 分类必须不动
-    set_config_override({"regime_per_asset": {"NDQ.AX": {"defense_atr_pct_min": 0.5}}})
-    assert defense_atr_threshold("NDQ.AX") == 0.5
+    set_config_override({"sentiment": {"atr_defense_spike_ratio": 1.0}})
     after = classify_regime(metrics, symbol="NDQ.AX")["regime"]
     assert after == before, "防御线居然影响了 regime 分类 — 解耦被破坏"
     assert after != "crash"
+
+
+def test_atr_spike_ratio_metric_computed():
+    """compute_metrics 输出 atr_spike_ratio：波动翻倍场景 ratio 显著 >1"""
+    import numpy as np
+    import pandas as pd
+    from utils.market_metrics import compute_metrics
+
+    n = 400
+    rng = np.random.default_rng(7)
+    # 前 370 天平静（日波动 ~0.5%），最后 30 天波动放大 4 倍（快崩场景）
+    rets = np.concatenate([
+        rng.normal(0, 0.005, n - 30), rng.normal(0, 0.02, 30),
+    ])
+    close = pd.Series(100 * np.cumprod(1 + rets))
+    df = pd.DataFrame({"Close": close})
+    m = compute_metrics(df)
+    assert m["atr_spike_ratio"] is not None
+    assert m["atr_spike_ratio"] >= 2.0, f"波动 4 倍场景 ratio 应 ≥2，实际 {m['atr_spike_ratio']:.2f}"
+
+    # 样本不足（<120) → None（graceful）
+    m_small = compute_metrics(df.iloc[:60])
+    assert m_small["atr_spike_ratio"] is None

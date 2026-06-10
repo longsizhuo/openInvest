@@ -978,8 +978,9 @@ def test_run_committee_defense_flag_blocks_aggressive(monkeypatch):
 # 防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 飙升（资产级, metrics），
 # 独立于 regime，确定性降级 BUY→ACCUMULATE / ACCUMULATE→HOLD。
 
-def _setup_session_mocks(monkeypatch, tmp_path, *, atr_pct: float):
-    """复用契约 5/7 的 mock 骨架，metrics.atr_pct 可控（默认阈值 crash_atr_pct_min=5.0）"""
+def _setup_session_mocks(monkeypatch, tmp_path, *, atr_spike_ratio: float):
+    """复用契约 5/7 的 mock 骨架，metrics.atr_spike_ratio 可控
+    （通用防御线 sentiment.atr_defense_spike_ratio=2.0）"""
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
@@ -1002,11 +1003,12 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_pct: float):
     monkeypatch.setattr("core.committee_runner.get_history_data", lambda *a, **kw: fake_df)
     monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
-    # metrics.atr_pct 可控 → ATR 腿确定性可测（TEST.AX 无 per-asset 覆盖，阈值 5.0）
+    # metrics.atr_spike_ratio 可控 → ATR 腿确定性可测（通用线 2.0，无 per-asset）
     monkeypatch.setattr(
         "core.committee_runner.compute_metrics",
         lambda df: {
-            "ma20": 100.0, "ma120": 96.0, "atr_pct": atr_pct,
+            "ma20": 100.0, "ma120": 96.0, "atr_pct": 1.5,
+            "atr_spike_ratio": atr_spike_ratio,
             "price_quantile_2y": 0.9, "return_30d": -0.05,
             "rebound_off_30d_low": None, "current_price": 104.0,
         },
@@ -1028,8 +1030,8 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_pct: float):
 
 
 def test_service_layer_computes_atr_defense_leg(monkeypatch, tmp_path):
-    """atr_pct=6.0 ≥ 阈值 5.0 → run_committee 收到 atr_defense_on=True"""
-    captured = _setup_session_mocks(monkeypatch, tmp_path, atr_pct=6.0)
+    """突变比 2.5 ≥ 通用线 2.0 → run_committee 收到 atr_defense_on=True"""
+    captured = _setup_session_mocks(monkeypatch, tmp_path, atr_spike_ratio=2.5)
     from core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
     assert captured, "run_committee 未被调用"
@@ -1039,8 +1041,8 @@ def test_service_layer_computes_atr_defense_leg(monkeypatch, tmp_path):
 
 
 def test_service_layer_atr_defense_off_when_calm(monkeypatch, tmp_path):
-    """atr_pct=1.2 < 阈值 → atr_defense_on=False（防御不乱触发）"""
-    captured = _setup_session_mocks(monkeypatch, tmp_path, atr_pct=1.2)
+    """突变比 1.1 < 通用线 2.0 → atr_defense_on=False（防御不乱触发）"""
+    captured = _setup_session_mocks(monkeypatch, tmp_path, atr_spike_ratio=1.1)
     from core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
     assert captured, "run_committee 未被调用"

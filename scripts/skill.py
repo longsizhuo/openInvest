@@ -816,8 +816,7 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
         solvency_strong=_solvency_strong,
         regime=regime_label_from_text(raw),
         defense_flag_on=(
-            "INDEP_DEFENSE_FLAG: on" in raw
-            or atr_defense_from_text(raw, args.symbol)
+            "INDEP_DEFENSE_FLAG: on" in raw or atr_defense_from_text(raw)
         ),
     )
 

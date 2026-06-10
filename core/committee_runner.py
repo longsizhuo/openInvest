@@ -19,7 +19,7 @@ from core.committee import (
     run_macro_view,
 )
 from core.portfolio_manager import PortfolioManager
-from core.regime import classify_regime, defense_atr_threshold, format_regime_brief
+from core.regime import classify_regime, format_regime_brief
 from core.regime_probability import (
     RegimeProbability,
     build_probability_table_from_ohlc,
@@ -420,19 +420,17 @@ def run_committee_for_symbol(
     # 让 Quant 基于数据判断方向，不是凭空判断。读失败 graceful 退化无数字中性版。
     _classification = classify_regime(metrics, symbol=symbol)
     _regime_for_hint = _classification["regime"]
-    # 独立快崩防御 ATR 腿（资产级）：阈值 defense_atr_pct_min 与 crash 分类解耦
-    # （分类不读它，调防御灵敏度不动 regime 判定），且不等 30d 回撤确认——
-    # crash 锁永不触发的根因就是双条件里慢腿拖死快腿。
+    # 独立快崩防御 ATR 腿（资产级，通用口径）：波动突变比 = 当日 ATR% / 自身
+    # 近 1 年滚动中位，≥ sentiment.atr_defense_spike_ratio（默认 2.0=翻倍）触发。
+    # 尺度无关（任何资产自校准，无 per-asset magic number），与 crash 分类完全
+    # 解耦，且不等 30d 回撤确认——crash 锁永不触发的根因就是慢腿拖死快腿。
     # VIX 腿（市场级）在 sentiment_brief（INDEP_DEFENSE_FLAG），run_committee 里 OR。
-    _atr_pct = metrics.get("atr_pct")
-    _atr_threshold = defense_atr_threshold(symbol)
-    atr_defense_on = bool(
-        _atr_pct is not None
-        and _atr_threshold is not None
-        and _atr_pct >= _atr_threshold
-    )
+    from core.config import load_config as _load_config
+    _spike = metrics.get("atr_spike_ratio")
+    _spike_min = _load_config().sentiment.atr_defense_spike_ratio
+    atr_defense_on = bool(_spike is not None and _spike >= _spike_min)
     if atr_defense_on:
-        emit("atr_defense_on", atr_pct=_atr_pct, threshold=_atr_threshold)
+        emit("atr_defense_on", atr_spike_ratio=_spike, threshold=_spike_min)
     _prob_hint = None
     try:
         from core.regime_probability import get_regime_forward_summary

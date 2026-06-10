@@ -72,15 +72,12 @@ def _calc_rsi(close: pd.Series, period: int = 14) -> Optional[float]:
     return float(100 - (100 / (1 + rs)))
 
 
-def _calc_atr_pct(df: pd.DataFrame, period: int = 14) -> Optional[float]:
-    """ATR 百分比 = ATR / 当前收盘价 * 100（Wilder 平滑，周期默认 14）。
+def _atr_pct_series(df: pd.DataFrame, period: int = 14) -> Optional[pd.Series]:
+    """逐日 ATR%（ATR / 当日收盘 * 100）序列，Wilder 平滑。
 
     True Range = max(high-low, |high-prev_close|, |low-prev_close|)，
     **正确包含跳空**（gap）。仅当 DataFrame 带 High/Low 列时走真 TR；DB 只有
     Close 时退化为 |ΔClose|（B 组补存 OHLC 后此退化分支不再走）。
-
-    平滑用 Wilder RMA（ewm alpha=1/period, adjust=False），不是 SMA。
-    分母是最新收盘价（标准 ATR% 口径）。
     """
     if len(df) < period + 1:
         return None
@@ -109,11 +106,45 @@ def _calc_atr_pct(df: pd.DataFrame, period: int = 14) -> Optional[float]:
         # 退化分支：DB 仅有 Close（无 High/Low）。低估真实波动，B 组补 OHLC 后失效。
         tr = close.diff().abs()
     atr = tr.ewm(alpha=1.0 / period, adjust=False).mean()
-    last_atr = _safe_last(atr)
-    last_price = _safe_last(close)
-    if last_atr is None or last_price is None or last_price == 0:
+    return atr / close * 100
+
+
+def _calc_atr_pct(df: pd.DataFrame, period: int = 14) -> Optional[float]:
+    """ATR 百分比 = ATR / 当前收盘价 * 100（Wilder 平滑，周期默认 14）。
+
+    平滑用 Wilder RMA（ewm alpha=1/period, adjust=False），不是 SMA。
+    分母是最新收盘价（标准 ATR% 口径）。
+    """
+    series = _atr_pct_series(df, period=period)
+    if series is None:
         return None
-    return float(last_atr / last_price * 100)
+    val = _safe_last(series)
+    return None if val is None else float(val)
+
+
+def _calc_atr_spike_ratio(
+    df: pd.DataFrame,
+    period: int = 14,
+    baseline_window: int = 252,
+    min_periods: int = 120,
+) -> Optional[float]:
+    """波动突变比 = 当日 ATR% / 自身近 1 年（252 交易日）滚动中位 ATR%。
+
+    独立快崩防御 ATR 腿的通用口径（2026-06）：尺度无关（任何资产自校准，
+    无需 per-asset 绝对阈值），且对历史尖峰稳健——滚动分位制会被 2 年窗里的
+    旧尖峰"脱敏"（2020 COVID 留窗内 → 2022 真实告警分位被压低），中位数基线
+    不受尾部影响。≥2.0 = 波动较自身常态翻倍 = 快崩哨兵。
+    样本不足 min_periods 时返回 None（graceful，防御腿不触发）。
+    """
+    series = _atr_pct_series(df, period=period)
+    if series is None or len(series.dropna()) < min_periods:
+        return None
+    baseline = series.rolling(baseline_window, min_periods=min_periods).median()
+    last_atr = _safe_last(series)
+    last_base = _safe_last(baseline)
+    if last_atr is None or last_base is None or last_base <= 0:
+        return None
+    return float(last_atr / last_base)
 
 
 def _calc_max_drawdown(close: pd.Series) -> Optional[float]:
@@ -220,6 +251,8 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
           rsi14: 14 日 Wilder RSI
           price_quantile_2y: 真百分位排名（窗口内 ≤ 当前价的比例，0-1）—— 通常传 2 年数据
           atr_pct: 14 日 Wilder ATR 占当前价的百分比（真 TR，含跳空）
+          atr_spike_ratio: 波动突变比（当日 ATR% / 近 1 年滚动中位 ATR%），
+            独立快崩防御 ATR 腿用；样本 <120 时 None
           volatility_annualized: 年化波动率（基于全部样本）
           max_drawdown: 最大回撤（负数）
           return_30d: 过去 30 交易日累计收益率（regime crash 跌幅腿）
@@ -236,6 +269,7 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
             "rsi14": None,
             "price_quantile_2y": None,
             "atr_pct": None,
+            "atr_spike_ratio": None,
             "volatility_annualized": None,
             "max_drawdown": None,
             "return_30d": None,
@@ -253,6 +287,7 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
         "rsi14": _calc_rsi(close, period=14),
         "price_quantile_2y": _calc_price_quantile(close),
         "atr_pct": _calc_atr_pct(df, period=14),
+        "atr_spike_ratio": _calc_atr_spike_ratio(df, period=14),
         "volatility_annualized": _calc_volatility_annualized(close),
         "max_drawdown": _calc_max_drawdown(close),
         "return_30d": _calc_return_30d(close),
