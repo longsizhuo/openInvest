@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.0](https://github.com/longsizhuo/openInvest/compare/v0.5.0...v0.6.0) (2026-06-10)
+
+
+### Features
+
+* **committee:** uptrend 杠杆做成显式 risk_profile 风险档（默认 steady） ([a45e791](https://github.com/longsizhuo/openInvest/commit/a45e7910513eb4f097127847fa39527cdd0f4a66))
+* **committee:** 独立快崩防御——VIX/ATR 任一触发，确定性降级买侧 verdict ([eb10a4e](https://github.com/longsizhuo/openInvest/commit/eb10a4e25d2deea8c4293a813f85e6d607548228))
+* **committee:** 补基本面/情绪维度对齐 TradingAgents（确定性事实块） ([6c076a1](https://github.com/longsizhuo/openInvest/commit/6c076a1145280a01e21a811990a8eff73227f847))
+* **committee:** 防御 ATR 腿改通用口径——波动突变比，删 per-asset 绝对线 ([3c53b54](https://github.com/longsizhuo/openInvest/commit/3c53b543f33b59237794d5b59a573ba3b5f1f87e))
+* **events:** 黄金事件覆盖——entity→GC=F 确定性兜底 + 持金常驻 gold queries ([51686e0](https://github.com/longsizhuo/openInvest/commit/51686e064ee7ee17ae41ef7697168e483c31664c))
+* **probability:** 概率表路径化——30/60/90 多窗分布 + 路径形状 ([824c4cd](https://github.com/longsizhuo/openInvest/commit/824c4cd1d7f03742d394e370f63a2885e2b385f4))
+* **regime:** 拆 regime 方向锁层，STRATEGY_HINT 改中性 OHLC 概率口径 ([90e0b41](https://github.com/longsizhuo/openInvest/commit/90e0b41ba9cc1719669c5c358b9c9e148ae838e7))
+* **regime:** 防御 ATR 线与 crash 分类解耦——新增 defense_atr_pct_min ([7c95950](https://github.com/longsizhuo/openInvest/commit/7c9595078e4cca5f1cf7db90daa45b2d350912df))
+* **regime:** 防御 ATR 线按确定性 sweep 调优 NDQ/GC → 2.0 ([5180928](https://github.com/longsizhuo/openInvest/commit/5180928e663ba1c08d46ff7f482a4fee8013ba3a))
+* **sentiment:** EVENT_STANCE 机制升级——per-asset 行 + 加权公式（默认禁用） ([7683c07](https://github.com/longsizhuo/openInvest/commit/7683c079eace5c4524377530ab9a4bea74e2adb7))
+
+
+### Refactor
+
+* **config:** 情绪/估值 magic number 迁入 tunable config 统一维护 ([7acf9e1](https://github.com/longsizhuo/openInvest/commit/7acf9e125968a299c503d4eacba3e4baf5f5d8e5))
+
+
+### Docs
+
+* **services:** 修正 news.py 过时孤儿注释——ddgs 已经事件层接入 production ([a6311a7](https://github.com/longsizhuo/openInvest/commit/a6311a73196f45fc494cb7af30e93b36a6819fef))
+
 ## [0.5.0](https://github.com/longsizhuo/openInvest/compare/v0.4.0...v0.5.0) (2026-05-30)
 
 
