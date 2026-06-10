@@ -9,6 +9,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 from core.committee import (
+    atr_defense_from_text,  # re-export: cmd_save_committee 提 ATR 防御腿用
     load_backup_cny,  # re-export: entry (daily_report / skill) 走 service layer
     load_wealth_context_view,
     parse_cio_memo,  # re-export: 给 entry (scripts.skill cmd_save_committee) 用，
@@ -417,7 +418,20 @@ def run_committee_for_symbol(
     # 2026-05-31: STRATEGY_HINT 不再给人写方向预设，改成中性引用该 regime 的 OHLC
     # 概率口径（中位 forward return / 跌破现价概率 / n）。先算好概率口径传进去，
     # 让 Quant 基于数据判断方向，不是凭空判断。读失败 graceful 退化无数字中性版。
-    _regime_for_hint = classify_regime(metrics, symbol=symbol)["regime"]
+    _classification = classify_regime(metrics, symbol=symbol)
+    _regime_for_hint = _classification["regime"]
+    # 独立快崩防御 ATR 腿（资产级）：复用 crash 分类的波动阈值（per-asset），但
+    # 不等 30d 回撤确认——crash 锁永不触发的根因就是双条件里慢腿拖死快腿。
+    # VIX 腿（市场级）在 sentiment_brief（INDEP_DEFENSE_FLAG），run_committee 里 OR。
+    _atr_pct = metrics.get("atr_pct")
+    _atr_threshold = _classification["thresholds_used"].get("crash_atr_pct_min")
+    atr_defense_on = bool(
+        _atr_pct is not None
+        and _atr_threshold is not None
+        and _atr_pct >= _atr_threshold
+    )
+    if atr_defense_on:
+        emit("atr_defense_on", atr_pct=_atr_pct, threshold=_atr_threshold)
     _prob_hint = None
     try:
         from core.regime_probability import get_regime_forward_summary
@@ -528,6 +542,7 @@ def run_committee_for_symbol(
         current_price=current_price,
         sentiment_brief=effective_sentiment_brief,
         valuation_brief=effective_valuation_brief,
+        atr_defense_on=atr_defense_on,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )

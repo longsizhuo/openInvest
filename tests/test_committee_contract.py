@@ -969,3 +969,118 @@ def test_run_committee_defense_flag_blocks_aggressive(monkeypatch):
         assert "_risk_profile_applied" not in result["verdict"]
     finally:
         reset_config()
+
+
+# ---------------------------------------------------------------------------
+# 契约 9: 独立快崩防御 — ATR 腿（service layer 算）+ 确定性买侧降级（端到端）
+# ---------------------------------------------------------------------------
+# MA120 regime 看不见快崩（COVID 全程 uptrend），crash 锁双条件永不触发。
+# 防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 飙升（资产级, metrics），
+# 独立于 regime，确定性降级 BUY→ACCUMULATE / ACCUMULATE→HOLD。
+
+def _setup_session_mocks(monkeypatch, tmp_path, *, atr_pct: float):
+    """复用契约 5/7 的 mock 骨架，metrics.atr_pct 可控（默认阈值 crash_atr_pct_min=5.0）"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.committee_runner.load_prior_insights", lambda *a, **kw: "")
+    monkeypatch.setattr("core.committee_runner.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.committee_runner.load_valuation_brief", lambda *a, **k: "")
+
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("core.committee_runner.get_history_data", lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+    # metrics.atr_pct 可控 → ATR 腿确定性可测（TEST.AX 无 per-asset 覆盖，阈值 5.0）
+    monkeypatch.setattr(
+        "core.committee_runner.compute_metrics",
+        lambda df: {
+            "ma20": 100.0, "ma120": 96.0, "atr_pct": atr_pct,
+            "price_quantile_2y": 0.9, "return_30d": -0.05,
+            "rebound_off_30d_low": None, "current_price": 104.0,
+        },
+    )
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    return captured
+
+
+def test_service_layer_computes_atr_defense_leg(monkeypatch, tmp_path):
+    """atr_pct=6.0 ≥ 阈值 5.0 → run_committee 收到 atr_defense_on=True"""
+    captured = _setup_session_mocks(monkeypatch, tmp_path, atr_pct=6.0)
+    from core.committee_runner import run_committee_session
+    run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+    assert captured, "run_committee 未被调用"
+    assert captured[0].get("atr_defense_on") is True, (
+        "ATR 腿没接进 run_committee — 检查 run_committee_for_symbol 的 atr_defense_on 计算"
+    )
+
+
+def test_service_layer_atr_defense_off_when_calm(monkeypatch, tmp_path):
+    """atr_pct=1.2 < 阈值 → atr_defense_on=False（防御不乱触发）"""
+    captured = _setup_session_mocks(monkeypatch, tmp_path, atr_pct=1.2)
+    from core.committee_runner import run_committee_session
+    run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+    assert captured, "run_committee 未被调用"
+    assert captured[0].get("atr_defense_on") is False
+
+
+def test_run_committee_atr_defense_downgrades_accumulate(monkeypatch):
+    """端到端：atr_defense_on=True + CIO 给 ACCUMULATE → 最终 HOLD（确定性降级）"""
+    from core import committee as cmt
+
+    class FakeAgent:
+        def __init__(self, role):
+            self._role = role
+
+        def run(self, ctx):
+            if self._role == "quant":
+                return "REGIME: uptrend\nSIGNAL: bullish\nSTRENGTH: 6\nONE_LINER: x\n"
+            if self._role == "risk":
+                return "SIGNAL: ok\nSTRENGTH: 3\nONE_LINER: x\n"
+            if self._role == "cio":
+                return (
+                    "VERDICT: ACCUMULATE\nCONFIDENCE: 0.6\nDOMINANT_VIEW: quant\n"
+                    "SUGGESTED_ALLOC_CNY: 5000\n"
+                )
+            return ""
+
+    monkeypatch.setattr(cmt, "_create_agent", lambda _p, **kw: FakeAgent(kw.get("role")))
+    monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+    result = cmt.run_committee(
+        asset={"symbol": "NDQ.AX", "display_name": "Test"},
+        market_data="fake market",
+        macro_view="fake macro",
+        portfolio_summary="用户风险偏好: Balanced\n",
+        regime_brief="REGIME: uptrend\nREASON: MA 滞后\nSTRATEGY_HINT: x",
+        atr_defense_on=True,
+        max_debate_rounds=1,
+    )
+    v = result["verdict"]
+    assert v["verdict"] == "HOLD", (
+        "ATR 防御没降级 ACCUMULATE — atr_defense_on 没接进 parse_cio_memo？"
+    )
+    assert v["_defense_downgrade"] == "accumulate_to_hold"
+    assert v["alloc_cny"] == 0
