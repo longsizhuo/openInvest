@@ -94,10 +94,11 @@ def test_atr_defense_from_text_below_threshold():
 
 
 def test_atr_defense_from_text_per_asset_threshold():
-    """per-asset 防御线（GC=F defense_atr_pct_min=3.5）：4.0% 对黄金触发、对默认资产不触发"""
-    gold = "INPUTS: ma20=4600.0, ma120=4500.0, atr_pct=4.0000"
-    assert atr_defense_from_text(gold, "GC=F") is True
-    assert atr_defense_from_text(gold, "NDQ.AX") is False  # NDQ 防御线 5.0
+    """per-asset 防御线（sweep 调优后 GC=F/NDQ.AX=2.0）：2.5% 对两者触发、对默认资产(5.0)不触发"""
+    text = "INPUTS: ma20=4600.0, ma120=4500.0, atr_pct=2.5000"
+    assert atr_defense_from_text(text, "GC=F") is True
+    assert atr_defense_from_text(text, "NDQ.AX") is True
+    assert atr_defense_from_text(text, "AAPL") is False  # 无 override → 默认线 5.0
 
 
 def test_atr_defense_from_text_missing_graceful():
