@@ -211,23 +211,17 @@ def _parse_events_json(raw_text: str, *, expected_size: int, offset: int) -> Lis
     return out
 
 
-# 确定性 entity→symbol 兜底映射（黄金事件覆盖，2026-06 待办5）：
-# LLM 偶尔只给 entities 不给 affected_symbols（央行购金类宏观事件尤其常见），
-# 这里用词边界正则兜底补上。**必须 \b 词边界**——"goldman sachs" 含子串 gold，
-# 子串匹配会把高盛新闻错误映射到金价（\bgold\b 后接 "man" 不命中，安全）。
-# 这是语义映射数据（同 rss_feeds.yml 性质），不是可 sweep 的标量，不进 tunable config。
-_ENTITY_SYMBOL_FALLBACK: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r"\bgold\b|\bbullion\b|\bxau\b"), "GC=F"),
-]
-
-
 def _apply_entity_symbol_fallback(
     entities: List[str], affected: List[str],
 ) -> List[str]:
-    """entities 命中映射且 symbol 不在 affected → append（保序去重）。纯代码规则，零 LLM。"""
-    joined = " ".join(entities)
-    for pattern, symbol in _ENTITY_SYMBOL_FALLBACK:
-        if pattern.search(joined) and symbol not in affected:
+    """entities 命中确定性映射且 symbol 不在 affected → append（保序去重）。
+
+    映射表在 services/symbol_map.py（issue #26：黄金 + 指数统一的两层映射模块；
+    词边界正则防 goldman sachs 误映射）。纯代码规则，零 LLM。
+    """
+    from services.symbol_map import canonical_symbols_for_entities
+    for symbol in canonical_symbols_for_entities(entities):
+        if symbol not in affected:
             affected = [*affected, symbol]
     return affected
 

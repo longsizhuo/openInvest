@@ -204,19 +204,25 @@ def _event_stance_line(event_brief: str) -> Optional[str]:
     return _format_stance_line(float(opp - risk), risk, opp)
 
 
-def event_stance_line_for_symbol(event_brief: str, symbol: str) -> Optional[str]:
-    """per-asset 净情绪行：只统计头行 [syms] 含该 symbol 的事件。
+def event_stance_line_for_symbol(
+    event_brief: str, symbol: str, *, tracks: Optional[Any] = None,
+) -> Optional[str]:
+    """per-asset 净情绪行：统计头行 [syms] 与该 symbol 代理集合相交的事件。
 
     驱动标的来自调用方（run_committee_for_symbol 的 symbol 参数 ←
     strategy.target_assets 动态解析）——**本函数不持有任何标的列表**，
-    任意 ticker 通用。session 模式下 brief 是跨资产合并版，靠头行过滤在
+    任意 ticker 通用。issue #26：匹配用 services.symbol_map.proxy_symbols_for
+    扩展（NDQ.AX 也命中标 ^NDX 的指数事件）；tracks = strategy 资产的可选
+    `tracks` 字段透传。session 模式下 brief 是跨资产合并版，靠头行过滤在
     session / standalone 两种模式行为一致。无命中事件 → None（graceful）。
     """
     if not event_brief or not symbol:
         return None
+    from services.symbol_map import proxy_symbols_for
+    targets = proxy_symbols_for(symbol, tracks=tracks)
     entries = [
         e for e in _parse_event_brief_entries(event_brief)
-        if symbol.upper() in e["syms"]
+        if e["syms"] & targets
     ]
     if not entries:
         return None

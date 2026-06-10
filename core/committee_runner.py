@@ -86,12 +86,15 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
         if store is None:
             return ""
         q_embed = embed_text(symbol) if store.vec_loaded else None
+        # issue #26: 召回时把用户标的扩展为代理集合（NDQ.AX 也命中 ^NDX 指数事件）
+        from services.symbol_map import proxy_symbols_for
         events = store.recall(
             symbol,
             time_window_days=int(os.getenv("INVEST_EVENT_RAG_WINDOW_DAYS", "7")),
             min_severity=os.getenv("INVEST_EVENT_RAG_MIN_SEVERITY", "mid"),
             top_k=int(os.getenv("INVEST_EVENT_RAG_TOP_K", "8")),
             query_embedding=q_embed,
+            aliases=sorted(proxy_symbols_for(symbol)),
         )
         return format_event_brief(events)
     except Exception as e:  # noqa: BLE001
@@ -526,7 +529,10 @@ def run_committee_for_symbol(
     # 标的来自本函数 symbol 参数（← strategy.target_assets 动态解析），无硬编码。
     try:
         from utils.sentiment import event_stance_line_for_symbol
-        _per_asset_stance = event_stance_line_for_symbol(effective_event_brief, symbol)
+        _per_asset_stance = event_stance_line_for_symbol(
+            effective_event_brief, symbol,
+            tracks=target.get("tracks"),  # issue #26: 用户可选声明追踪的指数
+        )
     except Exception as e:  # noqa: BLE001  聚合行失败不阻断委员会
         log.warning(f"per-asset EVENT_STANCE 行构建失败 graceful 跳过: {e}")
         _per_asset_stance = None
