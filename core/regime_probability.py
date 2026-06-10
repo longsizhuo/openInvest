@@ -389,20 +389,35 @@ def build_reentry_reference_text(
             if shape:
                 dip_med_price = current_price * (1 + shape["dip_median_pct"] / 100)
                 dip_p25_price = current_price * (1 + shape["dip_p25_pct"] / 100)
+                pop_med_price = current_price * (1 + shape["pop_median_pct"] / 100)
+                pop_p75_price = current_price * (1 + shape["pop_p75_pct"] / 100)
                 shape_lines = [
                     (
                         f"- {shape['window']} 路径形状（n={shape['n']}，"
                         f"重叠窗口独立≈{shape['effective_n']}）: "
                         f"先跌后涨 {shape['pct_dip_then_up'] * 100:.0f}% / "
                         f"直接涨(无显著回踩) {shape['pct_up_no_dip'] * 100:.0f}% / "
-                        f"期末收跌 {shape['pct_down'] * 100:.0f}%"
-                        f"（\"显著回踩\"=途中跌幅 ≥1×当日ATR）"
+                        f"冲高回落 {shape['pct_pop_then_down'] * 100:.0f}% / "
+                        f"一路收跌 {shape['pct_down_no_pop'] * 100:.0f}%"
+                        f"（\"显著\"=途中波幅 ≥1×当日ATR；冲高回落=先给更高卖点再收跌）"
+                    ),
+                    (
+                        f"- {shape['window']} 途中最高冲高: 中位 {shape['pop_median_pct']:+.1f}%"
+                        f"（→ ¥{pop_med_price:,.2f}），"
+                        f"高四分位 {shape['pop_p75_pct']:+.1f}%（→ ¥{pop_p75_price:,.2f}）；"
+                        f"中位 {shape['days_to_peak_median']} 个交易日见顶"
                     ),
                     (
                         f"- {shape['window']} 途中最深回踩: 中位 {shape['dip_median_pct']:+.1f}%"
                         f"（→ ¥{dip_med_price:,.2f}），"
                         f"深四分位 {shape['dip_p25_pct']:+.1f}%（→ ¥{dip_p25_price:,.2f}）；"
                         f"中位 {shape['days_to_trough_median']} 个交易日见谷底"
+                    ),
+                    (
+                        f"- {shape['window']} 窗内 regime 中位持续 "
+                        f"{shape['regime_persist_median_days']}/"
+                        f"{shape['window_median_days']} 个交易日"
+                        f"——持续占比低则形状占比含 regime 切换成分，解读权重打折"
                     ),
                 ]
         except Exception:  # noqa: BLE001  路径形状取失败不影响多窗分布主体
@@ -476,11 +491,17 @@ def compute_regime_return_frame(
     Returns:
         DataFrame：index=date，列 =
           - "regime"
-          - "fwd_<w>"   窗口期末 forward return（小数）
-          - "min_<w>"   窗口内**途中最深回踩**（相对当日收盘的最低点收益，小数，≤0 或小正）
-          - "tmin_<w>"  到达谷底的交易日数（路径时序："什么时候跌"）
-          - "atr_pct"   当日 ATR%（路径形状判定的自校准单位，"回踩显著"=跌幅 ≥1×当日ATR）
-        指标 warmup 不足的头部 regime=unknown；lookahead 不足的尾部 fwd_*/min_*/tmin_*=NaN。
+          - "fwd_<w>"     窗口期末 forward return（小数）
+          - "min_<w>"     窗口内**途中最深回踩**（相对当日收盘的最低点收益，小数）
+          - "tmin_<w>"    到达谷底的交易日数（路径时序："什么时候跌"）
+          - "max_<w>"     窗口内**途中最高冲高**（镜像 min；卖出时机的核心读数：
+                          "先给更高卖点再跌"要靠它才看得见——min 轴只问跌没跌过）
+          - "tmax_<w>"    到达顶点的交易日数（"什么时候涨"）
+          - "persist_<w>" 当日 regime 在窗内实际持续的交易日数（含当日，cap 到窗末）
+                          ——形状占比混着 regime 切换成分，靠它判断解读权重
+          - "wdays_<w>"   窗内交易日数（persist 的分母参照）
+          - "atr_pct"     当日 ATR%（路径形状的自校准"显著"单位，≥1×ATR 才算数）
+        指标 warmup 不足的头部 regime=unknown；lookahead 不足的尾部各前向列=NaN。
         空输入返回空 DataFrame。
     """
     import numpy as np
@@ -535,6 +556,12 @@ def compute_regime_return_frame(
 
     out = pd.DataFrame({"regime": regimes}, index=df.index)
 
+    # regime 前向连续段长（不 cap）：persist_<w> 用。倒序扫一遍 O(n)。
+    run = np.ones(n, dtype=int)
+    for k in range(n - 2, -1, -1):
+        if regimes[k + 1] == regimes[k]:
+            run[k] = run[k + 1] + 1
+
     # forward return（日历日）：找 date + Nd 当天或之后第一个收盘
     idx = df.index
     vals = close.values
@@ -546,20 +573,34 @@ def compute_regime_return_frame(
         valid = pos < n
         fwd[valid] = vals[pos[valid]] / vals[arange[valid]] - 1.0
         out[f"fwd_{w}"] = fwd
-        # 路径化（2026-06）：窗口内途中最深回踩 + 到谷底的交易日数。
+        # 路径化（2026-06）：窗口内途中最深回踩/最高冲高 + 各自到达的交易日数。
         # 只在 lookahead 完整（valid）的行算，与 fwd 同口径。
         mins = np.full(n, np.nan)
         tmins = np.full(n, np.nan)
+        maxs = np.full(n, np.nan)
+        tmaxs = np.full(n, np.nan)
+        persists = np.full(n, np.nan)
+        wdays = np.full(n, np.nan)
         for i in np.flatnonzero(valid):
             seg = vals[i + 1: pos[i] + 1]
             if seg.size:
                 j = int(np.argmin(seg))
                 mins[i] = seg[j] / vals[i] - 1.0
                 tmins[i] = j + 1  # 交易日数（t+1 起算）
+                j = int(np.argmax(seg))
+                maxs[i] = seg[j] / vals[i] - 1.0
+                tmaxs[i] = j + 1
+            # 窗内交易日数（含当日）与 regime 实际持续（精确逐行 cap，无近似魔数）
+            wdays[i] = pos[i] - i + 1
+            persists[i] = min(run[i], pos[i] - i + 1)
         out[f"min_{w}"] = mins
         out[f"tmin_{w}"] = tmins
+        out[f"max_{w}"] = maxs
+        out[f"tmax_{w}"] = tmaxs
+        out[f"persist_{w}"] = persists
+        out[f"wdays_{w}"] = wdays
 
-    # 当日 ATR%：路径形状的自校准"显著回踩"单位（无绝对百分比 magic number）
+    # 当日 ATR%：路径形状的自校准"显著"单位（无绝对百分比 magic number）
     out["atr_pct"] = atr_pct.values
 
     return out
@@ -583,18 +624,28 @@ def get_path_profile(
           "asset", "regime",
           "windows": { "30d": {n, effective_n, median_pct, p_below, p10_pct,
                                 p90_pct, low_confidence}, ... },
-          "shape": {   # 基于 shape_window（默认 90d）的路径形状分布
+          "shape": {   # 基于 shape_window（默认 90d）的路径形状分布（四类完备）
             "window", "n", "effective_n",
-            "pct_dip_then_up",   # 先跌后涨：途中回踩 ≥1×当日ATR 且期末收正
-            "pct_up_no_dip",     # 直接涨：期末收正且无显著回踩（没给低吸点）
-            "pct_down",          # 收跌：期末低于现价
-            "dip_median_pct",    # 途中最深回踩中位（全样本）
-            "dip_p25_pct",       # 深四分位（更悲观的回踩深度）
+            "pct_dip_then_up",    # 先跌后涨：途中回踩显著 且 期末收正（等回踩能接回）
+            "pct_up_no_dip",      # 直接涨：期末收正且无显著回踩（等回调会踏空）
+            "pct_pop_then_down",  # 冲高回落：途中冲高显著 且 期末收跌
+                                  # ——卖出时机的核心读数："先给更高卖点再跌"的占比
+            "pct_down_no_pop",    # 一路收跌：期末收跌且途中没给过显著高点
+            "dip_median_pct",     # 途中最深回踩中位（全样本）
+            "dip_p25_pct",        # 深四分位（更悲观的回踩深度）
             "days_to_trough_median",  # 中位多少个交易日见谷底（"什么时候跌"）
+            "pop_median_pct",     # 途中最高冲高中位（全样本，镜像 dip）
+            "pop_p75_pct",        # 高四分位（更乐观的冲高高度）
+            "days_to_peak_median",    # 中位多少个交易日见顶（"什么时候涨"）
+            "regime_persist_median_days",  # 窗内 regime 实际持续中位（交易日）
+            "window_median_days",          # 窗内交易日数中位（persist 的分母参照）
           } | None,
         }
         或 None（无数据 / 该 regime 无样本）。
-    "显著回踩"单位 = 当日 ATR%（自校准，无绝对百分比阈值）。
+    "显著"单位 = 当日 ATR%（自校准，无绝对百分比阈值）；回踩 ≤ −1×ATR 算 dipped，
+    冲高 ≥ +1×ATR 算 popped。四类 = up 支按 dipped 拆 / ¬up 支按 popped 拆，互斥完备。
+    persist：形状占比混着窗内 regime 切换的成分（"涨"可能不是本 regime 给的）——
+    persist 中位 / 窗中位 比值低时，形状解读权重要打折。
     """
     from db.market_store import MarketStore
     df = MarketStore().get_history_df(asset.upper(), days=days)
@@ -630,25 +681,35 @@ def get_path_profile(
         }
 
     sw = shape_window
-    cols = [f"fwd_{sw}", f"min_{sw}", f"tmin_{sw}", "atr_pct"]
+    cols = [f"fwd_{sw}", f"min_{sw}", f"tmin_{sw}", f"max_{sw}", f"tmax_{sw}",
+            f"persist_{sw}", f"wdays_{sw}", "atr_pct"]
     if all(c in sub.columns for c in cols):
         s = sub.dropna(subset=cols)
         if not s.empty:
             end = s[f"fwd_{sw}"] * 100
             dip = s[f"min_{sw}"] * 100
-            dipped = dip <= -s["atr_pct"]   # 回踩 ≥1×当日ATR 才算"给过低吸点"
+            pop = s[f"max_{sw}"] * 100
+            dipped = dip <= -s["atr_pct"]   # 回踩 ≥1×当日ATR = 给过显著低吸点
+            popped = pop >= s["atr_pct"]    # 冲高 ≥1×当日ATR = 给过显著高卖点
             up = end > 0
             n = len(s)
             out["shape"] = {
                 "window": sw,
                 "n": n,
                 "effective_n": max(1, n // int(sw.rstrip("d"))),
+                # 四类完备：up 支按 dipped 拆，¬up 支按 popped 拆
                 "pct_dip_then_up": round(float((dipped & up).mean()), 4),
                 "pct_up_no_dip": round(float((~dipped & up).mean()), 4),
-                "pct_down": round(float((~up).mean()), 4),
+                "pct_pop_then_down": round(float((popped & ~up).mean()), 4),
+                "pct_down_no_pop": round(float((~popped & ~up).mean()), 4),
                 "dip_median_pct": round(float(dip.median()), 2),
                 "dip_p25_pct": round(float(dip.quantile(0.25)), 2),
                 "days_to_trough_median": int(s[f"tmin_{sw}"].median()),
+                "pop_median_pct": round(float(pop.median()), 2),
+                "pop_p75_pct": round(float(pop.quantile(0.75)), 2),
+                "days_to_peak_median": int(s[f"tmax_{sw}"].median()),
+                "regime_persist_median_days": int(s[f"persist_{sw}"].median()),
+                "window_median_days": int(s[f"wdays_{sw}"].median()),
             }
     return out if out["windows"] else None
 
