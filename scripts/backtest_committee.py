@@ -142,6 +142,9 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
 
     print(f"\n📅 [{decision_date}] 跑 backtest...")
 
+    import os as _os_ta
+    _os_ta.environ["INVEST_TA_ASOF"] = decision_date  # test_ta 实验臂数据包钉日期
+
     with _patch_tools_to_date(decision_date):
         # Macro 一次跨资产共享
         try:

@@ -56,6 +56,8 @@ class CommitteeReport:
     prior_insights: str = ""
     sentiment_brief: str = ""         # 市场情绪表盘（确定性：VIX 分位 + CNN F&G，跨资产共享）
     valuation_brief: str = ""         # 估值（确定性：trailing PE + 价格分位，仅权益类，per-asset）
+    # test_ta 实验臂（INVEST_TA_ANALYSTS 开启时才有内容；默认空 dict = main 等价）
+    ta_analyst_reports: Dict[str, str] = field(default_factory=dict)
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
@@ -909,6 +911,22 @@ def run_committee(
         )
     if reentry_reference:
         cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{reentry_reference}"
+    # ===== test_ta 实验臂（INVEST_TA_ANALYSTS 未设 = 完全跳过，与 main 等价）=====
+    # TradingAgents 式分析师：Round 1 独立报告（不投票、不进收敛判定），
+    # 文本追加进 CIO brief。INVEST_TA_ASOF 由 backtest 按日钉数据包。
+    _ta_flag = os.getenv("INVEST_TA_ANALYSTS", "").strip()
+    if _ta_flag:
+        try:
+            from scripts.ta_integration import run_ta_analysts
+            _ta_reports = run_ta_analysts(sym, _ta_flag)
+            if _ta_reports:
+                report.ta_analyst_reports = _ta_reports
+                cio_brief += "\n\n=== TradingAgents 式分析师报告（实验臂，供综合参考） ===\n"
+                for _name, _rep in sorted(_ta_reports.items()):
+                    cio_brief += f"\n--- {_name} analyst ---\n{_rep}\n"
+                emit("ta_analysts_done", analysts=sorted(_ta_reports))
+        except Exception as e:  # noqa: BLE001  实验臂失败不阻断委员会
+            log.warning(f"TA analysts 实验臂失败 graceful 跳过: {e}")
     report.cio_memo = _ask(cio_agent, cio_brief)
     emit("cio_done",
          memo_preview=report.cio_memo[:240])
@@ -1041,6 +1059,9 @@ def _persist(report: CommitteeReport, verdict: Dict[str, Any],
         lines.append(
             f"\n\n---\n\n## Market Sentiment (deterministic)\n{report.sentiment_brief}"
         )
+    if report.ta_analyst_reports:
+        for _name, _rep in sorted(report.ta_analyst_reports.items()):
+            lines.append(f"\n\n---\n\n## TA Analyst (experiment): {_name}\n{_rep}")
     lines.extend([
         "\n\n---\n\n## Round 1 — Independent Briefs\n",
         f"\n### Quant Analyst\n{report.quant_view}",
