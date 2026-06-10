@@ -88,6 +88,33 @@ class MacroBucketConfig:
 
 
 @dataclass(frozen=True)
+class SentimentConfig:
+    """情绪表盘阈值（VIX 近 2 年分位的恐慌/贪婪分档 + 快崩哨兵线）
+
+    来源: utils/sentiment.py（2026-06-09 加维度时的模块常量，迁入 config 统一维护）
+    分位口径: 高 VIX = 恐慌。fear/greed 两侧分档 + defense 哨兵线独立可调。
+    """
+    vix_extreme_fear_q: float = 0.85
+    vix_fear_q: float = 0.65
+    vix_greed_q: float = 0.35
+    vix_extreme_greed_q: float = 0.15
+    # VIX 分位 ≥ 此值 → INDEP_DEFENSE_FLAG=on（独立于 MA regime 的快崩哨兵，
+    # 触发 parse_cio_memo 确定性买侧降级）。注意低波动期的"高分位"也会触发
+    # （如 VIX=21 站上 2y 87% 分位）——嫌敏感就抬这条线。
+    vix_defense_quantile: float = 0.85
+
+
+@dataclass(frozen=True)
+class ValuationConfig:
+    """估值 brief 阈值（权益类 trailing PE 绝对水平分档）
+
+    来源: utils/valuation.py（2026-06-09 加维度时的模块常量，迁入 config 统一维护）
+    """
+    pe_expensive: float = 30.0   # trailing PE ≥ 此值判"偏贵"（纳指类成长股经验阈值）
+    pe_cheap: float = 18.0       # trailing PE < 此值判"中性偏低"
+
+
+@dataclass(frozen=True)
 class OracleAccuracyConfig:
     """Verdict Oracle Accuracy 阈值 — 簇 9
 
@@ -129,5 +156,7 @@ class TunableConfig:
     verdict: VerdictConfig = field(default_factory=VerdictConfig)
     dreaming: DreamingTunableConfig = field(default_factory=DreamingTunableConfig)
     macro_buckets: MacroBucketConfig = field(default_factory=MacroBucketConfig)
+    sentiment: SentimentConfig = field(default_factory=SentimentConfig)
+    valuation: ValuationConfig = field(default_factory=ValuationConfig)
     oracle_accuracy: OracleAccuracyConfig = field(default_factory=OracleAccuracyConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)

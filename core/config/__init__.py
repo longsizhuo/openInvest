@@ -23,7 +23,9 @@ from .tunable import (
     RegimeConfig,
     RegimePerAssetConfig,
     RewardConfig,
+    SentimentConfig,
     TunableConfig,
+    ValuationConfig,
     VerdictConfig,
 )
 
@@ -42,6 +44,8 @@ __all__ = [
     "MacroBucketConfig",
     "OracleAccuracyConfig",
     "RewardConfig",
+    "SentimentConfig",
+    "ValuationConfig",
     # Locked dataclasses
     "LockedVerdictScoring",
     "LockedDreamingScoring",
