@@ -20,7 +20,8 @@ shell 命令的 agent 都能用，看下面 "选路径"。
 | Claude Code（有 `Agent({...})` 工具）| **Coordinator** | `prepare_committee` → spawn 4 subagent → `save_committee` | 不需要 DeepSeek key |
 | 任何其他 agent（Cursor / Cline / Codex / DeepSeek 本地 / 普通 Python）| **Direct** | `run_committee <SYMBOL>` 一键 | 需要 `DEEPSEEK_API_KEY` |
 
-两条路径**底座一样**——同一份 prompt，同一份 REGIME 硬约束，同一份落盘格式
+两条路径**底座一样**——同一份 prompt，同一份数据准备（regime 分类 + 概率口径 +
+确定性事实块），同一份落盘格式
 （`memory/.committee/<date>/<asset>.md`）。区别只在"4 个 LLM 角色谁来扮演"：
 Coordinator 由 Claude（用户订阅）扮演，Direct 由 DeepSeek-Chat（按 token 计）扮演。
 verdict 可能不同（不同模型，cross-validation 用）。
@@ -69,9 +70,11 @@ verdict 可能不同（不同模型，cross-validation 用）。
 - Stage 5：CIO 综合（**你**自己写，不 delegate）
 - Stage 6：`save_committee` 落盘
 
-**关键警告**：`prepare_committee` 输出的 `regime_brief` **必须**原样
-传给 Quant Round 1 / Round 2 worker，否则 REGIME 硬约束会失效，Quant 在
-震荡市底部会乱喊 bearish。
+**关键警告**：`prepare_committee` 输出的 `regime_brief` / `sentiment_brief` /
+`valuation_brief` / `reentry_reference` **必须**按 instructions 原样粘进对应
+worker 的 prompt：regime+估值+情绪进 Quant，三块+路径参考进 CIO。缺了的后果：
+Quant 失去概率口径与防御哨兵背景；CIO 的 EXPECTED_PATH 凭空编；INDEP_DEFENSE_FLAG
+不进 transcript → `save_committee` 的确定性防御降级（快崩哨兵）整条失效。
 
 ## Direct 路径详情（任意 agent）
 
