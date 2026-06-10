@@ -22,6 +22,8 @@ verdict:
   buy_confidence_downgrade_to: 0.6
   alloc_cny_ceiling: 100000
   worker_unavailable_confidence_floor: 0.4
+  # steady=无方向锁(B链, Sharpe/回撤最优) | aggressive=uptrend顺势杠杆(HOLD→ACCUMULATE, +CR −Sharpe 深DD)
+  risk_profile: steady
 
 dreaming:
   min_recall: 3

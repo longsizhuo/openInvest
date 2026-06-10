@@ -207,6 +207,18 @@ TRIM_REASON_RE = re.compile(r"TRIM_REASON:\s*(concentration|stop_loss|bearish)",
 REENTRY_PRICE_RE = re.compile(r"REENTRY_PRICE:\s*[¥$]?\s*(-?[\d,]+(?:\.\d+)?)", re.I)
 REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
 EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
+# regime 标签（format_regime_brief 输出首行 / coordinator transcript 里的同款行）
+REGIME_LABEL_RE = re.compile(r"^REGIME:\s*([a-z_]+)\s*$", re.MULTILINE)
+
+
+def regime_label_from_text(text: str) -> Optional[str]:
+    """从确定性文本（regime_brief / coordinator transcript）提取 regime 标签。
+
+    给 parse_cio_memo 的 risk_profile 后处理用：来源是系统自己
+    format_regime_brief 生成的 `REGIME: <label>` 行，不是 LLM 输出。
+    """
+    m = REGIME_LABEL_RE.search(text or "")
+    return m.group(1) if m else None
 
 
 # ============ Sanity-check 阈值（单点维护，便于调参）============
@@ -253,6 +265,8 @@ def parse_cio_memo(
     *,
     solvency_strong: bool = False,
     current_price: Optional[float] = None,
+    regime: Optional[str] = None,
+    defense_flag_on: bool = False,
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {"raw": text}
     m = VERDICT_RE.search(text)
@@ -367,6 +381,25 @@ def parse_cio_memo(
                 "parse_cio_memo: TRIM 但买回点%s → 强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）",
                 "缺失" if rp is None else f"¥{rp} ≥ 现价 ¥{current_price}",
             )
+
+    # 风险档 aggressive: uptrend 顺势加仓杠杆（显式风险偏好，不是 regime 智能）。
+    # 2026-06 消融结论：原 prompt 层 uptrend 方向锁 = 纯杠杆（牛市 +CR，代价
+    # −Sharpe + 深 MaxDD + 熊市更亏）。拆锁后把杠杆效应保留为显式 config 开关，
+    # 默认 steady（不开）。确定性后处理，不依赖 prompt。约束：
+    # - 只升级 HOLD→ACCUMULATE，不动 TRIM/SELL（防御性卖出不被杠杆覆盖）、不动 BUY
+    # - INDEP_DEFENSE_FLAG=on（VIX 快崩哨兵）时跳过——MA regime 看不见快速崩盘，
+    #   杠杆挂在滞后的假 uptrend 上正是最大伤害源
+    if (_verdict_cfg.risk_profile == "aggressive"
+            and regime == "uptrend"
+            and not defense_flag_on
+            and out["verdict"] == "HOLD"):
+        out.setdefault("_original_verdict", "HOLD")
+        out["_risk_profile_applied"] = "aggressive_uptrend_hold_to_accumulate"
+        out["verdict"] = "ACCUMULATE"
+        log.warning(
+            "parse_cio_memo: risk_profile=aggressive + uptrend → HOLD 升级 ACCUMULATE"
+            "（显式杠杆档，消融口径 +CR −Sharpe）",
+        )
 
     return out
 
@@ -842,6 +875,10 @@ def run_committee(
         report.cio_memo,
         solvency_strong=_solvency_strong,
         current_price=current_price,
+        # risk_profile 后处理输入：regime 标签来自确定性 regime_brief 首行；
+        # 防御哨兵来自确定性 sentiment_brief（INDEP_DEFENSE_FLAG）
+        regime=regime_label_from_text(regime_brief),
+        defense_flag_on="INDEP_DEFENSE_FLAG: on" in sentiment_brief,
     )
 
     debate_meta = {
@@ -992,4 +1029,5 @@ __all__ = [
     "run_macro_view",
     "run_committee",
     "parse_cio_memo",
+    "regime_label_from_text",
 ]

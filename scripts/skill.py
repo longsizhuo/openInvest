@@ -801,10 +801,17 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
 
     # 解析 CIO 输出（通过 committee_runner re-export, 不直接 import core.committee
     # 以遵守 lint-imports 契约：entry 必经 service layer）
-    from core.committee_runner import parse_cio_memo
+    from core.committee_runner import parse_cio_memo, regime_label_from_text
     # 从 transcript 提取 SOLVENCY_BUFFER_LEVEL 用于 sanity check 4
     _solvency_strong = "SOLVENCY_BUFFER_LEVEL: strong" in raw
-    verdict = parse_cio_memo(cio_text, solvency_strong=_solvency_strong)
+    # risk_profile 后处理输入（与 direct 路径同款）：transcript 里有粘贴进去的
+    # 确定性 regime_brief（REGIME: 行）和 sentiment_brief（INDEP_DEFENSE_FLAG 行）
+    verdict = parse_cio_memo(
+        cio_text,
+        solvency_strong=_solvency_strong,
+        regime=regime_label_from_text(raw),
+        defense_flag_on="INDEP_DEFENSE_FLAG: on" in raw,
+    )
 
     store = MemoryStore()
     today = datetime.now().strftime("%Y-%m-%d")
