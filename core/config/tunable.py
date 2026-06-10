@@ -108,6 +108,16 @@ class SentimentConfig:
     # 2.0 = 波动较自身常态翻倍。确定性 sweep 依据见 scripts/tune_defense_thresholds.py：
     # OR 组合 capture NDQ 3/3、GC 13/16，ATR 腿独立 on_rate 3.6%/3.7%。
     atr_defense_spike_ratio: float = 2.0
+    # EVENT_STANCE 聚合（utils/sentiment.py）：severity 权重 + 时效半衰期。
+    # **默认值 = 逐位等价旧纯计数**（等权 + half_life=0 禁用衰减 + band=0）。
+    # 2026-06-11 经 scripts/eval_event_stance.py 验证判 INSUFFICIENT_DATA
+    # （事件史仅 ~25d、信号日 7-17）——未经该脚本重跑给出达标结论前**不许改默认值**
+    # （ADR-010 rule 4 同款纪律，先例 trim_no_trim_loss_pct）。
+    event_stance_w_low: float = 1.0
+    event_stance_w_mid: float = 1.0
+    event_stance_w_high: float = 1.0
+    event_stance_half_life_hours: float = 0.0   # 0 = 禁用时效衰减
+    event_stance_neutral_band: float = 0.0      # |score| ≤ band → neutral
 
 
 @dataclass(frozen=True)

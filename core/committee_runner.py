@@ -102,13 +102,17 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
 def format_event_brief(events: List[Dict[str, Any]]) -> str:
     """事件列表 → Macro prompt 注入用的结构化文本（人类可读 + 时效冲突显式）
 
-    格式（最新在前）：
-        [2026-05-13 14:32] [risk/high] [NDQ.AX, NVDA] (sources: reuters, bloomberg)
+    格式（最新在前；ts 为 DB 原样 ISO 8601，可能含 Z/+00:00 或为空）：
+        [2026-05-13T14:32:00+00:00] [risk/high] [NDQ.AX, NVDA] (sources: reuters, bloomberg)
         Nvidia Q1 guidance miss, futures -3% AH.
 
-        [2026-05-12 08:00] [opportunity/mid] [GC=F] (sources: ft)
+        [2026-05-12T08:00:00Z] [opportunity/mid] [GC=F] (sources: ft)
         Powell signals dovish pivot; gold up 1.2%.
          ↳ supersedes 2026-05-10 hawkish-fed event
+
+    **头行格式是与 utils/sentiment._parse_event_brief_entries 的互解析契约**
+    （EVENT_STANCE 聚合行靠它解析 stance/severity/syms/ts）——改头行结构必须
+    同步解析正则 + tests/test_event_rag_resolve.py 的互解析回归测试。
     """
     if not events:
         return ""
@@ -516,6 +520,18 @@ def run_committee_for_symbol(
         effective_sentiment_brief = sentiment_brief
     else:
         effective_sentiment_brief = load_sentiment_brief(effective_event_brief)
+    # per-asset 净情绪行：从该资产视角过滤 event_brief（头行 [syms] 含本 symbol），
+    # 只改本地副本——session 共享的市场级 sentiment_brief 不变（与 valuation 的
+    # 市场级/资产级分工同构）。仅基座非空才附加（守"VIX 拿不到整块降级"红线）。
+    # 标的来自本函数 symbol 参数（← strategy.target_assets 动态解析），无硬编码。
+    try:
+        from utils.sentiment import event_stance_line_for_symbol
+        _per_asset_stance = event_stance_line_for_symbol(effective_event_brief, symbol)
+    except Exception as e:  # noqa: BLE001  聚合行失败不阻断委员会
+        log.warning(f"per-asset EVENT_STANCE 行构建失败 graceful 跳过: {e}")
+        _per_asset_stance = None
+    if _per_asset_stance and effective_sentiment_brief:
+        effective_sentiment_brief = effective_sentiment_brief + "\n" + _per_asset_stance
     if effective_sentiment_brief:
         emit("sentiment_brief_loaded", preview=effective_sentiment_brief[:240])
     # 估值：per-asset，仅权益类出（黄金/商品走 Macro 货币因素返 ""）

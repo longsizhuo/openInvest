@@ -181,3 +181,48 @@ def test_format_handles_missing_optional_fields():
     }]
     out = format_event_brief(events)
     assert "minimal event" in out  # 至少 claim 渲染了
+
+
+def test_format_output_parseable_by_sentiment_parser():
+    """互解析契约回归：format_event_brief 的头行必须能被
+    utils.sentiment._parse_event_brief_entries 解析（EVENT_STANCE 聚合行依赖）。
+    改任何一边的格式必须同步另一边——本测试防单边漂移。
+    """
+    from utils.sentiment import _parse_event_brief_entries
+
+    events = [
+        {
+            "ts": "2026-05-15T14:32:00+00:00",
+            "stance": "risk",
+            "severity": "high",
+            "affected_symbols": ["FAKE.AX", "NVDA"],
+            "one_line_claim": "bad",
+            "sources": [{"src_name": "reuters"}],
+        },
+        {
+            "ts": "2026-05-14T08:00:00Z",
+            "stance": "opportunity",
+            "severity": "mid",
+            "affected_symbols": ["OTHER=F"],
+            "one_line_claim": "good",
+            "sources": [],
+        },
+        {
+            # ts 空 / 无 symbols 的边角也要能解析（不抛、字段容错）
+            "ts": "",
+            "stance": "neutral",
+            "severity": "low",
+            "affected_symbols": [],
+            "one_line_claim": "meh",
+            "sources": [],
+        },
+    ]
+    out = format_event_brief(events)
+    entries = _parse_event_brief_entries(out)
+    assert len(entries) == 3, f"3 条事件应解析出 3 个头行，实际 {len(entries)}:\n{out}"
+    assert entries[0]["stance"] == "risk" and entries[0]["sev"] == "high"
+    assert entries[0]["syms"] == {"FAKE.AX", "NVDA"}
+    assert entries[0]["ts"] is not None
+    assert entries[1]["syms"] == {"OTHER=F"}
+    assert entries[1]["ts"] is not None  # Z 后缀可解析
+    assert entries[2]["ts"] is None and entries[2]["syms"] == set()

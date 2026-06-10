@@ -47,6 +47,14 @@ sentiment:
   # ATR 腿（通用口径, 尺度无关）: 当日 ATR% ≥ 此比值 × 自身近1年滚动中位 → 触发
   # sweep: OR 组合 capture NDQ 3/3、GC 13/16; ATR 腿独立 on_rate 3.6%/3.7%
   atr_defense_spike_ratio: 2.0
+  # EVENT_STANCE 聚合: 默认 = 逐位等价旧纯计数（等权+无衰减+band 0）。
+  # 2026-06-11 eval_event_stance.py 判 INSUFFICIENT_DATA —— 未经该脚本重跑
+  # 给出达标结论前不许改这组默认值（ADR-010 rule 4）。
+  event_stance_w_low: 1.0
+  event_stance_w_mid: 1.0
+  event_stance_w_high: 1.0
+  event_stance_half_life_hours: 0.0   # 0 = 禁用时效衰减
+  event_stance_neutral_band: 0.0
 
 valuation:
   pe_expensive: 30.0   # trailing PE ≥ 此值判"偏贵"
