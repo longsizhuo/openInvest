@@ -71,6 +71,8 @@ def test_defense_stacks_with_sanity1_overconfident_buy():
 
 
 # ---------- atr_defense_from_text（coordinator transcript 路径） ----------
+# 阈值与 direct 路径同源：core.regime.defense_atr_threshold(symbol)
+# （regime.defense_atr_pct_min，per-asset，与 crash 分类解耦）
 
 BRIEF_TRIGGERED = (
     "REGIME: uptrend\n"
@@ -82,6 +84,7 @@ BRIEF_TRIGGERED = (
 
 
 def test_atr_defense_from_text_triggers():
+    """默认防御线 5.0：atr 6.2% → 触发"""
     assert atr_defense_from_text(BRIEF_TRIGGERED) is True
 
 
@@ -91,15 +94,34 @@ def test_atr_defense_from_text_below_threshold():
 
 
 def test_atr_defense_from_text_per_asset_threshold():
-    """per-asset 阈值（GC=F crash_atr_pct_min=3.50）：4.0% 对黄金已触发"""
-    gold = (
-        "INPUTS: ma20=4600.0, ma120=4500.0, atr_pct=4.0000\n"
-        "THRESHOLDS (per-asset GC=F): trend_ma_spread_pct=5.00, crash_atr_pct_min=3.50"
-    )
-    assert atr_defense_from_text(gold) is True
+    """per-asset 防御线（GC=F defense_atr_pct_min=3.5）：4.0% 对黄金触发、对默认资产不触发"""
+    gold = "INPUTS: ma20=4600.0, ma120=4500.0, atr_pct=4.0000"
+    assert atr_defense_from_text(gold, "GC=F") is True
+    assert atr_defense_from_text(gold, "NDQ.AX") is False  # NDQ 防御线 5.0
 
 
 def test_atr_defense_from_text_missing_graceful():
     assert atr_defense_from_text("") is False
     assert atr_defense_from_text("no regime data") is False
-    assert atr_defense_from_text("INPUTS: atr_pct=9.0") is False  # 缺阈值行 → False
+
+
+# ---------- 防御线与 crash 分类解耦 ----------
+
+def test_defense_atr_threshold_decoupled_from_crash_classification():
+    """调 defense_atr_pct_min 不影响 classify_regime（分类只读 crash_atr_pct_min）"""
+    from core.config import set_config_override
+    from core.regime import classify_regime, defense_atr_threshold
+
+    metrics = {
+        "ma20": 100.0, "ma120": 96.0, "atr_pct": 2.0,
+        "price_quantile_2y": 0.5, "return_30d": -0.05,
+        "rebound_off_30d_low": None,
+    }
+    before = classify_regime(metrics, symbol="NDQ.AX")["regime"]
+
+    # 防御线压到 0.5（atr 2.0 会触发防御），crash 分类必须不动
+    set_config_override({"regime_per_asset": {"NDQ.AX": {"defense_atr_pct_min": 0.5}}})
+    assert defense_atr_threshold("NDQ.AX") == 0.5
+    after = classify_regime(metrics, symbol="NDQ.AX")["regime"]
+    assert after == before, "防御线居然影响了 regime 分类 — 解耦被破坏"
+    assert after != "crash"

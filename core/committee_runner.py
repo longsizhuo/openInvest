@@ -19,7 +19,7 @@ from core.committee import (
     run_macro_view,
 )
 from core.portfolio_manager import PortfolioManager
-from core.regime import classify_regime, format_regime_brief
+from core.regime import classify_regime, defense_atr_threshold, format_regime_brief
 from core.regime_probability import (
     RegimeProbability,
     build_probability_table_from_ohlc,
@@ -420,11 +420,12 @@ def run_committee_for_symbol(
     # 让 Quant 基于数据判断方向，不是凭空判断。读失败 graceful 退化无数字中性版。
     _classification = classify_regime(metrics, symbol=symbol)
     _regime_for_hint = _classification["regime"]
-    # 独立快崩防御 ATR 腿（资产级）：复用 crash 分类的波动阈值（per-asset），但
-    # 不等 30d 回撤确认——crash 锁永不触发的根因就是双条件里慢腿拖死快腿。
+    # 独立快崩防御 ATR 腿（资产级）：阈值 defense_atr_pct_min 与 crash 分类解耦
+    # （分类不读它，调防御灵敏度不动 regime 判定），且不等 30d 回撤确认——
+    # crash 锁永不触发的根因就是双条件里慢腿拖死快腿。
     # VIX 腿（市场级）在 sentiment_brief（INDEP_DEFENSE_FLAG），run_committee 里 OR。
     _atr_pct = metrics.get("atr_pct")
-    _atr_threshold = _classification["thresholds_used"].get("crash_atr_pct_min")
+    _atr_threshold = defense_atr_threshold(symbol)
     atr_defense_on = bool(
         _atr_pct is not None
         and _atr_threshold is not None
