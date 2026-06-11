@@ -101,6 +101,39 @@ Quant 失去概率口径与防御哨兵背景；CIO 的 EXPECTED_PATH 凭空编�
 
 **前置条件**：`.env` 有 `DEEPSEEK_API_KEY`。如果调用 agent 在用户机器上跑
 但没有 key，提示用户先 `run.sh init` 把 key 配好。
+（**远端模式例外**：key 在 hub 上，本机不需要——见下节。）
+
+## 远端模式（hub-and-spoke，多设备共享一份数据）
+
+`.env` 里设了 `INVEST_API_BASE` = 本机是**客户端**：所有子命令自动转发到远端
+hub（另一台跑着 invest web_api 的机器），**本机没有也不该有 `memory/`**。
+数据（持仓/策略/决议/prompt）全在 hub，改一处全设备生效。
+
+客户端 `.env` 最小配置（不需要 DeepSeek key / Gmail / memory）：
+
+```bash
+INVEST_API_BASE=https://your-hub.example.com   # 或 http://10.0.0.x:8765
+INVEST_API_TOKEN=<hub 的同名 token>             # hub 开了鉴权才需要
+# 走 Cloudflare Tunnel + Access 的话改用这对：
+# CF_ACCESS_CLIENT_ID=...  CF_ACCESS_CLIENT_SECRET=...
+```
+
+行为差异（其余命令全部透明转发，**输出与本地同形状**，决策树照常走）：
+
+| 命令 | 远端模式行为 |
+|------|--------------|
+| `doctor` | 返回 **hub 视角**检查 + 多一个 `remote` 段（api_base / 鉴权方式 / 连通性）|
+| `init` | **禁用**（数据在 hub；连接 hub 只需上面两行 .env）。报错带 hint |
+| `gui` | 不本机起 uvicorn，直接输出 hub 的 `gui_url`（浏览器开它即可）|
+| `live_prices` / `correlate` | 仍**本地**跑（纯 yfinance，不碰数据）|
+| `run_committee` | 在 **hub** 上跑（DeepSeek key 在 hub），CLI 自动轮询到完成；同日 cache 用 hub 日期口径 |
+| `prepare/save_committee` | 经 hub RPC——Coordinator 协议（spawn 4 subagent）**完全不变** |
+| `buy/sell/deposit/...` 写操作 | 落 hub 账本（history `source: skill_remote`）|
+| `event_check` | 转发 hub 手动扫描；`--live` / `--recall` 禁用（hub cron 已覆盖）|
+
+**纪律**：远端模式下本机没有 `memory/`，更不存在"直接读写 memory 文件"——
+一切经 `run.sh` 或 hub API。下面 Web API 表里的 `:8765` 在远端模式下替换为
+`$INVEST_API_BASE`，curl 时带 `Authorization: Bearer $INVEST_API_TOKEN`。
 
 ## Web GUI 是小白的主入口（**第一次回答必须提一句**）
 
