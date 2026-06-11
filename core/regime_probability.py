@@ -326,12 +326,31 @@ def build_reentry_reference_text(
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
 ) -> str:
-    """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。
+    """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。"""
+    text, _profile = build_reentry_reference(
+        asset, regime, current_price,
+        source=source, jsonl_path=jsonl_path, records=records, windows=windows,
+    )
+    return text
+
+
+def build_reentry_reference(
+    asset: str,
+    regime: str,
+    current_price: Optional[float],
+    *,
+    source: str = "ohlc",
+    jsonl_path: Optional[Path] = None,
+    records: Optional[List[Dict[str, Any]]] = None,
+    windows: Tuple[str, ...] = ("30d", "60d", "90d"),
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """路径参考 (text, profile)。profile = get_path_profile 的结构化 dict
+    （OHLC 源才有；给 path_review 决策时落快照用——事后校验"当时的预测分布"）。
 
     source: "ohlc"（默认，几十年 OHLC 直算）| "verdict_review"（旧源，保留）。
     """
     if current_price is None or current_price <= 0:
-        return ""
+        return "", None
     if source == "verdict_review" and records is None:
         if jsonl_path is None:
             from core.memory_store import MemoryStore
@@ -378,7 +397,7 @@ def build_reentry_reference_text(
             any_data = True
             lines.append(f"- {est.summary_line()}")
     if not any_data:
-        return ""
+        return "", None
 
     # 路径形状（概率表路径化，2026-06）：仅 OHLC 源有逐日路径可算。
     # 回答"先跌后涨 vs 持续跌 vs 直接涨"占比 + 回踩深度/时点 → 带路径的预测。
@@ -423,13 +442,14 @@ def build_reentry_reference_text(
         except Exception:  # noqa: BLE001  路径形状取失败不影响多窗分布主体
             shape_lines = []
 
-    return (
+    text = (
         f"# 路径参考（regime={regime} 历史 forward 路径分布；TRIM 买回点 + 持有路径预期）：\n"
         f"- 现价: ¥{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
         + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
         "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"
     )
+    return text, (profile if source == "ohlc" else None)
 
 
 # ============================================================================
@@ -613,6 +633,7 @@ def get_path_profile(
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
     shape_window: str = "90d",
     days: int = 100000,
+    asof: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """(asset, regime) 的多窗路径画像（纯 OHLC 算术，0 token）。
 
@@ -649,6 +670,10 @@ def get_path_profile(
     """
     from db.market_store import MarketStore
     df = MarketStore().get_history_df(asset.upper(), days=days)
+    if asof is not None and df is not None and not df.empty:
+        # point-in-time 模式（walk-forward 校准 / 复算"当时会预测什么"）：
+        # 只用 asof 及之前的数据建分布，零前视
+        df = df[df.index <= asof]
     all_windows = tuple(dict.fromkeys((*windows, shape_window)))
     frame = compute_regime_return_frame(df, asset.upper(), windows=all_windows)
     if frame.empty:

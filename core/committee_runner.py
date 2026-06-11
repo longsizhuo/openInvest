@@ -507,9 +507,10 @@ def run_committee_for_symbol(
     current_price = metrics.get("current_price")
     regime_label = _extract_regime_label(regime_brief)
     reentry_reference = ""
+    path_profile = None   # 结构化路径预测快照（path_review 事后校验用）
     try:
-        from core.regime_probability import build_reentry_reference_text
-        reentry_reference = build_reentry_reference_text(
+        from core.regime_probability import build_reentry_reference
+        reentry_reference, path_profile = build_reentry_reference(
             symbol, regime_label, current_price,
         )
         if reentry_reference:
@@ -567,6 +568,31 @@ def run_committee_for_symbol(
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )
+
+    # 6.5. 路径预测快照落盘（path_review 闭环：90 天后回看实际路径 vs 预测分布）。
+    # 落决策时的结构化 profile（与 CIO 看到的路径参考同源同算），而非事后重算——
+    # 防代码口径漂移污染 ground truth。graceful：失败不阻断。
+    if path_profile is not None:
+        try:
+            import json as _json
+            import re as _re
+            from datetime import datetime as _dt
+            from core.memory_store import MemoryStore as _MS
+            _dir = _MS().root / ".committee" / _dt.now().strftime("%Y-%m-%d")
+            _dir.mkdir(parents=True, exist_ok=True)
+            _safe = _re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+            (_dir / f"{_safe}_path.json").write_text(_json.dumps({
+                "schema": 1,
+                "date": _dt.now().strftime("%Y-%m-%d"),
+                "symbol": symbol,
+                "regime": regime_label,
+                "current_price": current_price,
+                "atr_pct": metrics.get("atr_pct"),
+                "profile": path_profile,
+            }, ensure_ascii=False, indent=1), encoding="utf-8")
+            emit("path_snapshot_saved", asset=symbol)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"path 快照落盘失败 graceful 跳过: {e}")
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
     if probability_table is not None:
