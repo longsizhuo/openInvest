@@ -14,6 +14,7 @@ import io
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -233,44 +234,67 @@ def _news_cache() -> Dict[str, List[dict]]:
     return out
 
 
-def fetch_gdelt_all(throttle_s: float = 8.0) -> None:
-    """一次性抓全部 (date,asset) 的前 7 天头条进缓存。断点续抓（按 key 跳过）。"""
+_COMBINED_QUERY = ('(nasdaq OR "tech stocks" OR "us stocks" OR "gold price" '
+                   'OR bullion OR "central bank gold" OR "gold demand")')
+_GOLD_KW = ("gold", "bullion", "xau", "precious metal")
+_NDQ_KW = ("nasdaq", "tech", "stock", "equit", "s&p", "dow", "fed", "rate",
+           "inflation", "treasury")
+
+
+def fetch_gdelt_all(throttle_s: float = 18.0) -> None:
+    """每个决策日一次合并请求（两资产共用），客户端按关键词分流到两个缓存 key。
+
+    为什么合并（2026-06-11 改）：本环境 IP 被 GDELT 重度限流（实测 ~75% 429），
+    每日两请求 → 一请求，墙钟减半；客户端关键词过滤的相关性不输原小查询
+    （GDELT hybridrel 排序本来就噪）。失败日不写缓存（防投毒），断点续抓。
+    """
     dates, assets = load_dates()
     cache = _news_cache()
-    todo = [(d, a) for d in dates for a in assets if f"{d}|{a}" not in cache]
-    print(f"GDELT 待抓 {len(todo)} / {len(dates)*len(assets)}")
+    todo = [d for d in dates if any(f"{d}|{a}" not in cache for a in assets)]
+    print(f"GDELT 待抓 {len(todo)} 个日期（已有 key {len(cache)}）", flush=True)
     with _NEWS_CACHE.open("a") as fh:
-        for i, (d, a) in enumerate(todo):
+        for i, d in enumerate(todo):
             start = (pd.Timestamp(d) - timedelta(days=7)).strftime("%Y%m%d%H%M%S")
             end = pd.Timestamp(d).strftime("%Y%m%d") + "000000"
-            q = urllib.request.quote(GDELT_QUERIES[a])
+            q = urllib.request.quote(_COMBINED_QUERY)
             url = (f"https://api.gdeltproject.org/api/v2/doc/doc?query={q}"
-                   f"&mode=artlist&maxrecords=15&format=json&sort=hybridrel"
+                   f"&mode=artlist&maxrecords=40&format=json&sort=hybridrel"
                    f"&startdatetime={start}&enddatetime={end}")
-            arts: Optional[List[dict]] = None   # None=失败（不写缓存，等续跑）
-            for attempt in range(5):
-                try:
-                    req = urllib.request.Request(url, headers={"User-Agent": "openInvest-research/0.1"})
-                    raw = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "replace")
-                    data = json.loads(raw)   # 429 返回纯文本 → 这里抛 → 重试
-                    arts = [{"title": x.get("title", ""), "domain": x.get("domain", ""),
-                             "seendate": x.get("seendate", "")}
-                            for x in (data.get("articles") or [])][:15]
-                    break
-                except Exception as e:  # noqa: BLE001  限流/格式错 → 退避重试
-                    wait = throttle_s * (2 ** attempt)
-                    print(f"  retry {d}|{a} ({type(e).__name__}) wait {wait:.0f}s", flush=True)
-                    time.sleep(wait)
+            # 单次尝试：快速重试会触发更长的 IP 级锁定（实测）
+            arts: Optional[List[dict]] = None
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "openInvest-research/0.1"})
+                raw = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "replace")
+                data = json.loads(raw)   # 429 返回纯文本 → 这里抛
+                arts = [{"title": x.get("title", ""), "domain": x.get("domain", ""),
+                         "seendate": x.get("seendate", "")}
+                        for x in (data.get("articles") or [])]
+            except urllib.error.HTTPError as e:
+                print(f"  miss {d} (HTTP {e.code})", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"  miss {d} ({type(e).__name__}: {str(e)[:60]})", flush=True)
             if arts is None:
-                print(f"  FAIL {d}|{a} 重试耗尽，留待续跑", flush=True)
-                time.sleep(throttle_s)
-                continue   # 关键：失败不写缓存（写空=缓存投毒，续跑永久跳过）
-            fh.write(json.dumps({"key": f"{d}|{a}", "articles": arts}, ensure_ascii=False) + "\n")
+                time.sleep(throttle_s + 40)   # miss 后额外冷却，给限流器降温
+                continue   # 失败不写缓存（写空=缓存投毒，续跑永久跳过）
+            # 客户端关键词分流（标题小写匹配，两边不沾的丢弃；每资产截 15 条）
+            buckets: Dict[str, List[dict]] = {a: [] for a in assets}
+            for x in arts:
+                t = (x["title"] or "").lower()
+                if "GC=F" in buckets and any(k in t for k in _GOLD_KW):
+                    if len(buckets["GC=F"]) < 15:
+                        buckets["GC=F"].append(x)
+                elif "NDQ.AX" in buckets and any(k in t for k in _NDQ_KW):
+                    if len(buckets["NDQ.AX"]) < 15:
+                        buckets["NDQ.AX"].append(x)
+            for a in assets:
+                if f"{d}|{a}" not in cache:
+                    fh.write(json.dumps({"key": f"{d}|{a}", "articles": buckets[a]},
+                                        ensure_ascii=False) + "\n")
             fh.flush()
             if (i + 1) % 10 == 0:
-                print(f"  {i+1}/{len(todo)}")
+                print(f"  {i+1}/{len(todo)}", flush=True)
             time.sleep(throttle_s)
-    print("GDELT 抓取完成")
+    print("GDELT 抓取完成", flush=True)
 
 
 def pack_news(symbol: str, asof: str) -> Tuple[str, Optional[str]]:

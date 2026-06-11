@@ -69,6 +69,13 @@ def _hit(stance: str, fwd: float) -> Optional[bool]:
 
 def main() -> None:
     rows = [json.loads(l) for l in REPORTS.open() if l.strip()]
+    # key 去重（断点续跑/补漏并发的双写护栏，首条为准）
+    seen, uniq = set(), []
+    for r in rows:
+        if r["key"] not in seen:
+            seen.add(r["key"])
+            uniq.append(r)
+    rows = uniq
     df = pd.DataFrame(rows)
     print(f"报告 {len(df)} 条，缺 STANCE {int(df['stance'].isna().sum())} 条")
     for h in HORIZONS:

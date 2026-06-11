@@ -151,17 +151,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--smoke", action="store_true", help="只跑 1 个日期做质检+成本外推")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--analysts", default="", help="逗号过滤（如 sentiment,fundamental）；空=全部")
     args = ap.parse_args()
 
     dates, assets = load_dates()
     if args.smoke:
         dates = ["2024-08-05"]
 
+    wanted = ([a.strip() for a in args.analysts.split(",") if a.strip()]
+              or list(PACK_FN))
     done = set()
     if OUT.exists():
         done = {json.loads(l)["key"] for l in OUT.open() if l.strip()}
-    todo = [(d, s, a) for d in dates for s in assets for a in PACK_FN
-            if f"{d}|{s}|{a}" not in done]
+    todo = [(d, s, a) for d in dates for s in assets for a in wanted
+            if a in PACK_FN and f"{d}|{s}|{a}" not in done]
     print(f"待跑 {len(todo)}（已完成 {len(done)}）")
     if not todo:
         return
