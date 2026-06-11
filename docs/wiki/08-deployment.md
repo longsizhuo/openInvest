@@ -306,6 +306,72 @@ GUI 数据源健康：`https://invest.your-domain.com/system` → "数据源" ta
 
 ---
 
+## 9. 多设备：hub-and-spoke 远端模式（2026-06）
+
+一台机器（hub）持有唯一的 `memory/` 并跑 web_api；其他设备（笔记本/另一台
+开发机）的 CLI / Claude Code skill 设 `INVEST_API_BASE` 后所有子命令转发到
+hub，读写都走 HTTP——**锁仍是 hub 单机 fcntl，零分布式复杂度**。中央调参
+自动成立：strategy / 角色 prompt 都在 hub，改一处全设备生效。
+
+```
+笔记本 (client)                         hub（本机/VPS）
+  run.sh status ──HTTP──┐                invest-web.service :8765
+  run.sh buy ...        ├──────────────▶   ├─ /api/skill/*      （CLI 等价端点）
+  prepare_committee ────┘                  ├─ /api/committee/*  （prepare/save/run）
+  （本机零 memory/）                        └─ memory/  ← 唯一账本，fcntl 锁
+```
+
+### hub 侧（已有部署零必改）
+
+走既有 Caddy + CF Access 的部署什么都不用动——客户端用 CF Access Service
+Token 过边缘即可（推荐，见下）。没有 CF 的局域网场景才需要：
+
+```bash
+# .env
+INVEST_API_TOKEN=<openssl rand -hex 24>   # 开应用层鉴权
+INVEST_WEB_HOST=0.0.0.0                   # 绑出 loopback（局域网直连时）
+```
+
+token 语义：非 loopback 来源访问 `/api/*`（`/api/health` 豁免）要求
+`Authorization: Bearer`；不设 token 行为完全不变。
+
+### 客户端侧（2 分钟）
+
+```bash
+# clone + uv sync 照常（run.sh 首跑自动），然后 .env 只要：
+INVEST_API_BASE=https://invest.your-domain.com   # 或 http://10.0.0.x:8765
+INVEST_API_TOKEN=...                             # hub 开了才需要
+~/.claude/skills/invest/scripts/run.sh doctor    # 验证：status ready + remote 段
+```
+
+客户端**没有** `memory/`、不需要 DeepSeek key / Gmail 凭据。`init` 在远端
+模式下被禁用；`run_committee` 在 hub 上跑（CLI 自动轮询）；`live_prices` /
+`correlate` 仍本地跑。写操作落 hub 账本，history 记 `source: skill_remote`。
+
+### 推荐：Cloudflare Tunnel + Access Service Token（hub 不开公网端口）
+
+1. CF Zero Trust → Access → Service Auth → 创建 Service Token，拿到
+   Client ID / Secret
+2. Access Application（invest 域名）的 Policy 加一条 `Service Auth` include
+3. 客户端 .env：
+   ```bash
+   INVEST_API_BASE=https://invest.your-domain.com
+   CF_ACCESS_CLIENT_ID=xxx.access
+   CF_ACCESS_CLIENT_SECRET=yyy
+   ```
+   remote dispatch 会自动带上 `CF-Access-Client-Id/Secret` 头；浏览器用户
+   照旧走 SSO。hub 继续只绑 127.0.0.1，后端零改动。
+
+### 已知限制
+
+- 委员会同步跑会阻塞 uvicorn 事件循环 5-10 分钟（既有限制，远端化放大）：
+  hub 建议 `--workers 2` 多进程部署；长任务全部走"触发 + 轮询"，不会撞 CF
+  ~100s 代理超时。
+- 客户端与 hub 的"同日 cache"以 **hub 的日期**为准（取自 `/api/health`
+  时间戳），跨时区设备不会错位。
+
+---
+
 ## 下一步
 
 → [09-troubleshooting.md](09-troubleshooting.md) — 部署后跑挂了去哪查
