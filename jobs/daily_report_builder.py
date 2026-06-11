@@ -188,6 +188,65 @@ def plain_verdict_summary(verdict: Dict[str, Any],
     return f"**一句话**: {act}{tail}。\n\n"
 
 
+# ============ 5b. 翻译官（人话解读，LLM 版；上面的确定性版是 graceful 回落） ============
+
+TRANSLATOR_SYSTEM_PROMPT = """你是 AI 投资委员会的"翻译官"，负责把委员会结论翻译给完全不懂投资的用户。
+
+铁律：
+1. **只许引用输入里出现的数字/价格/百分比，禁止自己计算、换算或编造任何数字**
+2. 每个资产输出一段 4-8 句的大白话，要做到三件事：
+   a. 先说该干嘛（买/卖/不动，多少钱）
+   b. 交代关键概率数字的出身和含义——用"历史上 N 个类似的日子里…""5 次里有 4 次…"
+      这种口吻；"悲观情形"要说明它不是最坏情况，是最差的 1/5 的分界线
+   c. 如果输入里有"CIO 原始结论被防御规则改掉"的留痕，必须解释系统真正在担心什么；
+      如果数字之间看似矛盾（比如概率偏多但结论偏空），必须调和解释，不许装看不见
+3. 不堆术语；必须用术语时随手用半句话解释
+4. 数据里标了"⚠样本不足"的，要提醒用户该数字只能看方向、别当真到个位数
+
+输出格式（严格遵守，不要输出任何其他内容）：
+每个资产先输出单独一行 `@@<symbol>`，从下一行开始是这个资产的解读正文。"""
+
+
+def build_translator_prompt(asset_inputs: List[Dict[str, Any]]) -> str:
+    """翻译官 user prompt（纯函数，零 IO）。
+
+    asset_inputs 每项: {symbol, display_name, verdict_line, defense_note,
+    path_lines: List[str], cio_memo}
+    """
+    blocks: List[str] = []
+    for x in asset_inputs:
+        defense = f"\n防御规则留痕: {x['defense_note']}" if x.get("defense_note") else ""
+        path = "\n".join(x.get("path_lines") or []) or "（路径分布不可用）"
+        blocks.append(
+            f"## {x['symbol']}（{x.get('display_name', x['symbol'])}）\n"
+            f"最终裁决: {x['verdict_line']}{defense}\n"
+            f"历史路径分布（与 CIO 看到的同一份）:\n{path}\n"
+            f"CIO 备忘原文:\n{x.get('cio_memo', '')}"
+        )
+    return (
+        "把下面每个资产的委员会结论翻译成大白话（输出格式见 system 指令）：\n\n"
+        + "\n\n---\n\n".join(blocks)
+    )
+
+
+def parse_translator_output(text: str) -> Dict[str, str]:
+    """解析翻译官输出：@@SYM 行分段 → {symbol: 正文}。格式不符返回 {}（回落确定性版）。"""
+    out: Dict[str, str] = {}
+    sym: Optional[str] = None
+    buf: List[str] = []
+    for ln in (text or "").splitlines():
+        if ln.strip().startswith("@@"):
+            if sym and "".join(buf).strip():
+                out[sym] = "\n".join(buf).strip()
+            sym = ln.strip().lstrip("@").strip()
+            buf = []
+        elif sym is not None:
+            buf.append(ln)
+    if sym and "".join(buf).strip():
+        out[sym] = "\n".join(buf).strip()
+    return out
+
+
 # 术语表（静态，放邮件末尾——小白查表，专家直接跳过）
 _GLOSSARY = """## 术语表（看不懂的词在这里查）
 
@@ -219,6 +278,7 @@ def assemble_full_report(
     total_assets_cny: float,
     final_decision_gemini: str,
     wealth_context_view: str = "",
+    plain_summaries: Optional[Dict[str, str]] = None,
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -235,6 +295,8 @@ def assemble_full_report(
         skipped_assets: 被跳过的资产 symbol 集合（数据缺失）
         total_assets_cny: 总资产 CNY 估算（已计算好）
         final_decision_gemini: Gemini 第二意见文本
+        plain_summaries: {symbol: 翻译官人话解读}（LLM 版，entry 层生成；
+            缺失/失败时该资产回落确定性 plain_verdict_summary 一句话）
 
     Returns:
         完整 markdown 报告字符串
@@ -247,12 +309,18 @@ def assemble_full_report(
         sym = a["symbol"]
         c = asset_committees[sym]
         v = c["verdict"]
+        # 小白友好：人话解读。优先翻译官（LLM，能调和矛盾/解释防御拦截），
+        # 该资产缺失/失败 → 回落确定性一句话（零 LLM）
+        translated = (plain_summaries or {}).get(sym, "").strip()
+        plain_block = (
+            f"**人话解读**: {translated}\n\n" if translated
+            else plain_verdict_summary(v, c.get("path_profile"))
+        )
         lines = [
             f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n",
             f"**裁决**: {v['verdict']} | 置信度 {v['confidence']:.2f} | "
             f"主导方 {v['dominant_view']} | 建议金额 ¥{v['alloc_cny']}\n\n",
-            # 小白友好：一句话人话结论（确定性生成，专家细节在后面的段落）
-            plain_verdict_summary(v, c.get("path_profile")),
+            plain_block,
         ]
         # TRIM 路径化：展示买回点 + 预期路径（让用户能判断"卖出是赚是亏"）
         if v.get("verdict") == "TRIM":

@@ -489,3 +489,81 @@ class TestAssembleFullReport:
         # 措辞区分：不是减仓计划
         assert "减仓路径" not in report
         assert "减仓被否" not in report
+
+
+# ============ 翻译官（人话解读 LLM 版） ============
+
+class TestTranslator:
+    def test_parse_well_formed_output(self):
+        from jobs.daily_report_builder import parse_translator_output
+        raw = (
+            "@@GC=F\n继续持有。历史上 408 个类似日子里……\n第二句。\n"
+            "@@0700.HK\n建议小额加仓 ¥2,500。\n"
+        )
+        out = parse_translator_output(raw)
+        assert set(out) == {"GC=F", "0700.HK"}
+        assert "408 个类似日子" in out["GC=F"]
+        assert "第二句" in out["GC=F"]
+
+    def test_parse_garbage_returns_empty(self):
+        from jobs.daily_report_builder import parse_translator_output
+        assert parse_translator_output("我不会遵守格式，直接说：持有吧") == {}
+        assert parse_translator_output("") == {}
+        assert parse_translator_output("@@GC=F\n   \n") == {}  # 有头无正文
+
+    def test_prompt_contains_data_and_defense_note(self):
+        from jobs.daily_report_builder import build_translator_prompt
+        prompt = build_translator_prompt([{
+            "symbol": "GC=F", "display_name": "伦敦金",
+            "verdict_line": "HOLD，置信度 0.65，建议金额 ¥0",
+            "defense_note": "CIO 原始结论 TRIM（建议金额 ¥-30000），想因集中度减仓被拦",
+            "path_lines": ["- 30d: 跌破现价概率 42%"],
+            "cio_memo": "VERDICT: HOLD",
+        }])
+        assert "GC=F" in prompt and "伦敦金" in prompt
+        assert "跌破现价概率 42%" in prompt
+        assert "集中度减仓被拦" in prompt
+
+    def test_assemble_prefers_translator_over_deterministic(self):
+        committees = {
+            "GC=F": {
+                "verdict": {"verdict": "HOLD", "confidence": 0.65,
+                            "dominant_view": "risk", "alloc_cny": 0},
+                "report": _FakeReport(cio_memo="m", quant_view="q", risk_view="r"),
+                "path_profile": {"windows": {"30d": {
+                    "p_below": 0.42, "downside_pct": -3.0, "median_pct": 1.1}}},
+            },
+        }
+        report = assemble_full_report(
+            today="2026-06-12", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "GC=F", "display_name": "伦敦金"}],
+            asset_committees=committees,
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            plain_summaries={"GC=F": "翻译官说：拿住别动，系统其实在担心你篮子太满。"},
+        )
+        assert "人话解读" in report
+        assert "篮子太满" in report
+        assert "一句话" not in report   # 翻译官命中时确定性版不再渲染
+
+    def test_assemble_falls_back_per_asset(self):
+        """翻译官只给了部分资产 → 缺的资产回落确定性一句话"""
+        committees = {
+            "GC=F": {
+                "verdict": {"verdict": "HOLD", "confidence": 0.65,
+                            "dominant_view": "risk", "alloc_cny": 0},
+                "report": _FakeReport(cio_memo="m", quant_view="q", risk_view="r"),
+            },
+        }
+        report = assemble_full_report(
+            today="2026-06-12", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "GC=F"}],
+            asset_committees=committees,
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            plain_summaries={"OTHER": "无关资产"},
+        )
+        assert "一句话" in report
+        assert "继续持有，不买也不卖" in report
