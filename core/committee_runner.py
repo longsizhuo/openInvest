@@ -349,6 +349,39 @@ def _extract_regime_label(regime_brief: str) -> str:
     return ""
 
 
+def _save_path_snapshot(
+    symbol: str,
+    regime_label: str,
+    current_price: Optional[float],
+    atr_pct: Optional[float],
+    path_profile: Dict[str, Any],
+) -> None:
+    """路径预测快照落盘 memory/.committee/<date>/<sym>_path.json（path_review 闭环）。
+
+    落决策时的结构化 profile（与 CIO 看到的路径参考同源同算），而非事后重算——
+    防代码口径漂移污染 ground truth。失败抛异常由调用方 graceful。
+    """
+    import json
+    import re
+    from datetime import datetime
+
+    from core.memory_store import MemoryStore
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    snap_dir = MemoryStore().root / ".committee" / today
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    (snap_dir / f"{safe}_path.json").write_text(json.dumps({
+        "schema": 1,
+        "date": today,
+        "symbol": symbol,
+        "regime": regime_label,
+        "current_price": current_price,
+        "atr_pct": atr_pct,
+        "profile": path_profile,
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def run_committee_for_symbol(
     symbol: str,
     *,
@@ -570,33 +603,19 @@ def run_committee_for_symbol(
     )
 
     # 6.5. 路径预测快照落盘（path_review 闭环：90 天后回看实际路径 vs 预测分布）。
-    # 落决策时的结构化 profile（与 CIO 看到的路径参考同源同算），而非事后重算——
-    # 防代码口径漂移污染 ground truth。graceful：失败不阻断。
+    # graceful：失败不阻断。
     if path_profile is not None:
         try:
-            import json as _json
-            import re as _re
-            from datetime import datetime as _dt
-            from core.memory_store import MemoryStore as _MS
-            _dir = _MS().root / ".committee" / _dt.now().strftime("%Y-%m-%d")
-            _dir.mkdir(parents=True, exist_ok=True)
-            _safe = _re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
-            (_dir / f"{_safe}_path.json").write_text(_json.dumps({
-                "schema": 1,
-                "date": _dt.now().strftime("%Y-%m-%d"),
-                "symbol": symbol,
-                "regime": regime_label,
-                "current_price": current_price,
-                "atr_pct": metrics.get("atr_pct"),
-                "profile": path_profile,
-            }, ensure_ascii=False, indent=1), encoding="utf-8")
+            _save_path_snapshot(
+                symbol, regime_label, current_price,
+                metrics.get("atr_pct"), path_profile,
+            )
             emit("path_snapshot_saved", asset=symbol)
         except Exception as e:  # noqa: BLE001
             log.warning(f"path 快照落盘失败 graceful 跳过: {e}")
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
     if probability_table is not None:
-        regime_label = _extract_regime_label(regime_brief)
         prob = get_regime_probability(
             symbol, regime_label, table=probability_table,
         )

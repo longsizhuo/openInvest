@@ -218,7 +218,9 @@ def recompute_snapshots(
         for d in dates:
             ts = pd.Timestamp(d)
             # 估计史不足 2 年的日期跳过——当时的分布建立在过薄的数据上，
-            # 评它的校准没有意义（结构护栏，非窗口调参）
+            # 评它的校准没有意义（结构护栏，非窗口调参）。
+            # 量纲是日历天≈近似：停牌/缺口多的资产可能日历满 2 年但有效样本薄；
+            # 当前资产池为连续日线，可接受。要精确可换 len(frame.loc[:ts])。
             if (ts - first).days < 730:
                 continue
             rows = frame[frame.index <= ts]
@@ -279,8 +281,12 @@ def summarize(reviews: List[PathReview]) -> Dict[str, Any]:
             "top1_hit": round(sum(1 for r in sh if r.shape_top1_hit) / n, 3),
             "trough_mae_days": round(float(np.mean([
                 abs(r.trough_real_days - r.trough_pred_days)
-                for r in sh if r.trough_real_days and r.trough_pred_days
-            ])), 1) if any(r.trough_real_days and r.trough_pred_days for r in sh) else None,
+                for r in sh
+                if r.trough_real_days is not None and r.trough_pred_days is not None
+            ])), 1) if any(
+                r.trough_real_days is not None and r.trough_pred_days is not None
+                for r in sh
+            ) else None,
         }
     # 按 regime 分桶（解读"哪个 regime 的路径分布最可信"）
     summ["by_regime"] = {}

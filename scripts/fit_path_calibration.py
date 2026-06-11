@@ -2,7 +2,7 @@
 
 输入：memory/.dreams/path_review.jsonl（walk-forward recompute，行内自带
 原始条件/无条件预测统计 pred/uncond）。
-变换（与 core/regime_probability.calibrate_profile 同公式）：
+变换直接调 core/regime_probability.calibrate_profile（单源，防公式两处漂移）：
   λ = eff_n / (eff_n + k)；stat' = λ·cond + (1−λ)·uncond     （小样本收缩）
   q'' = median' + γ·(q' − median')   对 p10/p90/downside      （带宽扩张）
 
@@ -25,6 +25,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.memory_store import MemoryStore  # noqa: E402
+from core.regime_probability import calibrate_profile  # noqa: E402
 
 WINDOWS = ("30d", "60d", "90d")
 FIT_END = "2017-12-31"
@@ -50,17 +51,18 @@ def load_rows():
 
 
 def apply_calibration(row, k: float, g: float):
-    """返回校准后的 (median, p10, p90, p_below)。与 calibrate_profile 同公式。"""
-    p, u = row["pred"], row["uncond"]
-    eff = p.get("effective_n", 1)
-    lam = eff / (eff + k) if k else 1.0
-    med = lam * p["median_pct"] + (1 - lam) * u["median_pct"]
-    p10 = lam * p["p10_pct"] + (1 - lam) * u["p10_pct"]
-    p90 = lam * p["p90_pct"] + (1 - lam) * u["p90_pct"]
-    pb = lam * p["p_below"] + (1 - lam) * u["p_below"]
-    p10 = med + g * (p10 - med)
-    p90 = med + g * (p90 - med)
-    return med, p10, p90, pb
+    """返回校准后的 (median, p10, p90, p_below)。
+
+    组 mini-profile 直接调 core 的 calibrate_profile —— 与 production 同一份
+    实现，公式改动只需改 core 一处（含每步 round(...,4) 的数值口径）。
+    """
+    w = row["window"]
+    prof = calibrate_profile(
+        {"windows": {w: row["pred"]}, "uncond_windows": {w: row["uncond"]}},
+        shrinkage_k=k, band_gamma=g,
+    )
+    st = prof["windows"][w]
+    return st["median_pct"], st["p10_pct"], st["p90_pct"], st["p_below"]
 
 
 def evaluate(rows, k: float, g: float):

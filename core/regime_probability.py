@@ -330,8 +330,8 @@ def calibrate_profile(
     2. **带宽校准**：P10/P90/downside 围绕中位按 γ 扩张（带覆盖 7 个时代里
        6 个 < 80% 目标，结构性偏窄）。γ=1 → 禁用。
 
-    参数默认从 config 读（regime_probability 节，经 fit/OOS 验证前默认禁用，
-    ADR-010 rule 4）；显式传参覆盖（fit 脚本网格搜索用）。
+    参数默认从 config 读（defaults.yaml `path:` 节 → PathConfig，经 fit/OOS
+    验证前默认禁用，ADR-010 rule 4）；显式传参覆盖（fit 脚本网格搜索用）。
     返回新 dict（不改原 profile），uncond_windows 缺失时原样返回。
     """
     if shrinkage_k is None or band_gamma is None:
@@ -352,13 +352,20 @@ def calibrate_profile(
         u = uncond.get(w)
         if shrinkage_k and u:
             lam = st["effective_n"] / (st["effective_n"] + shrinkage_k)
+            # 只校准两边都有的字段（fit 脚本喂的 mini-profile 无 p_down）
             for key in ("median_pct", "p_below", "p_down",
                         "p10_pct", "p90_pct", "downside_pct"):
-                st[key] = round(lam * st[key] + (1 - lam) * u[key], 4)
+                if key in st and key in u:
+                    st[key] = round(lam * st[key] + (1 - lam) * u[key], 4)
+            # 概率字段 clip 护栏：凸组合本身封闭于 [0,1]，这里只防上游脏数据静默传播
+            for key in ("p_below", "p_down"):
+                if key in st:
+                    st[key] = min(1.0, max(0.0, st[key]))
         if band_gamma != 1.0:
             med = st["median_pct"]
             for key in ("p10_pct", "p90_pct", "downside_pct"):
-                st[key] = round(med + band_gamma * (st[key] - med), 4)
+                if key in st:
+                    st[key] = round(med + band_gamma * (st[key] - med), 4)
         out["windows"][w] = st
     return out
 
