@@ -60,6 +60,12 @@ valuation:
   pe_expensive: 30.0   # trailing PE ≥ 此值判"偏贵"
   pe_cheap: 18.0       # trailing PE < 此值判"中性偏低"
 
+path:
+  # 路径分布校准层（calibrate_profile）。经 fit(≤2017)/OOS(2018+) 验证前禁用
+  # （ADR-010 rule 4）。验证脚本 scripts/fit_path_calibration.py
+  shrinkage_k: 0.0   # 0 = 禁用
+  band_gamma: 1.0    # 1 = 禁用
+
 oracle_accuracy:
   buy_positive: 5.0
   buy_negative: -3.0

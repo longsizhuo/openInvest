@@ -148,13 +148,23 @@ def score_one(snap: Dict[str, Any], source: str) -> Optional[PathReview]:
         fr = real.get(f"fwd_{w}")
         if pred is None or fr is None:
             continue
-        rv.windows[w] = {
+        row = {
             "fwd_real": fr,
             "in_band": bool(pred["p10_pct"] <= fr <= pred["p90_pct"]),
             "below_current": bool(fr < 0),
             "p_below": pred["p_below"],
             "err_vs_median": round(fr - pred["median_pct"], 3),
+            # 原始预测统计（校准研究自包含：fit 脚本纯算术做 收缩/带宽 网格）
+            "pred": {k: pred[k] for k in
+                     ("median_pct", "p10_pct", "p90_pct", "downside_pct",
+                      "p_below", "effective_n") if k in pred},
         }
+        u = (profile.get("uncond_windows") or {}).get(w)
+        if u:
+            row["uncond"] = {k: u[k] for k in
+                             ("median_pct", "p10_pct", "p90_pct",
+                              "downside_pct", "p_below") if k in u}
+        rv.windows[w] = row
     shape = profile.get("shape")
     if shape:
         rv.shape_pred = {

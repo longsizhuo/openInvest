@@ -572,3 +572,86 @@ def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
     assert "见谷底" in txt and "见顶" in txt
     assert "regime 中位持续" in txt  # 持续中位标注（防形状混 regime 切换误读）
     assert "¥1,000.00" in txt  # 现价行
+
+
+# ---------- 校准层 calibrate_profile（2026-06 校准闭环 Step 2） ----------
+
+def _mini_profile():
+    return {
+        "asset": "X", "regime": "downtrend",
+        "windows": {"30d": {
+            "n": 60, "effective_n": 2, "median_pct": 2.0, "p_below": 0.30,
+            "p_down": 0.10, "p10_pct": -3.0, "p90_pct": 6.0,
+            "downside_pct": -1.0, "low_confidence": True,
+        }},
+        "uncond_windows": {"30d": {
+            "n": 3000, "effective_n": 100, "median_pct": 1.0, "p_below": 0.40,
+            "p_down": 0.12, "p10_pct": -6.0, "p90_pct": 8.0,
+            "downside_pct": -3.0, "low_confidence": False,
+        }},
+        "shape": None,
+    }
+
+
+def test_calibrate_profile_disabled_is_noop():
+    from core.regime_probability import calibrate_profile
+    p = _mini_profile()
+    assert calibrate_profile(p, shrinkage_k=0, band_gamma=1.0) is p
+
+
+def test_calibrate_profile_shrinkage_math():
+    from core.regime_probability import calibrate_profile
+    p = calibrate_profile(_mini_profile(), shrinkage_k=2, band_gamma=1.0)
+    w = p["windows"]["30d"]
+    # λ = 2/(2+2) = 0.5 → 各统计量 = 条件/无条件均值
+    assert abs(w["median_pct"] - 1.5) < 1e-9
+    assert abs(w["p_below"] - 0.35) < 1e-9
+    assert abs(w["p10_pct"] - (-4.5)) < 1e-9
+    assert abs(w["p90_pct"] - 7.0) < 1e-9
+
+
+def test_calibrate_profile_band_widening_math():
+    from core.regime_probability import calibrate_profile
+    p = calibrate_profile(_mini_profile(), shrinkage_k=0, band_gamma=1.5)
+    w = p["windows"]["30d"]
+    # 围绕中位扩张：p10' = 2 + 1.5×(-3-2) = -5.5；p90' = 2 + 1.5×4 = 8
+    assert abs(w["p10_pct"] - (-5.5)) < 1e-9
+    assert abs(w["p90_pct"] - 8.0) < 1e-9
+    assert abs(w["median_pct"] - 2.0) < 1e-9  # 中位不动
+
+
+def test_calibrate_profile_reads_config():
+    from core.config import reset_config, set_config_override
+    from core.regime_probability import calibrate_profile
+    reset_config()
+    try:
+        # 默认禁用 → no-op
+        assert calibrate_profile(_mini_profile())["windows"]["30d"]["p10_pct"] == -3.0
+        set_config_override({"path": {"shrinkage_k": 2.0, "band_gamma": 1.0}})
+        p = calibrate_profile(_mini_profile())
+        assert abs(p["windows"]["30d"]["median_pct"] - 1.5) < 1e-9
+    finally:
+        reset_config()
+
+
+def test_get_path_profile_includes_uncond(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    import db.market_store as ms
+    from core.regime_probability import get_path_profile
+
+    n = 400
+    idx = pd.date_range("2018-01-01", periods=n, freq="D")
+    close = 100.0 * (1.002 ** np.arange(n))
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+    p = get_path_profile("TEST", "uptrend")
+    assert p is not None and p["uncond_windows"]
+    assert "30d" in p["uncond_windows"]
+    # 全程 uptrend 的合成序列：无条件≈条件
+    assert p["uncond_windows"]["30d"]["n"] >= p["windows"]["30d"]["n"]

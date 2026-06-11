@@ -316,6 +316,53 @@ def get_regime_forward_summary(
     }
 
 
+def calibrate_profile(
+    profile: Dict[str, Any],
+    *,
+    shrinkage_k: Optional[float] = None,
+    band_gamma: Optional[float] = None,
+) -> Dict[str, Any]:
+    """路径分布校准层（2026-06，walk-forward 时代分桶诊断出两个结构性缺陷的修复）：
+
+    1. **小样本收缩**：条件分布按 effective_n 向同资产无条件分布收缩，
+       λ = eff_n / (eff_n + k)。治 downtrend 这类独立样本个位数的桶拿 4 个
+       样本装精确（GC 07-09 downtrend 带覆盖实测 7%）。k=0 → λ=1 → 禁用。
+    2. **带宽校准**：P10/P90/downside 围绕中位按 γ 扩张（带覆盖 7 个时代里
+       6 个 < 80% 目标，结构性偏窄）。γ=1 → 禁用。
+
+    参数默认从 config 读（regime_probability 节，经 fit/OOS 验证前默认禁用，
+    ADR-010 rule 4）；显式传参覆盖（fit 脚本网格搜索用）。
+    返回新 dict（不改原 profile），uncond_windows 缺失时原样返回。
+    """
+    if shrinkage_k is None or band_gamma is None:
+        from core.config import load_config
+        cfg = load_config().path
+        if shrinkage_k is None:
+            shrinkage_k = cfg.shrinkage_k
+        if band_gamma is None:
+            band_gamma = cfg.band_gamma
+    if (not shrinkage_k and band_gamma == 1.0) or not profile:
+        return profile
+    uncond = profile.get("uncond_windows") or {}
+    out = dict(profile)
+    out["windows"] = {}
+    out["calibration"] = {"shrinkage_k": shrinkage_k, "band_gamma": band_gamma}
+    for w, st in (profile.get("windows") or {}).items():
+        st = dict(st)
+        u = uncond.get(w)
+        if shrinkage_k and u:
+            lam = st["effective_n"] / (st["effective_n"] + shrinkage_k)
+            for key in ("median_pct", "p_below", "p_down",
+                        "p10_pct", "p90_pct", "downside_pct"):
+                st[key] = round(lam * st[key] + (1 - lam) * u[key], 4)
+        if band_gamma != 1.0:
+            med = st["median_pct"]
+            for key in ("p10_pct", "p90_pct", "downside_pct"):
+                st[key] = round(med + band_gamma * (st[key] - med), 4)
+        out["windows"][w] = st
+    return out
+
+
 def build_reentry_reference_text(
     asset: str,
     regime: str,
@@ -363,6 +410,10 @@ def build_reentry_reference(
     if source == "ohlc":
         try:
             profile = get_path_profile(asset, regime, windows=windows)
+            if profile:
+                # 校准层（config path 节，经 fit/OOS 验证前默认禁用=恒等变换）。
+                # CIO 看到的文本与落盘快照都用校准后的分布——所见即所验。
+                profile = calibrate_profile(profile)
         except Exception:  # noqa: BLE001  概率表读失败不阻断（外层还有 graceful）
             profile = None
 
@@ -682,17 +733,16 @@ def get_path_profile(
     if sub.empty:
         return None
 
-    out: Dict[str, Any] = {"asset": asset, "regime": regime, "windows": {}, "shape": None}
-    for w in windows:
+    def _window_stats(rows, w: str) -> Optional[Dict[str, Any]]:
         col = f"fwd_{w}"
-        if col not in sub.columns:
-            continue
-        rets = (sub[col].dropna() * 100)
+        if col not in rows.columns:
+            return None
+        rets = (rows[col].dropna() * 100)
         if rets.empty:
-            continue
+            return None
         n = len(rets)
         eff = max(1, n // int(w.rstrip("d")))
-        out["windows"][w] = {
+        return {
             "n": n,
             "effective_n": eff,
             "median_pct": round(float(rets.median()), 2),
@@ -704,6 +754,19 @@ def get_path_profile(
             "downside_pct": round(float(rets.quantile(REENTRY_DOWNSIDE_QUANTILE)), 2),
             "low_confidence": eff < MIN_CONFIDENT_N,
         }
+
+    # 无条件分布（同资产全部非 unknown 历史日）：小样本收缩校准的混合对象
+    uncond = frame[frame["regime"] != "unknown"]
+    out: Dict[str, Any] = {"asset": asset, "regime": regime,
+                           "windows": {}, "uncond_windows": {}, "shape": None}
+    for w in windows:
+        st = _window_stats(sub, w)
+        if st is None:
+            continue
+        out["windows"][w] = st
+        ust = _window_stats(uncond, w)
+        if ust is not None:
+            out["uncond_windows"][w] = ust
 
     sw = shape_window
     cols = [f"fwd_{sw}", f"min_{sw}", f"tmin_{sw}", f"max_{sw}", f"tmax_{sw}",
