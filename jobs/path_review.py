@@ -204,8 +204,13 @@ def recompute_snapshots(
             continue
         # 逐日 point-in-time regime + atr（frame 的 regime/atr 列本就零前视）
         frame = compute_regime_return_frame(df, sym, windows=("30d",))
+        first = frame.index.min()
         for d in dates:
             ts = pd.Timestamp(d)
+            # 估计史不足 2 年的日期跳过——当时的分布建立在过薄的数据上，
+            # 评它的校准没有意义（结构护栏，非窗口调参）
+            if (ts - first).days < 730:
+                continue
             rows = frame[frame.index <= ts]
             if rows.empty:
                 continue
