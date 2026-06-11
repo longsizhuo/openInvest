@@ -1009,3 +1009,118 @@ def test_doctor_endpoint(skill_client, monkeypatch):
     assert "memory_initialized" in names
     mem = next(c for c in b["checks"] if c["name"] == "memory_initialized")
     assert mem["status"] == "ok", "seeded memory 应判定已初始化"
+
+
+# ---------- Committee prepare/save RPC（coordinator 路径远端化）----------
+
+def test_committee_prepare_unknown_symbol_cli_style_error(skill_client):
+    r = skill_client.post("/api/committee/prepare", json={"symbol": "AAPL"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["status"] == "error"
+    assert "AAPL" in b["error"] and "target_assets" in b["error"]
+
+
+def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatch):
+    """prepare 输出自包含 brief：prompts 6 段 + 确定性事实块 + instructions
+
+    mock 口径对齐 tests/test_prepare_committee.py:_mock_world（同一个 service 函数）
+    """
+    import core.committee_runner as cr
+    import core.regime_probability as rp
+    import jobs.daily_report_builder as drb
+    import utils.exchange_fee as ef
+    import utils.fx as fx
+
+    fake_df = pd.DataFrame(
+        {"Close": [100.0 + i for i in range(200)]},
+        index=pd.date_range("2025-10-01", periods=200),
+    )
+    monkeypatch.setattr(ef, "get_history_data", lambda *a, **k: fake_df)
+    monkeypatch.setattr(ef, "analyze_multi_timeframe", lambda *a, **k: "MOCK_MARKET")
+    monkeypatch.setattr(ef, "get_macro_data", lambda: "MOCK_MACRO")
+    monkeypatch.setattr(cr, "load_sentiment_brief", lambda *a, **k: "SENT_SENTINEL")
+    monkeypatch.setattr(cr, "load_valuation_brief", lambda *a, **k: "VAL_SENTINEL")
+    monkeypatch.setattr(cr, "load_wealth_context_view", lambda: "")
+    monkeypatch.setattr(cr, "load_prior_insights", lambda *a, **k: "")
+    monkeypatch.setattr(cr, "load_backup_cny", lambda pm: 0.0)
+    monkeypatch.setattr(rp, "get_regime_forward_summary", lambda *a, **k: None)
+    monkeypatch.setattr(rp, "build_reentry_reference_text", lambda *a, **k: "REENTRY_SENTINEL")
+    monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
+    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, "ok"))
+
+    r = skill_client.post("/api/committee/prepare", json={"symbol": "NDQ.AX"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["asset"]["symbol"] == "NDQ.AX"
+    assert set(b["prompts"].keys()) == {
+        "macro_strategist", "quant_round1", "risk_round1",
+        "quant_round2_after_risk", "risk_round2_after_quant", "cio",
+    }
+    assert b["sentiment_brief"] == "SENT_SENTINEL"
+    assert b["valuation_brief"] == "VAL_SENTINEL"
+    assert b["reentry_reference"] == "REENTRY_SENTINEL"
+    assert "INDEP_DEFENSE_FLAG" in b["instructions"]
+    assert b["save_command"].endswith("save_committee NDQ.AX")
+
+
+def test_committee_save_roundtrip(skill_client, tmp_store):
+    transcript = (
+        "=== MACRO ===\nmacro view text\n"
+        "=== QUANT_R1 ===\nquant r1\n"
+        "=== RISK_R1 ===\nrisk r1\n"
+        "=== CIO ===\nverdict: HOLD\nconfidence: 0.55\nalloc_cny: 0\n"
+    )
+    r = skill_client.post("/api/committee/save", json={
+        "symbol": "NDQ.AX", "transcript": transcript,
+    })
+    assert r.status_code == 200
+    b = r.json()
+    from pathlib import Path
+    saved = Path(b["saved"])
+    assert saved.exists(), "transcript 应落盘 hub memory/.committee"
+    assert str(tmp_store.root) in str(saved), "必须落在（测试隔离的）memory root 下"
+    assert "QUANT_R1" in saved.read_text(encoding="utf-8")
+    assert "verdict" in b["verdict"] and "confidence" in b["verdict"]
+
+
+def test_committee_save_empty_transcript_400(skill_client):
+    r = skill_client.post("/api/committee/save", json={
+        "symbol": "NDQ.AX", "transcript": "   \n",
+    })
+    assert r.status_code == 400
+
+
+def test_committee_run_summary_includes_cio_memo(client, monkeypatch):
+    """by_asset summary 必须带 cio_memo —— 远端 CLI run_committee 靠它渲染 memo"""
+    from types import SimpleNamespace
+    fake_verdict = {"verdict": "HOLD", "confidence": 0.5, "alloc_cny": 0, "dominant_view": "risk"}
+    fake_result = {
+        "asset": "NDQ.AX",
+        "verdict": fake_verdict,
+        "report": SimpleNamespace(cio_memo="## verdict\nHOLD — memo text"),
+        "debate": {"max_rounds": 1, "final_round": 1, "converged": True,
+                   "quant_history": ["q1"], "risk_history": ["r1"]},
+    }
+    import core.committee_runner as cr_mod
+    monkeypatch.setattr(cr_mod, "run_committee_for_symbol", lambda sym, **kw: fake_result)
+    monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
+    monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
+    monkeypatch.setattr(cr_mod, "load_wealth_context_view", lambda: "")
+    monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
+
+    r = client.post("/api/committee/run", json={"symbols": ["NDQ.AX"]})
+    task_id = r.json()["task_id"]
+
+    import time
+    deadline = time.time() + 5
+    final = None
+    while time.time() < deadline:
+        s = client.get(f"/api/committee/{task_id}").json()
+        if s["status"] in ("done", "error"):
+            final = s
+            break
+        time.sleep(0.05)
+
+    assert final is not None and final["status"] == "done", f"got {final}"
+    assert final["result"]["by_asset"]["NDQ.AX"]["cio_memo"] == "## verdict\nHOLD — memo text"

@@ -1393,6 +1393,12 @@ async def _run_committee_task(
             if isinstance(res, dict):
                 summary[sym] = {
                     "verdict": res.get("verdict"),
+                    # CLI run_committee 输出含 cio_memo（Markdown，agent 渲染给用户）；
+                    # web 路径补齐，远端模式下客户端轮询 done 后直接拿到同款字段
+                    "cio_memo": (
+                        res["report"].cio_memo
+                        if res.get("report") is not None else None
+                    ),
                     "debate_meta": (
                         {k: v for k, v in (res.get("debate") or {}).items()
                          if k not in {"quant_history", "risk_history"}}
@@ -3648,6 +3654,54 @@ async def skill_sell(body: SkillSellRequest = Body(...)) -> Dict[str, Any]:
         return pm.sell(body.symbol, body.units, body.price, source="skill_remote")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class CommitteePrepareRequest(BaseModel):
+    """POST /api/committee/prepare body"""
+    symbol: str
+
+
+class CommitteeSaveRequest(BaseModel):
+    """POST /api/committee/save body"""
+    symbol: str
+    transcript: str = Field(..., description="6 段 '=== ROLE ===' 分隔的 transcript 全文")
+
+
+@app.post("/api/committee/prepare", tags=["committee"])
+async def committee_prepare(body: CommitteePrepareRequest = Body(...)) -> Dict[str, Any]:
+    """Coordinator 路径的 prep RPC：cmd_prepare_committee 同款自包含 brief
+
+    返回 brief + 6 段角色 prompt 全内联——远端客户端的 Claude 据此 spawn 4 个
+    subagent，全程不需要本地 memory/。symbol 不在 target_assets 时返回 CLI
+    同款 status=error dict（200）。
+
+    注意：内部拉 2y 行情 + 情绪/估值事实块，同步阻塞数十秒（与既有委员会端点
+    同款已知限制，生产建议 --workers 2+）。
+    """
+    from core.committee_runner import prepare_committee_brief
+    try:
+        return prepare_committee_brief(body.symbol)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"openInvest 还没初始化（{exc!s}）。先在 hub 上跑 "
+                "`~/.claude/skills/invest/scripts/run.sh init` 完成 onboarding。"
+            ),
+        ) from exc
+
+
+@app.post("/api/committee/save", tags=["committee"])
+async def committee_save(body: CommitteeSaveRequest = Body(...)) -> Dict[str, Any]:
+    """Coordinator 路径的 persist RPC：cmd_save_committee 同款落盘
+
+    解析 transcript → parse_cio_memo（含确定性防御降级）→ 落
+    memory/.committee/<date>/<sym>.md + dream_event，返回 {saved, verdict}。
+    """
+    if not body.transcript.strip():
+        raise HTTPException(status_code=400, detail="transcript 为空")
+    from core.committee_runner import save_committee_transcript
+    return save_committee_transcript(body.symbol, body.transcript)
 
 
 # 一键部署模式：跑完 `python -m scripts.sync_gui_dist` 后，static/ 含 invest-gui 构建产物
