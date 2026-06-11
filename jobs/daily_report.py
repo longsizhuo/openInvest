@@ -28,10 +28,13 @@ log = logging.getLogger(__name__)
 from core.portfolio_manager import PortfolioManager
 from db.market_store import MarketStore
 from jobs.daily_report_builder import (
+    TRANSLATOR_SYSTEM_PROMPT,
     assemble_full_report,
     build_gemini_prompt,
+    build_translator_prompt,
     classify_asset_freshness,
     format_staleness_warning,
+    parse_translator_output,
     portfolio_summary_text,
 )
 from services.notifier import EmailDeliveryError, send_gmail_notification
@@ -433,6 +436,49 @@ def run() -> Dict[str, Any]:
     )
     final_decision_gemini = _run_gemini_cli_review(gemini_prompt)
 
+    # 3.5) 翻译官：人话解读（一次 LLM 调用；任何失败 graceful 回落
+    # builder 内的确定性一句话，邮件照发）
+    plain_summaries: Dict[str, str] = {}
+    try:
+        t_inputs = []
+        for a in target_assets:
+            sym = a["symbol"]
+            if sym in skipped_assets or sym not in asset_committees:
+                continue
+            r = asset_committees[sym]
+            v = r["verdict"]
+            defense_note = ""
+            if v.get("_original_verdict") and v["_original_verdict"] != v["verdict"]:
+                reason = (v.get("_defense_downgrade") and "VIX/ATR 快崩哨兵拦截买入") or \
+                         (v.get("_original_trim_reason") == "concentration"
+                          and "想因集中度减仓，被'兜底充足'规则拦下") or \
+                         (v.get("_sanity5_reason") and "TRIM 没给合格买回点被否") or "防御规则"
+                defense_note = (f"CIO 原始结论 {v['_original_verdict']}"
+                                f"（建议金额 ¥{v.get('_original_alloc', v['alloc_cny'])}），"
+                                f"{reason}，最终改为 {v['verdict']}")
+            path_lines = [ln for ln in (r.get("path_reference") or "").splitlines()
+                          if ln.startswith("- ")]
+            t_inputs.append({
+                "symbol": sym,
+                "display_name": a.get("display_name", sym),
+                "verdict_line": (f"{v['verdict']}，置信度 {v['confidence']:.2f}，"
+                                 f"建议金额 ¥{v['alloc_cny']}"),
+                "defense_note": defense_note,
+                "path_lines": path_lines,
+                "cio_memo": r["report"].cio_memo,
+            })
+        if t_inputs:
+            from agents.sdk_agent import SDKAgent
+            translator = SDKAgent(
+                system_prompt=TRANSLATOR_SYSTEM_PROMPT,
+                enable_tools=False, temperature=0.3,
+            )
+            raw = translator.run(build_translator_prompt(t_inputs))
+            plain_summaries = parse_translator_output(raw)
+            log.info("翻译官人话解读: %d/%d 资产", len(plain_summaries), len(t_inputs))
+    except Exception as e:  # noqa: BLE001  翻译官失败不阻断邮件
+        log.warning("翻译官失败 graceful 回落确定性一句话: %s", e)
+
     # 4) 拼报告（委托给 builder 的纯函数）
     full_report = assemble_full_report(
         today=today,
@@ -445,6 +491,7 @@ def run() -> Dict[str, Any]:
         total_assets_cny=total_assets_cny,
         final_decision_gemini=final_decision_gemini,
         wealth_context_view=wealth_view,
+        plain_summaries=plain_summaries,
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）

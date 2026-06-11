@@ -301,6 +301,111 @@ class TestAssembleFullReport:
         assert "NDQ.AX" in report
         assert "NDQ.AX CIO memo" in report  # _FakeReport 用 symbol 生成 cio_memo
 
+    def test_path_reference_rendered_data_lines_only(self):
+        """path_reference 的 "- " 数据行渲染进邮件；LLM 标题行和 TRIM 指令行不渲染"""
+        committees = self._make_committees(["NDQ.AX"])
+        committees["NDQ.AX"]["path_reference"] = (
+            "# 路径参考（regime=uptrend 历史 forward 路径分布）：\n"
+            "- 现价: ¥60.00\n"
+            "- 30d (n=1423): 跌破现价概率 43%、中位 +1.4%\n"
+            "- 90d 路径形状: 先跌后涨 49% / 直接涨 25%\n"
+            "（若要 TRIM，REENTRY_PRICE 必须低于现价）"
+        )
+        report = assemble_full_report(
+            today="2026-05-10",
+            macro_view="",
+            gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=committees,
+            skipped_assets=set(),
+            total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "路径概率" in report
+        assert "跌破现价概率 43%" in report
+        assert "先跌后涨 49%" in report
+        assert "# 路径参考" not in report          # LLM 标题行掐头
+        assert "REENTRY_PRICE 必须低于现价" not in report  # TRIM 指令行去尾
+
+    def test_plain_summary_rendered_from_profile(self):
+        """一句话人话摘要：verdict + 30d 路径分布确定性生成"""
+        committees = self._make_committees(["NDQ.AX"])
+        committees["NDQ.AX"]["verdict"]["verdict"] = "HOLD"
+        committees["NDQ.AX"]["path_profile"] = {
+            "windows": {"30d": {"p_below": 0.42, "downside_pct": -3.0,
+                                "median_pct": 1.1}},
+        }
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=committees,
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "一句话" in report
+        assert "继续持有，不买也不卖" in report
+        assert "更便宜的概率约 42%" in report
+        assert "-3.0%" in report
+
+    def test_plain_summary_without_profile_still_has_action(self):
+        """无 path_profile（概率表不可用）→ 人话行只有动作没有概率尾巴"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),  # ACCUMULATE 5000
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "一句话" in report
+        assert "建议小额加仓 ¥5,000" in report
+        assert "更便宜的概率" not in report
+
+    def test_analyst_views_fenced_no_details_tag(self):
+        """analyst 原文走 fenced block；不再用 <details>（markdown 不解析 HTML 块内部）"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "<details>" not in report
+        assert "NDQ.AX Quant" in report
+        assert "NDQ.AX Risk" in report
+        assert "分析师意见" in report
+
+    def test_glossary_rendered(self):
+        """术语表固定渲染在报告尾部（小白查表，专家跳过）"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "术语表" in report
+        assert "跌破现价概率" in report
+
+    def test_path_reference_absent_no_section(self):
+        """没有 path_reference（如概率表不可用）→ 不出现路径概率空段落"""
+        report = assemble_full_report(
+            today="2026-05-10",
+            macro_view="",
+            gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(),
+            total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "路径概率" not in report
+
     def test_gemini_opinion_included(self):
         """Gemini 第二意见包含在报告里"""
         opinion = "Gemini 认为：应该减仓"
@@ -384,3 +489,81 @@ class TestAssembleFullReport:
         # 措辞区分：不是减仓计划
         assert "减仓路径" not in report
         assert "减仓被否" not in report
+
+
+# ============ 翻译官（人话解读 LLM 版） ============
+
+class TestTranslator:
+    def test_parse_well_formed_output(self):
+        from jobs.daily_report_builder import parse_translator_output
+        raw = (
+            "@@GC=F\n继续持有。历史上 408 个类似日子里……\n第二句。\n"
+            "@@0700.HK\n建议小额加仓 ¥2,500。\n"
+        )
+        out = parse_translator_output(raw)
+        assert set(out) == {"GC=F", "0700.HK"}
+        assert "408 个类似日子" in out["GC=F"]
+        assert "第二句" in out["GC=F"]
+
+    def test_parse_garbage_returns_empty(self):
+        from jobs.daily_report_builder import parse_translator_output
+        assert parse_translator_output("我不会遵守格式，直接说：持有吧") == {}
+        assert parse_translator_output("") == {}
+        assert parse_translator_output("@@GC=F\n   \n") == {}  # 有头无正文
+
+    def test_prompt_contains_data_and_defense_note(self):
+        from jobs.daily_report_builder import build_translator_prompt
+        prompt = build_translator_prompt([{
+            "symbol": "GC=F", "display_name": "伦敦金",
+            "verdict_line": "HOLD，置信度 0.65，建议金额 ¥0",
+            "defense_note": "CIO 原始结论 TRIM（建议金额 ¥-30000），想因集中度减仓被拦",
+            "path_lines": ["- 30d: 跌破现价概率 42%"],
+            "cio_memo": "VERDICT: HOLD",
+        }])
+        assert "GC=F" in prompt and "伦敦金" in prompt
+        assert "跌破现价概率 42%" in prompt
+        assert "集中度减仓被拦" in prompt
+
+    def test_assemble_prefers_translator_over_deterministic(self):
+        committees = {
+            "GC=F": {
+                "verdict": {"verdict": "HOLD", "confidence": 0.65,
+                            "dominant_view": "risk", "alloc_cny": 0},
+                "report": _FakeReport(cio_memo="m", quant_view="q", risk_view="r"),
+                "path_profile": {"windows": {"30d": {
+                    "p_below": 0.42, "downside_pct": -3.0, "median_pct": 1.1}}},
+            },
+        }
+        report = assemble_full_report(
+            today="2026-06-12", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "GC=F", "display_name": "伦敦金"}],
+            asset_committees=committees,
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            plain_summaries={"GC=F": "翻译官说：拿住别动，系统其实在担心你篮子太满。"},
+        )
+        assert "人话解读" in report
+        assert "篮子太满" in report
+        assert "一句话" not in report   # 翻译官命中时确定性版不再渲染
+
+    def test_assemble_falls_back_per_asset(self):
+        """翻译官只给了部分资产 → 缺的资产回落确定性一句话"""
+        committees = {
+            "GC=F": {
+                "verdict": {"verdict": "HOLD", "confidence": 0.65,
+                            "dominant_view": "risk", "alloc_cny": 0},
+                "report": _FakeReport(cio_memo="m", quant_view="q", risk_view="r"),
+            },
+        }
+        report = assemble_full_report(
+            today="2026-06-12", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "GC=F"}],
+            asset_committees=committees,
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            plain_summaries={"OTHER": "无关资产"},
+        )
+        assert "一句话" in report
+        assert "继续持有，不买也不卖" in report
