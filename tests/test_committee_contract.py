@@ -1213,3 +1213,62 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
     assert (captured[0].get("sentiment_brief") or "") == "", (
         "基座空时不许附 per-asset 行（VIX 降级红线）"
     )
+
+
+def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
+    """SENTINEL: build_reentry_reference 的文本必须随 result["path_reference"] 返回。
+
+    漂移会被抓：entry（邮件/GUI/CLI）渲染的路径概率与 CIO 看到的不是同一份
+    → 用户问"我要的概率在哪里"（2026-06-12 邮件可读性事故的防回归）。
+    """
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    SENTINEL_PATH = "- PATH_REFERENCE_SENTINEL_30d 跌破现价概率 42%"
+
+    monkeypatch.setattr(
+        "core.regime_probability.build_reentry_reference",
+        lambda *a, **k: (SENTINEL_PATH, {"windows": {}}),
+    )
+    # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
+    monkeypatch.setattr("core.committee_runner.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.committee_runner.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("core.committee_runner.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.committee_runner.load_prior_insights", lambda *a, **kw: "")
+
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("core.committee_runner.get_history_data",
+                        lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+
+    def fake_run_committee(*args, **kwargs):
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+
+    from core.committee_runner import run_committee_session
+    result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    sym_result = result["asset_committees"]["TEST.AX"]
+    assert sym_result.get("path_reference") == SENTINEL_PATH, (
+        f"path_reference 漂移: 期望 {SENTINEL_PATH!r}, "
+        f"实际 {sym_result.get('path_reference')!r}\n"
+        "  → for_symbol 没把 reentry_reference 放进 result（邮件渲染会拿不到路径概率）"
+    )

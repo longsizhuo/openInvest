@@ -232,6 +232,15 @@ def assemble_full_report(
         prob = c.get("regime_probability")
         if prob is not None:
             lines.append(f"**历史参考**: {prob.summary_line()}\n\n")
+        # 路径概率（多窗分布 + 形状 + 时序）——与 CIO 决策时看到的同一份文本。
+        # 只取 "- " 数据行：掐头（给 LLM 的标题行）去尾（TRIM 指令行），用户只看数据。
+        path_ref = c.get("path_reference") or ""
+        path_lines = [ln for ln in path_ref.splitlines() if ln.startswith("- ")]
+        if path_lines:
+            lines.append(
+                "**路径概率**（该 regime 历史 forward 分布，CIO 决策依据）:\n\n"
+                + "\n".join(path_lines) + "\n\n"
+            )
         lines.extend([
             f"### CIO 备忘\n```\n{c['report'].cio_memo}\n```\n\n",
             f"<details><summary>📜 三个 analyst 详细意见</summary>\n\n",

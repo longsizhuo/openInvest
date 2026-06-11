@@ -602,6 +602,10 @@ def run_committee_for_symbol(
         progress_callback=progress_callback,
     )
 
+    # 路径分布参考随 result 返回——entry（邮件/GUI/CLI）渲染给用户，
+    # 与 CIO prompt 里看到的是同一份文本（所见即所得，防口径分叉）。
+    result["path_reference"] = reentry_reference
+
     # 6.5. 路径预测快照落盘（path_review 闭环：90 天后回看实际路径 vs 预测分布）。
     # graceful：失败不阻断。
     if path_profile is not None:

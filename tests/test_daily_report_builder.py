@@ -301,6 +301,48 @@ class TestAssembleFullReport:
         assert "NDQ.AX" in report
         assert "NDQ.AX CIO memo" in report  # _FakeReport 用 symbol 生成 cio_memo
 
+    def test_path_reference_rendered_data_lines_only(self):
+        """path_reference 的 "- " 数据行渲染进邮件；LLM 标题行和 TRIM 指令行不渲染"""
+        committees = self._make_committees(["NDQ.AX"])
+        committees["NDQ.AX"]["path_reference"] = (
+            "# 路径参考（regime=uptrend 历史 forward 路径分布）：\n"
+            "- 现价: ¥60.00\n"
+            "- 30d (n=1423): 跌破现价概率 43%、中位 +1.4%\n"
+            "- 90d 路径形状: 先跌后涨 49% / 直接涨 25%\n"
+            "（若要 TRIM，REENTRY_PRICE 必须低于现价）"
+        )
+        report = assemble_full_report(
+            today="2026-05-10",
+            macro_view="",
+            gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=committees,
+            skipped_assets=set(),
+            total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "路径概率" in report
+        assert "跌破现价概率 43%" in report
+        assert "先跌后涨 49%" in report
+        assert "# 路径参考" not in report          # LLM 标题行掐头
+        assert "REENTRY_PRICE 必须低于现价" not in report  # TRIM 指令行去尾
+
+    def test_path_reference_absent_no_section(self):
+        """没有 path_reference（如概率表不可用）→ 不出现路径概率空段落"""
+        report = assemble_full_report(
+            today="2026-05-10",
+            macro_view="",
+            gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(),
+            total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "路径概率" not in report
+
     def test_gemini_opinion_included(self):
         """Gemini 第二意见包含在报告里"""
         opinion = "Gemini 认为：应该减仓"
