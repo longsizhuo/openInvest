@@ -42,3 +42,4 @@ experiments/dspy_trainset_v3.json
 
 # AI 工具本地目录（Qwen Code review 等），不入库
 .qwen/
+docs/path_calibration.md

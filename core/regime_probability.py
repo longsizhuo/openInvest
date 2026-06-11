@@ -316,6 +316,60 @@ def get_regime_forward_summary(
     }
 
 
+def calibrate_profile(
+    profile: Dict[str, Any],
+    *,
+    shrinkage_k: Optional[float] = None,
+    band_gamma: Optional[float] = None,
+) -> Dict[str, Any]:
+    """路径分布校准层（2026-06，walk-forward 时代分桶诊断出两个结构性缺陷的修复）：
+
+    1. **小样本收缩**：条件分布按 effective_n 向同资产无条件分布收缩，
+       λ = eff_n / (eff_n + k)。治 downtrend 这类独立样本个位数的桶拿 4 个
+       样本装精确（GC 07-09 downtrend 带覆盖实测 7%）。k=0 → λ=1 → 禁用。
+    2. **带宽校准**：P10/P90/downside 围绕中位按 γ 扩张（带覆盖 7 个时代里
+       6 个 < 80% 目标，结构性偏窄）。γ=1 → 禁用。
+
+    参数默认从 config 读（defaults.yaml `path:` 节 → PathConfig，经 fit/OOS
+    验证前默认禁用，ADR-010 rule 4）；显式传参覆盖（fit 脚本网格搜索用）。
+    返回新 dict（不改原 profile），uncond_windows 缺失时原样返回。
+    """
+    if shrinkage_k is None or band_gamma is None:
+        from core.config import load_config
+        cfg = load_config().path
+        if shrinkage_k is None:
+            shrinkage_k = cfg.shrinkage_k
+        if band_gamma is None:
+            band_gamma = cfg.band_gamma
+    if (not shrinkage_k and band_gamma == 1.0) or not profile:
+        return profile
+    uncond = profile.get("uncond_windows") or {}
+    out = dict(profile)
+    out["windows"] = {}
+    out["calibration"] = {"shrinkage_k": shrinkage_k, "band_gamma": band_gamma}
+    for w, st in (profile.get("windows") or {}).items():
+        st = dict(st)
+        u = uncond.get(w)
+        if shrinkage_k and u:
+            lam = st["effective_n"] / (st["effective_n"] + shrinkage_k)
+            # 只校准两边都有的字段（fit 脚本喂的 mini-profile 无 p_down）
+            for key in ("median_pct", "p_below", "p_down",
+                        "p10_pct", "p90_pct", "downside_pct"):
+                if key in st and key in u:
+                    st[key] = round(lam * st[key] + (1 - lam) * u[key], 4)
+            # 概率字段 clip 护栏：凸组合本身封闭于 [0,1]，这里只防上游脏数据静默传播
+            for key in ("p_below", "p_down"):
+                if key in st:
+                    st[key] = min(1.0, max(0.0, st[key]))
+        if band_gamma != 1.0:
+            med = st["median_pct"]
+            for key in ("p10_pct", "p90_pct", "downside_pct"):
+                if key in st:
+                    st[key] = round(med + band_gamma * (st[key] - med), 4)
+        out["windows"][w] = st
+    return out
+
+
 def build_reentry_reference_text(
     asset: str,
     regime: str,
@@ -326,12 +380,31 @@ def build_reentry_reference_text(
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
 ) -> str:
-    """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。
+    """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。"""
+    text, _profile = build_reentry_reference(
+        asset, regime, current_price,
+        source=source, jsonl_path=jsonl_path, records=records, windows=windows,
+    )
+    return text
+
+
+def build_reentry_reference(
+    asset: str,
+    regime: str,
+    current_price: Optional[float],
+    *,
+    source: str = "ohlc",
+    jsonl_path: Optional[Path] = None,
+    records: Optional[List[Dict[str, Any]]] = None,
+    windows: Tuple[str, ...] = ("30d", "60d", "90d"),
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """路径参考 (text, profile)。profile = get_path_profile 的结构化 dict
+    （OHLC 源才有；给 path_review 决策时落快照用——事后校验"当时的预测分布"）。
 
     source: "ohlc"（默认，几十年 OHLC 直算）| "verdict_review"（旧源，保留）。
     """
     if current_price is None or current_price <= 0:
-        return ""
+        return "", None
     if source == "verdict_review" and records is None:
         if jsonl_path is None:
             from core.memory_store import MemoryStore
@@ -344,6 +417,10 @@ def build_reentry_reference_text(
     if source == "ohlc":
         try:
             profile = get_path_profile(asset, regime, windows=windows)
+            if profile:
+                # 校准层（config path 节，经 fit/OOS 验证前默认禁用=恒等变换）。
+                # CIO 看到的文本与落盘快照都用校准后的分布——所见即所验。
+                profile = calibrate_profile(profile)
         except Exception:  # noqa: BLE001  概率表读失败不阻断（外层还有 graceful）
             profile = None
 
@@ -378,7 +455,7 @@ def build_reentry_reference_text(
             any_data = True
             lines.append(f"- {est.summary_line()}")
     if not any_data:
-        return ""
+        return "", None
 
     # 路径形状（概率表路径化，2026-06）：仅 OHLC 源有逐日路径可算。
     # 回答"先跌后涨 vs 持续跌 vs 直接涨"占比 + 回踩深度/时点 → 带路径的预测。
@@ -423,13 +500,14 @@ def build_reentry_reference_text(
         except Exception:  # noqa: BLE001  路径形状取失败不影响多窗分布主体
             shape_lines = []
 
-    return (
+    text = (
         f"# 路径参考（regime={regime} 历史 forward 路径分布；TRIM 买回点 + 持有路径预期）：\n"
         f"- 现价: ¥{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
         + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
         "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"
     )
+    return text, (profile if source == "ohlc" else None)
 
 
 # ============================================================================
@@ -613,6 +691,7 @@ def get_path_profile(
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
     shape_window: str = "90d",
     days: int = 100000,
+    asof: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """(asset, regime) 的多窗路径画像（纯 OHLC 算术，0 token）。
 
@@ -649,6 +728,10 @@ def get_path_profile(
     """
     from db.market_store import MarketStore
     df = MarketStore().get_history_df(asset.upper(), days=days)
+    if asof is not None and df is not None and not df.empty:
+        # point-in-time 模式（walk-forward 校准 / 复算"当时会预测什么"）：
+        # 只用 asof 及之前的数据建分布，零前视
+        df = df[df.index <= asof]
     all_windows = tuple(dict.fromkeys((*windows, shape_window)))
     frame = compute_regime_return_frame(df, asset.upper(), windows=all_windows)
     if frame.empty:
@@ -657,17 +740,16 @@ def get_path_profile(
     if sub.empty:
         return None
 
-    out: Dict[str, Any] = {"asset": asset, "regime": regime, "windows": {}, "shape": None}
-    for w in windows:
+    def _window_stats(rows, w: str) -> Optional[Dict[str, Any]]:
         col = f"fwd_{w}"
-        if col not in sub.columns:
-            continue
-        rets = (sub[col].dropna() * 100)
+        if col not in rows.columns:
+            return None
+        rets = (rows[col].dropna() * 100)
         if rets.empty:
-            continue
+            return None
         n = len(rets)
         eff = max(1, n // int(w.rstrip("d")))
-        out["windows"][w] = {
+        return {
             "n": n,
             "effective_n": eff,
             "median_pct": round(float(rets.median()), 2),
@@ -679,6 +761,19 @@ def get_path_profile(
             "downside_pct": round(float(rets.quantile(REENTRY_DOWNSIDE_QUANTILE)), 2),
             "low_confidence": eff < MIN_CONFIDENT_N,
         }
+
+    # 无条件分布（同资产全部非 unknown 历史日）：小样本收缩校准的混合对象
+    uncond = frame[frame["regime"] != "unknown"]
+    out: Dict[str, Any] = {"asset": asset, "regime": regime,
+                           "windows": {}, "uncond_windows": {}, "shape": None}
+    for w in windows:
+        st = _window_stats(sub, w)
+        if st is None:
+            continue
+        out["windows"][w] = st
+        ust = _window_stats(uncond, w)
+        if ust is not None:
+            out["uncond_windows"][w] = ust
 
     sw = shape_window
     cols = [f"fwd_{sw}", f"min_{sw}", f"tmin_{sw}", f"max_{sw}", f"tmax_{sw}",

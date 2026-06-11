@@ -28,7 +28,8 @@
 5. [12-verification.md](12-verification.md) —— 实测数据 / "科学证据" / negative results
 6. [13-param-tuning-feasibility.md](13-param-tuning-feasibility.md) —— 参数调优可行性诊断 + [补充文档](13-param-tuning-feasibility-addendum.md)
 7. [15-path-probability.md](15-path-probability.md) —— 概率表路径化：多窗分布 + 四类路径形状（卖出时机的核心读数）
-8. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
+8. [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md) —— TradingAgents 式分析师实验：预注册 Gate 0/3 过线
+9. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
 ### 🎨 我是设计师 / 前端，想改 GUI
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA
@@ -55,6 +56,7 @@
 | 13 | [参数调优可行性诊断](13-param-tuning-feasibility.md) | 50+ 硬编码常数清单 + 耦合分析 + Optuna 回顾 + sweep 策略 |
 | 14 | [Sweep Runner](14-sweep-runner.md) | 参数 sweep 工具链 |
 | 15 | [概率表路径化](15-path-probability.md) | 30/60/90 多窗分布 + 四类路径形状 + regime 持续标注 |
+| 16 | [TA 分析师实验](16-ta-analysts-experiment.md) | 信号存在性两阶段实验，3 分析师 0/3 过预注册 Gate |
 
 ## 架构决策记录 (ADR)
 
@@ -70,6 +72,7 @@
 | [006](adr/006-event-layer.md) | 事件感知层 + 轻量新闻 RAG | 🚧 实现中（feature flag 默认关）|
 | [007](adr/007-few-shot-retirement.md) | few-shot (v1-v4) 退役，CIO 保持 zero-shot，反保守走 Dreaming | ✅ 已采纳 |
 | [008](adr/008-caution-insight-deferred.md) | caution 改 lift-based 评分（试金石验证非 reward hacking）；现有数据下休眠；"过度保守"假设缺证据 | ✅ 已采纳 |
+| [009](adr/009-no-ta-style-analyst-agents.md) | 否决 TradingAgents 式分析师 subagent（test_ta 实验，预注册 Gate 0/3） | ✅ 已采纳 |
 
 ---
 

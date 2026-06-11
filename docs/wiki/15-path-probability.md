@@ -135,7 +135,48 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
   确定性 verdict 改写；要 sweep 它需先建验证口径（同 EVENT_STANCE 权重的纪律，
   见 `scripts/eval_event_stance.py` 的 INSUFFICIENT_DATA 闸门先例）
 
-## 6. 怎么验证
+## 6. 校准闭环（path_review）与 walk-forward 基线
+
+路径预测是可验证的——`jobs/path_review.py`（照 verdict_review 模式）：
+
+- **决策时落快照**：committee_runner 把 CIO 看到的同一份结构化 profile 写到
+  `memory/.committee/<date>/<sym>_path.json`（防代码口径漂移污染 ground truth）
+- **成熟后对账**：实际 fwd 30/60/90、窗内最低/最高/到达时点、同口径形状分类
+- **校准口径**：P10-P90 带覆盖率（目标 ~80%）、p_below 的 Brier vs 基率 Brier、
+  形状概率分 vs uniform 0.25、见底时点 MAE
+- **recompute 模式**：预测器纯确定性 → `--recompute-weekly-since` 历史逐周重算
+  "当时会预测什么"（`get_path_profile(asof=...)` 零前视），不用等 90 天攒样本
+
+**Walk-forward 校准基线（2026-06-11，2024-01 起每周一 × 2 资产，n=388）**：
+
+| 窗 | n | 带覆盖(目标 0.8) | p_below Brier | 基率 Brier | 中位\|误差\| | 中位偏差 |
+|---|---|---|---|---|---|---|
+| 30d | 388 | **66%** | 0.248 | 0.220 | 4.4pp | +0.5pp |
+| 60d | 357 | **62%** | 0.275 | 0.220 | 7.2pp | +2.1pp |
+| 90d | 335 | **56%** | 0.240 | 0.185 | 9.6pp | +1.6pp |
+
+形状：概率分 0.29（uniform 0.25）、top1 命中 34%、见底时点 MAE 19.1 交易日。
+
+**诚实解读（单一牛市窗口，下同 16 章的局限）**：
+1. **预测带系统性偏窄**——2024-26 实际波动（尤其黄金大涨）频繁落出历史条件分布
+   的 P10-P90。读 brief 里的"悲观分位/带"时要知道它低估尾部
+2. **p_below 作为概率在本窗口输给基率**——per-regime 条件分布的方向概率不如
+   无条件基率校准（与 16 章"打不过基率"互证）。中位偏差为正=预测偏保守
+3. 形状分布略有信息量（0.29>0.25）但远非精确；见底时点 MAE ~19 天≈低信息
+4. ~~改进方向~~ **已落地（2026-06-11，校准层）**：扩窗到 2007-2026（n=1579）
+   做时代分桶确认两缺陷是**结构性**（带覆盖 7 个时代 6 个 <80%；小样本桶最差
+   ——GC 07-09 downtrend 覆盖 7%）→ `calibrate_profile` 两个修复：
+   **小样本收缩**（λ=eff_n/(eff_n+k)，条件分布向同资产无条件分布收缩）+
+   **带宽扩张**（P10/P90/downside 围绕中位 ×γ）。
+   `scripts/fit_path_calibration.py` 预注册 fit(2007-17)/OOS(2018-26)：
+   **OOS 三窗带覆盖 76/73/70% → 81/80/76% 全进 [75,85]，Brier 全窗改善 → PASS**，
+   k=80 / γ=1.1 已写入 defaults（path 节）。caveat：p_below 与"事后基率"
+   差距缩到 0.5-1.5% 但未反超（事后基率不可预知，仅参考）。
+   重拟合流程：walk-forward recompute → fit 脚本重跑（recompute 快照永远存
+   未校准原始分布，校准只在生产出口应用——fit 数据不会被自己污染）。
+   live 快照攒到 n≥30 后启用周度 path_review job 持续追踪
+
+## 7. 怎么验证
 
 ```bash
 uv run pytest tests/test_regime_probability.py -q     # 数值精确性 + 形状完备性
