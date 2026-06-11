@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -36,7 +37,9 @@ ASSET_LABEL = {"GC=F": "Gold futures (GC=F)", "NDQ.AX": "Nasdaq-100 ETF (NDQ.AX)
 
 
 def load_dates() -> Tuple[List[str], List[str]]:
-    d = json.loads((CACHE / "decision_dates.json").read_text())
+    # INVEST_TA_DATES: 换窗口重跑用独立日期文件（如 2022 熊市复测）
+    fname = os.getenv("INVEST_TA_DATES", "decision_dates.json")
+    d = json.loads((CACHE / fname).read_text())
     return d["dates"], d["assets"]
 
 
@@ -130,7 +133,7 @@ def ensure_cot() -> pd.DataFrame:
     if _COT_CACHE.exists():
         return pd.read_csv(_COT_CACHE, parse_dates=["as_of"])
     frames = []
-    for year in (2024, 2025, 2026):
+    for year in (2021, 2022, 2023, 2024, 2025, 2026):  # 2021 起：2022 熊市窗口复测需要滞后期
         url = f"https://www.cftc.gov/files/dea/history/deacot{year}.zip"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (research)"})

@@ -28,7 +28,8 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.ta_data import CACHE, hist  # noqa: E402
 
-REPORTS = CACHE / "phase_a_reports.jsonl"
+import os as _os
+REPORTS = CACHE / _os.getenv("INVEST_TA_OUT", "phase_a_reports.jsonl")
 HORIZONS = (30, 60)
 
 
