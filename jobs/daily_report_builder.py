@@ -154,7 +154,118 @@ def build_gemini_prompt(
     )
 
 
-# ============ 5. 核心：完整报告拼接 ============
+# ============ 5. 人话摘要（确定性，零 LLM） ============
+
+_VERDICT_PLAIN = {
+    "HOLD": "继续持有，不买也不卖",
+    "ACCUMULATE": "建议小额加仓",
+    "BUY": "建议买入",
+    "TRIM": "建议减掉一部分仓位",
+    "SELL": "建议清仓",
+}
+
+
+def plain_verdict_summary(verdict: Dict[str, Any],
+                          path_profile: Optional[Dict[str, Any]]) -> str:
+    """给小白看的一句话结论——从 verdict + 路径分布确定性生成，零 LLM 调用。
+
+    专家细节（CIO 备忘/analyst 原文）保留在后面的段落，这行只翻译"该干嘛 +
+    历史上类似行情接下来大概怎么走"。
+    """
+    vd = str(verdict.get("verdict", ""))
+    act = _VERDICT_PLAIN.get(vd, vd)
+    alloc = verdict.get("alloc_cny", 0) or 0
+    if vd in ("ACCUMULATE", "BUY") and alloc:
+        act += f" ¥{alloc:,.0f}"
+    st = ((path_profile or {}).get("windows") or {}).get("30d")
+    tail = ""
+    if st and all(k in st for k in ("p_below", "downside_pct", "median_pct")):
+        tail = (
+            f"。历史上类似行情，30 天后比今天更便宜的概率约 "
+            f"{st['p_below'] * 100:.0f}%；运气差的情形（最差 1/5）大约 "
+            f"{st['downside_pct']:+.1f}%，一般情形 {st['median_pct']:+.1f}%"
+        )
+    return f"**一句话**: {act}{tail}。\n\n"
+
+
+# ============ 5b. 翻译官（人话解读，LLM 版；上面的确定性版是 graceful 回落） ============
+
+TRANSLATOR_SYSTEM_PROMPT = """你是 AI 投资委员会的"翻译官"，负责把委员会结论翻译给完全不懂投资的用户。
+
+铁律：
+1. **只许引用输入里出现的数字/价格/百分比，禁止自己计算、换算或编造任何数字**
+2. 每个资产输出一段 4-8 句的大白话，要做到三件事：
+   a. 先说该干嘛（买/卖/不动，多少钱）
+   b. 交代关键概率数字的出身和含义——用"历史上 N 个类似的日子里…""5 次里有 4 次…"
+      这种口吻；"悲观情形"要说明它不是最坏情况，是最差的 1/5 的分界线
+   c. 如果输入里有"CIO 原始结论被防御规则改掉"的留痕，必须解释系统真正在担心什么；
+      如果数字之间看似矛盾（比如概率偏多但结论偏空），必须调和解释，不许装看不见
+3. 不堆术语；必须用术语时随手用半句话解释
+4. 数据里标了"⚠样本不足"的，要提醒用户该数字只能看方向、别当真到个位数
+
+输出格式（严格遵守，不要输出任何其他内容）：
+每个资产先输出单独一行 `@@<symbol>`，从下一行开始是这个资产的解读正文。"""
+
+
+def build_translator_prompt(asset_inputs: List[Dict[str, Any]]) -> str:
+    """翻译官 user prompt（纯函数，零 IO）。
+
+    asset_inputs 每项: {symbol, display_name, verdict_line, defense_note,
+    path_lines: List[str], cio_memo}
+    """
+    blocks: List[str] = []
+    for x in asset_inputs:
+        defense = f"\n防御规则留痕: {x['defense_note']}" if x.get("defense_note") else ""
+        path = "\n".join(x.get("path_lines") or []) or "（路径分布不可用）"
+        blocks.append(
+            f"## {x['symbol']}（{x.get('display_name', x['symbol'])}）\n"
+            f"最终裁决: {x['verdict_line']}{defense}\n"
+            f"历史路径分布（与 CIO 看到的同一份）:\n{path}\n"
+            f"CIO 备忘原文:\n{x.get('cio_memo', '')}"
+        )
+    return (
+        "把下面每个资产的委员会结论翻译成大白话（输出格式见 system 指令）：\n\n"
+        + "\n\n---\n\n".join(blocks)
+    )
+
+
+def parse_translator_output(text: str) -> Dict[str, str]:
+    """解析翻译官输出：@@SYM 行分段 → {symbol: 正文}。格式不符返回 {}（回落确定性版）。"""
+    out: Dict[str, str] = {}
+    sym: Optional[str] = None
+    buf: List[str] = []
+    for ln in (text or "").splitlines():
+        if ln.strip().startswith("@@"):
+            if sym and "".join(buf).strip():
+                out[sym] = "\n".join(buf).strip()
+            sym = ln.strip().lstrip("@").strip()
+            buf = []
+        elif sym is not None:
+            buf.append(ln)
+    if sym and "".join(buf).strip():
+        out[sym] = "\n".join(buf).strip()
+    return out
+
+
+# 术语表（静态，放邮件末尾——小白查表，专家直接跳过）
+_GLOSSARY = """## 术语表（看不懂的词在这里查）
+
+- **裁决**: 委员会结论。HOLD=持有不动；ACCUMULATE=小额加仓；BUY=买入；TRIM=减一部分；SELL=清仓
+- **置信度**: 委员会对这个结论的把握（0-1）。0.5 上下=分歧大，0.8+=很有把握
+- **主导方**: 这次结论主要听谁的——macro=宏观面 / quant=技术面 / risk=风控
+- **regime**: 系统对当前行情的粗分类（uptrend 上行 / downtrend 下行 / crash 急跌 / recovery 修复 / range 震荡）
+- **n 与"重叠窗口独立≈k"**: 历史样本量。相邻交易日的窗口高度重叠，真实独立样本只有 ≈k 个；带 ⚠样本不足 的行别太当真
+- **跌破现价概率**: 历史上同类行情里，N 天后价格低于今天的占比
+- **悲观情形(20分位)**: 历史同类行情里最差的 1/5 大约跌到哪（不是最坏情况）
+- **路径形状**: 未来 90 天怎么走的历史占比——先跌后涨 / 直接涨 / 冲高回落 / 一路收跌
+- **INDEP_DEFENSE_FLAG**: 快崩哨兵。VIX（恐慌指数）或波动率异常飙升时=on，系统会自动拒绝加仓建议
+- **集中度**: 单一资产占总资产比例。过高=鸡蛋在一个篮子
+- **子弹 / 可投**: 当前现金里可以用来加仓的部分
+- **报价币种**: 行情价用的是交易所报价币种（GC=F 是美元/盎司，与积存金的 ¥/克不同；换算看"黄金现货快照"节）
+"""
+
+
+# ============ 6. 核心：完整报告拼接 ============
 
 def assemble_full_report(
     today: str,
@@ -167,6 +278,7 @@ def assemble_full_report(
     total_assets_cny: float,
     final_decision_gemini: str,
     wealth_context_view: str = "",
+    plain_summaries: Optional[Dict[str, str]] = None,
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -183,6 +295,8 @@ def assemble_full_report(
         skipped_assets: 被跳过的资产 symbol 集合（数据缺失）
         total_assets_cny: 总资产 CNY 估算（已计算好）
         final_decision_gemini: Gemini 第二意见文本
+        plain_summaries: {symbol: 翻译官人话解读}（LLM 版，entry 层生成；
+            缺失/失败时该资产回落确定性 plain_verdict_summary 一句话）
 
     Returns:
         完整 markdown 报告字符串
@@ -195,10 +309,18 @@ def assemble_full_report(
         sym = a["symbol"]
         c = asset_committees[sym]
         v = c["verdict"]
+        # 小白友好：人话解读。优先翻译官（LLM，能调和矛盾/解释防御拦截），
+        # 该资产缺失/失败 → 回落确定性一句话（零 LLM）
+        translated = (plain_summaries or {}).get(sym, "").strip()
+        plain_block = (
+            f"**人话解读**: {translated}\n\n" if translated
+            else plain_verdict_summary(v, c.get("path_profile"))
+        )
         lines = [
             f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n",
             f"**裁决**: {v['verdict']} | 置信度 {v['confidence']:.2f} | "
             f"主导方 {v['dominant_view']} | 建议金额 ¥{v['alloc_cny']}\n\n",
+            plain_block,
         ]
         # TRIM 路径化：展示买回点 + 预期路径（让用户能判断"卖出是赚是亏"）
         if v.get("verdict") == "TRIM":
@@ -232,12 +354,23 @@ def assemble_full_report(
         prob = c.get("regime_probability")
         if prob is not None:
             lines.append(f"**历史参考**: {prob.summary_line()}\n\n")
+        # 路径概率（多窗分布 + 形状 + 时序）——与 CIO 决策时看到的同一份文本。
+        # 只取 "- " 数据行：掐头（给 LLM 的标题行）去尾（TRIM 指令行），用户只看数据。
+        path_ref = c.get("path_reference") or ""
+        path_lines = [ln for ln in path_ref.splitlines() if ln.startswith("- ")]
+        if path_lines:
+            lines.append(
+                "**路径概率**（该 regime 历史 forward 分布，CIO 决策依据）:\n\n"
+                + "\n".join(path_lines) + "\n\n"
+            )
+        # 全部用 fenced code block：python-markdown 不解析原生 HTML 块
+        # （<details>）内部的 markdown，**粗体**/换行在邮件里全坏
+        # （2026-06-12 用户实测）。Gmail 也不支持 <details> 折叠。
         lines.extend([
             f"### CIO 备忘\n```\n{c['report'].cio_memo}\n```\n\n",
-            f"<details><summary>📜 三个 analyst 详细意见</summary>\n\n",
-            f"**Quant**:\n{c['report'].quant_view}\n\n",
-            f"**Risk Officer**:\n{c['report'].risk_view}\n\n",
-            f"</details>",
+            "### 分析师意见（专家区）\n\n",
+            f"**Quant（技术面）**:\n```\n{c['report'].quant_view}\n```\n\n",
+            f"**Risk Officer（风控）**:\n```\n{c['report'].risk_view}\n```\n",
         ])
         return "".join(lines)
 
@@ -286,6 +419,9 @@ def assemble_full_report(
 ## {n+3}. Gemini 第二意见 (独立 challenge)
 {final_decision_gemini}
 
+---
+
+{_GLOSSARY}
 ---
 
 *用户当前总资产估算: ¥{total_assets_cny:,.0f}*

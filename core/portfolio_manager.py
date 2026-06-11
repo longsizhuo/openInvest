@@ -31,11 +31,11 @@ class UserStatus:
     """get_user_status() 返回值（用于 daily_report 等场景）"""
     cash_cny: float                     # CNY 现金（兼容字段：v2 内部从 cash["CNY"] 取）
     cash_aud: float                     # AUD 现金
-    disposable_for_invest: float        # 本期可投 CNY = max(0, cash_cny - exchange_buffer)，封顶 cap
+    disposable_for_invest: float        # 本期可投 CNY = max(0, cash_cny - exchange_buffer)；有正 cap 时封顶
     risk_level: str
     portfolio_value: float              # 总市值（CNY 折算粗算）
     target_asset: str                   # 主资产 symbol（target_assets[0]）
-    max_single_invest_cny: float
+    max_single_invest_cny: float        # 正数=单次上限；0=不设限（target_assets 全 0/缺失）
     user_name: str
     user_email: Optional[str] = None
     holdings_count: int = 0             # v2 新增：持仓资产数量
@@ -180,11 +180,14 @@ class PortfolioManager:
 
         target_assets = list(self.strategy.get("target_assets", []) or [])
         if target_assets:
-            max_single = max(
-                float(t.get("max_single_invest_cny", 0) or 0) for t in target_assets
-            ) or 10000.0
+            # 单次上限语义（2026-06-12）：0/缺失 = 该资产不设限；
+            # 全部不设限 → max_single=0 哨兵，disposable 不钳（金额交委员会裁量）
+            caps = [float(t.get("max_single_invest_cny", 0) or 0) for t in target_assets]
+            positive_caps = [c for c in caps if c > 0]
+            max_single = max(positive_caps) if positive_caps else 0.0
             primary_asset = str(target_assets[0].get("symbol", ""))
         else:
+            # 旧 v1 单资产 strategy 路径：保留 10000 默认，不引入新语义
             max_single = float(self.strategy.get("max_single_invest_cny", 10000) or 10000)
             primary_asset = str(self.strategy.get("target_asset", ""))
 
@@ -238,7 +241,7 @@ class PortfolioManager:
             # 拉不到汇率的 holding 静默跳过（缺口告警在 daily_report 那层做）
 
         available = max(0.0, cash_cny - exchange_buffer)
-        disposable = min(available, max_single)
+        disposable = min(available, max_single) if max_single > 0 else available
 
         return UserStatus(
             cash_cny=cash_cny,

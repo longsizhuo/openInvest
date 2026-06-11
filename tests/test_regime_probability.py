@@ -571,7 +571,7 @@ def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
     assert "冲高回落" in txt and "一路收跌" in txt  # 四类（卖出时机靠 max 轴）
     assert "见谷底" in txt and "见顶" in txt
     assert "regime 中位持续" in txt  # 持续中位标注（防形状混 regime 切换误读）
-    assert "¥1,000.00" in txt  # 现价行
+    assert "$1,000.00" in txt  # 现价行（无后缀合成 ticker → 报价币种默认 $）
 
 
 # ---------- 校准层 calibrate_profile（2026-06 校准闭环 Step 2） ----------
@@ -657,3 +657,29 @@ def test_get_path_profile_includes_uncond(monkeypatch):
     assert "30d" in p["uncond_windows"]
     # 全程 uptrend 的合成序列：无条件≈条件
     assert p["uncond_windows"]["30d"]["n"] >= p["windows"]["30d"]["n"]
+
+
+def test_quote_currency_prefix_by_suffix():
+    """报价币种符号按 ticker 后缀判定（display 用；2026-06-12 ¥/$ 混标修复）"""
+    from core.regime_probability import quote_currency_prefix
+    assert quote_currency_prefix("GC=F") == "$"      # COMEX 美元/盎司
+    assert quote_currency_prefix("NDQ.AX") == "A$"
+    assert quote_currency_prefix("0700.HK") == "HK$"
+    assert quote_currency_prefix("518880.SS") == "¥"
+    assert quote_currency_prefix("BTC-USD") == "$"
+    assert quote_currency_prefix("^VIX") == ""       # 指数点位无币种
+
+
+def test_reentry_estimate_uses_currency_symbol():
+    """summary_line 用 currency 字段而非硬编码 ¥"""
+    from core.regime_probability import ReentryEstimate
+    est = ReentryEstimate(
+        asset="GC=F", regime="downtrend", window="30d", n=100,
+        current_price=4100.0, threshold_pct=5.0,
+        p_below_current=0.42, p_down=0.1, median_return_pct=1.0,
+        downside_pct=-3.0, downside_price=3977.0, has_downside=True,
+        low_confidence=False, effective_n=100, currency="$",
+    )
+    line = est.summary_line()
+    assert "$3,977.00" in line
+    assert "¥" not in line
