@@ -455,36 +455,21 @@ def _now_iso_local():
 
 
 def cmd_deposit(args: argparse.Namespace) -> None:
-    """存入现金（任意币种）。等价 web_api POST /api/cash/{currency}/deposit。
+    """存入现金（任意币种）。等价 /api/skill/deposit。
 
     示例:
         skill deposit --currency CNY --amount 5000
         skill deposit -c AUD -a 300
-    """
-    ccy = args.currency.upper()
-    amount = float(args.amount)
-    if amount <= 0:
-        _print_json({"status": "error", "error": "amount 必须 > 0"})
-        sys.exit(1)
-    if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
-        _print_json({"status": "error", "error": f"非法币种 {ccy}"})
-        sys.exit(1)
 
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.deposit_cash
+    """
     pm = _resolve_pm()
-    with pm.with_portfolio_tx() as p:
-        cash = dict(p.get("cash") or {})
-        new_balance = float(cash.get(ccy, 0) or 0) + amount
-        cash[ccy] = round(new_balance, 2)
-        p["cash"] = cash
-    pm._reload()
-    pm.store.append_history({
-        "ts_origin": _now_iso_local(), "action": "deposit",
-        "symbol": ccy, "units": amount, "currency": ccy, "source": "skill_cli",
-    })
-    _print_json({
-        "status": "ok", "currency": ccy, "amount_deposited": amount,
-        "new_balance": new_balance, "cny_total": pm.cash_amount("CNY"),
-    })
+    try:
+        out = pm.deposit_cash(args.currency, args.amount, source="skill_cli")
+    except ValueError as e:
+        _print_json({"status": "error", "error": str(e)})
+        sys.exit(1)
+    _print_json(out)
 
 
 def cmd_withdraw(args: argparse.Namespace) -> None:
@@ -492,32 +477,23 @@ def cmd_withdraw(args: argparse.Namespace) -> None:
 
     示例:
         skill withdraw -c CNY -a 1000
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.withdraw_cash
     """
-    ccy = args.currency.upper()
     amount = float(args.amount)
     if amount <= 0:
         _print_json({"status": "error", "error": "amount 必须 > 0"})
         sys.exit(1)
 
     pm = _resolve_pm()
-    with pm.with_portfolio_tx() as p:
-        cash = dict(p.get("cash") or {})
-        current = float(cash.get(ccy, 0) or 0)
-        if current < amount:
-            raise SystemExit(json.dumps({
-                "status": "error", "error": f"{ccy} 余额 {current} < 取出 {amount}",
-            }, ensure_ascii=False))
-        cash[ccy] = round(current - amount, 2)
-        p["cash"] = cash
-    pm._reload()
-    pm.store.append_history({
-        "ts_origin": _now_iso_local(), "action": "withdraw",
-        "symbol": ccy, "units": -amount, "currency": ccy, "source": "skill_cli",
-    })
-    _print_json({
-        "status": "ok", "currency": ccy, "amount_withdrawn": amount,
-        "new_balance": current - amount, "cny_total": pm.cash_amount("CNY"),
-    })
+    try:
+        out = pm.withdraw_cash(args.currency, amount, source="skill_cli")
+    except ValueError as e:
+        # 历史行为：余额不足时 JSON 走 stderr + exit 1（SystemExit(str)）
+        raise SystemExit(json.dumps({
+            "status": "error", "error": str(e),
+        }, ensure_ascii=False))
+    _print_json(out)
 
 
 def cmd_buy(args: argparse.Namespace) -> None:
@@ -597,30 +573,17 @@ def cmd_delete_holding(args: argparse.Namespace) -> None:
     示例:
         skill delete_holding --symbol 510300.SS
         skill delete_holding --symbol 510300.SS --force   # 强删（units > 0 也删，慎用）
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.delete_holding
     """
-    symbol = args.symbol
     pm = _resolve_pm()
-    with pm.with_portfolio_tx() as p:
-        holdings = list(p.get("holdings") or [])
-        target = next((h for h in holdings if h.get("symbol") == symbol), None)
-        if target is None:
-            raise SystemExit(json.dumps({
-                "status": "error", "error": f"symbol {symbol} 不在持仓",
-            }, ensure_ascii=False))
-        units = float(target.get("units", 0) or 0)
-        is_tracking = bool(target.get("is_tracking_only", False))
-        if not is_tracking and units > 0 and not args.force:
-            raise SystemExit(json.dumps({
-                "status": "error",
-                "error": f"{symbol} 持仓 {units} > 0，请先 sell 或加 --force 强删",
-            }, ensure_ascii=False))
-        p["holdings"] = [h for h in holdings if h.get("symbol") != symbol]
-    pm._reload()
-    pm.store.append_history({
-        "ts_origin": _now_iso_local(), "action": "delete_holding",
-        "symbol": symbol, "source": "skill_cli",
-    })
-    _print_json({"status": "ok", "deleted": symbol})
+    try:
+        out = pm.delete_holding(args.symbol, force=args.force, source="skill_cli")
+    except ValueError as e:
+        raise SystemExit(json.dumps({
+            "status": "error", "error": str(e),
+        }, ensure_ascii=False))
+    _print_json(out)
 
 
 # ---------- doctor ----------
@@ -1211,6 +1174,16 @@ def main() -> None:
     p.set_defaults(func=cmd_event_check)
 
     args = parser.parse_args()
+
+    # 远端模式（hub-and-spoke）：INVEST_API_BASE 设置时子命令转发给远端 hub。
+    # 必须在 args.func（任何 MemoryStore()/PortfolioManager() 实例化）之前分发——
+    # MemoryStore.__init__ 会 mkdir memory/，客户端机器不应产生这个目录。
+    import os
+    if os.getenv("INVEST_API_BASE", "").strip():
+        from scripts.remote_dispatch import maybe_dispatch_remote
+        if maybe_dispatch_remote(args):
+            return
+
     args.func(args)
 
 

@@ -372,6 +372,80 @@ class PortfolioManager:
         self.store.append_history(trade)
         self._reload()
 
+    def deposit_cash(
+        self, currency: str, amount: float, *, source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """存入现金（任意币种）。CLI deposit 与 /api/skill/deposit 共用，
+        非法参数抛 ValueError（消息与原 CLI 输出一致）"""
+        ccy = currency.upper()
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError("amount 必须 > 0")
+        if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
+            raise ValueError(f"非法币种 {ccy}")
+        with self.with_portfolio_tx() as p:
+            cash = dict(p.get("cash") or {})
+            new_balance = float(cash.get(ccy, 0) or 0) + amount
+            cash[ccy] = round(new_balance, 2)
+            p["cash"] = cash
+        self._reload()
+        self.store.append_history({
+            "ts_origin": _now_iso_local(), "action": "deposit",
+            "symbol": ccy, "units": amount, "currency": ccy, "source": source,
+        })
+        return {
+            "status": "ok", "currency": ccy, "amount_deposited": amount,
+            "new_balance": new_balance, "cny_total": self.cash_amount("CNY"),
+        }
+
+    def withdraw_cash(
+        self, currency: str, amount: float, *, source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """取出现金（任意币种）。余额不足抛 ValueError（余额检查在 fcntl 锁内，防 TOCTOU）"""
+        ccy = currency.upper()
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError("amount 必须 > 0")
+        with self.with_portfolio_tx() as p:
+            cash = dict(p.get("cash") or {})
+            current = float(cash.get(ccy, 0) or 0)
+            if current < amount:
+                raise ValueError(f"{ccy} 余额 {current} < 取出 {amount}")
+            cash[ccy] = round(current - amount, 2)
+            p["cash"] = cash
+        self._reload()
+        self.store.append_history({
+            "ts_origin": _now_iso_local(), "action": "withdraw",
+            "symbol": ccy, "units": -amount, "currency": ccy, "source": source,
+        })
+        return {
+            "status": "ok", "currency": ccy, "amount_withdrawn": amount,
+            "new_balance": current - amount, "cny_total": self.cash_amount("CNY"),
+        }
+
+    def delete_holding(
+        self, symbol: str, *, force: bool = False, source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """删除持仓行（units 必须为 0，否则拒绝；force=True 强删）+ 记 history"""
+        with self.with_portfolio_tx() as p:
+            holdings = list(p.get("holdings") or [])
+            target = next((h for h in holdings if h.get("symbol") == symbol), None)
+            if target is None:
+                raise ValueError(f"symbol {symbol} 不在持仓")
+            units = float(target.get("units", 0) or 0)
+            is_tracking = bool(target.get("is_tracking_only", False))
+            if not is_tracking and units > 0 and not force:
+                raise ValueError(
+                    f"{symbol} 持仓 {units} > 0，请先 sell 或加 --force 强删"
+                )
+            p["holdings"] = [h for h in holdings if h.get("symbol") != symbol]
+        self._reload()
+        self.store.append_history({
+            "ts_origin": _now_iso_local(), "action": "delete_holding",
+            "symbol": symbol, "source": source,
+        })
+        return {"status": "ok", "deleted": symbol}
+
     def buy(
         self,
         symbol: str,

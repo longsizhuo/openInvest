@@ -3697,6 +3697,48 @@ async def skill_sell(body: SkillSellRequest = Body(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class SkillCashRequest(BaseModel):
+    """POST /api/skill/deposit|withdraw body"""
+    currency: str
+    amount: float
+
+
+class SkillDeleteHoldingRequest(BaseModel):
+    """POST /api/skill/delete_holding body"""
+    symbol: str
+    force: bool = False
+
+
+@app.post("/api/skill/deposit", tags=["skill"])
+async def skill_deposit(body: SkillCashRequest = Body(...)) -> Dict[str, Any]:
+    """cmd_deposit 同款存现金（/api/cash/* 是 WriteResponse 形状，对不上 CLI，故另设）"""
+    pm = _new_pm()
+    try:
+        return pm.deposit_cash(body.currency, body.amount, source="skill_remote")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/skill/withdraw", tags=["skill"])
+async def skill_withdraw(body: SkillCashRequest = Body(...)) -> Dict[str, Any]:
+    """cmd_withdraw 同款取现金（余额检查在 fcntl 锁内）"""
+    pm = _new_pm()
+    try:
+        return pm.withdraw_cash(body.currency, body.amount, source="skill_remote")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/skill/delete_holding", tags=["skill"])
+async def skill_delete_holding(body: SkillDeleteHoldingRequest = Body(...)) -> Dict[str, Any]:
+    """cmd_delete_holding 同款删持仓行（支持 force；DELETE /api/holdings 无 force 语义）"""
+    pm = _new_pm()
+    try:
+        return pm.delete_holding(body.symbol, force=body.force, source="skill_remote")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 class CommitteePrepareRequest(BaseModel):
     """POST /api/committee/prepare body"""
     symbol: str
