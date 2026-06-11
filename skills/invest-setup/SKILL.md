@@ -25,6 +25,36 @@ description: First-time openInvest installation and onboarding. **ONLY use when*
 
 如果你（agent）误进了这个 skill，**立刻退出**，告诉用户应该用 `invest` skill。
 
+## 两条 onboarding 路径
+
+| 路径 | 场景 | 流程 |
+|------|------|------|
+| **A. 全新部署**（默认）| 用户第一次用 openInvest，数据建在本机 | 下面"流程（4 步）" |
+| **B. 连接已有 hub** | 用户在另一台机器（服务器）已跑着 openInvest，想在本机共用同一份数据（多设备） | 下面"路径 B"，2 分钟 |
+
+触发路径 B 的说法："连接我的 hub" / "我服务器上已经装好了" / "多台电脑共用持仓" /
+"connect to my existing deployment"。
+
+## 路径 B：连接已有 hub（不跑 init）
+
+1. 问两个问题：
+   - hub 地址？（例 `https://invest.example.com` 或 `http://10.0.0.6:8765`）
+   - hub 开了鉴权吗？token（`INVEST_API_TOKEN`）还是 Cloudflare Access
+     service token（`CF_ACCESS_CLIENT_ID/SECRET`）？没开就跳过
+2. 把答案写进 `$INVEST_HOME/.env`（只需要这两三行；**不需要** DeepSeek key /
+   Gmail / 5 问流程——那些都在 hub 上）：
+   ```env
+   INVEST_API_BASE=https://invest.example.com
+   INVEST_API_TOKEN=...        # 可选
+   ```
+3. 验证：跑 `run.sh doctor` → 应返回 `status: "ready"` + `remote` 段
+   （api_base / 鉴权方式）。连不上时 error JSON 的 hint 会指出是地址、token
+   还是 hub 服务没起。
+4. 完成，移交 `invest` skill。
+
+**注意**：路径 B **不要跑 `init`**（远端模式下 init 被禁用并报错）；本机不会
+产生 `memory/`，所有数据留在 hub。
+
 ## 流程（4 步）
 
 ### 1. 先跑 `doctor` 确认真的需要 setup
