@@ -19,6 +19,7 @@ from .tunable import (
     OracleAccuracyConfig,
     RegimeConfig,
     RegimePerAssetConfig,
+    PathConfig,
     RewardConfig,
     SentimentConfig,
     TunableConfig,
@@ -73,7 +74,7 @@ def _read_env_overrides() -> dict[str, Any]:
     # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
     _KNOWN_SECTIONS = sorted(
         ["regime_per_asset", "oracle_accuracy", "macro_buckets", "regime", "verdict",
-         "dreaming", "reward", "sentiment", "valuation"],
+         "dreaming", "reward", "sentiment", "valuation", "path"],
         key=len,
         reverse=True,
     )
@@ -167,6 +168,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     macro = MacroBucketConfig(**{k: v for k, v in data.get("macro_buckets", {}).items() if k in {f.name for f in fields(MacroBucketConfig)}})
     sentiment = SentimentConfig(**{k: v for k, v in data.get("sentiment", {}).items() if k in {f.name for f in fields(SentimentConfig)}})
     valuation = ValuationConfig(**{k: v for k, v in data.get("valuation", {}).items() if k in {f.name for f in fields(ValuationConfig)}})
+    path = PathConfig(**{k: v for k, v in data.get("path", {}).items() if k in {f.name for f in fields(PathConfig)}})
     oracle = OracleAccuracyConfig(**{k: v for k, v in data.get("oracle_accuracy", {}).items() if k in {f.name for f in fields(OracleAccuracyConfig)}})
     reward = RewardConfig(**{k: v for k, v in data.get("reward", {}).items() if k in {f.name for f in fields(RewardConfig)}})
 
@@ -178,6 +180,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         macro_buckets=macro,
         sentiment=sentiment,
         valuation=valuation,
+        path=path,
         oracle_accuracy=oracle,
         reward=reward,
     )

@@ -121,6 +121,18 @@ class SentimentConfig:
 
 
 @dataclass(frozen=True)
+class PathConfig:
+    """路径分布校准层参数（core/regime_probability.calibrate_profile）
+
+    2026-06 walk-forward 时代分桶（n=1579，2007→2026）诊断：带覆盖 7 个时代
+    6 个 <80% 目标、小样本 regime 桶（downtrend）最差。两参数经 fit(≤2017)/
+    OOS(2018+) 验证后才设非禁用默认值（ADR-010 rule 4，先例 trim_*_pct）。
+    """
+    shrinkage_k: float = 0.0    # 条件→无条件收缩强度；0 = 禁用
+    band_gamma: float = 1.0     # P10/P90/downside 带宽扩张系数；1 = 禁用
+
+
+@dataclass(frozen=True)
 class ValuationConfig:
     """估值 brief 阈值（权益类 trailing PE 绝对水平分档）
 
@@ -174,5 +186,6 @@ class TunableConfig:
     macro_buckets: MacroBucketConfig = field(default_factory=MacroBucketConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
     valuation: ValuationConfig = field(default_factory=ValuationConfig)
+    path: PathConfig = field(default_factory=PathConfig)
     oracle_accuracy: OracleAccuracyConfig = field(default_factory=OracleAccuracyConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)

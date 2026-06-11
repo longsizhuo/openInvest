@@ -22,6 +22,7 @@ from .tunable import (
     OracleAccuracyConfig,
     RegimeConfig,
     RegimePerAssetConfig,
+    PathConfig,
     RewardConfig,
     SentimentConfig,
     TunableConfig,
@@ -46,6 +47,7 @@ __all__ = [
     "RewardConfig",
     "SentimentConfig",
     "ValuationConfig",
+    "PathConfig",
     # Locked dataclasses
     "LockedVerdictScoring",
     "LockedDreamingScoring",
