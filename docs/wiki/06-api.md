@@ -148,11 +148,13 @@ POST /api/gold/buy    POST /api/gold/sell    POST /api/gold/set    POST /api/gol
 
 | Method | Path | 用途 |
 |--------|------|------|
-| POST | `/api/committee/run` | 异步触发，立即返回 task_id |
+| POST | `/api/committee/run` | 异步触发，立即返回 task_id（done 后 `result.by_asset[sym]` 含 verdict + **cio_memo**）|
 | GET | `/api/committee/{task_id}` | 单次状态快照 |
 | GET | `/api/committee/live/{task_id}` | **SSE 直播**（25s keepalive 防 CF 5min idle 超时）|
 | GET | `/api/committee_sessions?limit=N` | 历史决议归档（按时间倒序）|
 | GET | `/api/committee_sessions/{date}/{symbol}` | 单条决议完整 markdown |
+| POST | `/api/committee/prepare` | Coordinator 路径 RPC：返回自包含 brief（6 段 prompt 内联），远端客户端 spawn subagent 用。body `{symbol}` |
+| POST | `/api/committee/save` | Coordinator 路径 RPC：transcript 解析 + 防御降级后处理 + 落盘。body `{symbol, transcript}` |
 
 ```bash
 # 触发
@@ -250,6 +252,13 @@ POST body schema：
 → 加 JWT 校验是过度工程，但**前提是没人能直连源站 IP**。
 → 加固方案：Caddy 加 `@cloudflare` matcher 仅放行 CF IP 段（未来）。
 
+**可选应用层 token（2026-06，远端模式）**：设 `INVEST_API_TOKEN` 后，
+**非 loopback** 来源访问 `/api/*`（`/api/health` 豁免探活）必须带
+`Authorization: Bearer <token>`（`secrets.compare_digest` 恒时比较）。
+不设 = 行为完全不变，上面的边缘鉴权模型照旧。loopback 豁免保证
+Caddy→127.0.0.1 链路和本机 GUI 不受影响；token 用于"绑 0.0.0.0 / 内网直连 /
+没有 CF 的局域网 hub"场景。token 永不进日志与响应体。
+
 详见 [08-deployment.md#cloudflare-access](08-deployment.md#cloudflare-access)。
 
 ---
@@ -329,6 +338,32 @@ INVEST_WEB_DEV_CORS=1 uv run uvicorn ...
 ```
 
 → 后端会注入 CORS middleware 仅放行 `http://localhost:5173`。
+
+---
+
+## 11. Skill-parity 端点（远端模式 hub-and-spoke）
+
+`scripts/skill.py` 设了 `INVEST_API_BASE` 时，CLI 子命令经
+`scripts/remote_dispatch.py` 转发到这些端点。**输出形状与本地 CLI 完全一致**
+（共享 `services/skill_views.py` / `PortfolioManager` 方法），所以 agent 协议
+（SKILL.md）零感知。
+
+| Method | Path | CLI 等价 | 说明 |
+|--------|------|----------|------|
+| GET | `/api/doctor` | `doctor` | hub 视角健康自检（memory/.env/LLM 可达性）|
+| GET | `/api/skill/status` | `status` | 现金 + holdings + 实时价 + 总资产 |
+| GET | `/api/skill/strategy` | `strategy` | strategy + Dreaming insights |
+| GET | `/api/skill/history?n=` | `history -n` | trades + debates（`/api/history` 只有 trades）|
+| POST | `/api/skill/what_if` | `what_if` | 情景模拟，body 字段与 CLI 参数一一对应 |
+| POST | `/api/skill/buy` / `/api/skill/sell` | `buy` / `sell` | 写持仓走 `with_portfolio_tx`，history `source: skill_remote` |
+| POST | `/api/skill/deposit` / `/api/skill/withdraw` | `deposit` / `withdraw` | CLI 同款输出（`/api/cash/*` 是 WriteResponse 形状，对不上 CLI 故另设）|
+| POST | `/api/skill/delete_holding` | `delete_holding` | 支持 `force`（`DELETE /api/holdings` 无此语义）|
+
+错误语义对齐 CLI：域内错误（如 what_if symbol 不在持仓）返回 **200 +
+`{"status": "error", ...}`**（客户端原样打印）；参数非法 400、memory 未初始化
+503、token 错 401——remote dispatch 端把它们映射回 CLI 同款 error JSON + exit 1。
+
+部署拓扑见 [08-deployment.md](08-deployment.md) 的 hub-and-spoke 章节。
 
 ---
 
