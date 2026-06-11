@@ -372,6 +372,105 @@ class PortfolioManager:
         self.store.append_history(trade)
         self._reload()
 
+    def buy(
+        self,
+        symbol: str,
+        units: float,
+        price: float,
+        *,
+        currency: str = "CNY",
+        kind: str = "equity",
+        unit_label: str = "股",
+        source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """加仓（已有 symbol 增加 units + 加权平均成本；新 symbol 直接建仓）
+
+        同步扣现金（保证账本一致：买 X 元股 = 扣 X 元现金）+ 记 history。
+        CLI (scripts/skill.py:cmd_buy) 与 Web API (/api/skill/buy) 共用——
+        units/price 非法抛 ValueError，由调用方转 CLI error JSON / HTTP 400。
+        """
+        if units <= 0 or price <= 0:
+            raise ValueError("units / price 必须 > 0")
+        ccy = currency.upper()
+        cost_cny = units * price  # 简化：fork 用户若用非 CNY 自己换算后再传 price=CNY 价
+        with self.with_portfolio_tx() as p:
+            holdings = list(p.get("holdings") or [])
+            existing = next((h for h in holdings if h.get("symbol") == symbol), None)
+            if existing:
+                # 加权平均成本
+                old_units = float(existing.get("units", 0) or 0)
+                old_avg = float(existing.get("avg_cost", 0) or 0)
+                new_units = old_units + units
+                new_avg = (old_units * old_avg + units * price) / new_units
+                existing["units"] = round(new_units, 6)
+                existing["avg_cost"] = round(new_avg, 6)
+                action_kind = "add"
+            else:
+                holdings.append({
+                    "symbol": symbol, "kind": kind, "units": units, "avg_cost": price,
+                    "unit_label": unit_label, "cost_currency": ccy, "proxy_kind": "direct",
+                })
+                action_kind = "new"
+            p["holdings"] = holdings
+
+            cash = dict(p.get("cash") or {})
+            cash[ccy] = round(float(cash.get(ccy, 0) or 0) - units * price, 2)
+            p["cash"] = cash
+        self._reload()
+        self.store.append_history({
+            "ts_origin": _now_iso_local(), "action": "buy",
+            "symbol": symbol, "units": units, "price": price,
+            "currency": ccy, "source": source,
+        })
+        return {
+            "status": "ok", "action": action_kind, "symbol": symbol,
+            "units_added": units, "price": price, "currency": ccy,
+            "cost_cny_estimate": cost_cny,
+        }
+
+    def sell(
+        self,
+        symbol: str,
+        units: float,
+        price: float,
+        *,
+        source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """减仓（units 减少，cost_avg 不变；卖出按 holding 的 cost_currency 还现金）
+
+        units 减完后保留为 0（删行走 delete_holding）。symbol 不在持仓 / 持仓不足
+        抛 ValueError，由调用方转 CLI error JSON / HTTP 400。
+        """
+        if units <= 0 or price <= 0:
+            raise ValueError("units / price 必须 > 0")
+        with self.with_portfolio_tx() as p:
+            holdings = list(p.get("holdings") or [])
+            target = next((h for h in holdings if h.get("symbol") == symbol), None)
+            if target is None:
+                raise ValueError(f"symbol {symbol} 不在持仓里")
+            old_units = float(target.get("units", 0) or 0)
+            if old_units < units:
+                raise ValueError(f"{symbol} 持仓 {old_units} < 卖出 {units}")
+            target["units"] = round(old_units - units, 6)
+            p["holdings"] = holdings
+
+            # 卖出收回现金（cost_currency = target 的 cost_currency）
+            ccy = str(target.get("cost_currency", "CNY")).upper()
+            cash = dict(p.get("cash") or {})
+            cash[ccy] = round(float(cash.get(ccy, 0) or 0) + units * price, 2)
+            p["cash"] = cash
+        self._reload()
+        self.store.append_history({
+            "ts_origin": _now_iso_local(), "action": "sell",
+            "symbol": symbol, "units": units, "price": price,
+            "currency": ccy, "source": source,
+        })
+        return {
+            "status": "ok", "symbol": symbol, "units_sold": units, "price": price,
+            "proceeds_cny_estimate": units * price,  # 简化估计
+            "remaining_units": old_units - units,
+        }
+
     def add_income(self, net_income_cny: float, payday_label: str) -> None:
         """payday_check job 调用 - CNY 月度净收入入账"""
         with self.with_portfolio_tx() as p:
@@ -397,6 +496,12 @@ class PortfolioManager:
 
 
 # ============ 工具函数 ============
+
+def _now_iso_local() -> str:
+    """本地时区 ISO 时间戳——history.jsonl 的 ts_origin 口径（与 scripts/skill.py 一致）"""
+    from datetime import timezone
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
 
 def _ensure_v2_inplace(p) -> None:
     """transaction 入口处确保 cash / holdings 字段已就位（v2 only）
