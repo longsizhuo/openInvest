@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import threading
@@ -36,7 +37,7 @@ from scripts.ta_data import (  # noqa: E402
     ASSET_LABEL, CACHE, load_dates, pack_fundamental, pack_news, pack_sentiment,
 )
 
-OUT = CACHE / "phase_a_reports.jsonl"
+OUT = CACHE / os.getenv("INVEST_TA_OUT", "phase_a_reports.jsonl")  # 换模型重跑用独立文件
 
 # ---------------------------------------------------------------------------
 # Prompts（TradingAgents 改编）
