@@ -368,6 +368,19 @@ class TestGetUserStatus:
         status = pm2.get_user_status(current_prices={}, exchange_rate=4.8)
         assert status.disposable_for_invest == 0.0
 
+    def test_dry_powder_uncapped_when_no_positive_caps(self, tmp_path):
+        """单次上限 0/缺失 = 不设限（2026-06-12 语义）：disposable = available"""
+        pm2 = self._make_pm_with_holdings(
+            tmp_path,
+            cash={"CNY": 100000.0},
+            holdings=[],
+            exchange_buffer_cny=5000.0,
+            max_single_invest_cny=0.0,   # 0 = 不设限，不再回落 10000
+        )
+        status = pm2.get_user_status(current_prices={}, exchange_rate=4.8)
+        assert status.disposable_for_invest == pytest.approx(95000.0)
+        assert status.max_single_invest_cny == 0.0  # 哨兵：不设限
+
     def test_risk_level_and_target_asset(self, tmp_path):
         """risk_level 和 target_asset 从文档正确读取"""
         s = _make_store(tmp_path)
