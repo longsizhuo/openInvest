@@ -625,7 +625,9 @@ def test_calibrate_profile_reads_config():
     from core.regime_probability import calibrate_profile
     reset_config()
     try:
-        # 默认禁用 → no-op
+        # 显式禁用 override → no-op（2026-06-11 起 defaults 已启用校准，
+        # 所以"默认=禁用"不再成立，这里测 config 读取链路本身）
+        set_config_override({"path": {"shrinkage_k": 0.0, "band_gamma": 1.0}})
         assert calibrate_profile(_mini_profile())["windows"]["30d"]["p10_pct"] == -3.0
         set_config_override({"path": {"shrinkage_k": 2.0, "band_gamma": 1.0}})
         p = calibrate_profile(_mini_profile())
