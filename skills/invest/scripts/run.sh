@@ -47,7 +47,8 @@ fi
 
 # 3) GUI dist：从 invest-gui dist-latest release 拉静态文件到 static/
 #    自动安装但不自动启动——uvicorn 是显式 `run.sh gui` 才起
-if [ ! -f "static/index.html" ]; then
+#    远端模式（INVEST_API_BASE 已设）跳过：GUI 由 hub serve，客户端不需要 static/
+if [ -z "${INVEST_API_BASE:-}" ] && [ ! -f "static/index.html" ]; then
     echo "🎨 第一次跑：拉 GUI dist 到 static/..." >&2
     .venv/bin/python -m scripts.sync_gui_dist >&2 || {
         echo "⚠️  GUI dist 拉取失败（可能 GitHub 网络问题）。跳过——CLI/skill 模式仍可用。" >&2
@@ -59,6 +60,11 @@ fi
 
 # 处理本 wrapper 自带的 gui 子命令（不进 Python skill.py）
 if [ "${1:-}" = "gui" ]; then
+    # 远端模式：GUI 在 hub 上，本机不起 uvicorn，直接给出入口
+    if [ -n "${INVEST_API_BASE:-}" ]; then
+        echo "{\"status\":\"ok\",\"mode\":\"remote\",\"gui_url\":\"${INVEST_API_BASE}\",\"hint\":\"远端模式：GUI 由 hub serve，浏览器直接打开 gui_url 即可（hub 开了 token/CF Access 的话按其登录方式走）。\"}"
+        exit 0
+    fi
     PORT="${INVEST_WEB_PORT:-8765}"
     HOST="${INVEST_WEB_HOST:-127.0.0.1}"
 
