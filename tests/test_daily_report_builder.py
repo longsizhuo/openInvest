@@ -328,6 +328,69 @@ class TestAssembleFullReport:
         assert "# 路径参考" not in report          # LLM 标题行掐头
         assert "REENTRY_PRICE 必须低于现价" not in report  # TRIM 指令行去尾
 
+    def test_plain_summary_rendered_from_profile(self):
+        """一句话人话摘要：verdict + 30d 路径分布确定性生成"""
+        committees = self._make_committees(["NDQ.AX"])
+        committees["NDQ.AX"]["verdict"]["verdict"] = "HOLD"
+        committees["NDQ.AX"]["path_profile"] = {
+            "windows": {"30d": {"p_below": 0.42, "downside_pct": -3.0,
+                                "median_pct": 1.1}},
+        }
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=committees,
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "一句话" in report
+        assert "继续持有，不买也不卖" in report
+        assert "更便宜的概率约 42%" in report
+        assert "-3.0%" in report
+
+    def test_plain_summary_without_profile_still_has_action(self):
+        """无 path_profile（概率表不可用）→ 人话行只有动作没有概率尾巴"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),  # ACCUMULATE 5000
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "一句话" in report
+        assert "建议小额加仓 ¥5,000" in report
+        assert "更便宜的概率" not in report
+
+    def test_analyst_views_fenced_no_details_tag(self):
+        """analyst 原文走 fenced block；不再用 <details>（markdown 不解析 HTML 块内部）"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "<details>" not in report
+        assert "NDQ.AX Quant" in report
+        assert "NDQ.AX Risk" in report
+        assert "分析师意见" in report
+
+    def test_glossary_rendered(self):
+        """术语表固定渲染在报告尾部（小白查表，专家跳过）"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert "术语表" in report
+        assert "跌破现价概率" in report
+
     def test_path_reference_absent_no_section(self):
         """没有 path_reference（如概率表不可用）→ 不出现路径概率空段落"""
         report = assemble_full_report(

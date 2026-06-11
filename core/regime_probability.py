@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import statistics
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -193,6 +194,10 @@ class ReentryEstimate:
     low_confidence: bool     # effective_n < MIN_CONFIDENT_N（重叠窗口源用独立样本判定）
     # 独立样本估计：OHLC 重叠日度 forward return ≈ n/窗口天数；verdict_review = n。
     effective_n: int = 0
+    # 报价币种符号（display 用）。GC=F 报价是美元/盎司，硬编码 ¥ 会把 $4116
+    # 标成 ¥4116（2026-06-12 用户邮件困惑事故）。channel 币种（如积存金 ¥/克）
+    # 是另一回事，由 CIO 的渠道快照负责。
+    currency: str = "¥"
 
     def summary_line(self) -> str:
         conf = " ⚠样本不足" if self.low_confidence else ""
@@ -209,7 +214,7 @@ class ReentryEstimate:
             f"{self.window} (n={self.n}{overlap}): 跌破现价概率 {self.p_below_current * 100:.0f}%、"
             f"跌>{self.threshold_pct:.0f}% 概率 {self.p_down * 100:.0f}%；"
             f"悲观情形({int(REENTRY_DOWNSIDE_QUANTILE * 100)}分位) {self.downside_pct:+.1f}% "
-            f"→ ¥{self.downside_price:,.2f}；中位 {self.median_return_pct:+.1f}%{conf}"
+            f"→ {self.currency}{self.downside_price:,.2f}；中位 {self.median_return_pct:+.1f}%{conf}"
         )
 
 
@@ -370,6 +375,25 @@ def calibrate_profile(
     return out
 
 
+def quote_currency_prefix(asset: str) -> str:
+    """yfinance 报价币种符号（display 用，按 ticker 后缀判定）。
+
+    注意是**报价**币种：GC=F 报美元/盎司、NDQ.AX 报澳元——与用户交易渠道的
+    币种/单位（如浙商积存金 ¥/克）无关。未识别后缀返回 "$"（yfinance 无后缀
+    ticker 默认美股）；指数（^ 开头）是点位无币种，返回 ""。
+    """
+    a = asset.upper()
+    if a.startswith("^"):
+        return ""
+    if a.endswith(".AX"):
+        return "A$"
+    if a.endswith(".HK"):
+        return "HK$"
+    if a.endswith((".SS", ".SZ")):
+        return "¥"
+    return "$"
+
+
 def build_reentry_reference_text(
     asset: str,
     regime: str,
@@ -405,6 +429,7 @@ def build_reentry_reference(
     """
     if current_price is None or current_price <= 0:
         return "", None
+    cur = quote_currency_prefix(asset)
     if source == "verdict_review" and records is None:
         if jsonl_path is None:
             from core.memory_store import MemoryStore
@@ -443,12 +468,15 @@ def build_reentry_reference(
                     has_downside=downside_price < current_price,
                     low_confidence=st["low_confidence"],
                     effective_n=st["effective_n"],
+                    currency=cur,
                 )
         else:
             est = get_reentry_estimate(
                 asset, regime, current_price,
                 window=w, source=source, records=records,
             )
+            if est is not None:
+                est = dataclasses.replace(est, currency=cur)
         if est is None:
             lines.append(f"- {w}: 历史样本不足 / unavailable")
         else:
@@ -480,14 +508,14 @@ def build_reentry_reference(
                     ),
                     (
                         f"- {shape['window']} 途中最高冲高: 中位 {shape['pop_median_pct']:+.1f}%"
-                        f"（→ ¥{pop_med_price:,.2f}），"
-                        f"高四分位 {shape['pop_p75_pct']:+.1f}%（→ ¥{pop_p75_price:,.2f}）；"
+                        f"（→ {cur}{pop_med_price:,.2f}），"
+                        f"高四分位 {shape['pop_p75_pct']:+.1f}%（→ {cur}{pop_p75_price:,.2f}）；"
                         f"中位 {shape['days_to_peak_median']} 个交易日见顶"
                     ),
                     (
                         f"- {shape['window']} 途中最深回踩: 中位 {shape['dip_median_pct']:+.1f}%"
-                        f"（→ ¥{dip_med_price:,.2f}），"
-                        f"深四分位 {shape['dip_p25_pct']:+.1f}%（→ ¥{dip_p25_price:,.2f}）；"
+                        f"（→ {cur}{dip_med_price:,.2f}），"
+                        f"深四分位 {shape['dip_p25_pct']:+.1f}%（→ {cur}{dip_p25_price:,.2f}）；"
                         f"中位 {shape['days_to_trough_median']} 个交易日见谷底"
                     ),
                     (
@@ -502,7 +530,7 @@ def build_reentry_reference(
 
     text = (
         f"# 路径参考（regime={regime} 历史 forward 路径分布；TRIM 买回点 + 持有路径预期）：\n"
-        f"- 现价: ¥{current_price:,.2f}\n"
+        f"- 现价: {cur}{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
         + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
         "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"

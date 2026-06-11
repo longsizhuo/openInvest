@@ -154,7 +154,59 @@ def build_gemini_prompt(
     )
 
 
-# ============ 5. 核心：完整报告拼接 ============
+# ============ 5. 人话摘要（确定性，零 LLM） ============
+
+_VERDICT_PLAIN = {
+    "HOLD": "继续持有，不买也不卖",
+    "ACCUMULATE": "建议小额加仓",
+    "BUY": "建议买入",
+    "TRIM": "建议减掉一部分仓位",
+    "SELL": "建议清仓",
+}
+
+
+def plain_verdict_summary(verdict: Dict[str, Any],
+                          path_profile: Optional[Dict[str, Any]]) -> str:
+    """给小白看的一句话结论——从 verdict + 路径分布确定性生成，零 LLM 调用。
+
+    专家细节（CIO 备忘/analyst 原文）保留在后面的段落，这行只翻译"该干嘛 +
+    历史上类似行情接下来大概怎么走"。
+    """
+    vd = str(verdict.get("verdict", ""))
+    act = _VERDICT_PLAIN.get(vd, vd)
+    alloc = verdict.get("alloc_cny", 0) or 0
+    if vd in ("ACCUMULATE", "BUY") and alloc:
+        act += f" ¥{alloc:,.0f}"
+    st = ((path_profile or {}).get("windows") or {}).get("30d")
+    tail = ""
+    if st and all(k in st for k in ("p_below", "downside_pct", "median_pct")):
+        tail = (
+            f"。历史上类似行情，30 天后比今天更便宜的概率约 "
+            f"{st['p_below'] * 100:.0f}%；运气差的情形（最差 1/5）大约 "
+            f"{st['downside_pct']:+.1f}%，一般情形 {st['median_pct']:+.1f}%"
+        )
+    return f"**一句话**: {act}{tail}。\n\n"
+
+
+# 术语表（静态，放邮件末尾——小白查表，专家直接跳过）
+_GLOSSARY = """## 术语表（看不懂的词在这里查）
+
+- **裁决**: 委员会结论。HOLD=持有不动；ACCUMULATE=小额加仓；BUY=买入；TRIM=减一部分；SELL=清仓
+- **置信度**: 委员会对这个结论的把握（0-1）。0.5 上下=分歧大，0.8+=很有把握
+- **主导方**: 这次结论主要听谁的——macro=宏观面 / quant=技术面 / risk=风控
+- **regime**: 系统对当前行情的粗分类（uptrend 上行 / downtrend 下行 / crash 急跌 / recovery 修复 / range 震荡）
+- **n 与"重叠窗口独立≈k"**: 历史样本量。相邻交易日的窗口高度重叠，真实独立样本只有 ≈k 个；带 ⚠样本不足 的行别太当真
+- **跌破现价概率**: 历史上同类行情里，N 天后价格低于今天的占比
+- **悲观情形(20分位)**: 历史同类行情里最差的 1/5 大约跌到哪（不是最坏情况）
+- **路径形状**: 未来 90 天怎么走的历史占比——先跌后涨 / 直接涨 / 冲高回落 / 一路收跌
+- **INDEP_DEFENSE_FLAG**: 快崩哨兵。VIX（恐慌指数）或波动率异常飙升时=on，系统会自动拒绝加仓建议
+- **集中度**: 单一资产占总资产比例。过高=鸡蛋在一个篮子
+- **子弹 / 可投**: 当前现金里可以用来加仓的部分
+- **报价币种**: 行情价用的是交易所报价币种（GC=F 是美元/盎司，与积存金的 ¥/克不同；换算看"黄金现货快照"节）
+"""
+
+
+# ============ 6. 核心：完整报告拼接 ============
 
 def assemble_full_report(
     today: str,
@@ -199,6 +251,8 @@ def assemble_full_report(
             f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n",
             f"**裁决**: {v['verdict']} | 置信度 {v['confidence']:.2f} | "
             f"主导方 {v['dominant_view']} | 建议金额 ¥{v['alloc_cny']}\n\n",
+            # 小白友好：一句话人话结论（确定性生成，专家细节在后面的段落）
+            plain_verdict_summary(v, c.get("path_profile")),
         ]
         # TRIM 路径化：展示买回点 + 预期路径（让用户能判断"卖出是赚是亏"）
         if v.get("verdict") == "TRIM":
@@ -241,12 +295,14 @@ def assemble_full_report(
                 "**路径概率**（该 regime 历史 forward 分布，CIO 决策依据）:\n\n"
                 + "\n".join(path_lines) + "\n\n"
             )
+        # 全部用 fenced code block：python-markdown 不解析原生 HTML 块
+        # （<details>）内部的 markdown，**粗体**/换行在邮件里全坏
+        # （2026-06-12 用户实测）。Gmail 也不支持 <details> 折叠。
         lines.extend([
             f"### CIO 备忘\n```\n{c['report'].cio_memo}\n```\n\n",
-            f"<details><summary>📜 三个 analyst 详细意见</summary>\n\n",
-            f"**Quant**:\n{c['report'].quant_view}\n\n",
-            f"**Risk Officer**:\n{c['report'].risk_view}\n\n",
-            f"</details>",
+            "### 分析师意见（专家区）\n\n",
+            f"**Quant（技术面）**:\n```\n{c['report'].quant_view}\n```\n\n",
+            f"**Risk Officer（风控）**:\n```\n{c['report'].risk_view}\n```\n",
         ])
         return "".join(lines)
 
@@ -295,6 +351,9 @@ def assemble_full_report(
 ## {n+3}. Gemini 第二意见 (独立 challenge)
 {final_decision_gemini}
 
+---
+
+{_GLOSSARY}
 ---
 
 *用户当前总资产估算: ¥{total_assets_cny:,.0f}*
