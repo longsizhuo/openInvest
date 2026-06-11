@@ -197,6 +197,15 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
    → LLM 不擅长 7 天 timing
    → 长期累积仍 +25% 是因为"不犯反向错"（仅 13.6% 错），不是"会择时"
 
+5. **TradingAgents 式分析师 subagent 无方向增量**（2026-06-11，test_ta 实验，
+   预注册 Gate 0/3 过线，n=244/分析师）
+   → fundamental 50.3%（真 COT 数据也 ≈ 抛硬币）、news 57.4%、sentiment 64.7%
+     ——全部低于"无脑猜多数方向"基率 ~73%
+   → sentiment 赢了自己输入数据的机械映射（57.5%）：LLM 的价值在**解读**不在
+     **方向投票**，支持"确定性事实块 + CIO 否决权"路线
+   → 全文 [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md)，
+     决策 [adr/009](adr/009-no-ta-style-analyst-agents.md)
+
 ---
 
 ## 怎么复现这些数据
