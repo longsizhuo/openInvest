@@ -864,3 +864,148 @@ def test_committee_sessions_lists_multiple_dates_reverse_sorted(client, tmp_stor
     sessions = r.json()["sessions"]
     dates = [s["date"] for s in sessions]
     assert dates == ["2026-05-19", "2026-05-18", "2026-05-17"], "必须按日期倒序"
+
+
+# ---------- Skill-parity 端点（远端模式 hub-and-spoke）----------
+
+@pytest.fixture
+def skill_client(client, monkeypatch):
+    """skill-parity 端点用的 client。
+
+    services/skill_views.py 的 builder 走**函数内延迟 import**（utils.exchange_fee /
+    utils.gold_price / utils.fx），所以要 patch 源模块属性，client fixture 只 patch
+    了 web_api 命名空间里的别名。
+    """
+    import utils.exchange_fee as ef
+    import utils.fx as fx
+    import utils.gold_price as gp
+
+    @dataclass
+    class FakeSnap:
+        gold_usd_per_oz: float = 2400.0
+        usdcny_rate: float = 7.2
+        spot_cny_per_gram: float = 1100.0
+        bank_cny_per_gram: float = 1113.2
+        offset_pct: float = 0.012
+        is_stale: bool = False
+
+    fake_df = pd.DataFrame(
+        {"Close": [40.0, 41.0, 42.0, 41.5, 42.5]},
+        index=pd.date_range("2026-04-28", periods=5, freq="D"),
+    )
+    monkeypatch.setattr(ef, "get_history_data", lambda symbol, period="5d": fake_df)
+    monkeypatch.setattr(gp, "get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
+    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda pm, prices, base="CNY": (100000.0, "ok"))
+    return client
+
+
+# cmd_status 的输出 key 集——/api/skill/status 必须与 CLI 同形状（防 local/remote 漂移）
+_CLI_STATUS_KEYS = {
+    "user", "cash", "ndq", "gold", "all_holdings",
+    "total_assets_cny", "fx", "live_prices",
+}
+
+
+def test_skill_status_matches_cli_shape(skill_client):
+    r = skill_client.get("/api/skill/status")
+    assert r.status_code == 200
+    b = r.json()
+    assert set(b.keys()) == _CLI_STATUS_KEYS, (
+        f"/api/skill/status 输出形状漂移：{set(b.keys()) ^ _CLI_STATUS_KEYS}"
+    )
+    assert b["cash"]["cny"] == 12345.67
+    assert b["user"]["name"] == "TestUser"
+    assert b["total_assets_cny"] == 100000.0
+    syms = [h["symbol"] for h in b["all_holdings"]]
+    assert "NDQ.AX" in syms and "GC=F" in syms
+
+
+def test_skill_strategy(skill_client):
+    r = skill_client.get("/api/skill/strategy")
+    assert r.status_code == 200
+    b = r.json()
+    assert set(b.keys()) == {"strategy", "long_term_insights", "insights_count"}
+    syms = [a["symbol"] for a in b["strategy"]["target_assets"]]
+    assert "NDQ.AX" in syms
+
+
+def test_skill_history(skill_client, tmp_store):
+    tmp_store.append_history({
+        "ts_origin": "2026-06-01T10:00:00+08:00", "action": "buy",
+        "symbol": "NDQ.AX", "units": 10, "price": 42.0, "source": "test",
+    })
+    r = skill_client.get("/api/skill/history?n=5")
+    assert r.status_code == 200
+    b = r.json()
+    assert set(b.keys()) == {"recent_trades", "recent_debates"}
+    assert b["recent_trades"][0]["symbol"] == "NDQ.AX"
+
+
+def test_skill_what_if_pct(skill_client):
+    r = skill_client.post("/api/skill/what_if", json={"symbol": "NDQ.AX", "pct": -5})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["status"] == "ok"
+    assert "NDQ.AX" in b["breakdown"]
+    assert b["breakdown"]["NDQ.AX"]["scenario_price"] == pytest.approx(42.5 * 0.95)
+
+
+def test_skill_what_if_unknown_symbol_is_cli_style_error(skill_client):
+    """域内错误保持 CLI 语义：HTTP 200 + status=error dict（remote 端原样打印）"""
+    r = skill_client.post("/api/skill/what_if", json={"symbol": "AAPL", "pct": -5})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["status"] == "error"
+    assert "AAPL" in b["error"]
+
+
+def test_skill_buy_appends_history_with_remote_source(skill_client, tmp_store):
+    r = skill_client.post("/api/skill/buy", json={
+        "symbol": "510300.SS", "units": 1000, "price": 4.2, "kind": "etf",
+    })
+    assert r.status_code == 200
+    b = r.json()
+    assert b["status"] == "ok" and b["action"] == "new"
+
+    pm = PortfolioManager(store=tmp_store)
+    h = pm.holdings.find("510300.SS")
+    assert h and h["units"] == 1000
+    # 同步扣现金：12345.67 - 4200 = 8145.67
+    assert pm.cash_amount("CNY") == pytest.approx(8145.67)
+    trades = tmp_store.read_history()
+    assert trades[-1]["source"] == "skill_remote"
+
+
+def test_skill_sell_insufficient_units_is_400(skill_client):
+    r = skill_client.post("/api/skill/sell", json={
+        "symbol": "NDQ.AX", "units": 99999, "price": 42.0,
+    })
+    assert r.status_code == 400
+    assert "99999" in r.json()["detail"]
+
+
+def test_skill_sell_returns_cash(skill_client, tmp_store):
+    r = skill_client.post("/api/skill/sell", json={
+        "symbol": "NDQ.AX", "units": 28, "price": 42.0,
+    })
+    assert r.status_code == 200
+    b = r.json()
+    assert b["remaining_units"] == 100.0
+    pm = PortfolioManager(store=tmp_store)
+    # 卖出按 cost_currency=AUD 还现金：100 + 28*42 = 1276
+    assert pm.cash_amount("AUD") == pytest.approx(1276.0)
+
+
+def test_doctor_endpoint(skill_client, monkeypatch):
+    """hub 视角 doctor：结构与 cmd_doctor 一致；删 LLM key 走 skipped 路径避免外网实测"""
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    r = skill_client.get("/api/doctor")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["status"] in {"ready", "needs_setup"}
+    assert {"ready_for_subcommands", "coordinator_ready", "direct_ready", "checks"} <= set(b.keys())
+    names = [c["name"] for c in b["checks"]]
+    assert "memory_initialized" in names
+    mem = next(c for c in b["checks"] if c["name"] == "memory_initialized")
+    assert mem["status"] == "ok", "seeded memory 应判定已初始化"
