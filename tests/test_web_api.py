@@ -1124,3 +1124,33 @@ def test_committee_run_summary_includes_cio_memo(client, monkeypatch):
 
     assert final is not None and final["status"] == "done", f"got {final}"
     assert final["result"]["by_asset"]["NDQ.AX"]["cio_memo"] == "## verdict\nHOLD — memo text"
+
+
+# ---------- 可选 bearer token 鉴权（INVEST_API_TOKEN）----------
+# TestClient 的 client.host 是 "testclient"（非 loopback）→ 正好测强制路径
+
+def test_auth_disabled_by_default(client, monkeypatch):
+    monkeypatch.delenv("INVEST_API_TOKEN", raising=False)
+    assert client.get("/api/strategy").status_code == 200
+
+
+def test_auth_enforced_when_token_set(client, monkeypatch):
+    monkeypatch.setenv("INVEST_API_TOKEN", "hub-secret-123")
+
+    # 无 token → 401；错 token → 401
+    assert client.get("/api/strategy").status_code == 401
+    r = client.get("/api/strategy", headers={"Authorization": "Bearer wrong"})
+    assert r.status_code == 401
+    # 响应体绝不回显 token
+    assert "hub-secret-123" not in r.text
+
+    # 正确 token → 200
+    r = client.get("/api/strategy", headers={"Authorization": "Bearer hub-secret-123"})
+    assert r.status_code == 200
+
+    # /api/health 豁免（探活）
+    assert client.get("/api/health").status_code == 200
+
+    # 写端点同样被保护
+    r = client.post("/api/skill/buy", json={"symbol": "X", "units": 1, "price": 1})
+    assert r.status_code == 401
