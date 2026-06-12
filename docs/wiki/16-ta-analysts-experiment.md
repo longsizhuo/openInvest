@@ -119,6 +119,8 @@ TauricResearch/TradingAgents（Apache-2.0）analyst system messages；与生产�
 
 针对 §5 的三个盲区（单窗口/单模型/无 ensemble）补测。**预注册扩展标准（裁决前
 写死）：跨模型 2/3 过线 = 信号存在但模型敏感；1/3 = 孤证不立维持原判。**
+（精确口径：2 个厂商 3 个模型——MiMo v2.5-pro 为生产同款；reasoner/chat 同属
+DeepSeek 不同后训练。GDELT 2022 缓存 102/104 key，缺 2022-01-03 两 key 优雅降级。）
 
 ### 30d 命中 vs Gate（CI 下界 > max(①基率, ③机械映射)）
 
@@ -126,8 +128,8 @@ TauricResearch/TradingAgents（Apache-2.0）analyst system messages；与生产�
 |---|---|---|---|
 | 2024-26 × mimo-flash（原实验）| 50.3% FAIL | 64.7% FAIL | 57.4% FAIL |
 | 2024-26 × deepseek-reasoner | 28.8% FAIL | 58.2% FAIL | 59.3% FAIL |
-| 2022 熊市 × mimo-flash | **74.3% PASS** | 48.3% FAIL | （GDELT 抓取中）|
-| 2022 熊市 × deepseek-reasoner | 60.6% FAIL | 48.0% FAIL | （同上）|
+| 2022 熊市 × mimo-flash | **74.3% PASS** | 48.3% FAIL | 50.9% FAIL |
+| 2022 熊市 × deepseek-reasoner | 60.6% FAIL | 48.0% FAIL | 50.0% FAIL |
 | 2022 熊市 × deepseek-chat（裁决）| 57.8% FAIL | — | — |
 
 **判定：fundamental-2022 单模型过线，跨模型 1/3 → 孤证不立。ADR-009 维持原判。**
@@ -148,7 +150,10 @@ TauricResearch/TradingAgents（Apache-2.0）analyst system messages；与生产�
 4. **sentiment 跨窗口对称失败**：2024 它的 bearish 是反指标，2022 它的 bullish
    是反指标（38% 命中，熊市里"恐慌=抄底"一路接刀）。哪条腿逆 regime 大势，
    哪条腿就是反指标——情绪无跨窗口稳定信号。
-5. **值得留意的残余信号**：③机械映射本身（COT 4 周变化符号 + 估值分位）在
+5. **news 熊市格收口**：2022 两模型 50.9%/50.0% ≈ 抛硬币（2024 是 57-59%
+   vs 基率 73）——两窗口×两模型一致指向"头条信息已被价格消化"，§4 归因表
+   里"部分根本性"的判断升级为主解释；前向实验（§6）仍是公平检验。
+6. **值得留意的残余信号**：③机械映射本身（COT 4 周变化符号 + 估值分位）在
    2022 达 61.3% vs 基率 51.4%（n=62，CI 含基率，未达显著）。三个模型都向它
    收敛。若做事实块（确定性、零 LLM 投票、regime 条件触发），是低成本前向
    实验候选——与"数据进桌、LLM 不加票"架构一致。

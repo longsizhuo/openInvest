@@ -203,7 +203,7 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
      ——全部低于"无脑猜多数方向"基率 ~73%
    → sentiment 赢了自己输入数据的机械映射（57.5%）：LLM 的价值在**解读**不在
      **方向投票**，支持"确定性事实块 + CIO 否决权"路线
-   → **2026-06-12 复测加固**（wiki 16 §5b）：2022 熊市窗口 × 3 模型家族 ×
+   → **2026-06-12 复测加固**（wiki 16 §5b）：2022 熊市窗口 × 2 厂商 3 模型 ×
      ensemble 三种组合，仅 fundamental-2022-flash 单格过线（跨模型 1/3，
      孤证不立）；"更强模型"假设反向证伪（reasoner 在 2024 窗口更差）
    → 全文 [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md)，
