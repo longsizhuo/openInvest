@@ -1,0 +1,104 @@
+{
+ "2024-26": {
+  "span": [
+   "2024-01-01",
+   "2026-04-27"
+  ],
+  "LLM_committee_B": {
+   "cagr_pct": 43.89,
+   "sharpe": 1.82,
+   "max_dd_pct": -17.73,
+   "time_in_market_pct": 96.6,
+   "exit_weeks": "4/122"
+  },
+  "A_buy_and_hold": {
+   "cagr_pct": 42.44,
+   "sharpe": 1.74,
+   "max_dd_pct": -17.73,
+   "time_in_market_pct": 100.0,
+   "exit_weeks": "-"
+  },
+  "B_200dma_trend": {
+   "cagr_pct": 42.44,
+   "sharpe": 1.74,
+   "max_dd_pct": -17.73,
+   "time_in_market_pct": 100.0,
+   "exit_weeks": "-"
+  },
+  "C_regime_deterministic": {
+   "cagr_pct": 42.44,
+   "sharpe": 1.74,
+   "max_dd_pct": -17.73,
+   "time_in_market_pct": 100.0,
+   "exit_weeks": "-"
+  }
+ },
+ "2022重放": {
+  "span": [
+   "2022-01-01",
+   "2022-12-31"
+  ],
+  "LLM_committee_B": {
+   "cagr_pct": 1.95,
+   "sharpe": 0.2,
+   "max_dd_pct": -19.79,
+   "time_in_market_pct": 96.0,
+   "exit_weeks": "2/53"
+  },
+  "A_buy_and_hold": {
+   "cagr_pct": -0.43,
+   "sharpe": 0.05,
+   "max_dd_pct": -20.43,
+   "time_in_market_pct": 100.0,
+   "exit_weeks": "-"
+  },
+  "B_200dma_trend": {
+   "cagr_pct": -6.46,
+   "sharpe": -0.55,
+   "max_dd_pct": -16.35,
+   "time_in_market_pct": 44.2,
+   "exit_weeks": "-"
+  },
+  "C_regime_deterministic": {
+   "cagr_pct": -5.7,
+   "sharpe": -0.37,
+   "max_dd_pct": -20.59,
+   "time_in_market_pct": 78.5,
+   "exit_weeks": "-"
+  }
+ },
+ "2020重放": {
+  "span": [
+   "2020-01-01",
+   "2020-12-30"
+  ],
+  "LLM_committee_B": {
+   "cagr_pct": 13.86,
+   "sharpe": 0.73,
+   "max_dd_pct": -13.44,
+   "time_in_market_pct": 88.1,
+   "exit_weeks": "6/53"
+  },
+  "A_buy_and_hold": {
+   "cagr_pct": 24.45,
+   "sharpe": 1.13,
+   "max_dd_pct": -13.44,
+   "time_in_market_pct": 100.0,
+   "exit_weeks": "-"
+  },
+  "B_200dma_trend": {
+   "cagr_pct": 12.3,
+   "sharpe": 0.67,
+   "max_dd_pct": -14.03,
+   "time_in_market_pct": 97.6,
+   "exit_weeks": "-"
+  },
+  "C_regime_deterministic": {
+   "cagr_pct": 24.45,
+   "sharpe": 1.13,
+   "max_dd_pct": -13.44,
+   "time_in_market_pct": 100.0,
+   "exit_weeks": "-"
+  }
+ }
+}
