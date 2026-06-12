@@ -350,6 +350,69 @@ def _extract_regime_label(regime_brief: str) -> str:
     return ""
 
 
+def _intervention_record(
+    symbol: str,
+    regime_label: str,
+    current_price: Optional[float],
+    verdict: Optional[Dict[str, Any]],
+    atr_defense_on: bool,
+) -> Optional[Dict[str, Any]]:
+    """从 verdict 的确定性后处理标记提取"干预记录"；无实质干预返回 None。
+
+    反事实记账（2026-06-12）：每次确定性规则改写 CIO 裁决（快崩防御降级 /
+    SOLVENCY 拦 TRIM / Sanity5 否 TRIM 等）都落一条结构化记录，攒"如果没拦
+    会怎样"的样本——这是防御/兜底规则未来能用钱口径验收的唯一数据来源
+    （黄金 VIX 腿验收 scripts/validate_gold_defense.py 判 FAIL 后尤其如此）。
+    只动 confidence 不动 verdict/alloc 的不算干预。
+    """
+    v = verdict or {}
+    orig_v = v.get("_original_verdict")
+    if not orig_v:
+        return None
+    final_v = v.get("verdict")
+    orig_alloc = float(v.get("_original_alloc", v.get("alloc_cny", 0)) or 0)
+    final_alloc = float(v.get("alloc_cny", 0) or 0)
+    if orig_v == final_v and orig_alloc == final_alloc:
+        return None
+    if v.get("_defense_downgrade"):
+        rule = f"defense_{v['_defense_downgrade']}"
+    elif v.get("_sanity5_reason"):
+        rule = f"sanity5_{v['_sanity5_reason']}"
+    elif v.get("_original_trim_reason") == "concentration":
+        rule = "sanity4_solvency_concentration"
+    else:
+        rule = "other"
+    from datetime import datetime
+    return {
+        "schema": 1,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "asset": symbol,
+        "regime": regime_label,
+        "price": current_price,
+        "rule": rule,
+        "atr_defense_on": bool(atr_defense_on),
+        "original_verdict": orig_v,
+        "original_alloc": orig_alloc,
+        "final_verdict": final_v,
+        "final_alloc": final_alloc,
+        # 反事实敞口差（CNY）：counterfactual_pnl_w = delta_exposure × fwd_w
+        # （jobs/intervention_review.py 回填）。买侧被拦为正，卖侧被拦为负。
+        "delta_exposure_cny": orig_alloc - final_alloc,
+    }
+
+
+def _log_intervention(record: Dict[str, Any]) -> None:
+    """append 进 memory/.dreams/interventions.jsonl（与 verdict_review 同目录）。"""
+    import json
+
+    from core.memory_store import MemoryStore
+
+    path = MemoryStore().root / ".dreams" / "interventions.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def _save_path_snapshot(
     symbol: str,
     regime_label: str,
@@ -620,6 +683,19 @@ def run_committee_for_symbol(
             emit("path_snapshot_saved", asset=symbol)
         except Exception as e:  # noqa: BLE001
             log.warning(f"path 快照落盘失败 graceful 跳过: {e}")
+
+    # 6.6. 反事实记账：确定性规则改写了 CIO 裁决 → 落 interventions.jsonl
+    # （"如果没拦会怎样"由 jobs/intervention_review.py 事后回填）。graceful。
+    try:
+        _rec = _intervention_record(
+            symbol, regime_label, current_price,
+            result.get("verdict"), atr_defense_on,
+        )
+        if _rec is not None:
+            _log_intervention(_rec)
+            emit("intervention_logged", asset=symbol, rule=_rec["rule"])
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"干预记账失败 graceful 跳过: {e}")
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
     if probability_table is not None:

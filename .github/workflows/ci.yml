@@ -57,6 +57,7 @@ jobs:
           uv run python -c "from utils.fx import get_fx_rate, cash_total_in_base"
           uv run python -c "from connectors.web_api import app"
           uv run python -c "from jobs.path_review import run, realized_path, score_one"
+          uv run python -c "from jobs.intervention_review import load_interventions, score, summarize"
           uv run python -c "from connectors.state_bus import write_committee_status, read_committee_status, _get_status_lock"
           uv run python -c "from db.trades_db import TradesDB"
           uv run python -c "from db.insights_db import InsightsDB"

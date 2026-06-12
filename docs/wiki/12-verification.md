@@ -209,6 +209,19 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
    → 全文 [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md)，
      决策 [adr/009](adr/009-no-ta-style-analyst-agents.md)
 
+6. **黄金 VIX 防御腿"语义错误"假设未过预注册验收**（2026-06-12，
+   `scripts/validate_gold_defense.py`）
+   → 假设：黄金双相（流动性挤兑先跌、危机买盘接力），高 VIX 拦黄金买入是
+     股票语义错装（2020-03 案例：挤兑 -8.6% 后 90d +30.7%）
+   → 探索性全样本（2002-2026, n=5962）强烈支持：VIX≥85 分位桶 30/60/90d 中位
+     全面右偏（+2.2/+3.6/+6.3% vs 无条件 +1.1/+2.8/+4.4%）
+   → 但 fit(≤2017)/OOS(2018+) 分割后，预注册判据"60d 跌破概率 ≤ 无条件"在
+     **两个时代都边际不满足**（41% vs 38%、34% vs 33%）→ **FAIL，维持现状**
+   → 教训：中位右偏与"跌破频率略高"可以并存（右偏 + 厚左尾分布）；探索性
+     结论 ≠ 可改生产默认值。最终裁决交给**反事实记账**（interventions.jsonl，
+     同日上线）：每次确定性拦截落"如果没拦会怎样"样本，
+     `jobs/intervention_review.py` 按 rule 聚合钱口径，每 rule ≥20 条再判
+
 ---
 
 ## 怎么复现这些数据
