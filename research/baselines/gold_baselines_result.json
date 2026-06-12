@@ -1,0 +1,53 @@
+{
+ "symbol": "GC=F",
+ "span": [
+  "2000-08-30",
+  "2026-06-10"
+ ],
+ "full": {
+  "A_buy_and_hold": {
+   "cagr_pct": 11.09,
+   "sharpe": 0.68,
+   "max_dd_pct": -44.36,
+   "time_in_market_pct": 100.0,
+   "n_days": 6479
+  },
+  "B_200dma_trend": {
+   "cagr_pct": 7.79,
+   "sharpe": 0.58,
+   "max_dd_pct": -39.03,
+   "time_in_market_pct": 70.7,
+   "n_days": 6479
+  },
+  "C_regime_deterministic": {
+   "cagr_pct": 9.11,
+   "sharpe": 0.6,
+   "max_dd_pct": -54.52,
+   "time_in_market_pct": 93.6,
+   "n_days": 6479
+  }
+ },
+ "2024+": {
+  "A_buy_and_hold": {
+   "cagr_pct": 31.79,
+   "sharpe": 1.38,
+   "max_dd_pct": -23.02,
+   "time_in_market_pct": 100.0,
+   "n_days": 626
+  },
+  "B_200dma_trend": {
+   "cagr_pct": 34.41,
+   "sharpe": 1.49,
+   "max_dd_pct": -19.16,
+   "time_in_market_pct": 99.0,
+   "n_days": 626
+  },
+  "C_regime_deterministic": {
+   "cagr_pct": 35.09,
+   "sharpe": 1.51,
+   "max_dd_pct": -18.45,
+   "time_in_market_pct": 99.4,
+   "n_days": 626
+  }
+ }
+}

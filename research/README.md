@@ -64,3 +64,12 @@ INVEST_TA_OUT=my_run.jsonl python scripts/eval_ta_signal.py
 openInvest TA-analyst pre-registered ablation, 2026-06.
 github.com/longsizhuo/openInvest @ branch test_ta, docs/wiki/16-ta-analysts-experiment.md
 ```
+
+## baselines/ — 三臂对照·免费臂（2026-06-12）
+
+`baselines/gold_baselines.py`（预注册映射，零 LLM）：GC=F 买入持有 / 200DMA 趋势 /
+production regime 确定性规则。结果 `gold_baselines_result.json`。要点：全历史
+（2000-2026）买入持有 CAGR 11.1% / Sharpe 0.68 三臂最优；**regime 臂 MaxDD -54.5%
+比买入持有(-44.4%)更深**——production 分类器作为黄金单独择时规则在 2011-15 熊市
+whipsaw，与"MA regime 看不见快速崩盘"互证。2024+ 窗三臂无差异（基本全程持仓）。
+第四臂（完整 LLM 系统）复用历史消融 draws 后补。
