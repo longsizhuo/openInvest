@@ -85,12 +85,34 @@ PROMPTS = {
         "not mechanically predictive; weigh sample context.\n\n{pack}\n"
         + _COMMON_TAIL
     ),
+    "combined": (
+        "You are the research manager for {label}. Three specialist data sets "
+        "(point-in-time as of {asof}) have been collected for you below: "
+        "(1) volatility / fear-greed sentiment dashboard, (2) fundamentals / "
+        "positioning, (3) news headlines from the past week (HEADLINES ONLY). "
+        "Synthesize them: where do they agree, where do they contradict, and "
+        "which evidence should dominate? Produce a combined trading-relevant "
+        "report with specific, actionable insights.\n\n{pack}\n"
+        + _COMMON_TAIL
+    ),
 }
+
+def pack_combined(symbol: str, asof: str):
+    """三包合一（联合上下文）——测"直接加三个"的信息合并是否产生方向信号
+    （2026-06-12 用户质疑：逐个测无信号 ≠ 合并后无信号）。
+    ③基线 = sentiment/fundamental 两个机械映射的一致票（同向才表态）。"""
+    s_text, s_det = pack_sentiment(symbol, asof)
+    f_text, f_det = pack_fundamental(symbol, asof)
+    n_text, _ = pack_news(symbol, asof)
+    det = s_det if (s_det and f_det and s_det == f_det) else "neutral"
+    return s_text + "\n" + f_text + "\n" + n_text, det
+
 
 PACK_FN = {
     "fundamental": pack_fundamental,
     "news": pack_news,
     "sentiment": pack_sentiment,
+    "combined": pack_combined,
 }
 
 STANCE_RE = re.compile(r"STANCE:\s*(bullish|bearish|neutral)", re.I)
