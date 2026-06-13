@@ -62,6 +62,33 @@ class TestInterventionRecord:
         assert rec["rule"] == "sanity5_reentry_missing"
         assert rec["atr_defense_on"] is True
 
+    def test_dca_tranche_record(self):
+        """黄金分批放行：rule=defense_gold_dca_tranche，delta=意图的 2/3（踏空账本）"""
+        rec = _intervention_record(
+            "GC=F", "uptrend", 4100.0,
+            _v(verdict="ACCUMULATE", alloc_cny=3000,
+               _original_verdict="BUY", _original_alloc=9000,
+               _defense_dca="tranche", _defense_dca_tranche_idx=1),
+            atr_defense_on=False,
+        )
+        assert rec["rule"] == "defense_gold_dca_tranche"
+        assert rec["rule_family"] == "buy_defense"
+        assert rec["defense_dca_tranche_idx"] == 1
+        assert rec["delta_exposure_cny"] == 6000.0   # 放行 1/3，踏空 2/3
+
+    def test_dca_blocked_record(self):
+        """黄金分批暂拦：rule=defense_gold_dca_blocked_<reason>，delta=全意图"""
+        rec = _intervention_record(
+            "GC=F", "uptrend", 4100.0,
+            _v(verdict="HOLD", alloc_cny=0,
+               _original_verdict="ACCUMULATE", _original_alloc=9000,
+               _defense_dca="blocked_spacing", _defense_dca_tranche_idx=2),
+            atr_defense_on=False,
+        )
+        assert rec["rule"] == "defense_gold_dca_blocked_spacing"
+        assert rec["rule_family"] == "buy_defense"
+        assert rec["delta_exposure_cny"] == 9000.0
+
     def test_no_marker_returns_none(self):
         assert _intervention_record("GC=F", "range", 4100.0, _v(), False) is None
 
@@ -155,6 +182,10 @@ class TestRuleFamily:
         assert rule_family("defense_accumulate_to_hold") == "buy_defense"
         assert rule_family("defense_buy_to_accumulate") == "buy_defense"
         assert rule_family("reconstructed_defense_downgrade") == "buy_defense"
+        # 黄金分批 DCA（放行批 + 暂拦批）都归 buy_defense，与旧全拦并桶
+        assert rule_family("defense_gold_dca_tranche") == "buy_defense"
+        assert rule_family("defense_gold_dca_blocked_spacing") == "buy_defense"
+        assert rule_family("defense_gold_dca_blocked_quota") == "buy_defense"
         assert rule_family("other") == "other"
 
     def test_record_carries_rule_family(self):
@@ -182,3 +213,83 @@ class TestRuleFamily:
         # 两行并入同一 trim_blocked 桶
         assert set(summ) == {"trim_blocked"}
         assert summ["trim_blocked"]["n"] == 2
+
+
+# ---------- 黄金防御分批 DCA 闸（2026-06-13 裁决，wiki18 §5）----------
+
+class TestGoldDcaGate:
+    """_gold_defense_dca_gate：读已放行分批，按交易日算 spacing/quota，决定放/拦。"""
+
+    # 固定交易日日历（业务日），最新 = 2026-06-12(周五)
+    import pandas as _pd
+    CAL = _pd.bdate_range("2026-05-01", "2026-06-12")
+
+    @staticmethod
+    def _seed(tmp_path, monkeypatch, records):
+        from core import memory_store as ms
+        monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
+        from core.committee_runner import _log_intervention
+        for r in records:
+            _log_intervention(r)
+
+    def _gate(self, **kw):
+        from core.committee_runner import _gold_defense_dca_gate
+        base = dict(n_tranches=3, fraction=0.3333, min_spacing_days=5, window_days=20)
+        base.update(kw)
+        return _gold_defense_dca_gate("GC=F", self.CAL, **base)
+
+    def test_first_tranche_when_no_history(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch, [])
+        g = self._gate()
+        assert g["allow"] is True
+        assert g["reason"] == "first" and g["tranche_idx"] == 1
+        assert g["fraction"] == 0.3333
+
+    def test_blocks_on_spacing(self, tmp_path, monkeypatch):
+        # 上一批 3 个交易日前（06-09）→ 距今 3 < 5 → spacing 暂拦
+        self._seed(tmp_path, monkeypatch, [
+            {"asset": "GC=F", "date": "2026-06-09", "rule": "defense_gold_dca_tranche"},
+        ])
+        g = self._gate()
+        assert g["allow"] is False and g["reason"] == "spacing"
+        assert g["tranche_idx"] == 2   # 第 2 批被拦
+
+    def test_allows_after_spacing(self, tmp_path, monkeypatch):
+        # 上一批 6 个交易日前（06-04）→ 距今 6 ≥ 5 且配额未满 → 放行第 2 批
+        self._seed(tmp_path, monkeypatch, [
+            {"asset": "GC=F", "date": "2026-06-04", "rule": "defense_gold_dca_tranche"},
+        ])
+        g = self._gate()
+        assert g["allow"] is True and g["reason"] == "ok"
+        assert g["tranche_idx"] == 2
+
+    def test_blocks_on_quota(self, tmp_path, monkeypatch):
+        # 窗内（最近 20 个交易日 ≈ 4 周）已 3 批（=n_tranches）→ quota 暂拦，
+        # 即便 spacing 满也拦（quota 先于 spacing 判）
+        self._seed(tmp_path, monkeypatch, [
+            {"asset": "GC=F", "date": "2026-05-26", "rule": "defense_gold_dca_tranche"},
+            {"asset": "GC=F", "date": "2026-06-03", "rule": "defense_gold_dca_tranche"},
+            {"asset": "GC=F", "date": "2026-06-10", "rule": "defense_gold_dca_tranche"},
+        ])
+        g = self._gate()
+        assert g["allow"] is False and g["reason"] == "quota"
+
+    def test_blocked_records_dont_consume_quota(self, tmp_path, monkeypatch):
+        # blocked 批 + 其它资产的 tranche 都不计配额；本资产仅 1 放行批且 spacing 满 → 放行
+        self._seed(tmp_path, monkeypatch, [
+            {"asset": "GC=F", "date": "2026-06-04", "rule": "defense_gold_dca_tranche"},
+            {"asset": "GC=F", "date": "2026-06-11", "rule": "defense_gold_dca_blocked_spacing"},
+            {"asset": "NDQ.AX", "date": "2026-06-10", "rule": "defense_gold_dca_tranche"},
+            {"asset": "GC=F", "date": "2026-06-10", "rule": "defense_accumulate_to_hold"},
+        ])
+        g = self._gate()
+        assert g["allow"] is True and g["reason"] == "ok"
+        assert g["tranche_idx"] == 2   # 只 1 个 GC=F 放行批被计入
+
+    def test_same_day_rerun_blocks_second_tranche(self, tmp_path, monkeypatch):
+        # 同日已放一批（06-12=最新交易日）→ 再跑距今 0 < 5 → spacing 拦（防同日双批）
+        self._seed(tmp_path, monkeypatch, [
+            {"asset": "GC=F", "date": "2026-06-12", "rule": "defense_gold_dca_tranche"},
+        ])
+        g = self._gate()
+        assert g["allow"] is False and g["reason"] == "spacing"

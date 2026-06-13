@@ -60,7 +60,7 @@ jobs:
           uv run python -c "from jobs.path_review import run, realized_path, score_one"
           uv run python -c "from jobs.intervention_review import load_interventions, score, summarize"
           uv run python -c "from core.regime_probability import forward_return"
-          uv run python -c "from core.committee_runner import rule_family, _intervention_record"
+          uv run python -c "from core.committee_runner import rule_family, _intervention_record, _gold_defense_dca_gate"
           uv run python -c "from connectors.state_bus import write_committee_status, read_committee_status, _get_status_lock"
           uv run python -c "from db.trades_db import TradesDB"
           uv run python -c "from db.insights_db import InsightsDB"
