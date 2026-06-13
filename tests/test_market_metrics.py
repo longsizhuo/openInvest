@@ -169,3 +169,35 @@ def test_compute_metrics_empty_has_new_keys():
     m = compute_metrics(pd.DataFrame())
     for k in ("return_30d", "rebound_off_30d_low", "rvol"):
         assert k in m and m[k] is None
+
+
+# ---------- 口径修正：price_quantile 强制 tail(504)（2026-06-13 审计）----------
+
+def test_price_quantile_uses_only_last_504():
+    """传入超长序列时，分位只对最后 504 根算（不对全量）——根因 bug 修正"""
+    import pandas as pd
+    from utils.market_metrics import _calc_price_quantile, TRADING_DAYS_2Y
+    assert TRADING_DAYS_2Y == 504
+    # 前 600 根全是高价(1000)，后 504 根递增 1..504；当前价=504 在近504窗里是最高=100%
+    old = [1000.0] * 600
+    recent = [float(i) for i in range(1, 505)]
+    s = pd.Series(old + recent)
+    q = _calc_price_quantile(s)
+    # 若错误地对全量(1104根)算：504 比 600 个 1000 都小 → 分位很低
+    # 正确(近504)：504 是窗口内最大 → 100%
+    assert q == 1.0, f"应只看近504根(分位100%)，实得 {q}"
+
+
+def test_price_quantile_window_param_overridable():
+    import pandas as pd
+    from utils.market_metrics import _calc_price_quantile
+    s = pd.Series([float(i) for i in range(1, 101)])  # 1..100 递增
+    # window=10 → 当前价 100 在近10根(91..100)里最大 = 100%
+    assert _calc_price_quantile(s, window=10) == 1.0
+
+
+def test_trading_days_2y_single_source():
+    """regime_probability 与 market_metrics 引同一个 504（单一可信源）"""
+    from utils.market_metrics import TRADING_DAYS_2Y
+    from core.regime_probability import _TRADING_DAYS_2Y
+    assert TRADING_DAYS_2Y is _TRADING_DAYS_2Y or TRADING_DAYS_2Y == _TRADING_DAYS_2Y == 504

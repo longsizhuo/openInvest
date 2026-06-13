@@ -47,11 +47,16 @@ def _vix_percentile() -> Optional[Tuple[float, float]]:
         return None
     if df is None or df.empty or "Close" not in df:
         return None
-    closes = df["Close"].dropna()
+    # 口径修正（2026-06-13）：get_history_data("^VIX","2y") 实际返回全量 DB（period
+    # 不截断），此前 (closes <= last).mean() 对全量历史算分位 → "近2年分位"名不副实、
+    # 随 DB 增长漂移。强制 tail(TRADING_DAYS_2Y)，与 validate_gold_defense 的
+    # rolling(504)、price_quantile_2y 同口径（单一可信源 utils.market_metrics）。
+    from utils.market_metrics import TRADING_DAYS_2Y
+    closes = df["Close"].dropna().tail(TRADING_DAYS_2Y)
     if len(closes) < 20:  # 样本太少分位无意义
         return None
     last = float(closes.iloc[-1])
-    pct = float((closes <= last).mean())  # 真百分位排名（≤ 当前的比例）
+    pct = float((closes <= last).mean())  # 真百分位排名（近2年内 ≤ 当前的比例）
     return last, pct
 
 

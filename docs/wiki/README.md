@@ -30,6 +30,7 @@
 7. [15-path-probability.md](15-path-probability.md) —— 概率表路径化：多窗分布 + 四类路径形状（卖出时机的核心读数）
 8. [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md) —— TradingAgents 式分析师实验：预注册 Gate 0/3 过线
 9. [17-asset-feature-sets.md](17-asset-feature-sets.md) —— 资产类别特征集显式契约（黄金 ≠ 股票语义）
+10. [18-governance-conventions.md](18-governance-conventions.md) —— 治理章程：口径定义/判据/脏数据红线（用户签字）
 9. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
 ### 🎨 我是设计师 / 前端，想改 GUI
@@ -59,6 +60,7 @@
 | 15 | [概率表路径化](15-path-probability.md) | 30/60/90 多窗分布 + 四类路径形状 + regime 持续标注 |
 | 16 | [TA 分析师实验](16-ta-analysts-experiment.md) | 信号存在性两阶段实验，3 分析师 0/3 过预注册 Gate |
 | 17 | [资产特征集契约](17-asset-feature-sets.md) | 特征×资产类别矩阵；黄金 VIX 语义审查；反事实记账 |
+| 18 | [治理章程](18-governance-conventions.md) | 口径单源定义 / 预注册判据 / 脏数据红线 / 合并前置 / 审计 log |
 
 ## 架构决策记录 (ADR)
 
