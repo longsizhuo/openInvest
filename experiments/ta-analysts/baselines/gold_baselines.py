@@ -21,33 +21,18 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # _metrics.py 同目录
 
+from _metrics import metrics  # noqa: E402  共享指标，避免逐字复制漂移
 from core.regime_probability import compute_regime_return_frame  # noqa: E402
 from db.market_store import MarketStore  # noqa: E402
 
 SYMBOL = "GC=F"
 RECENT_START = "2024-01-01"
-
-
-def metrics(daily_ret: pd.Series, in_market: pd.Series) -> dict:
-    r = daily_ret.dropna()
-    eq = (1 + r).cumprod()
-    years = len(r) / 252
-    cagr = eq.iloc[-1] ** (1 / years) - 1 if years > 0 else float("nan")
-    sharpe = (r.mean() / r.std() * np.sqrt(252)) if r.std() > 0 else float("nan")
-    mdd = (eq / eq.cummax() - 1).min()
-    return {
-        "cagr_pct": round(cagr * 100, 2),
-        "sharpe": round(float(sharpe), 2),
-        "max_dd_pct": round(float(mdd) * 100, 2),
-        "time_in_market_pct": round(float(in_market.mean()) * 100, 1),
-        "n_days": int(len(r)),
-    }
 
 
 def run() -> dict:

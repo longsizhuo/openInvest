@@ -127,9 +127,13 @@ class PathConfig:
     2026-06 walk-forward 时代分桶（n=1579，2007→2026）诊断：带覆盖 7 个时代
     6 个 <80% 目标、小样本 regime 桶（downtrend）最差。两参数经 fit(≤2017)/
     OOS(2018+) 验证后才设非禁用默认值（ADR-010 rule 4，先例 trim_*_pct）。
+
+    **dataclass 默认=禁用(0/1) 是有意的安全模式，不是与 YAML 漂移**：经验证的
+    生产值(80/1.1)在 defaults.yaml；dataclass 走"配置缺失→graceful 退化到不校准"
+    而非应用未验证参数。改默认值前必须先过 scripts/fit_path_calibration.py。
     """
-    shrinkage_k: float = 0.0    # 条件→无条件收缩强度；0 = 禁用
-    band_gamma: float = 1.0     # P10/P90/downside 带宽扩张系数；1 = 禁用
+    shrinkage_k: float = 0.0    # 条件→无条件收缩强度；0 = 禁用（生产值见 defaults.yaml）
+    band_gamma: float = 1.0     # P10/P90/downside 带宽扩张系数；1 = 禁用（同上）
 
 
 @dataclass(frozen=True)
