@@ -117,6 +117,20 @@ class TestReviewArithmetic:
         assert scored[1]["counterfactual_pnl_30d_cny"] == -2000.0
         assert scored[1]["counterfactual_pnl_60d_cny"] == 1000.0
 
+    def test_preview_fields(self, monkeypatch):
+        """未结算预览：决策日→最新收盘的浮动反事实"""
+        import jobs.intervention_review as ir
+        monkeypatch.setattr(ir, "fwd_return", lambda sym, d, w: None)  # 全未结算
+        monkeypatch.setattr(ir, "latest_return",
+                            lambda sym, d: {"ret": 0.02, "days": 5})
+        scored = ir.score([{"date": "2026-06-11", "asset": "GC=F",
+                            "rule": "reconstructed_trim_blocked",
+                            "delta_exposure_cny": -67000.0}])
+        assert scored[0]["preview_days"] == 5
+        # 被拦减仓遇反弹 +2% → 拦对：-67000×0.02 = -1340（负=避免损失）
+        assert scored[0]["preview_pnl_cny"] == -1340.0
+        assert scored[0]["counterfactual_pnl_30d_cny"] is None
+
     def test_summarize_aggregates(self, monkeypatch):
         import jobs.intervention_review as ir
         monkeypatch.setattr(ir, "fwd_return", lambda sym, d, w: 0.10)

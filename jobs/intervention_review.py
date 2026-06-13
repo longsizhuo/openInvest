@@ -67,8 +67,22 @@ def fwd_return(symbol: str, date: str, days: int) -> Optional[float]:
     return float(after.iloc[days]) / base - 1.0
 
 
+def latest_return(symbol: str, date: str) -> Optional[Dict[str, Any]]:
+    """决策日收盘 → 最新收盘的收益 + 经过的交易日数（未结算预览用）。"""
+    from db.market_store import MarketStore
+    df = MarketStore().get_history_df(symbol, days=100000)
+    if df is None or df.empty:
+        return None
+    upto = df.loc[:date]
+    if upto.empty:
+        return None
+    base = float(upto["Close"].iloc[-1])
+    after = df.loc[date:]["Close"]
+    return {"ret": float(after.iloc[-1]) / base - 1.0, "days": len(after) - 1}
+
+
 def score(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """逐条回填各窗口反事实损益（未到期窗口为 None）。"""
+    """逐条回填各窗口反事实损益（未到期窗口为 None）+ 最新收盘浮动预览。"""
     scored = []
     for r in rows:
         out = dict(r)
@@ -79,6 +93,9 @@ def score(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             out[f"counterfactual_pnl_{w}d_cny"] = (
                 None if f is None else round(delta * f, 1)
             )
+        lt = latest_return(r["asset"], r["date"])
+        out["preview_days"] = lt["days"] if lt else None
+        out["preview_pnl_cny"] = round(delta * lt["ret"], 1) if lt else None
         scored.append(out)
     return scored
 
@@ -120,8 +137,18 @@ def main() -> None:
         cells = "".join(
             f"{a[f'settled_{w}d']:>5}/{a[f'sum_pnl_{w}d']:>+9.0f}" for w in WINDOWS)
         print(f"{rule:<36}{a['n']:>4}{cells}")
+    # 未结算预览（按最新收盘的浮动反事实——信息参考，不是预注册判定口径）
+    prev = defaultdict(float)
+    prev_n = defaultdict(int)
+    for r in scored:
+        if r.get("preview_pnl_cny") is not None:
+            prev[r["rule"]] += r["preview_pnl_cny"]
+            prev_n[r["rule"]] += 1
+    print("\n未结算预览（决策日→最新收盘，浮动口径仅参考）：")
+    for rule in sorted(prev):
+        print(f"  {rule:<36}{prev_n[rule]:>3} 条  浮动反事实 ¥{prev[rule]:+,.0f}")
     print("\n口径：正=拦错（用户少赚/多亏），负=拦对（避免损失）。"
-          "每 rule 独立干预 <20 条前不下结论。")
+          "每 rule 独立干预 <20 条前不下结论；正式判定只看 30/60/90d 结算窗。")
     if args.jsonl:
         p = MemoryStore().root / ".dreams" / "interventions_scored.jsonl"
         with p.open("w", encoding="utf-8") as f:
