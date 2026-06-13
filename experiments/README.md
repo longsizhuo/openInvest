@@ -2,6 +2,23 @@
 
 训练 / 调参 / prompt 实验的 archive + config。**不影响生产**——这里只是研究材料。
 
+## 实验数据放哪：3 个角色，1 个名字（2026-06-12 收编）
+
+之前 `experiments/`（旧）和 `research/`（新 TA 包）是同一个东西的两个名，已统一。
+任何实验数据按生命周期分 3 处，**别再起第四个名**：
+
+| 角色 | 放哪 | PII | 例 |
+|---|---|---|---|
+| **进行中的实验**（活代码 + 原始落盘） | `test_ta` 式分支 + `memory/.{name}_experiment/`（gitignore） | 视内容 | TA 实验跑在 `test_ta` + `memory/.ta_experiment/` |
+| **冻结的可复现产物**（干净包：数据+脚本+README，进 main） | **`experiments/<name>/`** ← 就是这里 | **必须去 PII** | `experiments/ta-analysts/`、本目录的 DSPy/Optuna 产物 |
+| **防灾全量备份**（含 PII 的单点备份） | 私有 repo `openinvest-research-archive`（周更 cron） | 含 PII | 委员会 transcript、`.dreams/` 等 |
+
+> 结论/决策不是数据 → 进 `docs/wiki/` + `docs/wiki/adr/`，不进这里。
+
+**冻结一个实验进 main 时**：建 `experiments/<name>/`，子目录约定
+`data/ inputs/ scripts/ baselines/ README.md SCHEMA.md`，PII 扫描过再 commit。
+现有子包：`ta-analysts/`（TA 分析师消融，ADR-009）。
+
 ## 文件清单
 
 ```

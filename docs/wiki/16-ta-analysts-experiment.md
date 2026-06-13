@@ -180,8 +180,14 @@ live A/B（同日双跑，事件 brief 有/无），届时回填本页。
 
 ## 7. 复现
 
+**已冻结的去 PII 复现包在 main**：`experiments/ta-analysts/`（数据+脚本+基线+
+SCHEMA，2540 条报告可直接 `eval_ta_signal.py` 复算 Gate，不用重跑 LLM）。
+数据三角色约定见 `experiments/README.md`。
+
+从零重跑（需实验**活代码**，仍在 test_ta 分支）：
+
 ```bash
-git checkout test_ta   # 实验代码（勿在委员会跑动时切分支）
+git checkout test_ta   # 实验活代码（勿在委员会跑动时切分支）
 uv run python scripts/ta_data.py cot          # CFTC COT 缓存
 uv run python scripts/ta_data.py fetch_news   # GDELT 抓取（限流，数小时）
 uv run python scripts/ta_phase_a.py           # 732 次 LLM 调用（断点续跑）
