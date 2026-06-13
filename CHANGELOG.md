@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.8.0](https://github.com/longsizhuo/openInvest/compare/v0.7.0...v0.8.0) (2026-06-13)
+
+
+### Features
+
+* **api:** committee prepare/save 端点 + run summary 附 cio_memo ([0a552a3](https://github.com/longsizhuo/openInvest/commit/0a552a3c60ba49a30cd5208665dd81ba92bf992a))
+* **api:** skill-parity 端点（doctor/status/strategy/history/what_if/buy/sell） ([6d975fa](https://github.com/longsizhuo/openInvest/commit/6d975fa738324664c8ec278082f26462edb1f4a1))
+* **api:** 可选 bearer token 鉴权（INVEST_API_TOKEN） ([6229bff](https://github.com/longsizhuo/openInvest/commit/6229bff1d2cd63ec3f4d4a0f3268cc63a5397906))
+* **cli:** INVEST_API_BASE 远端模式（hub-and-spoke 客户端） ([2136260](https://github.com/longsizhuo/openInvest/commit/213626061e4ea98c3d54feedc016595793d08044))
+* **committee:** 反事实记账——确定性拦截落 interventions.jsonl + 钱口径复盘 job ([#36](https://github.com/longsizhuo/openInvest/issues/36)) ([bff20d8](https://github.com/longsizhuo/openInvest/commit/bff20d81bb0104ccf631ffe403490c69aa1280f5))
+* **committee:** 干预账本历史回填 + 未结算浮动预览 ([#37](https://github.com/longsizhuo/openInvest/issues/37)) ([d7d561a](https://github.com/longsizhuo/openInvest/commit/d7d561aadbc53f79f069fdb4dbb5cde7d65339f7))
+* **events:** 指数→代理标的确定性映射层（closes [#26](https://github.com/longsizhuo/openInvest/issues/26)） ([830c25a](https://github.com/longsizhuo/openInvest/commit/830c25ad0ba24bcf8176adab3b3d42384162e33e))
+* **probability:** 路径校准层 + walk-forward 闭环 + TA 实验结论（ADR-009） ([#31](https://github.com/longsizhuo/openInvest/issues/31)) ([e333076](https://github.com/longsizhuo/openInvest/commit/e333076cc2df03cfd1ba052aa8fdfa095a0b2791))
+* **report:** 路径概率渲染进日报邮件——与 CIO 看到的同一份分布 ([#32](https://github.com/longsizhuo/openInvest/issues/32)) ([4f00f46](https://github.com/longsizhuo/openInvest/commit/4f00f46628400a9adb88b79f7edf79fa44901037))
+* **skill:** run.sh 远端模式适配 ([c4e31eb](https://github.com/longsizhuo/openInvest/commit/c4e31eba1baa101c758d7a0b3c5761296c944b71))
+
+
+### Bug Fixes
+
+* **committee:** coordinator 路径补确定性事实块——防御链失效修复 ([1dc3e0b](https://github.com/longsizhuo/openInvest/commit/1dc3e0bc128c8ccdb534948ee1d43b023793d55f))
+
+
+### Refactor
+
+* **core:** 提取 skill 视图与委员会 prepare/save 到 service 层 ([8c104a7](https://github.com/longsizhuo/openInvest/commit/8c104a79118ce7622e27a427c884f1b69bb68392))
+
+
+### Docs
+
+* **setup-skill:** 新增'连接已有 hub'onboarding 路径 ([7ef9b8b](https://github.com/longsizhuo/openInvest/commit/7ef9b8b6bb8baf5222d320c508b35e458bfa1065))
+* **skill:** coordinator 指引对齐 v0.6——确定性事实块粘贴义务 ([2a690d0](https://github.com/longsizhuo/openInvest/commit/2a690d088ff932887a291b1a4e1f771da36cc993))
+* **skill:** 远端模式（hub-and-spoke）使用说明 ([bd92abc](https://github.com/longsizhuo/openInvest/commit/bd92abc91439497f6913133a181cd1fc59e92fc0))
+* **wiki:** combined 联合分析师补测——'直接加三个'两窗口均 FAIL 且劣于单独 ([#35](https://github.com/longsizhuo/openInvest/issues/35)) ([57467a1](https://github.com/longsizhuo/openInvest/commit/57467a15a301b8b76f4fd1fc30ca49d93f995277))
+* **wiki:** hub-and-spoke 部署拓扑 + skill-parity/committee RPC 端点参考 ([a4528c0](https://github.com/longsizhuo/openInvest/commit/a4528c04b979a8e1195c1e1ec44ead196218a053))
+* **wiki:** TA 实验复测矩阵——ADR-009 经 2 窗口×3 模型×ensemble 复测维持原判 ([#33](https://github.com/longsizhuo/openInvest/issues/33)) ([76a4084](https://github.com/longsizhuo/openInvest/commit/76a4084290f17b8f93ac008c260c90586910abd8))
+* **wiki:** 拆方向锁后的文档对齐——硬约束→中性概率口径 ([8d9fcd1](https://github.com/longsizhuo/openInvest/commit/8d9fcd1fa7fa4aa7028141a2dc981a5a90b0309b))
+
 ## [0.7.0](https://github.com/longsizhuo/openInvest/compare/v0.6.0...v0.7.0) (2026-06-10)
 
 
