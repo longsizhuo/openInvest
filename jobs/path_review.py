@@ -36,6 +36,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from core.memory_store import MemoryStore  # noqa: E402
+from core.regime_probability import forward_return  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -79,15 +80,16 @@ def realized_path(symbol: str, date: str) -> Optional[Dict[str, Any]]:
     i = idx.searchsorted(ts, side="right") - 1
     if i < 0:
         return None
-    base = float(s.iloc[i])
+    base = float(s.iloc[i])   # 路径形状段用；标量 fwd 走 forward_return 单一可信源
     out: Dict[str, Any] = {}
     for w in WINDOWS:
         days = int(w.rstrip("d"))
-        j = idx.searchsorted(ts + pd.Timedelta(days=days), side="left")
-        if j >= len(idx):
+        fr = forward_return(symbol, date, days, closes=s)   # canonical 日历天口径
+        if fr is None:
             continue   # 未成熟
-        out[f"fwd_{w}"] = round(float(s.iloc[j] / base - 1) * 100, 3)
+        out[f"fwd_{w}"] = round(fr * 100, 3)
         if w == SHAPE_WINDOW:
+            j = idx.searchsorted(ts + pd.Timedelta(days=days), side="left")
             seg = s.iloc[i + 1: j + 1].to_numpy()
             if seg.size:
                 k = int(np.argmin(seg))

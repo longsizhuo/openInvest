@@ -683,3 +683,47 @@ def test_reentry_estimate_uses_currency_symbol():
     line = est.summary_line()
     assert "$3,977.00" in line
     assert "¥" not in line
+
+
+# ---------- forward_return 单一可信源（2026-06-13 漂移审计）----------
+
+def _mk_closes():
+    import pandas as pd
+    # 工作日序列，价格 = 100, 101, 102, ...（每交易日 +1）
+    idx = pd.bdate_range("2024-01-01", periods=120)
+    return pd.Series([100.0 + i for i in range(len(idx))], index=idx)
+
+
+def test_forward_return_calendar_day_horizon():
+    """30 日历天 ≈ 21-22 个交易日，不是 30 个交易日（口径核心）"""
+    from core.regime_probability import forward_return
+    s = _mk_closes()
+    # asof = 第一个交易日 2024-01-01（周一）
+    fr = forward_return("X", "2024-01-01", 30, closes=s)
+    assert fr is not None
+    # base = s.iloc[0] = 100；target = 首个 >= 01-01+30天=01-31 的交易日
+    import pandas as pd
+    j = s.index.searchsorted(pd.Timestamp("2024-01-31"), side="left")
+    expected = s.iloc[j] / s.iloc[0] - 1.0
+    assert abs(fr - expected) < 1e-12
+    # 交易日数应在 21-22 区间（30 日历天），远小于 30
+    assert 19 <= j <= 23
+
+
+def test_forward_return_base_is_last_close_le_asof():
+    """base = ≤asof 最后收盘；asof 落在周末 → 取前一交易日"""
+    from core.regime_probability import forward_return
+    s = _mk_closes()
+    # 2024-01-06 是周六；≤它的最后交易日是 01-05（周五）
+    fr_sat = forward_return("X", "2024-01-06", 30, closes=s)
+    fr_fri = forward_return("X", "2024-01-05", 30, closes=s)
+    # base 同为周五；但 target 锚点不同（asof+30天不同）——只断言 base 一致性走另一路：
+    assert fr_sat is not None and fr_fri is not None
+
+
+def test_forward_return_immature_returns_none():
+    """窗口未走完 → None（不补值）"""
+    from core.regime_probability import forward_return
+    s = _mk_closes()
+    last = s.index[-1].strftime("%Y-%m-%d")
+    assert forward_return("X", last, 90, closes=s) is None

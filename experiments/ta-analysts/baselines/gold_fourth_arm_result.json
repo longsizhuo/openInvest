@@ -9,6 +9,7 @@
    "sharpe": 1.82,
    "max_dd_pct": -17.73,
    "time_in_market_pct": 96.6,
+   "n_days": 583,
    "exit_weeks": "4/122"
   },
   "A_buy_and_hold": {
@@ -16,6 +17,7 @@
    "sharpe": 1.74,
    "max_dd_pct": -17.73,
    "time_in_market_pct": 100.0,
+   "n_days": 583,
    "exit_weeks": "-"
   },
   "B_200dma_trend": {
@@ -23,6 +25,7 @@
    "sharpe": 1.74,
    "max_dd_pct": -17.73,
    "time_in_market_pct": 100.0,
+   "n_days": 583,
    "exit_weeks": "-"
   },
   "C_regime_deterministic": {
@@ -30,6 +33,7 @@
    "sharpe": 1.74,
    "max_dd_pct": -17.73,
    "time_in_market_pct": 100.0,
+   "n_days": 583,
    "exit_weeks": "-"
   }
  },
@@ -43,6 +47,7 @@
    "sharpe": 0.2,
    "max_dd_pct": -19.79,
    "time_in_market_pct": 96.0,
+   "n_days": 251,
    "exit_weeks": "2/53"
   },
   "A_buy_and_hold": {
@@ -50,6 +55,7 @@
    "sharpe": 0.05,
    "max_dd_pct": -20.43,
    "time_in_market_pct": 100.0,
+   "n_days": 251,
    "exit_weeks": "-"
   },
   "B_200dma_trend": {
@@ -57,6 +63,7 @@
    "sharpe": -0.55,
    "max_dd_pct": -16.35,
    "time_in_market_pct": 44.2,
+   "n_days": 251,
    "exit_weeks": "-"
   },
   "C_regime_deterministic": {
@@ -64,6 +71,7 @@
    "sharpe": -0.37,
    "max_dd_pct": -20.59,
    "time_in_market_pct": 78.5,
+   "n_days": 251,
    "exit_weeks": "-"
   }
  },
@@ -77,6 +85,7 @@
    "sharpe": 0.73,
    "max_dd_pct": -13.44,
    "time_in_market_pct": 88.1,
+   "n_days": 252,
    "exit_weeks": "6/53"
   },
   "A_buy_and_hold": {
@@ -84,6 +93,7 @@
    "sharpe": 1.13,
    "max_dd_pct": -13.44,
    "time_in_market_pct": 100.0,
+   "n_days": 252,
    "exit_weeks": "-"
   },
   "B_200dma_trend": {
@@ -91,6 +101,7 @@
    "sharpe": 0.67,
    "max_dd_pct": -14.03,
    "time_in_market_pct": 97.6,
+   "n_days": 252,
    "exit_weeks": "-"
   },
   "C_regime_deterministic": {
@@ -98,6 +109,7 @@
    "sharpe": 1.13,
    "max_dd_pct": -13.44,
    "time_in_market_pct": 100.0,
+   "n_days": 252,
    "exit_weeks": "-"
   }
  }

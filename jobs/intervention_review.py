@@ -1,6 +1,7 @@
 """反事实记账复盘 — 给 interventions.jsonl 回填"如果没拦会怎样"（确定性，零 LLM）。
 
-每条干预记录（确定性规则改写 CIO 裁决）在决策 30/60/90 天后可结算：
+每条干预记录（确定性规则改写 CIO 裁决）在决策 30/60/90 **日历天**后可结算
+（口径同路径分布/概率表，统一走 core.regime_probability.forward_return）：
 
     counterfactual_pnl_w = delta_exposure_cny × fwd_return_w
 
@@ -33,7 +34,7 @@ if str(ROOT) not in sys.path:
 
 from core.memory_store import MemoryStore  # noqa: E402
 
-WINDOWS = (30, 60, 90)
+WINDOWS = (30, 60, 90)   # 日历天（非交易日）；JSON key fwd_{w}d / pnl_{w}d_cny
 
 
 def load_interventions(path: Optional[Path] = None) -> List[Dict[str, Any]]:
@@ -52,19 +53,14 @@ def load_interventions(path: Optional[Path] = None) -> List[Dict[str, Any]]:
 
 
 def fwd_return(symbol: str, date: str, days: int) -> Optional[float]:
-    """决策日（含）后第 days 个交易日的收盘 / 决策日收盘 − 1。未到期返回 None。"""
-    from db.market_store import MarketStore
-    df = MarketStore().get_history_df(symbol, days=100000)
-    if df is None or df.empty:
-        return None
-    upto = df.loc[:date]
-    if upto.empty:
-        return None
-    base = float(upto["Close"].iloc[-1])
-    after = df.loc[date:]["Close"]
-    if len(after) <= days:
-        return None
-    return float(after.iloc[days]) / base - 1.0
+    """决策日 → days 个**日历日**后的收益。未到期返回 None。
+
+    口径单一可信源：直接调 core.regime_probability.forward_return（与路径分布、
+    概率表逐位一致的日历天口径）。2026-06-13 修漂移前这里曾是交易日口径
+    （30≈42 日历天），与 CIO 看的 30d 路径分布跨度对不上。
+    """
+    from core.regime_probability import forward_return
+    return forward_return(symbol, date, days)
 
 
 def latest_return(symbol: str, date: str) -> Optional[Dict[str, Any]]:
@@ -100,8 +96,17 @@ def score(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return scored
 
 
-def summarize(scored: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """按 rule 聚合：n、已结算 n、各窗口反事实损益合计。
+def _family_of(r: Dict[str, Any]) -> str:
+    """取 rule_family（旧行无此字段 → 用 mapper 从 rule 回退推导）。"""
+    fam = r.get("rule_family")
+    if fam:
+        return fam
+    from core.committee_runner import rule_family
+    return rule_family(r.get("rule", ""))
+
+
+def summarize(scored: List[Dict[str, Any]], key: str = "rule") -> Dict[str, Any]:
+    """按 key（"rule" 细粒度 / "rule_family" 并桶）聚合：n、已结算 n、各窗损益合计。
 
     正值 = 拦截让用户少赚/多亏了这么多（拦错）；负值 = 拦截避免了这么多损失（拦对）。
     """
@@ -109,7 +114,8 @@ def summarize(scored: List[Dict[str, Any]]) -> Dict[str, Any]:
         lambda: {"n": 0, **{f"settled_{w}d": 0 for w in WINDOWS},
                  **{f"sum_pnl_{w}d": 0.0 for w in WINDOWS}})
     for r in scored:
-        a = agg[r["rule"]]
+        k = _family_of(r) if key == "rule_family" else r.get(key, "?")
+        a = agg[k]
         a["n"] += 1
         for w in WINDOWS:
             pnl = r.get(f"counterfactual_pnl_{w}d_cny")
@@ -130,13 +136,20 @@ def main() -> None:
         print("interventions.jsonl 为空——还没有攒到干预记录（这是新机制，从今天起攒）")
         return
     scored = score(rows)
-    summ = summarize(scored)
     print(f"干预记录 {len(rows)} 条（{rows[0]['date']} → {rows[-1]['date']}）\n")
-    print(f"{'rule':<36}{'n':>4}" + "".join(f"{f'{w}d结算/合计':>16}" for w in WINDOWS))
-    for rule, a in sorted(summ.items()):
-        cells = "".join(
-            f"{a[f'settled_{w}d']:>5}/{a[f'sum_pnl_{w}d']:>+9.0f}" for w in WINDOWS)
-        print(f"{rule:<36}{a['n']:>4}{cells}")
+
+    def _print_table(summ: Dict[str, Any], col: str, width: int = 36) -> None:
+        print(f"{col:<{width}}{'n':>4}" + "".join(f"{f'{w}d结算/合计':>16}" for w in WINDOWS))
+        for k, a in sorted(summ.items()):
+            cells = "".join(
+                f"{a[f'settled_{w}d']:>5}/{a[f'sum_pnl_{w}d']:>+9.0f}" for w in WINDOWS)
+            print(f"{k:<{width}}{a['n']:>4}{cells}")
+
+    # 主视图：rule_family 并桶（live + reconstructed 同底层规则合并 → 回答"省钱费钱"）
+    print("【按规则家族（live+重建并桶）】")
+    _print_table(summarize(scored, key="rule_family"), "rule_family")
+    print("\n【按细粒度 rule（明细）】")
+    _print_table(summarize(scored, key="rule"), "rule")
     # 未结算预览（按最新收盘的浮动反事实——信息参考，不是预注册判定口径）
     prev = defaultdict(float)
     prev_n = defaultdict(int)

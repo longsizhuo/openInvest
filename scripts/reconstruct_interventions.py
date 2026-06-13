@@ -26,6 +26,7 @@ from typing import Dict, Optional, Tuple
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+from core.committee_runner import rule_family  # noqa: E402
 from core.memory_store import MemoryStore  # noqa: E402
 
 # transcript 里 CIO memo 的原话字段
@@ -106,7 +107,8 @@ def main() -> None:
             rows.append({
                 "schema": 1, "date": date, "asset": sym, "regime": regime,
                 "price": None,   # review job 以行情收盘为基准，不依赖此字段
-                "rule": rule, "atr_defense_on": None,
+                "rule": rule, "rule_family": rule_family(rule),
+                "atr_defense_on": None,
                 "original_verdict": ov, "original_alloc": oa,
                 "final_verdict": fv, "final_alloc": fa,
                 "delta_exposure_cny": oa - fa,
