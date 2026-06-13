@@ -55,6 +55,7 @@ jobs:
           uv run python -c "from jobs.daily_report_builder import assemble_full_report, classify_asset_freshness, format_staleness_warning, portfolio_summary_text"
           uv run python -c "from core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from utils.fx import get_fx_rate, cash_total_in_base"
+          uv run python -c "from utils.market_metrics import TRADING_DAYS_2Y, _calc_price_quantile"
           uv run python -c "from connectors.web_api import app"
           uv run python -c "from jobs.path_review import run, realized_path, score_one"
           uv run python -c "from jobs.intervention_review import load_interventions, score, summarize"

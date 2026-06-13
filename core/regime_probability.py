@@ -549,7 +549,7 @@ def build_reentry_reference(
 # 保证 regime 口径一致。
 
 # price_quantile_2y 的滚动窗口（≈2 年交易日），对齐 compute_metrics 传 "2y" 数据的口径
-_TRADING_DAYS_2Y = 504
+from utils.market_metrics import TRADING_DAYS_2Y as _TRADING_DAYS_2Y  # 单一可信源（504）
 
 
 def forward_return(
