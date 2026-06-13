@@ -28,6 +28,12 @@ import pandas as pd
 LOOKBACK_30D = 30
 # rvol 默认均量窗口（交易日）
 RVOL_WINDOW = 20
+# "近 2 年"窗口的**单一可信源**（交易日）。所有"2y 分位/口径"统一引此常量，
+# 杜绝 504/730/yfinance"2y" 多处各写。回测 compute_regime_return_frame 与生产
+# compute_metrics / utils.sentiment 必须同引此值。
+# 2026-06-13 口径审计根因：get_history_data(period) 不截断、返回 get_history_df(默认 730 行)，
+# price_quantile/VIX 分位对"730 行(≈2.9年)"而非 504 算 → 本常量 + tail() 修正(transcript 校验)。
+TRADING_DAYS_2Y = 504
 
 
 def _safe_last(series: pd.Series) -> Optional[float]:
@@ -163,20 +169,24 @@ def _calc_volatility_annualized(close: pd.Series) -> Optional[float]:
     return None if pd.isna(val) else float(val)
 
 
-def _calc_price_quantile(close: pd.Series) -> Optional[float]:
-    """真百分位排名 (percentile rank)：窗口内收盘价 ≤ 当前价的比例 (0~1)。
+def _calc_price_quantile(close: pd.Series,
+                         window: int = TRADING_DAYS_2Y) -> Optional[float]:
+    """真百分位排名 (percentile rank)：近 `window` 交易日内收盘价 ≤ 当前价的比例 (0~1)。
 
-    含义：返回 0.78 表示"历史 78% 的交易日收盘价 ≤ 当前价"，是统计意义上的
-    分位。
+    含义：返回 0.78 表示"近 2 年里 78% 的交易日收盘价 ≤ 当前价"，是统计意义上的分位。
 
     （旧实现是 (cur-min)/(max-min) 区间归一 —— 那是"当前价在最高最低之间的位置"，
     单根历史插针就能压缩整条区间、严重失真，且与"分位"语义不符，已废弃。）
 
-    窗口 = 传入的整段序列（调用方传 ~2y），窗口长度由 caller 决定。
+    **窗口在函数内强制 tail(window)**（2026-06-13 口径修正）：此前靠 caller 传"恰好 2y"
+    数据，但 get_history_data 实际返回全量 DB → 分位对全量历史算（price_quantile_2y
+    名不副实，且随 DB 增长漂移）。现在无论传入多长，只取最后 window 根，与回测
+    compute_regime_return_frame 的 rolling(TRADING_DAYS_2Y) 同口径。
     """
     valid = close.dropna()
     if valid.empty:
         return None
+    valid = valid.tail(window)   # 强制近 2 年窗口，单一可信源 TRADING_DAYS_2Y
     cur = valid.iloc[-1]
     if pd.isna(cur):
         return None
