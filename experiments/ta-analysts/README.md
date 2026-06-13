@@ -62,8 +62,9 @@ INVEST_TA_OUT=my_run.jsonl python scripts/eval_ta_signal.py
 
 ```
 openInvest TA-analyst pre-registered ablation, 2026-06.
-github.com/longsizhuo/openInvest @ branch test_ta, docs/wiki/16-ta-analysts-experiment.md
+github.com/longsizhuo/openInvest @ main:experiments/ta-analysts/, docs/wiki/16-ta-analysts-experiment.md
 ```
+（实验**活代码**仍在 `test_ta` 分支；本目录是冻结的去 PII 复现包。见 `experiments/README.md` 的 3 角色约定。）
 
 ## baselines/ — 三臂对照·免费臂（2026-06-12）
 
