@@ -209,18 +209,23 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
    → 全文 [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md)，
      决策 [adr/009](adr/009-no-ta-style-analyst-agents.md)
 
-6. **黄金 VIX 防御腿"语义错误"假设未过预注册验收**（2026-06-12，
-   `scripts/validate_gold_defense.py`）
+6. **黄金 VIX 防御腿"语义错误"假设——验收结论被一次窗口口径 bug 翻转（2026-06-13 漂移审计）**
+   （`scripts/validate_gold_defense.py`）
    → 假设：黄金双相（流动性挤兑先跌、危机买盘接力），高 VIX 拦黄金买入是
      股票语义错装（2020-03 案例：挤兑 -8.6% 后 90d +30.7%）
-   → 探索性全样本（2002-2026, n=5962）强烈支持：VIX≥85 分位桶 30/60/90d 中位
-     全面右偏（+2.2/+3.6/+6.3% vs 无条件 +1.1/+2.8/+4.4%）
-   → 但 fit(≤2017)/OOS(2018+) 分割后，预注册判据"60d 跌破概率 ≤ 无条件"在
-     **两个时代都边际不满足**（41% vs 38%、34% vs 33%）→ **FAIL，维持现状**
-   → 教训：中位右偏与"跌破频率略高"可以并存（右偏 + 厚左尾分布）；探索性
-     结论 ≠ 可改生产默认值。最终裁决交给**反事实记账**（interventions.jsonl，
-     同日上线）：每次确定性拦截落"如果没拦会怎样"样本，
-     `jobs/intervention_review.py` 按 rule 聚合钱口径，每 rule ≥20 条再判
+   → 探索性全样本（2002-2026, n≈5963）强烈支持：VIX≥85 分位桶各窗中位全面右偏
+   → **2026-06-12 初判 FAIL**（60d 跌破概率两时代边际不满足）——后查明是
+     **window 单位 bug**：当时用 `shift(-w)` = w **交易日**(≈1.4w 日历天)，
+     与生产路径分布的 **日历天** 口径不一致。
+   → **2026-06-13 漂移审计修正口径（日历天，与 forward_return 单源一致）后翻转为
+     PASS**：fit/OOS × 30d/60d 四格全满足（中位右偏 + 跌破概率 ≤ 无条件），
+     但 **fit-60d margin 仅 1pp（40% vs 41%），偏薄**。
+   → **生产防御行为未据此改动**——是否豁免黄金 VIX 腿是独立的、需结合反事实
+     记账（interventions.jsonl）钱口径证据的 gated 决策，留待另议。本条只记录
+     "验收口径修正后结论翻转"这个事实。
+   → 元教训：**验收脚本的 forward-return 必须用与生产同口径（日历天）**，否则
+     一个 ±40% 的横轴误差就能翻转 PASS/FAIL。这正是 forward_return 单一可信源
+     （`core/regime_probability.py`）要解决的根因。
 
 ---
 

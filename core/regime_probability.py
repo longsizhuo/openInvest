@@ -552,6 +552,46 @@ def build_reentry_reference(
 _TRADING_DAYS_2Y = 504
 
 
+def forward_return(
+    symbol: str, asof: str, calendar_days: int,
+    *, closes: Optional[pd.Series] = None,
+) -> Optional[float]:
+    """决策日→N 个**日历日**后的收益（小数，非 %）。canonical 单一可信源。
+
+    口径（与 compute_regime_return_frame / path_review.realized_path 逐位一致）：
+    - base = 价格序列中 **≤ asof 的最后一根收盘**
+    - target = **≥ asof + calendar_days 日历天的首根收盘**
+    - 窗口未走完（target 落在序列尾部之外）→ None（未成熟，不补值）
+
+    **日历天**是全系统统一口径：路径分布、概率表、干预反事实账本都按日历天，
+    这样"30d 反事实损益"和 CIO 当时看的"30d 路径分布"是同一时间跨度。
+    注意区别于 df.shift(-N)（那是 N 个**交易日** ≈ 1.4×N 日历天）。
+
+    closes 可传入复用（避免重复 IO）；不传则从 MarketStore 拉。
+    """
+    import pandas as pd  # 本模块 pandas 走惰性 import（见 compute_regime_return_frame）
+    if closes is None:
+        from db.market_store import MarketStore
+        df = MarketStore().get_history_df(symbol, days=100000)
+        if df is None or df.empty or "Close" not in df:
+            return None
+        closes = df["Close"]
+        if isinstance(closes, pd.DataFrame):
+            closes = closes.iloc[:, 0]
+        closes = closes[~closes.index.duplicated(keep="last")].dropna()
+    if closes is None or len(closes) == 0:
+        return None
+    idx = closes.index
+    ts = pd.Timestamp(asof)
+    i = idx.searchsorted(ts, side="right") - 1
+    if i < 0:
+        return None
+    j = idx.searchsorted(ts + pd.Timedelta(days=calendar_days), side="left")
+    if j >= len(idx):
+        return None
+    return float(closes.iloc[j]) / float(closes.iloc[i]) - 1.0
+
+
 def _percentile_rank(window):  # window: np.ndarray
     cur = window[-1]
     return float((window <= cur).sum() / len(window))

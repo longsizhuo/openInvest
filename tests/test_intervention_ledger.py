@@ -140,3 +140,45 @@ class TestReviewArithmetic:
         a = summ["defense_accumulate_to_hold"]
         assert a["n"] == 3 and a["settled_30d"] == 3
         assert a["sum_pnl_30d"] == 300.0
+
+
+# ---------- rule_family 并桶（2026-06-13 漂移审计）----------
+
+class TestRuleFamily:
+    def test_live_and_reconstructed_map_to_same_family(self):
+        from core.committee_runner import rule_family
+        # 拦减仓家族
+        assert rule_family("sanity4_solvency_concentration") == "trim_blocked"
+        assert rule_family("sanity5_reentry_missing") == "trim_blocked"
+        assert rule_family("reconstructed_trim_blocked") == "trim_blocked"
+        # 拦买入家族
+        assert rule_family("defense_accumulate_to_hold") == "buy_defense"
+        assert rule_family("defense_buy_to_accumulate") == "buy_defense"
+        assert rule_family("reconstructed_defense_downgrade") == "buy_defense"
+        assert rule_family("other") == "other"
+
+    def test_record_carries_rule_family(self):
+        rec = _intervention_record(
+            "GC=F", "downtrend", 4100.0,
+            _v(verdict="HOLD", alloc_cny=0,
+               _original_verdict="TRIM", _original_alloc=-20000,
+               _original_trim_reason="concentration"),
+            atr_defense_on=False,
+        )
+        assert rec["rule"] == "sanity4_solvency_concentration"
+        assert rec["rule_family"] == "trim_blocked"
+
+    def test_summarize_by_family_merges_live_and_reconstructed(self, monkeypatch):
+        import jobs.intervention_review as ir
+        monkeypatch.setattr(ir, "fwd_return", lambda sym, d, w: 0.05)
+        monkeypatch.setattr(ir, "latest_return", lambda sym, d: None)
+        rows = [
+            {"date": "2026-01-01", "asset": "GC=F", "rule": "sanity4_solvency_concentration",
+             "rule_family": "trim_blocked", "delta_exposure_cny": -10000.0},
+            {"date": "2026-01-01", "asset": "GC=F", "rule": "reconstructed_trim_blocked",
+             "delta_exposure_cny": -10000.0},  # 旧行无 rule_family，靠 mapper 回退
+        ]
+        summ = ir.summarize(ir.score(rows), key="rule_family")
+        # 两行并入同一 trim_blocked 桶
+        assert set(summ) == {"trim_blocked"}
+        assert summ["trim_blocked"]["n"] == 2

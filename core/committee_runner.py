@@ -350,6 +350,23 @@ def _extract_regime_label(regime_brief: str) -> str:
     return ""
 
 
+def rule_family(rule: str) -> str:
+    """干预 rule → 粗粒度家族（聚合钱口径用，single source）。
+
+    纯字符串映射，同时吃 live（defense_*/sanity4_*/sanity5_*）和 reconstruct
+    （reconstructed_trim_blocked/_defense_downgrade）两套命名，让"同一底层规则
+    拦截"在 live 行与历史重建行之间并桶——否则按细粒度 rule 聚合会拆成两组。
+    - trim_blocked：sanity4(集中度)/sanity5(买回点)/重建的 TRIM 被拦，都是"拦减仓"
+    - buy_defense：快崩防御对买侧降级，"拦加仓"
+    """
+    r = rule or ""
+    if "trim" in r or "sanity4" in r or "sanity5" in r:
+        return "trim_blocked"
+    if "defense" in r or "downgrade" in r:
+        return "buy_defense"
+    return "other"
+
+
 def _intervention_record(
     symbol: str,
     regime_label: str,
@@ -390,6 +407,8 @@ def _intervention_record(
         "regime": regime_label,
         "price": current_price,
         "rule": rule,
+        # 粗粒度归并：live 与 reconstructed 同底层规则并桶（聚合钱口径用）
+        "rule_family": rule_family(rule),
         "atr_defense_on": bool(atr_defense_on),
         "original_verdict": orig_v,
         "original_alloc": orig_alloc,

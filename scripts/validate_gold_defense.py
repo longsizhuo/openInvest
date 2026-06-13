@@ -7,7 +7,9 @@
 
 **预注册验收（跑之前写死，ADR-010 rule 4）**：
 - 数据：GC=F + ^VIX 全历史；VIX 分位 = 近 504 交易日滚动分位（生产同款口径）
-- 防御区 = 分位 ≥ 0.85（生产默认 vix_defense_quantile）
+- forward return = **日历天**口径（与 core.regime_probability.forward_return 单源一致；
+  2026-06-13 修：旧版 shift(-w) 是交易日，口径 bug 曾把结论从 PASS 误判成 FAIL）
+- 防御区 = 分位 ≥ vix_defense_quantile（**读 config 当前部署值**，默认 0.85）
 - 分割：fit = 2017-12-31 及之前；OOS = 2018-01-01 之后
 - **接受"黄金豁免 VIX 腿"当且仅当**（两个时代分别满足，30d 与 60d 两窗都满足）：
     1. 防御区中位前向收益 ≥ 无条件中位（拦截无保护价值）
@@ -24,9 +26,14 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from core.config import load_config  # noqa: E402
 from db.market_store import MarketStore  # noqa: E402
 
-DEFENSE_Q = 0.85
+# 验收当前部署的防御分位（读 config，tune 后验收自动跟随，不脱节）
+DEFENSE_Q = load_config().sentiment.vix_defense_quantile  # 默认 0.85
 FIT_END = "2017-12-31"
 GATE_WINDOWS = (30, 60)     # 参与判定
 REPORT_WINDOWS = (30, 60, 90)
@@ -39,8 +46,15 @@ def build_frame():
     df = gc.join(vix, how="inner").dropna()
     df["vix_q"] = df["vix"].rolling(504).apply(lambda w: (w <= w.iloc[-1]).mean(), raw=False)
     df = df.dropna()
+    # forward return 用**日历天**口径（与 core.regime_probability.forward_return /
+    # 路径分布一致；旧版用 shift(-w) 是交易日 ≈ 1.4×w 日历天，与生产 30d 跨度对不上）
+    idx, vals = df.index, df["gc"].to_numpy()
     for w in REPORT_WINDOWS:
-        df[f"fwd{w}"] = df["gc"].shift(-w) / df["gc"] - 1
+        tgt = idx.searchsorted(idx + pd.Timedelta(days=w), side="left")
+        ok = tgt < len(idx)
+        fwd = np.full(len(idx), np.nan)
+        fwd[ok] = vals[tgt[ok]] / vals[ok] - 1.0   # base = 当行收盘（=≤asof 最后收盘）
+        df[f"fwd{w}"] = fwd
     return df
 
 

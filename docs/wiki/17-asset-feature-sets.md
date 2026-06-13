@@ -12,7 +12,7 @@
 | regime 分类（MA120/250 + ATR + 回撤）| ✅ | ✅（per-asset 阈值覆盖：trend 5.0 / crash_atr 3.5）| `core/regime.py` |
 | 路径概率（regime 条件 OHLC 分布 + 校准层）| ✅ | ✅ | `core/regime_probability.py` |
 | VIX 2y 分位 → 恐慌/贪婪分档 | ✅ | ✅（**语义存疑**，见下）| `utils/sentiment.py` |
-| VIX 哨兵 → INDEP_DEFENSE_FLAG 拦买入 | ✅ | ⚠️ **维持但被审查中**（验收 FAIL 维持现状；反事实记账在攒活体证据）| 同上 |
+| VIX 哨兵 → INDEP_DEFENSE_FLAG 拦买入 | ✅ | ⚠️ **维持但被审查中**（验收口径修正后翻 PASS 但 margin 薄，生产未改；见 wiki 12 #6）| 同上 |
 | ATR 突变比防御腿（资产级自校准）| ✅ | ✅（尺度无关，语义干净）| 同上 |
 | trailing PE 估值分档 | ✅ | ❌ **不喂**（黄金无盈利；估值 brief 仅权益类出）| `utils/valuation.py` |
 | CNN Fear&Greed | ✅（graceful 退化）| 跟随市场级 sentiment brief（非黄金专属信号）| `utils/sentiment.py` |
@@ -24,9 +24,11 @@
 
 - **假设**：黄金双相（流动性挤兑期被一起卖 → 危机买盘接力），"高 VIX 拦买入"
   是股票语义错装
-- **证据**：探索性全样本支持（VIX≥85 分位桶各窗中位右偏）；但 fit/OOS 预注册
-  验收 **FAIL**（60d 跌破概率两时代均边际不利，右偏 + 厚左尾并存）
-- **裁决**：维持现状（VIX 腿继续拦黄金买入），由反事实记账攒活体样本后复审
+- **证据**：探索性全样本支持（VIX≥85 分位桶各窗中位右偏）。初判 FAIL 后查明是
+  window 单位 bug（交易日 vs 日历天），2026-06-13 修正口径后 **翻 PASS（fit-60d
+  margin 仅 1pp 偏薄）**。详见 wiki 12 #6。
+- **裁决**：**生产维持现状**（VIX 腿继续拦黄金买入）——验收翻 PASS 不自动改生产，
+  是否豁免=独立 gated 决策，需结合反事实记账钱口径证据
   （`memory/.dreams/interventions.jsonl` → `jobs/intervention_review.py`）
 - 复现：`uv run python scripts/validate_gold_defense.py`（预注册判据在 docstring）
 
