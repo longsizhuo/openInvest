@@ -288,7 +288,13 @@ def parse_cio_memo(
     current_price: Optional[float] = None,
     regime: Optional[str] = None,
     defense_flag_on: bool = False,
+    defense_dca: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """defense_dca（2026-06-13 黄金裁决，wiki18 §5）：非 None = 本资产是黄金且分批 DCA
+    启用，防御触发的买侧不再全拦，改"放行一批 or 按 spacing/quota 拦"。service 层算好传：
+        {"allow": bool, "fraction": float, "reason": str, "tranche_idx": int}
+    None = 非黄金/未启用 → 走旧"全拦"行为。两条腿已 OR 成单 defense_flag_on，单一计划。
+    """
     out: Dict[str, Any] = {"raw": text}
     m = VERDICT_RE.search(text)
     out["verdict"] = m.group(1).upper() if m else "UNCLEAR"
@@ -411,18 +417,44 @@ def parse_cio_memo(
     # 反而高买低卖；卖出判断留给委员会。
     if defense_flag_on and out["verdict"] in ("BUY", "ACCUMULATE"):
         out.setdefault("_original_verdict", out["verdict"])
-        if out["verdict"] == "BUY":
+        if defense_dca is not None:
+            # 黄金分批 DCA（2026-06-13 裁决）：不全拦，放行一批 or 按 spacing/quota 拦。
+            # 保护左尾(挤兑深跌)同时尊重中位右偏(典型涨,不该禁)。
+            out.setdefault("_original_alloc", out["alloc_cny"])
+            if defense_dca.get("allow"):
+                frac = float(defense_dca.get("fraction", 0.3333))
+                out["verdict"] = "ACCUMULATE"   # 买侧但小批
+                out["alloc_cny"] = int(round(out["alloc_cny"] * frac))
+                out["_defense_dca"] = "tranche"
+                out["_defense_dca_tranche_idx"] = int(defense_dca.get("tranche_idx", 1))
+                log.warning(
+                    "parse_cio_memo: 黄金防御分批 DCA 放行第 %s 批（×%.2f 意图金额=%s）",
+                    out["_defense_dca_tranche_idx"], frac, out["alloc_cny"],
+                )
+            else:
+                out["_defense_dca"] = f"blocked_{defense_dca.get('reason', 'spacing')}"
+                out["verdict"] = "HOLD"
+                out["alloc_cny"] = 0
+                log.warning(
+                    "parse_cio_memo: 黄金防御分批 DCA 本批暂拦（%s，等满 spacing/quota）",
+                    out["_defense_dca"],
+                )
+        elif out["verdict"] == "BUY":
             out["_defense_downgrade"] = "buy_to_accumulate"
             out["verdict"] = "ACCUMULATE"
+            log.warning(
+                "parse_cio_memo: 快崩防御触发（VIX 哨兵/ATR 飙升）→ %s（确定性降级，独立于 regime）",
+                out["_defense_downgrade"],
+            )
         else:
             out["_defense_downgrade"] = "accumulate_to_hold"
             out.setdefault("_original_alloc", out["alloc_cny"])
             out["verdict"] = "HOLD"
             out["alloc_cny"] = 0
-        log.warning(
-            "parse_cio_memo: 快崩防御触发（VIX 哨兵/ATR 飙升）→ %s（确定性降级，独立于 regime）",
-            out["_defense_downgrade"],
-        )
+            log.warning(
+                "parse_cio_memo: 快崩防御触发（VIX 哨兵/ATR 飙升）→ %s（确定性降级，独立于 regime）",
+                out["_defense_downgrade"],
+            )
 
     # 风险档 aggressive: uptrend 顺势加仓杠杆（显式风险偏好，不是 regime 智能）。
     # 2026-06 消融结论：原 prompt 层 uptrend 方向锁 = 纯杠杆（牛市 +CR，代价
@@ -717,6 +749,7 @@ def run_committee(
     valuation_brief: str = "",
     *,
     atr_defense_on: bool = False,
+    defense_dca: Optional[Dict[str, Any]] = None,
     persist_to_memory: bool = True,
     max_debate_rounds: int = 1,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -729,6 +762,10 @@ def run_committee(
             crash_atr_pct_min，调用方 run_committee_for_symbol 算好传入）。
             与 sentiment_brief 里的 VIX 哨兵（市场级）OR 后进 parse_cio_memo
             做确定性买侧降级。
+        defense_dca: 黄金防御分批 DCA 闸（2026-06-13 裁决，wiki18 §5）。非 None =
+            本资产是黄金且 gold_defense_dca_enabled，service 层算好的本批放行/暂拦决定
+            （{"allow", "fraction", "reason", "tranche_idx"}）。防御触发时改"全拦"为
+            "放行一批 or 按 spacing/quota 拦"。None = 非黄金/未启用 → 旧全拦行为。
         max_debate_rounds: cross-challenge 轮数上限。
             - 1 = 旧行为（仅 1 轮 Round 2 cross-challenge），daily_report 用
             - 4 = 真讨论模式（live 端点用），允许 4 轮拉锯，收敛后提前退出
@@ -928,6 +965,8 @@ def run_committee(
         defense_flag_on=(
             "INDEP_DEFENSE_FLAG: on" in sentiment_brief or atr_defense_on
         ),
+        # 黄金分批 DCA 闸（service 层算好的本批放行/暂拦；非黄金/未启用为 None=旧全拦）
+        defense_dca=defense_dca,
     )
 
     debate_meta = {

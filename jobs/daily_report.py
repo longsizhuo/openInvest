@@ -449,10 +449,17 @@ def run() -> Dict[str, Any]:
             v = r["verdict"]
             defense_note = ""
             if v.get("_original_verdict") and v["_original_verdict"] != v["verdict"]:
-                reason = (v.get("_defense_downgrade") and "VIX/ATR 快崩哨兵拦截买入") or \
-                         (v.get("_original_trim_reason") == "concentration"
-                          and "想因集中度减仓，被'兜底充足'规则拦下") or \
-                         (v.get("_sanity5_reason") and "TRIM 没给合格买回点被否") or "防御规则"
+                _dca = v.get("_defense_dca")
+                if _dca == "tranche":
+                    reason = (f"高 VIX/ATR 防御期，黄金买入改强制分批 DCA，本次只放行"
+                              f"约 1/3（第 {v.get('_defense_dca_tranche_idx', 1)} 批）")
+                elif _dca and str(_dca).startswith("blocked"):
+                    reason = "高 VIX/ATR 防御期，黄金买入分批，本批未满间隔/配额暂缓（等下一批）"
+                else:
+                    reason = (v.get("_defense_downgrade") and "VIX/ATR 快崩哨兵拦截买入") or \
+                             (v.get("_original_trim_reason") == "concentration"
+                              and "想因集中度减仓，被'兜底充足'规则拦下") or \
+                             (v.get("_sanity5_reason") and "TRIM 没给合格买回点被否") or "防御规则"
                 defense_note = (f"CIO 原始结论 {v['_original_verdict']}"
                                 f"（建议金额 ¥{v.get('_original_alloc', v['alloc_cny'])}），"
                                 f"{reason}，最终改为 {v['verdict']}")

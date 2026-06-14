@@ -24,6 +24,14 @@ verdict:
   worker_unavailable_confidence_floor: 0.4
   # steady=无方向锁(B链, Sharpe/回撤最优) | aggressive=uptrend顺势杠杆(HOLD→ACCUMULATE, +CR −Sharpe 深DD)
   risk_profile: steady
+  # 黄金防御分批 DCA（2026-06-13 用户裁决采纳，wiki 18 §5）：高 VIX 不全拦黄金买入，
+  # 改放行 1/3 一批、≥5 交易日一批、最多 3 批/20 交易日窗。参数机制选定非优化，
+  # 靠反事实账本将来调；关掉(false)即退回旧"全拦"行为。
+  gold_defense_dca_enabled: true
+  gold_defense_dca_n_tranches: 3
+  gold_defense_dca_fraction: 0.3333
+  gold_defense_dca_min_spacing_days: 5
+  gold_defense_dca_window_days: 20
 
 dreaming:
   min_recall: 3

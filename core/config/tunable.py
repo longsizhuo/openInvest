@@ -62,6 +62,16 @@ class VerdictConfig:
     #   牛市 +CR 但 −Sharpe + 深 MaxDD + 熊市更亏；是风险偏好，不是 alpha）
     # env: INVEST_VERDICT_RISK_PROFILE=aggressive
     risk_profile: str = "steady"
+    # 黄金 VIX/ATR 防御腿"分批 DCA"（2026-06-13 用户裁决，wiki 18 §5）：高 VIX 区不再
+    # 全拦黄金买入，改"放行但强制分批"——尊重中位右偏(典型涨,不该禁)，用时间分散吃
+    # 厚左尾(挤兑坑真实且 fit 期更深)。两条腿(VIX OR ATR)合成单一分批计划。
+    # 参数=机制选定的圆整值（左尾样本 ~6-20 太脆，非数据优化），靠反事实账本将来调。
+    # dataclass 默认关=退回全拦旧行为（安全）；defaults.yaml 开=用户裁决的生产值。
+    gold_defense_dca_enabled: bool = False
+    gold_defense_dca_n_tranches: int = 3          # 最多分几批
+    gold_defense_dca_fraction: float = 0.3333     # 每批=意图金额×此比例（≈1/3）
+    gold_defense_dca_min_spacing_days: int = 5    # 两批至少隔几个交易日
+    gold_defense_dca_window_days: int = 20        # N 批配额的滚动计数窗（交易日，≈3-4周）
 
 
 @dataclass(frozen=True)

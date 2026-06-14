@@ -70,6 +70,59 @@ def test_defense_stacks_with_sanity1_overconfident_buy():
     assert r["alloc_cny"] == 0
 
 
+# ---------- 黄金防御分批 DCA（2026-06-13 裁决，wiki18 §5）----------
+# defense_dca 非 None = 黄金且启用 → 防御触发时不全拦，放行一批(×1/3) or 按 spacing/quota 拦。
+
+def test_gold_dca_tranche_releases_one_third():
+    """放行批：BUY/ACCUMULATE 都改 ACCUMULATE 且 alloc=意图×fraction，不再全拦"""
+    gate = {"allow": True, "fraction": 0.3333, "reason": "first", "tranche_idx": 1}
+    r = parse_cio_memo(_memo("BUY", alloc=9000), defense_flag_on=True, defense_dca=gate)
+    assert r["verdict"] == "ACCUMULATE"
+    assert r["_original_verdict"] == "BUY"
+    assert r["_defense_dca"] == "tranche"
+    assert r["_defense_dca_tranche_idx"] == 1
+    assert r["_original_alloc"] == 9000
+    assert r["alloc_cny"] == round(9000 * 0.3333)   # 放行 1/3，不是全拦
+    assert "_defense_downgrade" not in r            # 走 DCA 分支，不走旧全拦
+
+
+def test_gold_dca_blocked_holds_and_zeroes_alloc():
+    """暂拦批（spacing/quota 未满）：HOLD + alloc 0，但留痕原值供踏空账本回算"""
+    gate = {"allow": False, "fraction": 0.3333, "reason": "spacing", "tranche_idx": 2}
+    r = parse_cio_memo(_memo("ACCUMULATE", alloc=9000), defense_flag_on=True, defense_dca=gate)
+    assert r["verdict"] == "HOLD"
+    assert r["alloc_cny"] == 0
+    assert r["_defense_dca"] == "blocked_spacing"
+    assert r["_original_alloc"] == 9000
+    assert "_defense_downgrade" not in r
+
+
+def test_gold_dca_none_falls_back_to_full_block():
+    """defense_dca=None（非黄金/未启用）→ 旧全拦行为完全不变"""
+    r = parse_cio_memo(_memo("ACCUMULATE", alloc=5000), defense_flag_on=True, defense_dca=None)
+    assert r["verdict"] == "HOLD"
+    assert r["_defense_downgrade"] == "accumulate_to_hold"
+    assert "_defense_dca" not in r
+
+
+def test_gold_dca_only_applies_when_defense_fires():
+    """defense_flag_on=False 时，即便传了 gate 也不动裁决（闸只在防御触发时生效）"""
+    gate = {"allow": True, "fraction": 0.3333, "reason": "first", "tranche_idx": 1}
+    r = parse_cio_memo(_memo("BUY", alloc=9000), defense_flag_on=False, defense_dca=gate)
+    assert r["verdict"] == "BUY"
+    assert "_defense_dca" not in r
+    assert r["alloc_cny"] == 9000
+
+
+def test_gold_dca_leaves_sell_side_untouched():
+    """分批只管买侧；HOLD/TRIM/SELL 不受 gate 影响"""
+    gate = {"allow": True, "fraction": 0.3333, "reason": "first", "tranche_idx": 1}
+    for v in ("HOLD", "TRIM", "SELL"):
+        r = parse_cio_memo(_memo(v, alloc=0), defense_flag_on=True, defense_dca=gate)
+        assert r["verdict"] == v, v
+        assert "_defense_dca" not in r, v
+
+
 # ---------- atr_defense_from_text（coordinator transcript 路径） ----------
 # 通用口径（无 per-asset 数字）：波动突变比 atr_spike_ratio（当日 ATR% / 自身
 # 近 1 年滚动中位）≥ sentiment.atr_defense_spike_ratio（默认 2.0=波动翻倍）
