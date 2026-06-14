@@ -272,24 +272,57 @@ ExecStart=/home/ubuntu/.local/bin/uv run --no-sync python -m scheduler.runner
 
 ## 7. 备份策略
 
-### memory/ 是最关键的
+### 权威状态散在两个 store——别只看 memory/
+
+"钱"不是只在 `memory/`。无法重建的权威状态有两块，**必须一起备份**：
+
+| 权威状态 | 是什么 | 丢了后果 |
+|---|---|---|
+| `memory/portfolio.md` | 当前持仓 + 现金 | 丢掉"我现在持有什么" |
+| `db/trades.db` | 交易账本（planned→executed） | 丢掉 9 个月交易史 |
+| `memory/{.committee,insights,daily,.dreams}` | 历史决议 / 洞察 | 理论可重生，但要烧大量 LLM token |
+| `.env` | 凭据 + 配置 | 重新申请 / 填写 |
+
+> ⚠️ **常见误区**：以为 `db/` 整个都是可丢的行情缓存。**`db/trades.db` 是账本不是缓存**——
+> 照"db/ 不需备份"去迁移会丢掉整个交易历史。可丢的只是下面"不需要备份"列的那几个 db。
+
+### 一键快照 / 迁移（推荐）
+
+`scripts/snapshot.py` 把上面权威状态打成单个 tar.gz（WAL 安全的 sqlite online
+backup + sha256 校验），新机一条命令拉起。**迁移 hub 到新机器就用它**：
 
 ```bash
-# 每天 cron
-0 4 * * *  rsync -a /home/ubuntu/projects-review/invest/memory/ /backup/invest-memory-$(date +\%F)/
+# 旧机：打包（不含 .env 密钥值，只在 manifest 列出要填哪些 key）
+uv run python -m scripts.snapshot snapshot --out ~/invest-snapshot.tar.gz
+
+# 新机：clone + uv sync 后还原（默认拒绝覆盖已有账本，--force 才覆盖）
+uv run python -m scripts.snapshot restore --in ~/invest-snapshot.tar.gz
 ```
 
-`memory/` 含个人持仓 + 9 个月交易历史 + 长期 insights，丢了重建很难。
+### 异地备份（每周自动）
+
+`~/openinvest-research-archive/refresh.sh`（cron `0 3 * * 0`）每周把决议/洞察
+**和账本（`portfolio.md` + `trades.db`，落 `invest_ledger/`）**推到私有 repo
+`openinvest-research-archive`。这是当前唯一的机外副本——别误删那条 cron。
+
+### 每天本地冷备（可选，建议加）
+
+```bash
+# 每天 cron——直接复用 snapshot.py，一份 tar 含全部权威状态
+0 4 * * *  cd /home/ubuntu/projects-review/invest && /home/ubuntu/.local/bin/uv run python -m scripts.snapshot snapshot --out /backup/invest-$(date +\%F).tar.gz
+```
 
 ### Cloudflare Access 配置
 
 CF Dashboard 端的 Access policy 没有 git 备份，建议手动截图保存策略 JSON。
 
-### 不需要备份
+### 不需要备份（新机首跑自动重建）
 
-- `db/` （行情缓存，可重新拉）
+- `db/market_data.db` / `db/events.db` （行情 + 新闻缓存，可重新拉）
+- `db/chroma.sqlite3` / `db/jobs.sqlite` （向量库 / 调度器 job store，可重建）
 - `cache_data/` （HTTP cache）
-- `static/` （前端 dist，可重新 sync）
+- `static/` （前端 dist，`scripts.sync_gui_dist` 重新拉）
+- `memory/.backtest*` （回测研究产物，非账本）
 
 ---
 
