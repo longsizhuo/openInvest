@@ -32,6 +32,12 @@ ROOT = Path(__file__).parent.parent
 DEFAULT_JSONL = ROOT / "memory" / ".dreams" / "verdict_review.jsonl"
 DEFAULT_OUT = ROOT / "docs" / "accuracy_summary.json"
 
+# 公开数据红线 #2：命中率 n < 30 不对外展示具体数字（防小样本被截图误传）。
+# 与 GUI invest-gui/src/routes/PublicStats.tsx 的 MIN_SAMPLE_FOR_DISPLAY 保持同一阈值——
+# 这里在「数据层」就把小样本 rate 置 null，避免任何人直接 curl 公开 JSON 拿到
+# GUI 本该屏蔽的小样本数字。hit/total 计数保留（GUI 仍展示 n）。
+MIN_SAMPLE_FOR_PUBLIC = 30
+
 # expected_direction → 方向组映射（verdict 原文不出现在输出里）
 _DIRECTION_MAP: Dict[str, str] = {
     "up": "bullish",
@@ -134,6 +140,30 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
+    """公开输出前抹掉小样本命中率（红线 #2）。
+
+    - 窗口整体 sample_size < MIN_SAMPLE_FOR_PUBLIC → direction_hit_rate 置 None
+    - 每个方向 total < MIN_SAMPLE_FOR_PUBLIC → 该方向 rate 置 None
+
+    保留 hit / total 计数（GUI 需要展示 n=XX「样本不足」），只抹具体命中率数字。
+    返回新 dict（不就地改入参，便于测试对照）。
+    """
+    out = dict(window)
+    if int(out.get("sample_size", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
+        out["direction_hit_rate"] = None
+
+    by_dir = out.get("by_direction") or {}
+    new_by_dir: Dict[str, Any] = {}
+    for bucket, counts in by_dir.items():
+        c = dict(counts)
+        if int(c.get("total", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
+            c["rate"] = None
+        new_by_dir[bucket] = c
+    out["by_direction"] = new_by_dir
+    return out
+
+
 def _filter_by_window(
     rows: List[Dict[str, Any]],
     days: Optional[int],
@@ -166,7 +196,9 @@ def build_summary(jsonl_path: Path) -> Dict[str, Any]:
         # 生成时间戳（UTC ISO）
         "generated_at": now.isoformat(timespec="seconds"),
         "windows": {
-            name: _aggregate(subset)
+            # 红线 #2：公开输出抹掉小样本命中率（_aggregate 仍算原始统计，
+            # 抑制只发生在对外这一层）
+            name: _suppress_small_samples(_aggregate(subset))
             for name, subset in windows.items()
         },
     }
