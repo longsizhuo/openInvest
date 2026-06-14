@@ -119,17 +119,17 @@ def client(tmp_store, monkeypatch):
         offset_pct: float = 0.012
         is_stale: bool = False
 
-    monkeypatch.setattr(web_api, "get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
+    monkeypatch.setattr("connectors.web_api.routers.read.get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
 
     # 假 NDQ.AX K 线（5d）
     fake_df = pd.DataFrame(
         {"Close": [40.0, 41.0, 42.0, 41.5, 42.5]},
         index=pd.date_range("2026-04-28", periods=5, freq="D"),
     )
-    monkeypatch.setattr(web_api, "get_history_data", lambda symbol, period="5d": fake_df)
+    monkeypatch.setattr("connectors.web_api.routers.read.get_history_data", lambda symbol, period="5d": fake_df)
 
     # 委员会任务落盘目录切到 tmp，避免污染真实 memory/.committee/
-    monkeypatch.setattr(web_api, "COMMITTEE_DIR", tmp_store.root / ".committee")
+    monkeypatch.setattr("connectors.web_api.routers.committee.COMMITTEE_DIR", tmp_store.root / ".committee")
 
     return TestClient(web_api.app)
 
@@ -362,7 +362,7 @@ def test_gold_set_no_history(client, tmp_store):
 def test_gold_offset_writes_strategy(client, tmp_store, monkeypatch):
     """报浙商克价 → 反推 offset → 写回 strategy.md"""
     # mock infer_offset_pct 返回固定值
-    monkeypatch.setattr(web_api, "infer_offset_pct", lambda bank_price: 0.025)
+    monkeypatch.setattr("connectors.web_api.routers.write.infer_offset_pct", lambda bank_price: 0.025)
 
     r = client.post("/api/gold/offset", json={"bank_price": 1130.0})
     assert r.status_code == 200
