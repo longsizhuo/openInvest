@@ -102,7 +102,7 @@ def _create_agent(
     asset: Optional[str] = None,
     round_label: Optional[str] = None,
 ) -> Optional[SDKAgent]:
-    """从 LangChain SimpleAgent 迁移到 SDKAgent（OpenAI 兼容协议直连 DeepSeek）。
+    """从 LangChain SimpleAgent 迁移到 SDKAgent（OpenAI 兼容协议直连，模型由 LLM_MODEL 决定）。
 
     架构升级（用户原话: '我们还是有点 hack 了'）：
     - 不再 ReAct 文本协议，用原生 OpenAI/DeepSeek function calling
@@ -121,13 +121,13 @@ def _create_agent(
         return None
     # v3 透明化：把 role/asset/round 传进 telemetry meta，让 LLM 调用记录可按维度切片
     from core.llm_telemetry import TelemetryMeta
-    # SDKAgent.provider 目前只支持 "deepseek" / "openai"（决定客户端怎么造）；
-    # 千问 / 智谱 / Kimi 都走 OpenAI 兼容协议，沿用 "deepseek" 分支即可（传 api_key+base_url）
+    # provider 既是客户端构造选择，也是 telemetry 标签——从 LLM_PROVIDER 读（默认 "openai"）。
+    # MiMo / DeepSeek / 千问 / 智谱 / Kimi 都走 OpenAI 兼容协议（"openai" 分支 + base_url）。
     meta = TelemetryMeta(
         agent_role=role,
         asset=asset,
         round=round_label,
-        provider="deepseek",
+        provider=provider_litellm,
         model=model_name,
     )
     return SDKAgent(
@@ -138,7 +138,7 @@ def _create_agent(
         temperature=temperature,
         enable_tools=search_enabled,
         max_tool_iterations=4,
-        provider="deepseek",
+        provider=provider_litellm,
         telemetry_meta=meta,
     )
 

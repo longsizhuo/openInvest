@@ -1,7 +1,7 @@
 """SDK 直连 LLM agent，替代 LangChain SimpleAgent — 支持原生 tool calling。
 
 设计：
-- DeepSeek 走 OpenAI 兼容协议（`openai.OpenAI(base_url=...)`），function calling 支持
+- OpenAI 兼容端点（MiMo / DeepSeek / 千问 / 智谱 / Kimi）走 `openai.OpenAI(base_url=...)`，function calling 支持
 - 未来加 Anthropic provider 时，本文件加 if provider == 'anthropic' 分支即可
 - Tool calling loop：LLM 每次返回 tool_calls → 我们调对应 impl → 把结果当 message 塞回去 → 继续直到 LLM 输出文本
 
@@ -56,10 +56,10 @@ class SDKAgent:
         temperature: float = 0.2,
         enable_tools: bool = True,
         max_tool_iterations: int = 4,
-        provider: str = "deepseek",
+        provider: str = "openai",
         telemetry_meta: Optional[TelemetryMeta] = None,
     ):
-        # caller 不传 model → 走 utils.llm.get_llm_config（默认 DeepSeek，可通过 LLM_MODEL 换千问/智谱）
+        # caller 不传 model → 走 utils.llm.get_llm_config（按 LLM_MODEL 决定，兜底 deepseek-v4-flash）
         if model is None:
             from utils.llm import get_llm_config_safe
             _api_key, _base, model, _provider = get_llm_config_safe()
@@ -78,18 +78,17 @@ class SDKAgent:
         self.telemetry_meta.provider = provider
         self.telemetry_meta.model = model
 
-        if provider == "deepseek":
-            # 默认走通用 LLM_* 配置（fallback 到 DEEPSEEK_*），兼容 DeepSeek / 千问 / 智谱 / Kimi 等 OpenAI 兼容 API
+        if provider in ("openai", "deepseek"):
+            # 任意 OpenAI 兼容端点（MiMo / DeepSeek / 千问 / 智谱 / Kimi / OpenAI 官方）。
+            # caller 没显式传 key/base_url 就回落到通用 LLM_* 配置（再 fallback DEEPSEEK_*）。
             if api_key is None or base_url is None:
                 from utils.llm import get_llm_config_safe
                 _ak, _bu, _m, _p = get_llm_config_safe()
                 api_key = api_key or _ak
                 base_url = base_url or _bu
             self.client = OpenAI(api_key=api_key, base_url=base_url)
-        elif provider == "openai":
-            self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
         else:
-            raise ValueError(f"未支持的 provider: {provider}（目前 deepseek/openai）")
+            raise ValueError(f"未支持的 provider: {provider}（目前 openai / deepseek，均走 OpenAI 兼容协议）")
 
     def _call_llm_with_telemetry(self, kwargs: Dict[str, Any], iteration: int):
         """v3 透明化：统一的 LLM 调用 + telemetry 记录入口
