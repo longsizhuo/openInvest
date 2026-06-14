@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
+import subprocess
+
 from jobs.pnl_snapshot import (
+    _auto_push_svg,
     _is_trading_window,
     _redact_token_in,
 )
@@ -70,3 +73,56 @@ def test_redact_handles_multiple_tokens():
     assert "tokenA" not in out
     assert "tokenB" not in out
     assert out.count("x-access-token:***@") == 2
+
+
+# ---------- _auto_push_svg 失败路径不泄露 token（audit security M1 回归） ----------
+
+_SECRET_TOKEN = "ghp_SUPERSECRET_should_never_leak"
+
+
+def _fake_git_run_factory(push_stderr: str):
+    """构造一个假的 subprocess.run，模拟 main 分支 push 失败时 git 的行为。
+
+    push 失败 stderr 里带 authed_remote（含 token），用来验证返回的 reason 已脱敏。
+    """
+    def _fake_run(cmd, **kwargs):
+        args = cmd[1:] if cmd and cmd[0] == "git" else cmd
+        check = kwargs.get("check", False)
+
+        def _done(returncode=0, stdout="", stderr=""):
+            cp = subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+            if check and returncode != 0:
+                raise subprocess.CalledProcessError(returncode, cmd, stdout, stderr)
+            return cp
+
+        if args[:2] == ["config", "--get"]:
+            return _done(stdout="https://github.com/owner/repo.git\n")
+        if args[:1] == ["diff"]:
+            # diff --cached --quiet：returncode!=0 表示有改动（不早退）
+            return _done(returncode=1)
+        if "push" in args:
+            return _done(returncode=1, stderr=push_stderr)
+        # add / commit 等：成功
+        return _done(returncode=0)
+
+    return _fake_run
+
+
+def test_auto_push_main_path_redacts_token_on_failure(monkeypatch):
+    """main 分支 push 失败时，返回的 reason 不得含明文 GITHUB_TOKEN。"""
+    monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", _SECRET_TOKEN)
+    monkeypatch.delenv("INVEST_PNL_PUSH_BRANCH", raising=False)  # 默认 main
+
+    authed = f"https://x-access-token:{_SECRET_TOKEN}@github.com/owner/repo.git"
+    push_stderr = f"fatal: unable to access '{authed}/': The requested URL returned error: 403"
+
+    monkeypatch.setattr(subprocess, "run", _fake_git_run_factory(push_stderr))
+
+    result = _auto_push_svg()
+
+    assert result["pushed"] is False
+    assert result["branch"] == "main"
+    # 核心断言：token 明文绝不出现在返回值里（避免流到 scheduler 日志）
+    assert _SECRET_TOKEN not in str(result)
+    assert "x-access-token:***@" in result["reason"]
