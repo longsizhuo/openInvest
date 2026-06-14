@@ -17,6 +17,9 @@ __pycache__/
 # 想了解结构看 docs/memory_layout.md
 memory/
 
+# 运行时日志（RotatingFileHandler 自动滚动，不入库）
+logs/
+
 # 数据库 (SQLite jobstore + 行情缓存)
 db/*.sqlite
 db/*.db

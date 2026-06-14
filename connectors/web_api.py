@@ -35,7 +35,6 @@ from core.memory_store import MemoryStore
 from core.portfolio_manager import PortfolioManager, _guess_kind_from_symbol
 from core.schemas import (
     StrategyData,
-    TargetAsset as SchemaTargetAsset,
     validate_strategy,
 )
 from utils.exchange_fee import get_history_data
