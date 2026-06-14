@@ -1,7 +1,7 @@
 [project]
 name = "invest"
 version = "0.9.0"
-description = "Add your description here"
+description = "多资产 AI 投资委员会 + 组合管理后端"
 requires-python = ">=3.13"
 dependencies = [
     "ddgs>=9.10.0",
