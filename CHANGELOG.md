@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/longsizhuo/openInvest/compare/v0.9.0...v0.9.1) (2026-06-14)
+
+
+### Bug Fixes
+
+* **committee:** 停止把 MiMo 调用误标成 deepseek（provider 标签从 LLM_PROVIDER 读） ([#48](https://github.com/longsizhuo/openInvest/issues/48)) ([0eb5783](https://github.com/longsizhuo/openInvest/commit/0eb5783830a9d555ad8805f4e6e2b3d991953b25))
+
 ## [0.9.0](https://github.com/longsizhuo/openInvest/compare/v0.8.0...v0.9.0) (2026-06-14)
 
 
