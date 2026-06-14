@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.0](https://github.com/longsizhuo/openInvest/compare/v0.8.0...v0.9.0) (2026-06-14)
+
+
+### Features
+
+* **committee:** 黄金高VIX/ATR防御 全拦→强制分批DCA（用户裁决 wiki18 §5） ([#46](https://github.com/longsizhuo/openInvest/issues/46)) ([6d007ff](https://github.com/longsizhuo/openInvest/commit/6d007ff96dafd3c88158cf451e61fcda61027d4e))
+* experiment CLAUDE.md ([991fcce](https://github.com/longsizhuo/openInvest/commit/991fcce6fb00c8607fa68ea58a78552c761515bd))
+
+
+### Bug Fixes
+
+* **metrics:** 生产 VIX/price 分位口径 730→504，强制生产与回测同源 ([#45](https://github.com/longsizhuo/openInvest/issues/45)) ([12b574a](https://github.com/longsizhuo/openInvest/commit/12b574a6ed4615464086642b12c1f7df971bf201))
+* **probability:** forward-return 单一可信源/日历天口径 + 干预 rule 并桶（漂移审计） ([#41](https://github.com/longsizhuo/openInvest/issues/41)) ([f19b415](https://github.com/longsizhuo/openInvest/commit/f19b415f3ec6bae9db8df6e8789bc99462d145fb))
+
+
+### Docs
+
+* **governance:** 治理章程（三原则+口径单源+否决权）——独立于代码，待用户签字 ([#43](https://github.com/longsizhuo/openInvest/issues/43)) ([4540538](https://github.com/longsizhuo/openInvest/commit/45405383264bf30fc98bc9309403cd64bc477666))
+
 ## [0.8.0](https://github.com/longsizhuo/openInvest/compare/v0.7.0...v0.8.0) (2026-06-13)
 
 
