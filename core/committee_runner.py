@@ -391,7 +391,13 @@ def _intervention_record(
     final_alloc = float(v.get("alloc_cny", 0) or 0)
     if orig_v == final_v and orig_alloc == final_alloc:
         return None
-    if v.get("_defense_downgrade"):
+    if v.get("_defense_dca"):
+        # 黄金防御分批 DCA（2026-06-13 裁决）：_defense_dca ∈ {"tranche","blocked_<reason>"}。
+        # tranche=放行一批（final_alloc=意图×1/3，delta=踏空的 2/3）；blocked=本批暂拦
+        # （final_alloc=0，delta=全意图）。rule 含 "defense" → rule_family=buy_defense，
+        # 与旧全拦的 defense_downgrade 并桶，账本统一回答"分批 vs 一次性省/费多少"。
+        rule = f"defense_gold_dca_{v['_defense_dca']}"
+    elif v.get("_defense_downgrade"):
         rule = f"defense_{v['_defense_downgrade']}"
     elif v.get("_sanity5_reason"):
         rule = f"sanity5_{v['_sanity5_reason']}"
@@ -409,6 +415,8 @@ def _intervention_record(
         "rule": rule,
         # 粗粒度归并：live 与 reconstructed 同底层规则并桶（聚合钱口径用）
         "rule_family": rule_family(rule),
+        # 黄金分批 DCA：第几批（None=非 DCA 干预），账本验"分批 vs 一次性"用
+        "defense_dca_tranche_idx": v.get("_defense_dca_tranche_idx"),
         "atr_defense_on": bool(atr_defense_on),
         "original_verdict": orig_v,
         "original_alloc": orig_alloc,
@@ -430,6 +438,99 @@ def _log_intervention(record: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _gold_defense_dca_gate(
+    symbol: str,
+    trading_days: Any,
+    *,
+    n_tranches: int,
+    fraction: float,
+    min_spacing_days: int,
+    window_days: int,
+) -> Dict[str, Any]:
+    """黄金防御分批 DCA 闸（2026-06-13 裁决，wiki18 §5）：防御触发时该放第几批还是暂拦。
+
+    读 interventions.jsonl 里本资产**已放行**的分批（rule=defense_gold_dca_tranche，
+    blocked 不占配额），按**交易日**日历算 spacing/quota：
+      - quota：滚动 window_days 个交易日内最多 n_tranches 批
+      - spacing：距上一批 ≥ min_spacing_days 个交易日才允许下一批
+    交易日日历用 service 层已有的 df.index（2y 行情），无需另起 MarketStore 调用。
+    纯读 + 确定性算，返回 parse_cio_memo 要的 dict：
+        {"allow": bool, "fraction": float, "reason": str, "tranche_idx": int}
+    读失败/无日历 graceful 退化（保守：日历缺则用日历天近似 spacing）。
+    """
+    import json
+    from datetime import datetime
+
+    from core.memory_store import MemoryStore
+
+    frac = float(fraction)
+
+    # 1. 已放行分批的日期（只数 tranche，blocked/其它干预不算）
+    prior_dates: List[str] = []
+    try:
+        path = MemoryStore().root / ".dreams" / "interventions.jsonl"
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:  # noqa: BLE001  坏行跳过
+                    continue
+                if rec.get("asset") != symbol:
+                    continue
+                if rec.get("rule") != "defense_gold_dca_tranche":
+                    continue
+                d = rec.get("date")
+                if d:
+                    prior_dates.append(str(d)[:10])
+    except Exception as e:  # noqa: BLE001  账本读失败 → 当作无历史，放第一批（不致命）
+        log.warning(f"DCA 闸读 interventions.jsonl 失败 graceful：{e}")
+
+    # 无历史分批 → 直接放第一批
+    if not prior_dates:
+        return {"allow": True, "fraction": frac, "reason": "first", "tranche_idx": 1}
+
+    last = max(prior_dates)
+
+    # 2. 交易日日历（df.index → 升序唯一 date 字符串）
+    cal: List[str] = []
+    try:
+        cal = sorted({
+            (ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10])
+            for ts in list(trading_days)
+        })
+    except Exception as e:  # noqa: BLE001  日历坏 → 退化日历天
+        log.warning(f"DCA 闸解析交易日日历失败 graceful，退化日历天：{e}")
+        cal = []
+
+    # 3. quota：window_days 个交易日窗内已放几批
+    if cal:
+        cutoff = cal[-window_days] if len(cal) >= window_days else cal[0]
+    else:
+        cutoff = last  # 无日历：保守用 last 当窗下界（至少把上一批算进窗内）
+    tranches_in_window = sum(1 for d in prior_dates if d >= cutoff)
+
+    # 4. spacing：距上一批的交易日数 = 日历里 (last, 最新] 的条目数
+    if cal:
+        trading_days_since = sum(1 for d in cal if d > last)
+    else:
+        try:
+            trading_days_since = (
+                datetime.now().date() - datetime.fromisoformat(last).date()
+            ).days
+        except Exception:  # noqa: BLE001
+            trading_days_since = 0  # 解析失败 → 当作同日，保守暂拦
+
+    tranche_idx = tranches_in_window + 1
+    if tranches_in_window >= n_tranches:
+        return {"allow": False, "fraction": frac, "reason": "quota", "tranche_idx": tranche_idx}
+    if trading_days_since < min_spacing_days:
+        return {"allow": False, "fraction": frac, "reason": "spacing", "tranche_idx": tranche_idx}
+    return {"allow": True, "fraction": frac, "reason": "ok", "tranche_idx": tranche_idx}
 
 
 def _save_path_snapshot(
@@ -667,6 +768,27 @@ def run_committee_for_symbol(
     if effective_valuation_brief:
         emit("valuation_brief_loaded", preview=effective_valuation_brief[:240])
 
+    # 5.9. 黄金防御分批 DCA 闸（2026-06-13 裁决）：仅黄金(type==metal)且配置开启时算。
+    # 防御触发时把"全拦黄金买入"改成"放行一批 or 按 spacing/quota 暂拦"——尊重黄金
+    # 中位右偏(典型涨不该禁)，用时间分散吃厚左尾(挤兑坑)。两条腿(VIX/ATR)已在
+    # run_committee 里 OR 成单 defense_flag_on，故只算一份合成计划（非各腿独立分批，
+    # 否则会叠成 1/9）。非黄金/未启用 → defense_dca=None → 旧全拦行为。
+    _vcfg = _load_config().verdict
+    defense_dca = None
+    if target.get("type") == "metal" and _vcfg.gold_defense_dca_enabled:
+        try:
+            defense_dca = _gold_defense_dca_gate(
+                symbol, df.index,
+                n_tranches=_vcfg.gold_defense_dca_n_tranches,
+                fraction=_vcfg.gold_defense_dca_fraction,
+                min_spacing_days=_vcfg.gold_defense_dca_min_spacing_days,
+                window_days=_vcfg.gold_defense_dca_window_days,
+            )
+            emit("gold_defense_dca_gate", asset=symbol, **defense_dca)
+        except Exception as e:  # noqa: BLE001  闸算失败 → 退回 None=旧全拦（安全侧）
+            log.warning(f"黄金 DCA 闸计算失败 graceful，退回全拦：{e}")
+            defense_dca = None
+
     # 6. 跑多轮辩论 + CIO
     result = run_committee(
         target,
@@ -681,6 +803,7 @@ def run_committee_for_symbol(
         sentiment_brief=effective_sentiment_brief,
         valuation_brief=effective_valuation_brief,
         atr_defense_on=atr_defense_on,
+        defense_dca=defense_dca,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
     )

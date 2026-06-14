@@ -349,6 +349,30 @@ def assemble_full_report(
                 f"但系统对未来路径的预期：{v['expected_path']}"
                 "（供你对照：系统预期偏空，你若有不同判断自行权衡）\n\n"
             )
+        # 买侧被快崩防御改写（VIX/ATR 哨兵），含黄金分批 DCA。翻译官路径已用
+        # defense_note 渲染；这里是无翻译官时的确定性兜底，保证决策维度不丢
+        #（守"邮件必须渲染决策维度"红线）。
+        elif v.get("_original_verdict") in ("BUY", "ACCUMULATE") and (
+            v.get("_defense_dca") or v.get("_defense_downgrade")
+        ):
+            _oa = v.get("_original_alloc", v.get("alloc_cny", 0)) or 0
+            _fa = v.get("alloc_cny", 0) or 0
+            if v.get("_defense_dca") == "tranche":
+                lines.append(
+                    f"**防御分批**: CIO 想 {v['_original_verdict']}（¥{_oa:,.0f}），高 VIX/ATR "
+                    f"防御期黄金买入改强制分批 DCA，本次只放行约 1/3（第 "
+                    f"{v.get('_defense_dca_tranche_idx', 1)} 批）→ {v['verdict']} ¥{_fa:,.0f}\n\n"
+                )
+            elif str(v.get("_defense_dca") or "").startswith("blocked"):
+                lines.append(
+                    f"**防御分批**: CIO 想 {v['_original_verdict']}（¥{_oa:,.0f}），高 VIX/ATR "
+                    "防御期黄金买入分批、本批未满间隔/配额 → 暂缓持有（等下一批）\n\n"
+                )
+            else:
+                lines.append(
+                    f"**防御降级**: CIO 想 {v['_original_verdict']}（¥{_oa:,.0f}），VIX/ATR "
+                    f"快崩哨兵触发 → 降级 {v['verdict']} ¥{_fa:,.0f}\n\n"
+                )
 
         # 概率分布（regime 概率表）
         prob = c.get("regime_probability")
