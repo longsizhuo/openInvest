@@ -96,7 +96,9 @@ def client(tmp_store, monkeypatch):
     """TestClient + 把 _new_pm 切成临时 store 版本"""
     def _new_pm_fake() -> PortfolioManager:
         return PortfolioManager(store=tmp_store)
-    monkeypatch.setattr(web_api, "_new_pm", _new_pm_fake)
+    # 路由用 Depends(get_pm) 注入 PM：测试用 dependency_overrides 覆盖（比 patch 函数干净）；
+    # monkeypatch.setitem 在用例结束后自动移除这个 override，不会泄漏到别的用例
+    monkeypatch.setitem(web_api.app.dependency_overrides, web_api.get_pm, _new_pm_fake)
 
     # MemoryStore() 默认构造仍走 MEMORY_ROOT，但 /api/history 和 /api/daily
     # 在 web_api 里 new MemoryStore() 是为了读 history.jsonl / daily/，它们

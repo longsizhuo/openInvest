@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -212,7 +212,7 @@ async def _bearer_token_auth(request, call_next):
     return await call_next(request)
 
 
-def _new_pm() -> PortfolioManager:
+def get_pm() -> PortfolioManager:
     """每请求新建 PortfolioManager（仿 napcat_bot.route 内的做法），
     保证读到 scheduler 刚写完的最新 memory，避免缓存陈旧
 
@@ -318,7 +318,7 @@ def _build_portfolio_response(pm: PortfolioManager) -> PortfolioResponse:
 
 
 @app.get("/api/portfolio", response_model=PortfolioResponse, tags=["read"])
-async def get_portfolio(response: Response) -> PortfolioResponse:
+async def get_portfolio(response: Response, pm: PortfolioManager = Depends(get_pm)) -> PortfolioResponse:
     """完整持仓快照（v1 兼容输出，前端无感）：现金 CNY/AUD + 黄金 + NDQ.AX
 
     no-store：fork 用户报告"GUI 不同步"——常见原因是反向代理 / 浏览器把这条
@@ -326,7 +326,7 @@ async def get_portfolio(response: Response) -> PortfolioResponse:
     都直接读 disk（PortfolioManager 不缓存），所以靠 no-store 让中间层别截。
     """
     response.headers["Cache-Control"] = "no-store"
-    return _build_portfolio_response(_new_pm())
+    return _build_portfolio_response(pm)
 
 
 @app.get("/api/portfolio/state", tags=["read"])
@@ -349,7 +349,7 @@ async def get_portfolio_state(response: Response) -> Dict[str, Any]:
     st = path.stat()
     # 顺便给一个 holdings 数 + cash 币种数，前端可不拉全量就知道有没有数据
     try:
-        pm = _new_pm()
+        pm = get_pm()
         holdings_count = sum(1 for _ in pm.holdings)
         cash_currencies = list(pm.cash.keys())
     except HTTPException:
@@ -447,14 +447,13 @@ def _build_holding_v2(h: Dict[str, Any]) -> HoldingV2:
 
 
 @app.get("/api/holdings", response_model=HoldingsListResponse, tags=["read"])
-async def get_holdings(response: Response) -> HoldingsListResponse:
+async def get_holdings(response: Response, pm: PortfolioManager = Depends(get_pm)) -> HoldingsListResponse:
     """v2 通用持仓列表：cash dict + holdings 数组（含实时 quote + 计算 P&L）
 
     no-store：参见 /api/portfolio 同步链路注释——防中间层缓存住，NapCat 写完
     portfolio.md 后下次 SWR refresh 必须拿到新数据。
     """
     response.headers["Cache-Control"] = "no-store"
-    pm = _new_pm()
     holdings = [_build_holding_v2(h) for h in pm.holdings]
     return HoldingsListResponse(cash=pm.cash, holdings=holdings)
 
@@ -485,6 +484,7 @@ class TotalValueResponse(BaseModel):
 @app.get("/api/portfolio/total_value", response_model=TotalValueResponse, tags=["read"])
 async def get_portfolio_total_value(
     base: str = Query("CNY", min_length=3, max_length=5, description="折算目标币种"),
+    pm: PortfolioManager = Depends(get_pm),
 ) -> TotalValueResponse:
     """所有现金 + 持仓 折算到指定币种的总市值
 
@@ -494,7 +494,6 @@ async def get_portfolio_total_value(
     """
     from utils.fx import get_fx_rate
     base = base.upper().strip()
-    pm = _new_pm()
 
     breakdown: List[TotalValueBreakdownItem] = []
     fx_rates: Dict[str, Optional[float]] = {}
@@ -695,12 +694,11 @@ class HoldingPatchRequest(BaseModel):
 
 
 @app.post("/api/holdings", response_model=HoldingV2, tags=["holdings_write"])
-async def add_holding(body: HoldingCreateRequest = Body(...)) -> HoldingV2:
+async def add_holding(body: HoldingCreateRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> HoldingV2:
     """新增持仓（任意 yfinance symbol）。symbol 已存在 → 409"""
     new_holding = body.model_dump(exclude_none=True)
     new_holding["cost_currency"] = str(new_holding["cost_currency"]).upper()
 
-    pm = _new_pm()
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         if any(h.get("symbol") == body.symbol for h in holdings):
@@ -716,7 +714,7 @@ async def add_holding(body: HoldingCreateRequest = Body(...)) -> HoldingV2:
 
 
 @app.put("/api/holdings/{symbol}", response_model=HoldingV2, tags=["holdings_write"])
-async def update_holding(symbol: str, body: HoldingPatchRequest = Body(...)) -> HoldingV2:
+async def update_holding(symbol: str, body: HoldingPatchRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> HoldingV2:
     """部分字段更新单个 holding（仅传非空字段会被改写）"""
     patch = body.model_dump(exclude_none=True)
     if not patch:
@@ -724,7 +722,6 @@ async def update_holding(symbol: str, body: HoldingPatchRequest = Body(...)) -> 
     if "cost_currency" in patch:
         patch["cost_currency"] = str(patch["cost_currency"]).upper()
 
-    pm = _new_pm()
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         target = next((h for h in holdings if h.get("symbol") == symbol), None)
@@ -740,9 +737,8 @@ async def update_holding(symbol: str, body: HoldingPatchRequest = Body(...)) -> 
 
 
 @app.delete("/api/holdings/{symbol}", tags=["holdings_write"])
-async def delete_holding(symbol: str) -> Dict[str, Any]:
+async def delete_holding(symbol: str, pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """删除持仓。units > 0 时拒绝（避免数据丢失），用户必须先卖光或显式 set units=0"""
-    pm = _new_pm()
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         target = next((h for h in holdings if h.get("symbol") == symbol), None)
@@ -809,9 +805,8 @@ async def search_symbols(
 # ============ 端点：策略 ============
 
 @app.get("/api/strategy", response_model=StrategyResponse, tags=["read"])
-async def get_strategy() -> StrategyResponse:
+async def get_strategy(pm: PortfolioManager = Depends(get_pm)) -> StrategyResponse:
     """当前投资策略：目标比例 + 各资产 cap / 点差 / 费率"""
-    pm = _new_pm()
     targets_raw = pm.strategy.get("target_assets", []) or []
     targets = [
         TargetAsset(
@@ -834,17 +829,16 @@ async def get_strategy() -> StrategyResponse:
 # ============ 端点：黄金独立查询 ============
 
 @app.get("/api/gold", response_model=GoldHolding, tags=["read"])
-async def get_gold() -> GoldHolding:
+async def get_gold(pm: PortfolioManager = Depends(get_pm)) -> GoldHolding:
     """黄金持仓 + 实时金价 + 渠道参考价（独立端点，前端可单独刷新而不重拉其他资产）"""
-    return _build_gold(_new_pm())
+    return _build_gold(pm)
 
 
 # ============ 端点：NDQ 独立查询 ============
 
 @app.get("/api/ndq", response_model=NDQHolding, tags=["read"])
-async def get_ndq() -> NDQHolding:
+async def get_ndq(pm: PortfolioManager = Depends(get_pm)) -> NDQHolding:
     """NDQ.AX 持仓 + 实时价 + 日变化（v2: 从 pm.holdings 读）"""
-    pm = _new_pm()
     ndq_h = pm.holdings.find("NDQ.AX")
     shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
     return _build_ndq(shares)
@@ -966,9 +960,8 @@ def _now_iso() -> str:
 # ===== /api/deposit =====
 
 @app.post("/api/deposit", response_model=WriteResponse, tags=["write"])
-async def deposit(body: DepositRequest = Body(...)) -> WriteResponse:
+async def deposit(body: DepositRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """存入现金（v2: 任意币种 cash dict 写入）。RMW 单锁，并发安全"""
-    pm = _new_pm()
     ccy = body.currency.upper()
 
     with pm.with_portfolio_tx() as p:
@@ -998,13 +991,12 @@ async def deposit(body: DepositRequest = Body(...)) -> WriteResponse:
 # ===== /api/withdraw =====
 
 @app.post("/api/withdraw", response_model=WriteResponse, tags=["write"])
-async def withdraw(body: WithdrawRequest = Body(...)) -> WriteResponse:
+async def withdraw(body: WithdrawRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """取出现金（v2: 任意币种 + 负数校验）。
     余额不足默认 400 拒绝（PM 关切：避免 AUD -6894 类似事故）
 
     余额检查在 fcntl 锁内执行，避免并发取款 TOCTOU 竞态。
     """
-    pm = _new_pm()
     ccy = body.currency.upper()
 
     with pm.with_portfolio_tx() as p:
@@ -1065,9 +1057,8 @@ def _gold_channel_defaults(pm: PortfolioManager) -> tuple[str, str]:
 # ===== /api/gold/buy =====（保留旧 path 给前端兼容；内部用 holdings 写）
 
 @app.post("/api/gold/buy", response_model=WriteResponse, tags=["write"])
-async def gold_buy(body: GoldTradeRequest = Body(...)) -> WriteResponse:
+async def gold_buy(body: GoldTradeRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """记录黄金买入（v2: holdings.upsert("GC=F")）"""
-    pm = _new_pm()
     grams, price = body.grams, body.price_per_gram
     total = grams * price
     channel, display_name = _gold_channel_defaults(pm)
@@ -1116,9 +1107,8 @@ async def gold_buy(body: GoldTradeRequest = Body(...)) -> WriteResponse:
 # ===== /api/gold/sell =====
 
 @app.post("/api/gold/sell", response_model=WriteResponse, tags=["write"])
-async def gold_sell(body: GoldTradeRequest = Body(...)) -> WriteResponse:
+async def gold_sell(body: GoldTradeRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """记录黄金卖出（v2: holdings.find + cash["CNY"] 联动）"""
-    pm = _new_pm()
     grams, price = body.grams, body.price_per_gram
 
     targets = pm.strategy.get("target_assets", [])
@@ -1166,9 +1156,8 @@ async def gold_sell(body: GoldTradeRequest = Body(...)) -> WriteResponse:
 # ===== /api/gold/set — 直接覆盖克数（校正用，不计流水）=====
 
 @app.post("/api/gold/set", response_model=WriteResponse, tags=["write"])
-async def gold_set(body: GoldSetRequest = Body(...)) -> WriteResponse:
+async def gold_set(body: GoldSetRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """直接设置黄金克数（v2: holdings GC=F units 直接覆盖；均价不变）"""
-    pm = _new_pm()
     channel, display_name = _gold_channel_defaults(pm)
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
@@ -1199,13 +1188,12 @@ async def gold_set(body: GoldSetRequest = Body(...)) -> WriteResponse:
 # ===== /api/gold/offset — 反推渠道点差，写回 strategy.md =====
 
 @app.post("/api/gold/offset", response_model=WriteResponse, tags=["write"])
-async def gold_offset(body: GoldOffsetRequest = Body(...)) -> WriteResponse:
+async def gold_offset(body: GoldOffsetRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """报当日实际买入克价 → 反推点差 offset → 写回 strategy.md。系统自学习渠道溢价"""
     offset = infer_offset_pct(body.bank_price)
     if offset is None:
         raise HTTPException(status_code=503, detail="无法获取实时金价，反推失败")
 
-    pm = _new_pm()
     targets = list(pm.strategy.get("target_assets", []))
     for a in targets:
         if a.get("symbol") == "GC=F":
@@ -1868,13 +1856,12 @@ class CashWriteRequest(BaseModel):
 
 
 @app.post("/api/cash/{currency}/deposit", response_model=WriteResponse, tags=["cash_write"])
-async def cash_deposit(currency: str, body: CashWriteRequest = Body(...)) -> WriteResponse:
+async def cash_deposit(currency: str, body: CashWriteRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """v2 通用任意币种存款"""
     ccy = currency.upper()
     if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
         raise HTTPException(status_code=400, detail=f"非法币种 {currency}")
 
-    pm = _new_pm()
     with pm.with_portfolio_tx() as p:
         cash = dict(p.get("cash") or {})
         new_balance = float(cash.get(ccy, 0) or 0) + body.amount
@@ -2181,7 +2168,7 @@ class ReengagementResponse(BaseModel):
 
 
 @app.get("/api/reengagement", response_model=ReengagementResponse, tags=["system"])
-async def get_reengagement_alerts() -> ReengagementResponse:
+async def get_reengagement_alerts(pm: PortfolioManager = Depends(get_pm)) -> ReengagementResponse:
     """主动 nudge 用户回 GUI 的事件流。前端轮询，detected 就弹 toast。
 
     PM-3 留存漏洞 #3 修复：当前没有任何 outbound 触发器把"事件"推到用户面前。
@@ -2190,7 +2177,6 @@ async def get_reengagement_alerts() -> ReengagementResponse:
       - high_confidence_buy: 最新 verdict confidence > 0.8 且方向是 BUY/ACCUMULATE
       - stale_decision: 上次跑委员会 > 7 天（用户该看一眼了）
     """
-    pm = _new_pm()
     store = MemoryStore()
     alerts: List[ReengagementAlert] = []
     now = datetime.now()
@@ -2583,7 +2569,7 @@ class DataSourcesHealthResponse(BaseModel):
 
 
 @app.get("/api/data_sources/health", response_model=DataSourcesHealthResponse, tags=["system"])
-async def get_data_sources_health() -> DataSourcesHealthResponse:
+async def get_data_sources_health(pm: PortfolioManager = Depends(get_pm)) -> DataSourcesHealthResponse:
     """所有数据源的当前可达性 + 最后成功拉取时间。GUI 透明化"我们用什么数据决策"
 
     B5 通用化（2026-05）：监控 symbol 不再硬编码作者持仓（NDQ.AX/GC=F），
@@ -2592,7 +2578,6 @@ async def get_data_sources_health() -> DataSourcesHealthResponse:
     sources: List[DataSourceHealth] = []
 
     # 用户实际持仓 + 通用宏观背景指标
-    pm = _new_pm()
     user_symbols: List[Tuple[str, str]] = []
     for h in pm.holdings:
         sym = str(h.get("symbol") or "")
@@ -3115,7 +3100,7 @@ async def get_committee_session(date: str, symbol: str) -> CommitteeSessionDetai
 
 
 @app.post("/api/cash/{currency}/withdraw", response_model=WriteResponse, tags=["cash_write"])
-async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...)) -> WriteResponse:
+async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """v2 通用任意币种取款（默认禁止扣到负数 — PM 强烈要求；后续可加 force=true 显式越过）
 
     余额检查在 fcntl 锁内执行，避免并发取款 TOCTOU 竞态。
@@ -3124,7 +3109,6 @@ async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...)) -> Wr
     if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
         raise HTTPException(status_code=400, detail=f"非法币种 {currency}")
 
-    pm = _new_pm()
 
     with pm.with_portfolio_tx() as p:
         cash = dict(p.get("cash") or {})
@@ -3186,7 +3170,7 @@ def _commsec_fetch(lookback_days: int) -> tuple[List[Dict[str, Any]], Optional[s
 
     from services.commsec_reader import CommSecReader
 
-    pm = _new_pm()
+    pm = get_pm()
     reader = CommSecReader(email_user, email_pass)
     if not reader.connect():
         return [], "IMAP 连接失败（凭证错误或 Gmail 限速）"
@@ -3227,6 +3211,7 @@ async def commsec_preview(
 )
 async def commsec_apply(
     body: CommsecApplyRequest = Body(...),
+    pm: PortfolioManager = Depends(get_pm),
 ) -> CommsecApplyResponse:
     """实际写入 CommSec 拉到的成交到 portfolio + history.jsonl
 
@@ -3236,7 +3221,6 @@ async def commsec_apply(
     if err:
         raise HTTPException(status_code=503, detail=err)
 
-    pm = _new_pm()
     written = 0
     errors: List[str] = []
     for t in trades:
@@ -3673,9 +3657,8 @@ async def skill_what_if(body: SkillWhatIfRequest = Body(default=SkillWhatIfReque
 
 
 @app.post("/api/skill/buy", tags=["skill"])
-async def skill_buy(body: SkillBuyRequest = Body(...)) -> Dict[str, Any]:
+async def skill_buy(body: SkillBuyRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """cmd_buy 同款加仓/建仓（加权平均成本 + 同步扣现金 + history 记 skill_remote）"""
-    pm = _new_pm()
     try:
         return pm.buy(
             body.symbol, body.units, body.price,
@@ -3687,9 +3670,8 @@ async def skill_buy(body: SkillBuyRequest = Body(...)) -> Dict[str, Any]:
 
 
 @app.post("/api/skill/sell", tags=["skill"])
-async def skill_sell(body: SkillSellRequest = Body(...)) -> Dict[str, Any]:
+async def skill_sell(body: SkillSellRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """cmd_sell 同款减仓（units 减、cost_avg 不变、按 cost_currency 还现金）"""
-    pm = _new_pm()
     try:
         return pm.sell(body.symbol, body.units, body.price, source="skill_remote")
     except ValueError as exc:
@@ -3709,9 +3691,8 @@ class SkillDeleteHoldingRequest(BaseModel):
 
 
 @app.post("/api/skill/deposit", tags=["skill"])
-async def skill_deposit(body: SkillCashRequest = Body(...)) -> Dict[str, Any]:
+async def skill_deposit(body: SkillCashRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """cmd_deposit 同款存现金（/api/cash/* 是 WriteResponse 形状，对不上 CLI，故另设）"""
-    pm = _new_pm()
     try:
         return pm.deposit_cash(body.currency, body.amount, source="skill_remote")
     except ValueError as exc:
@@ -3719,9 +3700,8 @@ async def skill_deposit(body: SkillCashRequest = Body(...)) -> Dict[str, Any]:
 
 
 @app.post("/api/skill/withdraw", tags=["skill"])
-async def skill_withdraw(body: SkillCashRequest = Body(...)) -> Dict[str, Any]:
+async def skill_withdraw(body: SkillCashRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """cmd_withdraw 同款取现金（余额检查在 fcntl 锁内）"""
-    pm = _new_pm()
     try:
         return pm.withdraw_cash(body.currency, body.amount, source="skill_remote")
     except ValueError as exc:
@@ -3729,9 +3709,8 @@ async def skill_withdraw(body: SkillCashRequest = Body(...)) -> Dict[str, Any]:
 
 
 @app.post("/api/skill/delete_holding", tags=["skill"])
-async def skill_delete_holding(body: SkillDeleteHoldingRequest = Body(...)) -> Dict[str, Any]:
+async def skill_delete_holding(body: SkillDeleteHoldingRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """cmd_delete_holding 同款删持仓行（支持 force；DELETE /api/holdings 无 force 语义）"""
-    pm = _new_pm()
     try:
         return pm.delete_holding(body.symbol, force=body.force, source="skill_remote")
     except ValueError as exc:
