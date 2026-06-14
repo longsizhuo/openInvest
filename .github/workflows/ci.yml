@@ -65,6 +65,7 @@ jobs:
           uv run python -c "from db.trades_db import TradesDB"
           uv run python -c "from db.insights_db import InsightsDB"
           uv run python -c "import scripts.export_accuracy"
+          uv run python -c "import scripts.snapshot"
           uv run python -c "from db.event_store import EventStore, claim_to_event_id"
           uv run python -c "from services.embeddings import embed_text, DEFAULT_DIM"
           uv run python -c "from services.event_normalizer import normalize, NormalizedEvent"
