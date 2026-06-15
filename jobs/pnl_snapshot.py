@@ -539,7 +539,10 @@ def _auto_push_svg() -> Dict[str, Any]:
         raw = e.stderr[:200] if e.stderr else str(e)
         return {"pushed": False, "reason": f"git failure: {_redact_token_in(raw)}"}
     except Exception as e:
-        return {"pushed": False, "reason": f"unexpected: {type(e).__name__}: {e}"}
+        # 兜底分支同样可能带 authed_remote（token）—— 非 CalledProcessError 的
+        # subprocess 异常（OSError/TimeoutExpired）或库异常的 message 里也会回显
+        # 带 token 的 URL，统一脱敏。type 名不含 secret，保留不脱敏。
+        return {"pushed": False, "reason": f"unexpected: {type(e).__name__}: {_redact_token_in(str(e))}"}
 
 
 def _is_trading_window(now: Optional[datetime] = None) -> bool:

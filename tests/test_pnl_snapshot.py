@@ -126,3 +126,70 @@ def test_auto_push_main_path_redacts_token_on_failure(monkeypatch):
     # 核心断言：token 明文绝不出现在返回值里（避免流到 scheduler 日志）
     assert _SECRET_TOKEN not in str(result)
     assert "x-access-token:***@" in result["reason"]
+
+
+def test_auto_push_generic_except_redacts_token(monkeypatch):
+    """兜底 `except Exception` 分支：非 CalledProcessError（OSError/TimeoutExpired
+    等）的异常 message 里若带 authed_remote 的 token，返回的 reason 必须脱敏。
+
+    驱动方式：让 authed_remote 构建完成（config --get 返回合法 https remote）后，
+    main 分支的第一个 git 调用（git add）抛 OSError，且 message 里嵌入带 token 的 URL。
+    """
+    monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", _SECRET_TOKEN)
+    monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "main")
+
+    authed = f"https://x-access-token:{_SECRET_TOKEN}@github.com/owner/repo.git"
+
+    def _fake_run(cmd, **kwargs):
+        args = cmd[1:] if cmd and cmd[0] == "git" else cmd
+        if args[:2] == ["config", "--get"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, "https://github.com/owner/repo.git\n", ""
+            )
+        # authed_remote 已构建完毕，下一步 git add 抛非 CPE 异常（带 token 的 URL）
+        raise OSError(f"connection reset talking to {authed}")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    result = _auto_push_svg()
+
+    assert result["pushed"] is False
+    # 核心断言：明文 token 绝不出现在返回值里
+    assert _SECRET_TOKEN not in str(result)
+    assert "x-access-token:***@" in result["reason"]
+    # type 名保留不脱敏
+    assert "OSError" in result["reason"]
+
+
+def test_auto_push_called_process_error_redacts_token(monkeypatch):
+    """`except subprocess.CalledProcessError` 兜底分支：git 调用以 check=True 抛
+    CalledProcessError 且 stderr 带 token 时，返回的 reason 必须脱敏。"""
+    monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", _SECRET_TOKEN)
+    monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "main")
+
+    authed = f"https://x-access-token:{_SECRET_TOKEN}@github.com/owner/repo.git"
+    cpe_stderr = f"fatal: unable to access '{authed}/': The requested URL returned error: 403"
+
+    def _fake_run(cmd, **kwargs):
+        args = cmd[1:] if cmd and cmd[0] == "git" else cmd
+        check = kwargs.get("check", False)
+        if args[:2] == ["config", "--get"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, "https://github.com/owner/repo.git\n", ""
+            )
+        # main 分支 git add 默认 check=True → 抛 CalledProcessError（带 token 的 stderr）
+        if check:
+            raise subprocess.CalledProcessError(1, cmd, "", cpe_stderr)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    result = _auto_push_svg()
+
+    assert result["pushed"] is False
+    # 核心断言：明文 token 绝不出现在返回值里
+    assert _SECRET_TOKEN not in str(result)
+    assert "x-access-token:***@" in result["reason"]
+    assert result["reason"].startswith("git failure:")
