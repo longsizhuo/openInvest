@@ -16,7 +16,13 @@ from pathlib import Path
 import pytest
 
 # 直接 import 模块（不作为 __main__ 运行）
-from scripts.export_accuracy import build_summary, _aggregate, _filter_by_window
+from scripts.export_accuracy import (
+    build_summary,
+    _aggregate,
+    _filter_by_window,
+    _suppress_small_samples,
+    MIN_SAMPLE_FOR_PUBLIC,
+)
 
 
 # ---------- helper ----------
@@ -149,6 +155,61 @@ def test_aggregate_empty_rows():
     assert result["direction_hit_rate"] is None
     for bucket in ("bullish", "bearish", "hold"):
         assert result["by_direction"][bucket]["total"] == 0
+
+
+# ---------- 小样本抑制（红线 #2：n < 30 不展示具体数字）----------
+
+def test_suppress_small_samples_nulls_overall_rate():
+    """窗口 sample_size < 30 → direction_hit_rate 置 None，但保留 sample_size"""
+    window = {
+        "direction_hit_rate": 0.8929,
+        "sample_size": 28,
+        "by_direction": {
+            "bullish": {"hit": 0, "total": 3, "rate": 0.0},
+            "hold": {"hit": 24, "total": 24, "rate": 1.0},
+        },
+    }
+    out = _suppress_small_samples(window)
+    assert out["direction_hit_rate"] is None
+    assert out["sample_size"] == 28              # 计数保留
+    assert out["by_direction"]["bullish"]["rate"] is None
+    assert out["by_direction"]["hold"]["rate"] is None
+    assert out["by_direction"]["bullish"]["total"] == 3  # 计数保留
+
+
+def test_suppress_keeps_large_overall_but_nulls_small_direction():
+    """整体 n>=30 保留 direction_hit_rate；但某方向 n<30 仍抹该方向 rate"""
+    window = {
+        "direction_hit_rate": 0.9118,
+        "sample_size": 34,
+        "by_direction": {
+            "bullish": {"hit": 0, "total": 3, "rate": 0.0},   # 小样本 → 抹
+            "hold": {"hit": 30, "total": 30, "rate": 1.0},    # >=30 → 保留
+        },
+    }
+    out = _suppress_small_samples(window)
+    assert out["direction_hit_rate"] == 0.9118
+    assert out["by_direction"]["bullish"]["rate"] is None
+    assert out["by_direction"]["hold"]["rate"] == 1.0
+
+
+def test_build_summary_suppresses_small_sample_public_output(tmp_path):
+    """端到端：build_summary 输出里小样本窗口不得带具体命中率数字"""
+    now = datetime.now(timezone.utc)
+    # 只造 5 条近期记录 → 所有窗口 n=5 < 30
+    rows = [
+        _make_row((now - timedelta(days=i)).strftime("%Y-%m-%d"), "up", True)
+        for i in range(5)
+    ]
+    jsonl = tmp_path / "v.jsonl"
+    _write_jsonl(jsonl, rows)
+
+    summary = build_summary(jsonl)
+    for name, window in summary["windows"].items():
+        assert window["sample_size"] < MIN_SAMPLE_FOR_PUBLIC
+        assert window["direction_hit_rate"] is None, f"{name} 窗口泄露了小样本命中率"
+        for bucket in window["by_direction"].values():
+            assert bucket["rate"] is None
 
 
 # ---------- 窗口过滤 ----------

@@ -526,12 +526,18 @@ def _auto_push_svg() -> Dict[str, Any]:
         ])
         push = _git(["push", authed_remote, f"HEAD:{branch}"], check=False)
         if push.returncode != 0:
-            return {"pushed": False, "reason": f"push failed: {push.stderr[:200]}",
+            # 必须脱敏：git push 失败 stderr 会回显带 token 的 authed_remote
+            # （'fatal: unable to access https://x-access-token:TOKEN@github.com/...'）
+            # 与 orphan 路径同口径，避免 GITHUB_TOKEN 流到 scheduler 日志（audit security M1）
+            return {"pushed": False,
+                    "reason": f"push failed: {_redact_token_in(push.stderr[:200])}",
                     "branch": branch}
         return {"pushed": True, "branch": branch, "mode": "main"}
 
     except subprocess.CalledProcessError as e:
-        return {"pushed": False, "reason": f"git failure: {e.stderr[:200] if e.stderr else e}"}
+        # e.stderr 同样可能带 authed_remote（token），统一脱敏
+        raw = e.stderr[:200] if e.stderr else str(e)
+        return {"pushed": False, "reason": f"git failure: {_redact_token_in(raw)}"}
     except Exception as e:
         return {"pushed": False, "reason": f"unexpected: {type(e).__name__}: {e}"}
 

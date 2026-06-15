@@ -57,6 +57,40 @@ def test_to_base(monkeypatch):
     assert fx.to_base("USD", 100, "CNY") == 700.0
 
 
+def test_to_base_threads_as_of_date(monkeypatch):
+    """回测：to_base(as_of_date=...) 必须把日期透传到 get_history_data（防前视偏差）"""
+    captured: dict = {}
+    monkeypatch.setattr(
+        fx, "get_history_data",
+        lambda s, p="5d", **kw: (captured.update(kw), _fake_df(6.5))[1],
+    )
+    fx.to_base("USD", 100, "CNY", as_of_date="2024-03-15")
+    assert captured.get("as_of_date") == "2024-03-15"
+
+
+def test_total_portfolio_value_threads_as_of_date(monkeypatch):
+    """total_portfolio_value_cny(as_of_date=...) 对 cash + holdings 折算都按历史汇率拉"""
+    seen_dates: list = []
+
+    def _capture(symbol, p="5d", **kw):
+        seen_dates.append(kw.get("as_of_date"))
+        return _fake_df(7.0)
+
+    monkeypatch.setattr(fx, "get_history_data", _capture)
+
+    class _StubPM:
+        cash = {"USD": 100}
+        holdings = [{"symbol": "AAPL", "units": 2, "avg_cost": 50, "cost_currency": "USD"}]
+
+    total, status = fx.total_portfolio_value_cny(
+        _StubPM(), {"AAPL": 50}, base="CNY", as_of_date="2024-03-15",
+    )
+    # cash 100 USD * 7 = 700；holding 2*50=100 USD * 7 = 700 → 1400
+    assert total == 1400.0
+    # 两次折算（cash + holding）都按历史日期拉，没有任何 None（实时）泄漏
+    assert seen_dates and all(d == "2024-03-15" for d in seen_dates)
+
+
 def test_cash_total_in_base_mixed(monkeypatch):
     rates = {"USDCNY=X": 7.0, "AUDCNY=X": 4.9}
     monkeypatch.setattr(
