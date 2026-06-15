@@ -37,7 +37,7 @@
   一次性"在深坑里省多少、典型涨势里踏空多少后再调。
 - **代价（诚实标注）**：典型情况会"付踏空学费换挤兑坑保护"——这是裁决接受的交易。
 - **可逆**：`verdict.gold_defense_dca_enabled=false` 即退回旧全拦行为（dataclass 默认
-  即关）。配置见 `core/config/defaults.yaml`，代码 `core/committee.py:parse_cio_memo`
+  即关）。配置见 `core/config/defaults.yaml`，代码 `core/committee/cio_parse.py:parse_cio_memo`
   + `core/runner/intervention.py:_gold_defense_dca_gate`。
 - 旧验收脚本 `scripts/validate_gold_defense.py`（测"全拦"是否 PASS）已是历史口径——
   裁决不再以"翻 PASS/FAIL"为准，改以账本钱口径长期验证（账本视角下"全拦 vs 分批 vs

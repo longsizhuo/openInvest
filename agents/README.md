@@ -14,5 +14,5 @@
 
 ## 与其他目录的关系
 
-- 上游：被 `core/committee.py:run_committee` 调用编排
+- 上游：被 `core/committee/debate.py:run_committee` 调用编排
 - 下游：调用 `services/news.py` 拉新闻、`utils/exchange_fee.py` 拉行情

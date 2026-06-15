@@ -80,7 +80,7 @@
 
 ## 3. Core 层（业务核心）
 
-### 3.1 编排器：`core/committee.py`
+### 3.1 编排器：`core/committee/` 包（`debate.py:run_committee` 为入口）
 
 ```python
 def run_committee(asset, market_data, macro_view, portfolio_summary,
@@ -244,7 +244,7 @@ holdings:
 每层都设计成可独立替换：
 
 - **加 connector**（如 Telegram bot）：照 napcat_bot.py 模式新建一个文件，**不要碰 core**
-- **加 agent 角色**（如 ESG 分析师）：在 `agents/` 加 prompt 文件，在 `committee.py:run_committee` 注册
+- **加 agent 角色**（如 ESG 分析师）：在 `agents/` 加 prompt 文件，在 `core/committee/debate.py:run_committee` 注册
 - **换 LLM provider**（DeepSeek → OpenAI）：改 `agents/agent.py` 的 client init，prompt 不动
 - **换持久化**（Markdown → SQLite）：实现 `MemoryStore` 同接口，core 不动
 

@@ -15,7 +15,7 @@ openInvest 的"4 角色委员会"（Macro / Quant / Risk / CIO）有两条执行
 | 路径 | 协调者 | Worker 实现 | 模型 |
 |------|--------|-------------|------|
 | **Skill** | 用户的 Claude 当 coordinator | `Agent({subagent_type})` 真 spawn 4 个 subprocess subagent | Claude 4 |
-| **Web/Cron** | `core/committee.py` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat |
+| **Web/Cron** | `core/committee.py`（现 `core/committee/` 包）| 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat |
 
 两套同 prompt 不同实现，**结果可能不同**（不同模型 + 不同隔离粒度）。
 
@@ -83,7 +83,7 @@ openInvest 的"4 角色委员会"（Macro / Quant / Risk / CIO）有两条执行
 - 完整双路径解释：[04-execution-paths.md](../04-execution-paths.md)
 - 不升级 Claude Agent SDK 的细节：[ADR-002](002-no-claude-agent-sdk.md)
 - Skill 实现：`skill/run.sh prepare_committee` + `skills/invest/SKILL.md`
-- Web/Cron 实现：`core/committee.py:run_committee` + `connectors/web_api.py:committee_run`
+- Web/Cron 实现：`core/committee.py:run_committee`（现 `core/committee/debate.py:run_committee`）+ `connectors/web_api.py:committee_run`
 
 ---
 

@@ -109,7 +109,7 @@
        ...
    ```
 
-2. **改 `core/committee.py:run_committee`** 注册到 Round 1 + Round 2..N 并行循环
+2. **改 `core/committee/debate.py:run_committee`** 注册到 Round 1 + Round 2..N 并行循环
    ```python
    esg_agent_r1 = _create_agent(
        build_esg_prompt(asset, "opening"),
@@ -132,7 +132,7 @@
 
 7. **同步 Coordinator 路径**：`skill/run.sh prepare_committee` 也要 spawn 第 5 个 subagent
    → 这是双路径的成本，详见 [04-execution-paths.md](04-execution-paths.md)
-   （Direct 路径 `run_committee` 复用 `core/committee.py`，第 4 步生效后自动跟上，不用单独改）
+   （Direct 路径 `run_committee` 复用 `core/committee/`，第 4 步生效后自动跟上，不用单独改）
 
 工时：~半天（含两条路径同步）。
 

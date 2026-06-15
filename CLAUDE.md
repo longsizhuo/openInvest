@@ -55,13 +55,15 @@ openInvest 有三个调用层，每层服务不同对象：
 ### 强制 4 层（2026-05-16 三路径统一架构）
 
 > 2026-06-15：`core/committee_runner.py` 已按职责拆成 `core/runner/` 包（event_brief / loaders / intervention / session / coordinator），`committee_runner.py` 留薄壳 façade re-export 全部符号——`from core.committee_runner import X` 对所有历史 X 仍可用，entry 零改。下面写新位置；旧 façade 路径仍有效。
+>
+> 2026-06-15（#57）：`core/committee.py` 同款拆成 `core/committee/` 包（agent_io / cio_parse / views / loaders / debate / persist），`__init__.py` 留薄壳 façade re-export 全部历史符号（含下划线名 + 模块常量）——`from core.committee import X` 与 `core.committee.X` 属性访问对所有历史 X 仍可用，entry / service / 测试 / 脚本零改。注意 `run_committee` 在 `debate.py` 命名空间内解析 `_create_agent` / `_persist`，monkeypatch 要钉 `core.committee.debate.*` 而非 façade 属性。
 
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee` | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
 | **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ wealth view + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
 | **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
-| **Primitive** | `core/committee.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
+| **Primitive** | `core/committee/debate.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
 
 ### Shared Input Loaders（单一可信源）
 
@@ -137,7 +139,7 @@ skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，�
 scripts/skill.py           CLI 入口（doctor/init/status/run_committee/...）
 connectors/web_api.py      FastAPI 端点（GUI + CLI 共享）
 core/portfolio_manager.py  持仓 façade，with_portfolio_tx fcntl 锁
-core/committee.py          委员会编排
+core/committee/            委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
 db/trades_db.py            内部账本 SQLite WAL（不连真实支付）
 docs/wiki/                 完整文档
 docs/wiki/adr/             关键决策记录（v1 退场 / daily_report 拆 / 双路径）

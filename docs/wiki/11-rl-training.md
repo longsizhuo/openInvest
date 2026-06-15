@@ -84,7 +84,7 @@
 
 **对策**：3 处必须修
 1. `utils/exchange_fee.py:get_history_data()` 加 `as_of_date` 参数，DB 缓存按日期 cutoff 过滤
-2. `core/committee.py:_capture_macro_context()` 用 `decision_date` 而非 `datetime.now()`
+2. `core/committee/persist.py:_capture_macro_context()` 用 `decision_date` 而非 `datetime.now()`
 3. `scripts/backtest_committee.py` 加 `--allow-lookahead` flag，默认拒绝 decision_date > 2024-06-30（DeepSeek 训练数据 cutoff，再之后的回测含 LLM 自身 lookahead bias）
 
 **测试**：`tests/test_backtest_no_lookahead.py`
@@ -289,7 +289,7 @@ scripts/build_dspy_trainset.py ← 给 DSPy 准备 trainset (verdict + 7d return
 core/paper_trade_simulator.py  ← PaperAccount + execute_verdict
 core/strategy_metrics.py       ← 年化 / Sharpe / Sortino / vs benchmark
 core/backtest_reward.py        ← reward function (单数值)
-core/committee.py              ← parse_cio_memo 含 INVEST_* env clamp
+core/committee/cio_parse.py    ← parse_cio_memo 含 INVEST_* env clamp
 
 # 实验 archive
 experiments/optuna_final_summary.json           ← 30-trial 数据

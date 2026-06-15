@@ -776,9 +776,11 @@ def test_run_committee_injects_sentiment_and_valuation_into_agents(monkeypatch):
                 )
             return ""
 
-    monkeypatch.setattr(cmt, "_create_agent",
+    # run_committee 搬进 core/committee/debate.py 后在该命名空间解析 _create_agent /
+    # _persist，façade 属性 cmt._x 的 patch 打不到 → 必须钉 core.committee.debate.*
+    monkeypatch.setattr("core.committee.debate._create_agent",
                         lambda _p, **kw: RecordingAgent(kw.get("role")))
-    monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+    monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
 
     cmt.run_committee(
         asset={"symbol": "NDQ.AX", "display_name": "Test"},
@@ -856,9 +858,10 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
             return FakeAgent(FAKE_CIO)
         return FakeAgent("")
 
-    monkeypatch.setattr(cmt, "_create_agent", fake_create_agent)
+    # run_committee 在 core/committee/debate.py 命名空间解析这两个名字 → 钉 debate.*
+    monkeypatch.setattr("core.committee.debate._create_agent", fake_create_agent)
     # 跳过 persist（写文件 + DB）—— 单测不关心
-    monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+    monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
 
     result = cmt.run_committee(
         asset={"symbol": "NDQ.AX", "display_name": "BetaShares Nasdaq 100 ETF"},
@@ -920,8 +923,9 @@ def test_run_committee_applies_aggressive_risk_profile(monkeypatch):
     set_config_override({"verdict": {"risk_profile": "aggressive"}})
     try:
         captured: dict = {}
-        monkeypatch.setattr(cmt, "_create_agent", _make_hold_cio_agent_factory(captured))
-        monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+        # run_committee 在 core/committee/debate.py 命名空间解析 → 钉 debate.*
+        monkeypatch.setattr("core.committee.debate._create_agent", _make_hold_cio_agent_factory(captured))
+        monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
         result = cmt.run_committee(
             asset={"symbol": "NDQ.AX", "display_name": "Test"},
             market_data="fake market",
@@ -949,8 +953,9 @@ def test_run_committee_defense_flag_blocks_aggressive(monkeypatch):
     set_config_override({"verdict": {"risk_profile": "aggressive"}})
     try:
         captured: dict = {}
-        monkeypatch.setattr(cmt, "_create_agent", _make_hold_cio_agent_factory(captured))
-        monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+        # run_committee 在 core/committee/debate.py 命名空间解析 → 钉 debate.*
+        monkeypatch.setattr("core.committee.debate._create_agent", _make_hold_cio_agent_factory(captured))
+        monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
         result = cmt.run_committee(
             asset={"symbol": "NDQ.AX", "display_name": "Test"},
             market_data="fake market",
@@ -1069,8 +1074,9 @@ def test_run_committee_atr_defense_downgrades_accumulate(monkeypatch):
                 )
             return ""
 
-    monkeypatch.setattr(cmt, "_create_agent", lambda _p, **kw: FakeAgent(kw.get("role")))
-    monkeypatch.setattr(cmt, "_persist", lambda *a, **kw: None)
+    # run_committee 在 core/committee/debate.py 命名空间解析 → 钉 debate.*
+    monkeypatch.setattr("core.committee.debate._create_agent", lambda _p, **kw: FakeAgent(kw.get("role")))
+    monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
     result = cmt.run_committee(
         asset={"symbol": "NDQ.AX", "display_name": "Test"},
         market_data="fake market",

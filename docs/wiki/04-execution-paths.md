@@ -18,7 +18,7 @@
 | 路径 | 谁能用 | 触发 | 协调者 | Worker 实现 | 模型 | 真 subagent? | 成本 |
 |------|--------|------|--------|-------------|------|-------------|------|
 | **Coordinator** | 仅 Claude Code（要 `Agent({...})` 工具）| skill `prepare_committee SYM` | 用户的 Claude | `Agent({subagent_type})` 真 spawn 4 subagent（subprocess 隔离）| Claude 4 | ✅ | 由用户订阅承担（项目 ¥0）|
-| **Direct** | 任意 agent（Cursor / Cline / Codex / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee.py` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
+| **Direct** | 任意 agent（Cursor / Cline / Codex / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee/` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
 
 **功能等价**：同一套 prompt，同一套 cross-challenge 协议，同一套 regime 分类 + 中性概率口径。
 **模型不同**：verdict 可能不同——这是**对比验证机制**而不是 bug。
@@ -79,7 +79,7 @@ Agent({...})  // cio 综合 transcript
 
 ## 2. Direct 路径（任意 agent / cron / Web GUI）
 
-三个触发入口都走同一份 `core/committee.py:run_committee`：
+三个触发入口都走同一份 `core/committee/debate.py:run_committee`：
 
 | 入口 | 谁用 | 备注 |
 |------|------|------|
@@ -94,7 +94,7 @@ Agent({...})  // cio 综合 transcript
 
 ### 实现
 
-`core/committee.py:run_committee` 在同一进程内：
+`core/committee/debate.py:run_committee` 在同一进程内：
 
 ```python
 # Round 1: Quant + Risk 并行
@@ -170,7 +170,7 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 ├─────────────────────────────────────────────────┤
 │  core/regime.py REGIME 分类 + 概率口径           │ ← 共享
 ├─────────────────────────────────────────────────┤
-│  core/committee.py run_committee 编排逻辑        │ ← 仅 Direct 用
+│  core/committee/debate.py run_committee 编排逻辑 │ ← 仅 Direct 用
 │  skill/run.sh prepare_committee 提示生成         │ ← 仅 Coordinator 用
 │  skill/run.sh run_committee（包 run_committee） │ ← Direct 在 skill 里的入口
 ├─────────────────────────────────────────────────┤
