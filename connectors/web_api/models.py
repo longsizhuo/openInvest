@@ -1,7 +1,7 @@
 """Pydantic 请求/响应模型 — 从 web_api.py 拆分（定义不变）。"""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
