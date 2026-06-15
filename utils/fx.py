@@ -80,9 +80,16 @@ def get_fx_rate(
     return rate
 
 
-def to_base(quote: str, amount: float, base: str = "CNY") -> Optional[float]:
-    """把 amount（quote 计价）换成 base 计价金额"""
-    rate = get_fx_rate(quote, base)
+def to_base(
+    quote: str, amount: float, base: str = "CNY",
+    *, as_of_date: Optional[str] = None,
+) -> Optional[float]:
+    """把 amount（quote 计价）换成 base 计价金额
+
+    as_of_date: backtest / paper trading 必传，按当天 close 拉 FX（绕过实时缓存）；
+        None=实盘。不透传会导致历史估值用今天的汇率 → 前视偏差。
+    """
+    rate = get_fx_rate(quote, base, as_of_date=as_of_date)
     if rate is None:
         return None
     return amount * rate
@@ -145,7 +152,7 @@ def total_portfolio_value_cny(
         if not amt:
             status[ccy] = "ok"   # 0 余额视为 ok（不算 fx 漂移）
             continue
-        converted = to_base(ccy, float(amt), base)
+        converted = to_base(ccy, float(amt), base, as_of_date=as_of_date)
         if converted is None:
             status[ccy] = "missing_fx"
         else:
@@ -175,7 +182,7 @@ def total_portfolio_value_cny(
                 continue
             price = avg
         local_value = units * float(price)
-        value_in_base = to_base(ccy, local_value, base)
+        value_in_base = to_base(ccy, local_value, base, as_of_date=as_of_date)
         if value_in_base is None:
             status[sym] = "missing_fx"
             continue
