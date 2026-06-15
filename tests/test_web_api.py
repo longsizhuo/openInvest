@@ -408,12 +408,12 @@ def test_committee_run_and_status_done(client, monkeypatch):
         "debate": {"max_rounds": 1, "final_round": 1, "converged": True,
                    "quant_history": ["q1"], "risk_history": ["r1"]},
     }
-    import core.committee_runner as cr_mod
+    import core.runner.session as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol",
                         lambda sym, **kw: fake_result)
     # macro_view 也 mock（session 在 dispatch 之前调一次共享 macro，避免真 LLM）
-    # 三路径统一架构后，session 通过 core.committee_runner.run_macro_view 引用调用，
-    # 这是真正生效的 mock 点
+    # 三路径统一架构后，session 通过 core.runner.session.run_macro_view 引用调用，
+    # 这是真正生效的 mock 点（committee_runner 拆包后 cr_mod 指向 core.runner.session）
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
     # wealth_view loader 也 mock（避免读真 user.md / 触发 LLM）
@@ -453,7 +453,7 @@ def test_committee_run_error_path(client, monkeypatch):
     def _boom(sym, **kw):
         raise RuntimeError("LLM API down")
 
-    import core.committee_runner as cr_mod
+    import core.runner.session as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", _boom)
     # session 共享 prep 也 mock（避免真 LLM）
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
@@ -1028,7 +1028,7 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
 
     mock 口径对齐 tests/test_prepare_committee.py:_mock_world（同一个 service 函数）
     """
-    import core.committee_runner as cr
+    import core.runner.coordinator as cr
     import core.regime_probability as rp
     import jobs.daily_report_builder as drb
     import utils.exchange_fee as ef
@@ -1104,7 +1104,7 @@ def test_committee_run_summary_includes_cio_memo(client, monkeypatch):
         "debate": {"max_rounds": 1, "final_round": 1, "converged": True,
                    "quant_history": ["q1"], "risk_history": ["r1"]},
     }
-    import core.committee_runner as cr_mod
+    import core.runner.session as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", lambda sym, **kw: fake_result)
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})

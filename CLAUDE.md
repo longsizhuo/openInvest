@@ -54,19 +54,21 @@ openInvest 有三个调用层，每层服务不同对象：
 
 ### 强制 4 层（2026-05-16 三路径统一架构）
 
+> 2026-06-15：`core/committee_runner.py` 已按职责拆成 `core/runner/` 包（event_brief / loaders / intervention / session / coordinator），`committee_runner.py` 留薄壳 façade re-export 全部符号——`from core.committee_runner import X` 对所有历史 X 仍可用，entry 零改。下面写新位置；旧 façade 路径仍有效。
+
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee` | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
-| **Orchestrator** | `core/committee_runner.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ wealth view + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
-| **Service** | `core/committee_runner.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
+| **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ wealth view + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
+| **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
 | **Primitive** | `core/committee.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
 
 ### Shared Input Loaders（单一可信源）
 
 加新的 cross-entry 参数（如 `event_brief`, `wealth_context_view`, `prior_insights`）时**只改 Orchestrator**：
 
-1. `core/committee_runner.py:run_committee_session()` 加内部步骤读 loader（或加 `<name>_override` kwarg）
-2. `core/committee_runner.py:load_<name>()` 实现 IO 读取 + graceful 退化空字符串
+1. `core/runner/session.py:run_committee_session()` 加内部步骤读 loader（或加 `<name>_override` kwarg）
+2. `core/runner/loaders.py:load_<name>()` 实现 IO 读取 + graceful 退化空字符串
 3. `run_committee_for_symbol` 加 `<name>_override` kwarg，session 一次调好后传进来避免重复
 4. `tests/test_committee_contract.py:test_run_committee_session_*` 加 SENTINEL 测试守
 

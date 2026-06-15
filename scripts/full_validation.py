@@ -30,7 +30,7 @@
 隔离副作用 / 未来泄漏:
   • core.committee._persist → no-op：**绝不写 memory/.committee/**（零污染，也不会
     回流进 get_recent_committee_verdicts）。
-  • core.committee_runner.load_prior_insights → ""：不读今天的 Dreaming insights。
+  • core.runner.session.load_prior_insights → ""：不读今天的 Dreaming insights。
   • agents.tools query_dreaming_insights / get_recent_committee_verdicts → []：
     LLM 工具调用也拿不到未来 insight / 别的采样点的决议（每点独立）。
   • **概率表 + 买回点参考也钉到 D**：patch db.market_store.MarketStore.get_history_df
@@ -149,7 +149,7 @@ def _pin_to_date_and_isolate(decision_date: str):
 
     import agents.tools as tools
     import core.committee as cm
-    import core.committee_runner as cr
+    import core.runner.session as cr
     import db.market_store as ms
     import utils.exchange_fee as ef
 

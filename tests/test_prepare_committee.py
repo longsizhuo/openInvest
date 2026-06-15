@@ -54,7 +54,7 @@ def _mock_world(monkeypatch):
     monkeypatch.setattr(gp, "get_gold_snapshot", lambda **k: None)
 
     # 确定性事实块 loaders（与 direct 路径同源）锚定 SENTINEL
-    import core.committee_runner as cr
+    import core.runner.coordinator as cr
     monkeypatch.setattr(cr, "load_sentiment_brief", lambda *a, **k: SENT)
     monkeypatch.setattr(cr, "load_valuation_brief", lambda *a, **k: VAL)
     monkeypatch.setattr(cr, "load_wealth_context_view", lambda: "")
