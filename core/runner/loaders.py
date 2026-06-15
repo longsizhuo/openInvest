@@ -2,31 +2,11 @@
 from __future__ import annotations
 
 import logging
-import os
-import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from core.committee import (
-    atr_defense_from_text,  # re-export: cmd_save_committee 提 ATR 防御腿用
-    load_backup_cny,  # re-export: entry (daily_report / skill) 走 service layer
-    load_wealth_context_view,
-    parse_cio_memo,  # re-export: 给 entry (scripts.skill cmd_save_committee) 用，
-                     # 避免 entry 直接 import core.committee 违反 lint-imports 契约
-    regime_label_from_text,  # re-export: 同上，cmd_save_committee 提 regime 标签用
-    run_committee,
-    run_macro_view,
-)
+from core.committee import load_backup_cny  # _build_default_portfolio_summary 兜底走 backup_cny 单一可信源
 from core.portfolio_manager import PortfolioManager
-from core.regime import classify_regime, format_regime_brief
-from core.regime_probability import (
-    RegimeProbability,
-    build_probability_table_from_ohlc,
-    get_regime_probability,
-)
-from utils.exchange_fee import (
-    analyze_multi_timeframe, get_history_data, get_macro_data,
-)
-from utils.market_metrics import compute_metrics
+from utils.exchange_fee import get_history_data
 
 log = logging.getLogger(__name__)
 

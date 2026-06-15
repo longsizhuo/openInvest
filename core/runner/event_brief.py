@@ -3,30 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
-import re
-from typing import Any, Callable, Dict, List, Optional
-
-from core.committee import (
-    atr_defense_from_text,  # re-export: cmd_save_committee 提 ATR 防御腿用
-    load_backup_cny,  # re-export: entry (daily_report / skill) 走 service layer
-    load_wealth_context_view,
-    parse_cio_memo,  # re-export: 给 entry (scripts.skill cmd_save_committee) 用，
-                     # 避免 entry 直接 import core.committee 违反 lint-imports 契约
-    regime_label_from_text,  # re-export: 同上，cmd_save_committee 提 regime 标签用
-    run_committee,
-    run_macro_view,
-)
-from core.portfolio_manager import PortfolioManager
-from core.regime import classify_regime, format_regime_brief
-from core.regime_probability import (
-    RegimeProbability,
-    build_probability_table_from_ohlc,
-    get_regime_probability,
-)
-from utils.exchange_fee import (
-    analyze_multi_timeframe, get_history_data, get_macro_data,
-)
-from utils.market_metrics import compute_metrics
+from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
@@ -183,8 +160,10 @@ def resolve_event_brief_multi(symbols: List[str]) -> str:
     deduped = list(dict.fromkeys(paragraphs))
     return "\n\n".join(deduped)
 
+# 注：_EVENT_STORE_SINGLETON 是模块级可变单例，刻意不放进 __all__——
+# 否则 façade 的 `import *` 会带出一个 import 时的 None 快照（不跟踪真单例），
+# 平白扩大 public surface。测试要重置直接 `core.runner.event_brief._EVENT_STORE_SINGLETON = None`。
 __all__ = [
-    "_EVENT_STORE_SINGLETON",
     "_get_event_store",
     "_resolve_event_brief",
     "format_event_brief",
