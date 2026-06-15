@@ -152,7 +152,7 @@ CIO 在下一次决策时通过 `MEMORY.md` 索引看到这条 → 在该 regime
 
 ## 4. 怎么被 CIO / Risk Officer 看到
 
-`core/committee_runner.py:load_prior_insights` 在跑委员会前读 `memory/insights/*.md`，
+`core/runner/loaders.py:load_prior_insights` 在跑委员会前读 `memory/insights/*.md`，
 注入到 prompt 上下文（`prior_insights`）。这是 [三路径单一可信源](04-execution-paths.md)
 的一部分——Skill / Web / Cron 三条路径都经 `run_committee_session` 注入，不漏。
 

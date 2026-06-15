@@ -188,7 +188,8 @@ uv run pytest tests/test_regime_probability.py -q     # 数值精确性 + 形状
 
 ```bash
 uv run python -c "
-from core.committee_runner import compute_metrics, get_history_data
+from utils.market_metrics import compute_metrics
+from utils.exchange_fee import get_history_data
 from core.regime import classify_regime
 from core.regime_probability import build_reentry_reference_text
 df = get_history_data('NDQ.AX', '2y'); m = compute_metrics(df)

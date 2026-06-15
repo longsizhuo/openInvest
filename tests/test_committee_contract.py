@@ -313,14 +313,14 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
     SENTINEL_M = "MACRO_SENTINEL_session_ghi"
 
     # 锚定 3 个 loader 的输出
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view",
                         lambda: SENTINEL_W)
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: SENTINEL_E)
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: SENTINEL_M)
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     # mock 行情，让 run_committee_for_symbol 能跑到 run_committee
@@ -329,9 +329,9 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.committee_runner.get_history_data",
+    monkeypatch.setattr("core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -345,7 +345,7 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
 
     from core.committee_runner import run_committee_session
     result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
@@ -378,12 +378,12 @@ def test_run_committee_session_continues_on_single_asset_error(
     from core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
 
     # 一个资产成功一个抛异常
     def fake_run_committee_for_symbol(symbol, **kw):
@@ -396,7 +396,7 @@ def test_run_committee_session_continues_on_single_asset_error(
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee_for_symbol",
+    monkeypatch.setattr("core.runner.session.run_committee_for_symbol",
                         fake_run_committee_for_symbol)
 
     from core.committee_runner import run_committee_session
@@ -426,14 +426,14 @@ def test_run_committee_session_event_brief_override_takes_priority(
     SENTINEL_OVERRIDE = "OVERRIDE_BRIEF_xxx"
     SENTINEL_MULTI = "MULTI_RECALL_BRIEF_yyy"
 
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: SENTINEL_MULTI)  # 不应被调
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: "M")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
     monkeypatch.setattr(
-        "core.committee_runner.run_committee_for_symbol",
+        "core.runner.session.run_committee_for_symbol",
         lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
                                        "alloc_cny": 0, "dominant_view": "macro",
                                        "raw": ""}, "report": None},
@@ -463,14 +463,14 @@ def test_run_committee_session_event_ids_translates_via_event_store(
     from core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: "M")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
 
     # multi_recall 不应被调（event_ids 优先于它）
     multi_called = []
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: (multi_called.append(syms), "SHOULD_NOT_BE_USED")[1])
 
     # 锚定 EventStore: 仅"ev_1" 反查得到
@@ -484,11 +484,11 @@ def test_run_committee_session_event_ids_translates_via_event_store(
             return None
         def get_sources(self, eid):
             return [{"src_name": "reuters", "url": "http://x/y"}]
-    monkeypatch.setattr("core.committee_runner._get_event_store",
+    monkeypatch.setattr("core.runner.session._get_event_store",
                         lambda: FakeStore())
 
     monkeypatch.setattr(
-        "core.committee_runner.run_committee_for_symbol",
+        "core.runner.session.run_committee_for_symbol",
         lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
                                        "alloc_cny": 0, "dominant_view": "macro",
                                        "raw": ""}, "report": None},
@@ -658,18 +658,18 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
     SENTINEL_VAL = "VALUATION_SENTINEL_abc"
 
     # 锚定新 loader 的输出
-    monkeypatch.setattr("core.committee_runner.load_sentiment_brief",
+    monkeypatch.setattr("core.runner.session.load_sentiment_brief",
                         lambda *a, **k: SENTINEL_SENT)
-    monkeypatch.setattr("core.committee_runner.load_valuation_brief",
+    monkeypatch.setattr("core.runner.session.load_valuation_brief",
                         lambda *a, **k: SENTINEL_VAL)
     # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     import pandas as pd
@@ -677,9 +677,9 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.committee_runner.get_history_data",
+    monkeypatch.setattr("core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -693,7 +693,7 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
 
     from core.committee_runner import run_committee_session
     result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
@@ -987,25 +987,25 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_spike_ratio: float):
     from core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi", lambda syms: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.committee_runner.load_prior_insights", lambda *a, **kw: "")
-    monkeypatch.setattr("core.committee_runner.load_sentiment_brief", lambda *a, **k: "")
-    monkeypatch.setattr("core.committee_runner.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.load_prior_insights", lambda *a, **kw: "")
+    monkeypatch.setattr("core.runner.session.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.runner.session.load_valuation_brief", lambda *a, **k: "")
 
     import pandas as pd
     fake_df = pd.DataFrame(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.committee_runner.get_history_data", lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+    monkeypatch.setattr("core.runner.session.get_history_data", lambda *a, **kw: fake_df)
+    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
     # metrics.atr_spike_ratio 可控 → ATR 腿确定性可测（通用线 2.0，无 per-asset）
     monkeypatch.setattr(
-        "core.committee_runner.compute_metrics",
+        "core.runner.session.compute_metrics",
         lambda df: {
             "ma20": 100.0, "ma120": 96.0, "atr_pct": 1.5,
             "atr_spike_ratio": atr_spike_ratio,
@@ -1025,7 +1025,7 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_spike_ratio: float):
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
     return captured
 
 
@@ -1111,17 +1111,17 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
         "irrelevant good news\n"
     )
 
-    monkeypatch.setattr("core.committee_runner.load_sentiment_brief",
+    monkeypatch.setattr("core.runner.session.load_sentiment_brief",
                         lambda *a, **k: SENTINEL_SENT)
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: FAKE_BRIEF)
-    monkeypatch.setattr("core.committee_runner.load_valuation_brief",
+    monkeypatch.setattr("core.runner.session.load_valuation_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     import pandas as pd
@@ -1129,9 +1129,9 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.committee_runner.get_history_data",
+    monkeypatch.setattr("core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -1145,7 +1145,7 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
 
     from core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
@@ -1170,17 +1170,17 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     FAKE_BRIEF = "[2026-06-10T08:00:00+00:00] [risk/high] [TEST.AX]\nbad\n"
-    monkeypatch.setattr("core.committee_runner.load_sentiment_brief",
+    monkeypatch.setattr("core.runner.session.load_sentiment_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi",
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
                         lambda syms: FAKE_BRIEF)
-    monkeypatch.setattr("core.committee_runner.load_valuation_brief",
+    monkeypatch.setattr("core.runner.session.load_valuation_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view",
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.committee_runner.load_prior_insights",
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     import pandas as pd
@@ -1188,9 +1188,9 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.committee_runner.get_history_data",
+    monkeypatch.setattr("core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -1204,7 +1204,7 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
 
     from core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
@@ -1235,22 +1235,22 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
         lambda *a, **k: (SENTINEL_PATH, {"windows": {}}),
     )
     # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
-    monkeypatch.setattr("core.committee_runner.load_sentiment_brief", lambda *a, **k: "")
-    monkeypatch.setattr("core.committee_runner.load_valuation_brief", lambda *a, **k: "")
-    monkeypatch.setattr("core.committee_runner.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.committee_runner.resolve_event_brief_multi", lambda syms: "")
-    monkeypatch.setattr("core.committee_runner.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.committee_runner.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.committee_runner.load_prior_insights", lambda *a, **kw: "")
+    monkeypatch.setattr("core.runner.session.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.runner.session.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("core.runner.session.load_prior_insights", lambda *a, **kw: "")
 
     import pandas as pd
     fake_df = pd.DataFrame(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.committee_runner.get_history_data",
+    monkeypatch.setattr("core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.committee_runner.analyze_multi_timeframe",
+    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     def fake_run_committee(*args, **kwargs):
@@ -1261,7 +1261,7 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
             "report": None,
         }
 
-    monkeypatch.setattr("core.committee_runner.run_committee", fake_run_committee)
+    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
 
     from core.committee_runner import run_committee_session
     result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
