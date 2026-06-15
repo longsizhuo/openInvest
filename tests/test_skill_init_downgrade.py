@@ -45,7 +45,10 @@ def _run_cmd_init_with_payload(
     - _parse_holdings_with_llm → 不实际调 LLM（按需 monkeypatch）
     - 标准输出 → 捕获
     """
-    import scripts.skill as skill_mod
+    # cmd_init 实现已搬到 scripts.skill_cmds.lifecycle_cmds：ROOT / _print_json /
+    # _parse_holdings_with_llm 都在该模块命名空间被 cmd_init 引用，patch 必须命中
+    # lifecycle_cmds 本身（patch façade scripts.skill 的同名属性对 cmd_init 内部无效）。
+    import scripts.skill_cmds.lifecycle_cmds as skill_mod
 
     # 重定向 ROOT 到 tmp_path，让 profile_path / env_path 写到临时目录
     monkeypatch.setattr(skill_mod, "ROOT", tmp_path)
@@ -174,7 +177,9 @@ def test_holdings_parse_note_on_downgrade(tmp_path, monkeypatch):
 
 def test_no_downgrade_when_key_provided(tmp_path, monkeypatch):
     """提供了有效 key 时，next_step 不走降级路径（不含降级专属措辞）"""
-    import scripts.skill as skill_mod
+    # caller(cmd_init) 与 callee(_parse_holdings_with_llm) 同在 lifecycle_cmds，
+    # patch 该模块属性才拦得住（patch façade scripts.skill 的同名属性无效）。
+    import scripts.skill_cmds.lifecycle_cmds as skill_mod
 
     # mock LLM 解析直接返回空 holdings（省掉真实 API 调用）
     def fake_llm_parse(text, api_key, base_url):

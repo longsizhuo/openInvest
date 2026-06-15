@@ -62,7 +62,7 @@ openInvest 有三个调用层，每层服务不同对象：
 
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
-| **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee` | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
+| **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee`（入口 façade，实现在 `scripts/skill_cmds/committee_cmds.py:cmd_run_committee`） | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
 | **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ wealth view + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
 | **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
 | **Primitive** | `core/committee/debate.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
@@ -138,7 +138,8 @@ openInvest 有三个调用层，每层服务不同对象：
 
 ```
 skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，不是"用户怎么用"）
-scripts/skill.py           CLI 入口（doctor/init/status/run_committee/...）
+scripts/skill.py           CLI 入口薄壳 façade（保留 main + ROOT；cmd 实现已拆到 scripts/skill_cmds/ 包）
+scripts/skill_cmds/        skill 各 cmd 实现子包（_helpers/analysis/committee/portfolio/lifecycle 5 模块）
 connectors/web_api/         FastAPI 端点包（GUI + CLI 共享）；app factory 在 __init__.py，端点按域拆在 routers/（insights/observability/verdict_review/committee_sessions/regime/state/read/write/...），响应模型在 models.py
 core/portfolio_manager.py  持仓 façade，with_portfolio_tx fcntl 锁
 core/committee/            委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
