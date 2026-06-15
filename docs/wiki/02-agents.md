@@ -41,7 +41,7 @@ Round 4  ─ CIO 看完整 transcript，1 LLM call 出 verdict
 
 实测耗时（DeepSeek-Chat + 2 资产并行 + 收敛退出）：**~16 秒**（journal log 实证）。
 
-文件：`core/committee.py:run_committee` 是入口；`core/committee_runner.py:run_committee_for_symbol` 是端到端封装。
+文件：`core/committee.py:run_committee` 是入口；`core/runner/session.py:run_committee_for_symbol` 是端到端封装。
 
 ### 两条路径 LLM 调用数对照（避免歧义）
 

@@ -128,7 +128,7 @@
 | 参数 | 文件:行号 | 当前值 | 依据 | 影响范围 |
 |------|-----------|--------|------|----------|
 | `max_single_invest_cny` 默认 | `core/portfolio_manager.py:188` | ¥10,000 | 无依据 | 单笔投资上限回退值 |
-| `max_workers` (committee) | `committee_runner.py:461` | 4 | "防 LLM API 限流" — 工程经验值 | 并发度 |
+| `max_workers` (committee) | `core/runner/session.py` | 4 | "防 LLM API 限流" — 工程经验值 | 并发度 |
 | `step_days` (walk-forward) | `experiments/train_config.py:121` | 7 | 无依据 | Optuna 训练决策频率 |
 | Dreaming LLM 验伪 temperature | `jobs/dreaming.py:440` | 0.1 | "验伪要稳定" — 设计意图 | LLM 验伪随机性 |
 | pnl_snapshot 渲染常数 | `jobs/pnl_snapshot.py:56-66` | W=800, LINE_H=240 等 | 视觉经验 | 图表渲染（非决策） |

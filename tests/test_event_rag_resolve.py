@@ -56,7 +56,7 @@ def test_resolve_default_on_when_env_unset(monkeypatch):
     """env 未设 → 当 true（PR #6 default-on 决策）。recall 失败 graceful 返空"""
     monkeypatch.delenv("INVEST_EVENT_RAG_ENABLED", raising=False)
     # 让 _get_event_store 返 None 模拟 init 失败 → 应该 graceful 返 ""
-    with patch("core.committee_runner._get_event_store", return_value=None):
+    with patch("core.runner.event_brief._get_event_store", return_value=None):
         result = _resolve_event_brief("AAPL", override=None)
         assert result == ""
 
@@ -71,7 +71,7 @@ def test_resolve_graceful_on_recall_exception(monkeypatch):
         def recall(self, *a, **kw):
             raise RuntimeError("DB locked or whatever")
 
-    with patch("core.committee_runner._get_event_store",
+    with patch("core.runner.event_brief._get_event_store",
                return_value=FakeBrokenStore()):
         result = _resolve_event_brief("AAPL", override=None)
         assert result == ""
@@ -94,7 +94,7 @@ def test_resolve_calls_recall_with_env_params(monkeypatch):
             captured.update(kwargs)
             return []
 
-    with patch("core.committee_runner._get_event_store", return_value=FakeStore()):
+    with patch("core.runner.event_brief._get_event_store", return_value=FakeStore()):
         _resolve_event_brief("NVDA", override=None)
 
     assert captured["symbol"] == "NVDA"
