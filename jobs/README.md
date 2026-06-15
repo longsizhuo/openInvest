@@ -13,6 +13,8 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |
 | `verdict_review.py` | 每月 1 日 | 月度委员会决策命中率报告 |
 
+> `verdict_review.yml`（cron `0 2 * * *`，`enabled: false`）：把 `.committee` live 委员会快照刷进 `.dreams/verdict_review.jsonl`，是 `dreaming` 的上游训练源。Phase 3 自学习开火时由用户确认频率后，与 `dreaming.yml` 一并改 `enabled: true`。
+
 - `INDEX.md` — 所有 job 的输入/输出 spec（人类参考）
 - `*.yml` — APScheduler cron 配置（声明式）
 
