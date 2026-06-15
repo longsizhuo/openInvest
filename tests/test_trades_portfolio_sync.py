@@ -70,7 +70,7 @@ def _call_sync(trade: Dict[str, Any], pm: PortfolioManager):
     # 复现 web_api 中的 _sync_trade_to_portfolio 逻辑，但注入真实 pm
     from connectors.web_api import _sync_trade_to_portfolio as _web_sync
     # 通过 patch PortfolioManager() 构造函数，注入已准备好的 pm
-    with patch("connectors.web_api.PortfolioManager", return_value=pm):
+    with patch("connectors.web_api.routers.trades.PortfolioManager", return_value=pm):
         return _web_sync(trade)
 
 
@@ -344,7 +344,7 @@ class TestEdgeCases:
 
         trade = {"symbol": "NDQ.AX", "direction": "BUY", "units": 5.0, "price": 100.0}
         # 让 PortfolioManager() 抛 FileNotFoundError
-        with patch("connectors.web_api.PortfolioManager",
+        with patch("connectors.web_api.routers.trades.PortfolioManager",
                    side_effect=FileNotFoundError("memory missing")):
             synced, holding = _sync_trade_to_portfolio(trade)
 

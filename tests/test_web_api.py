@@ -96,7 +96,9 @@ def client(tmp_store, monkeypatch):
     """TestClient + 把 _new_pm 切成临时 store 版本"""
     def _new_pm_fake() -> PortfolioManager:
         return PortfolioManager(store=tmp_store)
-    monkeypatch.setattr(web_api, "_new_pm", _new_pm_fake)
+    # 路由用 Depends(get_pm) 注入 PM：测试用 dependency_overrides 覆盖（比 patch 函数干净）；
+    # monkeypatch.setitem 在用例结束后自动移除这个 override，不会泄漏到别的用例
+    monkeypatch.setitem(web_api.app.dependency_overrides, web_api.get_pm, _new_pm_fake)
 
     # MemoryStore() 默认构造仍走 MEMORY_ROOT，但 /api/history 和 /api/daily
     # 在 web_api 里 new MemoryStore() 是为了读 history.jsonl / daily/，它们
@@ -117,17 +119,17 @@ def client(tmp_store, monkeypatch):
         offset_pct: float = 0.012
         is_stale: bool = False
 
-    monkeypatch.setattr(web_api, "get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
+    monkeypatch.setattr("connectors.web_api.routers.read.get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
 
     # 假 NDQ.AX K 线（5d）
     fake_df = pd.DataFrame(
         {"Close": [40.0, 41.0, 42.0, 41.5, 42.5]},
         index=pd.date_range("2026-04-28", periods=5, freq="D"),
     )
-    monkeypatch.setattr(web_api, "get_history_data", lambda symbol, period="5d": fake_df)
+    monkeypatch.setattr("connectors.web_api.routers.read.get_history_data", lambda symbol, period="5d": fake_df)
 
     # 委员会任务落盘目录切到 tmp，避免污染真实 memory/.committee/
-    monkeypatch.setattr(web_api, "COMMITTEE_DIR", tmp_store.root / ".committee")
+    monkeypatch.setattr("connectors.web_api.routers.committee.COMMITTEE_DIR", tmp_store.root / ".committee")
 
     return TestClient(web_api.app)
 
@@ -360,7 +362,7 @@ def test_gold_set_no_history(client, tmp_store):
 def test_gold_offset_writes_strategy(client, tmp_store, monkeypatch):
     """报浙商克价 → 反推 offset → 写回 strategy.md"""
     # mock infer_offset_pct 返回固定值
-    monkeypatch.setattr(web_api, "infer_offset_pct", lambda bank_price: 0.025)
+    monkeypatch.setattr("connectors.web_api.routers.write.infer_offset_pct", lambda bank_price: 0.025)
 
     r = client.post("/api/gold/offset", json={"bank_price": 1130.0})
     assert r.status_code == 200
