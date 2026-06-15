@@ -207,6 +207,8 @@ class PortfolioManager:
                 return amount
             if ccy == "AUD" and exchange_rate is not None:
                 return amount * float(exchange_rate)
+            # live valuation: as_of_date intentionally not threaded (no historical caller).
+            # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
             return to_base(ccy, amount, "CNY")
 
         portfolio_value = cash_cny

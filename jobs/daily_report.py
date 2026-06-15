@@ -314,6 +314,8 @@ def run() -> Dict[str, Any]:
     for ccy, amt in pm.cash.items():
         if str(ccy).upper() == "CNY" or not amt:
             continue  # CNY 已计入；空余额不算
+        # live valuation: as_of_date intentionally not threaded (no historical caller).
+        # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         ccy_in_cny = to_base(str(ccy).upper(), float(amt), "CNY")
         if ccy_in_cny is not None:
             total_assets_cny += ccy_in_cny
@@ -336,6 +338,8 @@ def run() -> Dict[str, Any]:
         if cur is None:
             continue
         local_value = units * cur
+        # live valuation: as_of_date intentionally not threaded (no historical caller).
+        # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         value_cny = to_base(ccy, local_value, "CNY")
         if value_cny is None:
             data_warnings.append(

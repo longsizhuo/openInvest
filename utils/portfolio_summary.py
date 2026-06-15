@@ -83,6 +83,8 @@ def portfolio_summary_text(
         if cur is None:
             continue
         local_value = units * cur
+        # live valuation: as_of_date intentionally not threaded (no historical caller).
+        # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         value_cny = to_base(ccy, local_value, "CNY")
         if value_cny is not None:
             holding_values_cny[sym] = value_cny
