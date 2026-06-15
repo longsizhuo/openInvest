@@ -73,7 +73,7 @@
        return Quote(price=nav, currency="CNY", ...)
    ```
 
-3. **改 `connectors/web_api.py:get_data_sources_health()`**
+3. **改 `connectors/web_api/routers/observability.py:get_data_sources_health()`**
    注册新数据源进健康面板（让用户能看到"天天基金 API 上次拉到几点"）
 
 4. **测试 `tests/test_eastmoney_fund.py`**
@@ -124,7 +124,7 @@
 
 3. **改 CIO prompt** 让它综合 ESG transcript
 
-4. **改 `connectors/web_api.py:RegimeRulesResponse`** 注册新角色到 `/api/regime_rules`
+4. **改 `connectors/web_api/routers/regime.py:get_regime_rules()` + `connectors/web_api/models.py:RegimeRulesResponse`** 注册新角色到 `/api/regime_rules`
 
 5. **改 GUI `routes/committee/AgentsTab.tsx`** 让"4 角色 + 规则" tab 改名"5 角色"
 
@@ -207,7 +207,7 @@
 
 ### 改动清单
 
-1. **`connectors/web_api.py` 加 endpoint + Pydantic 响应模型**
+1. **在 `connectors/web_api/routers/` 选对应域的 router 加 endpoint + 在 `connectors/web_api/models.py` 加 Pydantic 响应模型**
    ```python
    class ByCurrencyResponse(BaseModel):
        currency: str
