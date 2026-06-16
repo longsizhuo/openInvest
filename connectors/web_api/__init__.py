@@ -113,7 +113,11 @@ from connectors.web_api.routers.trades import _sync_trade_to_portfolio  # noqa: 
 # 只把 /api/* 反代到本服务，根本不会到这条 mount。共存无冲突。
 #
 # 必须放在所有路由声明之后；StaticFiles(html=True) 让 / 自动 serve index.html
-_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+# NOTE: 本文件在 connectors/web_api/ 包内，repo root 要往上三级（拆包前是
+# connectors/web_api.py 只需两级；refactor 后漏改导致指向不存在的 connectors/static，
+# GUI 一直没挂——生产走 Caddy 没暴露，docker compose 一键部署才会踩到）。
+# 必须与 scripts/sync_gui_dist.py 的写入目标（repo_root/static）一致。
+_STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
 if _STATIC_DIR.exists() and (_STATIC_DIR / "index.html").exists():
     from fastapi.staticfiles import StaticFiles
     from starlette.exceptions import HTTPException as _StarletteHTTPException
