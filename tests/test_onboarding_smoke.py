@@ -44,7 +44,9 @@ def _run_cmd_doctor(fake_root: Path) -> Dict[str, Any]:
     captured = io.StringIO()
     fake_memory_root = fake_root / "memory"
 
-    with patch("scripts.skill.ROOT", fake_root), \
+    # cmd_doctor 实现已搬到 scripts.skill_cmds.lifecycle_cmds，在自身模块全局读 ROOT，
+    # patch façade(scripts.skill) 的 ROOT 不再生效 → 必须 patch lifecycle_cmds.ROOT
+    with patch("scripts.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
          patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
          patch("sys.__stdout__", captured):
         cmd_doctor(SimpleNamespace())
@@ -65,7 +67,8 @@ def _run_cmd_init_from_payload(fake_root: Path, payload: Dict[str, Any]) -> Dict
     captured = io.StringIO()
     fake_memory_root = fake_root / "memory"
 
-    with patch("scripts.skill.ROOT", fake_root), \
+    # cmd_init 实现已搬到 scripts.skill_cmds.lifecycle_cmds，在自身模块全局读 ROOT
+    with patch("scripts.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
          patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
          patch("sys.__stdout__", captured), \
          patch("sys.stdin", io.StringIO(stdin_data)), \
@@ -243,7 +246,10 @@ class TestOnboardingSmoke:
         fake_df = pd.DataFrame({"Close": [55.0]}, index=pd.to_datetime(["2026-05-10"]))
         fake_memory_root = fake_root / "memory"
 
-        with patch("scripts.skill.ROOT", fake_root), \
+        # cmd_status 实现已搬到 scripts.skill_cmds.analysis_cmds。注意 cmd_status
+        # 实际不读 ROOT（此 patch 历史上是 no-op，真正生效的是 MEMORY_ROOT），
+        # 但为保持字面一致且不抛 AttributeError，analysis_cmds 也定义了 ROOT。
+        with patch("scripts.skill_cmds.analysis_cmds.ROOT", fake_root), \
              patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
              patch("sys.__stdout__", captured), \
              patch("utils.exchange_fee.get_history_data", return_value=fake_df), \
@@ -277,7 +283,8 @@ class TestOnboardingDataIntegrity:
         import core.memory_store as ms_module
         fake_memory_root = fake_root / "memory"
 
-        with patch("scripts.skill.ROOT", fake_root), \
+        # cmd_init 实现已搬到 scripts.skill_cmds.lifecycle_cmds，在自身模块全局读 ROOT
+        with patch("scripts.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
              patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
              patch("sys.__stdout__", io.StringIO()), \
              patch("sys.stdin", io.StringIO(json.dumps(payload))), \
