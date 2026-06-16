@@ -16,6 +16,11 @@ RUN uv sync --frozen --no-cache
 # 3. 复制项目代码
 COPY . .
 
+# 3.5 把 invest-gui 最新 dist 烤进 static/（web 服务 serve 它 → :8765 直出完整 GUI）。
+# 非致命：拉不到（离线 / release 暂缺）也不让 build 挂，web 仍能 serve /api。
+RUN /app/.venv/bin/python -m scripts.sync_gui_dist \
+    || echo "⚠ GUI dist 未烤入；web 仅 serve /api（运行时可跑 python -m scripts.sync_gui_dist 补）"
+
 # 创建必要的目录
 RUN mkdir -p db cache_data
 
