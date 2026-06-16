@@ -327,52 +327,70 @@ class PortfolioManager:
         currency = str(trade.get("currency", "")).strip().upper() or "AUD"
         kind = trade.get("kind") or _guess_kind_from_symbol(symbol)
 
-        with self.with_portfolio_tx() as p:
-            holdings = list(p.get("holdings") or [])
-            cash = dict(p.get("cash") or {})
-
-            # 找现有 holding
-            target = next((h for h in holdings if h.get("symbol") == symbol), None)
-            cur_units = float(target.get("units", 0) or 0) if target else 0.0
-            cur_avg = float(target.get("avg_cost", 0) or 0) if target else 0.0
-
-            if action == "bought":
-                new_units = cur_units + units
-                # 加权均价（cur_units==0 时退化为本次价）
-                new_avg = (
-                    (cur_avg * cur_units + amount) / new_units if new_units else (amount / units if units else 0)
-                )
-                if target:
-                    target["units"] = new_units
-                    target["avg_cost"] = round(new_avg, 4)
-                else:
-                    holdings.append({
-                        "symbol": symbol,
-                        "kind": kind,
-                        "units": new_units,
-                        "unit_label": "股" if kind in ("equity", "etf") else "share",
-                        "avg_cost": round(new_avg, 4),
-                        "cost_currency": currency,
-                        "channel": trade.get("channel"),
-                    })
-                cash[currency] = float(cash.get(currency, 0) or 0) - amount
-            elif action == "sold":
-                if target:
-                    target["units"] = max(0.0, cur_units - units)
-                cash[currency] = float(cash.get(currency, 0) or 0) + amount
-
-            p["holdings"] = holdings
-            p["cash"] = cash
-
-        # processed_emails 在 transaction 外（独立 state 文件）
+        # ---- 幂等闸：动账本之前先原子 claim email_id ----
+        # processed_emails 与 portfolio 是两个独立文件、各有各的锁，无法塞进单一事务。
+        # 退而求其次：在改 cash/holdings *之前* 原子 claim（check+append 同锁），apply
+        # 失败再 unclaim。关掉两个真实漏洞——
+        #   (1) 并发 commsec_apply：两请求同 email_id 只有一个 claim 成功，另一个早退
+        #   (2) 成功后崩溃/重试：email_id 已 claim → 早退，不会二次记账
+        # 残余风险（非全闭环）：claim 写盘后、portfolio-tx 提交前被 SIGKILL/OOM →
+        # email_id 永久 claimed 但账本未改，该笔成交会被静默跳过，需人工
+        # state_unclaim("processed_emails", email_id) 才能重放。旧行为（崩在 tx 提交
+        # 之后 = 双重记账真金白银）更糟，故接受此窄窗口权衡。
         email_id = trade.get("email_id")
-        if email_id:
-            processed = self.get_processed_emails()
-            if email_id not in processed:
-                processed.append(email_id)
-                self.store.state_set("processed_emails", processed)
+        if email_id and not self.store.state_claim("processed_emails", email_id):
+            log.info(f"record_external_trade: email_id={email_id} 已处理，跳过（幂等）")
+            return
 
-        # history.jsonl 也在 transaction 外（独立 append-only 锁）
+        try:
+            with self.with_portfolio_tx() as p:
+                holdings = list(p.get("holdings") or [])
+                cash = dict(p.get("cash") or {})
+
+                # 找现有 holding
+                target = next((h for h in holdings if h.get("symbol") == symbol), None)
+                cur_units = float(target.get("units", 0) or 0) if target else 0.0
+                cur_avg = float(target.get("avg_cost", 0) or 0) if target else 0.0
+
+                if action == "bought":
+                    new_units = cur_units + units
+                    # 加权均价（cur_units==0 时退化为本次价）
+                    new_avg = (
+                        (cur_avg * cur_units + amount) / new_units if new_units else (amount / units if units else 0)
+                    )
+                    if target:
+                        target["units"] = new_units
+                        target["avg_cost"] = round(new_avg, 4)
+                    else:
+                        holdings.append({
+                            "symbol": symbol,
+                            "kind": kind,
+                            "units": new_units,
+                            "unit_label": "股" if kind in ("equity", "etf") else "share",
+                            "avg_cost": round(new_avg, 4),
+                            "cost_currency": currency,
+                            "channel": trade.get("channel"),
+                        })
+                    cash[currency] = float(cash.get(currency, 0) or 0) - amount
+                elif action == "sold":
+                    # 有意设计：sold 无持仓仍记 cash。CommSec = 真实已结算成交，钱真的
+                    # 到账了；不记反而让现金低估真实余额（fork 用户半路接入、买入早于
+                    # lookback 都会触发）。与 web 手工路径 _sync_trade_to_portfolio 的
+                    # _SkipSync 故意语义不同——勿合并成共用底层函数。
+                    if target:
+                        target["units"] = max(0.0, cur_units - units)
+                    cash[currency] = float(cash.get(currency, 0) or 0) + amount
+
+                p["holdings"] = holdings
+                p["cash"] = cash
+        except Exception:
+            # 账本没改成 → 撤销 claim，让下次 sync 能重试这封邮件
+            # （避免 claim-but-not-applied 把真实成交静默丢掉）
+            if email_id:
+                self.store.state_unclaim("processed_emails", email_id)
+            raise
+
+        # history.jsonl 在 transaction 外（独立 append-only 锁）
         self.store.append_history(trade)
         self._reload()
 

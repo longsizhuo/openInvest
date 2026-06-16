@@ -307,6 +307,42 @@ class MemoryStore:
             _atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2))
         return path
 
+    def state_claim(self, name: str, item: str) -> bool:
+        """原子 claim 一个去重键（如 email_id）到 state list（list 不存在则建空）。
+
+        check-membership + append + 落盘在**同一把 fcntl 锁**内完成，杜绝
+        state_get → state_set 两次取锁之间的 TOCTOU（并发双重应用 / 重复记账）。
+        返回 True = 本次成功 claim（item 之前不存在）；False = 已被 claim 过。
+        """
+        path = self.root / ".state" / f"{name}.json"
+        with _file_lock(path):
+            cur: list = []
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    cur = json.load(f)
+            if not isinstance(cur, list):  # 文件被手工/异常写坏 → 视为空，别让 append 抛
+                cur = []
+            if item in cur:
+                return False
+            cur.append(item)
+            _atomic_write_text(path, json.dumps(cur, ensure_ascii=False, indent=2))
+            return True
+
+    def state_unclaim(self, name: str, item: str) -> None:
+        """撤销 state_claim（claim 后续操作失败时回滚，让该键下次能重试）。
+        同锁 read-modify-write；item 不存在则 noop。
+        """
+        path = self.root / ".state" / f"{name}.json"
+        with _file_lock(path):
+            if not path.exists():
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                cur = json.load(f)
+            if not isinstance(cur, list) or item not in cur:
+                return
+            cur = [x for x in cur if x != item]
+            _atomic_write_text(path, json.dumps(cur, ensure_ascii=False, indent=2))
+
     # ---------- portfolio_history.jsonl - append-only 交易流水 ----------
 
     def append_history(self, trade: Dict[str, Any]) -> None:
