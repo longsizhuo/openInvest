@@ -1,11 +1,38 @@
 services:
+  # ── Web API + GUI（:8765）──────────────────────────────────────────────
+  # 浏览器开 http://localhost:8765 看完整 GUI；GUI 已在镜像 build 期烤进 static/。
+  invest-web:
+    build: .
+    image: openinvest:local        # 与 invest-agent 共用同一镜像，只 build 一次
+    container_name: invest-web
+    restart: always
+    env_file:
+      - path: .env
+        required: false            # 没 .env 也能起（server + GUI 能跑；committee 端点要 key 才工作）
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      # 默认只绑 host loopback（安全）：本机直连或前面挂 Caddy 反代。
+      # 要 LAN/公网暴露：改成 "8765:8765" 并设 INVEST_API_TOKEN（见 connectors/web_api token 说明）。
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./memory:/app/memory       # portfolio 状态 source of truth，必挂
+      - ./db:/app/db
+      - ./cache_data:/app/cache_data
+      - ./logs:/app/logs
+    # __main__.py 写死 host=127.0.0.1（容器内不可达），故直接调 uvicorn 绑 0.0.0.0
+    command: ["uvicorn", "connectors.web_api:app", "--host", "0.0.0.0", "--port", "8765"]
+
+  # ── 定时任务 scheduler（无端口，跑 daily_report / pnl_snapshot 等 cron）──────
   invest-agent:
+    image: openinvest:local        # 复用 invest-web 构出的镜像
     build: .
     container_name: invest-agent
     restart: always
     # 挂载配置文件 (用户只需修改本地的 .env)
     env_file:
-      - .env
+      - path: .env
+        required: false
     # 数据持久化 (memory/ 是 portfolio 状态的 source of truth，必挂；db / cache_data
     # 是 yfinance 行情缓存，丢了会从外网重新拉但费时间)
     volumes:
