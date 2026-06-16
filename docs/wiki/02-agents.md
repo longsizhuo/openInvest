@@ -23,7 +23,7 @@
 
 ## 一次完整跑 6 步（Direct 路径视角）
 
-下面的 round 划分**对应 Direct 路径**（`core/committee.py`，包括 cron / Web GUI / skill `run_committee`）。Coordinator 路径（Claude Code spawn 4 subagent）分法略不同——见本节末"两条路径 LLM 调用数对照"。
+下面的 round 划分**对应 Direct 路径**（`core/committee/` 包，包括 cron / Web GUI / skill `run_committee`）。Coordinator 路径（Claude Code spawn 4 subagent）分法略不同——见本节末"两条路径 LLM 调用数对照"。
 
 ```
 Round 0  ─ Macro 1 LLM call（跨资产共享，每次跑只 1 次）
@@ -41,7 +41,7 @@ Round 4  ─ CIO 看完整 transcript，1 LLM call 出 verdict
 
 实测耗时（DeepSeek-Chat + 2 资产并行 + 收敛退出）：**~16 秒**（journal log 实证）。
 
-文件：`core/committee.py:run_committee` 是入口；`core/runner/session.py:run_committee_for_symbol` 是端到端封装。
+文件：`core/committee/debate.py:run_committee` 是入口；`core/runner/session.py:run_committee_for_symbol` 是端到端封装。
 
 ### 两条路径 LLM 调用数对照（避免歧义）
 
@@ -107,7 +107,7 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 | 快崩防御触发（VIX 哨兵 OR ATR 突变比）| BUY→ACCUMULATE / ACCUMULATE→HOLD（确定性买侧降级，独立于 regime）|
 | `risk_profile=aggressive` + uptrend + HOLD | 升级 ACCUMULATE（显式杠杆档，默认 steady 不动）|
 
-源：`core/committee.py:parse_cio_memo`（Sanity 0-5 + Defense + risk_profile，全部确定性后处理）。
+源：`core/committee/cio_parse.py:parse_cio_memo`（Sanity 0-5 + Defense + risk_profile，全部确定性后处理）。
 
 ---
 
@@ -167,7 +167,7 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 
 ### 收敛检测
 
-实现：`core/committee.py:_check_convergence`
+实现：`core/committee/debate.py:_check_convergence`
 
 ```python
 # 连续两轮，Quant 和 Risk 各自的 SIGNAL + STRENGTH 都稳定
@@ -218,7 +218,7 @@ GUI `/committee` → "4 角色 + 规则" tab 直接展示所有 4 个角色的�
 | 路径 | 协调者 | Worker 实现 | 模型 |
 |------|--------|-------------|------|
 | **Skill** | 用户的 Claude | Claude `Agent({subagent_type})` 真 spawn 4 个 subagent | Claude 4 |
-| **Web/Cron** | `core/committee.py` | 4 个 `SDKAgent` + ThreadPoolExecutor 同进程多线程 | DeepSeek |
+| **Web/Cron** | `core/committee/` | 4 个 `SDKAgent` + ThreadPoolExecutor 同进程多线程 | DeepSeek |
 
 详见 [04-execution-paths.md](04-execution-paths.md) 和 [adr/001-dual-execution-paths.md](adr/001-dual-execution-paths.md)。
 

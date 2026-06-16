@@ -230,7 +230,7 @@ DSPy 改善的是**单步 verdict 预测准确率**（dev set 上的 metric scor
 - `scripts/holdout_validate.py` — hold-out 验证（commit `这次`）
 
 ### 修改
-- `core/committee.py:parse_cio_memo()` — alloc/confidence env clamp
+- `core/committee/cio_parse.py:parse_cio_memo()` — alloc/confidence env clamp
 - `scripts/rl_train.py` — 修 regime key + env var 接通
 - `scripts/run_walk_forward.py` — 修周末 start bug
 - `scripts/backtest_committee.py` — 接 INVEST_MAX_DEBATE_ROUNDS

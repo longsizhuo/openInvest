@@ -61,8 +61,9 @@ allow_indirect_imports = "true"
 ignore_imports = [
     # backtest_committee 是研究用，跟 production 委员会不共享 service layer
     "scripts.backtest_committee -> core.committee",
-    # full_validation 是开卷下限验证（研究用），需 patch core.committee._persist 防污染
-    "scripts.full_validation -> core.committee",
+    # full_validation 是开卷下限验证（研究用），需 patch core.committee.debate._persist 防污染
+    # （committee 拆包后 _persist 搬进 debate 子模块，import 目标随之变 core.committee.debate）
+    "scripts.full_validation -> core.committee.debate",
 ]
 # 已删的孤儿 dep：
 # - duckduckgo-search: 被 ddgs 取代

@@ -120,7 +120,7 @@ LLM_MODEL=glm-4-flash
 
 三个核心选择，每个都有具体技术后果。详见 [docs/wiki/01-architecture.md](docs/wiki/README.md)：
 
-1. **Coordinator-Worker，不是 prompt 塞 4 个人格** — 4 个独立 LLM session，按 DAG 跑，信息隔离在 `core/committee.py` 显式控制
+1. **Coordinator-Worker，不是 prompt 塞 4 个人格** — 4 个独立 LLM session，按 DAG 跑，信息隔离在 `core/committee/` 显式控制
 2. **Markdown 就是数据库** — frontmatter + body，Python 和 LLM 看到的永远一致；fcntl + atomic write 双保险
 3. **OpenClaw 风格 Dreaming Memory** — 三阶段记忆整合，把跨日交易模式凝固成 insight 注入下次决策
 
