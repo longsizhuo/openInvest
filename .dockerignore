@@ -1,0 +1,17 @@
+# 只排明确安全、运行时绝不需要的东西，避免误删 db/ 这种"既是包又是数据目录"的源码。
+# 注意：db/ 含 trades_db.py 等源码（运行时 import），故**不**整体排除。
+.git
+.github
+.venv
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+*.egg-info
+node_modules
+.env
+.env.*
+logs/
+cache_data/
+memory/

@@ -1,0 +1,59 @@
+name: Publish image (GHCR)
+
+# 把后端打成容器镜像推到 GitHub Container Registry (ghcr.io)，填上 repo 主页 Packages，
+# 给自托管用户一条 `docker pull ghcr.io/longsizhuo/openinvest` 的路（不用 git clone + uv sync）。
+#
+# 触发：
+#   - 后端版本 tag（release-please 合并 Release PR 后打的 v0.1.x；不含 invest-skill-v* / invest-setup-skill-v*）
+#   - workflow_dispatch：手动触发（首发 / 临时重建）
+#
+# 镜像名由 metadata-action 自动小写（repo 是 openInvest，镜像是 ghcr.io/longsizhuo/openinvest）。
+
+on:
+  push:
+    tags:
+      - "v*"          # 只匹配后端版本 tag；skill tag 以 invest-skill-v / invest-setup-skill-v 开头，不会命中
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write     # 推 GHCR 需要
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}   # 自动小写 → ghcr.io/longsizhuo/openinvest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
