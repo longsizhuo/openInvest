@@ -58,6 +58,8 @@ openInvest 有三个调用层，每层服务不同对象：
 >
 > 2026-06-15（#57）：`core/committee.py` 同款拆成 `core/committee/` 包（agent_io / cio_parse / views / loaders / debate / persist），`__init__.py` 留薄壳 façade re-export 全部历史符号（含下划线名 + 模块常量）——`from core.committee import X` 与 `core.committee.X` 属性访问对所有历史 X 仍可用，entry / service / 测试 / 脚本零改。注意 `run_committee` 在 `debate.py` 命名空间内解析 `_create_agent` / `_persist`，monkeypatch 要钉 `core.committee.debate.*` 而非 façade 属性。
 
+> 2026-06-15：`connectors/web_api/routers/system.py`（#55 漏下的 catch-all）按域拆成 `insights` / `observability` / `verdict_review` / `committee_sessions` / `regime` / `state` 六个 router，装配处 `connectors/web_api/__init__.py` 的 `include_router` 循环同步换成这 6 个模块。所有 @router.get path 逐字不变（含 `/api/regime/{symbol:path}`），/openapi.json paths 零漂移。旧 `system.py` 已删除（全仓无外部 import，纯 router 容器无需保留 façade）。
+
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee` | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
@@ -137,7 +139,7 @@ openInvest 有三个调用层，每层服务不同对象：
 ```
 skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，不是"用户怎么用"）
 scripts/skill.py           CLI 入口（doctor/init/status/run_committee/...）
-connectors/web_api.py      FastAPI 端点（GUI + CLI 共享）
+connectors/web_api/         FastAPI 端点包（GUI + CLI 共享）；app factory 在 __init__.py，端点按域拆在 routers/（insights/observability/verdict_review/committee_sessions/regime/state/read/write/...），响应模型在 models.py
 core/portfolio_manager.py  持仓 façade，with_portfolio_tx fcntl 锁
 core/committee/            委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
 db/trades_db.py            内部账本 SQLite WAL（不连真实支付）
