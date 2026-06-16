@@ -37,7 +37,7 @@ openInvest 有三个调用层，每层服务不同对象：
 1. 公开 URL（`docs/accuracy_summary.json` / pnl-data 分支 / outperform feed）**绝对不能含** symbol / threshold / verdict 原文 / 任何可反推持仓的字段
 2. 命中率统计页 n < 30 不展示具体数字（防小样本被截图误传）
 3. README outperform 同时展示 winning + losing 事件（不只 winning，避免 survivorship bias）
-4. PATCH executed 必须同步 cash + holdings（账本一致性）
+4. PATCH executed 必须同步 cash + holdings（账本一致性）。**且必须幂等**——任何"累加语义 + 可重放触发"的账本写入（HTTP 重试 / 邮件轮询 / cron 重跑 / agent 重发 / 双击）必须有原子幂等闸（`state_claim`）或状态机守卫，绝不重复入账。规则 + 全路径审计表见 `docs/wiki/adr/016-ledger-mutation-idempotency.md`。已咬两次（#62 邮件、本轮 PATCH/payday）——加新账本写路径先对照该 ADR。
 
 ## 双路径架构（Coordinator vs Direct）
 
