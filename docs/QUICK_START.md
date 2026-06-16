@@ -38,6 +38,24 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
+## 🐳 想用 Docker？（替代 step 1 + 5）
+
+不想装 uv / 手起 uvicorn，可以直接用容器（镜像自带 GUI，无需单独 `sync_gui_dist`）：
+
+```bash
+git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
+cp .env.example .env && $EDITOR .env                               # 填 DEEPSEEK_API_KEY
+docker compose run --rm invest-agent python -m scripts.skill init  # onboarding（建 memory/）
+docker compose up -d --build                                       # 起 web(:8765) + scheduler
+```
+
+浏览器开 <http://localhost:8765>。预构建镜像（`docker compose pull`）/ 端口暴露 / 生产
+Caddy 等细节见 [08-deployment.md 第 0 节](wiki/08-deployment.md#0-容器一键自托管docker-compose--ghcr)。
+
+下面的 step 1–5 是**手装 uv 的等价路径**，与 Docker 二选一即可。
+
+---
+
 ## 1. clone + 装依赖（5 min）
 
 ```bash
