@@ -29,6 +29,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Set up Docker Buildx
+        # docker-container driver —— type=gha 缓存后端必须有它，默认 docker 驱动不支持
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
