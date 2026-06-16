@@ -236,15 +236,32 @@ async def patch_trade_status(
 
     响应额外携带 portfolio_synced 和 synced_holding 让前端展示 toast。
 
+    幂等保证靠**状态守卫**，不靠 _sync_trade_to_portfolio 本身——后者是累加的
+    （BUY: cur_units + units、cash -= amount），重复调用会重复入账。所以本端点用
+    trade_before["status"] 做转移判定：仅在非 executed → executed 的真实跃迁才同步；
+    对一笔已经 executed 的单子再次 PATCH executed（双击 / 网络超时重试 / agent 重发）
+    直接幂等返回，绝不二次同步（CLAUDE.md 红线 #4：账本一致性）。
+
     原子性保证：先同步 portfolio（可重试），成功后再提交 trades.db status。
-    如果 portfolio 同步失败，trade 保持 planned 状态，用户可重试。
-    _sync_trade_to_portfolio 是幂等的（BUY upsert / SELL 减 units），
-    重试不会产生重复数据。
+    同步失败时 trade 保持原状态，重试仍是非 executed → 会重新同步，不会丢账。
     """
     # 先取 trade 原始数据（patch 前），供后面同步用
     trade_before = _get_trades_db().get_trade(trade_id)
     if trade_before is None:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
+
+    # ---- 幂等闸：已是 executed 的单子再次 PATCH executed → 不重复入账 ----
+    # _sync_trade_to_portfolio 累加而非幂等，必须靠当前状态判定是否真的发生
+    # →executed 跃迁。否则双击 / 客户端超时重试 / agent 重发会把持仓和现金重复
+    # 计算（实测：units 10→20、AUD cash 3700→2400）。
+    if status == "executed" and trade_before.get("status") == "executed":
+        return {
+            "id": trade_id,
+            "status": "executed",
+            "ok": True,
+            "portfolio_synced": False,  # 首次 executed 时已同步，本次幂等跳过
+            "synced_holding": None,
+        }
 
     # ---- executed 时先同步 portfolio.md，成功后再提交 status ----
     portfolio_synced = False

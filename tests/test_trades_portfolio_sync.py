@@ -321,6 +321,52 @@ class TestIntendedDate:
         assert h["units"] == pytest.approx(8.0)
 
 
+class TestPatchStatusIdempotency:
+    """patch_trade_status 端点：重复 PATCH executed 不重复入账（finding #1 回归守卫）
+
+    _sync_trade_to_portfolio 是累加的（BUY: cur_units + units），端点必须靠
+    trade_before["status"] 判定是否真的发生 →executed 跃迁，否则双击 / 网络重试 /
+    agent 重发会把持仓和现金重复计算。
+    """
+
+    def test_double_patch_executed_does_not_double_apply(self, tmp_path, monkeypatch):
+        """同一笔 BUY 连续两次 PATCH executed → 持仓 + 现金只入账一次"""
+        import asyncio
+
+        from connectors.web_api.routers import trades as trades_mod
+
+        # 1. 临时 trades.db + 一笔 planned BUY（10 股 @ 130 AUD）
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(
+            symbol="NDQ.AX", direction="BUY", units=10.0, price=130.0,
+            cost_currency="AUD",
+        )
+        # _get_trades_db() 命中这个临时 db（已非 None）
+        monkeypatch.setattr(trades_mod, "_trades_db", db)
+
+        # 2. 临时 portfolio（空持仓，AUD 现金 5000）—— _sync 内 PortfolioManager() 返回它
+        pm = _make_pm(tmp_path)
+        monkeypatch.setattr(trades_mod, "PortfolioManager", lambda *a, **k: pm)
+
+        # 3. 第一次 PATCH executed → 正确入账
+        r1 = asyncio.run(trades_mod.patch_trade_status(trade_id, status="executed"))
+        assert r1["ok"] is True
+        assert r1["portfolio_synced"] is True
+
+        pm1 = PortfolioManager(pm.store)
+        assert pm1.find_holding("NDQ.AX")["units"] == pytest.approx(10.0)
+        assert pm1.cash_amount("AUD") == pytest.approx(3700.0)  # 5000 - 10*130
+
+        # 4. 第二次 PATCH executed（双击 / 重试 / agent 重发）→ 不能再入账
+        r2 = asyncio.run(trades_mod.patch_trade_status(trade_id, status="executed"))
+        assert r2["ok"] is True
+        assert r2["portfolio_synced"] is False  # 幂等：本次未同步
+
+        pm2 = PortfolioManager(pm.store)
+        assert pm2.find_holding("NDQ.AX")["units"] == pytest.approx(10.0)  # 仍 10，非 20
+        assert pm2.cash_amount("AUD") == pytest.approx(3700.0)  # 仍 3700，非 2400
+
+
 class TestEdgeCases:
     """边缘情况"""
 
