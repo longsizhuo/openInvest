@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.10.0](https://github.com/longsizhuo/openInvest/compare/v0.9.1...v0.10.0) (2026-06-16)
+
+
+### Features
+
+* **backup:** hub 权威状态 snapshot/restore + 修复账本备份缺口 ([#51](https://github.com/longsizhuo/openInvest/issues/51)) ([1b01324](https://github.com/longsizhuo/openInvest/commit/1b0132434fca99fd0bc783ce6a9c144207ac6cbe))
+* **scheduler:** 补 verdict_review.yml 让 Phase 3 自学习闭环可被发现（enabled=false） ([#58](https://github.com/longsizhuo/openInvest/issues/58)) ([c31078a](https://github.com/longsizhuo/openInvest/commit/c31078a18bb7328fa03fb06d6dfbece1ed37381e))
+
+
+### Bug Fixes
+
+* **pnl:** redact token in generic except branch + harden fx/export public-data guards ([#57](https://github.com/longsizhuo/openInvest/issues/57)) ([bf8b3e0](https://github.com/longsizhuo/openInvest/commit/bf8b3e08bdd9f9f83668d4f92a3fa9bbf1ded206))
+* token-leak redaction, public n&lt;30 suppression, backtest FX lookahead ([#53](https://github.com/longsizhuo/openInvest/issues/53)) ([7ddab07](https://github.com/longsizhuo/openInvest/commit/7ddab073d729290fe53b082e00520a337308b788))
+
+
+### Refactor
+
+* **committee:** committee_runner.py 拆成 core/runner/ 包 + façade ([#56](https://github.com/longsizhuo/openInvest/issues/56)) ([b5d7083](https://github.com/longsizhuo/openInvest/commit/b5d7083758a16cb9ea5c35e4c35de6fabfc2967b))
+* **committee:** core/committee.py 拆成 core/committee/ 包 + 薄壳 façade ([#59](https://github.com/longsizhuo/openInvest/issues/59)) ([124c67f](https://github.com/longsizhuo/openInvest/commit/124c67f3b06d333f98ef76dbc8e2cc131b8a21b9))
+* **scripts:** 把 skill.py 拆成 skill_cmds 包 + 薄壳 façade ([#61](https://github.com/longsizhuo/openInvest/issues/61)) ([04eb155](https://github.com/longsizhuo/openInvest/commit/04eb155b133a54e609bed23411b27787e80934f2))
+* **web-api:** system.py 按域拆成 6 个 router 子模块 ([#60](https://github.com/longsizhuo/openInvest/issues/60)) ([9fb31b6](https://github.com/longsizhuo/openInvest/commit/9fb31b6a48962aaae2bb6c0065f181707b975790))
+* **web-api:** web_api.py 拆成 router 包 + Depends(get_pm) ([#55](https://github.com/longsizhuo/openInvest/issues/55)) ([65e9b6c](https://github.com/longsizhuo/openInvest/commit/65e9b6c953b56fcae85540a49bbb98a68c3ee054))
+
 ## [0.9.1](https://github.com/longsizhuo/openInvest/compare/v0.9.0...v0.9.1) (2026-06-14)
 
 
