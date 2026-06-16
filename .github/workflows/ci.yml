@@ -17,10 +17,10 @@ jobs:
     # 跳过 [skip ci] 标记的 commit（我们的 pnl-bot autocommit 会带这个）
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
           version: "latest"
 
