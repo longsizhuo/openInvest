@@ -109,6 +109,8 @@ def cash_total_in_base(
     total = 0.0
     rates: dict[str, Optional[float]] = {}
     for ccy, amt in cash.items():
+        # live valuation: as_of_date intentionally not threaded (no historical caller).
+        # For backtest/historical use, thread as_of_date like to_base (see PR#53 fix(fx)).
         rate = get_fx_rate(ccy, base)
         rates[ccy] = rate
         if rate is not None:

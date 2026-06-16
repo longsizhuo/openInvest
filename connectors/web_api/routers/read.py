@@ -236,6 +236,8 @@ async def get_portfolio_total_value(
 
     cash_total = 0.0
     for ccy, amt in pm.cash.items():
+        # live valuation: as_of_date intentionally not threaded (no historical caller).
+        # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         rate = get_fx_rate(ccy, base)
         fx_rates[ccy] = rate
         in_base = amt * rate if rate is not None else None
@@ -276,6 +278,8 @@ async def get_portfolio_total_value(
         market_value_local = quote.price * units
         rate = fx_rates.get(cost_ccy)
         if rate is None:
+            # live valuation: as_of_date intentionally not threaded (no historical caller).
+            # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
             rate = get_fx_rate(cost_ccy, base)
             fx_rates[cost_ccy] = rate
         in_base = market_value_local * rate if rate is not None else None

@@ -264,6 +264,8 @@ def build_what_if_view(
             return local_value
         if ccy == "AUD":
             return local_value * fx   # 情景汇率覆盖
+        # live valuation: as_of_date intentionally not threaded (no historical caller).
+        # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         converted = to_base(ccy, local_value, "CNY")
         return converted if converted is not None else local_value  # 拉不到汇率退化
 

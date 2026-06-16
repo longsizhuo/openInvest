@@ -91,6 +91,39 @@ def test_total_portfolio_value_threads_as_of_date(monkeypatch):
     assert seen_dates and all(d == "2024-03-15" for d in seen_dates)
 
 
+def test_to_base_live_default_passes_none_as_of_date(monkeypatch):
+    """无 as_of_date 调用 = 实盘路径：get_fx_rate 必须收到 as_of_date=None。
+
+    锁住 "不传日期 => 实时 FX"，防未来 refactor 误注入一个 stale/default 日期
+    （那会让实盘估值悄悄用历史汇率，正是 PR#53 fix(fx) 要防的前视/陈旧漂移）。
+    """
+    seen: list = []
+    monkeypatch.setattr(
+        fx, "get_fx_rate",
+        lambda quote, base="CNY", **kw: (seen.append(kw.get("as_of_date", "MISSING")), 7.0)[1],
+    )
+    assert fx.to_base("USD", 100, "CNY") == 700.0
+    assert seen == [None], "to_base 无 as_of_date 应以 as_of_date=None 调 get_fx_rate（实盘路径）"
+
+
+def test_total_portfolio_value_live_default_passes_none_as_of_date(monkeypatch):
+    """total_portfolio_value_cny 无 as_of_date：cash + holding 两腿都 as_of_date=None。"""
+    seen: list = []
+    monkeypatch.setattr(
+        fx, "get_fx_rate",
+        lambda quote, base="CNY", **kw: (seen.append(kw.get("as_of_date", "MISSING")), 7.0)[1],
+    )
+
+    class _StubPM:
+        cash = {"USD": 100}
+        holdings = [{"symbol": "AAPL", "units": 2, "avg_cost": 50, "cost_currency": "USD"}]
+
+    total, _status = fx.total_portfolio_value_cny(_StubPM(), {"AAPL": 50}, base="CNY")
+    assert total == 1400.0
+    # 两腿（cash + holding）都走实盘路径，没有任何 stale/default 日期泄漏进来
+    assert seen == [None, None], "两腿都应以 as_of_date=None 调 get_fx_rate（实盘路径）"
+
+
 def test_cash_total_in_base_mixed(monkeypatch):
     rates = {"USDCNY=X": 7.0, "AUDCNY=X": 4.9}
     monkeypatch.setattr(

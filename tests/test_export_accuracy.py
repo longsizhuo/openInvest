@@ -21,8 +21,40 @@ from scripts.export_accuracy import (
     _aggregate,
     _filter_by_window,
     _suppress_small_samples,
+    DEFAULT_OUT,
     MIN_SAMPLE_FOR_PUBLIC,
 )
+
+
+# ---------- helper: 小样本 rate 泄露断言（红线 #2 的可信源谓词）----------
+
+def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
+    """对一份 accuracy_summary dict 施加红线 #2：
+
+    - 窗口 sample_size < MIN_SAMPLE_FOR_PUBLIC ⇒ direction_hit_rate 必须为 None
+    - 每个方向 bucket total < MIN_SAMPLE_FOR_PUBLIC ⇒ bucket rate 必须为 None
+
+    计数（hit/total）可以保留——只有具体 rate 在小样本时必须被抹掉。
+    where 仅用于失败信息定位。
+    """
+    windows = summary.get("windows") or {}
+    assert windows, f"{where}: summary 缺 windows，结构异常"
+    for name, window in windows.items():
+        sample_size = int(window.get("sample_size", 0) or 0)
+        if sample_size < MIN_SAMPLE_FOR_PUBLIC:
+            assert window.get("direction_hit_rate") is None, (
+                f"{where}: 窗口 {name!r} sample_size={sample_size} "
+                f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 direction_hit_rate="
+                f"{window.get('direction_hit_rate')!r}（红线 #2）"
+            )
+        for bucket_name, bucket in (window.get("by_direction") or {}).items():
+            total = int(bucket.get("total", 0) or 0)
+            if total < MIN_SAMPLE_FOR_PUBLIC:
+                assert bucket.get("rate") is None, (
+                    f"{where}: 窗口 {name!r} 方向 {bucket_name!r} total={total} "
+                    f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 rate={bucket.get('rate')!r}"
+                    f"（红线 #2）"
+                )
 
 
 # ---------- helper ----------
@@ -264,3 +296,73 @@ def test_build_summary_writes_file(tmp_path):
     raw = out.read_text(encoding="utf-8")
     for forbidden in ("symbol", "threshold", "NDQ", "GC=F"):
         assert forbidden not in raw
+
+
+# ---------- 守护 COMMITTED 的 docs/accuracy_summary.json（红线 #2）----------
+# 背景：CI 的「脱敏」grep 只扫 symbol / threshold / verdict 关键字，
+# 不会捕获 n<30 的命中率泄露。所以这一红线此前只有 synthetic 输入的单测在守，
+# 真正对外的 committed JSON 没人验。这里直接加载 committed 文件做谓词断言。
+
+def test_committed_accuracy_summary_no_small_sample_rate_leak():
+    """加载 *真实 committed* docs/accuracy_summary.json，断言红线 #2：
+
+    任何 sample_size < MIN_SAMPLE_FOR_PUBLIC 的窗口，其 direction_hit_rate 必须为 None；
+    任何 total < MIN_SAMPLE_FOR_PUBLIC 的方向 bucket，其 rate 必须为 None。
+
+    路径用 export_accuracy.DEFAULT_OUT（基于 repo root 解析，单一可信源），
+    阈值用 MIN_SAMPLE_FOR_PUBLIC（跟随源，不硬编码 30）。
+
+    文件缺失 → skip（带清晰原因）；存在但泄露小样本 rate → FAIL。
+    """
+    committed = DEFAULT_OUT
+    if not committed.exists():
+        pytest.skip(
+            f"committed accuracy_summary 不存在: {committed}（无法守红线 #2，跳过）"
+        )
+
+    summary = json.loads(committed.read_text(encoding="utf-8"))
+    _assert_no_small_sample_rate_leak(summary, where=str(committed))
+
+
+def test_leaky_summary_dict_is_flagged_by_predicate():
+    """非空证明（non-vacuous guard）：同一个谓词若遇到泄露的 JSON 必然 FAIL。
+
+    构造一份内存 dict——sample_size=5 < 30 却带 direction_hit_rate=0.8，
+    且方向 bucket total=5 < 30 却带 rate=0.8——断言 _assert_no_small_sample_rate_leak
+    抛 AssertionError。这证明：若有人 commit 这样一份 JSON，
+    test_committed_accuracy_summary_no_small_sample_rate_leak 会变红。
+    """
+    leaky = {
+        "windows": {
+            "30d": {
+                "direction_hit_rate": 0.8,   # 泄露：n<30 仍给整体命中率
+                "sample_size": 5,
+                "by_direction": {
+                    "bullish": {"hit": 4, "total": 5, "rate": 0.8},  # 泄露：n<30 仍给方向 rate
+                },
+            },
+        },
+    }
+    with pytest.raises(AssertionError):
+        _assert_no_small_sample_rate_leak(leaky, where="<in-memory leaky>")
+
+
+def test_predicate_passes_on_clean_small_sample_dict():
+    """对照：小样本但 rate 已被抹（None）的 dict 不应触发断言。
+
+    确保谓词不是「永远 raise」——计数保留、rate=None 时必须 PASS，
+    避免 test_leaky_summary_dict_is_flagged_by_predicate 变成假阳性。
+    """
+    clean = {
+        "windows": {
+            "30d": {
+                "direction_hit_rate": None,  # 已抹
+                "sample_size": 5,
+                "by_direction": {
+                    "bullish": {"hit": 4, "total": 5, "rate": None},  # 计数保留、rate 已抹
+                },
+            },
+        },
+    }
+    # 不应抛异常
+    _assert_no_small_sample_rate_leak(clean, where="<in-memory clean>")
