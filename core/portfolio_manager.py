@@ -333,6 +333,10 @@ class PortfolioManager:
         # 失败再 unclaim。关掉两个真实漏洞——
         #   (1) 并发 commsec_apply：两请求同 email_id 只有一个 claim 成功，另一个早退
         #   (2) 成功后崩溃/重试：email_id 已 claim → 早退，不会二次记账
+        # 残余风险（非全闭环）：claim 写盘后、portfolio-tx 提交前被 SIGKILL/OOM →
+        # email_id 永久 claimed 但账本未改，该笔成交会被静默跳过，需人工
+        # state_unclaim("processed_emails", email_id) 才能重放。旧行为（崩在 tx 提交
+        # 之后 = 双重记账真金白银）更糟，故接受此窄窗口权衡。
         email_id = trade.get("email_id")
         if email_id and not self.store.state_claim("processed_emails", email_id):
             log.info(f"record_external_trade: email_id={email_id} 已处理，跳过（幂等）")

@@ -70,6 +70,17 @@ class TestApply:
         assert h["avg_cost"] == pytest.approx(100.0)  # 1000 / 10
         assert pm.cash_amount("AUD") == pytest.approx(4000.0)  # 5000 - 1000
 
+    def test_sold_normal_reduces_units_credits_cash(self, tmp_path):
+        """正常 sold（持仓够）：持有 10 卖 5 → 剩 5，cash 加 proceeds，holding 不删。"""
+        existing = [{"symbol": "NDQ.AX", "units": 10.0, "avg_cost": 100.0,
+                     "cost_currency": "AUD", "kind": "equity"}]
+        pm = _make_pm(tmp_path, holdings=existing)
+        pm.record_external_trade(_trade(symbol="NDQ.AX", action="sold",
+                                        units=5.0, total_amount=600.0, email_id="N1"))
+        h = pm.find_holding("NDQ.AX")
+        assert h is not None and h["units"] == pytest.approx(5.0)  # 剩 5，未删
+        assert pm.cash_amount("AUD") == pytest.approx(5600.0)      # 5000 + 600
+
 
 # ============ 幂等性（fix [2]）============
 

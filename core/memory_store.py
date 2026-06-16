@@ -320,6 +320,8 @@ class MemoryStore:
             if path.exists():
                 with open(path, "r", encoding="utf-8") as f:
                     cur = json.load(f)
+            if not isinstance(cur, list):  # 文件被手工/异常写坏 → 视为空，别让 append 抛
+                cur = []
             if item in cur:
                 return False
             cur.append(item)
@@ -336,7 +338,7 @@ class MemoryStore:
                 return
             with open(path, "r", encoding="utf-8") as f:
                 cur = json.load(f)
-            if item not in cur:
+            if not isinstance(cur, list) or item not in cur:
                 return
             cur = [x for x in cur if x != item]
             _atomic_write_text(path, json.dumps(cur, ensure_ascii=False, indent=2))
