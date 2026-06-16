@@ -62,11 +62,9 @@ from utils.market_metrics import compute_metrics
 # 训练集（如 Phase 1.5 的 2023-2024 leak-free 窗口）时，数据比 wall-clock"现在"老得多，
 # 需用 INVEST_DREAMING_LOOKBACK_DAYS 调大（如 99999）把整个历史窗口纳入，否则全被滤掉。
 #
-# Step 3b: 从 config 读取，set_config_override() 实时生效。
-# 模块级变量保留向后兼容，但函数内每次调用读 config。
-LOOKBACK_DAYS = int(os.getenv("INVEST_DREAMING_LOOKBACK_DAYS", "90"))
-WINDOWS = [7, 30]         # 回看交易后 N 天的市场表现
-MIN_RECALL = 3            # 一个 pattern 至少出现 3 次
+# lookback_days / windows / min_recall 全部从 config 实时读（_get_dreaming_config()，
+# 支持 env INVEST_DREAMING_* + set_config_override()）。原同名模块常量已删——它们是 config
+# 迁移前的死副本（全仓无人引用，真实逻辑只读 config），留着会造成"同一参数两处定义"漂移。
 
 
 def _get_dreaming_config():
@@ -79,13 +77,15 @@ def _get_macro_buckets():
     """读 macro bucket 分桶阈值（实时，支持 set_config_override）。"""
     from core.config import load_config
     return load_config().macro_buckets
-MIN_SCORE = 0.8           # Deep Sleep 阈值（OpenClaw 同款）— 仅供文档，实际从 locked config 读取
+
+
 # caution lift-based 评分参数（2026-05-27 ADR 008，原理正确修正，非 reward hacking）：
-# - CAUTION_MIN_BASE_DOWN：该 regime 的 30d 真实下行基率必须 ≥ 此值，否则"踏空"只是
+# - caution_min_base_down：该 regime 的 30d 真实下行基率必须 ≥ 此值，否则"踏空"只是
 #   单向上涨基率假象（Phase1.5 牛市 / post-cutoff 急跌后 V 反弹都是 base_down≈0）。
-# - CAUTION_LIFT_FULL：lift（HOLD missed_up − regime base_up）达到此值算满分 quality。
-CAUTION_MIN_BASE_DOWN = 0.15
-CAUTION_LIFT_FULL = 0.20
+# - caution_lift_full：lift（HOLD missed_up − regime base_up）达到此值算满分 quality。
+# 这俩 + min_score 的真实值在 LockedDreamingScoring（core/config/locked.py，ADR-008 锁），
+# 代码经 get_locked() 读。原同名模块常量（MIN_SCORE / CAUTION_*）是迁移前死副本：MIN_SCORE
+# 全仓没人读、CAUTION_* 旁路了 locked（改 locked 不生效），已删以消除"两处定义"漂移。
 
 # 旧（v1 写死 2 个 symbol，fork 用户持 AAPL/510300/BTC-USD 时 outcomes 完全空）：
 #   ASSET_PRICE_SYMBOL = {"GOLD-CNY": "GC=F", "NDQ.AX": "NDQ.AX"}
@@ -503,6 +503,8 @@ def _score(c: Dict[str, Any]) -> float:
     sample = min(c["count"] / 10.0, 1.0)
     if "verdict" in c:
         if c.get("kind") == "caution":
+            from core.config import get_locked
+            _, locked_dreaming, _, _ = get_locked()
             # lift-based caution 评分（2026-05-27 ADR 008）。旧公式用绝对 missed_up_rate，
             # 会把"单向上涨 regime 里 HOLD 必然踏空"当强信号（Phase1.5 假 caution 即此）。
             # 试金石：新公式同时拒绝 Phase1.5 假 caution（base_down≈0）和 post-cutoff 急跌
@@ -511,12 +513,12 @@ def _score(c: Dict[str, Any]) -> float:
             base_down = c.get("base_down")
             if base_up is None or base_down is None:
                 return 0.0  # 无 regime 基率 → 无法判真伪 → 安全休眠
-            if base_down < CAUTION_MIN_BASE_DOWN:
+            if base_down < locked_dreaming.caution_min_base_down:
                 return 0.0  # regime 无真实下行 → "踏空"是单向基率假象 → 非 caution
             lift = c.get("missed_up_rate", 0.0) - base_up
             if lift <= 0:
                 return 0.0  # HOLD 没比该 regime 基率更频繁踏空 → 非真信号
-            quality = min(lift / CAUTION_LIFT_FULL, 1.0)
+            quality = min(lift / locked_dreaming.caution_lift_full, 1.0)
             return round(quality * 0.7 + sample * 0.3, 3)
         # reliable：方向判断越准越有价值 → 用 hit_rate（不变）
         return round(c["hit_rate"] * 0.7 + sample * 0.3, 3)
