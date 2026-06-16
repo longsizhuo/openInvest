@@ -32,25 +32,25 @@
 | ETH-USD | trend_ma_spread_pct | 8.0% | 无依据 |
 | ETH-USD | crash_atr_pct_min | 8.0% | 无依据 |
 
-### 1.2 Committee Sanity Check 阈值 (`core/committee.py`)
+### 1.2 Committee Sanity Check 阈值 (`core/committee/cio_parse.py`)
 
 | 参数 | 文件:行号 | 当前值 | 依据 | 影响范围 |
 |------|-----------|--------|------|----------|
-| `buy_confidence_overdrive` | `core/committee.py:209` | 0.95 | "60 天样本信号不显著，>0.95 历史命中率反而低于 0.7-0.8" — commit 注释，有数据支撑 | BUY→ACCUMULATE 降级触发线 |
-| `buy_confidence_downgrade_to` | `core/committee.py:212` | 0.6 | "表达原 LLM 过度自信" — 设计意图，无量化 | 降级后的 confidence 值 |
-| `alloc_cny_ceiling` | `core/committee.py:216` | 100,000 | "月投 ~¥10k，单笔超 10x 几乎一定是 LLM 错乱" — 经验 | alloc clamp 上限 |
-| `worker_unavailable_confidence_floor` | `core/committee.py:219` | 0.4 | "worker 不全 → 证据不足" — 设计意图 | worker 失败时 confidence 封顶 |
+| `buy_confidence_overdrive` | `core/committee/cio_parse.py:84` | 0.95 | "60 天样本信号不显著，>0.95 历史命中率反而低于 0.7-0.8" — commit 注释，有数据支撑 | BUY→ACCUMULATE 降级触发线 |
+| `buy_confidence_downgrade_to` | `core/committee/cio_parse.py:85` | 0.6 | "表达原 LLM 过度自信" — 设计意图，无量化 | 降级后的 confidence 值 |
+| `alloc_cny_ceiling` | `core/committee/cio_parse.py:86` | 100,000 | "月投 ~¥10k，单笔超 10x 几乎一定是 LLM 错乱" — 经验 | alloc clamp 上限 |
+| `worker_unavailable_confidence_floor` | `core/committee/cio_parse.py:87` | 0.4 | "worker 不全 → 证据不足" — 设计意图 | worker 失败时 confidence 封顶 |
 
-### 1.3 LLM 调用参数 (`core/committee.py`)
+### 1.3 LLM 调用参数 (`core/committee/agent_io.py`，`max_debate_rounds` 在 `debate.py`)
 
 | 参数 | 文件:行号 | 当前值 | 依据 | 影响范围 |
 |------|-----------|--------|------|----------|
-| `LLM_MAX_ATTEMPTS` | `core/committee.py:38` | 3 (env) | "3 次在 ~14s 内完成" — 工程经验值 | 重试次数，影响延迟和成本 |
-| `LLM_BASE_DELAY` | `core/committee.py:39` | 2.0s (env) | 无依据 | 重试间隔指数退避基数 |
-| `LLM_MAX_DELAY` | `core/committee.py:40` | 20.0s (env) | 无依据 | 重试最大等待 |
-| `temperature` | `core/committee.py:89` | 0.2 | 无依据。CIO 用 0.1 | LLM 输出随机性 |
-| `max_tool_iterations` | `core/committee.py:129` | 4 | 无依据 | Agent tool call 轮次上限 |
-| `max_debate_rounds` | `core/committee.py:531` | 1 (默认) / 4 (live) | 工程经验值 | Cross-challenge 轮数，影响 LLM 调用量 |
+| `LLM_MAX_ATTEMPTS` | `core/committee/agent_io.py:23` | 3 (env) | "3 次在 ~14s 内完成" — 工程经验值 | 重试次数，影响延迟和成本 |
+| `LLM_BASE_DELAY` | `core/committee/agent_io.py:24` | 2.0s (env) | 无依据 | 重试间隔指数退避基数 |
+| `LLM_MAX_DELAY` | `core/committee/agent_io.py:25` | 20.0s (env) | 无依据 | 重试最大等待 |
+| `temperature` | `core/committee/agent_io.py:35` | 0.2 | 无依据。CIO 用 0.1 | LLM 输出随机性 |
+| `max_tool_iterations` | `core/committee/agent_io.py:75` | 4 | 无依据 | Agent tool call 轮次上限 |
+| `max_debate_rounds` | `core/committee/debate.py:153` | 1 (默认) / 4 (live) | 工程经验值 | Cross-challenge 轮数，影响 LLM 调用量 |
 
 ### 1.4 Dreaming 系统参数 (`jobs/dreaming.py`)
 
@@ -317,7 +317,7 @@
 | 文件 | 内容 |
 |------|------|
 | `core/regime.py` | Regime 分类 Single Source of Truth（THRESHOLDS + ASSET_OVERRIDES） |
-| `core/committee.py:206-220` | Committee sanity check 阈值 |
+| `core/committee/cio_parse.py:84-87` | Committee sanity check 阈值（THRESHOLDS build）|
 | `core/backtest_reward.py` | Reward 函数 + Oracle accuracy |
 | `core/strategy_metrics.py` | 策略指标计算 |
 | `jobs/dreaming.py:60-73` | Dreaming 系统参数 |

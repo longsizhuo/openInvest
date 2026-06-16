@@ -28,7 +28,7 @@
      sweep_runner，没动 get_history_data，所以这个 patch 仍然必要。）
     get_macro_data() 同模块调 get_history_data → 自动一并钉到 D。
 隔离副作用 / 未来泄漏:
-  • core.committee._persist → no-op：**绝不写 memory/.committee/**（零污染，也不会
+  • core.committee.debate._persist → no-op：**绝不写 memory/.committee/**（零污染，也不会
     回流进 get_recent_committee_verdicts）。
   • core.runner.session.load_prior_insights → ""：不读今天的 Dreaming insights。
   • agents.tools query_dreaming_insights / get_recent_committee_verdicts → []：
@@ -120,10 +120,11 @@ NEUTRAL_PORTFOLIO_SUMMARY = (
     "不要据此做集中度减仓判断。"
 )
 
-# 复刻 core.committee.VERDICT_RE，用于从 CIO 原文还原 Sanity 改写前的 verdict_raw。
-# 本脚本另在 _pin_to_date_and_isolate 里 import core.committee 以 patch _persist（防污染），
-# 这条 scripts.full_validation -> core.committee 已加进 pyproject.toml 的 import-linter
-# 例外（同 backtest_committee，研究脚本不共享 production service layer）。
+# 复刻 core.committee.VERDICT_RE（现 core/committee/cio_parse.py），用于从 CIO 原文
+# 还原 Sanity 改写前的 verdict_raw。
+# 本脚本另在 _pin_to_date_and_isolate 里 import core.committee.debate 以 patch _persist
+# （防污染），这条 scripts.full_validation -> core.committee 例外已加进 pyproject.toml 的
+# import-linter（同 backtest_committee，研究脚本不共享 production service layer）。
 _VERDICT_RAW_RE = re.compile(r"VERDICT:\s*(BUY|ACCUMULATE|HOLD|TRIM|SELL)", re.I)
 
 log = logging.getLogger("full_validation")
@@ -148,7 +149,9 @@ def _pin_to_date_and_isolate(decision_date: str):
     import pandas as pd
 
     import agents.tools as tools
-    import core.committee as cm
+    # _persist 已搬进 core/committee/debate.py；run_committee 在 debate 命名空间解析它，
+    # 必须 patch debate._persist（patch façade core.committee._persist 打不到）。
+    import core.committee.debate as cm_debate
     import core.runner.session as cr
     import db.market_store as ms
     import utils.exchange_fee as ef
@@ -195,7 +198,7 @@ def _pin_to_date_and_isolate(decision_date: str):
         # 1b. 概率表 + 买回点参考钉到 D（look-ahead 修复：闭卷段不从概率表后门看未来）
         stack.enter_context(patch.object(ms.MarketStore, "get_history_df", patched_get_history_df))
         # 2. 绝不持久化到 memory/.committee/
-        stack.enter_context(patch.object(cm, "_persist", _noop))
+        stack.enter_context(patch.object(cm_debate, "_persist", _noop))
         # 3. 不读今天的 Dreaming insights（service layer 注入路径）
         stack.enter_context(patch.object(cr, "load_prior_insights", _empty_str))
         # 4. LLM 工具调用也拿不到未来 insight / 别的采样点决议

@@ -15,7 +15,7 @@
 |------|------------------|-------------|
 | 谁能用 | **仅 Claude Code**（要 `Agent({...})` 工具）| 任何 agent（Cursor / Cline / Codex / DeepSeek 本地 / 普通 Python 脚本）+ cron 自动跑 |
 | 触发方式 | skill 里 `prepare_committee` → spawn 4 subagent → `save_committee` | skill 里 `run_committee SYM` 一条命令 / `POST /api/committee/run` / cron `daily_report` |
-| Coordinator | 那个对话里的 Claude（你）| `core/committee.py` Python 模块 |
+| Coordinator | 那个对话里的 Claude（你）| `core/committee/` Python 包 |
 | Worker 实现 | `Agent({subagent_type})` 真 subprocess | 4 个 `SDKAgent` 实例 + ThreadPool |
 | Worker 模型 | Claude（用户 Claude 订阅）| DeepSeek-Chat |
 | 成本 | 项目零开销，用户 Claude budget 承担 | ~¥0.01-0.03 一次（DeepSeek token）|

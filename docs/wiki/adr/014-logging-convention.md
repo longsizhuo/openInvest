@@ -98,7 +98,7 @@ log = logging.getLogger(__name__)
 | 文件 | print 数 | 优先级 |
 |------|---------|--------|
 | `jobs/daily_report.py` | 12 | P0 — 每日核心链路 |
-| `core/committee.py` | 7 | P0 — 决策引擎 |
+| `core/committee.py`（现 `core/committee/` 包，print/log 分散到 6 子模块，总数不变）| 7 | P0 — 决策引擎 |
 | `scripts/skill.py` | 7 | P1 — skill 入口（部分 print 是 CLI 输出，保留）|
 | `jobs/verdict_review.py` | 5 | P1 — 复盘链路 |
 | `services/news.py` | 6 | P1 — 新闻采集 |
