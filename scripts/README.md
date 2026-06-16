@@ -6,7 +6,8 @@ CLI 脚本入口 + 一次性维护工具。**不在生产 cron 里跑**（生产
 
 | 脚本 | 用途 | 频率 |
 |------|------|------|
-| `skill.py` | Claude Skill 入口（`run.sh` 调它）— 给外部 agent 暴露 status/strategy/history/what_if/prepare_committee 命令 | 按需 |
+| `skill.py` | Claude Skill 入口（`run.sh` 调它）— 给外部 agent 暴露 status/strategy/history/what_if/prepare_committee 命令。已退化为薄壳 façade，cmd 实现拆在 `skill_cmds/` 子包 | 按需 |
+| `skill_cmds/` | skill 各 cmd 实现子包（_helpers / analysis_cmds / committee_cmds / portfolio_cmds / lifecycle_cmds，见该目录 README） | — |
 | `migrate_portfolio_to_holdings.py` | v1 → v2 portfolio.md 一次性迁移（cash_cny 等扁平字段 → cash dict + holdings list） | 一次 |
 | `migrate_profile.py` | 旧 user_profile.json → memory/user.md (历史一次性) | 一次 |
 | `init_market_db.py` | 首次启动时初始化 `db/market_data.db` schema | 一次 |

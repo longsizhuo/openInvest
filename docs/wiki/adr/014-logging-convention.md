@@ -37,7 +37,7 @@
 ### 1. 禁止生产代码使用 `print()` 做诊断
 
 `print()` 仅允许两种场景：
-- **CLI 脚本的最终输出**：`scripts/skill.py` 的 `cmd_*()` 函数直接给用户看的 JSON/text
+- **CLI 脚本的最终输出**：`scripts/skill_cmds/*` 的 `cmd_*()` 函数（原 `scripts/skill.py`，重构后实现拆到 `skill_cmds/` 子包）直接给用户看的 JSON/text
 - **`if __name__ == "__main__"` 的交互式入口**：如 `print(run())`
 
 所有诊断、警告、错误信息必须用 `log.*()`.
@@ -99,7 +99,7 @@ log = logging.getLogger(__name__)
 |------|---------|--------|
 | `jobs/daily_report.py` | 12 | P0 — 每日核心链路 |
 | `core/committee.py`（现 `core/committee/` 包，print/log 分散到 6 子模块，总数不变）| 7 | P0 — 决策引擎 |
-| `scripts/skill.py` | 7 | P1 — skill 入口（部分 print 是 CLI 输出，保留）|
+| `scripts/skill_cmds/*` | 7 | P1 — skill 入口（重构后从 `scripts/skill.py` 拆到 `skill_cmds/` 包：`analysis_cmds.py` 2 处 / `lifecycle_cmds.py` 余下；部分 print 是 CLI 输出，保留）|
 | `jobs/verdict_review.py` | 5 | P1 — 复盘链路 |
 | `services/news.py` | 6 | P1 — 新闻采集 |
 | `services/commsec_reader.py` | 5 | P2 — CommSec 同步 |
