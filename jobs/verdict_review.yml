@@ -1,0 +1,11 @@
+# verdict_review：消费 memory/.committee 的 live 委员会快照 → 刷新 .dreams/verdict_review.jsonl
+# 这是 dreaming 的上游：dreaming 读 verdict-outcome（命中率 + HOLD 机会成本）做记忆整合，
+# 训练样本若不持续吃 live，dreaming 永远只在 backtest 牛市集上学。
+# enabled 暂 false：Phase 3 开火时由用户确认 cron 频率后，与 dreaming.yml 一并改 true。
+# 频率待定（见 ADR / rationale 的 open question）：月度太稀疏，建议每日/每周让 jsonl 持续吃 live 样本。
+name: verdict_review
+description: 消费 .committee live 快照刷新 .dreams/verdict_review.jsonl（dreaming 上游）；Phase 3 前 enabled=false
+schedule: "0 2 * * *"
+timezone: Asia/Shanghai
+entry: jobs.verdict_review:run
+enabled: false  # Phase 3 开火前由用户确认 cron 频率后改 true，与 dreaming.yml 一并启用
