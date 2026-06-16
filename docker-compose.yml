@@ -54,9 +54,9 @@ services:
           echo "三种方式完成 onboarding：" >&2
           echo "  1. 推荐：在 Claude Code 里说 \"帮我初始化 invest\"，让 skill 走 5 个问题" >&2
           echo "  2. 一次性容器跑 onboarding：" >&2
-          echo "       docker compose run --rm invest-agent python -m scripts.skill init" >&2
+          echo "       docker compose run --rm invest-web python -m scripts.skill init" >&2
           echo "  3. 直接编辑 user_profile.json 后跑：" >&2
-          echo "       docker compose run --rm invest-agent python scripts/migrate_profile.py" >&2
+          echo "       docker compose run --rm invest-web python scripts/migrate_profile.py" >&2
           exit 1
         fi
         exec python -m scheduler.runner

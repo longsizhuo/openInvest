@@ -43,10 +43,11 @@ git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
 cp .env.example .env && $EDITOR .env       # 至少填 DEEPSEEK_API_KEY（没 .env 也能起，但委员会跑不动）
 ```
 
-**onboarding（建 `memory/`）**——`invest-agent`（scheduler）缺 `memory/user.md` 会拒启：
+**onboarding（建 `memory/`）**——`invest-agent`（scheduler）缺 `memory/user.md` 会拒启。
+一次性命令走 `invest-web`（`invest-agent` 的 `entrypoint: ["/bin/sh","-c"]` 会吞掉追加参数）：
 
 ```bash
-docker compose run --rm invest-agent python -m scripts.skill init
+docker compose run --rm invest-web python -m scripts.skill init
 # 或在 Claude Code 里说"帮我初始化 invest"走 5 个问题
 ```
 

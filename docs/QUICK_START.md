@@ -45,7 +45,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```bash
 git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
 cp .env.example .env && $EDITOR .env                               # 填 DEEPSEEK_API_KEY
-docker compose run --rm invest-agent python -m scripts.skill init  # onboarding（建 memory/）
+docker compose run --rm invest-web python -m scripts.skill init     # onboarding（建 memory/，走 invest-web：agent 的 sh -c entrypoint 会吞参数）
 docker compose up -d --build                                       # 起 web(:8765) + scheduler
 ```
 
