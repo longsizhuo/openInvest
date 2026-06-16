@@ -3,7 +3,7 @@ services:
   # 浏览器开 http://localhost:8765 看完整 GUI；GUI 已在镜像 build 期烤进 static/。
   invest-web:
     build: .
-    image: openinvest:local        # 与 invest-agent 共用同一镜像，只 build 一次
+    image: ghcr.io/longsizhuo/openinvest:latest   # build: . 在本地构建并打这个名；docker compose pull 可直接拉预构建镜像免本地 build
     container_name: invest-web
     restart: always
     env_file:
@@ -25,7 +25,7 @@ services:
 
   # ── 定时任务 scheduler（无端口，跑 daily_report / pnl_snapshot 等 cron）──────
   invest-agent:
-    image: openinvest:local        # 复用 invest-web 构出的镜像
+    image: ghcr.io/longsizhuo/openinvest:latest   # 复用 invest-web 同名镜像（只 build/pull 一次）
     build: .
     container_name: invest-agent
     restart: always
@@ -54,9 +54,9 @@ services:
           echo "三种方式完成 onboarding：" >&2
           echo "  1. 推荐：在 Claude Code 里说 \"帮我初始化 invest\"，让 skill 走 5 个问题" >&2
           echo "  2. 一次性容器跑 onboarding：" >&2
-          echo "       docker compose run --rm invest-agent python -m scripts.skill init" >&2
+          echo "       docker compose run --rm invest-web python -m scripts.skill init" >&2
           echo "  3. 直接编辑 user_profile.json 后跑：" >&2
-          echo "       docker compose run --rm invest-agent python scripts/migrate_profile.py" >&2
+          echo "       docker compose run --rm invest-web python scripts/migrate_profile.py" >&2
           exit 1
         fi
         exec python -m scheduler.runner

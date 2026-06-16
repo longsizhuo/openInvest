@@ -29,6 +29,49 @@ Caddy 反代 (caddy-gateway 容器)
 
 ---
 
+## 0. 容器一键自托管（Docker Compose / GHCR）
+
+> 不想手装 uv / 配 systemd？用容器。镜像 `ghcr.io/longsizhuo/openinvest` 每个后端版本
+> tag（`v*`）由 `publish-image.yml` 自动发布，**GUI 已在 build 期烤进 `static/`**——
+> `docker compose up` 起来浏览器直接看完整看板。要 CF Access 保护，仍可在前面挂下面
+> 第 1–2 节的 Caddy（反代容器的 `127.0.0.1:8765`）。
+
+前置：Docker + Docker Compose v2。
+
+```bash
+git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
+cp .env.example .env && $EDITOR .env       # 至少填 DEEPSEEK_API_KEY（没 .env 也能起，但委员会跑不动）
+```
+
+**onboarding（建 `memory/`）**——`invest-agent`（scheduler）缺 `memory/user.md` 会拒启。
+一次性命令走 `invest-web`（`invest-agent` 的 `entrypoint: ["/bin/sh","-c"]` 会吞掉追加参数）：
+
+```bash
+docker compose run --rm invest-web python -m scripts.skill init
+# 或在 Claude Code 里说"帮我初始化 invest"走 5 个问题
+```
+
+起服务：
+
+```bash
+docker compose up -d --build                 # 本地构建（首次几分钟：uv sync + 烤 GUI）
+# —— 或拉预构建镜像（更快，需该 package 已 Public 或先 docker login ghcr.io）——
+docker compose pull && docker compose up -d
+```
+
+浏览器开 <http://localhost:8765> → 完整 GUI。
+
+| 服务 | 作用 | 端口 |
+|------|------|------|
+| `invest-web` | FastAPI + GUI（uvicorn 绑 `0.0.0.0:8765`）| 宿主 `127.0.0.1:8765`（默认只绑 loopback）|
+| `invest-agent` | scheduler：跑 `jobs/*.yml`（daily_report / pnl_snapshot…）| 无 |
+
+- **暴露到 LAN/公网**：把 `invest-web` 的 `ports` 改成 `"8765:8765"` 并设 `INVEST_API_TOKEN`；或保持 loopback、前面挂 Caddy + CF Access（见下文第 1–2 节）。
+- **数据持久化**：`memory/`（账本，必挂）/ `db/` / `cache_data/` / `logs/` 都 bind-mount 到宿主，容器重建不丢。
+- **镜像可见性**：GHCR 包首发是 private——要 `docker compose pull` 匿名拉，须在 GitHub Packages 把它设为 Public（或 `docker login ghcr.io`）。
+
+---
+
 ## 1. 服务器一次性配置
 
 ### 1.1 装 uv + clone 仓库
