@@ -16,17 +16,28 @@
 
 </div>
 
+
+## 实盘 PnL（live）
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
+  <sub>每 2h 自动更新到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半 = 30 天趋势 · 下半 = vs 8 个基准的累计涨幅</sub>
+  <br/>
+  <sub>📌 <b>图中数据为作者本人账户</b>，仅作方法论展示。你跑起来后看到的是<b>你自己的</b>持仓曲线。</sub>
+</div>
+
+<!-- OUTPERFORM_FEED_START — jobs/pnl_snapshot 每 2h 追加 -->
+<!-- OUTPERFORM_FEED_END -->
+
+**对比的基准**：AI 投顾 / 公募基金 / 储蓄理财 / 大盘指数 4 类共 8 条。完整对比方法论 + 数据源说明见 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
+
+**实盘命中率公开**（自我披露不利数字）：方向性 verdict 历史命中率 25%，HOLD 占 84%——见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。这工具不会让你致富，它只是把决策过程透明化。
+
+
 ---
-
-## ⚠️ Beta 状态须知
-
 - **Web GUI 是 beta**——主面板 / 决策回放 / 实时同步可能不工作。
   推荐入口：通过 Claude Code / Cursor / Cline 等 AI agent 跑 `invest` skill，
   让 AI 带你看持仓、跑委员会、查决策。GUI 只做辅助调试。
-- **代码更新频繁**：每次使用前请 `cd ~/openInvest && git pull` 拉最新。
-  GUI bug / oracle 修复经常发版没有 release tag。
-- **fork 用户已知问题**：[GitHub Issues](https://github.com/longsizhuo/openInvest/issues)
-
 ---
 
 ## 它在做什么
@@ -43,10 +54,13 @@
 
 ---
 
-## 装上
+## 安装
 
-最简单的方式：装成 Claude Code 的 skill，让 Claude 帮你 onboard。
-
+最简单的方式：装成 Claude Code 的 skill，让 Claude 帮你 onboard：
+```bash
+Hi, Claude, 帮我安装https://github.com/longsizhuo/openInvest/tree/main/skills/invest 这个Skill
+```
+也可以手动导入：
 ```bash
 git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
 bash ~/openInvest/skill/install.sh
@@ -61,7 +75,7 @@ bash ~/openInvest/skill/install.sh
 
 之后任何时候说"看看我的持仓" / "分析一下黄金" / "该不该加仓 X"，Claude 会调委员会给你 memo。
 
-> 💡 **DeepSeek API key 是可选的**。Skill 模式下委员会用 Claude 跑，不需要 DeepSeek。
+> 💡 **API key 是可选的**。Skill 模式下委员会用 Claude 跑，不需要 API 消耗。
 > 想后台自动跑（cron 日报 / 任意非 Claude agent 调用）才需要注册。
 
 **其他装法**（Docker / 手动 Python / 自带 GUI）：见 [QUICK_START.md](docs/QUICK_START.md)。
@@ -95,24 +109,6 @@ LLM_MODEL=glm-4-flash
 
 `LLM_*` 系列变量是新的通用配置（推荐）；老的 `DEEPSEEK_*` 保留向后兼容，
 现存 `.env` 不需要迁移。两组都没设时 `LLM_API_KEY` 会自动回落到 `DEEPSEEK_API_KEY`。
-
----
-
-## 实盘 PnL（live）
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
-  <sub>每 2h 自动更新到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半 = 30 天趋势 · 下半 = vs 8 个基准的累计涨幅</sub>
-  <br/>
-  <sub>📌 <b>图中数据为作者本人账户</b>，仅作方法论展示。你跑起来后看到的是<b>你自己的</b>持仓曲线。</sub>
-</div>
-
-<!-- OUTPERFORM_FEED_START — jobs/pnl_snapshot 每 2h 追加 -->
-<!-- OUTPERFORM_FEED_END -->
-
-**对比的基准**：AI 投顾 / 公募基金 / 储蓄理财 / 大盘指数 4 类共 8 条。完整对比方法论 + 数据源说明见 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
-
-**实盘命中率公开**（自我披露不利数字）：方向性 verdict 历史命中率 25%，HOLD 占 84%——见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。这工具不会让你致富，它只是把决策过程透明化。
 
 ---
 
