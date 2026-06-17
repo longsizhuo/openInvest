@@ -79,6 +79,7 @@ curl http://127.0.0.1:8765/openapi.json
 | Method | Path | 用途 |
 |--------|------|------|
 | GET | `/api/strategy` | 完整策略 + target_assets |
+| GET | `/api/config` | 可经 API 配置的白名单 tunable 当前生效值 + 是否被 override + 元信息（ADR-017）|
 | GET | `/api/symbols/search?q=apple&limit=8` | yfinance Search 搜 symbol（GUI 新增资产用）|
 | GET | `/api/regime/{symbol}` | 该 symbol 当前 regime + 算法输入 |
 | GET | `/api/regime_rules` | 全部硬规则 + 4 角色 prompt 全文 |
@@ -139,6 +140,14 @@ POST /api/gold/buy    POST /api/gold/sell    POST /api/gold/set    POST /api/gol
 | POST | `/api/strategy/asset` | 加 target_asset |
 | PUT | `/api/strategy/asset/{symbol}` | 改 target_asset cap / 费率 |
 | DELETE | `/api/strategy/asset/{symbol}` | 删 target_asset |
+| PUT | `/api/config` | 设一条白名单 config override（body `{key, value}`，落盘持久，优先级 > env；ADR-017）|
+| DELETE | `/api/config/{key}` | 删一条 config override，回退 env/yaml/默认 |
+
+> **config-via-API（ADR-017）**：白名单 `API_SETTABLE`（`core/config/_loader.py`）只放用户安全
+> 的行为开关（`verdict.concentration_lens_enabled` / `verdict.risk_profile` /
+> `verdict.gold_defense_dca_enabled` / `dreaming.llm_verify_enabled`）。落盘
+> `memory/.state/config_overrides.json`，`load_config()` 在 env 之上合入，web/cron/skill 三进程共读。
+> 机密 + 部署引导仍只走 env；`locked.py` 永不暴露。CLI 同款：`skill config [--set K V] [--clear K]`。
 
 ---
 

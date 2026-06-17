@@ -1156,3 +1156,43 @@ def test_auth_enforced_when_token_set(client, monkeypatch):
     # 写端点同样被保护
     r = client.post("/api/skill/buy", json={"symbol": "X", "units": 1, "price": 1})
     assert r.status_code == 401
+
+
+# ---------- /api/config（ADR-017 config-via-API）----------
+
+def test_config_endpoints_roundtrip(client):
+    """GET/PUT/DELETE /api/config：白名单生效 + 校验 + 落盘往返（tmp store 隔离）。"""
+    from core.config import reset_config
+    reset_config()
+
+    # GET 默认
+    r = client.get("/api/config")
+    assert r.status_code == 200
+    items = {it["key"]: it for it in r.json()["items"]}
+    assert set(items) == {
+        "verdict.concentration_lens_enabled", "verdict.risk_profile",
+        "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",
+    }
+    assert items["verdict.concentration_lens_enabled"]["value"] is True
+    assert items["verdict.concentration_lens_enabled"]["overridden"] is False
+
+    # PUT bool override
+    r = client.put("/api/config", json={"key": "verdict.concentration_lens_enabled", "value": False})
+    assert r.status_code == 200
+    cl = {it["key"]: it for it in r.json()["items"]}["verdict.concentration_lens_enabled"]
+    assert cl["value"] is False and cl["overridden"] is True
+
+    # PUT enum
+    assert client.put("/api/config", json={"key": "verdict.risk_profile", "value": "aggressive"}).status_code == 200
+    # 非白名单 → 400；enum 非法 → 400
+    assert client.put("/api/config", json={"key": "verdict.alloc_cny_ceiling", "value": 1}).status_code == 400
+    assert client.put("/api/config", json={"key": "verdict.risk_profile", "value": "yolo"}).status_code == 400
+
+    # DELETE 复位
+    r = client.delete("/api/config/verdict.concentration_lens_enabled")
+    assert r.status_code == 200
+    cl = {it["key"]: it for it in r.json()["items"]}["verdict.concentration_lens_enabled"]
+    assert cl["value"] is True and cl["overridden"] is False
+    # 非白名单 delete → 404
+    assert client.delete("/api/config/verdict.alloc_cny_ceiling").status_code == 404
+    reset_config()

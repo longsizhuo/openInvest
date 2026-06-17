@@ -8,7 +8,15 @@
 """
 from __future__ import annotations
 
-from ._loader import load_config, reset_config, set_config_override
+from ._loader import (
+    API_SETTABLE,
+    clear_persisted_override,
+    effective_api_config,
+    load_config,
+    reset_config,
+    set_config_override,
+    set_persisted_override,
+)
 from .locked import (
     LockedCommitteeDefaults,
     LockedDreamingScoring,
@@ -36,6 +44,11 @@ __all__ = [
     "reset_config",
     "set_config_override",
     "get_locked",
+    # 持久化 API 配置层（ADR-017）
+    "API_SETTABLE",
+    "effective_api_config",
+    "set_persisted_override",
+    "clear_persisted_override",
     # Tunable dataclasses
     "TunableConfig",
     "RegimeConfig",

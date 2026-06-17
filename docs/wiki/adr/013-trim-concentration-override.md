@@ -33,6 +33,16 @@ PR #14（已合入）在 CIO prompt 层加了"零花钱账户 TRIM 约束"，但
 3. **`portfolio_summary_text()`** 加 `backup_cny` 参数，附注真实财富占比
 4. 跟现有的 BUY→ACCUMULATE（Sanity 1）、WORKER→HOLD（Sanity 3）同款机制
 
+> **2026-06-17（ADR-017）**：Sanity check 4 现在**双触发**——`solvency_strong` **或**
+> `concentration_lens_enabled=False`（用户经 `/api/config` 关掉集中度 lens，单资产/刻意集中
+> 策略）时，**无条件** force-HOLD 掉 `TRIM_REASON=concentration`（lens-off 那条不依赖 solvency）。
+> 这把"我有家族兜底（emergency_buffer）"和"别因集中度唠叨我减仓"两件事**解耦**：以前只能
+> 靠填假的 `emergency_buffer_cny` 触发 strong 来规避，现在有真 toggle。`out["_concentration_lens"]`
+> 标记区分两种触发（`disabled` vs `sanity4_solvency`），供 intervention 反事实账本分桶
+> （`config_concentration_lens_off` vs `sanity4_solvency_concentration`），别混淆统计。
+> prompt 层（`agents/cio.py` / `agents/risk_officer.py`）同步软抑制超配规则。详见
+> [017-config-via-api](017-config-via-api.md)。
+
 ### 与 PR #14 的关系
 
 PR #14 在 prompt 层加了"零花钱账户 + 浮亏 < 5% 不允许 TRIM"约束。本次的

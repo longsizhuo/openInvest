@@ -51,6 +51,19 @@ class TestInterventionRecord:
         assert rec["rule"] == "sanity4_solvency_concentration"
         assert rec["delta_exposure_cny"] == -20000.0
 
+    def test_config_concentration_lens_off_labeled_distinctly(self):
+        """用户 config 关 lens 拦 TRIM → 标 config_concentration_lens_off（与 sanity4 兜底分桶）"""
+        rec = _intervention_record(
+            "GC=F", "downtrend", 4100.0,
+            _v(verdict="HOLD", alloc_cny=0,
+               _original_verdict="TRIM", _original_alloc=-20000,
+               _original_trim_reason="concentration",
+               _concentration_lens="disabled"),
+            atr_defense_on=False,
+        )
+        assert rec["rule"] == "config_concentration_lens_off"
+        assert rec["delta_exposure_cny"] == -20000.0
+
     def test_sanity5_reentry_missing(self):
         rec = _intervention_record(
             "NDQ.AX", "uptrend", 60.0,
@@ -178,6 +191,7 @@ class TestRuleFamily:
         assert rule_family("sanity4_solvency_concentration") == "trim_blocked"
         assert rule_family("sanity5_reentry_missing") == "trim_blocked"
         assert rule_family("reconstructed_trim_blocked") == "trim_blocked"
+        assert rule_family("config_concentration_lens_off") == "trim_blocked"
         # 拦买入家族
         assert rule_family("defense_accumulate_to_hold") == "buy_defense"
         assert rule_family("defense_buy_to_accumulate") == "buy_defense"

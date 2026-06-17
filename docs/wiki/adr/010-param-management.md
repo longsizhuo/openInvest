@@ -24,6 +24,12 @@ openInvest 有 50+ 个硬编码参数，分三类：
 - `core/config/locked.py` 里的参数：**不可调**。代码从 locked.py 读值，注入链
   （YAML/CLI/env）在物理上无法覆盖。改动需要新开 ADR，说明为什么推翻原设计承诺。
 
+> **2026-06-17（ADR-017）**：注入链在 env 之后追加了一层**持久 API override**
+> （`memory/.state/config_overrides.json`，最高优先级），让 tunable 里的**白名单子集**
+> （`API_SETTABLE`）能经 `GET/PUT /api/config` + `skill config` 运行时配置——"配置走 API，
+> env 退为 bootstrap 默认"。白名单只放用户安全的行为开关；内部 sweep 阈值不暴露（守本 ADR
+> rule 4）。详见 [017-config-via-api](017-config-via-api.md)。`locked.py` 仍既不进 env 也不进 API。
+
 ### 规则 2：Sweep 必须 train + holdout 双指标
 
 任何参数 sweep 的结果，必须同时报告 train set 和 holdout set 的指标。
