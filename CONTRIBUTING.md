@@ -127,7 +127,7 @@ feat(napcat): 11 命令切 v2 数据模型 + 18 fixture 测试
 - ❌ `update`（说更新什么）
 - ❌ `wip`（开 PR 前 squash 掉）
 
-**Co-author 规则**：如果你的改动接管了别人的工作（基于他们的 PR / Issue），commit message 加 `Co-authored-by: Name <email>`。**不要**加 Claude 署名（[memory 决策](https://github.com/anthropics/claude-code) `feedback_commit_no_claude_coauthor`）。
+**Co-author 规则**：如果你的改动接管了别人的工作（基于他们的 PR / Issue），commit message 加 `Co-authored-by: Name <email>`。
 
 ### 3.3 测试
 
@@ -339,5 +339,3 @@ MIT。提交 PR 即代表你同意以 MIT 协议授权这部分代码。
 
 > 写代码是一回事，让别人能读懂、能改、能扩，是另一回事。
 > openInvest 不指望成为下一个开源大热门，但它欢迎认真的贡献者。
-
-— longsizhuo
