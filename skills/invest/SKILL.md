@@ -180,6 +180,7 @@ GUI，他根本用不上。所以：
 | `buy --symbol S --units N --price P [-c CCY] [--kind etf/equity/...]` | 通用 写 | 加仓 / 建仓（加权平均成本） | JSON action + 估算成本 |
 | `sell --symbol S --units N --price P` | 通用 写 | 减仓（按 holding cost_currency 还现金） | JSON 剩余 units |
 | `delete_holding --symbol S [--force]` | 通用 写 | 删除持仓行（units 必须 0 或 --force） | JSON 已删 |
+| `config [--set KEY VALUE] [--clear KEY]` | 通用 读/写 | 读/改可经 API 配置的白名单参数（concentration_lens / risk_profile / gold_defense_dca / dreaming.llm_verify）。无参=读全部。等价 GET/PUT /api/config（ADR-017）| JSON 全部生效值 |
 
 **子命令名是封闭集合 —— 上表之外的命令都不存在**。看到自己想调
 `get_committee_context` / `analyze_asset` / `pull_brief` 这种名字时，停下，
@@ -210,6 +211,9 @@ GUI，他根本用不上。所以：
 | `POST /api/strategy/asset` | 加 target_assets 条目 | `{symbol, channel?, max_single_invest_cny}` |
 | `GET /api/events/recent?hours=24&min_severity=low&limit=50` | 列最近 N 小时事件层感知的新闻（ADR-006）。debug / "系统现在感知到什么" | — |
 | `POST /api/events/check` | 手动跑一次 event_watch（拉新闻 + 归一化 + 入库 + 命中触发委员会）。同步 30-90s | — |
+| `GET /api/config` | 看可经 API 配置的白名单参数当前生效值（+ 是否被 override + 元信息）| — |
+| `PUT /api/config` | 改一条白名单 override（落盘持久、跨进程共读，优先级高于 env；ADR-017）| `{key, value}`，如 `{"key":"verdict.concentration_lens_enabled","value":false}` |
+| `DELETE /api/config/{key}` | 删一条 override 回退默认 | — |
 
 **典型流程**：用户说"我打算..."/"刚买了 X"/"我的持仓多了 Y" → 用
 `POST /api/trades/record`（带 intended_date 区分计划 vs 已成交）→ 真实成交后用
