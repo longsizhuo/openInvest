@@ -209,6 +209,68 @@ def test_sanity4_trim_reason_extraction():
     assert r2["verdict"] == "HOLD"
 
 
+# ---------- 集中度 lens 开关 (concentration_lens_enabled) ----------
+
+def test_concentration_lens_off_forces_hold_even_without_solvency():
+    """lens 关 → 无条件 force-HOLD 掉 concentration-TRIM（不依赖 solvency_strong）"""
+    set_config_override({"verdict": {"concentration_lens_enabled": False}})
+    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
+    assert r["verdict"] == "HOLD"
+    assert r["_original_verdict"] == "TRIM"
+    assert r["trim_reason"] is None
+    assert r["alloc_cny"] == 0
+    assert r["_concentration_lens"] == "disabled"
+
+
+def test_concentration_lens_marker_distinguishes_solvency_from_config():
+    """lens 开(默认) + solvency_strong → marker=sanity4_solvency（区别于用户关 lens）"""
+    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=True)
+    assert r["verdict"] == "HOLD"
+    assert r["_concentration_lens"] == "sanity4_solvency"
+
+
+def test_concentration_lens_on_by_default_does_not_override():
+    """默认 lens 开 + 弱兜底 → concentration-TRIM 不被覆盖（守"无静默行为变更"）"""
+    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
+    assert r["verdict"] == "TRIM"
+    assert r["trim_reason"] == "concentration"
+    assert "_concentration_lens" not in r
+
+
+def test_concentration_lens_off_keeps_stop_loss_trim():
+    """lens 关只压"超配"，真实风险（stop_loss）TRIM 不受影响"""
+    set_config_override({"verdict": {"concentration_lens_enabled": False}})
+    r = parse_cio_memo(_trim_text("stop_loss"), solvency_strong=False)
+    assert r["verdict"] == "TRIM"
+    assert r["trim_reason"] == "stop_loss"
+    assert r["alloc_cny"] == -5000
+
+
+def test_cio_prompt_concentration_directive_off_by_default():
+    """默认 lens 开 → CIO prompt 不含关闭指令"""
+    from agents.cio import build_cio_prompt
+    prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
+    assert "集中度 lens 已被用户关闭" not in prompt
+
+
+def test_cio_prompt_concentration_directive_on_when_lens_disabled():
+    """lens 关 → CIO prompt 注入关闭指令"""
+    set_config_override({"verdict": {"concentration_lens_enabled": False}})
+    from agents.cio import build_cio_prompt
+    prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
+    assert "集中度 lens 已被用户关闭" in prompt
+
+
+def test_risk_officer_prompt_concentration_directive_both_rounds():
+    """lens 关 → Risk Officer opening + rebuttal 两轮 prompt 都注入关闭指令"""
+    from agents.risk_officer import build_risk_officer_prompt
+    asset = {"symbol": "GC=F", "display_name": "黄金"}
+    assert "集中度 lens 已关闭" not in build_risk_officer_prompt(asset)
+    set_config_override({"verdict": {"concentration_lens_enabled": False}})
+    assert "集中度 lens 已关闭" in build_risk_officer_prompt(asset, round_label="opening")
+    assert "集中度 lens 已关闭" in build_risk_officer_prompt(asset, round_label="rebuttal")
+
+
 # ---------- Sanity check 5: TRIM 必须给低于现价的买回点，否则降级 HOLD ----------
 
 def _trim_reentry_text(reentry_price="950", reason="bearish") -> str:

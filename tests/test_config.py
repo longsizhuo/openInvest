@@ -34,6 +34,10 @@ from core.config import (
     load_config,
     reset_config,
     set_config_override,
+    API_SETTABLE,
+    effective_api_config,
+    set_persisted_override,
+    clear_persisted_override,
 )
 
 
@@ -388,3 +392,76 @@ class TestFixtureIsolation:
         """这个 test 应该看到默认值，不受上一个 test 影响。"""
         cfg = load_config()
         assert cfg.regime.trend_ma_spread_pct == 3.0
+
+
+# ---------- config-via-API 持久层（ADR-017）----------
+
+
+class TestApiConfig:
+    """白名单校验 + 优先级（持久 API override > env）+ 落盘往返。落盘隔离到 tmp。"""
+
+    @pytest.fixture(autouse=True)
+    def _tmp_memory(self, tmp_path, monkeypatch):
+        from core import memory_store as ms
+        monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
+        yield
+
+    def test_effective_view_defaults(self):
+        view = {it["key"]: it for it in effective_api_config()}
+        assert set(view) == set(API_SETTABLE)
+        assert view["verdict.concentration_lens_enabled"]["value"] is True
+        assert view["verdict.concentration_lens_enabled"]["overridden"] is False
+        assert view["verdict.risk_profile"]["choices"] == ["steady", "aggressive"]
+
+    def test_set_persists_and_survives_reload(self):
+        """set → 落盘 → reset 后重 load 仍生效（模拟另一进程读同一文件）。"""
+        cfg = set_persisted_override("verdict.concentration_lens_enabled", False)
+        assert cfg.verdict.concentration_lens_enabled is False
+        reset_config()
+        assert load_config().verdict.concentration_lens_enabled is False
+        ov = [it["overridden"] for it in effective_api_config()
+              if it["key"] == "verdict.concentration_lens_enabled"][0]
+        assert ov is True
+
+    def test_str_bool_coercion(self):
+        cfg = set_persisted_override("verdict.concentration_lens_enabled", "false")
+        assert cfg.verdict.concentration_lens_enabled is False
+
+    def test_enum_validation(self):
+        assert set_persisted_override("verdict.risk_profile", "aggressive").verdict.risk_profile == "aggressive"
+        with pytest.raises(ValueError):
+            set_persisted_override("verdict.risk_profile", "yolo")
+
+    def test_non_whitelist_rejected(self):
+        with pytest.raises(ValueError):
+            set_persisted_override("verdict.alloc_cny_ceiling", 1)
+
+    def test_bad_bool_rejected(self):
+        with pytest.raises(ValueError):
+            set_persisted_override("verdict.concentration_lens_enabled", "maybe")
+
+    def test_clear_reverts_to_default(self):
+        set_persisted_override("verdict.concentration_lens_enabled", False)
+        cfg = clear_persisted_override("verdict.concentration_lens_enabled")
+        assert cfg.verdict.concentration_lens_enabled is True
+        with pytest.raises(ValueError):
+            clear_persisted_override("verdict.alloc_cny_ceiling")  # 非白名单
+
+    def test_api_override_beats_env(self, monkeypatch):
+        """ADR-017 核心：持久 API override 优先级高于 env。"""
+        monkeypatch.setenv("INVEST_VERDICT_CONCENTRATION_LENS_ENABLED", "true")
+        set_persisted_override("verdict.concentration_lens_enabled", False)
+        reset_config()
+        assert load_config().verdict.concentration_lens_enabled is False  # API 赢 env
+
+    def test_env_applies_when_no_override(self, monkeypatch):
+        """无持久 override 时 env 仍是 bootstrap 默认（向后兼容）。"""
+        monkeypatch.setenv("INVEST_VERDICT_RISK_PROFILE", "aggressive")
+        reset_config()
+        assert load_config().verdict.risk_profile == "aggressive"
+
+    def test_dreaming_llm_verify_legacy_env(self, monkeypatch):
+        """#3 向后兼容：旧 INVEST_DREAMING_LLM_VERIFY=1 经 _LEGACY_MAP 进 config。"""
+        monkeypatch.setenv("INVEST_DREAMING_LLM_VERIFY", "1")
+        reset_config()
+        assert load_config().dreaming.llm_verify_enabled in (True, 1)

@@ -19,13 +19,24 @@ def build_risk_officer_prompt(asset: Dict[str, Any], round_label: str = "opening
     round_label="opening" → SKILL.md (Round 1 独立陈述)
     round_label="rebuttal" → SKILL_rebuttal.md (Round 2 cross-challenge)
     """
+    from core.config import load_config
     asset_name = asset.get("display_name", asset.get("symbol"))
-    return load_skill(
+    prompt = load_skill(
         "risk_officer",
         round_label=round_label,
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
     )
+    # 集中度 lens 关闭时（单资产/刻意集中策略）压掉超配升级。前置注入而非占位符：一次覆盖
+    # opening + rebuttal 两个 SKILL 文件，不会漏某一轮。CONCENTRATION_PCT 字段仍如实输出。
+    if not load_config().verdict.concentration_lens_enabled:
+        directive = (
+            "**🚫 集中度 lens 已关闭（单资产 / 刻意集中策略）**：下方 CONCENTRATION_PCT 字段仍如实"
+            "输出该资产占比，但**不得据此升级 SIGNAL 或建议减仓**（跳过 `>60% 至少 concerned` 规则）。"
+            "其余风险维度（波动 / 回撤 / 止损 / 现金流动性 / 追涨）照常评估。\n\n"
+        )
+        prompt = directive + prompt
+    return prompt
 
 
 __all__ = ["build_risk_officer_prompt"]

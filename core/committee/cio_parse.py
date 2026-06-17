@@ -196,22 +196,28 @@ def parse_cio_memo(
         log.warning("parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
                     "强制 verdict=HOLD + confidence≤floor + alloc=0")
 
-    # Sanity check 4: SOLVENCY=strong + TRIM + TRIM_REASON=concentration → 强制 HOLD
-    # 兜底充足时，"账户内集中度高"不应触发减仓（真实财富风险不存在），
-    # 只应限制加仓。确定性后处理，不依赖 prompt。
-    if (solvency_strong
+    # Sanity check 4: TRIM + TRIM_REASON=concentration → 强制 HOLD，两种触发：
+    #  (a) SOLVENCY=strong — 兜底充足时"账户内集中度高"不触发减仓（真实财富风险不存在）；
+    #  (b) concentration_lens_enabled=False — 用户在 config 关掉集中度 lens（单资产/刻意
+    #      集中策略），无条件 force-HOLD 掉 concentration-TRIM，不再依赖 solvency_strong。
+    # 确定性后处理，是硬兜底；prompt 层（agents/cio.py + risk_officer.py）只是软抑制，
+    # 防 LLM 把超配换标签成 bearish 绕过本检查。
+    _lens_off = not _verdict_cfg.concentration_lens_enabled
+    if ((solvency_strong or _lens_off)
             and out["verdict"] == "TRIM"
             and out.get("trim_reason") == "concentration"):
         out["_original_verdict"] = "TRIM"
         out["_original_trim_reason"] = "concentration"
+        # 区分两种触发，供 intervention 反事实账本 / daily_report 分开统计，别混成一种 override。
+        out["_concentration_lens"] = "disabled" if _lens_off else "sanity4_solvency"
         # setdefault: 若 Sanity 1/2 已记录更早的原值（如 Sanity 2 的 pre-clamp
         # alloc），不要被这里覆盖丢掉真正的原始值。
         out.setdefault("_original_confidence", out["confidence"])
         out.setdefault("_original_alloc", out["alloc_cny"])
         out["trim_reason"] = None
         _force_hold(out, confidence_ceiling=_verdict_cfg.forced_hold_confidence_ceiling)
-        log.warning("parse_cio_memo: SOLVENCY=strong + TRIM(concentration) → "
-                    "强制 HOLD（兜底充足，集中度不触发减仓）")
+        log.warning("parse_cio_memo: %s + TRIM(concentration) → 强制 HOLD",
+                    "集中度 lens 已关闭（config）" if _lens_off else "SOLVENCY=strong（兜底充足）")
 
     # Sanity check 5: TRIM 必须给出"低于现价的买回点"，否则降级 HOLD
     # 卖出后买回点缺失 or 不低于现价 = 卖了高价大概率接回 = 纯亏，TRIM 不成立。

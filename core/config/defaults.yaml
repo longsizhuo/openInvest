@@ -22,6 +22,9 @@ verdict:
   buy_confidence_downgrade_to: 0.6
   alloc_cny_ceiling: 100000
   worker_unavailable_confidence_floor: 0.4
+  # 集中度 lens：关掉=单资产/刻意集中用户不再被"超配减仓"纠缠（仍保留波动/回撤/止损/估值）。
+  # 默认开=现有行为不变。env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=false
+  concentration_lens_enabled: true
   # steady=无方向锁(B链, Sharpe/回撤最优) | aggressive=uptrend顺势杠杆(HOLD→ACCUMULATE, +CR −Sharpe 深DD)
   risk_profile: steady
   # 黄金防御分批 DCA（2026-06-13 用户裁决采纳，wiki 18 §5）：高 VIX 不全拦黄金买入，
@@ -37,6 +40,8 @@ dreaming:
   min_recall: 3
   lookback_days: 90
   windows: [7, 30]
+  # Deep Sleep LLM 验伪（默认关=零 LLM 成本）。env 向后兼容 INVEST_DREAMING_LLM_VERIFY=1。
+  llm_verify_enabled: false
 
 macro_buckets:
   vix_low: 18.0
