@@ -82,6 +82,8 @@ def _read_env_overrides() -> dict[str, Any]:
     # 已知的 env → config 映射（处理不符合命名规则的旧变量）
     _LEGACY_MAP = {
         "INVEST_DREAMING_LOOKBACK_DAYS": "dreaming.lookback_days",
+        # 旧裸 os.getenv 收进 config 后保留向后兼容（dreaming.llm_verify_enabled）
+        "INVEST_DREAMING_LLM_VERIFY": "dreaming.llm_verify_enabled",
     }
 
     for key, val in os.environ.items():
@@ -233,6 +235,12 @@ def load_config(
     if env_overrides:
         base = _deep_merge(base, env_overrides)
 
+    # 5. 持久化 API override（GET/PUT /api/config 落盘，跨 cron/web/skill 三进程共读）。
+    #    最高优先级——"配置走 API，env 退为 bootstrap 默认"（ADR-017）。白名单见 API_SETTABLE。
+    persisted = _read_persisted_overrides()
+    if persisted:
+        base = _deep_merge(base, persisted)
+
     config = _build_tunable_from_dict(base)
 
     # 更新缓存
@@ -281,3 +289,124 @@ def set_config_override(overrides: dict) -> TunableConfig:
     _persistent_overrides = overrides
     # 清缓存，下次 load_config() 用新 override 重建
     return load_config(_force_reload=True)
+
+
+# ============================================================================
+# 持久化 API 配置层（ADR-017）：用户可经 GET/PUT /api/config 改的白名单 tunable，
+# 落盘 memory/.state/config_overrides.json（MemoryStore 原子写 + fcntl），load_config
+# 在 env 之上合入 → web/cron/skill 三进程共读一致；env 退为 bootstrap 默认。
+# locked.py 永不在此暴露；内部 sweep 阈值也不进白名单（守 ADR-010）。
+# ============================================================================
+
+_PERSIST_STATE_NAME = "config_overrides"
+
+# 白名单：dotted key → 元信息。只放"用户安全"的行为开关（GUI/agent 都经 /api/config 改）。
+API_SETTABLE: Dict[str, Dict[str, Any]] = {
+    "verdict.concentration_lens_enabled": {
+        "type": "bool",
+        "label": "集中度 lens",
+        "help": "关闭=单资产/刻意集中策略不再因持仓集中度被建议减仓（仍保留波动/回撤/止损/估值风险）",
+    },
+    "verdict.risk_profile": {
+        "type": "enum",
+        "choices": ["steady", "aggressive"],
+        "label": "风险档",
+        "help": "steady=无方向锁（Sharpe/回撤最优，默认）；aggressive=uptrend 顺势加仓杠杆（高风险）",
+    },
+    "verdict.gold_defense_dca_enabled": {
+        "type": "bool",
+        "label": "黄金防御分批 DCA",
+        "help": "高 VIX/ATR 区不全拦黄金买入，改分批放行；关闭=退回旧'全拦'行为",
+    },
+    "dreaming.llm_verify_enabled": {
+        "type": "bool",
+        "label": "Dreaming LLM 验伪",
+        "help": "Deep Sleep 写 insights 前过一次廉价 LLM 挑伪相关（默认关=零 LLM 成本）",
+    },
+}
+
+
+def _coerce_and_validate(key: str, value: Any) -> Any:
+    """按白名单 spec 校验 + 归一化 value；非法 → ValueError。"""
+    if key not in API_SETTABLE:
+        raise ValueError(f"config key 不可经 API 配置（不在白名单）: {key}")
+    spec = API_SETTABLE[key]
+    t = spec["type"]
+    if t == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.lower() in ("true", "false"):
+            return value.lower() == "true"
+        raise ValueError(f"{key} 需 bool，得到 {value!r}")
+    if t == "enum":
+        if value in spec["choices"]:
+            return value
+        raise ValueError(f"{key} 需 ∈ {spec['choices']}，得到 {value!r}")
+    raise ValueError(f"未知白名单 type: {t}")  # pragma: no cover
+
+
+def _read_persisted_overrides() -> dict:
+    """读落盘 API override（memory/.state/config_overrides.json）。缺失/异常 → {}（优雅退化）。"""
+    try:
+        from core.memory_store import MemoryStore
+        return MemoryStore().state_get(_PERSIST_STATE_NAME, {}) or {}
+    except Exception:  # noqa: BLE001 — 配置读取永不应让调用方崩
+        return {}
+
+
+def _get_dotted(cfg: TunableConfig, dotted: str) -> Any:
+    cur: Any = cfg
+    for part in dotted.split("."):
+        cur = getattr(cur, part)
+    return cur
+
+
+def effective_api_config() -> List[Dict[str, Any]]:
+    """GET /api/config 视图：白名单每项的当前生效值 + 是否被持久 override + 元信息。"""
+    cfg = load_config()
+    persisted = _read_persisted_overrides()
+    out: List[Dict[str, Any]] = []
+    for key, spec in API_SETTABLE.items():
+        section, fld = key.split(".", 1)
+        overridden = isinstance(persisted.get(section), dict) and fld in persisted[section]
+        item: Dict[str, Any] = {
+            "key": key,
+            "value": _get_dotted(cfg, key),
+            "overridden": overridden,
+            "type": spec["type"],
+            "label": spec["label"],
+            "help": spec["help"],
+        }
+        if spec["type"] == "enum":
+            item["choices"] = spec["choices"]
+        out.append(item)
+    return out
+
+
+def set_persisted_override(key: str, value: Any) -> TunableConfig:
+    """白名单校验后落盘一条 API override + 失效缓存。返回新 config。"""
+    coerced = _coerce_and_validate(key, value)
+    from core.memory_store import MemoryStore
+    store = MemoryStore()
+    cur = store.state_get(_PERSIST_STATE_NAME, {}) or {}
+    _deep_set(cur, key, coerced)
+    store.state_set(_PERSIST_STATE_NAME, cur)
+    reset_config()
+    return load_config()
+
+
+def clear_persisted_override(key: str) -> TunableConfig:
+    """删除一条持久 override（回退 env/yaml/默认）+ 失效缓存。返回新 config。"""
+    if key not in API_SETTABLE:
+        raise ValueError(f"config key 不在白名单: {key}")
+    from core.memory_store import MemoryStore
+    store = MemoryStore()
+    cur = store.state_get(_PERSIST_STATE_NAME, {}) or {}
+    section, fld = key.split(".", 1)
+    if isinstance(cur.get(section), dict):
+        cur[section].pop(fld, None)
+        if not cur[section]:
+            cur.pop(section, None)
+    store.state_set(_PERSIST_STATE_NAME, cur)
+    reset_config()
+    return load_config()

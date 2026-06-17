@@ -830,6 +830,31 @@ class CommitteeSaveRequest(BaseModel):
     symbol: str
     transcript: str = Field(..., description="6 段 '=== ROLE ===' 分隔的 transcript 全文")
 
+
+# ============ config-via-API（ADR-017）============
+
+class ConfigItem(BaseModel):
+    """GET/PUT /api/config 中的单条白名单配置项"""
+    key: str = Field(..., description="dotted config key，如 verdict.concentration_lens_enabled")
+    value: Any = Field(..., description="当前生效值（bool 或 enum 字符串）")
+    overridden: bool = Field(..., description="是否被持久 API override（区别于 env/yaml/默认）")
+    type: str = Field(..., description="bool | enum")
+    label: str
+    help: str
+    choices: Optional[List[str]] = Field(default=None, description="enum 时的可选值")
+
+
+class ConfigResponse(BaseModel):
+    """GET/PUT/DELETE /api/config 响应：白名单全部配置项的当前生效视图"""
+    items: List[ConfigItem]
+
+
+class ConfigUpdateRequest(BaseModel):
+    """PUT /api/config body：设一条白名单 override"""
+    key: str = Field(..., description="必须 ∈ 白名单（API_SETTABLE）")
+    value: Any = Field(..., description="bool 或 enum 字符串；后端按白名单 spec 校验")
+
+
 __all__ = [
     "HealthResponse",
     "CashSummary",
@@ -915,4 +940,7 @@ __all__ = [
     "SkillDeleteHoldingRequest",
     "CommitteePrepareRequest",
     "CommitteeSaveRequest",
+    "ConfigItem",
+    "ConfigResponse",
+    "ConfigUpdateRequest",
 ]

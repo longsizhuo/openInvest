@@ -63,6 +63,7 @@ from scripts.skill_cmds.analysis_cmds import *  # noqa: E402,F401,F403
 from scripts.skill_cmds.committee_cmds import *  # noqa: E402,F401,F403
 from scripts.skill_cmds.portfolio_cmds import *  # noqa: E402,F401,F403
 from scripts.skill_cmds.lifecycle_cmds import *  # noqa: E402,F401,F403
+from scripts.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 
 
 # ---------- main ----------
@@ -184,6 +185,16 @@ def main() -> None:
     p.add_argument("--recall", metavar="SYMBOL",
                    help="只测 event_store.recall(SYMBOL)，不抓新源")
     p.set_defaults(func=cmd_event_check)
+
+    p = sub.add_parser(
+        "config",
+        help="读/改可经 API 配置的白名单参数（concentration_lens / risk_profile / "
+             "gold_defense_dca / dreaming.llm_verify）。等价 GET/PUT /api/config。",
+    )
+    p.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"),
+                   help="设一条 override，如 --set verdict.concentration_lens_enabled false")
+    p.add_argument("--clear", metavar="KEY", help="删一条 override，回退 env/yaml/默认")
+    p.set_defaults(func=cmd_config)
 
     args = parser.parse_args()
 
