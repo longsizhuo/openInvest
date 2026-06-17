@@ -33,11 +33,23 @@ def build_cio_prompt(asset: Dict[str, Any]) -> str:
             f"- 金融逻辑：零花钱账户 + 强破产兜底，小额浮亏不值得交易"
         )
 
+    # 集中度 lens 关闭时（单资产/刻意集中策略）压掉 CIO 的超配规则。空串=开启时零改动
+    # （str.replace 空串为 no-op）。这是 prompt 软层；硬兜底在 cio_parse.py Sanity 4。
+    concentration_directive = ""
+    if not verdict_cfg.concentration_lens_enabled:
+        concentration_directive = (
+            "**🚫 集中度 lens 已被用户关闭（单资产 / 刻意集中策略）**：忽略上方所有基于 "
+            "CONCENTRATION_PCT 的超配规则——`<20% / 20-40% / >40%` 分档与 `>60% 限仓` 均不适用，"
+            "**不得以集中度 / 超配为由输出 TRIM**（也不得换标签成 bearish 但实由超配驱动）。"
+            "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。"
+        )
+
     return load_skill(
         "cio",
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
         TRIM_CONSTRAINT=trim_constraint,
+        CONCENTRATION_DIRECTIVE=concentration_directive,
     )
 
 

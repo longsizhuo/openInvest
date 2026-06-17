@@ -52,6 +52,11 @@ class VerdictConfig:
     # force-HOLD 时统一的 confidence 上限（Sanity 4：兜底充足覆盖集中度减仓用）。
     # 与 worker_unavailable_confidence_floor 同默认但语义独立，便于分别 tune。
     forced_hold_confidence_ceiling: float = 0.4
+    # 集中度 lens 开关（2026-06 用户裁决）：单资产 / 刻意集中策略可关掉"超配减仓"视角。
+    # True（默认）= 现有行为不变；False = 无条件 force-HOLD 掉 TRIM_REASON=concentration
+    # （不再依赖 solvency_strong），并在 Risk/CIO prompt 压掉超配规则；仍保留波动/回撤/止损/
+    # 估值/压力测试风险。env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=false
+    concentration_lens_enabled: bool = True
     # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
     # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
     trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
@@ -83,6 +88,9 @@ class DreamingTunableConfig:
     min_recall: int = 3
     lookback_days: int = 90
     windows: tuple[int, ...] = (7, 30)
+    # Deep Sleep 写 insights 前过一次廉价 LLM 验伪（挑 spurious correlation）。默认关=零 LLM 成本。
+    # 原 INVEST_DREAMING_LLM_VERIFY 裸 os.getenv 已收进 config（_loader 的 _LEGACY_MAP 向后兼容）。
+    llm_verify_enabled: bool = False
 
 
 @dataclass(frozen=True)

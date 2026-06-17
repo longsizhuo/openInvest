@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -577,11 +576,12 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
                           "note": "no_candidate_passed_threshold"})
         return []
 
-    # P1-3 LLM 验伪（可选）：默认 off，env 开 INVEST_DREAMING_LLM_VERIFY=1 启用
+    # P1-3 LLM 验伪（可选）：默认 off。从 config 读（dreaming.llm_verify_enabled），
+    # 支持 API/yaml/set_config_override + env INVEST_DREAMING_LLM_VERIFY=1（_LEGACY_MAP 向后兼容）。
     # 设计意图：统计阈值（命中率 + 样本量）能挡掉随机噪音，但挡不掉
     # "样本被切薄的虚假相关性"。让一个廉价 LLM 看完所有候选一次性给意见，
     # 把"看着像但其实是过拟合"的候选 REJECT 掉。LLM 不能改原数据，只能否决。
-    if os.getenv("INVEST_DREAMING_LLM_VERIFY", "0") == "1":
+    if _get_dreaming_config().llm_verify_enabled:
         keep_mask, verdicts = _llm_verify_candidates(accepted)
         kept = [c for c, k in zip(accepted, keep_mask) if k]
         rejected = [c for c, k in zip(accepted, keep_mask) if not k]

@@ -21,11 +21,11 @@ def rule_family(rule: str) -> str:
     纯字符串映射，同时吃 live（defense_*/sanity4_*/sanity5_*）和 reconstruct
     （reconstructed_trim_blocked/_defense_downgrade）两套命名，让"同一底层规则
     拦截"在 live 行与历史重建行之间并桶——否则按细粒度 rule 聚合会拆成两组。
-    - trim_blocked：sanity4(集中度)/sanity5(买回点)/重建的 TRIM 被拦，都是"拦减仓"
+    - trim_blocked：sanity4(集中度)/sanity5(买回点)/config 关 lens/重建的 TRIM 被拦，都是"拦减仓"
     - buy_defense：快崩防御对买侧降级，"拦加仓"
     """
     r = rule or ""
-    if "trim" in r or "sanity4" in r or "sanity5" in r:
+    if "trim" in r or "sanity4" in r or "sanity5" in r or "concentration_lens" in r:
         return "trim_blocked"
     if "defense" in r or "downgrade" in r:
         return "buy_defense"
@@ -67,7 +67,11 @@ def _intervention_record(
     elif v.get("_sanity5_reason"):
         rule = f"sanity5_{v['_sanity5_reason']}"
     elif v.get("_original_trim_reason") == "concentration":
-        rule = "sanity4_solvency_concentration"
+        # 区分"用户 config 关掉集中度 lens"与"兜底充足(Sanity4)拦减仓"——反事实语义不同，
+        # 别并桶污染账本（前者是用户主动免责，后者是兜底覆盖触发的拦截）。
+        rule = ("config_concentration_lens_off"
+                if v.get("_concentration_lens") == "disabled"
+                else "sanity4_solvency_concentration")
     else:
         rule = "other"
     from datetime import datetime
