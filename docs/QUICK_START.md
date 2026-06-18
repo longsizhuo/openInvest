@@ -25,8 +25,8 @@ documents:
 | 1. 装依赖 | 5 min | `uv sync` |
 | 2. 配 `.env` 凭证 | 5 min | DeepSeek key + 邮箱（可跳过 IMAP） |
 | 3. 改 `memory/` 的 portfolio + strategy | 10 min | 把"演示数据"换成自己的 |
-| 4. 跑第一次委员会 | 5 min | `python -m jobs.daily_report` |
-| 5. 装 Web GUI | 5 min | `python -m scripts.sync_gui_dist` + uvicorn |
+| 4. 跑第一次委员会 | 5 min | `uv run python -m jobs.daily_report` |
+| 5. 装 Web GUI | 5 min | `uv run python -m scripts.sync_gui_dist` + uvicorn |
 
 ---
 
@@ -274,13 +274,13 @@ uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
 # 系统级 cron 每天 03:00 跑委员会
 crontab -e
 # 加一行：
-0 3 * * * cd /your/path/openInvest && uv run python -m jobs.daily_report
+0 3 * * * cd $HOME/openInvest && $HOME/.local/bin/uv run python -m jobs.daily_report
 ```
 
 或者用 invest 自带的 jobs runner：
 
 ```bash
-uv run python -m core.scheduler   # 读 jobs/*.yml 跑所有 enabled job
+uv run python -m scheduler.runner   # 读 jobs/*.yml 跑所有 enabled job
 ```
 
 ### CommSec 自动同步成交（澳股用户）
@@ -309,7 +309,7 @@ uv run python -m scripts.import_commsec --lookback 30 --apply
 
 ### NapCat QQ 命令（移动端）
 
-`/balance` `/deposit 1000` `/gold_buy 5g 720` 等 11 个命令在 QQ 私聊里就能跑。装 NapCat → `core/napcat_runner.py` 启动即可。命令清单见 `connectors/napcat_bot.py:_handle`。
+`/balance` `/deposit 1000` `/gold_buy 5g 720` 等 11 个命令在 QQ 私聊里就能跑。装 NapCat → `uv run python -m connectors.napcat_bot` 启动即可（建议 nohup / systemd 长跑）。命令清单见 `connectors/napcat_bot.py`。
 
 ---
 
@@ -377,7 +377,7 @@ rm -rf memory/.committee/* memory/.runs/* memory/daily/*
 走完上面 5 步，下面这些都应该能正常：
 
 - [ ] `uv run pytest tests/` 全绿
-- [ ] `python -m jobs.daily_report` 能跑出 `memory/daily/<date>/<SYMBOL>.md`
+- [ ] `uv run python -m jobs.daily_report` 能跑出 `memory/daily/<date>/<SYMBOL>.md`
 - [ ] `curl http://localhost:8765/api/portfolio` 返回真实数字
 - [ ] 浏览器开 :8765 能看到主面板 + 持仓数字一致
 - [ ] GUI 点 [Run committee] 能看到 SSE 直播 6 个 stage
