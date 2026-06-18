@@ -238,3 +238,27 @@ def test_feed_attribution_no_remote(monkeypatch):
     label, link, branch = _outperform_feed_attribution()
     assert label == "本账户"
     assert link == ""
+
+
+def test_feed_attribution_author_trailing_slash(monkeypatch):
+    """作者仓 URL 带 trailing / → 仍判定作者（CR 回归：之前 $ 锚点漏判退成本账户）。"""
+    monkeypatch.setattr(
+        subprocess, "run",
+        _remote_run_factory("https://github.com/longsizhuo/openInvest/"),
+    )
+    monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "pnl-data")
+    label, link, branch = _outperform_feed_attribution()
+    assert label == "作者账户"
+    assert "longsizhuo/openInvest" in link
+
+
+def test_feed_attribution_lookalike_host_not_matched(monkeypatch):
+    """host 含 github.com 子串（my-github.com）不得误匹配（CR 回归：避免渲染
+    指向真 github.com/team/repo 的错误外链）→ 纯文字不外链。"""
+    monkeypatch.setattr(
+        subprocess, "run",
+        _remote_run_factory("https://my-github.com/team/repo.git"),
+    )
+    label, link, branch = _outperform_feed_attribution()
+    assert label == "本账户"
+    assert link == ""

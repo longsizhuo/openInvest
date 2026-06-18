@@ -661,14 +661,16 @@ def _outperform_feed_attribution() -> Tuple[str, str, str]:
             ["git", "config", "--get", "remote.origin.url"],
             cwd=str(ROOT), capture_output=True, text=True, check=False,
         ).stdout.strip()
-        m = re.search(r"github\.com[:/]+([^/]+?)/([^/]+?)(?:\.git)?$", remote)
+        # host 前必须是 行首 / @ / /（挡掉 my-github.com 这类子串误匹配）；
+        # 尾部容忍 .git 和 trailing /（否则 https://…/openInvest/ 会漏判）
+        m = re.search(r"(?:^|[@/])github\.com[:/]+([^/]+?)/([^/]+?)(?:\.git)?/?$", remote)
         if m:
             owner, repo = m.group(1), m.group(2)
     except Exception:  # noqa: BLE001  推断失败退化成无链接，不阻断 README 刷新
         pass
 
     branch = os.getenv("INVEST_PNL_PUSH_BRANCH", "pnl-data").strip() or "pnl-data"
-    label = "作者账户" if owner == _CANONICAL_OWNER else "本账户"
+    label = "作者账户" if owner.lower() == _CANONICAL_OWNER else "本账户"
     link = f"https://github.com/{owner}/{repo}/tree/{branch}" if owner and repo else ""
     return label, link, branch
 
