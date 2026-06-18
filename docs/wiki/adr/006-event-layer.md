@@ -1,3 +1,25 @@
+---
+type: adr
+title: "ADR-006：事件感知层（第一层）+ 轻量新闻 RAG"
+tags: [event-layer, rag, news, committee, feature-flag]
+intent: 事件驱动架构决策
+schema_source:
+  - db/event_store.py:EventStore
+documents:
+  endpoints:
+    - POST /api/committee/run
+  config_keys:
+    - INVEST_EVENT_RAG_ENABLED
+  symbols:
+    - _resolve_event_brief
+    - resolve_event_brief_multi
+    - format_event_brief
+status: accepted
+date: "2026-05-13"
+supersedes: []
+superseded_by: []
+---
+
 # ADR-006：事件感知层（第一层）+ 轻量新闻 RAG
 
 **日期**：2026-05-13（v1 默认关）；**2026-05-15 修订为默认开**

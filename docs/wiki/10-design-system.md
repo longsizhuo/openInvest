@@ -1,3 +1,14 @@
+---
+type: wiki-chapter
+title: GUI 设计系统
+tags: [design-system, frontend, css-tokens, typography, information-architecture]
+intent: GUI 设计规范
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 # GUI 设计系统
 
 > Token 三层 + 排版三层 + IA 决策。

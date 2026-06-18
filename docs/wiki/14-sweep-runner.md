@@ -1,3 +1,21 @@
+---
+type: wiki-chapter
+title: Sweep Runner
+tags: [sweep, backtesting, parameter-tuning, regime, pnl]
+intent: 参数 sweep 工具使用指南
+documents:
+  endpoints: []
+  config_keys:
+    - regime.trend_ma_spread_pct
+    - regime.crash_atr_pct_min
+    - verdict.buy_confidence_overdrive
+    - reward.weight_max_drawdown
+    - oracle_accuracy.buy_positive
+  symbols:
+    - run_arithmetic_sweep
+    - run_pnl_sweep
+---
+
 # Sweep Runner
 
 参数 sweep 工具，支持两种模式。

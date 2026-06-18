@@ -1,3 +1,27 @@
+---
+type: adr
+title: "ADR-005: daily_report.py 调度/采集/渲染分离"
+tags: [daily-report, refactor, pure-functions, architecture, testing]
+intent: 架构决策
+schema_source:
+  - jobs/daily_report_builder.py:classify_asset_freshness
+  - jobs/daily_report_builder.py:format_staleness_warning
+  - jobs/daily_report_builder.py:assemble_full_report
+  - utils/portfolio_summary.py:portfolio_summary_text
+documents:
+  endpoints: []
+  config_keys: []
+  symbols:
+    - classify_asset_freshness
+    - format_staleness_warning
+    - assemble_full_report
+    - portfolio_summary_text
+status: accepted
+date: 2026-05-10
+supersedes: []
+superseded_by: []
+---
+
 # ADR-005: daily_report.py 调度/采集/渲染分离
 
 **状态**: 已接受  

@@ -1,3 +1,27 @@
+---
+type: wiki-chapter
+title: Web API 参考
+tags: [api, rest, fastapi, openapi]
+intent: API Contract
+schema_source:
+  - connectors/web_api/models.py:PortfolioResponse
+  - connectors/web_api/models.py:HoldingsListResponse
+  - connectors/web_api/models.py:TotalValueResponse
+  - connectors/web_api/models.py:ConfigResponse
+documents:
+  endpoints:
+    - GET /api/portfolio
+    - GET /api/holdings
+    - GET /api/portfolio/total_value
+    - GET /api/cash
+    - GET /api/gold
+    - GET /api/ndq
+    - GET /api/config
+    - PUT /api/config
+  config_keys: []
+  symbols: [PortfolioManager]
+---
+
 # Web API 参考
 
 > FastAPI 暴露的 40+ REST 端点 + SSE。同源部署，CF Access 边缘鉴权。

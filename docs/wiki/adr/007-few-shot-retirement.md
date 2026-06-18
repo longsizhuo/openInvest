@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR 007 — few-shot 路线退役，CIO 保持 zero-shot"
+tags: [few-shot, cio, dspy, committee, verdict]
+intent: 决策参数
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [build_cio_prompt]
+status: accepted
+date: "2026-05-27"
+supersedes: []
+superseded_by: []
+---
+
 # ADR 007 — few-shot 路线退役，CIO 保持 zero-shot
 
 **日期**: 2026-05-27

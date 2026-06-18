@@ -1,3 +1,14 @@
+---
+type: readme
+title: DDGS | Dux Distributed Global Search
+tags: [ddgs, search, metasearch, web-search, third-party]
+intent: 外部依赖参考
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 ![Python >= 3.10](https://img.shields.io/badge/python->=3.10-red.svg) [![](https://badgen.net/github/release/deedy5/ddgs)](https://github.com/deedy5/ddgs/releases) [![](https://badge.fury.io/py/ddgs.svg)](https://pypi.org/project/ddgs)
 # DDGS | Dux Distributed Global Search<a name="TOP"></a>
 

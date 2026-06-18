@@ -1,3 +1,19 @@
+---
+type: wiki-chapter
+title: 架构总览
+tags: [architecture, pipeline, committee, connectors, concurrency]
+intent: 系统分层心智模型
+documents:
+  endpoints:
+    - POST /api/committee/run
+    - GET /api/committee/live/{task_id}
+  config_keys: []
+  symbols:
+    - run_committee
+    - PortfolioManager
+    - with_portfolio_tx
+---
+
 # 架构总览
 
 > 给开发者建立心智模型的第一篇。读完应能回答："数据从哪来 → 经过几手 → 决策怎么形成 → 写到哪去"。
@@ -53,7 +69,7 @@
 
 详见各 connector 子目录 README：
 - [connectors/README.md](../../connectors/README.md)
-- [skill/README.md](../../skill/README.md)
+- [skills/README.md](../../skills/README.md)
 
 ---
 

@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR-014: 生产代码 logging 规范"
+tags: [logging, convention, production, observability]
+intent: 日志规范
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+status: proposed
+date: "2026-05-28"
+supersedes: []
+superseded_by: []
+---
+
 # ADR-014: 生产代码 logging 规范
 
 **状态**: 提议中

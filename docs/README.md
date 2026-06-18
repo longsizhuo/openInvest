@@ -1,3 +1,15 @@
+---
+type: readme
+title: "docs/"
+tags: [documentation, index, wiki, pnl, 文档]
+intent: 文档目录索引
+documents:
+  endpoints:
+    - "GET /api/pnl_chart.svg"
+  config_keys: []
+  symbols: []
+---
+
 # docs/
 
 项目文档与自动生成的可视化产物。**人类阅读 + 仓库展示** 用。

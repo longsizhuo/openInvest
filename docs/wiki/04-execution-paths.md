@@ -1,3 +1,20 @@
+---
+type: wiki-chapter
+title: 双执行路径
+tags: [committee, execution-paths, coordinator, direct, architecture]
+intent: 双路径架构说明
+documents:
+  endpoints:
+    - POST /api/committee/run
+    - GET /api/committee/{task_id}
+    - GET /api/committee/live/{task_id}
+  config_keys: []
+  symbols:
+    - run_committee
+    - run_committee_session
+    - SDKAgent
+---
+
 # 双执行路径
 
 > 同一套委员会逻辑，**两个独立实现**：Coordinator 路径让用户的 Claude 当协调者真 spawn 4 个 subagent，

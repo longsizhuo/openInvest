@@ -1,3 +1,19 @@
+---
+type: wiki-chapter
+title: Dreaming 记忆整合
+tags: [dreaming, memory, committee, regime, insights]
+intent: 记忆整合
+schema_source:
+  - jobs/dreaming.py:light_sleep
+  - jobs/dreaming.py:rem_sleep
+  - jobs/dreaming.py:deep_sleep
+  - core/runner/loaders.py:load_prior_insights
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [light_sleep, rem_sleep, deep_sleep, load_prior_insights]
+---
+
 # Dreaming 记忆整合
 
 > LLM 没有跨会话记忆。Dreaming 是 OpenClaw 风格的三阶段后台整合，
