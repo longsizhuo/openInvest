@@ -1,3 +1,33 @@
+---
+type: adr
+title: "ADR-016: 账本写入幂等性（可重放触发必须有原子幂等闸）"
+tags: [idempotency, ledger, portfolio, state-machine, adr]
+intent: 账本写入幂等性规则
+documents:
+  endpoints:
+    - POST /api/holdings
+    - PUT /api/holdings/{symbol}
+    - DELETE /api/holdings/{symbol}
+    - POST /api/deposit
+    - POST /api/withdraw
+    - POST /api/gold/buy
+    - POST /api/gold/sell
+    - POST /api/trades/record
+    - PATCH /api/trades/{trade_id}/status
+    - POST /api/skill/buy
+    - POST /api/skill/sell
+  config_keys: []
+  symbols:
+    - state_claim
+    - state_unclaim
+    - record_external_trade
+    - _sync_trade_to_portfolio
+status: proposed
+date: "2026-06-16"
+supersedes: []
+superseded_by: []
+---
+
 # ADR-016: 账本写入幂等性（可重放触发必须有原子幂等闸）
 
 **状态**: 提议中

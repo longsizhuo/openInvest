@@ -1,3 +1,26 @@
+---
+type: wiki-chapter
+title: 4 角色委员会
+tags: [committee, agents, regime, llm, cross-challenge]
+intent: 委员会角色设计与辩论协议
+schema_source:
+  - core/regime.py:THRESHOLDS
+  - core/committee/debate.py:run_committee
+  - core/committee/cio_parse.py:parse_cio_memo
+documents:
+  endpoints:
+    - GET /api/regime_rules
+  config_keys:
+    - verdict.risk_profile
+    - verdict.buy_confidence_overdrive
+  symbols:
+    - run_committee
+    - run_committee_for_symbol
+    - parse_cio_memo
+    - _check_convergence
+    - THRESHOLDS
+---
+
 # 4 角色委员会
 
 > 4 个独立 LLM session，信息隔离 + cross-challenge 多轮辩论 + REGIME 中性概率口径（仅 crash/unknown 保留约束）。

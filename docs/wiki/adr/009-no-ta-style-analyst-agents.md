@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR-009: 否决 TradingAgents 式分析师 subagent 扩展"
+tags: [adr, committee, analyst-agents, architecture, experiment]
+intent: 架构决策
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+status: accepted
+date: "2026-06-11"
+supersedes: []
+superseded_by: []
+---
+
 # ADR-009: 否决 TradingAgents 式分析师 subagent 扩展
 
 **日期**: 2026-06-11

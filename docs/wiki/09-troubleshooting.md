@@ -1,3 +1,21 @@
+---
+type: wiki-chapter
+title: 故障排查
+tags: [troubleshooting, ops, deployment, debugging]
+intent: 故障排查
+documents:
+  endpoints:
+    - GET /api/health
+    - GET /api/portfolio/total_value
+    - GET /api/committee/live/{task_id}
+    - GET /api/data_sources/health
+    - GET /api/pnl_chart.svg
+    - POST /api/cash/{currency}/deposit
+    - POST /api/cash/{currency}/withdraw
+  config_keys: []
+  symbols: []
+---
+
 # 故障排查
 
 > 线上跑挂了去哪查、SSE 断了怎么 debug、sync_gui_dist 失败怎么办。

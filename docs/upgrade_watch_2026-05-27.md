@@ -1,3 +1,14 @@
+---
+type: report
+title: 上线监控备忘 — 2026-05-27 regime/指标/dreaming 升级
+tags: [upgrade, regime, monitoring, rollback, metrics]
+intent: 故障排查
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 # 上线监控备忘 — 2026-05-27 regime/指标/dreaming 升级
 
 上线内容：真 TR ATR + Wilder RSI + 真百分位 + RVOL（market_metrics）、regime 双触发器 crash + recovery、

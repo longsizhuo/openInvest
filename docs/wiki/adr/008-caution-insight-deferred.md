@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR 008 — caution 改用 lift-based 评分；现有数据下正式休眠"
+tags: [dreaming, caution-insight, scoring, regime, backtest]
+intent: 记录 caution insight lift-based 评分决策及休眠理由
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [_score, VerdictReview]
+status: accepted
+date: 2026-05-27
+supersedes: []
+superseded_by: []
+---
+
 # ADR 008 — caution 改用 lift-based 评分；现有数据下正式休眠
 
 **日期**: 2026-05-27（2026-05-27 二次更新：采纳 lift-based 评分 + post-cutoff 验证）

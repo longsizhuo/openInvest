@@ -1,3 +1,19 @@
+---
+type: wiki-chapter
+title: 17 — 资产类别特征集声明（显式契约）
+tags: [asset-features, regime, gold, dca, feature-matrix]
+intent: 资产类别特征集单一可信源
+schema_source:
+  - core/config/tunable.py:VerdictConfig
+documents:
+  endpoints: []
+  config_keys:
+    - verdict.gold_defense_dca_enabled
+  symbols:
+    - _gold_defense_dca_gate
+    - parse_cio_memo
+---
+
 # 17 — 资产类别特征集声明（显式契约）
 
 > 为什么有这页：特征是按"股票直觉"逐个加的，黄金等非权益资产**默认继承**了

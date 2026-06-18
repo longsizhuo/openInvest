@@ -1,3 +1,14 @@
+---
+type: index
+title: openInvest Wiki
+tags: [wiki, navigation, architecture, documentation]
+intent: Wiki 导航主页
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 # openInvest Wiki
 
 > 多资产 AI 投资委员会系统的完整文档。

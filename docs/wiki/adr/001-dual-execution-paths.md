@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR-001: 委员会保留 Skill + Web/Cron 双执行路径"
+tags: [architecture, committee, execution-paths, skill, deepseek]
+intent: 双执行路径架构决策
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [run_committee]
+status: accepted
+date: 2026-05-06
+supersedes: []
+superseded_by: []
+---
+
 # ADR-001: 委员会保留 Skill + Web/Cron 双执行路径
 
 - **状态**: ✅ 已采纳

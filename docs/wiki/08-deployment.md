@@ -1,3 +1,15 @@
+---
+type: wiki-chapter
+title: 生产部署
+tags: [deployment, docker, systemd, caddy, cloudflare]
+intent: 部署
+documents:
+  endpoints:
+    - GET /api/health
+  config_keys: []
+  symbols: []
+---
+
 # 生产部署
 
 > Caddy + Cloudflare Access + systemd + GitHub Releases dist 分发。

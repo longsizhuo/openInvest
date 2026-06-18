@@ -73,7 +73,7 @@ for old in "$INVEST_DIR/SKILL.md" "$INVEST_DIR/scripts" "$INVEST_DIR/references"
 done
 
 echo
-echo "[1/2] invest (日常使用 skill)"
+echo "[1/3] invest (日常使用 skill)"
 link_one skills/invest "$INVEST_DIR" SKILL.md
 link_one skills/invest "$INVEST_DIR" scripts
 link_one skills/invest "$INVEST_DIR" references
@@ -95,10 +95,20 @@ for old in "$SETUP_DIR/SKILL.md" "$SETUP_DIR/scripts" "$SETUP_DIR/references"; d
 done
 
 echo
-echo "[2/2] invest-setup (一次性 onboarding skill)"
+echo "[2/3] invest-setup (一次性 onboarding skill)"
 link_one skills/invest-setup "$SETUP_DIR" SKILL.md
 link_one skills/invest-setup "$SETUP_DIR" scripts
 link_one skills/invest-setup "$SETUP_DIR" references
+
+# ---- skill: ~/.claude/skills/okf-frontmatter/  (文档维护 + 查找) ----
+OKF_DIR="$CLAUDE_SKILLS_DIR/okf-frontmatter"
+mkdir -p "$OKF_DIR"
+
+echo
+echo "[3/3] okf-frontmatter (OKF 文档维护 + 查找 skill)"
+link_one skills/okf-frontmatter "$OKF_DIR" SKILL.md
+link_one skills/okf-frontmatter "$OKF_DIR" scripts
+link_one skills/okf-frontmatter "$OKF_DIR" references
 
 echo
 echo "✅ Done. Restart Claude Code if it was running."

@@ -1,3 +1,22 @@
+---
+type: reference
+title: Memory 目录布局 (OpenClaw-style)
+tags: [memory, portfolio, schema, dreaming, concurrency]
+intent: 记忆目录布局与数据模型
+schema_source:
+  - core/memory_store.py:MemoryStore
+  - core/portfolio_manager.py:PortfolioManager
+documents:
+  endpoints:
+    - GET /api/committee_sessions
+    - GET /api/llm/usage
+    - GET /api/committee/live/{task_id}
+  config_keys: []
+  symbols:
+    - MemoryStore
+    - PortfolioManager
+---
+
 # Memory 目录布局 (OpenClaw-style)
 
 仿 [OpenClaw 2026.4.9](https://github.com/openclaw/openclaw) 的 Markdown + frontmatter 持久化设计。

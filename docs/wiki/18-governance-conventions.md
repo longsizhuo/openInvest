@@ -1,3 +1,18 @@
+---
+type: wiki-chapter
+title: 18 — 治理章程：口径定义 / 判据 / 脏数据红线 / 否决权（用户签字）
+tags: [governance, conventions, audit, data-quality]
+intent: 治理章程
+documents:
+  endpoints: []
+  config_keys: []
+  symbols:
+    - forward_return
+    - TRADING_DAYS_2Y
+    - _calc_price_quantile
+    - _vix_percentile
+---
+
 # 18 — 治理章程：口径定义 / 判据 / 脏数据红线 / 否决权（用户签字）
 
 > 这份是**治理章程**，不是技术文档。AI 起草、用户签字。用户签的不是"算法对不对"

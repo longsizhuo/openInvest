@@ -1,3 +1,14 @@
+---
+type: wiki-chapter
+title: 12 — Verification（实测验证 / "科学证据"）
+tags: [verification, backtesting, experiments, negative-results, prompt-optimization]
+intent: 实验验证
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 # 12 — Verification（实测验证 / "科学证据"）
 
 > 这章不讲架构，讲**用真实数据证明这工具有用**。给愿意深读的人看，给质疑"LLM

@@ -1,3 +1,22 @@
+---
+type: adr
+title: "ADR-011 — HOLD Oracle 语义：hold_wrong 阈值该设多宽"
+tags: [oracle, hold, backtest, threshold, verdict]
+intent: 决策参数
+documents:
+  endpoints: []
+  config_keys:
+    - oracle_accuracy.hold_neutral
+    - oracle_accuracy.hold_wrong
+  symbols:
+    - verdict_oracle_accuracy
+    - compute_strategy_reward
+status: proposed
+date: "2026-05-27"
+supersedes: []
+superseded_by: []
+---
+
 # ADR-011 — HOLD Oracle 语义：hold_wrong 阈值该设多宽
 
 **日期**: 2026-05-27

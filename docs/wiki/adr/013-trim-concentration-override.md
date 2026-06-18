@@ -1,3 +1,24 @@
+---
+type: adr
+title: "ADR-013: SOLVENCY=strong 时集中度不触发 TRIM（确定性后处理）"
+tags: [concentration, trim, solvency, sanity-check, cio]
+intent: 决策参数
+schema_source:
+  - core/committee/cio_parse.py:parse_cio_memo
+  - utils/portfolio_summary.py:portfolio_summary_text
+documents:
+  endpoints: []
+  config_keys:
+    - verdict.concentration_lens_enabled
+  symbols:
+    - parse_cio_memo
+    - portfolio_summary_text
+status: accepted
+date: "2026-05-28"
+supersedes: []
+superseded_by: []
+---
+
 # ADR-013: SOLVENCY=strong 时集中度不触发 TRIM（确定性后处理）
 
 ## 状态

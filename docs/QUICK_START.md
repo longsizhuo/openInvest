@@ -1,3 +1,15 @@
+---
+type: reference
+title: 30 分钟上手 openInvest
+tags: [quickstart, onboarding, setup, deployment]
+intent: 新用户从 clone 到跑通委员会的最快通路
+documents:
+  endpoints:
+    - GET /api/portfolio
+  config_keys: []
+  symbols: []
+---
+
 # 30 分钟上手 openInvest
 
 > 给陌生 fork 用户的最快通路：从 `git clone` 到第一份 AI memo + GUI 看板。

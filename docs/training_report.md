@@ -1,3 +1,14 @@
+---
+type: report
+title: openInvest RL 训练报告
+tags: [rl, training, backtest, optuna, dspy]
+intent: RL 训练实验结果
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [parse_cio_memo, run_committee]
+---
+
 # openInvest RL 训练报告
 
 **日期**：2026-05-11
