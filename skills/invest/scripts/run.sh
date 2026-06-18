@@ -6,7 +6,7 @@
 #   2. 首次调用自动 git clone https://github.com/longsizhuo/openInvest.git → $INVEST_HOME
 #   3. 自动 `uv sync` 装 venv
 #   4. 自动 `python -m scripts.sync_gui_dist` 拉前端 dist 到 static/（130KB，零成本，让 Web GUI 可用）
-#   5. Onboarding：Claude 调 `run.sh doctor` 检测到缺 memory/.env → 问用户 6 个问题 →
+#   5. Onboarding：Claude 调 `run.sh doctor` 检测到缺 memory/.env → 问用户 5 个问题 →
 #      `run.sh init --from-stdin` 写入
 #   6. 之后每次子命令都 delegate 给 scripts/skill.py
 #
@@ -23,6 +23,12 @@ INVEST_BRANCH="${INVEST_BRANCH:-main}"
 
 # 1) clone 仓库（如果不存在）
 if [ ! -d "$INVEST_HOME" ]; then
+    # 首次 clone 需要 git——缺了给结构化错误，别让 set -e 吐裸 "command not found"
+    if ! command -v git >/dev/null 2>&1; then
+        echo "❌ git 未安装。首次运行要 git clone 后端仓库。" >&2
+        echo '{"status":"error","error":"git 未安装","hint":"用系统包管理器装 git（Debian/Ubuntu: `sudo apt-get install git`；macOS: `xcode-select --install`；Fedora: `sudo dnf install git`），装好后重试本命令。"}'
+        exit 1
+    fi
     echo "🌱 第一次跑：克隆 openInvest 到 $INVEST_HOME..." >&2
     mkdir -p "$(dirname "$INVEST_HOME")"
     git clone --branch "$INVEST_BRANCH" "$INVEST_REPO" "$INVEST_HOME" >&2
