@@ -1,3 +1,19 @@
+---
+type: wiki-chapter
+title: 数据模型
+tags: [data-model, portfolio, schema, concurrency]
+intent: 数据模型
+schema_source:
+  - core/schemas.py:Holding
+  - core/schemas.py:PortfolioData
+  - core/portfolio_manager.py:PortfolioManager
+  - core/portfolio_manager.py:HoldingsView
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [with_portfolio_tx, _file_lock, _atomic_write_text]
+---
+
 # 数据模型
 
 > v2 schema（2026-05+）：cash dict + holdings list，任意 yfinance symbol plug-and-play。

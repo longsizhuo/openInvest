@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR-010 — 参数管理纪律"
+tags: [config, params, sweep, governance]
+intent: 参数分层纪律
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+status: proposed
+date: 2026-05-27
+supersedes: []
+superseded_by: []
+---
+
 # ADR-010 — 参数管理纪律
 
 **日期**: 2026-05-27

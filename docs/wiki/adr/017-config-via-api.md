@@ -1,3 +1,27 @@
+---
+type: adr
+title: ADR-017 — 配置走 API（config-via-API）
+status: accepted
+date: 2026-06-17
+tags: [config, governance, adr]
+intent: 决策参数
+schema_source:
+  - core/config/_loader.py:API_SETTABLE
+  - connectors/web_api/models.py:ConfigItem
+documents:
+  endpoints:
+    - GET /api/config
+    - PUT /api/config
+  config_keys:
+    - verdict.concentration_lens_enabled
+    - verdict.risk_profile
+    - verdict.gold_defense_dca_enabled
+    - dreaming.llm_verify_enabled
+  symbols: []
+supersedes: []
+superseded_by: []
+---
+
 # ADR-017 — 配置走 API（config-via-API）
 
 **日期**: 2026-06-17

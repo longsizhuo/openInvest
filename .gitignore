@@ -46,3 +46,6 @@ experiments/dspy_trainset_v3.json
 # AI 工具本地目录（Qwen Code review 等），不入库
 .qwen/
 docs/path_calibration.md
+
+# okf-frontmatter skill 的可选索引缓存（run.sh index --cache 生成，可重建）
+docs/.okf-index.json

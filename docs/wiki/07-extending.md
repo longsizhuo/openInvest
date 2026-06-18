@@ -1,3 +1,21 @@
+---
+type: wiki-chapter
+title: 扩展指南（cookbook）
+tags: [extending, cookbook, architecture, development]
+intent: 扩展开发指引
+documents:
+  endpoints:
+    - POST /api/holdings
+    - GET /api/data_sources/health
+    - GET /api/regime_rules
+  config_keys: []
+  symbols:
+    - get_quote
+    - run_committee
+    - with_portfolio_tx
+    - RegimeRulesResponse
+---
+
 # 扩展指南（cookbook）
 
 > 「我想加 X」该改哪几个文件——按真实场景分。

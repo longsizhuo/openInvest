@@ -9,11 +9,12 @@
 |---|---|---|
 | [`invest/`](invest/) | 日常使用 —— 看持仓 / 跑委员会 / 加减仓 / 关联分析 | 高频持续 |
 | [`invest-setup/`](invest-setup/) | 首次安装 / migrate / 重配 —— 5 问 onboarding | 一次性 |
+| [`okf-frontmatter/`](okf-frontmatter/) | 维护 docs/wiki 文档（OKF frontmatter）+ 按 schema/endpoint/config 反查文档 | 改文档时 |
 
 ## 一键装两个 skill
 
 ```bash
-cd $INVEST_HOME              # 默认 ~/projects-review/invest
+cd $INVEST_HOME              # 默认 ~/openInvest
 bash skills/install.sh
 ```
 

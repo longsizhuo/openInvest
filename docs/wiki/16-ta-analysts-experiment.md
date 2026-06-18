@@ -1,3 +1,14 @@
+---
+type: wiki-chapter
+title: 16 — TradingAgents 式分析师实验（test_ta，2026-06-11）
+tags: [experiment, analyst-agents, signal-testing, committee, ta]
+intent: 实验结论（分析师 subagent 预注册 gate 结果）
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 # 16 — TradingAgents 式分析师实验（test_ta，2026-06-11）
 
 > 问题：给委员会加基本面/情绪/新闻 3 个 TradingAgents 式分析师 subagent，有没有收益？

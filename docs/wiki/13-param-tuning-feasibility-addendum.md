@@ -1,3 +1,21 @@
+---
+type: wiki-chapter
+title: 参数调优可行性诊断 — 补充文档
+tags: [param-tuning, optuna, regime, backtesting]
+intent: 参数耦合分析与调优可行性
+documents:
+  endpoints: []
+  config_keys:
+    - regime.crash_atr_pct_min
+    - regime.crash_drawdown_30d_pct
+    - regime.trend_ma_spread_pct
+    - regime.recovery_rebound_pct
+    - regime.recovery_quantile_max
+    - verdict.buy_confidence_overdrive
+  symbols:
+    - compute_strategy_reward
+---
+
 # 参数调优可行性诊断 — 补充文档
 
 > 纯只读，不改代码。2026-05-27。

@@ -1,3 +1,18 @@
+---
+type: adr
+title: "ADR-002: 暂不升级 Web/Cron 到 Claude Agent SDK"
+tags: [architecture, agent, cost, deployment]
+intent: 决策参数
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+status: accepted
+date: 2026-05-06
+supersedes: []
+superseded_by: []
+---
+
 # ADR-002: 暂不升级 Web/Cron 到 Claude Agent SDK
 
 - **状态**: ✅ 已采纳

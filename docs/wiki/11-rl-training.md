@@ -1,3 +1,14 @@
+---
+type: wiki-chapter
+title: 11 — RL 训练 / Backtest / 参数搜索
+tags: [backtest, optuna, paper-trade, dspy, prompt-optimization]
+intent: 回测与参数搜索流程
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: [PaperTradeSimulator, compute_strategy_reward]
+---
+
 # 11 — RL 训练 / Backtest / 参数搜索
 
 > 想优化你的委员会"水平"？这章讲清楚我们怎么验证 + 优化的，**绝不是真 ML 训练**。
