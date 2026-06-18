@@ -39,6 +39,14 @@
       "extra-files": [
         { "type": "generic", "path": "SKILL.md" }
       ]
+    },
+    "skills/okf-frontmatter": {
+      "release-type": "simple",
+      "component": "okf-frontmatter-skill",
+      "package-name": "okf-frontmatter-skill",
+      "extra-files": [
+        { "type": "generic", "path": "SKILL.md" }
+      ]
     }
   }
 }

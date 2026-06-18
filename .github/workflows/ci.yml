@@ -92,3 +92,8 @@ jobs:
             done
             echo "✅ 脱敏聚合输出无敏感字段"
           fi
+
+      - name: OKF 文档 frontmatter lint（非阻塞：未迁移文档不算失败）
+        # okf-frontmatter skill：已迁移文档的断链 / schema_source 指向消失符号 / 缺 type 才 fail。
+        # 未加 frontmatter 的文档算 not_migrated（info），不阻塞 CI。
+        run: uv run python skills/okf-frontmatter/scripts/find_docs.py --repo . lint --ci
