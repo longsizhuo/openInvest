@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-INVEST_HOME="${INVEST_HOME:-$HOME/projects-review/invest}"
+INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
 INVEST_REPO="${INVEST_REPO:-https://github.com/longsizhuo/openInvest.git}"
 INVEST_BRANCH="${INVEST_BRANCH:-main}"
 
