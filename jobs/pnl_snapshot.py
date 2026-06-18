@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -642,6 +643,36 @@ def _persist_outperform(events: List[Dict[str, Any]]) -> None:
         log.warning(f"README outperform feed 刷新失败（不影响 jsonl 落盘）: {e}")
 
 
+_CANONICAL_OWNER = "longsizhuo"
+
+
+def _outperform_feed_attribution() -> Tuple[str, str, str]:
+    """据 git remote 推断 README outperform feed 的署名 + 链接 + 分支。
+
+    fork / 自托管用户的 README 不该挂"作者账户"+ 指向作者仓库的链接——数据是
+    他们自己的，归属也该是他们自己的。从 remote.origin.url 解析 owner/repo：
+      - owner == 作者     → ("作者账户", 作者仓 tree 链接, 分支)  原行为不变
+      - 其它 owner        → ("本账户", 该 fork 自己的 tree 链接, 分支)
+      - 解析不到 remote   → ("本账户", "", 分支)  纯文字，不外链任何人
+    """
+    owner = repo = ""
+    try:
+        remote = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=str(ROOT), capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        m = re.search(r"github\.com[:/]+([^/]+?)/([^/]+?)(?:\.git)?$", remote)
+        if m:
+            owner, repo = m.group(1), m.group(2)
+    except Exception:  # noqa: BLE001  推断失败退化成无链接，不阻断 README 刷新
+        pass
+
+    branch = os.getenv("INVEST_PNL_PUSH_BRANCH", "pnl-data").strip() or "pnl-data"
+    label = "作者账户" if owner == _CANONICAL_OWNER else "本账户"
+    link = f"https://github.com/{owner}/{repo}/tree/{branch}" if owner and repo else ""
+    return label, link, branch
+
+
 def _update_readme_outperform_feed(jsonl_path: Path, top_n: int = 3) -> None:
     """读 outperform_events.jsonl 最新 N 条，渲染 markdown 写进 README marker 之间。
 
@@ -683,8 +714,12 @@ def _update_readme_outperform_feed(jsonl_path: Path, top_n: int = 3) -> None:
             break
 
     # 金融视角红线：固定免责 + 展示 winning + losing 两类事件，避免 survivorship 偏差
+    # 署名/链接按 git remote 推断——fork / 自托管用户的 README 不该挂"作者账户"+作者仓链接
+    feed_label, feed_link, feed_branch = _outperform_feed_attribution()
+    refresh = (f"由 [{feed_branch} 分支]({feed_link}) 每 2h 自动刷新"
+               if feed_link else "每 2h 自动刷新")
     rendered = [
-        "> 📈 **作者账户实盘事件**（最近 vs 基准，由 [pnl-data 分支](https://github.com/longsizhuo/openInvest/tree/pnl-data) 每 2h 自动刷新）：",
+        f"> 📈 **{feed_label}实盘事件**（最近 vs 基准，{refresh}）：",
         ">",
     ]
     for ev in deduped:
@@ -694,10 +729,16 @@ def _update_readme_outperform_feed(jsonl_path: Path, top_n: int = 3) -> None:
         marker = "🟢" if ev.get("is_outperform") else "🔴"
         rendered.append(f"> - {marker} `{ts}` {label}")
     rendered.append(">")
-    rendered.append(
-        "> *以上为作者本人账户历史事件，仅供工具效果参考，**不构成投资建议**，"
-        "过去表现不预示未来收益。fork 用户的部署会看到自己的事件。*",
-    )
+    if feed_label == "作者账户":
+        rendered.append(
+            "> *以上为作者本人账户历史事件，仅供工具效果参考，**不构成投资建议**，"
+            "过去表现不预示未来收益。fork 用户的部署会看到自己的事件。*",
+        )
+    else:
+        rendered.append(
+            "> *以上为本部署账户历史事件，仅供工具效果参考，**不构成投资建议**，"
+            "过去表现不预示未来收益。*",
+        )
 
     new_block = "\n".join(rendered)
     text = readme.read_text(encoding="utf-8")

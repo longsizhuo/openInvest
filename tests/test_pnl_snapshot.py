@@ -8,6 +8,7 @@ import subprocess
 from jobs.pnl_snapshot import (
     _auto_push_svg,
     _is_trading_window,
+    _outperform_feed_attribution,
     _redact_token_in,
 )
 
@@ -193,3 +194,47 @@ def test_auto_push_called_process_error_redacts_token(monkeypatch):
     assert _SECRET_TOKEN not in str(result)
     assert "x-access-token:***@" in result["reason"]
     assert result["reason"].startswith("git failure:")
+
+
+# ---------- README outperform feed 署名按 git remote 推断（fork 不挂作者账户） ----------
+
+def _remote_run_factory(url: str):
+    """假 subprocess.run：让 git config --get remote.origin.url 返回指定 url。"""
+    def _fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, url + "\n", "")
+    return _fake_run
+
+
+def test_feed_attribution_author_remote(monkeypatch):
+    """作者本仓 → 保留"作者账户" + 指向作者仓的链接。"""
+    monkeypatch.setattr(
+        subprocess, "run",
+        _remote_run_factory("https://github.com/longsizhuo/openInvest.git"),
+    )
+    monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "pnl-data")
+    label, link, branch = _outperform_feed_attribution()
+    assert label == "作者账户"
+    assert "longsizhuo/openInvest" in link
+    assert branch == "pnl-data"
+
+
+def test_feed_attribution_fork_remote(monkeypatch):
+    """fork 用户 → "本账户" + 指向他自己的仓，绝不挂作者署名/链接。"""
+    monkeypatch.setattr(
+        subprocess, "run",
+        _remote_run_factory("git@github.com:alice/my-invest.git"),
+    )
+    monkeypatch.delenv("INVEST_PNL_PUSH_BRANCH", raising=False)  # 默认 pnl-data
+    label, link, branch = _outperform_feed_attribution()
+    assert label == "本账户"
+    assert "alice/my-invest" in link
+    assert "longsizhuo" not in link
+    assert branch == "pnl-data"
+
+
+def test_feed_attribution_no_remote(monkeypatch):
+    """解析不到 remote → "本账户" + 空链接（纯文字，不外链任何人）。"""
+    monkeypatch.setattr(subprocess, "run", _remote_run_factory(""))
+    label, link, branch = _outperform_feed_attribution()
+    assert label == "本账户"
+    assert link == ""
