@@ -363,8 +363,9 @@ class TestAssembleFullReport:
         assert "建议小额加仓 ¥5,000" in report
         assert "更便宜的概率" not in report
 
-    def test_analyst_views_fenced_no_details_tag(self):
-        """analyst 原文走 fenced block；不再用 <details>（markdown 不解析 HTML 块内部）"""
+    def test_analyst_views_rendered_as_md_cards(self):
+        """analyst 原文走 .analyst md_in_html 卡片（正常排版），
+        不再用 <details>，也不塞进 ``` 代码块（会导致 ** 原文泄露、灰块难读）。"""
         report = assemble_full_report(
             today="2026-05-10", macro_view="", gold_snapshot_text="",
             friction_report="",
@@ -374,6 +375,11 @@ class TestAssembleFullReport:
             final_decision_gemini="",
         )
         assert "<details>" not in report
+        # 卡片容器 + markdown="1" 让 notifier 的 md_in_html 解析内部 markdown
+        assert 'class="analyst"' in report
+        assert 'markdown="1"' in report
+        # 分析师原文不再被 ``` 围栏包裹（围栏只留给等宽数据块）
+        assert "```\nNDQ.AX Quant" not in report
         assert "NDQ.AX Quant" in report
         assert "NDQ.AX Risk" in report
         assert "分析师意见" in report
