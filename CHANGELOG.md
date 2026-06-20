@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.11.0](https://github.com/longsizhuo/openInvest/compare/v0.10.0...v0.11.0) (2026-06-20)
+
+
+### Features
+
+* **config:** 运行时 config-via-API + 集中度 lens 开关（ADR-017） ([#71](https://github.com/longsizhuo/openInvest/issues/71)) ([7f812b6](https://github.com/longsizhuo/openInvest/commit/7f812b62685a12fa7f918317d15830f506a8e4f0))
+* **skill:** okf-frontmatter — OKF 文档维护 skill + frontmatter 迁移 ([#72](https://github.com/longsizhuo/openInvest/issues/72)) ([b4a4548](https://github.com/longsizhuo/openInvest/commit/b4a45485ee323e341704b799bec148151d2e209c))
+
+
+### Bug Fixes
+
+* **email:** 修复分析师原文以代码块泄露 + 重设计邮件版式 ([#75](https://github.com/longsizhuo/openInvest/issues/75)) ([406a805](https://github.com/longsizhuo/openInvest/commit/406a8055b3f6f4312a2537a96246e1a8e06653e0))
+* **payday:** atomic month-claim to prevent concurrent double-credit ([ce1331c](https://github.com/longsizhuo/openInvest/commit/ce1331c46fd866d72466fd13986f7be631fab5ec))
+* **portfolio:** make CommSec record_external_trade idempotent ([#62](https://github.com/longsizhuo/openInvest/issues/62)) ([8a00733](https://github.com/longsizhuo/openInvest/commit/8a00733f98a3356c1a046367c182ec41f0ba07a0))
+* **self-host:** 默认值加固 — INVEST_HOME 统一 ~/openInvest + PnL 署名按 remote + 去硬编码路径 ([#74](https://github.com/longsizhuo/openInvest/issues/74)) ([930c0e4](https://github.com/longsizhuo/openInvest/commit/930c0e4ba1bb1b83c0c67915671e1c4170fa11cf))
+* **web-api:** make patch_trade_status idempotent on repeated executed PATCH ([dbcee52](https://github.com/longsizhuo/openInvest/commit/dbcee523e0aee371bf953357efecd7ba462f0e34))
+* **web-api:** serve GUI in container — correct _STATIC_DIR + compose web service ([#68](https://github.com/longsizhuo/openInvest/issues/68)) ([4c2ff71](https://github.com/longsizhuo/openInvest/commit/4c2ff71cf0337fdfbf91a5f3b692498fe6884441))
+
+
+### Docs
+
+* **adr:** record ledger-mutation idempotency invariant and audit ([3d7e7ca](https://github.com/longsizhuo/openInvest/commit/3d7e7caaab0ce341e8a7fbfda3b7b528e0afca08))
+* **deploy:** document container self-host + compose pulls GHCR image ([#69](https://github.com/longsizhuo/openInvest/issues/69)) ([2ad9b88](https://github.com/longsizhuo/openInvest/commit/2ad9b8812c38d45112eb50c965d1987f5a314ab5))
+
 ## [0.10.0](https://github.com/longsizhuo/openInvest/compare/v0.9.1...v0.10.0) (2026-06-16)
 
 
