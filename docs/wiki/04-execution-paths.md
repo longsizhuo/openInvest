@@ -47,14 +47,14 @@ documents:
 ### 触发
 
 ```bash
-~/.claude/skills/invest/run.sh prepare_committee NDQ.AX
+~/.claude/skills/invest/scripts/run.sh prepare_committee NDQ.AX
 ```
 
 或在 Claude Code 对话里说："帮我跑委员会分析 NDQ"——Claude 会自动调用 skill。
 
 ### 实现
 
-`skill/run.sh prepare_committee` 做的事：
+`skills/invest/scripts/run.sh prepare_committee` 做的事：
 
 1. 拉 NDQ.AX 行情 + REGIME 算好
 2. 把 4 个角色的 system prompt + 输入数据写到 `/tmp/.committee/<task_id>/{macro,quant,risk,cio}.md`
@@ -100,7 +100,7 @@ Agent({...})  // cio 综合 transcript
 
 | 入口 | 谁用 | 备注 |
 |------|------|------|
-| `~/.claude/skills/invest/run.sh run_committee SYM` | Cursor / Cline / Codex / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
+| `~/.claude/skills/invest/scripts/run.sh run_committee SYM` | Cursor / Cline / Codex / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
 | `POST /api/committee/run` | Web GUI 的"触发/直播"按钮 | 异步 + SSE 进度推送 |
 | cron `0 3 * * *` 跑 `jobs/daily_report.py` | 服务器自动每日 | 跑全部 target_assets，可选发邮件 |
 
@@ -182,18 +182,18 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 ## 4. 实现层次（哪些代码两条路径共享）
 
 ```
-┌─────────────────────────────────────────────────┐
-│  agents/{macro,quant,risk,cio}.py 的 prompt     │ ← 共享
-├─────────────────────────────────────────────────┤
-│  core/regime.py REGIME 分类 + 概率口径           │ ← 共享
-├─────────────────────────────────────────────────┤
-│  core/committee/debate.py run_committee 编排逻辑 │ ← 仅 Direct 用
-│  skill/run.sh prepare_committee 提示生成         │ ← 仅 Coordinator 用
-│  skill/run.sh run_committee（包 run_committee） │ ← Direct 在 skill 里的入口
-├─────────────────────────────────────────────────┤
-│  agents/sdk_agent.py SDKAgent (DeepSeek HTTP)   │ ← 仅 Direct 用
-│  Claude Agent({...}) tool                        │ ← 仅 Coordinator 用
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  agents/{macro,quant,risk,cio}.py 的 prompt                    │ ← 共享
+├────────────────────────────────────────────────────────────────┤
+│  core/regime.py REGIME 分类 + 概率口径                         │ ← 共享
+├────────────────────────────────────────────────────────────────┤
+│  core/committee/debate.py run_committee 编排逻辑               │ ← 仅 Direct 用
+│  skills/invest/scripts/run.sh prepare_committee 提示生成       │ ← 仅 Coordinator 用
+│  skills/invest/scripts/run.sh run_committee（包 run_committee）│ ← Direct 在 skill 里的入口
+├────────────────────────────────────────────────────────────────┤
+│  agents/sdk_agent.py SDKAgent (DeepSeek HTTP)                  │ ← 仅 Direct 用
+│  Claude Agent({...}) tool                                      │ ← 仅 Coordinator 用
+└────────────────────────────────────────────────────────────────┘
 ```
 
 **共享率约 70%**（prompt + REGIME + sanity check + 数据准备）。

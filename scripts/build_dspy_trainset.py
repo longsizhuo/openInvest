@@ -147,7 +147,7 @@ def build_trainset(workspace: Path, output_path: Path) -> List[Dict[str, Any]]:
 
 def main():
     import sys
-    sys.path.insert(0, "/home/ubuntu/projects-review/invest")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
     p = argparse.ArgumentParser()
     p.add_argument("--workspace", required=True, type=Path,

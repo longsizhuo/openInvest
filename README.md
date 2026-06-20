@@ -63,7 +63,7 @@ Hi, Claude, 帮我安装https://github.com/longsizhuo/openInvest/tree/main/skill
 也可以手动导入：
 ```bash
 git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
-bash ~/openInvest/skill/install.sh
+bash ~/openInvest/skills/install.sh
 ```
 
 回 Claude Code 对话里说："帮我初始化 invest"。Claude 会：
@@ -128,7 +128,7 @@ LLM_MODEL=glm-4-flash
 agents/    4 个角色的 prompt
 core/      Coordinator-Worker 编排 + memory store
 jobs/      APScheduler cron tasks（含 event_watch 事件感知层）
-connectors/web_api.py + skill/ 两条调用入口
+connectors/web_api.py + skills/ 两条调用入口
 services/  news_sources / event_normalizer / event_notifier / notifier
 db/        SQLite WAL（trades / insights / market data / events）
 docs/wiki/ 完整架构文档 + ADR

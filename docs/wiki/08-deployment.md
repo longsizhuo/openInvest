@@ -90,8 +90,8 @@ docker compose pull && docker compose up -d
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-git clone https://github.com/longsizhuo/openInvest.git ~/projects-review/invest
-cd ~/projects-review/invest
+git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
+cd ~/openInvest
 uv sync --frozen --python 3.13
 cp .env.example .env
 # 编辑 .env 填 DEEPSEEK_API_KEY / EMAIL_* / 等
@@ -127,12 +127,12 @@ sudo systemctl status invest-web
 
 unit 关键字段：
 ```ini
-WorkingDirectory=/home/ubuntu/projects-review/invest
-EnvironmentFile=/home/ubuntu/projects-review/invest/.env
-ExecStart=/home/ubuntu/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+WorkingDirectory=%h/openInvest
+EnvironmentFile=%h/openInvest/.env
+ExecStart=%h/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
 Restart=on-failure
 ProtectSystem=strict
-ReadWritePaths=/home/ubuntu/projects-review/invest
+ReadWritePaths=%h/openInvest
 ```
 
 → 仅写 invest 目录（systemd 加固）。
@@ -213,7 +213,7 @@ Include: Emails → your-email@gmail.com
 ### 升级后端
 
 ```bash
-cd ~/projects-review/invest
+cd ~/openInvest
 git pull origin main
 uv sync   # 如果有依赖变化
 sudo systemctl restart invest-web
@@ -225,12 +225,12 @@ sudo systemctl restart invest-web
 
 ```bash
 # 方案 A：从 GitHub Releases 拉
-cd ~/projects-review/invest
+cd ~/openInvest
 uv run python -m scripts.sync_gui_dist
 # 注意：只更新 static/ 不动 /srv/invest-gui/
 
 # 方案 B：本机构建 + rsync 到 Caddy serve 目录（生产用）
-cd ~/projects-review/invest-gui
+cd ~/invest-gui
 git pull origin main
 pnpm install
 pnpm deploy   # = scripts/deploy.sh，rsync dist/ → /srv/invest-gui/
@@ -318,7 +318,7 @@ sudo systemctl list-units --type=service | grep invest
 `invest-scheduler.service`（如果你跑 cron）unit 类似：
 
 ```ini
-ExecStart=/home/ubuntu/.local/bin/uv run --no-sync python -m scheduler.runner
+ExecStart=%h/.local/bin/uv run --no-sync python -m scheduler.runner
 ```
 
 详见 `systemd/README.md` 和 `scheduler/README.md`。
@@ -364,7 +364,7 @@ uv run python -m scripts.snapshot restore --in ~/invest-snapshot.tar.gz
 
 ```bash
 # 每天 cron——直接复用 snapshot.py，一份 tar 含全部权威状态
-0 4 * * *  cd /home/ubuntu/projects-review/invest && /home/ubuntu/.local/bin/uv run python -m scripts.snapshot snapshot --out /backup/invest-$(date +\%F).tar.gz
+0 4 * * *  cd $HOME/openInvest && $HOME/.local/bin/uv run python -m scripts.snapshot snapshot --out /backup/invest-$(date +\%F).tar.gz
 ```
 
 ### Cloudflare Access 配置

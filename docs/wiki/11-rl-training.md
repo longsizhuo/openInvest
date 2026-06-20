@@ -226,7 +226,7 @@ CONCENTRATION_PCT < 20%（仓位 < 20%，子弹 ≥ 80%）：
 ### 跑诊断（看当前 prompt 是否复读机）
 
 ```bash
-cd ~/projects-review/invest
+cd ~/openInvest
 set -a && . ./.env && set +a
 rm -rf /tmp/my_diagnose
 

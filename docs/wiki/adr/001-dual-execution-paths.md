@@ -97,7 +97,7 @@ openInvest 的"4 角色委员会"（Macro / Quant / Risk / CIO）有两条执行
 
 - 完整双路径解释：[04-execution-paths.md](../04-execution-paths.md)
 - 不升级 Claude Agent SDK 的细节：[ADR-002](002-no-claude-agent-sdk.md)
-- Skill 实现：`skill/run.sh prepare_committee` + `skills/invest/SKILL.md`
+- Skill 实现：`skills/invest/scripts/run.sh prepare_committee` + `skills/invest/SKILL.md`
 - Web/Cron 实现：`core/committee.py:run_committee`（现 `core/committee/debate.py:run_committee`）+ `connectors/web_api.py:committee_run`
 
 ---
