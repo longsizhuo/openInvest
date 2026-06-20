@@ -387,14 +387,20 @@ def assemble_full_report(
                 "**路径概率**（该 regime 历史 forward 分布，CIO 决策依据）:\n\n"
                 + "\n".join(path_lines) + "\n\n"
             )
-        # 全部用 fenced code block：python-markdown 不解析原生 HTML 块
-        # （<details>）内部的 markdown，**粗体**/换行在邮件里全坏
-        # （2026-06-12 用户实测）。Gmail 也不支持 <details> 折叠。
+        # 分析师长文走 .analyst 卡片（md_in_html）而非 ``` 代码块。
+        # 历史（2026-06-12）：曾用 <details> 折叠，但 python-markdown 默认不解析
+        # 原生 HTML 块内部 markdown → **粗体**/换行全坏，于是改塞 ``` 代码块；副作用是
+        # LLM 原文（含 ** 标记）以灰色等宽块原样泄露、极难阅读。
+        # 现方案（2026-06-20）：notifier 开 md_in_html 扩展 + `markdown="1"` 容器，
+        # 卡片内 markdown 正常解析（粗体/换行/列表都对），版式可读且不泄露原文。
         lines.extend([
-            f"### CIO 备忘\n```\n{c['report'].cio_memo}\n```\n\n",
+            "### CIO 备忘\n\n",
+            f'<div class="analyst" markdown="1">\n\n{c["report"].cio_memo}\n\n</div>\n\n',
             "### 分析师意见（专家区）\n\n",
-            f"**Quant（技术面）**:\n```\n{c['report'].quant_view}\n```\n\n",
-            f"**Risk Officer（风控）**:\n```\n{c['report'].risk_view}\n```\n",
+            "**Quant（技术面）**\n\n",
+            f'<div class="analyst" markdown="1">\n\n{c["report"].quant_view}\n\n</div>\n\n',
+            "**Risk Officer（风控）**\n\n",
+            f'<div class="analyst" markdown="1">\n\n{c["report"].risk_view}\n\n</div>\n',
         ])
         return "".join(lines)
 

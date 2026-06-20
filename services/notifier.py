@@ -44,40 +44,61 @@ def _resolve_receiver(default_sender: str) -> str:
     return default_sender
 
 
+# 邮件视觉设计（2026-06-20 重设计）：卡片式版式，主内容白底圆角卡，灰底衬托。
+# 关键：分析师长文（CIO/Quant/Risk）走 .analyst 卡片（见 daily_report_builder），
+# 用 md_in_html 扩展让卡片内部 markdown 仍被解析——粗体/换行正常，不再塞进灰色
+# 代码块导致原文泄露。等宽数据块（黄金快照 / 摩擦成本表）才保留 <pre> monospace。
 _DEFAULT_EMAIL_CSS = """
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-    h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 30px; }
-    h2 { color: #2980b9; margin-top: 25px; border-left: 4px solid #3498db; padding-left: 10px; }
-    h3 { color: #16a085; margin-top: 20px; }
-    p { margin-bottom: 15px; }
-    blockquote { border-left: 4px solid #ddd; padding: 10px 20px; color: #666; background: #f9f9f9; font-style: italic; margin: 20px 0; }
-    pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; border: 1px solid #ddd; }
-    code { font-family: Consolas, Monaco, 'Andale Mono', monospace; background: #f4f4f4; padding: 2px 5px; border-radius: 3px; color: #d63384; }
-    ul, ol { margin-bottom: 15px; padding-left: 25px; }
-    li { margin-bottom: 5px; }
-    table { border-collapse: collapse; width: 100%; margin: 20px 0; }
-    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-    th { background-color: #f8f9fa; color: #2c3e50; font-weight: bold; }
-    tr:nth-child(even) { background-color: #fcfcfc; }
-    hr { border: 0; border-top: 1px solid #eee; margin: 30px 0; }
-    .footer { font-size: 12px; color: #999; margin-top: 40px; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
-    .highlight { background-color: #fff3cd; padding: 2px 4px; border-radius: 4px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.7; color: #2b2f36; background: #eef1f5; margin: 0; padding: 24px 12px; }
+    .container { max-width: 720px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 28px 34px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    h1 { font-size: 23px; color: #1a2533; margin: 4px 0 22px; padding-bottom: 14px; border-bottom: 3px solid #2d7ff9; }
+    h2 { font-size: 19px; color: #1a2533; margin: 30px 0 12px; padding-left: 12px; border-left: 4px solid #2d7ff9; }
+    h3 { font-size: 16px; color: #0b7285; margin: 22px 0 10px; }
+    p { margin: 0 0 13px; }
+    strong { color: #1a2533; }
+    a { color: #2d7ff9; text-decoration: none; }
+    blockquote { border-left: 4px solid #d7dee6; background: #f7f9fb; padding: 12px 18px; color: #52606d; margin: 18px 0; }
+    ul, ol { margin: 0 0 14px; padding-left: 24px; }
+    li { margin-bottom: 6px; }
+    hr { border: 0; border-top: 1px solid #e4e9ee; margin: 26px 0; }
+    table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14px; }
+    th, td { border: 1px solid #e4e9ee; padding: 10px 12px; text-align: left; }
+    th { background: #f4f6f8; color: #1a2533; font-weight: 600; }
+    tr:nth-child(even) { background: #fafbfc; }
+    /* 等宽数据块（对齐的快照/表格）才用 monospace */
+    pre { background: #f7f9fb; border: 1px solid #e4e9ee; border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+    pre code { background: none; padding: 0; color: #2b2f36; }
+    code { font-family: "SFMono-Regular", Consolas, Monaco, monospace; }
+    :not(pre) > code { background: #eef1f5; padding: 2px 6px; border-radius: 4px; color: #c0392b; font-size: 13px; }
+    /* 分析师卡片：LLM 长文走这里，正常排版而非灰色代码块 */
+    .analyst { background: #f7f9fb; border: 1px solid #e7edf3; border-left: 4px solid #0b7285; border-radius: 8px; padding: 12px 18px; margin: 6px 0 18px; font-size: 14.5px; color: #3a444f; }
+    .analyst p { margin: 0 0 9px; }
+    .analyst p:last-child { margin-bottom: 0; }
+    .footer { font-size: 12px; color: #9aa5b1; margin-top: 34px; padding-top: 18px; border-top: 1px solid #e4e9ee; text-align: center; }
+    .highlight { background: #fff3cd; padding: 2px 5px; border-radius: 4px; }
 """
 
 
 def render_markdown_email(content_md: str, *, footer_label: str = "Invest Agent") -> str:
-    """Markdown → 完整 HTML body（含 CSS + footer），给 send_email_html 用"""
+    """Markdown → 完整 HTML body（含 CSS + footer），给 send_email_html 用。
+
+    md_in_html 扩展：让 <div class="analyst" markdown="1"> 等 HTML 块内部的 markdown
+    仍被解析（粗体/列表/换行正常）。这替代了旧的"把分析师长文塞进 ``` 代码块"做法
+    —— 那会让 LLM 原文（含 **粗体** 标记）以灰色等宽块原样泄露、难以阅读。
+    """
     html_content = markdown.markdown(
         content_md,
-        extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'],
+        extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc', 'md_in_html'],
     )
     return f"""
     <html>
-    <head><style>{_DEFAULT_EMAIL_CSS}</style></head>
+    <head><meta charset="utf-8"><style>{_DEFAULT_EMAIL_CSS}</style></head>
     <body>
-        {html_content}
-        <div class="footer">
-            Generated by <b>{footer_label}</b> • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        <div class="container">
+            {html_content}
+            <div class="footer">
+                Generated by <b>{footer_label}</b> • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            </div>
         </div>
     </body>
     </html>
