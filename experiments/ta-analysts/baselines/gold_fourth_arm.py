@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -39,7 +40,10 @@ WINDOWS_DRAWS = {
     "2022重放": "exp_B_2022.jsonl",
     "2020重放": "exp_B_2020.jsonl",
 }
-DRAW_DIR = Path("/home/ubuntu/openinvest-research-archive/ablation_draws")
+DRAW_DIR = Path(os.getenv(
+    "OPENINVEST_DRAW_DIR",
+    str(Path.home() / "openinvest-research-archive" / "ablation_draws"),
+))
 EXIT_VERDICTS = {"TRIM", "SELL"}
 
 

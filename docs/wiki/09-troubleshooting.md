@@ -133,10 +133,10 @@ GUI 「触发委员会」按钮按了，task_id 出来了，但状态一直 `que
 
 ```bash
 # 1. 任务状态文件存在吗
-ls /home/ubuntu/projects-review/invest/memory/.committee/<task_id>/
+ls ~/openInvest/memory/.committee/<task_id>/
 
 # 2. status.json 在变吗（每个 stage 完成会写）
-watch -n 1 cat /home/ubuntu/projects-review/invest/memory/.committee/<task_id>/status.json
+watch -n 1 cat ~/openInvest/memory/.committee/<task_id>/status.json
 
 # 3. journal 里 LLM 调用在跑吗
 sudo journalctl -u invest-web --since "5 minutes ago" | grep -i "deepseek\|httpx"
@@ -172,7 +172,7 @@ GUI HoldingCard 显示"⚠ 陈旧"标记，或行情字段是 `null`。
 
 ```bash
 # 用 Python 直接试
-cd ~/projects-review/invest
+cd ~/openInvest
 uv run python -c "from utils.exchange_fee import get_history_data; df = get_history_data('NDQ.AX', '5d'); print(df.tail())"
 ```
 
@@ -236,7 +236,7 @@ cron 自动同步在 IMAP 临时失败时会**静默漏成交**，导致 portfol
 
 ```bash
 # pnl_history.jsonl 直接看
-tail -20 ~/projects-review/invest/memory/pnl_history.jsonl
+tail -20 ~/openInvest/memory/pnl_history.jsonl
 # 找时间戳异常的行（凌晨非交易时段、未来时间）
 ```
 

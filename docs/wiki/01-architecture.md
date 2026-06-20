@@ -30,7 +30,7 @@ documents:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  CONNECTORS（外部触发器，多消费者模式）                       │
-│  napcat_bot.py · web_api.py · skill/run.sh                  │
+│  napcat_bot.py · web_api.py · skills/invest/scripts/run.sh  │
 └────────────────┬────────────────────────────────────────────┘
                  │  调用业务函数（不直接接 LLM）
                  ▼
@@ -62,7 +62,7 @@ documents:
 |-----------|---------|------|
 | `connectors/napcat_bot.py` | QQ WebSocket 私聊命令（`/balance` `/deposit 100`）| 移动端快速操作 |
 | `connectors/web_api.py` | HTTP REST + SSE | Web GUI / 程序化集成 |
-| `skill/run.sh` (CLI) | Claude Code Skill | 让 Claude 自己当协调者跑 |
+| `skills/invest/scripts/run.sh` (CLI) | Claude Code Skill | 让 Claude 自己当协调者跑 |
 
 **关键约束**：connector 必须**只做协议转换**，业务逻辑全部 forward 给 `core/`。
 违反这条 → connector 之间会出现行为飘移（已有教训：早期 napcat 自己改 portfolio dict 导致 Web 写入失败）。

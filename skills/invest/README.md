@@ -26,7 +26,7 @@ skills/invest/
 被父目录 `../install.sh` 一次装两个 skill：
 
 ```bash
-cd $INVEST_HOME              # 默认 ~/projects-review/invest
+cd $INVEST_HOME              # 默认 ~/openInvest
 bash skills/install.sh        # 同时装 invest + invest-setup
 ```
 
