@@ -25,6 +25,7 @@ from .locked import (
     get_locked,
 )
 from .tunable import (
+    DCAConfig,
     DreamingTunableConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
@@ -61,6 +62,7 @@ __all__ = [
     "SentimentConfig",
     "ValuationConfig",
     "PathConfig",
+    "DCAConfig",
     # Locked dataclasses
     "LockedVerdictScoring",
     "LockedDreamingScoring",

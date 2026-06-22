@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from .tunable import (
+    DCAConfig,
     DreamingTunableConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
@@ -74,7 +75,7 @@ def _read_env_overrides() -> dict[str, Any]:
     # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
     _KNOWN_SECTIONS = sorted(
         ["regime_per_asset", "oracle_accuracy", "macro_buckets", "regime", "verdict",
-         "dreaming", "reward", "sentiment", "valuation", "path"],
+         "dreaming", "reward", "sentiment", "valuation", "path", "dca"],
         key=len,
         reverse=True,
     )
@@ -174,6 +175,15 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     oracle = OracleAccuracyConfig(**{k: v for k, v in data.get("oracle_accuracy", {}).items() if k in {f.name for f in fields(OracleAccuracyConfig)}})
     reward = RewardConfig(**{k: v for k, v in data.get("reward", {}).items() if k in {f.name for f in fields(RewardConfig)}})
 
+    dca_data = dict(data.get("dca", {}))
+    # auto_dca_symbols: 单 str / 逗号 str / list → tuple（frozen dataclass 字段需不可变）
+    if "auto_dca_symbols" in dca_data:
+        v = dca_data["auto_dca_symbols"]
+        if isinstance(v, str):
+            v = [s.strip() for s in v.split(",") if s.strip()]
+        dca_data["auto_dca_symbols"] = tuple(v)
+    dca = DCAConfig(**{k: v for k, v in dca_data.items() if k in {f.name for f in fields(DCAConfig)}})
+
     return TunableConfig(
         regime=regime,
         regime_per_asset=per_asset,
@@ -185,6 +195,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         path=path,
         oracle_accuracy=oracle,
         reward=reward,
+        dca=dca,
     )
 
 
@@ -323,6 +334,16 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "Dreaming LLM 验伪",
         "help": "Deep Sleep 写 insights 前过一次廉价 LLM 挑伪相关（默认关=零 LLM 成本）",
     },
+    "dca.auto_dca_enabled": {
+        "type": "bool",
+        "label": "自动定投",
+        "help": "开启=jobs/dca_daily 每日给配置的 symbols 记一笔 external_funding 买入（不扣子弹池现金）；默认关",
+    },
+    "dca.auto_dca_amount_cny": {
+        "type": "float",
+        "label": "定投金额(CNY)",
+        "help": "每个标的每次定投基准金额；智慧定投实际浮动，本系统按此估算记账、月度对账校准",
+    },
 }
 
 
@@ -342,6 +363,14 @@ def _coerce_and_validate(key: str, value: Any) -> Any:
         if value in spec["choices"]:
             return value
         raise ValueError(f"{key} 需 ∈ {spec['choices']}，得到 {value!r}")
+    if t == "float":
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} 需 float，得到 {value!r}")
+        if f < 0:
+            raise ValueError(f"{key} 不能为负，得到 {f}")
+        return f
     raise ValueError(f"未知白名单 type: {t}")  # pragma: no cover
 
 
