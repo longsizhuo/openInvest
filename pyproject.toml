@@ -1,6 +1,6 @@
 [project]
 name = "invest"
-version = "0.11.0"
+version = "0.12.0"
 description = "多资产 AI 投资委员会 + 组合管理后端"
 
 requires-python = ">=3.13"
