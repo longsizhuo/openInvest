@@ -112,6 +112,51 @@ def test_idempotent_same_day(seeded, monkeypatch):
     assert pm.find_holding("510300.SS")["units"] == pytest.approx(320.0)  # 只加一次
 
 
+def test_unheld_symbol_skipped(seeded, monkeypatch):
+    """未持有的 symbol → 跳过(not_tracked)：不猜币种（避免把 USD 价当 CNY 记错账）"""
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "AAPL")  # 未持有
+    monkeypatch.setattr(dca, "get_quote", _fixed_quote(200.0))  # 即便能取价也不该记
+    out = dca.run()
+    assert out["results"][0]["status"] == "skipped"
+    assert out["results"][0]["reason"] == "not_tracked"
+    pm = PortfolioManager(seeded)
+    assert pm.find_holding("AAPL") is None
+    assert pm.cash_amount("CNY") == pytest.approx(30000.0)
+
+
+def test_units_too_small_skipped_and_unclaims(seeded, monkeypatch):
+    """金额/价格使 units 舍入为 0 → 跳过(amount_too_small)且 unclaim（不调 buy 报错、不卡死）"""
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_AMOUNT_CNY", "0.000001")  # /5 → round6 = 0
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "510300.SS")
+    monkeypatch.setattr(dca, "get_quote", _fixed_quote(5.0))
+    out = dca.run()
+    assert out["results"][0]["status"] == "skipped"
+    assert out["results"][0]["reason"] == "amount_too_small"
+    pm = PortfolioManager(seeded)
+    assert pm.find_holding("510300.SS")["units"] == 300.0  # 没买
+
+
+def test_quote_exception_isolated_not_aborting(seeded, monkeypatch):
+    """取价抛异常 → 记 error 并继续（不 raise 中断整批）；unclaim 后同日可重试"""
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "510300.SS")
+
+    def boom(h):
+        raise RuntimeError("yf down")
+    monkeypatch.setattr(dca, "get_quote", boom)
+    out = dca.run()                       # 不应抛
+    assert out["status"] == "success"
+    assert out["results"][0]["status"] == "error"
+    pm = PortfolioManager(seeded)
+    assert pm.find_holding("510300.SS")["units"] == 300.0  # 没买
+
+    # unclaim 后同日重试：有价 → 成交
+    monkeypatch.setattr(dca, "get_quote", _fixed_quote(5.0))
+    assert dca.run()["results"][0]["status"] == "bought"
+
+
 def test_no_price_skips_and_unclaims(seeded, monkeypatch):
     """拉不到价 → 跳过且 unclaim；同日换成有价能重试成交（幂等闸不卡死）"""
     monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")

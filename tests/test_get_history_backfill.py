@@ -50,9 +50,18 @@ def test_shallow_db_backfills_2y(recording_yf, monkeypatch):
 
 
 def test_deep_symbol_incremental_5d(recording_yf, monkeypatch):
-    """DB 已有足够历史（≥60 根）但今天没更新 → 5d 增量刷新即可（不浪费全量拉取）"""
-    idx = pd.date_range("2025-01-01", periods=120, freq="D")
-    df = pd.DataFrame({"Close": list(range(1, 121))}, index=idx)
+    """DB 已有足够历史（≥250 根）但今天没更新 → 5d 增量刷新即可（不浪费全量拉取）"""
+    idx = pd.date_range("2024-01-01", periods=300, freq="D")
+    df = pd.DataFrame({"Close": list(range(1, 301))}, index=idx)
     monkeypatch.setattr(ef._STORE, "get_history_df", lambda s: df)
     ef.get_history_data("OLD.SS")
     assert recording_yf.last_period == "5d"
+
+
+def test_mid_depth_still_backfills_2y(recording_yf, monkeypatch):
+    """60~249 根（够 RSI 不够 MA250）→ 仍触发 2y，避免 MA250/regime 残缺"""
+    idx = pd.date_range("2025-01-01", periods=100, freq="D")
+    df = pd.DataFrame({"Close": list(range(1, 101))}, index=idx)
+    monkeypatch.setattr(ef._STORE, "get_history_df", lambda s: df)
+    ef.get_history_data("MID.SS")
+    assert recording_yf.last_period == "2y"

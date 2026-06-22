@@ -15,9 +15,10 @@ from db.market_store import MarketStore
 CACHE_DIR = "cache_data"
 _STORE = MarketStore()
 
-# 历史行数低于此阈值 → 视为深度不足（empty 或仅几天），触发 2y 全量回填，
-# 保证 RSI/MA120/MA250/regime 等长周期指标算得出（MA250 需 ~250 根）。
-_MIN_HISTORY_ROWS = 60
+# 历史行数低于此阈值 → 视为深度不足，触发 2y 全量回填。取 250 = 最长指标 MA250 的窗口，
+# 保证 RSI/MA120/MA250/regime 全部算得出（仅 60 会让 60~249 根的 symbol 仍缺 MA120/MA250
+# → REGIME=unknown）。年轻 symbol（上市不足 ~1 年）会每次拉 2y 取尽可用历史，可接受。
+_MIN_HISTORY_ROWS = 250
 
 
 def _nan_to_none(v):
