@@ -1172,6 +1172,7 @@ def test_config_endpoints_roundtrip(client):
     assert set(items) == {
         "verdict.concentration_lens_enabled", "verdict.risk_profile",
         "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",
+        "dca.auto_dca_enabled", "dca.auto_dca_amount_cny",
     }
     assert items["verdict.concentration_lens_enabled"]["value"] is True
     assert items["verdict.concentration_lens_enabled"]["overridden"] is False
@@ -1184,6 +1185,11 @@ def test_config_endpoints_roundtrip(client):
 
     # PUT enum
     assert client.put("/api/config", json={"key": "verdict.risk_profile", "value": "aggressive"}).status_code == 200
+    # PUT float（DCA 金额，str → float 归一）+ 负值 400
+    rf = client.put("/api/config", json={"key": "dca.auto_dca_amount_cny", "value": "150"})
+    assert rf.status_code == 200
+    assert {it["key"]: it for it in rf.json()["items"]}["dca.auto_dca_amount_cny"]["value"] == 150.0
+    assert client.put("/api/config", json={"key": "dca.auto_dca_amount_cny", "value": -5}).status_code == 400
     # 非白名单 → 400；enum 非法 → 400
     assert client.put("/api/config", json={"key": "verdict.alloc_cny_ceiling", "value": 1}).status_code == 400
     assert client.put("/api/config", json={"key": "verdict.risk_profile", "value": "yolo"}).status_code == 400
