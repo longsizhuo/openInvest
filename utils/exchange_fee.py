@@ -15,6 +15,10 @@ from db.market_store import MarketStore
 CACHE_DIR = "cache_data"
 _STORE = MarketStore()
 
+# 历史行数低于此阈值 → 视为深度不足（empty 或仅几天），触发 2y 全量回填，
+# 保证 RSI/MA120/MA250/regime 等长周期指标算得出（MA250 需 ~250 根）。
+_MIN_HISTORY_ROWS = 60
+
 
 def _nan_to_none(v):
     """yfinance 行里的 NaN / 缺失值转 None（落库为 NULL）。
@@ -162,7 +166,10 @@ def get_history_data(
     if needs_update:
         if as_of_date is None:
             should_fetch_yf = True
-            fetch_period = "5d"
+            # 深度不足（empty 或仅几天）→ 全量回填 2y，保证 RSI/MA120/MA250/regime
+            # 算得出；已有足够历史 → 5d 增量。修「新 symbol 只 5d → REGIME=unknown」bug，
+            # 并自愈已浅的 symbol（如先前被 5d 抓过的 510500/SPY 再被跟踪时）。
+            fetch_period = "5d" if len(df_db) >= _MIN_HISTORY_ROWS else "2y"
         else:
             from datetime import datetime as _dt, timedelta as _td
             try:
