@@ -200,7 +200,7 @@ GUI，他根本用不上。所以：
 | 端点 | 用在 | body 简例 |
 |------|------|-----------|
 | `GET /api/user` | **分析战况前必读**，拿 wealth_context（家族 backup / 账户性质 / 应急金）—— 决定怎么解释集中度 + 低现金 | — |
-| `PUT /api/user/wealth_context` | 用户改家族 backup / 账户性质等（GUI 在 /settings 页填，agent 一般不调）| `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?}` |
+| `PUT /api/user/wealth_context` | 用户改家族 backup / 账户性质 / **月度补充额（开口池）**等（GUI 在 /settings 页填，agent 一般不调）| `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?, monthly_contribution_cny?}` |
 | `POST /api/trades/record` | **记一笔意向交易**（不连真实支付，只内部账本）| `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
 | `GET /api/trades?limit=N` | 看最近 N 笔意向 / 已成交 | — |
 | `PATCH /api/trades/{id}/status` | **标记成交**（status: "executed"）→ 自动同步 portfolio.md（更新 holdings + 扣 cash）| `{status: "executed"}` |

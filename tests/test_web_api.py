@@ -1202,3 +1202,23 @@ def test_config_endpoints_roundtrip(client):
     # 非白名单 delete → 404
     assert client.delete("/api/config/verdict.alloc_cny_ceiling").status_code == 404
     reset_config()
+
+
+# ============ open-pot 月度补充（wealth_context.monthly_contribution_cny）============
+
+
+def test_wealth_context_monthly_contribution_roundtrip(client):
+    """PUT monthly_contribution_cny → GET /api/user 的 wealth_context 反映，且不清掉已有字段"""
+    client.put("/api/user/wealth_context", json={"emergency_buffer_cny": 4_000_000})
+    r = client.put("/api/user/wealth_context", json={"monthly_contribution_cny": 10000})
+    assert r.status_code == 200
+    wc = client.get("/api/user").json()["wealth_context"]
+    assert wc["monthly_contribution_cny"] == 10000
+    assert wc["emergency_buffer_cny"] == 4_000_000  # merge，不被清掉
+
+
+def test_wealth_context_negative_monthly_rejected(client):
+    """负的月度补充 → 422（ge=0 校验）"""
+    assert client.put(
+        "/api/user/wealth_context", json={"monthly_contribution_cny": -5}
+    ).status_code == 422
