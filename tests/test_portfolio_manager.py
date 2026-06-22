@@ -597,3 +597,73 @@ class TestPortfolioManagerInitErrors:
         }, "")
         with pytest.raises(FileNotFoundError):
             PortfolioManager(s)
+
+
+# ============ 任务 2：buy() 资金来源（external_funding 不扣现金）============
+
+class TestBuyFundingSource:
+    """buy() 的资金来源语义（子弹池模型基础）
+
+    - source_type="cash_deduct"（默认）：买入扣减对应币种现金 = 现有行为，不变
+    - source_type="external_funding"：外部新钱建仓，portfolio cash 不动
+      （日定投走京东/工资银行卡，钱不来自子弹池现金 → 不该扣 cash，
+       否则 ¥30k 子弹池会被日定投错误消耗，10 个月归零）
+    """
+
+    def test_default_buy_deducts_cash(self, tmp_path):
+        """默认（不传 source_type）：买入扣现金，现有行为保持不变（回归守卫）"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 10000.0}, holdings=[])
+        pm2 = PortfolioManager(s)
+        pm2.buy("510300.SS", units=100.0, price=5.0, currency="CNY", kind="etf")
+        pm2._reload()
+        assert pm2.cash_amount("CNY") == pytest.approx(9500.0)  # 10000 - 100*5
+        assert pm2.find_holding("510300.SS")["units"] == 100.0
+
+    def test_external_funding_does_not_deduct_cash(self, tmp_path):
+        """source_type=external_funding：现金不动，持仓照常建立（子弹池语义）"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 10000.0}, holdings=[])
+        pm2 = PortfolioManager(s)
+        pm2.buy("510300.SS", units=100.0, price=5.0, currency="CNY", kind="etf",
+                source_type="external_funding")
+        pm2._reload()
+        assert pm2.cash_amount("CNY") == pytest.approx(10000.0)  # 现金不动
+        h = pm2.find_holding("510300.SS")
+        assert h is not None and h["units"] == 100.0 and h["avg_cost"] == 5.0
+
+    def test_external_funding_weighted_avg_on_existing(self, tmp_path):
+        """external_funding 对已有持仓仍走加权均价，只是不扣现金"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 10000.0}, holdings=[
+            {"symbol": "510300.SS", "kind": "etf", "units": 100.0, "avg_cost": 5.0,
+             "unit_label": "股", "cost_currency": "CNY", "proxy_kind": "direct"}
+        ])
+        pm2 = PortfolioManager(s)
+        pm2.buy("510300.SS", units=100.0, price=6.0, currency="CNY", kind="etf",
+                source_type="external_funding")
+        pm2._reload()
+        h = pm2.find_holding("510300.SS")
+        assert h["units"] == 200.0
+        assert h["avg_cost"] == pytest.approx(5.5)  # (100*5+100*6)/200
+        assert pm2.cash_amount("CNY") == pytest.approx(10000.0)
+
+    def test_external_funding_recorded_in_history(self, tmp_path):
+        """external_funding 在 history 里留 funding_source 审计字段（账本可追溯）"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 10000.0}, holdings=[])
+        pm2 = PortfolioManager(s)
+        pm2.buy("510300.SS", units=100.0, price=5.0, currency="CNY", kind="etf",
+                source_type="external_funding")
+        last = s.read_history()[-1]
+        assert last["action"] == "buy"
+        assert last["funding_source"] == "external_funding"
+
+    def test_invalid_source_type_rejected(self, tmp_path):
+        """非法 source_type 抛 ValueError（防手滑传错字符串静默扣/不扣）"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 10000.0}, holdings=[])
+        pm2 = PortfolioManager(s)
+        with pytest.raises(ValueError):
+            pm2.buy("510300.SS", units=100.0, price=5.0, currency="CNY",
+                    kind="etf", source_type="nonsense")
