@@ -199,6 +199,22 @@ class RewardConfig:
 
 
 @dataclass(frozen=True)
+class DCAConfig:
+    """自动定投（DCA）参数 — 子弹池模型（见 ADR-018）
+
+    日定投在京东/银行卡侧自动扣款，钱不来自 portfolio 子弹池现金 → 走
+    buy(source_type="external_funding") 入账（不扣 cash）。本系统按 amount_cny
+    估算每日买入量记账，月度用真实基金余额对账校准。
+
+    dataclass 默认=禁用（安全模式）：fork 用户 / 未配置时绝不自动动账本。
+    用户经 /api/config 或 INVEST_DCA_* env 开启。
+    """
+    auto_dca_enabled: bool = False              # 总开关（默认关）
+    auto_dca_amount_cny: float = 100.0          # 每个 symbol 每次定投基准金额（CNY）
+    auto_dca_symbols: tuple[str, ...] = ()      # 定投标的 yfinance symbol，如 ("510300.SS",)
+
+
+@dataclass(frozen=True)
 class TunableConfig:
     """所有可调参数的顶层容器"""
     regime: RegimeConfig = field(default_factory=RegimeConfig)
@@ -211,3 +227,4 @@ class TunableConfig:
     path: PathConfig = field(default_factory=PathConfig)
     oracle_accuracy: OracleAccuracyConfig = field(default_factory=OracleAccuracyConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
+    dca: DCAConfig = field(default_factory=DCAConfig)

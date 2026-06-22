@@ -49,11 +49,12 @@ jobs:
         # Sprint 1+2 (2026-05) 新增：trades_db / state_bus / insights_db / daily_report_builder
         run: |
           uv run python -c "from core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
-          uv run python -c "from core.config import effective_api_config, set_persisted_override, clear_persisted_override, API_SETTABLE"
+          uv run python -c "from core.config import effective_api_config, set_persisted_override, clear_persisted_override, API_SETTABLE, DCAConfig"
           uv run python -c "from core.memory_store import MemoryStore, _atomic_write_text"
           uv run python -c "from core.portfolio_manager import PortfolioManager, _render_portfolio_body_v2"
           uv run python -c "from jobs.pnl_snapshot import _is_trading_window, _redact_token_in, _outperform_events"
           uv run python -c "from jobs.daily_report_builder import assemble_full_report, classify_asset_freshness, format_staleness_warning, portfolio_summary_text"
+          uv run python -c "from jobs.dca_daily import run, _holding_for_quote"
           uv run python -c "from core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from utils.fx import get_fx_rate, cash_total_in_base"
           uv run python -c "from utils.market_metrics import TRADING_DAYS_2Y, _calc_price_quantile"

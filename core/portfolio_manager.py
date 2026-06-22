@@ -478,15 +478,25 @@ class PortfolioManager:
         kind: str = "equity",
         unit_label: str = "股",
         source: str = "skill_cli",
+        source_type: str = "cash_deduct",
     ) -> Dict[str, Any]:
         """加仓（已有 symbol 增加 units + 加权平均成本；新 symbol 直接建仓）
 
         同步扣现金（保证账本一致：买 X 元股 = 扣 X 元现金）+ 记 history。
         CLI (scripts/skill.py:cmd_buy) 与 Web API (/api/skill/buy) 共用——
         units/price 非法抛 ValueError，由调用方转 CLI error JSON / HTTP 400。
+
+        资金来源 source_type（子弹池模型，见 ADR-018）：
+        - "cash_deduct"（默认）：从 portfolio cash 扣对应币种金额（账本一致，现有行为）
+        - "external_funding"：外部新钱（工资/银行卡，如自动定投）建仓，**portfolio cash 不动**。
+          日定投的钱不来自子弹池现金，扣它会错误消耗抄底弹药（¥30k 子弹 10 个月归零）。
         """
         if units <= 0 or price <= 0:
             raise ValueError("units / price 必须 > 0")
+        if source_type not in ("cash_deduct", "external_funding"):
+            raise ValueError(
+                f"非法 source_type {source_type!r}（只接受 cash_deduct / external_funding）"
+            )
         ccy = currency.upper()
         cost_cny = units * price  # 简化：fork 用户若用非 CNY 自己换算后再传 price=CNY 价
         with self.with_portfolio_tx() as p:
@@ -509,19 +519,21 @@ class PortfolioManager:
                 action_kind = "new"
             p["holdings"] = holdings
 
-            cash = dict(p.get("cash") or {})
-            cash[ccy] = round(float(cash.get(ccy, 0) or 0) - units * price, 2)
-            p["cash"] = cash
+            # 资金来源决定是否扣现金：external_funding = 外部新钱，子弹池现金不动
+            if source_type == "cash_deduct":
+                cash = dict(p.get("cash") or {})
+                cash[ccy] = round(float(cash.get(ccy, 0) or 0) - units * price, 2)
+                p["cash"] = cash
         self._reload()
         self.store.append_history({
             "ts_origin": _now_iso_local(), "action": "buy",
             "symbol": symbol, "units": units, "price": price,
-            "currency": ccy, "source": source,
+            "currency": ccy, "source": source, "funding_source": source_type,
         })
         return {
             "status": "ok", "action": action_kind, "symbol": symbol,
             "units_added": units, "price": price, "currency": ccy,
-            "cost_cny_estimate": cost_cny,
+            "cost_cny_estimate": cost_cny, "funding_source": source_type,
         }
 
     def sell(
