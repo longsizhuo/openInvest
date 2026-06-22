@@ -190,6 +190,12 @@ class WealthContextRequest(BaseModel):
         default=None, max_length=512,
         description="自由文本说明，如 '家族资金 ¥4M 仅作破产兜底，不可作投资使用'",
     )
+    monthly_contribution_cny: Optional[float] = Field(
+        default=None, ge=0,
+        description="每月从工资/外部补充进投资池的额度（CNY，开口池）。让 WealthContextOfficer "
+                    "把 portfolio cash 当流量而非封闭快照：低现金更不算流动性风险、30% 现金目标软化。"
+                    "**仍不算当下可投资金**——加仓上限永远 = 当前 portfolio cash。",
+    )
 
 
 class UserProfileResponse(BaseModel):

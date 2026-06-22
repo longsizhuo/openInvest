@@ -66,5 +66,6 @@ RSI/MA120/MA250/regime 全 N/A、`REGIME=unknown`（510500.SS / SPY 复现）。
 - **币种**：CNY 标的直接 `amount_cny / price`；非 CNY 标的经 `utils.fx.to_base` 折算后再除价。
 - **代理跟踪**：场外联接基金（yfinance 取不到净值）按同指数的场内 ETF symbol 做价值代理记账
   （如京东 110020 → openInvest 记 510300.SS），份额是价值代理、市值/PnL 同指数跟得准。
-- **未来工作**：把"开口池 / 月度外部补充额"显式建模进 `wealth_context`，让现金目标 / 集中度
-  不再假设 portfolio cash 是封闭快照（另起 ADR）。
+- **开口池模型（已实现）**：`wealth_context.monthly_contribution_cny` —— 用户每月从外部补充进
+  投资池的额度。WealthContextOfficer 据此把 portfolio cash 当**流量**而非封闭快照：低现金更不算
+  流动性风险、30% 现金目标软化（铁律不变：本次加仓上限仍 = **当前** portfolio cash）。
