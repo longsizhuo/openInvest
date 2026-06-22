@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from core.config import (
+    DCAConfig,
     DreamingTunableConfig,
     LockedCommitteeDefaults,
     LockedDreamingScoring,
@@ -465,3 +466,80 @@ class TestApiConfig:
         monkeypatch.setenv("INVEST_DREAMING_LLM_VERIFY", "1")
         reset_config()
         assert load_config().dreaming.llm_verify_enabled in (True, 1)
+
+
+# ---------- 自动定投配置（DCAConfig，子弹池模型）----------
+
+
+class TestDCAConfig:
+    """DCAConfig：默认禁用（安全）+ env / 持久 API 可配。
+
+    落盘隔离到 tmp（同 TestApiConfig），避免污染真实 memory/.state/。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _tmp_memory(self, tmp_path, monkeypatch):
+        from core import memory_store as ms
+        monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
+        yield
+
+    def test_dca_defaults(self):
+        """默认：禁用、¥100/次、无 symbols（dataclass 默认=安全模式）"""
+        cfg = DCAConfig()
+        assert cfg.auto_dca_enabled is False
+        assert cfg.auto_dca_amount_cny == 100.0
+        assert cfg.auto_dca_symbols == ()
+
+    def test_load_config_has_dca_defaults(self):
+        cfg = load_config()
+        assert cfg.dca.auto_dca_enabled is False
+        assert cfg.dca.auto_dca_amount_cny == 100.0
+        assert cfg.dca.auto_dca_symbols == ()
+
+    def test_dca_frozen(self):
+        cfg = DCAConfig()
+        with pytest.raises(AttributeError):
+            cfg.auto_dca_enabled = True  # type: ignore[misc]
+
+    def test_env_override_enabled(self, monkeypatch):
+        monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")
+        reset_config()
+        assert load_config().dca.auto_dca_enabled is True
+
+    def test_env_override_amount(self, monkeypatch):
+        monkeypatch.setenv("INVEST_DCA_AUTO_DCA_AMOUNT_CNY", "150")
+        reset_config()
+        assert load_config().dca.auto_dca_amount_cny == 150.0
+
+    def test_env_override_symbols_single(self, monkeypatch):
+        """单 symbol（env 值无逗号 → 是裸 str）也要归一成单元素 tuple"""
+        monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "510300.SS")
+        reset_config()
+        assert load_config().dca.auto_dca_symbols == ("510300.SS",)
+
+    def test_env_override_symbols_multi(self, monkeypatch):
+        """逗号分隔多 symbol → tuple（去空格）"""
+        monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "510300.SS, GC=F")
+        reset_config()
+        assert load_config().dca.auto_dca_symbols == ("510300.SS", "GC=F")
+
+    def test_dca_in_api_whitelist(self):
+        """enabled(bool) + amount(float) 进 API 白名单（GUI/agent 经 /api/config 改）"""
+        assert API_SETTABLE["dca.auto_dca_enabled"]["type"] == "bool"
+        assert API_SETTABLE["dca.auto_dca_amount_cny"]["type"] == "float"
+
+    def test_set_persisted_enabled(self):
+        assert set_persisted_override("dca.auto_dca_enabled", True).dca.auto_dca_enabled is True
+
+    def test_set_persisted_amount_float_coercion(self):
+        """float 白名单项：str '200' → 200.0"""
+        assert set_persisted_override("dca.auto_dca_amount_cny", "200").dca.auto_dca_amount_cny == 200.0
+
+    def test_amount_bad_value_rejected(self):
+        with pytest.raises(ValueError):
+            set_persisted_override("dca.auto_dca_amount_cny", "abc")
+
+    def test_effective_view_includes_dca(self):
+        view = {it["key"]: it for it in effective_api_config()}
+        assert "dca.auto_dca_enabled" in view
+        assert view["dca.auto_dca_enabled"]["value"] is False
