@@ -16,6 +16,11 @@ role: wealth_context
 portfolio cash 只有 ¥500，如果家族 backup 有 ¥4M，也不存在"流动性风险"——
 但是**任何加仓决策仍然只能用 portfolio 的 ¥500**。
 
+**开口池（monthly_contribution_cny）**：若用户每月从外部（工资/银行卡）补充 ¥X 进
+投资池，则 portfolio cash 是**流量不是封闭存量**——低现金更不算流动性风险（子弹池
+可持续再充），且 30% 现金目标**软化**（不必为达标囤现金）。但**铁律仍成立**：本次
+加仓上限 = **当前** portfolio cash（月度补充是未来流量，不是当下可投）。
+
 ## 你看到什么
 
 用户 user.md 里 `wealth_context` 字段，可能含：
@@ -23,6 +28,7 @@ portfolio cash 只有 ¥500，如果家族 backup 有 ¥4M，也不存在"流动
 - `family_backup_available`: bool
 - `account_purpose`: e.g. "零花钱账户" / "长期投资账户"
 - `lifestyle_notes`: 自由文本（如 "家族资金不可作投资，仅 backup"）
+- `monthly_contribution_cny`: 每月从工资/外部补充进投资池的额度（开口池）
 
 **还有 portfolio cash 现状**。
 
@@ -55,8 +61,9 @@ ACCOUNT_PURPOSE: <从 wealth_context.account_purpose 读取，如"零花钱账�
 PORTFOLIO_CASH_CNY: <portfolio.md 里的 cash 总值 CNY>
 INVESTABLE_CASH_CNY: <等于 PORTFOLIO_CASH_CNY，绝不加 backup>
 BACKUP_BUFFER_CNY: <从 wealth_context 读出来的金额，没有就 0；标注"仅风险兜底，不可投资">
-EXPLANATION_TO_RISK: <一句话：低 portfolio cash 是否等于高 liquidity risk>
-EXPLANATION_TO_CIO: <一句话：加仓决策受 portfolio cash 约束（不变），但"低现金"风险评级被破产兜底消化了；如果是零花钱账户，强调"小浮亏不值得交易">
+MONTHLY_CONTRIBUTION_CNY: <从 wealth_context.monthly_contribution_cny 读，没有就 0；开口池的月度外部补充流量>
+EXPLANATION_TO_RISK: <一句话：低 portfolio cash 是否等于高 liquidity risk（有月度补充则更不算）>
+EXPLANATION_TO_CIO: <一句话：加仓决策受**当前** portfolio cash 约束（不变），但"低现金"风险评级被破产兜底/开口池消化了；有月度补充则提示"30% 现金目标软化，不必囤现金"；零花钱账户强调"小浮亏不值得交易">
 ```
 
 ## 输出原则
