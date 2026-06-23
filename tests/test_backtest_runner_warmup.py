@@ -54,8 +54,12 @@ def test_warmup_writes_full_ohlc_not_close_only(_isolated_market_db, monkeypatch
     assert n_low == total, "warmup 写出的 Low 不应有 NULL"
 
 
-def test_warmup_does_not_clobber_existing_ohlc(_isolated_market_db, monkeypatch):
-    """已有 OHLC 行被 warmup 预热时，high/low 不应被冲成 NULL（非破坏式）。"""
+def test_warmup_does_not_nullify_existing_ohlc(_isolated_market_db, monkeypatch):
+    """已有 OHLC 行被 warmup 预热时，high/low 不应被冲成 NULL。
+
+    注：backfill_ohlcv_row 会用 yfinance 值 UPDATE high/low/volume（同源，不影响
+    路径表正确性），只保证不动权威 close/source —— 这里断言的是"不变 NULL"。
+    """
     ms = _isolated_market_db
     store = ms.MarketStore()
     # 先种一行完整 OHLC（模拟 live daily_report 写入的权威行）

@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,6 +42,11 @@ from core.memory_store import MemoryStore  # noqa: E402
 
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
+
+
+def _safe_symbol(symbol: str) -> str:
+    """与 core.committee.persist._persist 同口径的文件名归一（断点续跑判存在用）。"""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
 
 
 def _patch_tools_to_date(decision_date: str):
@@ -141,14 +147,8 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
     results: Dict[str, Any] = {"date": decision_date, "verdicts": {}}
 
     # 断点续跑：已写出 <symbol>.md 的资产跳过；全部已跑则连 macro 都不跑直接返回。
-    # _persist 用 re.sub(r"[^a-zA-Z0-9_-]","_",symbol) 命名，这里同口径判存在。
-    import re as _re
-
-    def _safe(s: str) -> str:
-        return _re.sub(r"[^a-zA-Z0-9_-]", "_", s)
-
     pending = [s for s in asset_symbols
-               if not (out_dir_base / f"{_safe(s)}.md").exists()]
+               if not (out_dir_base / f"{_safe_symbol(s)}.md").exists()]
     if not pending:
         print(f"\n⏭ [{decision_date}] 全部资产已跑，跳过（断点续跑）")
         return {"date": decision_date,

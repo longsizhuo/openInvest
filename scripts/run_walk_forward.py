@@ -193,6 +193,8 @@ def run_walk_forward(
             if "error" in asset_data:
                 log.warning(f"    {sym}: error {asset_data['error'][:80]}")
                 continue
+            if asset_data.get("skipped"):
+                continue  # run_one_day 断点续跑跳过的残影，别当成空 HOLD 事务记账
             # asset_data 直接是 verdict dict（不嵌套）
             tx = sim.execute_verdict(d, sym, asset_data)
             log.info(f"    {sym}: {asset_data.get('verdict', '?')} → {tx.action} (alloc={asset_data.get('alloc_cny', 0)})")
