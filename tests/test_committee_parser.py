@@ -147,7 +147,11 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
     assert "10.0%" in prompt
 
 
-# ---------- Sanity check 4: SOLVENCY=strong + TRIM(concentration) → HOLD ----------
+# ---------- Sanity check 4: 集中度 lens 关 → concentration-TRIM 强制 HOLD ----------
+# 2026-06-23：solvency 自动兜底（"兜底充足 ⇒ 账户内集中度高不算风险"）已移除——它在
+# 事后悄悄反转 CIO 的减仓、掩盖真实集中度风险，且只在 parse 层动手、prompt 层不知情，
+# 导致"CIO 据理力争减仓 vs 裁决 HOLD"的自相矛盾。集中度是否构成约束，只由显式 lens
+# 开关说了算（关 lens 时同时在 Risk/CIO prompt 软抑制 + 这里硬兜底，两层一致）。
 
 def _trim_text(reason: str = "concentration") -> str:
     return (
@@ -159,79 +163,57 @@ def _trim_text(reason: str = "concentration") -> str:
     )
 
 
-def test_sanity4_solvency_strong_trim_concentration_forces_hold():
-    """SOLVENCY=strong + TRIM + concentration → 强制 HOLD"""
-    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=True)
-    assert r["verdict"] == "HOLD"
-    assert r["_original_verdict"] == "TRIM"
-    assert r["trim_reason"] is None
-    assert r["confidence"] <= 0.4
-    assert r["alloc_cny"] == 0
+def test_parse_cio_memo_rejects_solvency_strong_kwarg():
+    """solvency 自动兜底已移除 → parse_cio_memo 不再接受 solvency_strong（防回潮）"""
+    with pytest.raises(TypeError):
+        parse_cio_memo(_trim_text("concentration"), solvency_strong=True)
 
 
-def test_sanity4_solvency_strong_trim_stop_loss_not_overridden():
-    """SOLVENCY=strong + TRIM + stop_loss → 不覆盖（stop_loss 是真实风险）"""
-    r = parse_cio_memo(_trim_text("stop_loss"), solvency_strong=True)
-    assert r["verdict"] == "TRIM"
-    assert r["trim_reason"] == "stop_loss"
-    # 未触发 Sanity 4 → confidence / alloc 不应被 force-HOLD 副作用改动
-    assert r["confidence"] == 0.7
-    assert r["alloc_cny"] == -5000
-
-
-def test_sanity4_solvency_strong_trim_bearish_not_overridden():
-    """SOLVENCY=strong + TRIM + bearish → 不覆盖"""
-    r = parse_cio_memo(_trim_text("bearish"), solvency_strong=True)
-    assert r["verdict"] == "TRIM"
-    assert r["trim_reason"] == "bearish"
-    assert r["confidence"] == 0.7
-    assert r["alloc_cny"] == -5000
-
-
-def test_sanity4_solvency_weak_trim_concentration_not_overridden():
-    """SOLVENCY≠strong + TRIM + concentration → 不覆盖"""
-    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
+def test_concentration_trim_visible_when_lens_on():
+    """lens 开（默认）→ concentration-TRIM 如实保留，不被任何写死兜底掩盖"""
+    r = parse_cio_memo(_trim_text("concentration"))
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "concentration"
     assert r["confidence"] == 0.7
     assert r["alloc_cny"] == -5000
+    assert "_concentration_lens" not in r
 
 
-def test_sanity4_trim_reason_extraction():
-    """TRIM_REASON 正确提取"""
-    r = parse_cio_memo(_trim_text("bearish"), solvency_strong=False)
-    assert r["trim_reason"] == "bearish"
-    r2 = parse_cio_memo(
-        "VERDICT: HOLD\nCONFIDENCE: 0.5\nTRIM_REASON: N/A\n",
-        solvency_strong=True,
-    )
+def test_non_concentration_trim_visible_when_lens_on():
+    """lens 开 → stop_loss / bearish 等真实风险 TRIM 一律如实保留"""
+    for reason in ("stop_loss", "bearish"):
+        r = parse_cio_memo(_trim_text(reason))
+        assert r["verdict"] == "TRIM"
+        assert r["trim_reason"] == reason
+        assert r["confidence"] == 0.7
+        assert r["alloc_cny"] == -5000
+
+
+def test_trim_reason_extraction():
+    """TRIM_REASON 正确提取；HOLD + N/A → None"""
+    assert parse_cio_memo(_trim_text("bearish"))["trim_reason"] == "bearish"
+    r2 = parse_cio_memo("VERDICT: HOLD\nCONFIDENCE: 0.5\nTRIM_REASON: N/A\n")
     assert r2["trim_reason"] is None
     assert r2["verdict"] == "HOLD"
 
 
 # ---------- 集中度 lens 开关 (concentration_lens_enabled) ----------
 
-def test_concentration_lens_off_forces_hold_even_without_solvency():
-    """lens 关 → 无条件 force-HOLD 掉 concentration-TRIM（不依赖 solvency_strong）"""
+def test_concentration_lens_off_forces_hold():
+    """lens 关 → concentration-TRIM 强制 HOLD（移除 solvency 后唯一的集中度兜底路径）"""
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
-    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
+    r = parse_cio_memo(_trim_text("concentration"))
     assert r["verdict"] == "HOLD"
     assert r["_original_verdict"] == "TRIM"
     assert r["trim_reason"] is None
     assert r["alloc_cny"] == 0
+    assert r["confidence"] <= 0.4
     assert r["_concentration_lens"] == "disabled"
 
 
-def test_concentration_lens_marker_distinguishes_solvency_from_config():
-    """lens 开(默认) + solvency_strong → marker=sanity4_solvency（区别于用户关 lens）"""
-    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=True)
-    assert r["verdict"] == "HOLD"
-    assert r["_concentration_lens"] == "sanity4_solvency"
-
-
 def test_concentration_lens_on_by_default_does_not_override():
-    """默认 lens 开 + 弱兜底 → concentration-TRIM 不被覆盖（守"无静默行为变更"）"""
-    r = parse_cio_memo(_trim_text("concentration"), solvency_strong=False)
+    """默认 lens 开 → concentration-TRIM 不被覆盖（守"无静默行为变更"）"""
+    r = parse_cio_memo(_trim_text("concentration"))
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "concentration"
     assert "_concentration_lens" not in r
@@ -240,7 +222,7 @@ def test_concentration_lens_on_by_default_does_not_override():
 def test_concentration_lens_off_keeps_stop_loss_trim():
     """lens 关只压"超配"，真实风险（stop_loss）TRIM 不受影响"""
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
-    r = parse_cio_memo(_trim_text("stop_loss"), solvency_strong=False)
+    r = parse_cio_memo(_trim_text("stop_loss"))
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "stop_loss"
     assert r["alloc_cny"] == -5000

@@ -236,14 +236,11 @@ def save_committee_transcript(symbol: str, raw: str) -> Dict[str, Any]:
 
     cio_text = sections.get("CIO", raw if not sections else "")
 
-    # 从 transcript 提取 SOLVENCY_BUFFER_LEVEL 用于 sanity check 4
-    _solvency_strong = "SOLVENCY_BUFFER_LEVEL: strong" in raw
     # risk_profile / 快崩防御 后处理输入（与 direct 路径同款）：transcript 里有
     # 粘贴进去的确定性 regime_brief（REGIME:/INPUTS:/THRESHOLDS: 行）和
     # sentiment_brief（INDEP_DEFENSE_FLAG 行）
     verdict = parse_cio_memo(
         cio_text,
-        solvency_strong=_solvency_strong,
         regime=regime_label_from_text(raw),
         defense_flag_on=(
             "INDEP_DEFENSE_FLAG: on" in raw or atr_defense_from_text(raw)

@@ -39,8 +39,9 @@ class TestInterventionRecord:
         assert rec["delta_exposure_cny"] == 3000.0
         assert rec["asset"] == "GC=F" and rec["price"] == 4100.0
 
-    def test_sanity4_blocked_trim(self):
-        """SOLVENCY 拦 TRIM：delta_exposure = 负（原 alloc 是负数卖出）"""
+    def test_concentration_trim_blocked_records_lens_off(self):
+        """集中度减仓被拦 → rule=config_concentration_lens_off（移除 solvency 后唯一路径）；
+        delta_exposure = 负（原 alloc 是负数卖出）"""
         rec = _intervention_record(
             "GC=F", "downtrend", 4100.0,
             _v(verdict="HOLD", alloc_cny=0,
@@ -48,11 +49,11 @@ class TestInterventionRecord:
                _original_trim_reason="concentration"),
             atr_defense_on=False,
         )
-        assert rec["rule"] == "sanity4_solvency_concentration"
+        assert rec["rule"] == "config_concentration_lens_off"
         assert rec["delta_exposure_cny"] == -20000.0
 
     def test_config_concentration_lens_off_labeled_distinctly(self):
-        """用户 config 关 lens 拦 TRIM → 标 config_concentration_lens_off（与 sanity4 兜底分桶）"""
+        """用户 config 关 lens 拦 TRIM → 标 config_concentration_lens_off"""
         rec = _intervention_record(
             "GC=F", "downtrend", 4100.0,
             _v(verdict="HOLD", alloc_cny=0,
@@ -210,7 +211,7 @@ class TestRuleFamily:
                _original_trim_reason="concentration"),
             atr_defense_on=False,
         )
-        assert rec["rule"] == "sanity4_solvency_concentration"
+        assert rec["rule"] == "config_concentration_lens_off"
         assert rec["rule_family"] == "trim_blocked"
 
     def test_summarize_by_family_merges_live_and_reconstructed(self, monkeypatch):

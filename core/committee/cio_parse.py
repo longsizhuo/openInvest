@@ -94,7 +94,7 @@ THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
 def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
     """统一 force-HOLD 后处理：verdict→HOLD、confidence 压到 ≤ ceiling、alloc_cny→0。
 
-    多个 sanity check（worker 输入失败 / 兜底充足覆盖集中度减仓）最终都要把裁决
+    多个 sanity check（worker 输入失败 / 集中度 lens 关闭）最终都要把裁决
     钉成"HOLD 且不带方向性信号强度"。集中到一处，避免每个 check 各自手抄时漏步
     —— Sanity 3 历史上 force HOLD 却没归零 alloc_cny，导致 HOLD 仍带建议金额。
     调用方负责记录各自的 _original_* 溯源（语义不同，不放进这里）。
@@ -107,7 +107,6 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
 def parse_cio_memo(
     text: str,
     *,
-    solvency_strong: bool = False,
     current_price: Optional[float] = None,
     regime: Optional[str] = None,
     defense_flag_on: bool = False,
@@ -196,28 +195,27 @@ def parse_cio_memo(
         log.warning("parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
                     "强制 verdict=HOLD + confidence≤floor + alloc=0")
 
-    # Sanity check 4: TRIM + TRIM_REASON=concentration → 强制 HOLD，两种触发：
-    #  (a) SOLVENCY=strong — 兜底充足时"账户内集中度高"不触发减仓（真实财富风险不存在）；
-    #  (b) concentration_lens_enabled=False — 用户在 config 关掉集中度 lens（单资产/刻意
-    #      集中策略），无条件 force-HOLD 掉 concentration-TRIM，不再依赖 solvency_strong。
-    # 确定性后处理，是硬兜底；prompt 层（agents/cio.py + risk_officer.py）只是软抑制，
-    # 防 LLM 把超配换标签成 bearish 绕过本检查。
+    # Sanity check 4: 用户关掉集中度 lens（concentration_lens_enabled=False — 单资产 /
+    # 刻意集中 / 全可投资金池）→ 无条件 force-HOLD 掉 TRIM_REASON=concentration 的减仓。
+    # 2026-06-23 移除 solvency 自动兜底（曾："兜底充足 ⇒ 账户内集中度高不算风险"）：它只在
+    # parse 层事后反转 CIO 减仓、prompt 层却不知情 → 既自相矛盾又掩盖真实集中度风险。现在
+    # 集中度是否构成约束只由这一个显式开关说了算。本检查是硬兜底；lens 关时 prompt 层
+    # （agents/cio.py + risk_officer.py）同步软抑制，防 LLM 把超配换标签成 bearish 绕过。
     _lens_off = not _verdict_cfg.concentration_lens_enabled
-    if ((solvency_strong or _lens_off)
+    if (_lens_off
             and out["verdict"] == "TRIM"
             and out.get("trim_reason") == "concentration"):
         out["_original_verdict"] = "TRIM"
         out["_original_trim_reason"] = "concentration"
-        # 区分两种触发，供 intervention 反事实账本 / daily_report 分开统计，别混成一种 override。
-        out["_concentration_lens"] = "disabled" if _lens_off else "sanity4_solvency"
+        # 标记 lens 关闭触发，供 intervention 反事实账本 / daily_report 留痕。
+        out["_concentration_lens"] = "disabled"
         # setdefault: 若 Sanity 1/2 已记录更早的原值（如 Sanity 2 的 pre-clamp
         # alloc），不要被这里覆盖丢掉真正的原始值。
         out.setdefault("_original_confidence", out["confidence"])
         out.setdefault("_original_alloc", out["alloc_cny"])
         out["trim_reason"] = None
         _force_hold(out, confidence_ceiling=_verdict_cfg.forced_hold_confidence_ceiling)
-        log.warning("parse_cio_memo: %s + TRIM(concentration) → 强制 HOLD",
-                    "集中度 lens 已关闭（config）" if _lens_off else "SOLVENCY=strong（兜底充足）")
+        log.warning("parse_cio_memo: 集中度 lens 已关闭（config）+ TRIM(concentration) → 强制 HOLD")
 
     # Sanity check 5: TRIM 必须给出"低于现价的买回点"，否则降级 HOLD
     # 卖出后买回点缺失 or 不低于现价 = 卖了高价大概率接回 = 纯亏，TRIM 不成立。
