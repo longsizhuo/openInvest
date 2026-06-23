@@ -349,14 +349,8 @@ def run_committee(
     emit("cio_done",
          memo_preview=report.cio_memo[:240])
 
-    # 从 wealth_context_view 提取 SOLVENCY_BUFFER_LEVEL 用于 sanity check 4
-    _solvency_strong = bool(
-        wealth_context_view
-        and "SOLVENCY_BUFFER_LEVEL: strong" in wealth_context_view
-    )
     cio_parsed = parse_cio_memo(
         report.cio_memo,
-        solvency_strong=_solvency_strong,
         current_price=current_price,
         # risk_profile / 快崩防御 后处理输入：regime 标签来自确定性 regime_brief
         # 首行；防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 腿（资产级, 调用方算好）

@@ -337,17 +337,22 @@ def assemble_full_report(
             why = ("没给买回点" if v["_sanity5_reason"] == "reentry_missing"
                    else "买回点不低于现价（卖了高价接回 = 纯亏）")
             lines.append(f"**减仓被否**: CIO 想 TRIM，但{why} → 系统降级 HOLD\n\n")
-        # 被 Sanity check 4 从 TRIM(concentration) 降级成 HOLD 的：决定是持有，但 CIO
-        # 当初给的"卖出后路径预期"是系统对未来的判断，不只是减仓计划——即便 HOLD，
-        # 这个预期对用户判断"信不信自己的看法"有参考价值，摆出来不藏。
-        # 措辞刻意区分：不是"减仓计划"，是"系统路径预期 vs 你的持有决定"。
+        # 被 Sanity check 4（集中度 lens 已关）从 TRIM(concentration) 拦成 HOLD 的：
+        # 你已声明本池为单资产 / 刻意集中 / 全可投资金，集中度不作为减仓理由。措辞明确
+        # 留痕"CIO 想减仓 → 因 lens 关被拦"，不再用旧的"兜底充足/集中度不构成真实风险"
+        # （那是已移除的 solvency 自动兜底口径）。CIO 给的卖出后路径预期仍摆出供对照。
         elif (v.get("_original_verdict") == "TRIM"
               and v.get("_original_trim_reason") == "concentration"
-              and v.get("expected_path")):
+              and v.get("_concentration_lens") == "disabled"):
+            _path = v.get("expected_path")
+            _orig_alloc = v.get("_original_alloc", v.get("alloc_cny", 0))
             lines.append(
-                "**系统路径预期**: 裁决 HOLD（集中度不构成真实风险，兜底充足）。"
-                f"但系统对未来路径的预期：{v['expected_path']}"
-                "（供你对照：系统预期偏空，你若有不同判断自行权衡）\n\n"
+                f"**减仓未执行（集中度 lens 已关）**: CIO 想因集中度减仓（建议金额 "
+                f"¥{_orig_alloc}），但你已关闭集中度 lens（本池视为刻意集中 / 全可投资金）"
+                "→ 系统维持 HOLD。"
+                + (f"系统对未来路径的预期仍供对照：{_path}"
+                   "（系统预期偏空，你若有不同判断自行权衡）" if _path else "")
+                + "\n\n"
             )
         # 买侧被快崩防御改写（VIX/ATR 哨兵），含黄金分批 DCA。翻译官路径已用
         # defense_note 渲染；这里是无翻译官时的确定性兜底，保证决策维度不丢

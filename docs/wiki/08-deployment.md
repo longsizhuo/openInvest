@@ -283,6 +283,10 @@ NAPCAT_WS_URL=ws://localhost:6101
 NAPCAT_HTTP_URL=http://localhost:6100
 INVEST_WHITELIST_QQ=12345678   # 必填，否则 napcat 拒绝所有
 
+# 委员会行为开关（也可运行时经 GUI/API/CLI 改，ADR-017；env 仅部署期默认）
+# 集中度 lens：false=单资产/刻意集中/全可投资金池不因持仓集中度被建议减仓（ADR-019）
+INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
+
 # 开发环境（Vite 跨域调）
 INVEST_WEB_DEV_CORS=1   # 仅本机 dev 时用，生产别开
 ```

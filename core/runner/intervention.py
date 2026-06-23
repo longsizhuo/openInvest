@@ -67,11 +67,10 @@ def _intervention_record(
     elif v.get("_sanity5_reason"):
         rule = f"sanity5_{v['_sanity5_reason']}"
     elif v.get("_original_trim_reason") == "concentration":
-        # 区分"用户 config 关掉集中度 lens"与"兜底充足(Sanity4)拦减仓"——反事实语义不同，
-        # 别并桶污染账本（前者是用户主动免责，后者是兜底覆盖触发的拦截）。
-        rule = ("config_concentration_lens_off"
-                if v.get("_concentration_lens") == "disabled"
-                else "sanity4_solvency_concentration")
+        # 集中度减仓被拦只剩一条路径：用户主动关掉集中度 lens（solvency 自动兜底
+        # 2026-06-23 已移除）。历史 jsonl 里的 sanity4_solvency_concentration 由
+        # rule_family() 继续并入 trim_blocked 桶，聚合不丢。
+        rule = "config_concentration_lens_off"
     else:
         rule = "other"
     from datetime import datetime

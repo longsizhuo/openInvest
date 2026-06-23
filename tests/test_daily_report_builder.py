@@ -480,21 +480,29 @@ class TestAssembleFullReport:
         })
         assert "减仓被否" in report
 
-    def test_sanity4_downgrade_shows_system_path_expectation(self):
-        """Sanity4 降级（concentration）→ 展示"系统路径预期 vs 持有决定"，措辞非减仓计划"""
+    def test_concentration_lens_off_downgrade_shows_lens_note(self):
+        """集中度 lens 关 → 拦下 concentration-TRIM：措辞明确"减仓未执行 / lens 已关"
+        + CIO 原始减仓金额留痕，非"减仓计划"，也非旧的"兜底充足 / 系统路径预期"口径；
+        CIO 的路径预期仍供对照。"""
         report = self._report_with_verdict({
-            "verdict": "HOLD", "confidence": 0.75, "dominant_view": "risk",
-            "alloc_cny": -20000, "_original_verdict": "TRIM",
+            "verdict": "HOLD", "confidence": 0.40, "dominant_view": "risk",
+            "alloc_cny": 0, "_original_verdict": "TRIM",
             "_original_trim_reason": "concentration",
+            "_concentration_lens": "disabled",
+            "_original_alloc": -20000,
             "reentry_price": 938.0,
             "expected_path": "range_bound 历史30天跌破现价概率100%，中位→¥947、20分位→¥938",
         })
-        assert "系统路径预期" in report
+        assert "减仓未执行" in report and "集中度 lens 已关" in report
+        assert "¥-20000" in report  # CIO 原始减仓金额留痕
         assert "自行权衡" in report
         assert "¥947" in report and "¥938" in report
-        # 措辞区分：不是减仓计划
+        # 措辞区分：不是减仓计划（TRIM 执行），也不是 Sanity5 的"减仓被否"
         assert "减仓路径" not in report
         assert "减仓被否" not in report
+        # 已移除的 solvency 自动兜底口径不应再出现
+        assert "兜底充足" not in report
+        assert "系统路径预期" not in report
 
 
 # ============ 翻译官（人话解读 LLM 版） ============

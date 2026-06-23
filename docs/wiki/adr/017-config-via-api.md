@@ -108,3 +108,10 @@ default(dataclass) → YAML → CLI/set_config_override → env → [新增] 持
 - 缓存：`load_config()` module 级缓存；API 写后 `reset_config()` 失效，同进程下次重读；
   跨进程（cron/skill 新进程）天然读最新存档。
 - 远端 hub 模式：存档在 hub 的 `memory/.state/`，客户端经 `$INVEST_API_BASE` 转发，行为一致。
+
+## 后续（2026-06-23, ADR-019）
+
+集中度 lens 刚上线时与 ADR-013 的 solvency 自动兜底**并存**（Sanity 4 双触发）。
+2026-06-23 [ADR-019](019-remove-solvency-concentration-override.md) 移除了 solvency 那条
+自动触发：集中度是否构成约束，现在**只由 `verdict.concentration_lens_enabled` 这一个
+显式开关控制**。lens 成为单一可信源，正合本 ADR"配置走显式 API、env 仅 bootstrap"的哲学。
