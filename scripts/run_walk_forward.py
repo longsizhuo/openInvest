@@ -183,7 +183,9 @@ def run_walk_forward(
     for i, d in enumerate(decision_dates, 1):
         log.info(f"[{i}/{len(decision_dates)}] {d} ...")
         try:
-            day_result = run_one_day(d, assets)
+            # resume=False：walk_forward 每次从零重建 simulator，必须拿到每天真实
+            # verdict 回放成交；断点续跑会跳过已写日期 → 成交集残缺、指标静默失真。
+            day_result = run_one_day(d, assets, resume=False)
         except Exception as e:
             log.error(f"  {d} 失败: {e}")
             continue

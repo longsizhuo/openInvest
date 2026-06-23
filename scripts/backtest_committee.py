@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -42,11 +41,6 @@ from core.memory_store import MemoryStore  # noqa: E402
 
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
-
-
-def _safe_symbol(symbol: str) -> str:
-    """与 core.committee.persist._persist 同口径的文件名归一（断点续跑判存在用）。"""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
 
 
 def _patch_tools_to_date(decision_date: str):
@@ -125,8 +119,15 @@ def _patch_tools_to_date(decision_date: str):
     return stack
 
 
-def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
-    """对单个历史日期跑一次完整 committee（每个资产）"""
+def run_one_day(decision_date: str, asset_symbols: List[str],
+                *, resume: bool = True) -> Dict[str, Any]:
+    """对单个历史日期跑一次完整 committee（每个资产）
+
+    resume=True（默认，CLI 分片回测用）：已写出 <symbol>.md 的资产跳过，支持断点续跑。
+    resume=False（run_walk_forward 用）：无条件跑全部资产——walk_forward 每次从零重建
+        PaperTradeSimulator，必须拿到每天真实 verdict 才能正确回放成交，跳过会让权益
+        曲线/指标算在残缺成交集上（静默错误），所以它不能用断点续跑。
+    """
     from core.committee import (
         run_macro_view, run_committee, parse_cio_memo, _persist
     )
@@ -146,13 +147,18 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
 
     results: Dict[str, Any] = {"date": decision_date, "verdicts": {}}
 
-    # 断点续跑：已写出 <symbol>.md 的资产跳过；全部已跑则连 macro 都不跑直接返回。
-    pending = [s for s in asset_symbols
-               if not (out_dir_base / f"{_safe_symbol(s)}.md").exists()]
-    if not pending:
-        print(f"\n⏭ [{decision_date}] 全部资产已跑，跳过（断点续跑）")
-        return {"date": decision_date,
-                "verdicts": {s: {"skipped": True} for s in asset_symbols}}
+    # 断点续跑（仅 resume=True）：已写出 <symbol>.md 的资产跳过；全部已跑则连 macro 都
+    # 不跑直接返回。文件名口径用 persist.safe_symbol 单一可信源（避免与 _persist 漂移）。
+    if resume:
+        from core.committee import safe_symbol  # 走 façade（与本文件其它 core.committee 导入同口径，import-linter 例外覆盖）
+        pending = [s for s in asset_symbols
+                   if not (out_dir_base / f"{safe_symbol(s)}.md").exists()]
+        if not pending:
+            print(f"\n⏭ [{decision_date}] 全部资产已跑，跳过（断点续跑）")
+            return {"date": decision_date,
+                    "verdicts": {s: {"skipped": True} for s in asset_symbols}}
+    else:
+        pending = list(asset_symbols)
 
     print(f"\n📅 [{decision_date}] 跑 backtest... (待跑 {len(pending)}/{len(asset_symbols)})")
 
