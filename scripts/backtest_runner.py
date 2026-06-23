@@ -143,6 +143,8 @@ def _warmup_market_data(symbols: list) -> None:
     # 用 10y：yfinance 默认 2y 只回到 today-2y，无法 backtest 早于此的日期。
     # 10y 给所有 symbol 都覆盖回 2016+，配合 _apply_cutoff 安全过滤。
     print("🔥 预热 market_data：拉 10y 历史给 backtest 用...")
+    import math
+
     import yfinance as yf
     from db.market_store import MarketStore
     store = MarketStore()
@@ -155,9 +157,25 @@ def _warmup_market_data(symbols: list) -> None:
             if df.empty:
                 print(f"  ⚠ {sym}: yfinance 返回空")
                 continue
+            written = 0
             for idx, row in df.iterrows():
-                store.save_generic_price(sym, idx.strftime("%Y-%m-%d"), row["Close"])
-            print(f"  ✓ {sym}: {len(df)} 行入库")
+                c, h, l = row.get("Close"), row.get("High"), row.get("Low")
+                # OHLC 缺失行跳过（yfinance 末行常 NaN）：写 NULL 会毁路径表
+                # （core.regime_probability 走 OHLC 滚动窗口，缺 high/low 算不出）。
+                if any(x is None or (isinstance(x, float) and math.isnan(x))
+                       for x in (c, h, l)):
+                    continue
+                v = row.get("Volume", 0.0)
+                # 非破坏式写全 OHLC：补 high/low/volume，不冲掉已有 close/source。
+                # 旧实现用 save_generic_price 只写 close（INSERT OR REPLACE）→ 把已有
+                # 行的 high/low 冲成 NULL，被预热资产（含黄金）路径表算不出（2026-06-23 修）。
+                store.backfill_ohlcv_row(
+                    sym, idx.strftime("%Y-%m-%d"),
+                    float(c), float(h), float(l),
+                    float(v) if v == v else 0.0,
+                )
+                written += 1
+            print(f"  ✓ {sym}: {written} 行入库（全 OHLC）")
         except Exception as e:
             print(f"  ❌ {sym}: {e}")
 
