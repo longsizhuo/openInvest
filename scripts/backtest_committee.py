@@ -140,7 +140,21 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
 
     results: Dict[str, Any] = {"date": decision_date, "verdicts": {}}
 
-    print(f"\n📅 [{decision_date}] 跑 backtest...")
+    # 断点续跑：已写出 <symbol>.md 的资产跳过；全部已跑则连 macro 都不跑直接返回。
+    # _persist 用 re.sub(r"[^a-zA-Z0-9_-]","_",symbol) 命名，这里同口径判存在。
+    import re as _re
+
+    def _safe(s: str) -> str:
+        return _re.sub(r"[^a-zA-Z0-9_-]", "_", s)
+
+    pending = [s for s in asset_symbols
+               if not (out_dir_base / f"{_safe(s)}.md").exists()]
+    if not pending:
+        print(f"\n⏭ [{decision_date}] 全部资产已跑，跳过（断点续跑）")
+        return {"date": decision_date,
+                "verdicts": {s: {"skipped": True} for s in asset_symbols}}
+
+    print(f"\n📅 [{decision_date}] 跑 backtest... (待跑 {len(pending)}/{len(asset_symbols)})")
 
     with _patch_tools_to_date(decision_date):
         # Macro 一次跨资产共享
@@ -150,7 +164,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str]) -> Dict[str, Any]:
         except Exception as e:
             macro_view = f"[backtest macro failed: {e}]"
 
-        for symbol in asset_symbols:
+        for symbol in pending:
             asset = {
                 "symbol": symbol,
                 "display_name": symbol,
