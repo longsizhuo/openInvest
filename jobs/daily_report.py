@@ -462,6 +462,7 @@ def run() -> Dict[str, Any]:
                 else:
                     reason = (v.get("_defense_downgrade") and "VIX/ATR 快崩哨兵拦截买入") or \
                              (v.get("_original_trim_reason") == "concentration"
+                              and v.get("_concentration_lens") == "disabled"
                               and "集中度 lens 已按 config 关闭，不因超配减仓") or \
                              (v.get("_sanity5_reason") and "TRIM 没给合格买回点被否") or "防御规则"
                 defense_note = (f"CIO 原始结论 {v['_original_verdict']}"
