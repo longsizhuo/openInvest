@@ -183,7 +183,9 @@ def run_walk_forward(
     for i, d in enumerate(decision_dates, 1):
         log.info(f"[{i}/{len(decision_dates)}] {d} ...")
         try:
-            day_result = run_one_day(d, assets)
+            # resume=False：walk_forward 每次从零重建 simulator，必须拿到每天真实
+            # verdict 回放成交；断点续跑会跳过已写日期 → 成交集残缺、指标静默失真。
+            day_result = run_one_day(d, assets, resume=False)
         except Exception as e:
             log.error(f"  {d} 失败: {e}")
             continue
@@ -193,6 +195,8 @@ def run_walk_forward(
             if "error" in asset_data:
                 log.warning(f"    {sym}: error {asset_data['error'][:80]}")
                 continue
+            if asset_data.get("skipped"):
+                continue  # run_one_day 断点续跑跳过的残影，别当成空 HOLD 事务记账
             # asset_data 直接是 verdict dict（不嵌套）
             tx = sim.execute_verdict(d, sym, asset_data)
             log.info(f"    {sym}: {asset_data.get('verdict', '?')} → {tx.action} (alloc={asset_data.get('alloc_cny', 0)})")

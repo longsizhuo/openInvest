@@ -22,6 +22,15 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def safe_symbol(symbol: str) -> str:
+    """symbol → 落盘文件名归一（committee/backtest transcript 的 <symbol>.md）。
+
+    单一可信源：_persist 写文件名用它，断点续跑判存在的脚本也 import 它，避免
+    两处手抄正则漂移（改了一处另一处仍按旧规则探测 → 找不到文件静默重跑）。
+    """
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol or "asset")
+
+
 def _capture_macro_context(as_of_date: Optional[str] = None) -> Dict[str, Any]:
     """快照决议时的 macro 状态（给 verdict_review 做事后归因用）。
 
@@ -67,7 +76,7 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     today = date_override or datetime.now().strftime("%Y-%m-%d")
     out_dir = output_dir if output_dir is not None else (store.root / ".committee" / today)
     out_dir.mkdir(parents=True, exist_ok=True)
-    safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", report.asset.get("symbol", "asset"))
+    safe_sym = safe_symbol(report.asset.get("symbol", "asset"))
     path = out_dir / f"{safe_sym}.md"
 
     # backtest 时 macro_ctx 必须用 decision_date，不是当下 now()。否则
@@ -150,4 +159,5 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
 __all__ = [
     "_persist",
     "_capture_macro_context",
+    "safe_symbol",
 ]
