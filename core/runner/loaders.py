@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict, Optional
 
 from core.committee import load_backup_cny  # _build_default_portfolio_summary 兜底走 backup_cny 单一可信源
@@ -133,7 +134,11 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
                 else:
                     df = get_history_data(sym, "5d")
                     if df is not None and not df.empty:
-                        current_prices[sym] = float(df["Close"].iloc[-1])
+                        # 当日 close=NULL（yfinance 收盘前半成型 bar）会读成 NaN：
+                        # NaN 不入 current_prices（belt-and-suspenders，下游 fx 已防）。
+                        c = float(df["Close"].iloc[-1])
+                        if math.isfinite(c):
+                            current_prices[sym] = c
             except Exception as e:  # noqa: BLE001
                 log.warning(
                     f"_build_default_portfolio_summary: {sym} 价拉取失败已跳过: "
