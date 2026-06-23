@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/longsizhuo/openInvest/compare/v0.12.0...v0.12.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **committee:** 移除 solvency 集中度自动兜底，集中度只由 lens 控制 ([#84](https://github.com/longsizhuo/openInvest/issues/84)) ([3f963c0](https://github.com/longsizhuo/openInvest/commit/3f963c0c38008f986b5fb3d82c48ad65815c1e49))
+
 ## [0.12.0](https://github.com/longsizhuo/openInvest/compare/v0.11.0...v0.12.0) (2026-06-22)
 
 
