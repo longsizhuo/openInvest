@@ -16,14 +16,21 @@ documents:
 status: accepted
 date: "2026-05-28"
 supersedes: []
-superseded_by: []
+superseded_by:
+  - 019-remove-solvency-concentration-override
 ---
 
 # ADR-013: SOLVENCY=strong 时集中度不触发 TRIM（确定性后处理）
 
+> ⚠️ **2026-06-23（[ADR-019](019-remove-solvency-concentration-override.md)）已移除本 ADR 的 solvency 自动触发。**
+> Sanity check 4 不再因 `SOLVENCY_BUFFER_LEVEL=strong` 改写减仓——它在 parse 层静默
+> 翻转 CIO 的减仓、掩盖真实集中度风险。集中度是否构成约束现在**只由显式开关
+> `verdict.concentration_lens_enabled`（ADR-017）控制**。下文 solvency 相关部分保留作
+> 历史记录；`TRIM_REASON` 提取、lens-off 硬兜底、TRIM 路径化待办仍有效。
+
 ## 状态
 
-Accepted — 2026-05-28
+Superseded（solvency 触发部分）— 2026-05-28 立，2026-06-23 由 ADR-019 移除
 
 ## 背景
 
@@ -63,6 +70,11 @@ PR #14（已合入）在 CIO prompt 层加了"零花钱账户 TRIM 约束"，但
 > （`config_concentration_lens_off` vs `sanity4_solvency_concentration`），别混淆统计。
 > prompt 层（`agents/cio.py` / `agents/risk_officer.py`）同步软抑制超配规则。详见
 > [017-config-via-api](017-config-via-api.md)。
+>
+> **2026-06-23（ADR-019）后续**：上面的"双触发"已收敛为**单触发**——solvency 那条删了，
+> Sanity 4 现在只在 lens-off 时触发；`_concentration_lens` 只产出 `disabled`，rule 只产出
+> `config_concentration_lens_off`（历史 `sanity4_solvency_concentration` 仍由 `rule_family()`
+> 并入 `trim_blocked` 桶）。
 
 ### 与 PR #14 的关系
 

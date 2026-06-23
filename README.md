@@ -112,6 +112,32 @@ LLM_MODEL=glm-4-flash
 
 ---
 
+## 调整委员会行为（集中度 lens / 风险档 等）
+
+几个行为开关可**运行时**调，GUI / API / CLI / env 四个途径等价（白名单见
+[ADR-017](docs/wiki/adr/017-config-via-api.md)）：
+
+| 开关 | 作用 |
+|---|---|
+| `verdict.concentration_lens_enabled` | **集中度 lens**。默认开=持仓过度集中会被建议减仓；关掉=单资产 / 刻意集中 / 全可投资金池**不因集中度被建议减仓**（止损 / 回撤 / 波动 / 估值风险仍照看）。详见 [ADR-019](docs/wiki/adr/019-remove-solvency-concentration-override.md) |
+| `verdict.risk_profile` | `steady`（默认）/ `aggressive`（uptrend 顺势加杠杆） |
+| `verdict.gold_defense_dca_enabled` | 高 VIX/ATR 区黄金买入是否改分批放行 |
+| `dca.auto_dca_enabled` / `dca.auto_dca_amount_cny` | 自动定投开关与金额（[ADR-018](docs/wiki/adr/018-dca-dip-reserve.md)） |
+
+四个途径任选其一（以关掉集中度 lens 为例）：
+
+```bash
+# GUI： invest-gui「设置 → 委员会配置」开关
+# API： curl -X PUT localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
+# CLI/agent： uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
+# env（部署期 bootstrap 默认，写 .env）： INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=false
+```
+
+GUI / API / CLI 三者落盘持久（`memory/.state/config_overrides.json`）、跨进程共读、优先级高于
+env；env 仅作部署期默认。
+
+---
+
 ## 设计理念
 
 三个核心选择，每个都有具体技术后果。详见 [docs/wiki/01-architecture.md](docs/wiki/README.md)：
