@@ -11,10 +11,19 @@ written memo.
 
 ## Install
 
+**Claude Code:**
 ```
 /plugin marketplace add longsizhuo/openInvest
 /plugin install invest@openinvest
 ```
+
+**Codex** (same plugin, via the Codex marketplace):
+```
+codex plugin marketplace add longsizhuo/openInvest
+```
+then enable **invest** from `/plugins`. Codex reads the same `SKILL.md`
+(agentskills.io) from `.codex-plugin/`; skills can also be dropped straight into
+`~/.agents/skills/`.
 
 Then in chat say **"set up invest" / 帮我初始化 invest** — a 5-question
 onboarding (name, risk tolerance, income, current holdings, optional API key)
