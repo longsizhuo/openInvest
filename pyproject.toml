@@ -2,6 +2,7 @@
 name = "invest"
 version = "0.12.1"
 description = "多资产 AI 投资委员会 + 组合管理后端"
+license = "MIT"
 
 requires-python = ">=3.13"
 dependencies = [
