@@ -13,6 +13,7 @@ LLM 调用次数: 1 (macro) + 3 * N (asset committee)
 from __future__ import annotations
 
 import logging
+import math
 import os
 import subprocess
 from datetime import datetime
@@ -317,7 +318,7 @@ def run() -> Dict[str, Any]:
         # live valuation: as_of_date intentionally not threaded (no historical caller).
         # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         ccy_in_cny = to_base(str(ccy).upper(), float(amt), "CNY")
-        if ccy_in_cny is not None:
+        if ccy_in_cny is not None and math.isfinite(ccy_in_cny):
             total_assets_cny += ccy_in_cny
         else:
             data_warnings.append(
@@ -335,13 +336,19 @@ def run() -> Dict[str, Any]:
             continue
         ccy = str(h.get("cost_currency", "CNY"))
         cur = current_prices.get(sym)
-        if cur is None:
+        # NaN 价（当日 close=NULL 被读成 float('nan')）等同缺价：排除并告警，
+        # 绝不 total_assets_cny += NaN（否则总资产 NaN 污染整个集中度风控）。
+        if cur is None or not math.isfinite(cur):
+            data_warnings.append(
+                f"\n⚠️ **{sym} 实时价不可用**（NaN/缺），已从总资产排除，"
+                f"集中度会偏高，请勿据此做大额操作。"
+            )
             continue
         local_value = units * cur
         # live valuation: as_of_date intentionally not threaded (no historical caller).
         # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         value_cny = to_base(ccy, local_value, "CNY")
-        if value_cny is None:
+        if value_cny is None or not math.isfinite(value_cny):
             data_warnings.append(
                 f"\n⚠️ **{sym} 持仓折算 CNY 失败**（{ccy}→CNY 汇率拉不到），"
                 f"total_assets_cny 漏算这部分，集中度会偏高，请勿做大额操作。"

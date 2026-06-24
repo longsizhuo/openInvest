@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Dict
 
 if TYPE_CHECKING:
@@ -51,10 +52,19 @@ def portfolio_summary_text(
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
     dry_powder = max(0.0, cash_cny - buffer_cny)
 
+    # 总资产是否可用：NaN / 非有限（上游某腿不可解析污染了 total）时显式降级，
+    # 绝不渲染 ¥nan 或据假值算集中度。
+    total_ok = (
+        isinstance(total_assets_cny, (int, float))
+        and math.isfinite(total_assets_cny)
+        and total_assets_cny > 0
+    )
+    total_str = f"¥{total_assets_cny:,.0f}" if total_ok else "¥不可用"
+
     # 现金部分（多币种通用）
     lines = [
         f"用户风险偏好: {risk_level}",
-        f"总资产估算: ¥{total_assets_cny:,.0f}",
+        f"总资产估算: {total_str}",
         f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)",
         f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}",
     ]
@@ -80,13 +90,14 @@ def portfolio_summary_text(
         units = float(h.get("units", 0) or 0)
         ccy = str(h.get("cost_currency", "CNY"))
         cur = current_prices.get(sym)
-        if cur is None:
+        # NaN 价等同缺价：不写进 holding_values_cny（否则 NaN 市值会污染下游展示）
+        if cur is None or not math.isfinite(cur):
             continue
         local_value = units * cur
         # live valuation: as_of_date intentionally not threaded (no historical caller).
         # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
         value_cny = to_base(ccy, local_value, "CNY")
-        if value_cny is not None:
+        if value_cny is not None and math.isfinite(value_cny):
             holding_values_cny[sym] = value_cny
 
     for h in real_holdings:
@@ -100,7 +111,8 @@ def portfolio_summary_text(
         channel_str = f" ({channel})" if channel else ""
 
         cur = current_prices.get(sym)
-        if cur is None or cost <= 0:
+        # NaN 价等同缺价：只显示持仓量 + 均价，不算浮盈/集中度
+        if cur is None or not math.isfinite(cur) or cost <= 0:
             # 缺价 / 无成本时仅显示持仓量
             lines.append(
                 f"  - **{display}** ({sym}){channel_str}: "
@@ -113,25 +125,44 @@ def portfolio_summary_text(
         ccy_symbol = "¥" if ccy == "CNY" else ("$" if ccy in ("USD", "AUD") else "")
         # 集中度 = 该 asset CNY 市值 / total_assets_cny
         value_cny = holding_values_cny.get(sym, 0.0)
-        conc_pct = (value_cny / total_assets_cny * 100) if total_assets_cny > 0 else 0.0
+        if total_ok:
+            conc_pct = value_cny / total_assets_cny * 100
+            conc_str = (
+                f"**集中度 {conc_pct:.1f}%** "
+                f"(CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})"
+            )
+        else:
+            # total 不可用（NaN/缺）：绝不伪造 0.0%，输出可见降级标记促人工复核
+            conc_str = (
+                f"**集中度 暂不可计算**（总资产不可用，请勿据此做集中度判断；"
+                f"CNY 市值 ¥{value_cny:,.0f}）"
+            )
         lines.append(
             f"  - **{display}** ({sym}){channel_str}: "
             f"{units:.4f} {unit_label}, "
             f"均价 {ccy_symbol}{cost:.2f}, "
             f"现价 {ccy_symbol}{cur:.2f}, "
             f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy}), "
-            f"**集中度 {conc_pct:.1f}%** (CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})",
+            f"{conc_str}",
         )
 
     # 真实总财富占比注释（当有兜底 backup 时附注，给 Risk Officer / CIO 参考）
     if backup_cny > 0:
-        real_total = total_assets_cny + backup_cny
-        account_ratio = (total_assets_cny / real_total * 100) if real_total > 0 else 0.0
-        lines.append(
-            f"  [兜底注释] 账户总资产 ¥{total_assets_cny:,.0f} 占真实总财富 "
-            f"¥{real_total:,.0f} 的 {account_ratio:.1f}%，"
-            f"BACKUP ¥{backup_cny:,.0f} 仅作风险兜底不可投资。"
-            f"账户归零不影响生存。"
-        )
+        if total_ok:
+            real_total = total_assets_cny + backup_cny
+            account_ratio = (total_assets_cny / real_total * 100) if real_total > 0 else 0.0
+            lines.append(
+                f"  [兜底注释] 账户总资产 ¥{total_assets_cny:,.0f} 占真实总财富 "
+                f"¥{real_total:,.0f} 的 {account_ratio:.1f}%，"
+                f"BACKUP ¥{backup_cny:,.0f} 仅作风险兜底不可投资。"
+                f"账户归零不影响生存。"
+            )
+        else:
+            # 总资产不可用：仍附注 BACKUP 存在，但占比暂不可算（绝不渲染 ¥nan）
+            lines.append(
+                f"  [兜底注释] 账户总资产暂不可用（请勿据此判断），"
+                f"BACKUP ¥{backup_cny:,.0f} 仅作风险兜底不可投资。"
+                f"账户归零不影响生存。"
+            )
 
     return "\n".join(lines) + "\n"
