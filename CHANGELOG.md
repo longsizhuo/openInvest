@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/longsizhuo/openInvest/compare/v0.12.1...v0.13.0) (2026-06-24)
+
+
+### Features
+
+* **plugin:** add Codex plugin manifest (.codex-plugin) + Codex repo marketplace (.agents/plugins); README codex install ([c7c08c6](https://github.com/longsizhuo/openInvest/commit/c7c08c6dfde878b73526626b27b31444c32e2e39))
+
+
+### Bug Fixes
+
+* **backtest:** warmup 写全 OHLC（修被预热资产路径表样本不足） ([#86](https://github.com/longsizhuo/openInvest/issues/86)) ([29fec85](https://github.com/longsizhuo/openInvest/commit/29fec854583daf85b7f955036ed3efa78098f6d9))
+* **fx:** NaN 价不再污染总资产/集中度，单坏腿不静默关闭风控 ([#89](https://github.com/longsizhuo/openInvest/issues/89)) ([1877992](https://github.com/longsizhuo/openInvest/commit/1877992e0e8722923ef80a32b75fe1242f237716))
+
 ## [0.12.1](https://github.com/longsizhuo/openInvest/compare/v0.12.0...v0.12.1) (2026-06-23)
 
 
