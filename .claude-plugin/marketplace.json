@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "openinvest",
+  "description": "openInvest — self-hosted multi-asset AI investment committee. Ships the daily-use + first-time-setup agent skills; the backend self-bootstraps on first call.",
+  "owner": {
+    "name": "longsizhuo",
+    "url": "https://github.com/longsizhuo"
+  },
+  "plugins": [
+    {
+      "name": "invest",
+      "source": "./plugin",
+      "category": "productivity",
+      "description": "View portfolio + live prices, track any yfinance symbol, and run a 4-role LLM committee for buy/sell verdicts. Backend self-bootstraps (git clone + uv sync) on first use."
+    }
+  ]
+}
