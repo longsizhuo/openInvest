@@ -9,7 +9,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
 [⚡ 示例 memo](examples/sample_memo.md) · [🪄 装上](#装上) · [📚 完整文档](docs/wiki/README.md) · [🤝 贡献](CONTRIBUTING.md)
@@ -56,7 +56,15 @@
 
 ## 安装
 
-最简单的方式：装成 Claude Code 的 skill，让 Claude 帮你 onboard：
+### 装成 Claude Code plugin（推荐，一行装好）
+```bash
+/plugin marketplace add longsizhuo/openInvest
+/plugin install invest@openinvest
+```
+plugin 只带 skill 层（很小）；**后端在你第一次问问题时自动 `git clone` + `uv sync` 到 `~/openInvest`**，不用手动拉仓库。
+
+### 或：装成 skill
+让 Claude 帮你装：
 ```bash
 Hi, Claude, 帮我安装https://github.com/longsizhuo/openInvest/tree/main/skills/invest 这个Skill
 ```
