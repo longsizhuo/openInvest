@@ -1,0 +1,12 @@
+{
+  "name": "invest",
+  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. The backend self-bootstraps (git clone + uv sync) on first call — the plugin only ships the agent skill layer.",
+  "skills": "./skills/",
+  "author": {
+    "name": "longsizhuo",
+    "url": "https://github.com/longsizhuo"
+  },
+  "homepage": "https://github.com/longsizhuo/openInvest",
+  "repository": "https://github.com/longsizhuo/openInvest",
+  "keywords": ["investing", "portfolio", "finance", "llm", "committee", "yfinance"]
+}
