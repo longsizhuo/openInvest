@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Optional
 
@@ -155,7 +156,8 @@ def total_portfolio_value_cny(
             status[ccy] = "ok"   # 0 余额视为 ok（不算 fx 漂移）
             continue
         converted = to_base(ccy, float(amt), base, as_of_date=as_of_date)
-        if converted is None:
+        # NaN 等同 None：绝不 total += NaN（NaN 会污染整个总资产 → round(NaN)=NaN）
+        if converted is None or not math.isfinite(converted):
             status[ccy] = "missing_fx"
         else:
             total += converted
@@ -176,17 +178,24 @@ def total_portfolio_value_cny(
             continue
         ccy = str(h.get("cost_currency", "CNY"))
         price = current_prices.get(sym) if current_prices else None
-        if price is None:
+        # NaN 价（如当日 close=NULL 被读成 float('nan')）等同缺价 → 走 cost 兜底。
+        # 只判 `is None` 会让 NaN 穿透守卫污染 total（round(NaN)=NaN），是本类 bug 根因。
+        if price is None or not math.isfinite(price):
             # 缺价：用 cost 兜底（与 portfolio_manager.get_user_status 同口径）
             avg = float(h.get("avg_cost", 0) or 0)
             if avg <= 0:
                 status[sym] = "missing_price"
                 continue
             price = avg
+        # cost 兜底后仍非有限（理论上 avg 已 >0 finite，这里 belt-and-suspenders）
+        if not math.isfinite(price):
+            status[sym] = "missing_price"
+            continue
         local_value = units * float(price)
         value_in_base = to_base(ccy, local_value, base, as_of_date=as_of_date)
-        if value_in_base is None:
-            status[sym] = "missing_fx"
+        # 绝不 total += NaN：NaN 价/汇率单独标 status 排除，total 永远 finite
+        if value_in_base is None or not math.isfinite(value_in_base):
+            status[sym] = "missing_fx" if math.isfinite(local_value) else "missing_price"
             continue
         total += value_in_base
         status[sym] = "ok"

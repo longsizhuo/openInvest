@@ -190,10 +190,16 @@ def get_history_data(
             df_yf = ticker.history(period=fetch_period)
             if not df_yf.empty:
                 for idx, row in df_yf.iterrows():
+                    # 数据源闸：close=NaN（yfinance 收盘前半成型 bar）不落库。
+                    # 否则它以 NULL 入 daily_prices，下游读价 float(NULL)→NaN，穿过
+                    # 全链路 is-None 守卫污染总资产（510300.SS 2026-06-23 根因）。
+                    close = _nan_to_none(row.get('Close'))
+                    if close is None:
+                        continue
                     # 一并落 OHLCV：High/Low 给真 TR/ATR，Volume 给 RVOL。
                     # NaN（如 FX/指数无成交量）转 None，落 NULL。
                     _STORE.save_generic_price(
-                        symbol, idx.strftime('%Y-%m-%d'), row['Close'],
+                        symbol, idx.strftime('%Y-%m-%d'), close,
                         high=_nan_to_none(row.get('High')),
                         low=_nan_to_none(row.get('Low')),
                         volume=_nan_to_none(row.get('Volume')),

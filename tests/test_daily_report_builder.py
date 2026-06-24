@@ -195,6 +195,55 @@ class TestPortfolioSummaryText:
         text = portfolio_summary_text(pm, total_assets_cny=20000.0, current_prices={})
         assert "兜底注释" not in text
 
+    def test_concentration_not_zeroed_when_total_unknown(self, tmp_path):
+        """total_assets_cny=NaN（上游某腿不可解析）时，集中度不得伪造成 0.0%。
+
+        根因回归：单个持仓 current_price=NaN 污染 total → total=NaN → renderer 走
+        `total>0=False` else 分支，把每个 holding 的集中度静默写成 0.0%。这会让
+        Risk Officer 据假 0% 决策（关闭集中度风控）。修复后应输出可见降级标记，
+        促人工复核而非沉默归零。
+        """
+        holdings = [
+            {"symbol": "NDQ.AX", "kind": "etf", "units": 100.0, "unit_label": "股",
+             "avg_cost": 50.0, "cost_currency": "AUD", "display_name": "Nasdaq100"},
+            {"symbol": "510300.SS", "kind": "etf", "units": 1000.0, "unit_label": "份",
+             "avg_cost": 4.0, "cost_currency": "CNY", "display_name": "沪深300"},
+        ]
+        pm = _make_pm(tmp_path, cash={"CNY": 0.0}, holdings=holdings)
+        text = portfolio_summary_text(
+            pm, total_assets_cny=float("nan"),
+            current_prices={"NDQ.AX": 55.0, "510300.SS": 4.5},
+        )
+        # 不得出现伪造的 0.0% 集中度
+        assert "集中度 0.0%" not in text
+        # 必须有可见降级标记
+        assert ("总资产不可用" in text) or ("暂不可计算" in text)
+
+    def test_concentration_correct_when_one_holding_priced_other_missing(self, tmp_path):
+        """传入已修正的合法 total（只含可解析腿），缺价 holding 只显示均价不被归零，
+        有价 holding 显示正确非零集中度。
+        """
+        holdings = [
+            # 黄金：1 单位 * 134 CNY = 134 CNY 市值
+            {"symbol": "GOLD", "kind": "commodity", "units": 1.0, "unit_label": "克",
+             "avg_cost": 100.0, "cost_currency": "CNY", "display_name": "黄金"},
+            # 缺价 holding（current_prices 不含它）
+            {"symbol": "510300.SS", "kind": "etf", "units": 1000.0, "unit_label": "份",
+             "avg_cost": 4.0, "cost_currency": "CNY", "display_name": "沪深300"},
+        ]
+        pm = _make_pm(tmp_path, cash={"CNY": 100.0}, holdings=holdings)
+        # 合法 total（已剔除缺价腿）：cash 100 + 黄金 134 = 234；黄金占比 134/234 ≈ 57.3%
+        text = portfolio_summary_text(
+            pm, total_assets_cny=234.0,
+            current_prices={"GOLD": 134.0},  # 510300.SS 缺价
+        )
+        # 有价持仓显示正确非零集中度（不再被 NaN 静默归零）
+        assert "集中度 57.3%" in text
+        # 缺价持仓只显示均价行（无浮盈、无集中度数字）
+        assert "510300.SS" in text
+        # 缺价腿那一行不应出现伪造 0.0% 集中度
+        assert "集中度 0.0%" not in text
+
 
 # ============ load_backup_cny：守 emergency_buffer_cny key 漂移回归 ============
 
