@@ -23,8 +23,9 @@ verdict:
   alloc_cny_ceiling: 100000
   worker_unavailable_confidence_floor: 0.4
   # 集中度 lens：关掉=单资产/刻意集中用户不再被"超配减仓"纠缠（仍保留波动/回撤/止损/估值）。
-  # 默认开=现有行为不变。env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=false
-  concentration_lens_enabled: true
+  # 2026-06-25 默认翻 OFF（ADR-020）：持仓多是自选/watchlist 非净资产，集中度=风险前提对默认
+  # 用户就错；想要的人显式开。env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
+  concentration_lens_enabled: false
   # steady=无方向锁(B链, Sharpe/回撤最优) | aggressive=uptrend顺势杠杆(HOLD→ACCUMULATE, +CR −Sharpe 深DD)
   risk_profile: steady
   # 黄金防御分批 DCA（2026-06-13 用户裁决采纳，wiki 18 §5）：高 VIX 不全拦黄金买入，

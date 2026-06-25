@@ -410,7 +410,7 @@ class TestApiConfig:
     def test_effective_view_defaults(self):
         view = {it["key"]: it for it in effective_api_config()}
         assert set(view) == set(API_SETTABLE)
-        assert view["verdict.concentration_lens_enabled"]["value"] is True
+        assert view["verdict.concentration_lens_enabled"]["value"] is False  # ADR-020: default OFF
         assert view["verdict.concentration_lens_enabled"]["overridden"] is False
         assert view["verdict.risk_profile"]["choices"] == ["steady", "aggressive"]
 
@@ -442,9 +442,9 @@ class TestApiConfig:
             set_persisted_override("verdict.concentration_lens_enabled", "maybe")
 
     def test_clear_reverts_to_default(self):
-        set_persisted_override("verdict.concentration_lens_enabled", False)
+        set_persisted_override("verdict.concentration_lens_enabled", True)
         cfg = clear_persisted_override("verdict.concentration_lens_enabled")
-        assert cfg.verdict.concentration_lens_enabled is True
+        assert cfg.verdict.concentration_lens_enabled is False  # ADR-020: default OFF
         with pytest.raises(ValueError):
             clear_persisted_override("verdict.alloc_cny_ceiling")  # 非白名单
 

@@ -52,12 +52,14 @@ class VerdictConfig:
     # force-HOLD 时统一的 confidence 上限（Sanity 4：集中度 lens 关闭覆盖集中度减仓用）。
     # 与 worker_unavailable_confidence_floor 同默认但语义独立，便于分别 tune。
     forced_hold_confidence_ceiling: float = 0.4
-    # 集中度 lens 开关（2026-06 用户裁决）：单资产 / 刻意集中策略可关掉"超配减仓"视角。
-    # True（默认）= 现有行为不变；False = 无条件 force-HOLD 掉 TRIM_REASON=concentration
-    # （集中度约束的唯一开关，2026-06-23 起 solvency 自动兜底已移除），并在 Risk/CIO prompt
-    # 压掉超配规则；仍保留波动/回撤/止损/估值/压力测试风险。
-    # env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=false
-    concentration_lens_enabled: bool = True
+    # 集中度 lens 开关（2026-06 用户裁决；2026-06-25 默认翻 OFF，见 ADR-020）：
+    # openInvest 持仓常是「自选 / watchlist」而非用户全部净资产 → 「持仓集中度=风险」这个前提
+    # 对默认用户就是错的，反复修它的算法（NaN 价 #89 / solvency #84）只会冒新 bug。集中度改为 opt-in：
+    #   False（默认）= 不因持仓集中度建议减仓（无条件 force-HOLD 掉 TRIM_REASON=concentration，
+    #     并在 Risk/CIO prompt 压掉超配规则）；仍保留波动/回撤/止损/估值/压力测试风险。
+    #   True = 把全部净资产都录进系统、想要「超配减仓」视角的用户显式开启。
+    # env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
+    concentration_lens_enabled: bool = False
     # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
     # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
     trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
