@@ -66,7 +66,8 @@ def _mock_world(monkeypatch):
 
     import core.regime_probability as rp
     monkeypatch.setattr(rp, "get_regime_forward_summary", lambda *a, **k: None)
-    monkeypatch.setattr(rp, "build_reentry_reference_text", lambda *a, **k: REENTRY)
+    # coordinator 改用 build_reentry_reference（取回结构化 profile，与 session 路径对齐）
+    monkeypatch.setattr(rp, "build_reentry_reference", lambda *a, **k: (REENTRY, None))
 
     import jobs.daily_report_builder as drb
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
