@@ -1174,14 +1174,14 @@ def test_config_endpoints_roundtrip(client):
         "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",
         "dca.auto_dca_enabled", "dca.auto_dca_amount_cny",
     }
-    assert items["verdict.concentration_lens_enabled"]["value"] is True
+    assert items["verdict.concentration_lens_enabled"]["value"] is False  # ADR-020: default OFF
     assert items["verdict.concentration_lens_enabled"]["overridden"] is False
 
-    # PUT bool override
-    r = client.put("/api/config", json={"key": "verdict.concentration_lens_enabled", "value": False})
+    # PUT bool override (flip to True, the non-default)
+    r = client.put("/api/config", json={"key": "verdict.concentration_lens_enabled", "value": True})
     assert r.status_code == 200
     cl = {it["key"]: it for it in r.json()["items"]}["verdict.concentration_lens_enabled"]
-    assert cl["value"] is False and cl["overridden"] is True
+    assert cl["value"] is True and cl["overridden"] is True
 
     # PUT enum
     assert client.put("/api/config", json={"key": "verdict.risk_profile", "value": "aggressive"}).status_code == 200
@@ -1198,7 +1198,7 @@ def test_config_endpoints_roundtrip(client):
     r = client.delete("/api/config/verdict.concentration_lens_enabled")
     assert r.status_code == 200
     cl = {it["key"]: it for it in r.json()["items"]}["verdict.concentration_lens_enabled"]
-    assert cl["value"] is True and cl["overridden"] is False
+    assert cl["value"] is False and cl["overridden"] is False  # ADR-020: default OFF
     # 非白名单 delete → 404
     assert client.delete("/api/config/verdict.alloc_cny_ceiling").status_code == 404
     reset_config()
