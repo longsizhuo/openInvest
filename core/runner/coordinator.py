@@ -148,10 +148,20 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
         target["symbol"], metrics.get("price_quantile_2y"),
     )
     reentry_reference = ""
+    path_profile = None   # 结构化路径预测快照——与 session 路径对齐（issue: 两 entry 别漂移）
     try:
-        from core.regime_probability import build_reentry_reference_text
-        reentry_reference = build_reentry_reference_text(
+        from core.regime_probability import build_reentry_reference, convert_ccy_for
+        # 币种自适应（ADR-021）：与 service layer 同源——持仓非报价币种时按持仓币种附下行口径。
+        try:
+            _holding = pm.holdings.find(target["symbol"])
+            _convert_ccy = convert_ccy_for(target["symbol"], (_holding or {}).get("cost_currency"))
+        except Exception:  # noqa: BLE001  持仓币种取不到 → 退回本币口径，不影响 reentry 主体
+            _convert_ccy = None
+        # 用 *_reference（非 *_text）取回结构化 profile，与 session.py 同口径：daily report
+        # 的一句话人话摘要(daily_report_builder 读 path_profile)在两条 entry 上才一致。
+        reentry_reference, path_profile = build_reentry_reference(
             target["symbol"], _regime_for_hint, metrics.get("current_price"),
+            convert_ccy=_convert_ccy,
         )
     except Exception:  # noqa: BLE001  路径参考读失败不阻断 prepare
         pass
@@ -169,6 +179,8 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
         "valuation_brief": valuation_brief,
         # CIO 的"卖出后路径/买回点参考"（30/60/90 多窗+路径形状），EXPECTED_PATH 必须引用
         "reentry_reference": reentry_reference,
+        # 结构化 path_profile：与 session 路径一致，供 daily report 一句话摘要等确定性渲染
+        "path_profile": path_profile,
         "gold_snapshot": gold_ctx,
         "prior_insights": insights,
         "prompts": {
