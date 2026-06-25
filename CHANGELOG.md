@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.13.0](https://github.com/longsizhuo/openInvest/compare/v0.12.1...v0.13.0) (2026-06-25)
+
+
+### Features
+
+* **committee:** path-profile 按持仓币种自适应 —— 汇率卷积 (ADR-021) ([#95](https://github.com/longsizhuo/openInvest/issues/95)) ([7d36e57](https://github.com/longsizhuo/openInvest/commit/7d36e57e07067e9dd7621eab73444101f6095787))
+* **committee:** 通用历史回填 backfill_history + 黄金长历史(去偏 path-profile) ([#94](https://github.com/longsizhuo/openInvest/issues/94)) ([79cd0a2](https://github.com/longsizhuo/openInvest/commit/79cd0a21ccfa6ab4805ab6d8bd2ba0dd22ba12e1))
+* **plugin:** add Codex plugin manifest (.codex-plugin) + Codex repo marketplace (.agents/plugins); README codex install ([c7c08c6](https://github.com/longsizhuo/openInvest/commit/c7c08c6dfde878b73526626b27b31444c32e2e39))
+
+
+### Bug Fixes
+
+* **backtest:** warmup 写全 OHLC（修被预热资产路径表样本不足） ([#86](https://github.com/longsizhuo/openInvest/issues/86)) ([29fec85](https://github.com/longsizhuo/openInvest/commit/29fec854583daf85b7f955036ed3efa78098f6d9))
+* **committee:** 集中度 lens 默认 OFF —— concentration 改 opt-in (ADR-020) ([#93](https://github.com/longsizhuo/openInvest/issues/93)) ([54b1603](https://github.com/longsizhuo/openInvest/commit/54b16032c9770447bd49e9255043d8ab8cfd8e5e))
+* **fx:** NaN 价不再污染总资产/集中度，单坏腿不静默关闭风控 ([#89](https://github.com/longsizhuo/openInvest/issues/89)) ([1877992](https://github.com/longsizhuo/openInvest/commit/1877992e0e8722923ef80a32b75fe1242f237716))
+* **pnl:** 满宽负条 % 标签翻入条内,不再压住左侧基准名 (openInvest[#92](https://github.com/longsizhuo/openInvest/issues/92)) ([#96](https://github.com/longsizhuo/openInvest/issues/96)) ([95e543f](https://github.com/longsizhuo/openInvest/commit/95e543f4199e08c2f96958b7975cf33b76f28274))
+
 ## [0.12.1](https://github.com/longsizhuo/openInvest/compare/v0.12.0...v0.12.1) (2026-06-23)
 
 
