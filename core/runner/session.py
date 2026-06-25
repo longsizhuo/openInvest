@@ -187,9 +187,16 @@ def run_committee_for_symbol(
     reentry_reference = ""
     path_profile = None   # 结构化路径预测快照（path_review 事后校验用）
     try:
-        from core.regime_probability import build_reentry_reference
+        from core.regime_probability import build_reentry_reference, convert_ccy_for
+        # 币种自适应（ADR-021）：持仓以非报价币种计价（如 GC=F 报 USD、浙商积存金记 CNY）
+        # → path-profile 用汇率卷积合成持仓币种下行口径，避免 USD 口径低估 CNY 持有者风险。
+        try:
+            _holding = pm.holdings.find(symbol)
+            _convert_ccy = convert_ccy_for(symbol, (_holding or {}).get("cost_currency"))
+        except Exception:  # noqa: BLE001  持仓币种取不到 → 退回本币口径，不影响 reentry 主体
+            _convert_ccy = None
         reentry_reference, path_profile = build_reentry_reference(
-            symbol, regime_label, current_price,
+            symbol, regime_label, current_price, convert_ccy=_convert_ccy,
         )
         if reentry_reference:
             emit("reentry_reference_loaded", asset=symbol, regime=regime_label)

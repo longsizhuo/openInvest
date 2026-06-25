@@ -26,6 +26,9 @@ DEFAULT_THRESHOLD_PCT = 5.0
 MIN_CONFIDENT_N = 10
 # 买回参考用的"悲观但可能"分位（forward return 的低分位 → 卖出后可能触及的低点）
 REENTRY_DOWNSIDE_QUANTILE = 0.20
+# 币种自适应 path-profile（ADR-021）：汇率卷积 MC 采样数 + 固定种子（确定性 → 缓存/walk-forward 可复算）
+_CONVOLUTION_N = 200_000
+_CONVOLUTION_SEED = 20260625
 
 
 @dataclass
@@ -394,6 +397,48 @@ def quote_currency_prefix(asset: str) -> str:
     return "$"
 
 
+def quote_currency_iso(asset: str) -> Optional[str]:
+    """yfinance 报价币种 ISO（GC=F→USD, NDQ.AX→AUD, 0700.HK→HKD, 510300.SS→CNY）。
+    指数（^）无币种 → None。与 quote_currency_prefix 同源后缀规则，供汇率卷积用。"""
+    a = asset.upper()
+    if a.startswith("^"):
+        return None
+    if a.endswith(".AX"):
+        return "AUD"
+    if a.endswith(".HK"):
+        return "HKD"
+    if a.endswith((".SS", ".SZ")):
+        return "CNY"
+    return "USD"
+
+
+def convert_ccy_for(asset: str, holding_cost_ccy: Optional[str]) -> Optional[str]:
+    """持仓计价币种 != 资产报价币种 → 返回需转换到的币种（path-profile 汇率卷积用），否则 None。
+    例：GC=F 报价 USD 但浙商积存金 cost_currency=CNY → 返回 "CNY"。"""
+    base = quote_currency_iso(asset)
+    if holding_cost_ccy and base and holding_cost_ccy.upper() != base:
+        return holding_cost_ccy.upper()
+    return None
+
+
+def _fx_forward_returns(base_ccy: str, quote_ccy: str, windows: Tuple[str, ...]):
+    """FX (base→quote) 每个 window 的远期收益数组（小数）。USD→CNY 读 MarketStore 的 USDCNY=X。
+    返回 (dict[window→np.ndarray], fx_symbol)；无数据返回 ({}, fx_symbol)。"""
+    from db.market_store import MarketStore
+    fxsym = f"{base_ccy}{quote_ccy}=X"
+    out: Dict[str, Any] = {}
+    fdf = MarketStore().get_history_df(fxsym, days=100000)
+    if fdf is None or fdf.empty or "Close" not in fdf.columns:
+        return out, fxsym
+    fc = fdf["Close"].dropna()
+    for w in windows:
+        d = int(w.rstrip("d"))
+        r = (fc.shift(-d) / fc - 1.0).dropna().to_numpy()
+        if r.size:
+            out[w] = r
+    return out, fxsym
+
+
 def build_reentry_reference_text(
     asset: str,
     regime: str,
@@ -403,11 +448,13 @@ def build_reentry_reference_text(
     jsonl_path: Optional[Path] = None,
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
+    convert_ccy: Optional[str] = None,
 ) -> str:
     """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。"""
     text, _profile = build_reentry_reference(
         asset, regime, current_price,
         source=source, jsonl_path=jsonl_path, records=records, windows=windows,
+        convert_ccy=convert_ccy,
     )
     return text
 
@@ -421,6 +468,7 @@ def build_reentry_reference(
     jsonl_path: Optional[Path] = None,
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
+    convert_ccy: Optional[str] = None,
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """路径参考 (text, profile)。profile = get_path_profile 的结构化 dict
     （OHLC 源才有；给 path_review 决策时落快照用——事后校验"当时的预测分布"）。
@@ -446,6 +494,13 @@ def build_reentry_reference(
                 # 校准层（config path 节，经 fit/OOS 验证前默认禁用=恒等变换）。
                 # CIO 看到的文本与落盘快照都用校准后的分布——所见即所验。
                 profile = calibrate_profile(profile)
+                if convert_ccy:
+                    # 币种自适应（ADR-021）：再算一份持仓币种分布挂到 currency_overlay。
+                    # 文本主体 + 价位仍用本币 profile（与委员会其余 brief 同币种），末尾附一行
+                    # 持仓币种口径的下行提示，避免 USD 口径低估 CNY 持有者的真实下行。
+                    _cp = get_path_profile(asset, regime, windows=windows, convert_ccy=convert_ccy)
+                    if _cp:
+                        profile["currency_overlay"] = calibrate_profile(_cp)
         except Exception:  # noqa: BLE001  概率表读失败不阻断（外层还有 graceful）
             profile = None
 
@@ -528,10 +583,32 @@ def build_reentry_reference(
         except Exception:  # noqa: BLE001  路径形状取失败不影响多窗分布主体
             shape_lines = []
 
+    # 持仓币种口径下行提示（ADR-021）：仅当 currency_overlay 存在（持仓非报价币种）时附一行。
+    ccy_note = ""
+    _ov = (profile or {}).get("currency_overlay")
+    if _ov and _ov.get("windows"):
+        _ccy = _ov.get("currency", "")
+        _seg = []
+        for w in windows:
+            c = _ov["windows"].get(w)
+            u = (profile or {}).get("windows", {}).get(w)
+            if c and u:
+                _seg.append(
+                    f"{w} 跌破现价 {c['p_below'] * 100:.0f}% · 20分位 {c['downside_pct']:+.1f}%"
+                    f"（USD 口径 {u['downside_pct']:+.1f}%）"
+                )
+        if _seg:
+            ccy_note = (
+                f"\n- ⚠ 持仓以 {_ccy} 计价：下行按 {_ccy} 口径（含汇率，本币分布 ⊗ {_ccy} 汇率 MC 卷积）"
+                f" → " + " | ".join(_seg)
+                + "（USD 口径会低估你的下行；上方价位仍为资产报价币种）"
+            )
+
     text = (
         f"# 路径参考（regime={regime} 历史 forward 路径分布；TRIM 买回点 + 持有路径预期）：\n"
         f"- 现价: {cur}{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
+        + ccy_note
         + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
         "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"
     )
@@ -760,6 +837,7 @@ def get_path_profile(
     shape_window: str = "90d",
     days: int = 100000,
     asof: Optional[str] = None,
+    convert_ccy: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """(asset, regime) 的多窗路径画像（纯 OHLC 算术，0 token）。
 
@@ -808,15 +886,29 @@ def get_path_profile(
     if sub.empty:
         return None
 
-    def _window_stats(rows, w: str) -> Optional[Dict[str, Any]]:
+    def _window_stats(rows, w: str, fx=None) -> Optional[Dict[str, Any]]:
         col = f"fwd_{w}"
         if col not in rows.columns:
             return None
-        rets = (rows[col].dropna() * 100)
-        if rets.empty:
+        base = rows[col].dropna()
+        if base.empty:
             return None
-        n = len(rets)
+        n = len(base)
+        # 独立样本由本币(如 USD)腿决定——汇率腿更厚，瓶颈在本币腿，故 effective_n 不被卷积虚抬
         eff = max(1, n // int(w.rstrip("d")))
+        extra: Dict[str, Any] = {}
+        if fx is not None and len(fx):
+            # 汇率卷积（ADR-021）：r_quote = (1+r_base)(1+r_fx)-1，MC 采样合成持仓币种分布。
+            # 固定种子 → 确定性，可缓存 / walk-forward 复算。
+            import numpy as np
+            import pandas as pd
+            rng = np.random.default_rng(_CONVOLUTION_SEED)
+            su = rng.choice(base.to_numpy(), _CONVOLUTION_N)
+            sf = rng.choice(fx, _CONVOLUTION_N)
+            rets = pd.Series(((1.0 + su) * (1.0 + sf) - 1.0) * 100.0)
+            extra["fx_effective_n"] = max(1, len(fx) // int(w.rstrip("d")))
+        else:
+            rets = base * 100
         return {
             "n": n,
             "effective_n": eff,
@@ -828,20 +920,38 @@ def get_path_profile(
             # 悲观情形低分位（与 get_reentry_estimate 的 downside 同口径）
             "downside_pct": round(float(rets.quantile(REENTRY_DOWNSIDE_QUANTILE)), 2),
             "low_confidence": eff < MIN_CONFIDENT_N,
+            **extra,
         }
 
     # 无条件分布（同资产全部非 unknown 历史日）：小样本收缩校准的混合对象
     uncond = frame[frame["regime"] != "unknown"]
     out: Dict[str, Any] = {"asset": asset, "regime": regime,
                            "windows": {}, "uncond_windows": {}, "shape": None}
+    # 币种自适应（ADR-021）：持仓以非报价币种计价时（GC=F 报 USD 但浙商积存金记 CNY），
+    # 用汇率卷积把本币分布合成到持仓币种——本币黄金 57 年 ⊗ 汇率几十年，两腿样本都厚，绕开
+    # "长 XAU/CNY 历史不存在"（人民币 2005 才浮动）。终端风险按持仓币种；形状(何时见底)仍按本币。
+    fx_map: Dict[str, Any] = {}
+    fx_symbol = None
+    base_ccy = quote_currency_iso(asset)
+    if convert_ccy and base_ccy and convert_ccy.upper() != base_ccy:
+        try:
+            fx_map, fx_symbol = _fx_forward_returns(base_ccy, convert_ccy.upper(), all_windows)
+        except Exception:  # noqa: BLE001  汇率读失败 → 退回本币分布（不阻断）
+            fx_map = {}
     for w in windows:
-        st = _window_stats(sub, w)
+        st = _window_stats(sub, w, fx=fx_map.get(w))
         if st is None:
             continue
         out["windows"][w] = st
-        ust = _window_stats(uncond, w)
+        ust = _window_stats(uncond, w, fx=fx_map.get(w))
         if ust is not None:
             out["uncond_windows"][w] = ust
+    if fx_map:
+        out["currency"] = convert_ccy.upper()
+        out["currency_method"] = (
+            f"hybrid MC-convolution: {asset}({base_ccy}) ⊗ {fx_symbol}; "
+            f"终端分布按 {convert_ccy.upper()} 口径(含汇率)，形状仍按 {base_ccy}"
+        )
 
     sw = shape_window
     cols = [f"fwd_{sw}", f"min_{sw}", f"tmin_{sw}", f"max_{sw}", f"tmax_{sw}",

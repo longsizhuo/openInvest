@@ -149,9 +149,16 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     )
     reentry_reference = ""
     try:
-        from core.regime_probability import build_reentry_reference_text
+        from core.regime_probability import build_reentry_reference_text, convert_ccy_for
+        # 币种自适应（ADR-021）：与 service layer 同源——持仓非报价币种时按持仓币种附下行口径。
+        try:
+            _holding = pm.holdings.find(target["symbol"])
+            _convert_ccy = convert_ccy_for(target["symbol"], (_holding or {}).get("cost_currency"))
+        except Exception:  # noqa: BLE001  持仓币种取不到 → 退回本币口径，不影响 reentry 主体
+            _convert_ccy = None
         reentry_reference = build_reentry_reference_text(
             target["symbol"], _regime_for_hint, metrics.get("current_price"),
+            convert_ccy=_convert_ccy,
         )
     except Exception:  # noqa: BLE001  路径参考读失败不阻断 prepare
         pass

@@ -21,6 +21,9 @@ class _FakeHoldings:
     def __iter__(self):
         return iter([])
 
+    def find(self, symbol):
+        return None
+
 
 class _FakePM:
     def __init__(self):
