@@ -1047,7 +1047,8 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
     monkeypatch.setattr(cr, "load_prior_insights", lambda *a, **k: "")
     monkeypatch.setattr(cr, "load_backup_cny", lambda pm: 0.0)
     monkeypatch.setattr(rp, "get_regime_forward_summary", lambda *a, **k: None)
-    monkeypatch.setattr(rp, "build_reentry_reference_text", lambda *a, **k: "REENTRY_SENTINEL")
+    # coordinator 改用 build_reentry_reference（取回结构化 profile，与 session 路径对齐）
+    monkeypatch.setattr(rp, "build_reentry_reference", lambda *a, **k: ("REENTRY_SENTINEL", None))
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, "ok"))
 
