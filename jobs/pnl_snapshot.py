@@ -232,6 +232,24 @@ def _latest_pct(series: BenchmarkSeries, start_date: str) -> Optional[float]:
     return valid[-1][1]
 
 
+def _pct_label_pos(
+    pct: float, bar_x: float, bar_w: float, is_user: bool, bar_axis_left: float
+) -> Tuple[float, str, Optional[str]]:
+    """柱状图 % 标签的 (x, text-anchor, fill)。
+
+    默认贴在条端外侧（正条右、负条左）。满宽负条外侧会向左压住左侧基准名 label
+    （openInvest#92）→ 放不下就翻到条内右生长，并换对比色（金色用户条用深色、
+    基准条用浅色）。fill=None 表示沿用条本身的颜色。
+    """
+    LABEL_W = 56  # ≈ "-100.00%" @ 11px 等宽字
+    if pct >= 0:
+        # 右侧固定留了 80px 边距，正条外侧标签放得下 → 保持原样
+        return bar_x + bar_w + 6, "start", None
+    if bar_x - 6 - LABEL_W >= bar_axis_left:
+        return bar_x - 6, "end", None
+    return bar_x + 6, "start", "#0d1117" if is_user else "#f0f6fc"
+
+
 def render_svg(history: List[Dict[str, Any]]) -> str:
     """上半部分：用户三线折线趋势 (Total / NDQ / Gold)
        下半部分：横向柱状图，11 个基准 + 用户实盘按累计涨幅排序
@@ -338,11 +356,12 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
         # 百分比数字（产品对比榜单语境下，用户柱也直接显示真实 %，
         # 因为 % 是相对量、不暴露资产规模，与基准并排时藏起来反而显得心虚）
         pct_text = f"{pct:+.2f}%"
-        pct_x = (bar_x + bar_w + 6) if pct >= 0 else (bar_x - 6)
-        pct_anchor = "start" if pct >= 0 else "end"
+        pct_x, pct_anchor, pct_fill = _pct_label_pos(
+            pct, bar_x, bar_w, is_user, BAR_AXIS_LEFT
+        )
         bar_svg.append(
             f'<text x="{pct_x:.1f}" y="{y + BAR_ROW_H / 2 + 4:.1f}" '
-            f'text-anchor="{pct_anchor}" fill="{color}" class="label" '
+            f'text-anchor="{pct_anchor}" fill="{pct_fill or color}" class="label" '
             f'font-weight="{label_weight}">{pct_text}</text>'
         )
 
