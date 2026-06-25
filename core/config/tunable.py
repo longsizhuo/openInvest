@@ -218,6 +218,28 @@ class DCAConfig:
 
 
 @dataclass(frozen=True)
+class EventConfig:
+    """事件感知与向量召回（Event RAG & Event Watcher）参数
+    
+    默认开启，允许用户在 GUI/API/CLI 中运行时配置。
+    """
+    enabled: bool = True                        # 是否启用盘中新闻事件向量召回并注入委员会决策
+    rag_window_days: int = 7                    # 向量召回新闻事件的最长历史天数
+    rag_min_severity: str = "mid"               # 向量召回新闻事件的最低严重度级别
+    rag_top_k: int = 8                          # 每个标的召回的新闻事件最大数量
+    max_per_source: int = 15                    # 每次拉取新闻的最大条数
+    min_severity: str = "mid"                   # 触发重跑委员会的最低严重度级别
+    max_rounds: int = 2                         # 触发重跑委员会时的最大辩论轮数
+
+
+@dataclass(frozen=True)
+class StalenessConfig:
+    """价格数据陈旧判定与硬熔断阈值"""
+    price_stale_days: int = 3                   # 超过 N 天显示软警告
+    hard_abort_stale_days: int = 7              # 超过 N 天硬熔断跳过运行
+
+
+@dataclass(frozen=True)
 class TunableConfig:
     """所有可调参数的顶层容器"""
     regime: RegimeConfig = field(default_factory=RegimeConfig)
@@ -231,3 +253,5 @@ class TunableConfig:
     oracle_accuracy: OracleAccuracyConfig = field(default_factory=OracleAccuracyConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     dca: DCAConfig = field(default_factory=DCAConfig)
+    event: EventConfig = field(default_factory=EventConfig)
+    staleness: StalenessConfig = field(default_factory=StalenessConfig)
