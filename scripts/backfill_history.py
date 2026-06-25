@@ -39,13 +39,23 @@ from db.market_store import MarketStore
 ROOT = Path(__file__).resolve().parent.parent
 INPUTS = ROOT / "experiments" / "ta-analysts" / "inputs"
 
-# Commodity deep-history splice: symbol -> (bundled CSV, start, before-futures cutoff).
-# Only rows in [start, before) are spliced — the gap before yfinance's futures history.
+# Commodity deep-history splice: symbol -> (bundled CSV, start, fallback_before).
+# CSV rows in [start, before) are spliced in front of the futures series, where `before`
+# is yfinance's ACTUAL first row date (computed at runtime — so the seam stays gapless
+# even if the futures inception drifts). The literal third element is only a fallback
+# for when yfinance returns nothing for the symbol.
 # CSV is a long daily series (Date,Open,High,Low,Close) in the symbol's own quote unit.
 COMMODITY_DEEP_HISTORY = {
     "GC=F": (INPUTS / "xauusd_daily_1966_2026.csv", "1969-01-01", "2000-08-30"),
     # "SI=F": (INPUTS / "xagusd_daily.csv", "1969-01-01", "2000-08-30"),  # add when needed
 }
+
+
+def _num(v):
+    """NaN/None → None. yfinance 偶尔给停牌/退市/拆股边界日返 NaN OHLC；写 None 让 SQLite
+    落 NULL,不把 NaN 混进 daily_prices —— 否则 forward-return 除以 NaN close 产生 NaN,
+    被下游 .dropna() 静默删掉,反而缩小本想扩大的下行样本。"""
+    return None if v is None or pd.isna(v) else float(v)
 
 
 def _yf_max(symbol):
@@ -64,12 +74,17 @@ def backfill(symbol: str, ms: MarketStore) -> None:
 
     # 1) yfinance max — the general, automated path (full life for equities/ETF/crypto/FX)
     df = _yf_max(symbol)
+    yf_first = None
     if df is not None:
+        yf_first = df.index.min().strftime("%Y-%m-%d")
         for r in df.itertuples():
+            close = _num(r.Close)
+            if close is None:
+                continue  # 无收盘价的行跳过（close 是 authoritative 字段，不能落 NULL）
             res = ms.backfill_ohlcv_row(
                 symbol, r.Index.strftime("%Y-%m-%d"),
-                float(r.Close), float(r.High), float(r.Low),
-                float(getattr(r, "Volume", 0) or 0), source="yfinance_max",
+                close, _num(r.High), _num(r.Low),
+                _num(getattr(r, "Volume", 0)) or 0.0, source="yfinance_max",
             )
             ins += res == "inserted"; upd += res == "updated"
     else:
@@ -78,16 +93,21 @@ def backfill(symbol: str, ms: MarketStore) -> None:
     # 2) commodity deep-history splice — the bounded exception
     deep = COMMODITY_DEEP_HISTORY.get(symbol)
     if deep:
-        csv, start, before = deep
+        csv, start, fallback_before = deep
+        # 接缝用 yfinance 实际起点,而非写死日期 —— 期货 inception 若漂移也不留洞
+        before = yf_first or fallback_before
         if not csv.exists():
             print(f"  {symbol:10} deep-history CSV missing: {csv}")
         else:
             cd = pd.read_csv(csv, parse_dates=["Date"]).sort_values("Date")
             cd = cd[(cd["Date"] >= start) & (cd["Date"] < before)]
             for r in cd.itertuples():
+                close = _num(r.Close)
+                if close is None:
+                    continue
                 res = ms.backfill_ohlcv_row(
                     symbol, r.Date.strftime("%Y-%m-%d"),
-                    float(r.Close), float(r.High), float(r.Low), 0.0,
+                    close, _num(r.High), _num(r.Low), 0.0,
                     source=f"deep_history:{csv.name}",
                 )
                 ins += res == "inserted"; upd += res == "updated"
@@ -102,11 +122,19 @@ def main() -> None:
     ms = MarketStore()
     symbols = sys.argv[1:] or ms.distinct_symbols()
     print(f"backfilling {len(symbols)} symbol(s)...")
+    failed = []
     for s in symbols:
         try:
             backfill(s, ms)
         except Exception as e:  # one bad symbol shouldn't abort the batch
             print(f"  {s:10} ERR {type(e).__name__}: {str(e)[:80]}")
+            failed.append(s)
+    # 非零退出 + 汇总：否则一批里几个挂了脚本仍 exit 0,自动化/操作者误判成功,
+    # 那些 symbol 的 path-profile 继续用欠采样的 bull-biased 分布而无人察觉。
+    if failed:
+        print(f"\n{len(failed)}/{len(symbols)} symbol(s) FAILED: {', '.join(failed)}")
+        sys.exit(1)
+    print(f"\nall {len(symbols)} symbol(s) ok")
 
 
 if __name__ == "__main__":
