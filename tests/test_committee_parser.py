@@ -170,7 +170,8 @@ def test_parse_cio_memo_rejects_solvency_strong_kwarg():
 
 
 def test_concentration_trim_visible_when_lens_on():
-    """lens 开（默认）→ concentration-TRIM 如实保留，不被任何写死兜底掩盖"""
+    """lens 显式开 → concentration-TRIM 如实保留，不被任何写死兜底掩盖"""
+    set_config_override({"verdict": {"concentration_lens_enabled": True}})
     r = parse_cio_memo(_trim_text("concentration"))
     assert r["verdict"] == "TRIM"
     assert r["trim_reason"] == "concentration"
@@ -211,12 +212,12 @@ def test_concentration_lens_off_forces_hold():
     assert r["_concentration_lens"] == "disabled"
 
 
-def test_concentration_lens_on_by_default_does_not_override():
-    """默认 lens 开 → concentration-TRIM 不被覆盖（守"无静默行为变更"）"""
+def test_concentration_lens_off_by_default_forces_hold():
+    """默认 lens 关（ADR-020，2026-06-25）→ concentration-TRIM 默认即被 force-HOLD，无需显式 override"""
     r = parse_cio_memo(_trim_text("concentration"))
-    assert r["verdict"] == "TRIM"
-    assert r["trim_reason"] == "concentration"
-    assert "_concentration_lens" not in r
+    assert r["verdict"] == "HOLD"
+    assert r["_original_verdict"] == "TRIM"
+    assert r["_concentration_lens"] == "disabled"
 
 
 def test_concentration_lens_off_keeps_stop_loss_trim():
@@ -228,8 +229,9 @@ def test_concentration_lens_off_keeps_stop_loss_trim():
     assert r["alloc_cny"] == -5000
 
 
-def test_cio_prompt_concentration_directive_off_by_default():
-    """默认 lens 开 → CIO prompt 不含关闭指令"""
+def test_cio_prompt_no_concentration_directive_when_lens_on():
+    """lens 显式开 → CIO prompt 不含关闭指令"""
+    set_config_override({"verdict": {"concentration_lens_enabled": True}})
     from agents.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "集中度 lens 已被用户关闭" not in prompt
@@ -247,6 +249,7 @@ def test_risk_officer_prompt_concentration_directive_both_rounds():
     """lens 关 → Risk Officer opening + rebuttal 两轮 prompt 都注入关闭指令"""
     from agents.risk_officer import build_risk_officer_prompt
     asset = {"symbol": "GC=F", "display_name": "黄金"}
+    set_config_override({"verdict": {"concentration_lens_enabled": True}})
     assert "集中度 lens 已关闭" not in build_risk_officer_prompt(asset)
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
     assert "集中度 lens 已关闭" in build_risk_officer_prompt(asset, round_label="opening")
