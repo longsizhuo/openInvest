@@ -416,10 +416,12 @@ class TestApiConfig:
 
     def test_set_persists_and_survives_reload(self):
         """set → 落盘 → reset 后重 load 仍生效（模拟另一进程读同一文件）。"""
-        cfg = set_persisted_override("verdict.concentration_lens_enabled", False)
-        assert cfg.verdict.concentration_lens_enabled is False
+        # 必须用非默认值 True：ADR-020 后默认是 False，若这里仍 set False，
+        # 「reload 后仍是 False」无论持久化是否生效都成立 → 断言空转。
+        cfg = set_persisted_override("verdict.concentration_lens_enabled", True)
+        assert cfg.verdict.concentration_lens_enabled is True
         reset_config()
-        assert load_config().verdict.concentration_lens_enabled is False
+        assert load_config().verdict.concentration_lens_enabled is True
         ov = [it["overridden"] for it in effective_api_config()
               if it["key"] == "verdict.concentration_lens_enabled"][0]
         assert ov is True
