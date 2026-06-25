@@ -9,6 +9,7 @@ from jobs.pnl_snapshot import (
     _auto_push_svg,
     _is_trading_window,
     _outperform_feed_attribution,
+    _pct_label_pos,
     _redact_token_in,
 )
 
@@ -262,3 +263,33 @@ def test_feed_attribution_lookalike_host_not_matched(monkeypatch):
     label, link, branch = _outperform_feed_attribution()
     assert label == "本账户"
     assert link == ""
+
+
+# ---------- % 标签防与左侧名 label 重叠（openInvest#92 回归）----------
+# 柱状图左轴 BAR_AXIS_LEFT=200，左侧 <200 是基准名 label 区。
+
+
+def test_pct_label_full_width_negative_flips_inside():
+    # 满宽负条 bar_x≈200，外侧标签会向左压住名 label → 翻到条内右生长
+    x, anchor, fill = _pct_label_pos(-50.0, 200.0, 320.0, is_user=False, bar_axis_left=200)
+    assert anchor == "start"      # 条内、向右
+    assert x >= 200               # 不进入左侧 label 区 (<200)
+    assert fill == "#f0f6fc"      # 基准条上用浅色保证可读
+
+
+def test_pct_label_full_width_negative_user_bar_uses_dark():
+    _, _, fill = _pct_label_pos(-50.0, 200.0, 320.0, is_user=True, bar_axis_left=200)
+    assert fill == "#0d1117"      # 金色用户条改用深色
+
+
+def test_pct_label_short_negative_stays_outside():
+    # 短负条远离左轴，外侧放得下 → 维持外侧左生长、沿用条色 (None)
+    assert _pct_label_pos(-3.0, 500.0, 18.0, is_user=False, bar_axis_left=200) == (
+        494.0, "end", None,
+    )
+
+
+def test_pct_label_positive_outside_unchanged():
+    assert _pct_label_pos(12.0, 400.0, 120.0, is_user=False, bar_axis_left=200) == (
+        526.0, "start", None,
+    )
