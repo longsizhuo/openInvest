@@ -184,6 +184,10 @@ def _filter_by_window(
 def build_summary(jsonl_path: Path) -> Dict[str, Any]:
     """核心逻辑：读 jsonl → 按窗口聚合 → 返回脱敏 dict"""
     rows = _load_rows(jsonl_path)
+    # ADR-022 红线：公开命中率只反映【live 实时决策】的真实战绩。backtest 条目一律剔除——
+    # 污染段(决议日 ≤ 训练 cutoff)记忆穿越会虚高命中率，干净 holdout 也是回测而非实盘战绩；
+    # 两者都不属于"live committee 准确率"。缺 source 的老条目按 live（jsonl 早于 backtest 集成时全是 live）。
+    rows = [r for r in rows if str(r.get("source", "live")) == "live"]
     now = datetime.now(timezone.utc)
 
     windows = {

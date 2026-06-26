@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def run_holdout(
     optuna_workspace: Path,
     holdout_workspace: Path,
+    # 这是【参数过拟合】holdout,整段在记忆 cutoff 之内=污染,不是记忆/业绩 holdout(那是 post-2024-12-31)。别拿它 PASS 当业绩证据(ADR-022 要点5)。
     holdout_start: str = "2024-11-18",
     holdout_end: str = "2024-12-31",
     assets: list = None,

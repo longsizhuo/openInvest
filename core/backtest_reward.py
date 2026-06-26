@@ -61,6 +61,7 @@ def compute_strategy_reward(metrics: Dict[str, Any]) -> float:
     sharpe = metrics.get("sharpe_ratio", 0)
 
     # vs 余额宝 alpha（如果有）
+    # reward 锚=现金 → 牛市跑赢现金 trivial 且可同时输给 buy-and-hold;headline 基准应为同资产 buy-and-hold(strategy_metrics.alpha_pct 已实现)。ADR-022 T5。
     vs = metrics.get("vs_benchmarks", {}).get("余额宝", {})
     alpha_yuebao = vs.get("alpha_pct", 0) / 100
 
