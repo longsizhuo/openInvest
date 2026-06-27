@@ -140,7 +140,9 @@ def _patch_tools_to_date(decision_date: str):
 
 
 def run_one_day(decision_date: str, asset_symbols: List[str],
-                *, resume: bool = True) -> Dict[str, Any]:
+                *, resume: bool = True,
+                portfolio_summary_override: "str | None" = None,
+                out_subdir: str = ".backtest") -> Dict[str, Any]:
     """对单个历史日期跑一次完整 committee（每个资产）
 
     resume=True（默认，CLI 分片回测用）：已写出 <symbol>.md 的资产跳过，支持断点续跑。
@@ -162,7 +164,8 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
     from utils.market_metrics import compute_metrics
 
     store = MemoryStore()
-    out_dir_base = store.root / ".backtest" / decision_date
+    # out_subdir 让闭环回测写到独立目录(.backtest_closedloop),不覆盖空桩基线(.backtest)
+    out_dir_base = store.root / out_subdir / decision_date
     out_dir_base.mkdir(parents=True, exist_ok=True)
 
     results: Dict[str, Any] = {"date": decision_date, "verdicts": {}}
@@ -207,13 +210,18 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 # 用同一份已截断的 df 算 → 与 live 路径一致，注入委员会，不再让 LLM 瞎猜 REGIME。
                 regime_brief = format_regime_brief(compute_metrics(df), symbol=symbol) if not df.empty else ""
 
-                # 极简 portfolio_summary（backtest 不知道当时用户持仓）
-                # 回测无真实持仓 → Risk 集中度闸(ADR-020)从不触发 → 回测委员会≠live,verdict 分布不可外推(ADR-022 T3)。
-                portfolio_summary = (
-                    f"# Backtest Mode\n"
-                    f"该日期为历史回测，用户持仓上下文无法精确还原。\n"
-                    f"假设用户持仓中性（无极端集中度），focus 在技术 + 宏观信号。"
-                )
+                # 默认中性空桩(ADR-022 T3:委员会看不到持仓→从不减仓→verdict 不可外推 live)。
+                # 闭环回测传 portfolio_summary_override(模拟器当前真实仓位:含浮亏/集中度/剩余现金)
+                # → 委员会能像 live 一样 de-risk → 才测得出择时 skill。同一份 override 当日各资产共用
+                # (对齐 live:日内委员会都看当日开盘时的组合,执行在决策之后)。
+                if portfolio_summary_override is not None:
+                    portfolio_summary = portfolio_summary_override
+                else:
+                    portfolio_summary = (
+                        f"# Backtest Mode\n"
+                        f"该日期为历史回测，用户持仓上下文无法精确还原。\n"
+                        f"假设用户持仓中性（无极端集中度），focus 在技术 + 宏观信号。"
+                    )
 
                 # max_debate_rounds 从环境变量读（Optuna 训练用）
                 import os as _os
