@@ -36,17 +36,17 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger(__name__)
 
-# DeepSeek 公开定价（官方 pricing page，单位 CNY / 1M tokens）
+# DeepSeek 公开定价（官方 pricing page，单位 CNY / 1M tokens，2026-06 核对）
 # https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 # v4-flash = 旧 deepseek-chat 非 thinking 模式；v4-pro = 旧 deepseek-reasoner thinking 模式
-# input_cache_hit = KVCache 命中价（共享前缀复用，便宜 50×）；input = 未命中价。
-# 2026-06：v4-pro 折扣（曾 ¥3.1/¥6.2）已于 2026-05-31 过期，回到全价（models.json $1.74/$3.48 ×7.1）。
+# input_cache_hit = KVCache 命中价（共享前缀复用，便宜 ~50×）；input = 未命中价。
+# 官方页原文：flash 命中 0.02 / 未命中 1 / 输出 2；pro 命中 0.025 / 未命中 3 / 输出 6。
 PRICING_CNY_PER_M_TOKENS: Dict[str, Dict[str, float]] = {
     "deepseek-v4-flash": {"input": 1.0, "input_cache_hit": 0.02, "output": 2.0},
-    "deepseek-v4-pro": {"input": 12.4, "input_cache_hit": 1.03, "output": 24.7},
+    "deepseek-v4-pro": {"input": 3.0, "input_cache_hit": 0.025, "output": 6.0},
     # legacy 名（兼容旧 telemetry 日志；2026-07-24 弃用，等价 v4-flash/v4-pro）
     "deepseek-chat": {"input": 1.0, "input_cache_hit": 0.02, "output": 2.0},
-    "deepseek-reasoner": {"input": 12.4, "input_cache_hit": 1.03, "output": 24.7},
+    "deepseek-reasoner": {"input": 3.0, "input_cache_hit": 0.025, "output": 6.0},
     # OpenAI 价格更贵，先用 gpt-4o 作为占位（如真用上要更新）
     "gpt-4o": {"input": 17.0, "output": 70.0},        # ~$2.5/$10 ≈ ¥17/¥70
     "gpt-4o-mini": {"input": 1.1, "output": 4.3},

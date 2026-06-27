@@ -104,40 +104,80 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
     out["alloc_cny"] = 0
 
 
+def _fields_to_out(out: Dict[str, Any], fields: Dict[str, Any]) -> None:
+    """从结构化 JSON fields（DeepSeek JSON Output）填 out 基础字段，与 regex 路径同口径
+    （verdict 大写 / confidence float / alloc int / dominant_view&trim_reason 限定集）。
+    类型异常一律退化到与"regex 没匹配"等价的默认值，不抛。"""
+    out["verdict"] = str(fields.get("verdict") or "UNCLEAR").upper()
+    try:
+        out["confidence"] = float(fields.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        out["confidence"] = 0.0
+    dv = str(fields.get("dominant_view") or "").lower()
+    out["dominant_view"] = dv if dv in ("quant", "macro", "risk") else "tie"
+    try:
+        out["alloc_cny"] = int(float(fields.get("suggested_alloc_cny") or 0))
+    except (TypeError, ValueError):
+        out["alloc_cny"] = 0
+    tr = fields.get("trim_reason")
+    tr = str(tr).lower() if tr else None
+    out["trim_reason"] = tr if tr in ("concentration", "stop_loss", "bearish") else None
+    rp = fields.get("reentry_price")
+    try:
+        out["reentry_price"] = float(rp) if rp is not None else None
+    except (TypeError, ValueError):
+        out["reentry_price"] = None
+    rc = fields.get("reentry_condition")
+    rc = str(rc).strip() if rc else None
+    out["reentry_condition"] = rc if (rc and rc.upper() != "N/A") else None
+    ep = fields.get("expected_path")
+    ep = str(ep).strip() if ep else None
+    out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
+
+
 def parse_cio_memo(
     text: str,
     *,
+    fields: Optional[Dict[str, Any]] = None,
+    worker_brief: Optional[str] = None,
     current_price: Optional[float] = None,
     regime: Optional[str] = None,
     defense_flag_on: bool = False,
     defense_dca: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """fields（DeepSeek JSON Output 解析后的 dict）非 None 时走结构化抽取，否则 regex（旧路径）。
+    worker_brief（CIO 输入的 worker 简报）非 None 时额外参与 [WORKER_UNAVAILABLE] backstop——
+    JSON 模式下 CIO 输出是纯 JSON 不回显哨兵，靠 brief 才查得到 worker 失败（加性，不动旧文本检测）。
+    """
     """defense_dca（2026-06-13 黄金裁决，wiki18 §5）：非 None = 本资产是黄金且分批 DCA
     启用，防御触发的买侧不再全拦，改"放行一批 or 按 spacing/quota 拦"。service 层算好传：
         {"allow": bool, "fraction": float, "reason": str, "tranche_idx": int}
     None = 非黄金/未启用 → 走旧"全拦"行为。两条腿已 OR 成单 defense_flag_on，单一计划。
     """
     out: Dict[str, Any] = {"raw": text}
-    m = VERDICT_RE.search(text)
-    out["verdict"] = m.group(1).upper() if m else "UNCLEAR"
-    m = CONFIDENCE_RE.search(text)
-    out["confidence"] = float(m.group(1)) if m else 0.0
-    m = DOMINANT_RE.search(text)
-    out["dominant_view"] = m.group(1).lower() if m else "tie"
-    m = ALLOC_RE.search(text)
-    out["alloc_cny"] = int(m.group(1)) if m else 0
-    m = TRIM_REASON_RE.search(text)
-    out["trim_reason"] = m.group(1).lower() if m else None
+    if fields is not None:
+        _fields_to_out(out, fields)
+    else:
+        m = VERDICT_RE.search(text)
+        out["verdict"] = m.group(1).upper() if m else "UNCLEAR"
+        m = CONFIDENCE_RE.search(text)
+        out["confidence"] = float(m.group(1)) if m else 0.0
+        m = DOMINANT_RE.search(text)
+        out["dominant_view"] = m.group(1).lower() if m else "tie"
+        m = ALLOC_RE.search(text)
+        out["alloc_cny"] = int(m.group(1)) if m else 0
+        m = TRIM_REASON_RE.search(text)
+        out["trim_reason"] = m.group(1).lower() if m else None
 
-    # TRIM 路径化字段：买回价 / 买回条件 / 预期路径（真正解析并保留，不再全丢）
-    m = REENTRY_PRICE_RE.search(text)
-    out["reentry_price"] = float(m.group(1).replace(",", "")) if m else None
-    m = REENTRY_CONDITION_RE.search(text)
-    rc = m.group(1).strip() if m else None
-    out["reentry_condition"] = rc if (rc and rc.upper() != "N/A") else None
-    m = EXPECTED_PATH_RE.search(text)
-    ep = m.group(1).strip() if m else None
-    out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
+        # TRIM 路径化字段：买回价 / 买回条件 / 预期路径（真正解析并保留，不再全丢）
+        m = REENTRY_PRICE_RE.search(text)
+        out["reentry_price"] = float(m.group(1).replace(",", "")) if m else None
+        m = REENTRY_CONDITION_RE.search(text)
+        rc = m.group(1).strip() if m else None
+        out["reentry_condition"] = rc if (rc and rc.upper() != "N/A") else None
+        m = EXPECTED_PATH_RE.search(text)
+        ep = m.group(1).strip() if m else None
+        out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
     # Sanity check 0: INVEST_CIO_CONFIDENCE_CAP（Optuna 训练参数）clamp confidence 上限
     cap_env = os.getenv("INVEST_CIO_CONFIDENCE_CAP")
@@ -189,7 +229,10 @@ def parse_cio_memo(
     # 上游传来的 raw 是 brief，含 macro/quant/risk 内容；如果 brief 里出现 worker
     # unavailable 哨兵，CIO 大概率是在 garbage 上综合
     floor = _verdict_cfg.worker_unavailable_confidence_floor
-    if "[WORKER_UNAVAILABLE]" in text and out["confidence"] > floor:
+    _wu = "[WORKER_UNAVAILABLE]" in text or (
+        worker_brief is not None and "[WORKER_UNAVAILABLE]" in worker_brief
+    )
+    if _wu and out["confidence"] > floor:
         out["_original_confidence_unavailable"] = out["confidence"]
         _force_hold(out, confidence_ceiling=floor)
         log.warning("parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"

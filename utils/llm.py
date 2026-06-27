@@ -79,6 +79,21 @@ def get_llm_config_safe(
     return api_key, base_url, model, provider
 
 
+def supports_json_output(model: Optional[str] = None, base_url: Optional[str] = None) -> bool:
+    """是否【尝试】response_format={"type":"json_object"}（DeepSeek JSON Output 是 GA，
+    且 json_object 本就是 OpenAI 标准参数，多数兼容 provider 都支持）。
+
+    不做 provider == 硬判定——真不支持的由调用方【运行时优雅回退】兜底（发不出 / 不是
+    合法 JSON → 退回文本 + regex，见 core.committee.debate 的 CIO 路径）。这里只给一个
+    "默认尝试 + 可关" 的旋钮：INVEST_FORCE_JSON_OUTPUT=0 全关（确认自家 provider 不支持
+    又不想吃一次回退的双调用成本时）、=1 强开。缺省尝试。
+    """
+    force = os.getenv("INVEST_FORCE_JSON_OUTPUT")
+    if force is not None:
+        return force == "1"
+    return True
+
+
 def get_dspy_lm(temperature: float = 0.2, max_tokens: int = 1500):
     """返回配置好的 ``dspy.LM`` 实例（DSPy 训练 / sandbox 用）
 

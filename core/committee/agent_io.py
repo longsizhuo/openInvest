@@ -37,6 +37,7 @@ def _create_agent(
     asset: Optional[str] = None,
     round_label: Optional[str] = None,
     enable_thinking: bool = False,
+    response_format: Optional[dict] = None,
 ) -> Optional[SDKAgent]:
     """从 LangChain SimpleAgent 迁移到 SDKAgent（OpenAI 兼容协议直连，模型由 LLM_MODEL 决定）。
 
@@ -77,6 +78,7 @@ def _create_agent(
         provider=provider_litellm,
         telemetry_meta=meta,
         enable_thinking=enable_thinking,
+        response_format=response_format,
     )
 
 

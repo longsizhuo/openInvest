@@ -59,6 +59,7 @@ class SDKAgent:
         provider: str = "openai",
         telemetry_meta: Optional[TelemetryMeta] = None,
         enable_thinking: bool = False,
+        response_format: Optional[Dict[str, Any]] = None,
     ):
         # caller 不传 model → 走 utils.llm.get_llm_config（按 LLM_MODEL 决定，兜底 deepseek-v4-flash）
         if model is None:
@@ -73,6 +74,9 @@ class SDKAgent:
         # enable_thinking=True 给单角色（如 CIO 终裁）开思考做 A/B；DeepSeek 思考的
         # reasoning_content 与 content 分开，不像 MiMo 会吃空 content。
         self.enable_thinking = enable_thinking
+        # response_format={"type":"json_object"} 强制结构化输出（DeepSeek JSON Output）。
+        # 仅 caller 确认 provider 支持时传（见 utils.llm.supports_json_output 门控）。
+        self.response_format = response_format
         self.provider = provider
         self.last_tool_calls: List[ToolCallTrace] = []
         # v3 透明化：LLM 调用元数据；caller 不传则用默认匿名
@@ -164,6 +168,8 @@ class SDKAgent:
         # enable_thinking=True 的角色跳过 disable，保留思考模式（P3 CIO A/B）。
         if not self.enable_thinking:
             kwargs.update(get_thinking_disable_kwargs(self.model))
+        if self.response_format:
+            kwargs["response_format"] = self.response_format
         if self.enable_tools:
             kwargs["tools"] = TOOL_DEFINITIONS
             kwargs["tool_choice"] = "auto"

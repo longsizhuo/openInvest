@@ -30,9 +30,11 @@ def test_cache_hit_clamped_to_input():
     assert c == round(1000/1e6*0.02, 6)
 
 
-def test_v4_pro_full_price_not_expired_discount():
-    # 折扣已过期：v4-pro 未命中输入应是 ¥12.4/M（不是旧 ¥3.1）
-    assert estimate_cost_cny("deepseek-v4-pro", 1_000_000, 0) == 12.4
+def test_v4_pro_official_price():
+    # 官方页：v4-pro 未命中输入 ¥3/M、输出 ¥6/M、命中 ¥0.025/M
+    assert estimate_cost_cny("deepseek-v4-pro", 1_000_000, 0) == 3.0
+    assert estimate_cost_cny("deepseek-v4-pro", 0, 1_000_000) == 6.0
+    assert estimate_cost_cny("deepseek-v4-pro", 1_000_000, 0, cache_hit_tokens=1_000_000) == 0.025
 
 
 if __name__ == "__main__":
@@ -40,5 +42,5 @@ if __name__ == "__main__":
     test_partial_hit_split()
     test_default_no_cache_is_upper_bound()
     test_cache_hit_clamped_to_input()
-    test_v4_pro_full_price_not_expired_discount()
+    test_v4_pro_official_price()
     print("ok")
