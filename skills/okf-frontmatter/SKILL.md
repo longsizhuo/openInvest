@@ -1,6 +1,6 @@
 ---
 name: okf-frontmatter
-version: 0.2.0 # x-release-please-version
+version: 0.3.0 # x-release-please-version
 description: >-
   Maintain openInvest's docs (docs/wiki chapters + docs/wiki/adr) under Google's
   Open Knowledge Format (OKF). Two jobs. (1) Teach agents to maintain docs the OKF
