@@ -197,6 +197,7 @@ DeepSeek-Chat 训练数据估算截止约 2024-06-30，模型已经"见过"那�
 
 ## 致谢
 
+- [MiMo](https://mimo.mi.com/) — 感谢 MiMo 团队赠予的 token Plan。生产委员会跑的就是 `mimo-v2.5-pro`，[experiments/](experiments/) 里横跨 1966–2026（黄金回溯到 1966，近 60 年）的多资产回测，全靠这份额度才跑得完。
 - [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 三阶段记忆架构
 - [Claude Code](https://claude.com/claude-code) — Skill 模式 Coordinator 实现
 
