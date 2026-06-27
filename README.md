@@ -1,204 +1,202 @@
 <div align="center">
-
-<img src="docs/logo.svg" alt="openInvest logo" width="120" height="120"/>
+  
+<img width="120" height="120" alt="owl-02-lineart-gold" src="https://github.com/user-attachments/assets/e4c1efa0-026a-4777-ae62-48b9b0be435c" />
 
 # openInvest
 
-
-**自部署的 AI 投资委员会工具。4 个独立 LLM 角色互相 challenge，给出投资建议——决策权归你。**
+**基于 Coordinator-Worker 架构的自托管 AI 投资决策委员会系统。多大语言模型角色信息隔离质询，提供可审计的投资决策追踪流水（Audit Trail）。**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
+[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=for-the-badge&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4OTEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTISOWwgNS42MDAxIDUuNjAxNTYgNS4zMTM1NiA1LjYwMTU2IDQuOTYwMVYyLjI0MDFDNS42MDE1NiAxLjg4NjY0IDUuMzE1MDIgMS42MDAxIDQuOTYxNTYgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8pGF0aCBkPSJNNC45NjE1NiAxMC4zOTk5SDIuMjQxNTZDMS44ODgxIDEwLjM5OTkgMS42MDE1NiAxMC42ODY0IDEuY0AxNTYgMTEuMDM5OVYxMy43NTk5QzEuNjAxNTYgMTQuMTE0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8+CjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8pGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8+CjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/longsizhuo/invest)
 
-[⚡ 示例 memo](examples/sample_memo.md) · [🪄 装上](#装上) · [📚 完整文档](docs/wiki/README.md) · [🤝 贡献](CONTRIBUTING.md)
+[📚 完整架构文档](docs/wiki/README.md)
 
 </div>
 
+---
 
-## 实盘 PnL（live）
+## 生产环境性能指标 (Live Performance & PnL)
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
-  <sub>每 2h 自动更新到 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a> · 上半 = 30 天趋势 · 下半 = vs 8 个基准的累计涨幅</sub>
+  <sub>数据流基于 `jobs/pnl_snapshot` 每 2 小时原子替换自动更新至 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a></sub>
   <br/>
-  <sub>📌 <b>图中数据为作者本人账户</b>，仅作方法论展示。你跑起来后看到的是<b>你自己的</b>持仓曲线。</sub>
+  <sub>上半图：30天净值动量趋势 · 下半图：相较于 8 类基准资产的累计超额收益 (Alpha)</sub>
+  <br/>
+  <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，系统将依据您在 `memory/` 中定义的专属账户持仓自动渲染对应的净值曲线。</sub>
 </div>
 
-<!-- OUTPERFORM_FEED_START — jobs/pnl_snapshot 每 2h 追加 -->
+<!-- OUTPERFORM_FEED_START -->
 <!-- OUTPERFORM_FEED_END -->
 
-**对比的基准**：AI 投顾 / 公募基金 / 储蓄理财 / 大盘指数 4 类共 8 条。完整对比方法论 + 数据源说明见 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
-
-**实盘命中率公开**（自我披露不利数字）：方向性 verdict 历史命中率 25%，HOLD 占 84%——见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。这工具不会让你致富，它只是把决策过程透明化。
-
-
----
-- **Web GUI 是 beta**——主面板 / 决策回放 / 实时同步可能不工作。
-  推荐入口：通过 Claude Code / Cursor / Cline 等 AI agent 跑 `invest` skill，
-  让 AI 带你看持仓、跑委员会、查决策。GUI 只做辅助调试。
----
-
-## 它在做什么
-
-每天早上，4 个独立 LLM 各自看不同维度，互相 challenge 后给出建议：
-
-- **Macro Strategist** 看宏观（VIX / 利率 / 汇率）
-- **Quant Analyst** 看技术面（RSI / 多周期分位 / 趋势），不知道你的持仓
-- **Risk Officer** 看风控（集中度 / 浮盈缓冲 / 尾部损失），不知道技术信号
-- **Round 2**：Quant 和 Risk 互看对方报告，调整观点
-- **CIO** 综合所有人发言，输出 BUY / ACCUMULATE / HOLD / TRIM / SELL + 置信度
-
-输出一份 Markdown memo。系统不会自动下单——决策仍归你。
+*   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
+*   **系统统计自我披露**：本系统属于**消除人类投资认知偏差、强化推理过程透明度**的审计工具，而非收益放大黑盒。在长期运行统计中，方向性 Verdict 的绝对历史命中率为 **25%**，其中 `HOLD`（不作为）决策占比高达 **84%**。完整审计流水详见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。
 
 ---
 
-## 安装
+## 系统拓扑与多 Agent 编排机制
 
-### 装成 Claude Code plugin（推荐，一行装好）
+`openInvest` 拒绝在单一 LLM Session 中通过多角色 Prompt 进行伪辩论。系统在 `core/committee/` 层强行实施**信息隔离契约（Information Isolation Contract）**，通过有向无环图（DAG）驱动 4 个完全独立的 LLM 进程进行多轮交叉质询：
+
+
+
+```
+                [ 宏观数据注入 ]
+                       │
+             ▼ 1. 宏观对齐边界 (Context)
+         ┌──────────────────────────┐
+         │    Macro Strategist      │ (审视 VIX / 利率分位 / 汇率动量)
+         └─────────────┬────────────┘
+                       │
+             ▼ 2. 多维度异步质询管道 (Async DAG)
+         ┌─────────────┴────────────┐
+         ▼                          ▼
+┌──────────────────────────┐  ┌──────────────────────────┐
+│      Quant Analyst       │  │       Risk Officer       │
+│  (RSI/多周期分位/技术指标) │  │ (资产集中度/VaR/浮盈缓冲) │
+│                          │  │                          │
+│ 🛑 状态盲区：不知晓持仓   │  │ 🛑 状态盲区：不知晓技术面 │
+└────────────┬─────────────┘  └────────────┬─────────────┘
+│                             │
+└─────────────┬───────────────┘
+│
+▼ 3. Round 2 Rebuttal 交叉质询层
+│ 相互注入对方 Round 1 报告进行修正
+▼
+┌────────────────────────────────────────────────────────┐
+│               Chief Investment Officer (CIO)           │
+└──────────────────────────┬─────────────────────────────┘
+│
+▼ 4. 确定性原语落盘 (Atomic Markdown)
+[ BUY / ACCUMULATE / HOLD / TRIM / SELL ]
+
+```
+
+1.  **Macro Strategist (宏观策略官)**：评估系统宏观环境（VIX / 期限利差 / 核心汇率矩阵），设定全局风险基调。
+2.  **Quant Analyst (量化分析师)**：纯粹的数学动量与技术指标过滤器。**严格被阻断在持仓 Context 之外**，从根源消除人类在亏损持仓时的心理高估。
+3.  **Risk Officer (风险控制官)**：专注于组合尾部风险（最大回撤缓冲、流动性集中度、Solvency 杠杆因子）。**严格被阻断在技术信号之外**，仅对资产暴露进行冷酷裁决。
+4.  **Round 2 Rebuttal (交叉辩论机制)**：Quant 与 Risk 在第二轮被强制注入对方的 Round 1 报告，进行边界碰撞，直到两个 Agent 的信号和强度达成收敛，或触发收敛安全阀。
+5.  **CIO (首席投资官)**：汇总经过多轮过滤的质询追踪，输出结构化 `Verdict`（BUY / ACCUMULATE / HOLD / TRIM / SELL）与置信度。系统保持强克制，**不具备任何自动自动下单原语**，最终执行交由人类审计。
+
+---
+
+## 核心设计理念
+
+*   **Coordinator-Worker 架构**：各 Agent 具备独立的上下文字段。状态隔离逻辑在框架层通过 Python 硬编码限制，防范多角色长文本在同一上下文下的内部注意力污染。
+*   **Markdown 即数据库 (Markdown-as-a-Database)**：系统采用 Frontmatter (YAML) + Body (Markdown) 作为存储与运行时的**唯一事实来源**。结合 `fcntl.flock` 文件锁与临时文件原子替换（Atomic Write）机制，利用 Git 原生支持提供不可篡改的**投资决策审计追踪流**。
+*   **三阶段 Dreaming 记忆固化**：基于类似 OpenClaw 风格。每日凌晨系统自动解冻历史决策，对比真实市场 Outcome 进行复盘归纳（浅睡 $\rightarrow$ REM $\rightarrow$ 深睡），将行为洞察固化回长期记忆，防止大模型发生跨日长窗口上下文漂移。
+
+---
+
+## 生产环境快速部署
+
+### 1. 接入 Claude Code 运行时（推荐）
+通过官方 Marketplace 动态加载轻量化 Skill，宿主 Agent 在首次运行时会自动拉取核心代码并完成 `uv sync` 环境依赖对齐：
 ```bash
 /plugin marketplace add longsizhuo/openInvest
 /plugin install invest@openinvest
-```
-plugin 只带 skill 层（很小）；**后端在你第一次问问题时自动 `git clone` + `uv sync` 到 `~/openInvest`**，不用手动拉仓库。
 
-### 或：装成 skill
-让 Claude 帮你装：
-```bash
-Hi, Claude, 帮我安装https://github.com/longsizhuo/openInvest/tree/main/skills/invest 这个Skill
 ```
-也可以手动导入：
+
+### 2. 独立 Skill 原生导入
+
 ```bash
-git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
+git clone [https://github.com/longsizhuo/openInvest.git](https://github.com/longsizhuo/openInvest.git) ~/openInvest
 bash ~/openInvest/skills/install.sh
+
 ```
 
-回 Claude Code 对话里说："帮我初始化 invest"。Claude 会：
+在支持 Skill 的 AI 终端中发送 `帮我初始化 invest`。系统将触发交互式 Bootstrap 原语，指导完成以下初始化：
 
-1. 检测 memory / .env 缺失
-2. 用 5 个问题问你的情况（姓名 / 风险偏好 / 月收入 / 当前持仓 / 可选 API key）
-3. 写入配置 + 跑数据迁移
-4. 直接验证持仓
+1. 检测 `memory/` 状态存储路径及 `.env` 环境变量契约。
+2. 5 维度画像引导（合规法律名 / 风险容量 / 偿债结构 / 初始持仓资产 / 可选第三方密钥）。
+3. 运行静态数据迁移，即刻生成首份实时资产暴露 memo。
 
-之后任何时候说"看看我的持仓" / "分析一下黄金" / "该不该加仓 X"，Claude 会调委员会给你 memo。
+> 💡 **零成本运行声明**：在内置 Skill 交互模式下，委员会的底层推理完全依托宿主 Agent（如 Claude Code）的推理管道，**无需消耗您个人的第三方 API Key 额度**。仅在配置 Cron 独立日报任务或运行外部服务调用时，才需声明底层 API 供应。
 
-> 💡 **API key 是可选的**。Skill 模式下委员会用 Claude 跑，不需要 API 消耗。
-> 想后台自动跑（cron 日报 / 任意非 Claude agent 调用）才需要注册。
-
-**其他装法**（Docker / 手动 Python / 自带 GUI）：见 [QUICK_START.md](docs/QUICK_START.md)。
+更多部署矩阵（Docker 容器化、本地独立 Web GUI 调试端口）参阅 [QUICK_START.md](https://www.google.com/search?q=docs/QUICK_START.md)。
 
 ---
 
-## 配置其他 LLM Provider
+## 底层 LLM Provider 配置契约
 
-默认用 DeepSeek。要换千问 / 智谱 / Kimi 等任何 OpenAI 兼容接口，改 `.env`：
+系统默认采用高性价比的 DeepSeek 系列端点。如需替换为任何标准的 OpenAI 兼容架构（如通义千问、智谱等），必须严格遵循 `.env` 的配置契约（务必确保 `LLM_MODEL` 的官方真实 ID 映射，不可仅改 URL）：
 
 ```env
-# === DeepSeek（默认） ===
-LLM_API_KEY=sk-xxx
-LLM_BASE_URL=https://api.deepseek.com
+# === 选项 A: DeepSeek (架构默认) ===
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxx──────────────
+LLM_BASE_URL=[https://api.deepseek.com](https://api.deepseek.com)
 LLM_MODEL=deepseek-v4-flash
 
-# === 千问（Aliyun DashScope） ===
-LLM_API_KEY=sk-xxx
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode
+# === 选项 B: 通义千问 (Aliyun DashScope 兼容模式) ===
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
+LLM_BASE_URL=[https://dashscope.aliyuncs.com/compatible-mode](https://dashscope.aliyuncs.com/compatible-mode)
 LLM_MODEL=qwen-max
 
-# === 智谱 AI ===
-LLM_API_KEY=xxx
-LLM_BASE_URL=https://open.bigmodel.cn/api/paas
+# === 选项 C: 智谱 AI (GLM API 兼容端点) ===
+LLM_API_KEY=xxxxxxxxxxxxxxxx.xxxxxxxxx
+LLM_BASE_URL=[https://open.bigmodel.cn/api/paas](https://open.bigmodel.cn/api/paas)
 LLM_MODEL=glm-4-flash
+
 ```
 
-注意：**model name 必须改**（不是只改 API key + base_url），否则会 400
-"model not found"。每家 provider 的 model 名都不一样（`qwen-max` / `glm-4-flash` /
-`moonshot-v1-8k` 等），上对应官网查。
-
-`LLM_*` 系列变量是新的通用配置（推荐）；老的 `DEEPSEEK_*` 保留向后兼容，
-现存 `.env` 不需要迁移。两组都没设时 `LLM_API_KEY` 会自动回落到 `DEEPSEEK_API_KEY`。
+*注：系统内部维护向下兼容逻辑，原旧版 `DEEPSEEK_*` 专属环境变量无缝回落至新的 `LLM_*` 通用标准空间，生产环境无须强制迁移。*
 
 ---
 
-## 调整委员会行为（集中度 lens / 风险档 等）
+## 运行时委员会行为调整原语
 
-几个行为开关可**运行时**调，GUI / API / CLI / env 四个途径等价（白名单见
-[ADR-017](docs/wiki/adr/017-config-via-api.md)）：
+openInvest 提供了极高内聚的运行时参数配置开关。依据 [ADR-017](https://www.google.com/search?q=docs/wiki/adr/017-config-via-api.md)，以下 Tunable 变量在 Web GUI / API / CLI / env 四个通道具备完全等价的覆盖优先级，并持久化于 `memory/.state/config_overrides.json` 中：
 
-| 开关 | 作用 |
-|---|---|
-| `verdict.concentration_lens_enabled` | **集中度 lens**。默认开=持仓过度集中会被建议减仓；关掉=单资产 / 刻意集中 / 全可投资金池**不因集中度被建议减仓**（止损 / 回撤 / 波动 / 估值风险仍照看）。详见 [ADR-019](docs/wiki/adr/019-remove-solvency-concentration-override.md) |
-| `verdict.risk_profile` | `steady`（默认）/ `aggressive`（uptrend 顺势加杠杆） |
-| `verdict.gold_defense_dca_enabled` | 高 VIX/ATR 区黄金买入是否改分批放行 |
-| `dca.auto_dca_enabled` / `dca.auto_dca_amount_cny` | 自动定投开关与金额（[ADR-018](docs/wiki/adr/018-dca-dip-reserve.md)） |
+| 统一配置键 (Config Key) | 数据类型 & 默认值 | 工程行为后果描述 |
+| --- | --- | --- |
+| `verdict.concentration_lens_enabled` | `bool` (`true`) | **持仓集中度过滤器**。默认为开：当单一标的暴露过高时强行触发安全减仓阈值。若关闭，则单资产或全额风险池将**不因过度集中而被 CIO 建议减仓**（但波动率、估值风险、最大回撤风控依旧生效）。详见 [ADR-019](https://www.google.com/search?q=docs/wiki/adr/019-remove-solvency-concentration-override.md) |
+| `verdict.risk_profile` | `str` (`"steady"`) | 风险偏好特征描述符。`steady`（稳健稳健）/ `aggressive`（在 Downtime 阶段允许激活高顺势加仓弹性）。 |
+| `verdict.gold_defense_dca_enabled` | `bool` (`true`) | 黄金防御机制。在 VIX / ATR 骤增阶段，强行将单次大额加仓原语拆分为多期 DCA（分批放行）。 |
+| `dca.auto_dca_enabled` | `bool` (`false`) | 全自动定期定投决策开关。 |
+| `dca.auto_dca_amount_cny` | `float` (`0.0`) | 触发自动定投时的单期基准人民币资本配置额度。详见 [ADR-018](https://www.google.com/search?q=docs/wiki/adr/018-dca-dip-reserve.md) |
 
-四个途径任选其一（以关掉集中度 lens 为例）：
+### 参数运行时重写（以关闭集中度 Lens 为例）
 
 ```bash
-# GUI： invest-gui「设置 → 委员会配置」开关
-# API： curl -X PUT localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
-# CLI/agent： uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
-# env（部署期 bootstrap 默认，写 .env）： INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=false
-```
+# 途径 1: 使用 CLI 原语重写
+uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
 
-GUI / API / CLI 三者落盘持久（`memory/.state/config_overrides.json`）、跨进程共读、优先级高于
-env；env 仅作部署期默认。
+# 途径 2: 通过运行时 REST API 注入
+curl -X PUT localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
 
----
-
-## 设计理念
-
-三个核心选择，每个都有具体技术后果。详见 [docs/wiki/01-architecture.md](docs/wiki/README.md)：
-
-1. **Coordinator-Worker，不是 prompt 塞 4 个人格** — 4 个独立 LLM session，按 DAG 跑，信息隔离在 `core/committee/` 显式控制
-2. **Markdown 就是数据库** — frontmatter + body，Python 和 LLM 看到的永远一致；fcntl + atomic write 双保险
-3. **OpenClaw 风格 Dreaming Memory** — 三阶段记忆整合，把跨日交易模式凝固成 insight 注入下次决策
-
----
-
-## 架构与扩展
+# 途径 3: 宿主 GUI 交互控制
+# 前往 invest-gui「Settings → Committee Configuration」面板直接热切换
 
 ```
-agents/    4 个角色的 prompt
-core/      Coordinator-Worker 编排 + memory store
-jobs/      APScheduler cron tasks（含 event_watch 事件感知层）
-connectors/web_api.py + skills/ 两条调用入口
-services/  news_sources / event_normalizer / event_notifier / notifier
-db/        SQLite WAL（trades / insights / market data / events）
-docs/wiki/ 完整架构文档 + ADR
+
+---
+
+## 严谨性声明与回测局限说明
+
+1. **无商业顾问要约**：本系统仅为大语言模型驱动的决策辅助工具。输出的 Markdown 备忘录属于基于确定性输入的模拟推理，不构成任何特定的资产配置与投资建议。
+2. **回测时间锁与过拟合防范**：`scripts/backtest_runner.py` 内置硬编码安全阀。**默认全面拒绝 `decision_date > 2024-06-30` 的任何回测请求**（若强行越界，需显式声明 `--allow-lookahead`）。由于目前主流基础模型的训练语料库截止于 2024 年中，对其后时段的回测将不可避免地混入**模型训练的先知偏差（Lookahead Bias）**。任何调参、超参数 Sweep（Optuna 实验）及 Prompt 评估必须严格在 2024-06-30 之前的历史区间内运行。
+
+---
+
+## 核心系统代码库纵览
+
+```
+agents/      # 多角色决策 Prompt 与行为契约定义
+core/        # 核心协调器（Coordinator）编排层、持久化文件文件锁与状态总线
+jobs/        # 定时自动化任务体系（基于 APScheduler，含 event_watch 感知层）
+connectors/  # 外部协议桥接（FastAPI Web API / 终端交互 Skill 适配）
+services/    # 基础公共服务群（新闻多源同步 / 结构化事件清洗 / 消息分发）
+db/          # 高性能 SQLite WAL 预写日志数据库群（交易流水/Insight记忆/市场特征）
+docs/wiki/   # 完整的架构设计记录（ADR）与分布式设计原理解析
 ```
 
-**事件层（第一层）**（实现中，默认关）：盘中每 30 分钟扫多源新闻（DDGS + RSS + yfinance），flash 归一化成结构化事件落 `db/events.db`，命中用户持仓 / target_assets 则邮件通知 + 触发委员会重跑。开关：`jobs/event_watch.yml` 的 `enabled: true` + env `DEEPSEEK_API_KEY` + `EMAIL_SENDER`。详见 [ADR-006](docs/wiki/adr/006-event-layer.md)。
-
-详见：
-- [架构总览](docs/wiki/01-architecture.md) | [4 角色 prompt 解析](docs/wiki/02-agents.md) | [Dreaming](docs/wiki/03-dreaming.md)
-- [双执行路径 — Coordinator vs Direct](docs/wiki/04-execution-paths.md)
-- [数据模型 v2](docs/wiki/05-data-model.md) | [Web API](docs/wiki/06-api.md)
-- [扩展指南](docs/wiki/07-extending.md) | [故障排查](docs/wiki/09-troubleshooting.md)
-- [ADR — 关键决策记录](docs/wiki/adr/)
-
 ---
 
-## 免责
+## 开源致谢
 
-LLM-driven 决策辅助工具。**不构成投资建议**。LLM 会出错、会过度自信、会漏看东西。
-
-系统不会自动下单。建议先用 `what_if` 在小金额上跑两周再上真仓。
-
-公开命中率数据 / PnL 曲线 / 跑赢事件均为作者本人账户历史记录，**过去表现不预示未来收益**。
-
-**回测局限**：`scripts/backtest_runner.py` 跑的 paper-trading walk-forward 默认拒绝
-decision_date > 2024-06-30 的回测（强制跑加 `--allow-lookahead`）。原因：
-DeepSeek-Chat 训练数据估算截止约 2024-06-30，模型已经"见过"那段时间的市场，
-对 2024 下半年的 backtest verdict 含 **LLM 训练数据 lookahead bias**——结果
-**仅作上限估计**，训练 / 调参信号请用 2024-06-30 之前的日期范围。
-
----
-
-## 致谢
-
-- [MiMo](https://mimo.mi.com/) — 感谢 MiMo 团队赠予的 token Plan。生产委员会跑的就是 `mimo-v2.5-pro`，[experiments/](experiments/) 里横跨 1966–2026（黄金回溯到 1966，近 60 年）的多资产回测，全靠这份额度才跑得完。
-- [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 三阶段记忆架构
-- [Claude Code](https://claude.com/claude-code) — Skill 模式 Coordinator 实现
-
-PR / Issue 欢迎。
+* [MiMo](https://mimo.mi.com/) — 感谢 MiMo 量化实验室提供的生产级高性能推理算力赞助（支持 `mimo-v2.5-pro` 长期并发回测）。
+* [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 系统三阶段记忆固化与蒸馏架构的基础理论来源。
