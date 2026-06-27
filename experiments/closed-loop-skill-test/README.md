@@ -43,11 +43,24 @@ TRIM(负 alloc)吞成 HOLD → SELL 从不成交,委员会"减仓"全是 no-op�
 
 → 委员会主动交易**连机械 DCA 都跑不赢**。
 
-### 闭环 ±R3-vol(CI ⏳ 待填)
-10 个闭环并行:**5× 带 R3-vol**(conditional vol-target sizing,`INVEST_VOL_TARGET=1`)+ **5× R0-only**,
-各 ≥5 跑报 CI。**铁律**:R3-vol 的 CI 必须显著跑赢傻瓜 DCA 的 −1.15%,才算 sizing skill;否则赢的只是
-"把钱投进牛市",退回傻瓜 DCA。
-> ⏳ 2026-06-27 跑中(`memory/.backtest_cl_{v1..v5,n1..n5}`),完成后把 CI 填这里。
+### 闭环 ±R3-vol(CI,n=5+5,DeepSeek-v4-flash 2026-06-27)
+10 个闭环并行:**5× 带 R3-vol**(conditional vol-target sizing,`INVEST_VOL_TARGET=1`)+ **5× R0-only**。
+
+| 配置 | alpha vs 同资产 buy-hold | 范围 |
+|---|---|---|
+| 闭环 R0-only(no vol) | **−6.04% ± 1.70** | [−8.66, −4.05] |
+| 闭环 + R3-vol | **−4.88% ± 1.63** | [−7.48, −3.44] |
+| 差(vol − no-vol) | **+1.16%**(t≈1.10, **p≈0.30 不显著**) | 区间重叠 |
+| 对照:傻瓜 DCA | −1.15% | — |
+| 对照:buy-hold | 0%(定义) | — |
+
+**铁律判定:R3-vol 必须显著跑赢傻瓜 DCA 的 −1.15% 才算 sizing skill → 失败。**
+① vol-target 只把 alpha 从 −6.04% 挪到 −4.88%,差 +1.16% 但 **n=5 下不显著**(范围全重叠);
+② 即便最好的一跑(−3.44%)也输给傻瓜 DCA(−1.15%),整个 vol 分布都在 −1.15% 下方;
+③ 10 跑里 TRIM/SELL 合计 2 次(给了真实仓位委员会**仍几乎不减仓**)→ 无择时 skill 实锤(ADR-022 T3)。
+
+> **不 promote 到 live**。给委员会真实仓位上下文(闭环 −6.04% vs 空桩 −8.06%)+ vol-target sizing
+> 都只是把"亏多少"减轻,改不了"主动委员会跑输被动持有/机械 DCA"这个底色(本上行窗口)。
 
 ### 真因(修复后归因)
 1. **欠配 / 现金拖累**:140 次 HOLD + ACCUMULATE 单笔太小(10万本金才投 1200-6300)→ 子弹拖 9 个月才投完。
@@ -70,7 +83,8 @@ uv run python experiments/closed-loop-skill-test/scripts/dumb_dca.py
 
 ## 局限(预注册诚实声明,引用前必读)
 - **窗口几乎全是上行市**(2025-2026)→ 没有大回撤给 de-risk skill 发挥;防御性在熊市也许才值钱,本窗口证不了。
-- **MiMo 有温度无 seed** → 单次蒙特卡洛;故闭环 ±R3-vol 各跑 ≥5 次报 CI(2026-06-27 进行中)。
+- **LLM 有温度无 seed** → 单次蒙特卡洛;故闭环 ±R3-vol 各跑 5 次报 CI(2026-06-27,DeepSeek-v4-flash;
+  MiMo 免费额度耗尽后切付费 DeepSeek)。n=5 下 +1.16% 的 vol 增益不显著,加大 n 也许能定阈但本窗口 alpha 已确定为负。
 - **闭环少数委员会 portfolio 上下文降级**("Risk 数据不可用")→ 那几日不建仓,轻微低估活跃度。
 - holdout n≈14 个月单宏观路径;R0 修后基线 12 买 6 卖,成交仍偏少 → 业绩对建仓节奏敏感。
 - 模型训练 cutoff(2024-12-31)是 MiMo 自报非实证;若实际更晚,holdout 头部可能被污染(ADR-022)。

@@ -48,6 +48,34 @@ def parse_md(p):
             "dominant_view": d.group(1).strip() if d else ""}
 
 
+import os as _os
+import pandas as _pd
+from db.market_store import MarketStore as _MS
+
+
+_VOL_CACHE = {}
+
+
+def vol_target_factor(sym, d):
+    """R3-vol conditional vol-target(同 holdout_closed_loop.vol_target_factor):当前 20 日年化波动
+    vs 2 年分布,>80 分位 0.6 / <20 分位 1.4 / 中间 1.0,只缩放 BUY/ACCUMULATE。零前视(只 ≤d)。"""
+    if sym not in _VOL_CACHE:
+        _VOL_CACHE[sym] = _MS().get_history_df(sym, days=100000)
+    df = _VOL_CACHE[sym]
+    if df is None or df.empty:
+        return 1.0
+    df = df[df.index <= _pd.to_datetime(d)]
+    if len(df) < 80:
+        return 1.0
+    rets = df["Close"].pct_change().dropna()
+    cur = rets.tail(20).std() * (252 ** 0.5)
+    roll = (rets.rolling(20).std().dropna() * (252 ** 0.5)).tail(504)
+    if not (cur > 0) or len(roll) < 60:
+        return 1.0
+    pct = float((roll < cur).mean())
+    return 0.6 if pct >= 0.8 else (1.4 if pct <= 0.2 else 1.0)
+
+
 def main():
     store = MemoryStore()
     bt = store.root / ".backtest"
@@ -60,6 +88,7 @@ def main():
         print("无 holdout 日期")
         return
     end = dates[-1]
+    vol_on = bool(_os.getenv("INVEST_VOL_TARGET"))  # R3-vol overlay(quota-free 验证用)
     sim = PaperTradeSimulator(start_date=START, initial_cash_cny=INIT_CASH)
     n_verdict = 0
     for d in dates:
@@ -69,13 +98,15 @@ def main():
                 continue
             vd = parse_md(f)
             if vd:
+                if vol_on and str(vd["verdict"]).upper() in ("BUY", "ACCUMULATE"):
+                    vd = {**vd, "alloc_cny": vd["alloc_cny"] * vol_target_factor(sym, d)}
                 sim.execute_verdict(d, sym, vd)
                 n_verdict += 1
     tdays = _trading_days_between(START, end)
     sim.account.daily_values = [(d, sim.mark_to_market(d)) for d in tdays]
     benchmarks = build_benchmarks(START, end, INIT_CASH, ASSETS)
     m = evaluate_strategy(sim.account.daily_values, sim.account.transactions, benchmarks)
-    print(f"=== HOLDOUT 业绩(干净,1轮) {START}..{end} | {len(dates)} 决议日, {n_verdict} verdict ===")
+    print(f"=== HOLDOUT 业绩(干净,1轮) vol_target={vol_on} {START}..{end} | {len(dates)} 决议日, {n_verdict} verdict ===")
     print(f"总收益 {m['total_return_pct']:+.2f}% | 年化 {m['annualized_return_pct']:+.2f}% | "
           f"MaxDD {m['max_drawdown_pct']:.2f}% | Sharpe {m['sharpe_ratio']:.2f}")
     print(f"交易 BUY={m['n_buys']} SELL={m['n_sells']} HOLD={m['n_holds']} SKIP={m['n_skips']}")
