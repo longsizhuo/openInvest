@@ -193,7 +193,10 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
         except Exception as e:
             macro_view = f"[backtest macro failed: {e}]"
 
-        for symbol in pending:
+        # 当日各资产相互独立(共享同一 macro_view + portfolio 快照),并行跑 = 3× 提速。
+        # 全在 _patch_tools_to_date 内(patch 是日期级 process-global,所有线程同一 cutoff);
+        # LLM 是 IO-bound(GIL 在 IO 释放);_persist 各资产独立路径;llm_usage append <4096B 原子。
+        def _run_symbol(symbol):
             asset = {
                 "symbol": symbol,
                 "display_name": symbol,
@@ -203,7 +206,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 df = ef.get_history_data(symbol, "2y")
                 if df is None or df.empty or len(df) < 30:
                     print(f"  ⏭ {symbol}: skipped (insufficient history: {len(df) if df is not None else 0} rows)")
-                    continue
+                    return symbol, None
                 market_data = ef.analyze_multi_timeframe(df, symbol)
 
                 # 确定性 regime brief（双触发器 crash / recovery / per-asset 阈值），
@@ -254,15 +257,21 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                         f"{'<=' if contaminated else '>'} cutoff {CONTAMINATION_CUTOFF})\n"
                     )
 
-                results["verdicts"][symbol] = {
+                print(f"  ✓ {symbol}: {verdict['verdict']} (conf {verdict['confidence']:.2f})")
+                return symbol, {
                     "verdict": verdict["verdict"],
                     "confidence": verdict["confidence"],
                     "alloc_cny": verdict["alloc_cny"],
                 }
-                print(f"  ✓ {symbol}: {verdict['verdict']} (conf {verdict['confidence']:.2f})")
             except Exception as e:
                 print(f"  ✗ {symbol}: failed {type(e).__name__}: {e}")
-                results["verdicts"][symbol] = {"error": str(e)[:200]}
+                return symbol, {"error": str(e)[:200]}
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(pending) or 1) as ex:
+            for symbol, vd in ex.map(_run_symbol, pending):
+                if vd is not None:
+                    results["verdicts"][symbol] = vd
 
     return results
 
