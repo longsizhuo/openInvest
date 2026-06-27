@@ -42,7 +42,13 @@ log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
-from core.benchmarks import BenchmarkSeries, get_all_series
+from core.benchmarks import (
+    BENCHMARKS,
+    BenchmarkSeries,
+    get_all_series,
+    load_benchmark,
+    refresh_benchmark,
+)
 from core.memory_store import MemoryStore
 from utils.exchange_fee import get_history_data
 from utils.gold_price import get_gold_snapshot
@@ -233,21 +239,46 @@ def _latest_pct(series: BenchmarkSeries, start_date: str) -> Optional[float]:
 
 
 def _pct_label_pos(
-    pct: float, bar_x: float, bar_w: float, is_user: bool, bar_axis_left: float
+    pct: float, bar_x: float, bar_w: float, is_user: bool,
+    bar_axis_left: float, bar_axis_right: float = 720,
 ) -> Tuple[float, str, Optional[str]]:
     """柱状图 % 标签的 (x, text-anchor, fill)。
 
-    默认贴在条端外侧（正条右、负条左）。满宽负条外侧会向左压住左侧基准名 label
-    （openInvest#92）→ 放不下就翻到条内右生长，并换对比色（金色用户条用深色、
-    基准条用浅色）。fill=None 表示沿用条本身的颜色。
+    默认贴在条端外侧（正条右、负条左）。满宽条外侧可能越界：
+    - 负向满宽：外侧向左压住左侧基准名 label（openInvest#92）
+    - 正向满宽：外侧向右溢出画布右边距
+    两种情况都翻到条内，并换对比色保证可读。
+    fill=None 表示沿用条本身的颜色。
     """
     LABEL_W = 56  # ≈ "-100.00%" @ 11px 等宽字
+    _inside_fill = "#0d1117" if is_user else "#f0f6fc"
     if pct >= 0:
-        # 右侧固定留了 80px 边距，正条外侧标签放得下 → 保持原样
-        return bar_x + bar_w + 6, "start", None
+        outside_x = bar_x + bar_w + 6
+        if outside_x + LABEL_W <= bar_axis_right + 80:  # 80 = right margin
+            return outside_x, "start", None
+        # 正向满宽 → 翻到条内左端
+        return bar_x + bar_w - 6, "end", _inside_fill
     if bar_x - 6 - LABEL_W >= bar_axis_left:
         return bar_x - 6, "end", None
-    return bar_x + 6, "start", "#0d1117" if is_user else "#f0f6fc"
+    return bar_x + 6, "start", _inside_fill
+
+
+def _ensure_benchmarks_fresh(start_date: str, end_date: str) -> None:
+    """Auto-refresh benchmark caches that don't cover [start_date, end_date].
+
+    Without this, if cached benchmark data ends before the PnL history window
+    starts, ``to_pct_series`` returns empty → all benchmark bars disappear.
+    Only refreshes stale entries; already-fresh caches are left untouched.
+    Network failures are swallowed per-key (same as refresh_benchmark design).
+    """
+    for key in BENCHMARKS:
+        cached = load_benchmark(key)
+        if cached and cached.get("end", "") >= start_date:
+            continue  # cache covers the window
+        try:
+            refresh_benchmark(key, start_date, end_date)
+        except Exception as exc:
+            log.warning("benchmark refresh failed for %s: %s", key, exc)
 
 
 def render_svg(history: List[Dict[str, Any]]) -> str:
@@ -268,6 +299,12 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
 """
 
     start_date = history[0]["ts"][:10]
+    end_date = history[-1]["ts"][:10]
+
+    # 自动刷新过期基准缓存 — 缓存数据不覆盖当前渲染窗口时重拉
+    # （openInvest#92 根因之一：缓存 Apr 27 结束，窗口从 May 28 开始 → 0 条基准）
+    _ensure_benchmarks_fresh(start_date, end_date)
+
     benchmark_series = get_all_series(start_date)
 
     # ===== 上半：用户三线折线（不再叠加基准）=====
@@ -357,7 +394,7 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
         # 因为 % 是相对量、不暴露资产规模，与基准并排时藏起来反而显得心虚）
         pct_text = f"{pct:+.2f}%"
         pct_x, pct_anchor, pct_fill = _pct_label_pos(
-            pct, bar_x, bar_w, is_user, BAR_AXIS_LEFT
+            pct, bar_x, bar_w, is_user, BAR_AXIS_LEFT, BAR_AXIS_RIGHT
         )
         bar_svg.append(
             f'<text x="{pct_x:.1f}" y="{y + BAR_ROW_H / 2 + 4:.1f}" '
