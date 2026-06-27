@@ -19,19 +19,39 @@
 | 防穿越 | 仓位只由过去决策构成;summary 用 as-of-d 价 | 同 |
 
 ## 结果
-| 指标 | 基线(空桩) | 闭环(真实仓位) |
-|---|---|---|
-| 总收益 | +41.38% | +31.32% |
-| MaxDD | 13.32% | **11.30%** |
-| Sharpe | 1.63 | 1.47 |
-| **alpha vs 同资产 buy-hold** | +11.57%(**执行假象**) | **−2.58%**(真实) |
-| TRIM 执行 | ~0 | **16** |
-| BUY 执行 | 2 | 36 |
-| verdict 分布 | ACCUMULATE 380 / TRIM 8 / HOLD 563 | ACCUMULATE 36 / TRIM 16 / HOLD 140 |
 
-**两个关键判读**:
-1. 基线 +11.57% alpha 是**执行假象**:委员会 day1-2 把 ¥100k 现金买进 510300+黄金,01-07 想买 NDQ 时没钱→SKIP,**碰巧没拿到后来跑输的 NDQ**→赢了等权基准。不是决策。
-2. 闭环修复成功(委员会看到真实仓位→TRIM 16、MaxDD↓),但**真实 alpha = −2.58%(跑输 buy-hold)**:牛市里它的减仓=卖飞。**少亏的代价是少赚** = 防御型策略签名,不是正 skill。
+⚠ **2026-06-27 修订**:初版含执行 bug —— `paper_trade_simulator` 的 `alloc_cny<=0` 守卫把所有
+TRIM(负 alloc)吞成 HOLD → SELL 从不成交,委员会"减仓"全是 no-op。已修(R0:`qty_cny=abs(alloc)`
++ `tests/test_paper_trade_simulator_trim.py`)。初版的 +11.57% / −2.58% **作废**,下面是修复后。
+
+### 基线(空桩),R0 修复前后
+| 指标 | 修复前(buggy) | 修复后 |
+|---|---|---|
+| BUY / SELL 执行 | 2 / 0 | 12 / 6 |
+| 总收益 / Sharpe | +41.4% / 1.63 | +21.8% / 1.03 |
+| **alpha vs 同资产 buy-hold** | +11.57%(双重假象) | **−8.06%** |
+
+初版 +11.57% 是双重假象:① TRIM 被吞→从不卖;② 现金 day1-2 花光、碰巧没买跑输的 NDQ。
+修复后真相:**委员会主动交易(买+卖)跑输持有 8 个百分点。**
+
+### A/B 标尺(对照过拟合)
+| 基准 | alpha vs buy-hold |
+|---|---|
+| buy-hold(满仓持有) | 0%(定义) |
+| 傻瓜加速 DCA(`dumb_dca.py`,无委员会机械投) | **−1.15%** |
+| 委员会空桩基线(R0 修后) | **−8.06%** |
+
+→ 委员会主动交易**连机械 DCA 都跑不赢**。
+
+### 闭环 ±R3-vol(CI ⏳ 待填)
+10 个闭环并行:**5× 带 R3-vol**(conditional vol-target sizing,`INVEST_VOL_TARGET=1`)+ **5× R0-only**,
+各 ≥5 跑报 CI。**铁律**:R3-vol 的 CI 必须显著跑赢傻瓜 DCA 的 −1.15%,才算 sizing skill;否则赢的只是
+"把钱投进牛市",退回傻瓜 DCA。
+> ⏳ 2026-06-27 跑中(`memory/.backtest_cl_{v1..v5,n1..n5}`),完成后把 CI 填这里。
+
+### 真因(修复后归因)
+1. **欠配 / 现金拖累**:140 次 HOLD + ACCUMULATE 单笔太小(10万本金才投 1200-6300)→ 子弹拖 9 个月才投完。
+2. **牛市减仓 = 卖飞**:TRIM 真执行后,上行市里卖出拉低收益。
 
 ## 复现
 ```bash
@@ -40,14 +60,17 @@ cd <repo root>; export INVEST_HOME=$PWD PYTHONPATH=$PWD INVEST_MAX_DEBATE_ROUNDS
 uv run python experiments/closed-loop-skill-test/scripts/holdout_perf.py
 # 逐季立场 vs CMB:
 uv run python experiments/closed-loop-skill-test/scripts/holdout_quarterly_stance.py
-# 闭环全量(顺序,~数小时;写 memory/.backtest_closedloop/):
-uv run python experiments/closed-loop-skill-test/scripts/holdout_closed_loop.py
+# 闭环(顺序~数小时;RUN_TAG 写独立目录,INVEST_VOL_TARGET=1 开 R3-vol):
+RUN_TAG=v1 INVEST_VOL_TARGET=1 uv run python experiments/closed-loop-skill-test/scripts/holdout_closed_loop.py
+# 傻瓜加速 DCA A/B 基准(确定性,秒级):
+uv run python experiments/closed-loop-skill-test/scripts/dumb_dca.py
+# CI:并行起 5× vol(RUN_TAG=v1..v5 INVEST_VOL_TARGET=1)+ 5× R0-only(n1..n5),grep 各 log alpha 算均值±std
 ```
 `data/` 已存原始 transcript(baseline 955 + closed-loop 192)+ 闭环运行日志,免重烧。
 
 ## 局限(预注册诚实声明,引用前必读)
 - **窗口几乎全是上行市**(2025-2026)→ 没有大回撤给 de-risk skill 发挥;防御性在熊市也许才值钱,本窗口证不了。
-- **MiMo 有温度无 seed** → 单次蒙特卡洛,非点估计;严谨应同窗口重跑 ≥5 次报 CI(未做)。
+- **MiMo 有温度无 seed** → 单次蒙特卡洛;故闭环 ±R3-vol 各跑 ≥5 次报 CI(2026-06-27 进行中)。
 - **闭环少数委员会 portfolio 上下文降级**("Risk 数据不可用")→ 那几日不建仓,轻微低估活跃度。
-- holdout n≈14 个月单宏观路径;基线仅 2 笔实际成交 → 业绩对初始建仓极敏感。
+- holdout n≈14 个月单宏观路径;R0 修后基线 12 买 6 卖,成交仍偏少 → 业绩对建仓节奏敏感。
 - 模型训练 cutoff(2024-12-31)是 MiMo 自报非实证;若实际更晚,holdout 头部可能被污染(ADR-022)。
