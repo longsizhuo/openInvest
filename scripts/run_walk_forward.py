@@ -64,10 +64,12 @@ def _trading_days_between(start: str, end: str) -> List[str]:
 
 
 def _build_benchmark_curves(
-    start: str, end: str, initial_cash_cny: float,
+    start: str, end: str, initial_cash_cny: float, assets: "list | None" = None,
 ) -> Dict[str, List[Tuple[str, float]]]:
-    """4 个基准曲线：buy-and-hold 各个资产 + 余额宝 + 沪深300 + 持有现金"""
+    """基准曲线:`buy_hold`(实际交易资产的等权 buy-and-hold,T2 正确的 headline,reward 锚=它)
+    + 余额宝 + 沪深300 + 纯现金 + 等权组合(legacy,含 AAPL,勿当 headline)。"""
     from utils.exchange_fee import get_history_data
+    from core.paper_trade_simulator import get_asset_currency
     trading_days = _trading_days_between(start, end)
     if not trading_days:
         return {}
@@ -106,6 +108,16 @@ def _build_benchmark_curves(
         for d in trading_days:
             eq_curve[d] += sub_dict.get(d, cash)
     benchmarks["等权组合"] = [(d, v) for d, v in sorted(eq_curve.items())]
+
+    # 5. buy_hold：实际交易资产的等权 buy-and-hold —— T2 正确的 headline 基准,reward 锚=它
+    #    (不是上面含 AAPL 的 legacy 等权组合;ADR-022 T5)。无 assets 时退回三资产默认。
+    bh_assets = assets or ["NDQ.AX", "GC=F", "510300.SS"]
+    per = initial_cash_cny / len(bh_assets)
+    bh: Dict[str, float] = {d: 0.0 for d in trading_days}
+    for sym in bh_assets:
+        for d, v in _buy_and_hold_curve(sym, get_asset_currency(sym), start, end, per):
+            bh[d] += v
+    benchmarks["buy_hold"] = [(d, v) for d, v in sorted(bh.items())]
 
     return benchmarks
 
@@ -209,9 +221,10 @@ def run_walk_forward(
         v = sim.mark_to_market(d)
         sim.account.daily_values.append((d, v))
 
-    # 4. 算基准曲线
-    log.info("📈 计算 4 个基准曲线...")
-    benchmark_curves = _build_benchmark_curves(start, end, initial_cash_cny)
+    # 4. 算基准曲线（传 assets → buy_hold 用实际交易资产,非含 AAPL 的 legacy 篮）
+    log.info("📈 计算基准曲线...")
+    benchmark_curves = _build_benchmark_curves(start, end, initial_cash_cny, assets=assets)
+    assert "buy_hold" in benchmark_curves, "reward 锚 buy_hold 缺失(R1/ADR-022 T5)"
 
     # 5. evaluate metrics
     log.info("🧮 evaluate strategy...")
