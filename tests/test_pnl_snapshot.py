@@ -267,29 +267,136 @@ def test_feed_attribution_lookalike_host_not_matched(monkeypatch):
 
 # ---------- % 标签防与左侧名 label 重叠（openInvest#92 回归）----------
 # 柱状图左轴 BAR_AXIS_LEFT=200，左侧 <200 是基准名 label 区。
+# BAR_AXIS_RIGHT=720（W=800 - 80 右边距）。
 
 
 def test_pct_label_full_width_negative_flips_inside():
     # 满宽负条 bar_x≈200，外侧标签会向左压住名 label → 翻到条内右生长
-    x, anchor, fill = _pct_label_pos(-50.0, 200.0, 320.0, is_user=False, bar_axis_left=200)
+    x, anchor, fill = _pct_label_pos(
+        -50.0, 200.0, 320.0, is_user=False, bar_axis_left=200, bar_axis_right=720,
+    )
     assert anchor == "start"      # 条内、向右
     assert x >= 200               # 不进入左侧 label 区 (<200)
     assert fill == "#f0f6fc"      # 基准条上用浅色保证可读
 
 
 def test_pct_label_full_width_negative_user_bar_uses_dark():
-    _, _, fill = _pct_label_pos(-50.0, 200.0, 320.0, is_user=True, bar_axis_left=200)
+    _, _, fill = _pct_label_pos(
+        -50.0, 200.0, 320.0, is_user=True, bar_axis_left=200, bar_axis_right=720,
+    )
     assert fill == "#0d1117"      # 金色用户条改用深色
 
 
 def test_pct_label_short_negative_stays_outside():
     # 短负条远离左轴，外侧放得下 → 维持外侧左生长、沿用条色 (None)
-    assert _pct_label_pos(-3.0, 500.0, 18.0, is_user=False, bar_axis_left=200) == (
-        494.0, "end", None,
-    )
+    assert _pct_label_pos(
+        -3.0, 500.0, 18.0, is_user=False, bar_axis_left=200, bar_axis_right=720,
+    ) == (494.0, "end", None)
 
 
 def test_pct_label_positive_outside_unchanged():
-    assert _pct_label_pos(12.0, 400.0, 120.0, is_user=False, bar_axis_left=200) == (
-        526.0, "start", None,
+    assert _pct_label_pos(
+        12.0, 400.0, 120.0, is_user=False, bar_axis_left=200, bar_axis_right=720,
+    ) == (526.0, "start", None)
+
+
+# ---------- 正向满宽条 % 标签防右侧溢出 ----------
+
+def test_pct_label_full_width_positive_flips_inside():
+    """正向满宽条的 % 标签放到条端外侧会超出画布右边 → 翻到条内"""
+    # bar 从 400 到 720 (bar_w=320)，外侧 x=726 + LABEL_W(56) = 782 <= 800 → OK
+    x, anchor, fill = _pct_label_pos(
+        50.0, 400.0, 320.0, is_user=False, bar_axis_left=200, bar_axis_right=720,
     )
+    assert anchor == "start"
+    assert fill is None
+
+    # Bar 到 760 (bar_w=360), outside_x=766, 766+56=822 > 800 → flip
+    x3, anchor3, fill3 = _pct_label_pos(
+        99.0, 400.0, 360.0, is_user=False, bar_axis_left=200, bar_axis_right=720,
+    )
+    assert anchor3 == "end"       # 条内、向左
+    assert x3 == 400.0 + 360.0 - 6  # 贴在条右端内侧
+    assert fill3 == "#f0f6fc"     # 基准条用浅色
+
+
+def test_pct_label_full_width_positive_user_bar_uses_dark():
+    """正向满宽的用户条，翻入条内时用深色"""
+    _, _, fill = _pct_label_pos(
+        99.0, 400.0, 360.0, is_user=True, bar_axis_left=200, bar_axis_right=720,
+    )
+    assert fill == "#0d1117"
+
+
+# ---------- _ensure_benchmarks_fresh（过期基准自动刷新）----------
+
+def test_ensure_benchmarks_fresh_skips_when_cached_covers(monkeypatch):
+    """缓存数据覆盖 start_date 时不调用 refresh"""
+    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+
+    refresh_calls = []
+    monkeypatch.setattr(
+        "jobs.pnl_snapshot.load_benchmark",
+        lambda key: {"end": "2026-06-30"},
+    )
+    monkeypatch.setattr(
+        "jobs.pnl_snapshot.refresh_benchmark",
+        lambda k, s, e: refresh_calls.append(k),
+    )
+    _ensure_benchmarks_fresh("2026-06-01", "2026-06-27")
+    assert refresh_calls == []
+
+
+def test_ensure_benchmarks_fresh_refreshes_stale(monkeypatch):
+    """缓存 end < start_date 时自动刷新"""
+    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+
+    refresh_calls = []
+    monkeypatch.setattr(
+        "jobs.pnl_snapshot.load_benchmark",
+        lambda key: {"end": "2026-04-27"},  # stale
+    )
+    monkeypatch.setattr(
+        "jobs.pnl_snapshot.refresh_benchmark",
+        lambda k, s, e: refresh_calls.append(k),
+    )
+    _ensure_benchmarks_fresh("2026-05-28", "2026-06-27")
+    from core.benchmarks import BENCHMARKS
+    assert len(refresh_calls) == len(BENCHMARKS)
+
+
+def test_ensure_benchmarks_fresh_handles_no_cache(monkeypatch):
+    """无缓存时自动刷新"""
+    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+
+    refresh_calls = []
+    monkeypatch.setattr("jobs.pnl_snapshot.load_benchmark", lambda key: None)
+    monkeypatch.setattr(
+        "jobs.pnl_snapshot.refresh_benchmark",
+        lambda k, s, e: refresh_calls.append(k),
+    )
+    _ensure_benchmarks_fresh("2026-05-28", "2026-06-27")
+    from core.benchmarks import BENCHMARKS
+    assert len(refresh_calls) == len(BENCHMARKS)
+
+
+def test_ensure_benchmarks_fresh_swallows_errors(monkeypatch):
+    """单个基准 refresh 失败不影响其他基准"""
+    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+
+    refresh_calls = []
+    fail_count = [0]
+    monkeypatch.setattr("jobs.pnl_snapshot.load_benchmark", lambda key: None)
+
+    def _mock_refresh(k, s, e):
+        if fail_count[0] == 0:
+            fail_count[0] += 1
+            raise ConnectionError("network down")
+        refresh_calls.append(k)
+
+    monkeypatch.setattr("jobs.pnl_snapshot.refresh_benchmark", _mock_refresh)
+    _ensure_benchmarks_fresh("2026-05-28", "2026-06-27")
+    from core.benchmarks import BENCHMARKS
+    # 1 个失败，其余成功
+    assert len(refresh_calls) == len(BENCHMARKS) - 1
+
