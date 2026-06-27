@@ -131,9 +131,12 @@ class PaperTradeSimulator:
         HOLD：不动
         """
         direction = str(verdict.get("verdict", "HOLD")).upper()
-        alloc_cny = float(verdict.get("alloc_cny", 0) or 0)
+        # TRIM/SELL 的 alloc_cny 是负数(表示减仓方向),BUY/ACCUMULATE 是正数。统一取量级
+        # qty_cny,方向由 direction 决定。⚠ 旧代码 `alloc_cny <= 0` 把负的减仓 alloc 全吞成
+        # HOLD → SELL/TRIM 从不成交(回测里委员会"减仓"全是 no-op,曾被误判成"会 de-risk")。
+        qty_cny = abs(float(verdict.get("alloc_cny", 0) or 0))
 
-        if direction == "HOLD" or alloc_cny <= 0:
+        if direction == "HOLD" or qty_cny == 0:
             tx = Transaction(
                 decision_date=decision_date, asset=asset, action="HOLD",
                 units=0, price=0, cost_currency="", cny_value=0, fx_rate=0,
@@ -156,9 +159,9 @@ class PaperTradeSimulator:
             return tx
 
         if direction in ("BUY", "ACCUMULATE"):
-            return self._execute_buy(decision_date, asset, alloc_cny, price, ccy, fx)
+            return self._execute_buy(decision_date, asset, qty_cny, price, ccy, fx)
         elif direction in ("SELL", "TRIM"):
-            return self._execute_sell(decision_date, asset, alloc_cny, price, ccy, fx)
+            return self._execute_sell(decision_date, asset, qty_cny, price, ccy, fx)
         else:
             # 未知 verdict，当 HOLD
             tx = Transaction(
