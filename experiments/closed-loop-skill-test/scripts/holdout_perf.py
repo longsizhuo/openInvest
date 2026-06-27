@@ -32,7 +32,7 @@ START = "2025-01-01"
 INIT_CASH = 100_000.0
 
 _V = re.compile(r"\*\*Verdict\*\*:\s*(\w+)\s*\(confidence\s*([\d.]+)\)")
-_A = re.compile(r"\*\*Suggested allocation CNY\*\*:\s*([\d.]+)")
+_A = re.compile(r"\*\*Suggested allocation CNY\*\*:\s*(-?[\d.]+)")  # 保负号:TRIM 是负 alloc
 _D = re.compile(r"\*\*Dominant view\*\*:\s*(.+)")
 
 
