@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -327,9 +328,12 @@ def run_committee(
 
     # ===== CIO 综合所有 =====
     emit("cio_start", asset=sym)
+    # P3 A/B: INVEST_CIO_THINKING=1 给终裁 CIO 开思考模式（分析师仍 fast path）。
+    # 默认关——委员会 4 worker 已思考过，且无 alpha 证据下加思考未必值（见 wiki 17）。
+    _cio_thinking = bool(os.getenv("INVEST_CIO_THINKING"))
     cio_agent = _create_agent(
         build_cio_prompt(asset), search_enabled=False, temperature=0.1,
-        role="cio", asset=sym, round_label="cio",
+        role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
     )
     # CIO 看完整辩论历史（不只是最后一轮），让它能识别 agent 是否在讨论中漂移
     cio_brief = report.to_cio_brief()

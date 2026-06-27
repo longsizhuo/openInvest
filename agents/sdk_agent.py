@@ -58,6 +58,7 @@ class SDKAgent:
         max_tool_iterations: int = 4,
         provider: str = "openai",
         telemetry_meta: Optional[TelemetryMeta] = None,
+        enable_thinking: bool = False,
     ):
         # caller 不传 model → 走 utils.llm.get_llm_config（按 LLM_MODEL 决定，兜底 deepseek-v4-flash）
         if model is None:
@@ -68,6 +69,10 @@ class SDKAgent:
         self.temperature = temperature
         self.enable_tools = enable_tools
         self.max_tool_iterations = max_tool_iterations
+        # 默认沿用全局策略（committee 4 worker 已思考 → disable 走 fast path）。
+        # enable_thinking=True 给单角色（如 CIO 终裁）开思考做 A/B；DeepSeek 思考的
+        # reasoning_content 与 content 分开，不像 MiMo 会吃空 content。
+        self.enable_thinking = enable_thinking
         self.provider = provider
         self.last_tool_calls: List[ToolCallTrace] = []
         # v3 透明化：LLM 调用元数据；caller 不传则用默认匿名
@@ -103,6 +108,15 @@ class SDKAgent:
             usage = getattr(response, "usage", None)
             input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
             output_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+            # KVCache 命中 token：DeepSeek 用 usage.prompt_cache_hit_tokens；
+            # OpenAI 风格用 usage.prompt_tokens_details.cached_tokens。两种都抓，算真实成本。
+            cache_hit_tokens = 0
+            if usage:
+                cache_hit_tokens = int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0)
+                if not cache_hit_tokens:
+                    details = getattr(usage, "prompt_tokens_details", None)
+                    if details:
+                        cache_hit_tokens = int(getattr(details, "cached_tokens", 0) or 0)
 
             # 这一轮里 assistant 主动要调多少 tool（next-step）
             msg = response.choices[0].message
@@ -116,6 +130,7 @@ class SDKAgent:
                 tool_calls=tool_calls_planned,
                 iteration=iteration,
                 ok=True,
+                cache_hit_tokens=cache_hit_tokens,
             )
             return response
         except Exception as e:
@@ -146,7 +161,9 @@ class SDKAgent:
         # DeepSeek v4 / MiMo v2.5 系列默认 thinking 模式 → committee 场景 disable 走 fast 路径
         # （MiMo CIO long prompt 下 thinking 会吃完 max_tokens 导致 content 为空）。
         # 不同 provider 的 extra_body 格式不同（DeepSeek 用 dict，MiMo 用 string），helper 统一处理。
-        kwargs.update(get_thinking_disable_kwargs(self.model))
+        # enable_thinking=True 的角色跳过 disable，保留思考模式（P3 CIO A/B）。
+        if not self.enable_thinking:
+            kwargs.update(get_thinking_disable_kwargs(self.model))
         if self.enable_tools:
             kwargs["tools"] = TOOL_DEFINITIONS
             kwargs["tool_choice"] = "auto"

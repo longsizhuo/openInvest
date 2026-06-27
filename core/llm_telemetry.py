@@ -36,16 +36,17 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger(__name__)
 
-# DeepSeek 公开定价（2026-05 v4 系列，单位 CNY / 1M tokens；按 1 USD ≈ 7.1 CNY 换算）
-# https://api-docs.deepseek.com/quick_start/pricing
+# DeepSeek 公开定价（官方 pricing page，单位 CNY / 1M tokens）
+# https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 # v4-flash = 旧 deepseek-chat 非 thinking 模式；v4-pro = 旧 deepseek-reasoner thinking 模式
-# v4-pro 当前 75% 折扣，截止 2026-05-31，过期后回到全价（×4）
+# input_cache_hit = KVCache 命中价（共享前缀复用，便宜 50×）；input = 未命中价。
+# 2026-06：v4-pro 折扣（曾 ¥3.1/¥6.2）已于 2026-05-31 过期，回到全价（models.json $1.74/$3.48 ×7.1）。
 PRICING_CNY_PER_M_TOKENS: Dict[str, Dict[str, float]] = {
-    "deepseek-v4-flash": {"input": 1.0, "output": 2.0},      # $0.14/$0.28 ≈ ¥1.0/¥2.0
-    "deepseek-v4-pro": {"input": 3.1, "output": 6.2},        # 折扣价 $0.435/$0.87 ≈ ¥3.1/¥6.2
-    # legacy 名（兼容旧 telemetry 日志，新调用走 v4-flash）
-    "deepseek-chat": {"input": 1.0, "output": 2.0},
-    "deepseek-reasoner": {"input": 3.1, "output": 6.2},
+    "deepseek-v4-flash": {"input": 1.0, "input_cache_hit": 0.02, "output": 2.0},
+    "deepseek-v4-pro": {"input": 12.4, "input_cache_hit": 1.03, "output": 24.7},
+    # legacy 名（兼容旧 telemetry 日志；2026-07-24 弃用，等价 v4-flash/v4-pro）
+    "deepseek-chat": {"input": 1.0, "input_cache_hit": 0.02, "output": 2.0},
+    "deepseek-reasoner": {"input": 12.4, "input_cache_hit": 1.03, "output": 24.7},
     # OpenAI 价格更贵，先用 gpt-4o 作为占位（如真用上要更新）
     "gpt-4o": {"input": 17.0, "output": 70.0},        # ~$2.5/$10 ≈ ¥17/¥70
     "gpt-4o-mini": {"input": 1.1, "output": 4.3},
@@ -67,14 +68,23 @@ class TelemetryMeta:
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
-def estimate_cost_cny(model: str, input_tokens: int, output_tokens: int) -> float:
-    """根据公开定价估算单次调用成本"""
+def estimate_cost_cny(model: str, input_tokens: int, output_tokens: int,
+                      cache_hit_tokens: int = 0) -> float:
+    """根据公开定价估算单次调用成本。
+
+    cache_hit_tokens（KVCache 命中的输入 token 数，DeepSeek usage 返回）按命中价计，
+    其余输入按未命中价——不传则全按未命中（保守上界，旧行为）。
+    """
     pricing = PRICING_CNY_PER_M_TOKENS.get(model)
     if not pricing:
         return 0.0
+    hit = min(max(cache_hit_tokens or 0, 0), input_tokens or 0)
+    miss = (input_tokens or 0) - hit
+    hit_rate = pricing.get("input_cache_hit", pricing["input"])
     return round(
-        input_tokens / 1_000_000 * pricing["input"]
-        + output_tokens / 1_000_000 * pricing["output"],
+        miss / 1_000_000 * pricing["input"]
+        + hit / 1_000_000 * hit_rate
+        + (output_tokens or 0) / 1_000_000 * pricing["output"],
         6,
     )
 
@@ -89,12 +99,15 @@ def record_llm_call(
     iteration: int = 0,
     ok: bool = True,
     error: Optional[str] = None,
+    cache_hit_tokens: int = 0,
 ) -> Dict[str, Any]:
     """记录一次 LLM 调用。线程安全（单 append fcntl-style 不严格，jsonl 容忍并发追加）
 
+    cache_hit_tokens：KVCache 命中的输入 token（DeepSeek usage 返回）→ 按命中价计真实成本。
+
     返回 record dict（caller 可用作 logging）。
     """
-    cost = estimate_cost_cny(meta.model, input_tokens, output_tokens)
+    cost = estimate_cost_cny(meta.model, input_tokens, output_tokens, cache_hit_tokens)
     record: Dict[str, Any] = {
         "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
         "agent_role": meta.agent_role,
@@ -103,6 +116,7 @@ def record_llm_call(
         "provider": meta.provider,
         "model": meta.model,
         "input_tokens": int(input_tokens or 0),
+        "cache_hit_tokens": int(cache_hit_tokens or 0),
         "output_tokens": int(output_tokens or 0),
         "total_tokens": int((input_tokens or 0) + (output_tokens or 0)),
         "latency_ms": int(latency_ms),
