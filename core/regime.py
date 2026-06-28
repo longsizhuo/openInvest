@@ -153,6 +153,7 @@ def classify_regime(
     # atr_spike_ratio 不参与分类，但回写进 inputs_used → format_regime_brief 的
     # INPUTS 行 → coordinator transcript，让 atr_defense_from_text 两路径同源
     inputs_used = {
+        # 未归一化绝对 MA → format_regime_brief INPUTS 行 → 记忆穿越指纹(ADR-022)。其余分位/spread 已相对,唯独这俩漏绝对量。
         "ma20": ma20,
         "ma120": ma120,
         "atr_pct": atr_pct,

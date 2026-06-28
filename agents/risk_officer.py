@@ -27,12 +27,14 @@ def build_risk_officer_prompt(asset: Dict[str, Any], round_label: str = "opening
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
     )
-    # 集中度 lens 关闭时（单资产/刻意集中策略）压掉超配升级。前置注入而非占位符：一次覆盖
-    # opening + rebuttal 两个 SKILL 文件，不会漏某一轮。CONCENTRATION_PCT 字段仍如实输出。
+    # 集中度 lens 关闭时（单资产/刻意集中策略）彻底隐藏集中度。前置注入而非占位符：一次覆盖
+    # opening + rebuttal 两个 SKILL 文件，不会漏某一轮。配合 portfolio_summary 已不喂集中度数字
+    # （单一源 gate），这里再令模型省略字段 + 不提及，OFF 时集中度从报告彻底消失。
     if not load_config().verdict.concentration_lens_enabled:
         directive = (
-            "**🚫 集中度 lens 已关闭（单资产 / 刻意集中策略）**：下方 CONCENTRATION_PCT 字段仍如实"
-            "输出该资产占比，但**不得据此升级 SIGNAL 或建议减仓**（跳过 `>60% 至少 concerned` 规则）。"
+            "**🚫 集中度 lens 已关闭（单资产 / 刻意集中策略）**：用户上下文里已【不含】集中度数字。"
+            "**不要输出 CONCENTRATION_PCT 字段，也不要在分析/理由里提及集中度、仓位占比、超配**"
+            "（跳过下方模板的 CONCENTRATION_PCT 与 `>60% 至少 concerned` 规则）。"
             "其余风险维度（波动 / 回撤 / 止损 / 现金流动性 / 追涨）照常评估。\n\n"
         )
         prompt = directive + prompt

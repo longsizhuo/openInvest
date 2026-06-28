@@ -63,7 +63,10 @@ def _yf_max(symbol):
     if df is None or df.empty:
         return None
     if df.index.tz is not None:
-        df.index = df.index.tz_convert(None)
+        # tz_localize(None) 保留交易所【挂牌当日】的 wall-clock date；
+        # 绝不能用 tz_convert(None)——它把 Asia/Australia(UTC+8/+11) 的周一 00:00 转成 UTC
+        # 变成周日，凭空造出"周末 bar"，且该 bar 收盘 = 次日(周一)价 → 未来泄漏 + 指标失真。
+        df.index = df.index.tz_localize(None)
     return df
 
 

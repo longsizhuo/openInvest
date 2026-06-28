@@ -60,15 +60,15 @@ def test_abort_when_all_assets_missing(mock_pm, monkeypatch):
         "phase": "daily_report_aborted_stale",
         "reason": "all_assets_unusable",
         "asset_freshness": {"NDQ.AX": "missing", "GC=F": "missing"},
-        "abort_threshold_days": daily_report_mod.STALE_HARD_ABORT_DAYS,
+        "abort_threshold_days": daily_report_mod.get_stale_hard_abort_days(),
         "date": result["date"],
     })
 
 
 def test_abort_when_all_very_stale(mock_pm, monkeypatch):
     """NDQ + GC=F 都 very_stale 时熔断"""
-    # 把硬熔断阈值 patch 到 5 天
-    monkeypatch.setattr(daily_report_mod, "STALE_HARD_ABORT_DAYS", 5)
+    # 把硬熔断阈值 patch 到 5 天（常量已改为读 config 的 get_stale_hard_abort_days()）
+    monkeypatch.setattr(daily_report_mod, "get_stale_hard_abort_days", lambda: 5)
 
     # NDQ 价存在但 14 天前（> 5）→ very_stale
     monkeypatch.setattr(

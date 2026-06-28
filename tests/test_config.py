@@ -545,3 +545,74 @@ class TestDCAConfig:
         view = {it["key"]: it for it in effective_api_config()}
         assert "dca.auto_dca_enabled" in view
         assert view["dca.auto_dca_enabled"]["value"] is False
+
+
+# ---------- 事件与陈旧度配置（EventConfig & StalenessConfig）----------
+
+
+class TestEventAndStalenessConfig:
+    """验证 EventConfig 和 StalenessConfig 的默认值、注入覆盖与 API 白名单"""
+
+    @pytest.fixture(autouse=True)
+    def _tmp_memory(self, tmp_path, monkeypatch):
+        from core import memory_store as ms
+        monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
+        yield
+
+    def test_event_and_staleness_defaults(self):
+        cfg = load_config()
+        # EventConfig 默认值
+        assert cfg.event.enabled is True
+        assert cfg.event.rag_window_days == 7
+        assert cfg.event.rag_min_severity == "mid"
+        assert cfg.event.rag_top_k == 8
+        assert cfg.event.max_per_source == 15
+        assert cfg.event.min_severity == "mid"
+        assert cfg.event.max_rounds == 2
+        # StalenessConfig 默认值
+        assert cfg.staleness.price_stale_days == 3
+        assert cfg.staleness.hard_abort_stale_days == 7
+
+    def test_env_override_event_and_staleness(self, monkeypatch):
+        monkeypatch.setenv("INVEST_EVENT_RAG_ENABLED", "false")
+        monkeypatch.setenv("INVEST_EVENT_RAG_WINDOW_DAYS", "14")
+        monkeypatch.setenv("INVEST_EVENT_RAG_MIN_SEVERITY", "high")
+        monkeypatch.setenv("INVEST_PRICE_STALE_DAYS", "5")
+        monkeypatch.setenv("INVEST_HARD_ABORT_STALE_DAYS", "10")
+        reset_config()
+        cfg = load_config()
+        assert cfg.event.enabled is False
+        assert cfg.event.rag_window_days == 14
+        assert cfg.event.rag_min_severity == "high"
+        assert cfg.staleness.price_stale_days == 5
+        assert cfg.staleness.hard_abort_stale_days == 10
+
+    def test_api_whitelist_registration(self):
+        assert "event.enabled" in API_SETTABLE
+        assert API_SETTABLE["event.enabled"]["type"] == "bool"
+        assert "event.rag_window_days" in API_SETTABLE
+        assert API_SETTABLE["event.rag_window_days"]["type"] == "int"
+        assert "event.rag_min_severity" in API_SETTABLE
+        assert API_SETTABLE["event.rag_min_severity"]["type"] == "enum"
+        assert "staleness.price_stale_days" in API_SETTABLE
+        assert API_SETTABLE["staleness.price_stale_days"]["type"] == "int"
+
+    def test_set_persisted_event_and_staleness(self):
+        # bool coercion
+        cfg = set_persisted_override("event.enabled", "false")
+        assert cfg.event.enabled is False
+
+        # int coercion
+        cfg = set_persisted_override("event.rag_top_k", "12")
+        assert cfg.event.rag_top_k == 12
+
+        # enum validation
+        cfg = set_persisted_override("event.rag_min_severity", "high")
+        assert cfg.event.rag_min_severity == "high"
+        with pytest.raises(ValueError):
+            set_persisted_override("event.rag_min_severity", "invalid_sev")
+
+        # staleness int coercion
+        cfg = set_persisted_override("staleness.price_stale_days", 4)
+        assert cfg.staleness.price_stale_days == 4
+

@@ -203,6 +203,8 @@ class TestPortfolioSummaryText:
         Risk Officer 据假 0% 决策（关闭集中度风控）。修复后应输出可见降级标记，
         促人工复核而非沉默归零。
         """
+        from core.config import set_config_override
+        set_config_override({"verdict": {"concentration_lens_enabled": True}})  # 测集中度计算→显式开 lens
         holdings = [
             {"symbol": "NDQ.AX", "kind": "etf", "units": 100.0, "unit_label": "股",
              "avg_cost": 50.0, "cost_currency": "AUD", "display_name": "Nasdaq100"},
@@ -223,6 +225,8 @@ class TestPortfolioSummaryText:
         """传入已修正的合法 total（只含可解析腿），缺价 holding 只显示均价不被归零，
         有价 holding 显示正确非零集中度。
         """
+        from core.config import set_config_override
+        set_config_override({"verdict": {"concentration_lens_enabled": True}})  # 测集中度计算→显式开 lens
         holdings = [
             # 黄金：1 单位 * 134 CNY = 134 CNY 市值
             {"symbol": "GOLD", "kind": "commodity", "units": 1.0, "unit_label": "克",
@@ -243,6 +247,21 @@ class TestPortfolioSummaryText:
         assert "510300.SS" in text
         # 缺价腿那一行不应出现伪造 0.0% 集中度
         assert "集中度 0.0%" not in text
+
+    def test_concentration_hidden_when_lens_off(self, tmp_path):
+        """集中度 lens 关闭(默认,ADR-020)时 portfolio_summary 完全不渲染集中度。
+        这是 cron/session/Direct 共用的单一源 helper,关一处即三路径全关。"""
+        holdings = [
+            {"symbol": "GOLD", "kind": "commodity", "units": 1.0, "unit_label": "克",
+             "avg_cost": 100.0, "cost_currency": "CNY", "display_name": "黄金"},
+        ]
+        pm = _make_pm(tmp_path, cash={"CNY": 100.0}, holdings=holdings)
+        # 默认 config = lens OFF（#93/ADR-020），不显式 override
+        text = portfolio_summary_text(
+            pm, total_assets_cny=234.0, current_prices={"GOLD": 134.0},
+        )
+        assert "集中度" not in text, "lens OFF 时集中度不应出现在 portfolio_summary"
+        assert "黄金" in text and "浮盈" in text  # 其余持仓信息仍在
 
 
 # ============ load_backup_cny：守 emergency_buffer_cny key 漂移回归 ============

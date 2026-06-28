@@ -1174,6 +1174,11 @@ def test_config_endpoints_roundtrip(client):
         "verdict.concentration_lens_enabled", "verdict.risk_profile",
         "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",
         "dca.auto_dca_enabled", "dca.auto_dca_amount_cny",
+        # ADR-017: event RAG + staleness 阈值也进 config API 白名单(558d9e9)
+        "event.enabled", "event.min_severity", "event.max_rounds",
+        "event.max_per_source", "event.rag_top_k", "event.rag_window_days",
+        "event.rag_min_severity",
+        "staleness.price_stale_days", "staleness.hard_abort_stale_days",
     }
     assert items["verdict.concentration_lens_enabled"]["value"] is False  # ADR-020: default OFF
     assert items["verdict.concentration_lens_enabled"]["overridden"] is False

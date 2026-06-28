@@ -49,3 +49,4 @@ docs/path_calibration.md
 
 # okf-frontmatter skill 的可选索引缓存（run.sh index --cache 生成，可重建）
 docs/.okf-index.json
+experiments/reference/

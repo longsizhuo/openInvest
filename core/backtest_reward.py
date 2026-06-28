@@ -60,14 +60,17 @@ def compute_strategy_reward(metrics: Dict[str, Any]) -> float:
     max_dd = metrics.get("max_drawdown_pct", 0) / 100  # 已是绝对值
     sharpe = metrics.get("sharpe_ratio", 0)
 
-    # vs 余额宝 alpha（如果有）
-    vs = metrics.get("vs_benchmarks", {}).get("余额宝", {})
-    alpha_yuebao = vs.get("alpha_pct", 0) / 100
+    # reward 锚 = 同资产 buy-and-hold（ADR-022 T5 / R1 修复）。旧锚=余额宝/现金:牛市跑赢现金
+    # trivial,且可同时输给 buy-hold → 优化器被奖励"坐现金避险"(正是 −8% alpha 那套行为)。
+    # 换成 vs buy_hold 的 alpha 才奖励真超额。weight_alpha_vs_yuebao 字段名沿用(配置面未改),
+    # 语义已是"alpha 锚项权重"。buy_hold 缺失时退化为 0(不奖不罚),run_walk_forward 已 assert 它在。
+    vs = metrics.get("vs_benchmarks", {}).get("buy_hold", {})
+    alpha_anchor = vs.get("alpha_pct", 0) / 100
 
     reward = (
         cfg.weight_annualized_return * annualized
         + cfg.weight_max_drawdown * max_dd
-        + cfg.weight_alpha_vs_yuebao * alpha_yuebao
+        + cfg.weight_alpha_vs_yuebao * alpha_anchor
         + cfg.weight_sharpe_bonus * max(0, sharpe - cfg.sharpe_bonus_threshold)
     )
 
@@ -80,8 +83,8 @@ def explain_reward(metrics: Dict[str, Any]) -> str:
     annualized = metrics.get("annualized_return_pct", 0)
     max_dd = metrics.get("max_drawdown_pct", 0)
     sharpe = metrics.get("sharpe_ratio", 0)
-    vs = metrics.get("vs_benchmarks", {}).get("余额宝", {})
-    alpha_yuebao = vs.get("alpha_pct", 0)
+    vs = metrics.get("vs_benchmarks", {}).get("buy_hold", {})
+    alpha_anchor = vs.get("alpha_pct", 0)
 
     reward = compute_strategy_reward(metrics)
 
@@ -89,7 +92,7 @@ def explain_reward(metrics: Dict[str, Any]) -> str:
         f"reward = {reward:.4f}\n"
         f"  ├─ 年化收益: {annualized:+.2f}%  →  +{cfg.weight_annualized_return * annualized/100:.4f}\n"
         f"  ├─ 最大回撤: {max_dd:.2f}%   →  {cfg.weight_max_drawdown * max_dd/100:.4f}\n"
-        f"  ├─ vs 余额宝: {alpha_yuebao:+.2f}%  →  +{cfg.weight_alpha_vs_yuebao * alpha_yuebao/100:.4f}\n"
+        f"  ├─ vs buy-hold: {alpha_anchor:+.2f}%  →  +{cfg.weight_alpha_vs_yuebao * alpha_anchor/100:.4f}\n"
         f"  └─ Sharpe ratio: {sharpe:.2f}  →  +{cfg.weight_sharpe_bonus * max(0, sharpe-cfg.sharpe_bonus_threshold):.4f}"
     )
 

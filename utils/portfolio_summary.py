@@ -84,6 +84,11 @@ def portfolio_summary_text(
     # 直接显式输出每个 asset 的 concentration_pct 给 Risk Officer 用。
     # 用 utils.fx.to_base 而非硬编码 if ccy=="AUD"，支持任意币种 (EUR/JPY/HKD 等)。
     from utils.fx import to_base
+    from core.config import load_config
+    # 集中度 lens 关闭(ADR-020：单资产/刻意集中策略)→ 单一源在此 gate,不渲染集中度。
+    # 这是 cron / session / Direct 三路径共用的 helper,在此关一处即全关;下游
+    # _extract_concentration_from_summary 取不到 → cio_parse 覆写 no-op，Risk 也拿不到数字。
+    _show_conc = bool(load_config().verdict.concentration_lens_enabled)
     holding_values_cny: Dict[str, float] = {}
     for h in real_holdings:
         sym = str(h.get("symbol", ""))
@@ -123,28 +128,29 @@ def portfolio_summary_text(
         pnl_pct = ((cur / cost) - 1) * 100
         pnl_local = (cur - cost) * units
         ccy_symbol = "¥" if ccy == "CNY" else ("$" if ccy in ("USD", "AUD") else "")
-        # 集中度 = 该 asset CNY 市值 / total_assets_cny
-        value_cny = holding_values_cny.get(sym, 0.0)
-        if total_ok:
-            conc_pct = value_cny / total_assets_cny * 100
-            conc_str = (
-                f"**集中度 {conc_pct:.1f}%** "
-                f"(CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})"
-            )
-        else:
-            # total 不可用（NaN/缺）：绝不伪造 0.0%，输出可见降级标记促人工复核
-            conc_str = (
-                f"**集中度 暂不可计算**（总资产不可用，请勿据此做集中度判断；"
-                f"CNY 市值 ¥{value_cny:,.0f}）"
-            )
-        lines.append(
+        line = (
             f"  - **{display}** ({sym}){channel_str}: "
             f"{units:.4f} {unit_label}, "
             f"均价 {ccy_symbol}{cost:.2f}, "
             f"现价 {ccy_symbol}{cur:.2f}, "
-            f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy}), "
-            f"{conc_str}",
+            f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})"
         )
+        # 集中度 = 该 asset CNY 市值 / total_assets_cny —— 仅 lens 开启时渲染（ADR-020）
+        if _show_conc:
+            value_cny = holding_values_cny.get(sym, 0.0)
+            if total_ok:
+                conc_pct = value_cny / total_assets_cny * 100
+                line += (
+                    f", **集中度 {conc_pct:.1f}%** "
+                    f"(CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})"
+                )
+            else:
+                # total 不可用（NaN/缺）：绝不伪造 0.0%，输出可见降级标记促人工复核
+                line += (
+                    f", **集中度 暂不可计算**（总资产不可用，请勿据此做集中度判断；"
+                    f"CNY 市值 ¥{value_cny:,.0f}）"
+                )
+        lines.append(line)
 
     # 真实总财富占比注释（当有兜底 backup 时附注，给 Risk Officer / CIO 参考）
     if backup_cny > 0:

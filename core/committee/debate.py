@@ -13,7 +13,9 @@
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -327,9 +329,17 @@ def run_committee(
 
     # ===== CIO 综合所有 =====
     emit("cio_start", asset=sym)
+    # P3 A/B: INVEST_CIO_THINKING=1 给终裁 CIO 开思考模式（分析师仍 fast path）。
+    # 默认关——委员会 4 worker 已思考过，且无 alpha 证据下加思考未必值（见 wiki 17）。
+    _cio_thinking = bool(os.getenv("INVEST_CIO_THINKING"))
+    # P1: CIO 走 DeepSeek JSON Output 结构化裁决，替正则解析（治 TRIM 负号等一类 bug）。
+    # 与思考 A/B 互斥（思考路径留文本+regex）。不支持的 provider 由下方运行时优雅回退兜底。
+    from utils.llm import supports_json_output
+    _want_json = supports_json_output() and not _cio_thinking
     cio_agent = _create_agent(
-        build_cio_prompt(asset), search_enabled=False, temperature=0.1,
-        role="cio", asset=sym, round_label="cio",
+        build_cio_prompt(asset, json_mode=_want_json), search_enabled=False, temperature=0.1,
+        role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
+        response_format=({"type": "json_object"} if _want_json else None),
     )
     # CIO 看完整辩论历史（不只是最后一轮），让它能识别 agent 是否在讨论中漂移
     cio_brief = report.to_cio_brief()
@@ -346,11 +356,36 @@ def run_committee(
     if reentry_reference:
         cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{reentry_reference}"
     report.cio_memo = _ask(cio_agent, cio_brief)
+
+    # P1 优雅回退：JSON 模式下试解析；provider 没真支持 / 没吐合法 JSON（含 _ask 失败返回
+    # 的 [WORKER_UNAVAILABLE] 哨兵）→ 退回文本模式重问一次，走 regex。DeepSeek 正常一次过。
+    cio_fields: Optional[Dict[str, Any]] = None
+    if _want_json:
+        try:
+            cio_fields = json.loads(report.cio_memo)
+            if not isinstance(cio_fields, dict):
+                cio_fields = None
+        except (ValueError, TypeError):
+            cio_fields = None
+        if cio_fields is None:
+            log.warning("CIO JSON Output 未拿到合法 JSON（provider 不支持？）→ 优雅回退文本模式重问")
+            cio_agent = _create_agent(
+                build_cio_prompt(asset, json_mode=False), search_enabled=False, temperature=0.1,
+                role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
+            )
+            report.cio_memo = _ask(cio_agent, cio_brief)
+        else:
+            # prose 保住：GUI/transcript 展示 memo 字段（缺失则留原始 JSON 文本）
+            _memo = cio_fields.get("memo")
+            if isinstance(_memo, str) and _memo.strip():
+                report.cio_memo = _memo
     emit("cio_done",
          memo_preview=report.cio_memo[:240])
 
     cio_parsed = parse_cio_memo(
         report.cio_memo,
+        fields=cio_fields,
+        worker_brief=cio_brief,
         current_price=current_price,
         # risk_profile / 快崩防御 后处理输入：regime 标签来自确定性 regime_brief
         # 首行；防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 腿（资产级, 调用方算好）

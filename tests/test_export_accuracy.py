@@ -86,6 +86,22 @@ def _write_jsonl(path: Path, rows: list) -> None:
     )
 
 
+# ---------- ADR-022:backtest 不进公开 accuracy ----------
+
+def test_backtest_entries_excluded_from_public(tmp_path):
+    """公开 accuracy 只反映 live 实时战绩;backtest 条目(污染 pre-cutoff 或干净 holdout)全剔除。"""
+    from scripts.export_accuracy import build_summary
+    jsonl = tmp_path / "verdict_review.jsonl"
+    live = [{**_make_row("2025-03-03", "up", True), "source": "live"} for _ in range(5)]
+    bt = [{**_make_row("2020-02-14", "up", True), "source": "backtest"} for _ in range(40)]
+    _write_jsonl(jsonl, live + bt)
+    assert build_summary(jsonl)["windows"]["all"]["sample_size"] == 5, \
+        "backtest 条目泄漏进了公开 accuracy(ADR-022 红线)"
+    # 缺 source 的老条目按 live 计入(向后兼容:jsonl 早于 backtest 集成时全是 live)
+    _write_jsonl(jsonl, [_make_row("2025-03-03", "up", True)])
+    assert build_summary(jsonl)["windows"]["all"]["sample_size"] == 1
+
+
 # ---------- 脱敏红线测试 ----------
 
 def test_no_sensitive_fields_in_output(tmp_path):
