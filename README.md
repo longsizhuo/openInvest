@@ -24,7 +24,7 @@
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
   <sub>数据流基于 `jobs/pnl_snapshot` 每 2 小时原子替换自动更新至 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a></sub>
   <br/>
-  <sub>上半图：30天净值动量趋势 · 下半图：相较于 8 类基准资产的累计超额收益 (Alpha)</sub>
+  <sub>上半图：30天净值趋势 · 下半图：相较于 8 类基准资产的净值对照（透明披露，<b>非 alpha 主张</b>——委员会的可证价值是纪律与透明，不是超额收益，见 <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>）</sub>
   <br/>
   <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，系统将依据您在 `memory/` 中定义的专属账户持仓自动渲染对应的净值曲线。</sub>
 </div>
@@ -33,7 +33,7 @@
 <!-- OUTPERFORM_FEED_END -->
 
 *   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
-*   **系统统计自我披露**：本系统属于**消除人类投资认知偏差、强化推理过程透明度**的审计工具，而非收益放大黑盒。在长期运行统计中，方向性 Verdict 的绝对历史命中率为 **25%**，其中 `HOLD`（不作为）决策占比高达 **84%**。完整审计流水详见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。
+*   **系统统计自我披露**：本系统是**消除人类投资认知偏差、强化推理透明度**的审计工具，而非收益放大黑盒。最新自动审计（`docs/verdict_accuracy.md`）：方向性 Verdict（剔除 HOLD）真实命中率 **42.2%**（n=56，**低于随机**）；`HOLD`（不作为）占 **56%**；含 HOLD 的 7d 命中率 70.7% 系"HOLD 算 hit"灌水。即系统价值在透明/纪律（多数时候不作为、低换手），**不在方向预测**。完整流水详见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。
 
 ---
 

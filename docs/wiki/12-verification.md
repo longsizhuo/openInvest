@@ -238,6 +238,23 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
      一个 ±40% 的横轴误差就能翻转 PASS/FAIL。这正是 forward_return 单一可信源
      （`core/regime_probability.py`）要解决的根因。
 
+7. **趋势择时 overlay 扛不住交易——Q2 的"黄金 MA200 信号"是 beta（2026-06-28，
+   `experiments/signal-eval/trend_dca.py`）**
+   → 背景：signal-eval Q2 发现"黄金价在 MA200 上方 90d forward 中位 +3.43% vs 下方
+     −0.64%，p_holm=0.016"，一度被当作"唯一显著信号"。
+   → 把它做成**可交易**的 long/flat 择时,对照**匹配平均敞口**的被动常仓(隔离 beta)、
+     两腿都扣成本(GC=F 0.38%/侧)、DSR 对 MA 网格搜索 deflate：
+     - 黄金 post-2000 择时终值 **3.07 vs 满仓买持 15.10 vs 匹配被动 7.50**(只赚买持 1/5)
+     - Sharpe **+0.36 vs 被动 +0.68**;maxDD **−57% vs 买持 −44%** → **"躲跌"实测失败,回撤反而更深**
+     - 10 变体(MA{100..300}×buf{0,0.01})× 3 成本 × 3 资产(黄金/A股/纳指)**无一过 DSR>0.95**
+   → **DCA 投入 tilt**(双 sleeve"今天少投/明天多投",core 永不卖):同总额按 MA200 趋势 tilt vs 平均投入,
+     终值倍数(抄底/平均/顺势)黄金 4.85/4.91/4.98、A股 1.62/1.55/1.49、纳指 3.20/3.18/3.15——
+     **两向只动 ±1–8%、无一致赢家(≈wash)**,按趋势调投入额不是收益杠杆。
+   → 含义:Q2 的统计显著是 **beta**(在 MA200 上方=更牛的日子),不是择时能力;MA200 滞后→
+     跌完才出场(锁亏)、涨起来才回场(踏空)。单资产趋势=噪声,不与 time-series momentum 文献矛盾
+     (那套靠 ~50 市场跨资产分散才稳),本 3 资产篮子做不出分散趋势组合。独立实现交叉验证数字逐位吻合。
+   → 全文 [experiments/signal-eval/README.md](../../experiments/signal-eval/README.md) "趋势择时闸" 一节。
+
 ---
 
 ## 怎么复现这些数据
