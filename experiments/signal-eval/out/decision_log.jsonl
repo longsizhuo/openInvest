@@ -1,1 +1,3 @@
 {"gate": "Q2", "regime": "textbook", "contrasts": 12, "powered": 12, "holm_significant_<0.05": 1}
+{"gate": "M3_step0_cutoff_probe", "effective_cutoff_lb": "<2024-07", "holdout_2025_leaks": true}
+{"gate": "M3_step0_cutoff_probe", "effective_cutoff_lb": "2025-01", "holdout_2025_leaks": true}

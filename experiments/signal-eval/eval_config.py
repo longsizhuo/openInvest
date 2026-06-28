@@ -12,8 +12,15 @@ BASKET_ASSETS = ["GC=F", "510300.SS", "NDQ.AX"]
 # 重探 effective cutoff(arXiv:2403.12958 effective>reported 常态),否则 holdout 边界失锚。
 # Q2 本身无 LLM(纯确定性 regime→forward),不受 memorization 影响,可用全历史;受影响的是
 # regime 阈值的 in-sample tuning(见 Q2 脚本的 textbook-regime 干净读)。
-CONTAMINATION_CUTOFF = "2024-12-31"
-HOLDOUT_START = "2025-01-01"
+CONTAMINATION_CUTOFF = "2024-12-31"   # 旧 MiMo 自报(历史 CI 用)
+HOLDOUT_START = "2025-01-01"          # 旧(MiMo)holdout 起点
+
+# 经验探针(cutoff_probe.py,2026-06-28):deepseek-v4-flash 知道 2025-01 DeepSeek-R1,
+# 不知道 2025-05 Claude 4 → effective cutoff ≈ 2025-01..04(晚于自报,印证 arXiv:2403.12958)。
+# 含义:① 2025-01..04 段对 DeepSeek 已污染 → 干净 holdout 须从 2025-05 后起;② 昨晚那轮闭环
+# CI(2025-01..2026-03)头部被污染——但污染【抬高】业绩,委员会仍亏 → "委员会跑输"结论反而更稳。
+DEEPSEEK_EFFECTIVE_CUTOFF = "2025-04-30"        # 保守上界(知道到 ~early 2025)
+CLEAN_HOLDOUT_START_DEEPSEEK = "2025-06-01"     # cutoff + buffer:M3 LLM 回测须从此起才干净
 
 INIT_CASH_CNY = 100_000.0
 WEEKLY_STEP_DAYS = 7

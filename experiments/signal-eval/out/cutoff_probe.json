@@ -1,0 +1,38 @@
+{
+  "probe": "deepseek-v4-flash effective cutoff",
+  "effective_cutoff_lower_bound": "2025-01",
+  "holdout_start": "2025-01-01",
+  "holdout_leaks_if_true": true,
+  "results": [
+    {
+      "anchor": "2024-09",
+      "knows": true,
+      "answer": "Apple announced the iPhone 16 in September 2024 as the successor to the iPhone 15."
+    },
+    {
+      "anchor": "2024-10",
+      "knows": true,
+      "answer": "John Hopfield."
+    },
+    {
+      "anchor": "2024-12",
+      "knows": true,
+      "answer": "DeepSeek released DeepSeek-V3 in December 2024."
+    },
+    {
+      "anchor": "2025-01",
+      "knows": true,
+      "answer": "DeepSeek released the open-source reasoning model DeepSeek-R1 in January 2025."
+    },
+    {
+      "anchor": "2025-05",
+      "knows": false,
+      "answer": "I don't know."
+    },
+    {
+      "anchor": "2025-08",
+      "knows": false,
+      "answer": "I don't know."
+    }
+  ]
+}
