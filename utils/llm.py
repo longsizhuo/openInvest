@@ -88,6 +88,9 @@ def supports_json_output(model: Optional[str] = None, base_url: Optional[str] = 
     "默认尝试 + 可关" 的旋钮：INVEST_FORCE_JSON_OUTPUT=0 全关（确认自家 provider 不支持
     又不想吃一次回退的双调用成本时）、=1 强开。缺省尝试。
     """
+    # model / base_url: reserved for future provider-specific gating（真不支持 json_object 的
+    # provider 一旦确认，可在此按 model/base_url 关掉，省一次回退的双调用成本）。当前只读全局旋钮。
+    _ = (model, base_url)
     force = os.getenv("INVEST_FORCE_JSON_OUTPUT")
     if force is not None:
         return force == "1"

@@ -331,7 +331,7 @@ def run_committee(
     emit("cio_start", asset=sym)
     # P3 A/B: INVEST_CIO_THINKING=1 给终裁 CIO 开思考模式（分析师仍 fast path）。
     # 默认关——委员会 4 worker 已思考过，且无 alpha 证据下加思考未必值（见 wiki 17）。
-    _cio_thinking = bool(os.getenv("INVEST_CIO_THINKING"))
+    _cio_thinking = os.getenv("INVEST_CIO_THINKING") == "1"
     # P1: CIO 走 DeepSeek JSON Output 结构化裁决，替正则解析（治 TRIM 负号等一类 bug）。
     # 与思考 A/B 互斥（思考路径留文本+regex）。不支持的 provider 由下方运行时优雅回退兜底。
     from utils.llm import supports_json_output

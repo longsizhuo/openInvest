@@ -268,7 +268,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 return symbol, {"error": str(e)[:200]}
 
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=len(pending) or 1) as ex:
+        with ThreadPoolExecutor(max_workers=min(len(pending), 4) or 1) as ex:
             for symbol, vd in ex.map(_run_symbol, pending):
                 if vd is not None:
                     results["verdicts"][symbol] = vd

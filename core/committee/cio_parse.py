@@ -113,7 +113,7 @@ def _fields_to_out(out: Dict[str, Any], fields: Dict[str, Any]) -> None:
         out["confidence"] = float(fields.get("confidence") or 0.0)
     except (TypeError, ValueError):
         out["confidence"] = 0.0
-    dv = str(fields.get("dominant_view") or "").lower()
+    dv = str(fields.get("dominant_view") or "").strip().lower()
     out["dominant_view"] = dv if dv in ("quant", "macro", "risk") else "tie"
     try:
         out["alloc_cny"] = int(float(fields.get("suggested_alloc_cny") or 0))
@@ -148,8 +148,8 @@ def parse_cio_memo(
     """fields（DeepSeek JSON Output 解析后的 dict）非 None 时走结构化抽取，否则 regex（旧路径）。
     worker_brief（CIO 输入的 worker 简报）非 None 时额外参与 [WORKER_UNAVAILABLE] backstop——
     JSON 模式下 CIO 输出是纯 JSON 不回显哨兵，靠 brief 才查得到 worker 失败（加性，不动旧文本检测）。
-    """
-    """defense_dca（2026-06-13 黄金裁决，wiki18 §5）：非 None = 本资产是黄金且分批 DCA
+
+    defense_dca（2026-06-13 黄金裁决，wiki18 §5）：非 None = 本资产是黄金且分批 DCA
     启用，防御触发的买侧不再全拦，改"放行一批 or 按 spacing/quota 拦"。service 层算好传：
         {"allow": bool, "fraction": float, "reason": str, "tranche_idx": int}
     None = 非黄金/未启用 → 走旧"全拦"行为。两条腿已 OR 成单 defense_flag_on，单一计划。
