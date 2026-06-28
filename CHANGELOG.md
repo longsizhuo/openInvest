@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.1](https://github.com/longsizhuo/openInvest/compare/v0.14.0...v0.14.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **committee:** 处理 [#110](https://github.com/longsizhuo/openInvest/issues/110) CR 建议 ([d3f2a38](https://github.com/longsizhuo/openInvest/commit/d3f2a380de018cbe611cdd60839959976d3ae8c9))
+* **pnl:** 修复基准柱全部消失与正向满宽标签溢出问题 ([#92](https://github.com/longsizhuo/openInvest/issues/92)) ([70c9473](https://github.com/longsizhuo/openInvest/commit/70c9473aba6b845eda41d3ad09ea591f9c4bfc06))
+* **pnl:** 基准柱全部消失 + 正向满宽条标签溢出 (openInvest[#92](https://github.com/longsizhuo/openInvest/issues/92)) ([ceab622](https://github.com/longsizhuo/openInvest/commit/ceab62259052ea9fe0ba54163ff08e6594088c98))
+
 ## [0.14.0](https://github.com/longsizhuo/openInvest/compare/v0.13.0...v0.14.0) (2026-06-27)
 
 
