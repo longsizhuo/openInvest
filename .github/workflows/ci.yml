@@ -37,6 +37,12 @@ jobs:
           DEEPSEEK_API_KEY: test-fake-key
           INVEST_LLM_BASE_DELAY: "0.01"  # 加速测试
 
+      - name: M-stat research tests (统计层闸,带 scipy/statsmodels 数值栈)
+        # 评测闸子的可信度全吊在 experiments/signal-eval/mstat.py。它依赖 scipy/statsmodels
+        # (研究依赖,不进 production pyproject,走 uv run --with,同 DSPy 约定)。这一 lane 确保
+        # 那些 fixture 在自动 CI 真跑——不只靠本地手敲 --with 才抓回归(base pytest 会 importorskip 跳过)。
+        run: uv run --with scipy --with statsmodels python -m pytest experiments/signal-eval/ -q
+
       - name: Import rules (防 entry 直调 core primitives 漂移)
         # 强制分层契约：jobs / connectors / scripts 不能直接 import core.committee
         # 跳过 shared input loaders（如 load_wealth_context_view）。配置见 pyproject.toml

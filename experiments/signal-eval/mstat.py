@@ -10,7 +10,14 @@ pyproject**(同 repo DSPy 用 `--with` 的约定)。scipy/statsmodels 在函数�
 参考:
 - Spearman rank-IC:scipy.stats.spearmanr
 - Newey-West HAC t:statsmodels OLS(cov_type='HAC');auto 带宽 = Newey-West(1994) floor(4·(n/100)^(2/9))
-- PSR / Deflated Sharpe:Bailey & López de Prado(2012 PSR;2014 DSR,期望最大 SR 用 Gumbel 近似)
+- PSR / Deflated Sharpe:Bailey & López de Prado, "The Deflated Sharpe Ratio"
+  (JPM 2014;SSRN abstract_id=2460551),公式逐字抄自论文 PDF(本仓 fixture 已对论文式独立复算):
+    · Eq(1) 期望最大 SR:E[max{SRₙ}] = E[{SRₙ}] + √V[{SRₙ}]·((1−γ)·Z⁻¹(1−1/N) + γ·Z⁻¹(1−1/(N·e)))
+      γ≈0.5772(Euler-Mascheroni),Z=标准正态 CDF;DSR 用 E[{SRₙ}]=0 → SR₀ = √V·(…)。
+    · Eq(2) DSR:Z[(SR−SR₀)·√(T−1) / √(1 − γ̂₃·SR + (γ̂₄−1)/4·SR²)]。
+  ⚠ 约定(论文口径,踩错就静默错):① SR 与 T **同周期、非年化**(per-observation SR + 样本观测数 T);
+  ② γ̂₄ 是**全峰度(正态=3)**,不是 excess kurtosis(差 3 = 经典 off-by 错);
+  ③ SR₀ 依赖**所有试过的腿的 SR 的方差** V[{SRₙ}](= sr_std_trials²),不是只靠 N 计数——台账须存每条腿的 SR。
 - Holm:step-down,等价 statsmodels.stats.multitest.multipletests('holm')
 - 两样本桶差异:scipy.stats.mannwhitneyu(非参,稳健于非正态收益)
 

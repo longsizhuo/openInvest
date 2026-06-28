@@ -74,22 +74,39 @@ def test_psr_normal_case():
     assert mstat.psr(sr, T, skew=1.0, kurt=3.0) > mstat.psr(sr, T)
 
 
-def test_expected_max_sharpe_monotonic():
+def test_expected_max_sharpe_matches_paper_eq1():
+    # DSR 是全塔里唯一没有 canonical 库能自检的——已知答案只能来自论文。
+    # Bailey & López de Prado (2014) "The Deflated Sharpe Ratio" SSRN 2460551, Eq(1):
+    #   E[max{SRₙ}] = E[{SRₙ}] + √V·((1−γ)·Z⁻¹(1−1/N) + γ·Z⁻¹(1−1/(N·e))),γ=Euler-Mascheroni
+    # DSR 用 E[{SRₙ}]=0。下面【独立】按论文式重算(直接 scipy,不调 mstat),再与 mstat 对——
+    # 若 mstat 转录错(常数/符号),两边不一致即抓到。
+    from scipy.stats import norm
+    g = 0.5772156649015329
+    for V, N in [(1.0, 10), (1.0, 1000), (0.25, 50)]:
+        sr0_paper = math.sqrt(V) * ((1 - g) * norm.ppf(1 - 1.0 / N)
+                                    + g * norm.ppf(1 - 1.0 / (N * math.e)))
+        assert mstat.expected_max_sharpe(math.sqrt(V), N) == pytest.approx(sr0_paper)
+    assert norm.ppf(0.9) == pytest.approx(1.2815515655, abs=1e-6)  # well-known 锚(N=10 项之一)
+    # 不变量:N≤1 → 0;试验越多 SR₀ 越高
     assert mstat.expected_max_sharpe(0.5, 1) == 0.0
     assert mstat.expected_max_sharpe(0.5, 0) == 0.0
-    e10 = mstat.expected_max_sharpe(0.5, 10)
-    e100 = mstat.expected_max_sharpe(0.5, 100)
-    assert 0 < e10 < e100  # 试验越多,光靠运气的最大 SR 越高
+    assert 0 < mstat.expected_max_sharpe(0.5, 10) < mstat.expected_max_sharpe(0.5, 100)
 
 
-def test_deflated_sharpe_invariants():
-    # n_trials=1 → 基准 0 → 退化 PSR(sr vs 0)
+def test_deflated_sharpe_matches_paper_eq2():
+    # Eq(2): DSR = Z[(SR−SR₀)·√(T−1) / √(1 − γ₃·SR + (γ₄−1)/4·SR²)],γ₄=全峰度(正态=3)。
+    # 独立按论文式重算,与 mstat 对(任意但具体的一组,含负偏 + 厚尾)。
+    from scipy.stats import norm
+    g = 0.5772156649015329
+    SR, T, N, V, skew, kurt = 0.045, 1250, 100, 0.25, -0.5, 8.0
+    sr0 = math.sqrt(V) * ((1 - g) * norm.ppf(1 - 1.0 / N) + g * norm.ppf(1 - 1.0 / (N * math.e)))
+    denom = math.sqrt(1 - skew * SR + (kurt - 1) / 4 * SR * SR)
+    dsr_paper = norm.cdf((SR - sr0) * math.sqrt(T - 1) / denom)
+    assert mstat.deflated_sharpe(SR, T, N, math.sqrt(V), skew=skew, kurt=kurt) == pytest.approx(dsr_paper)
+    # 不变量:n_trials=1 → 基准 0 → 退化 PSR(sr vs 0);试过越多腿 DSR 越低;∈[0,1]
     assert mstat.deflated_sharpe(0.2, 100, 1, 0.1) == pytest.approx(mstat.psr(0.2, 100))
-    # 试过越多腿 → DSR 越低(越难显著)
     assert mstat.deflated_sharpe(0.2, 100, 50, 0.1) < mstat.deflated_sharpe(0.2, 100, 1, 0.1)
-    # DSR ∈ [0,1]
-    d = mstat.deflated_sharpe(0.2, 100, 20, 0.1)
-    assert 0.0 <= d <= 1.0
+    assert 0.0 <= mstat.deflated_sharpe(0.2, 100, 20, 0.1) <= 1.0
 
 
 def test_holm_known_and_vs_statsmodels():
