@@ -24,7 +24,7 @@
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
   <sub>数据流基于 `jobs/pnl_snapshot` 每 2 小时原子替换自动更新至 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a></sub>
   <br/>
-  <sub>上半图：30天净值动量趋势 · 下半图：相较于 8 类基准资产的累计超额收益 (Alpha)</sub>
+  <sub>上半图：30天净值趋势 · 下半图：相较于 8 类基准资产的净值对照（透明披露，<b>非 alpha 主张</b>——委员会的可证价值是纪律与透明，不是超额收益，见 <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>）</sub>
   <br/>
   <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，系统将依据您在 `memory/` 中定义的专属账户持仓自动渲染对应的净值曲线。</sub>
 </div>
