@@ -43,7 +43,7 @@ def sig_trend(close: pd.Series, window: int, buf: float) -> pd.Series:
     for i in range(len(close)):
         m = mv[i]
         if not np.isfinite(m):
-            pos[i] = 0; continue
+            pos[i] = np.nan; continue   # 暖机 → NaN(evaluate dropna 丢弃,不当作"flat"拉低 avg_exp)
         if cv[i] > m * (1 + buf): state = 1
         elif cv[i] < m * (1 - buf): state = 0
         pos[i] = state
@@ -60,7 +60,7 @@ def sig_meanrev(close: pd.Series, window: int, z_enter: float) -> pd.Series:
     for i in range(len(close)):
         v = zv[i]
         if not np.isfinite(v):
-            pos[i] = 0; continue
+            pos[i] = np.nan; continue   # 暖机 / std=0 → NaN(无信号,不算 flat)
         if v < -z_enter: state = 1
         elif v > z_enter: state = 0
         pos[i] = state
@@ -72,7 +72,7 @@ def sig_voltarget(close: pd.Series, window: int, target_ann: float) -> pd.Series
     ret = close.pct_change()
     rv = ret.rolling(window, min_periods=window).std(ddof=0) * np.sqrt(TRADING_DAYS)
     pos = (target_ann / rv).clip(lower=0.0, upper=1.0)
-    return pos.fillna(0.0)
+    return pos.where(rv > 1e-12)   # 暖机(rv NaN)/ 零波动(div0) → NaN;不留 inf/"零波动满仓"假象
 
 
 def sig_breakout(close: pd.Series, window: int) -> pd.Series:
@@ -83,7 +83,7 @@ def sig_breakout(close: pd.Series, window: int) -> pd.Series:
     pos = np.zeros(len(close)); state = 0
     for i in range(len(close)):
         if not (np.isfinite(hv[i]) and np.isfinite(lv[i])):
-            pos[i] = 0; continue
+            pos[i] = np.nan; continue   # 暖机 → NaN
         if cv[i] > hv[i]: state = 1
         elif cv[i] < lv[i]: state = 0
         pos[i] = state
@@ -113,30 +113,35 @@ def _maxdd(ret: pd.Series) -> float:
 
 
 def evaluate(close: pd.Series, pos: pd.Series, cost: float) -> Optional[Dict]:
-    """信号仓位 vs 匹配平均敞口被动,扣成本。暖机(pos 前导 NaN/全 0)由首个有效仓位起算。"""
+    """信号仓位 vs 匹配平均敞口被动,扣成本。
+    暖机由信号 NaN + dropna 处理(不再硬截"首个非零仓位"——那会把信号合法的早期 flat 也砍掉、
+    系统性抬高 avg_exp → 偏向 null,review 修)。合法的 flat(pos=0)保留。
+    avg_exp 用全样本均值是**有意的**:active=strat−avg_exp·aret 的均值 ≈ Cov(pos,ret)−cost,
+    即纯择时技能(avg_exp 只是 demean 常数,不是可交易基线;可交易对照见 trend_dca 的满仓买持)。"""
     df = pd.DataFrame({"close": close, "pos": pos}).dropna()
-    # 砍掉最前面仓位恒 0 的暖机段(信号还没成熟),避免 avg_exp 被拖低
-    nz = np.flatnonzero(df["pos"].values > 0)
-    if len(nz) == 0:
-        return None
-    df = df.iloc[nz[0]:]
     if len(df) < 120:
         return None
     df["aret"] = df["close"].pct_change()
     df["held"] = df["pos"].shift(1)
     df["turn"] = (df["pos"] - df["pos"].shift(1)).abs()
     df = df.dropna()
+    if len(df) < 60:
+        return None
     avg_exp = float(df["pos"].mean())
     strat = df["held"] * df["aret"] - cost * df["turn"]
     passive = avg_exp * df["aret"]
     active = strat - passive
     sd = float(active.std(ddof=1))
     sr = float(active.mean() / sd) if sd > 0 else float("nan")
+    skew = float(active.skew())
+    kurt_full = float(active.kurt() + 3.0)
+    if not (np.isfinite(skew) and np.isfinite(kurt_full)):
+        skew, kurt_full = 0.0, 3.0   # 退化样本 → 正态默认(不让 NaN 传进 DSR)
     return {
         "T": len(active), "avg_exposure": avg_exp,
         "trades": int((df["turn"] > 1e-9).sum()), "turnover": float(df["turn"].sum()),
         "sr_active_pp": sr, "sr_active_ann": sr * np.sqrt(TRADING_DAYS) if np.isfinite(sr) else float("nan"),
-        "skew": float(active.skew()), "kurt_full": float(active.kurt() + 3.0),
+        "skew": skew, "kurt_full": kurt_full,
         "wealth_strat": float((1 + strat).prod()), "wealth_passive": float((1 + passive).prod()),
         "maxdd_strat": _maxdd(strat), "maxdd_passive": _maxdd(passive),
     }
@@ -152,7 +157,7 @@ def run_asset(sym: str, close: pd.Series) -> Dict:
         r.update({"family": v["fam"], "label": v["lab"]})
         rows.append(r)
     srs = [r["sr_active_pp"] for r in rows if np.isfinite(r["sr_active_pp"])]
-    n_trials = len(rows)                                   # 该资产上所有试过的变体(诚实选择规模)
+    n_trials = len(srs)                                    # 有限 SR 的变体数(与 sr_std 同口径,喂 DSR deflation)
     sr_std = float(np.std(srs, ddof=1)) if len(srs) > 1 else 0.0
     for r in rows:
         sr, T = r["sr_active_pp"], r["T"]

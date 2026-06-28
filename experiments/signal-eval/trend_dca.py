@@ -82,15 +82,21 @@ def evaluate_variant(close: pd.Series, window: int, entry_buf: float, exit_buf: 
     df["held"] = df["pos"].shift(1)               # 进入第 t 日时持有的仓(t-1 决定)→ 无前视
     df["turn"] = (df["pos"] - df["pos"].shift(1)).abs()
     df = df.dropna()
+    # avg_exp 用全样本均值是**有意的**:active=strat−avg_exp·aret 的均值 ≈ Cov(pos,ret)−cost,
+    # 即纯择时技能(avg_exp 只是 demean 常数,不是可交易基线)。可交易的零前视对照 = 满仓买持(下方
+    # wealth_buyhold/sharpe_buyhold)——策略连它也输,故结论不依赖匹配被动这个基线选择。
     avg_exp = float(df["pos"].mean())
     strat = df["held"] * df["aret"] - cost * df["turn"]   # 成本在换仓当日(close t)结算
-    passive = avg_exp * df["aret"]                         # 平均敞口相同的常仓(被动)
+    passive = avg_exp * df["aret"]                         # 平均敞口相同的常仓(被动,demean 对照)
+    buyhold = df["aret"]                                   # 满仓买入持有(exposure=1,零前视、零择时、零成本)
     active = strat - passive
     T = len(active)
     sd = float(active.std(ddof=1))
-    sr = float(active.mean() / sd) if sd > 0 else float("nan")   # 单周期 SR(非年化,喂 DSR)
+    sr = float(active.mean() / sd) if sd > 0 else float("nan")   # active 单周期 SR(非年化,喂 DSR)
     skew = float(active.skew())
     kurt_full = float(active.kurt() + 3.0)                 # mstat 要全峰度(正态=3),pandas.kurt 是 excess
+    if not (np.isfinite(skew) and np.isfinite(kurt_full)):
+        skew, kurt_full = 0.0, 3.0
     return {
         "window": window, "entry_buf": entry_buf, "exit_buf": exit_buf, "cost": cost,
         "T": T, "avg_exposure": avg_exp,
@@ -99,9 +105,13 @@ def evaluate_variant(close: pd.Series, window: int, entry_buf: float, exit_buf: 
         "sr_active_ann": sr * np.sqrt(TRADING_DAYS) if np.isfinite(sr) else float("nan"),
         "mean_active_ann": float(active.mean() * TRADING_DAYS),
         "skew": skew, "kurt_full": kurt_full,
+        # 绝对(各自收益序列自身)年化 Sharpe——文档"择时 0.36 vs 被动/买持 0.68"出处
+        "sharpe_strat_ann": _abs_sharpe(strat), "sharpe_passive_ann": _abs_sharpe(passive),
+        "sharpe_buyhold_ann": _abs_sharpe(buyhold),
         "wealth_strat": float((1 + strat).prod()),
         "wealth_passive": float((1 + passive).prod()),
-        "maxdd_strat": _maxdd(strat), "maxdd_passive": _maxdd(passive),
+        "wealth_buyhold": float((1 + buyhold).prod()),   # 文档"满仓买持 15.10"出处
+        "maxdd_strat": _maxdd(strat), "maxdd_passive": _maxdd(passive), "maxdd_buyhold": _maxdd(buyhold),
         "_active": active,   # 内部用,出 JSON 前删
     }
 
@@ -110,6 +120,27 @@ def _maxdd(ret: pd.Series) -> float:
     """收益序列的最大回撤(负数,如 -0.42 = -42%)。"""
     eq = (1 + ret).cumprod()
     return float((eq / eq.cummax() - 1.0).min())
+
+
+def _abs_sharpe(ret: pd.Series) -> float:
+    """收益序列自身的年化 Sharpe(均值/标准差×√252)。"""
+    sd = float(ret.std(ddof=1))
+    return float(ret.mean() / sd * np.sqrt(TRADING_DAYS)) if sd > 0 else float("nan")
+
+
+def dca_tilt_multiples(close: pd.Series, window: int = 200) -> Dict[str, float]:
+    """DCA 投入择时:同总额按趋势 tilt 每日投入 vs 平均投入。k>0=MA 上方多投(顺势),
+    k<0=下方多投(抄底)。core 永不卖,只调投入额。返回各 k 的 终值/总投入 倍数。0 前视。"""
+    ma = close.rolling(window, min_periods=window).mean()
+    df = pd.DataFrame({"c": close, "ma": ma}).dropna()
+    sig = (df["c"] > df["ma"]).astype(float)
+    sbar = float(sig.mean())
+    out: Dict[str, float] = {}
+    for k in (-1.0, -0.5, 0.0, 0.5, 1.0):
+        a = (1.0 + k * (sig - sbar)).clip(lower=0.0)   # 投入权重,Σa=N(总额不变)
+        units = float((a / df["c"]).sum())
+        out[f"k={k:+.1f}"] = units * float(df["c"].iloc[-1]) / float(a.sum())
+    return out
 
 
 def run_asset(sym: str, close: pd.Series, label: str, cost: float = PRIMARY_COST) -> Dict:
@@ -124,7 +155,7 @@ def run_asset(sym: str, close: pd.Series, label: str, cost: float = PRIMARY_COST
         return {"asset": sym, "label": label, "error": "no_variants"}
 
     srs = [v["sr_active_perperiod"] for v in variants if np.isfinite(v["sr_active_perperiod"])]
-    n_trials = len(variants)                       # 实际搜索的腿数(选择效应规模)
+    n_trials = len(srs)                            # 有限 SR 的腿数(与 sr_std_trials 同口径)
     sr_std_trials = float(np.std(srs, ddof=1)) if len(srs) > 1 else 0.0
 
     for v in variants:
@@ -182,6 +213,19 @@ def main() -> Dict:
         close = df["Close"].dropna()
         close.index = pd.to_datetime(close.index)
         out["results"].append(run_asset(sym, close, label=f"{sym}_full"))
+
+    # DCA 投入 tilt(同总额,趋势加权 vs 平均)——文档"抄底>平均>顺势"具体数字出处,可复现
+    tilt: Dict = {}
+    for sym, start in [("GC=F", GOLD_PRIMARY_START), ("510300.SS", None), ("NDQ.AX", None)]:
+        df = ms.get_history_df(sym, days=100000)
+        if df is None or df.empty:
+            continue
+        c = df["Close"].dropna(); c.index = pd.to_datetime(c.index)
+        if start:
+            c = c[c.index >= start]
+        tilt[sym] = dca_tilt_multiples(c)
+    out["dca_tilt"] = {"design": "same total invested, weight by MA200 trend; k>0=顺势(上方多投), k<0=抄底(下方多投)",
+                       "terminal_multiple_by_asset_and_k": tilt}
 
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(os.path.join(OUT_DIR, "trend_dca.json"), "w", encoding="utf-8") as f:
