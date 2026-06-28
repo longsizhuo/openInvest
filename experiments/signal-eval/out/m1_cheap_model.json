@@ -1,0 +1,9 @@
+{
+  "test": "M1_cheap_model_GBM_walkforward",
+  "universe": "current S&P500 (survivorship-biased)",
+  "n_oos_dates": 110,
+  "mean_oos_ic": 0.0027056941599600975,
+  "icir": 0.015764893099205604,
+  "nw_t": 0.09437860705126212,
+  "p_nw": 0.9248084090419397
+}

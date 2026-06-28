@@ -132,13 +132,14 @@ def _trigger_committee(symbols: List[str], event_ids: List[str]) -> Optional[str
     if not symbols:
         return None
     import requests
+    from core.config import load_config
     base = os.getenv("INVEST_EVENT_API_URL", "http://127.0.0.1:8765")
     try:
         r = requests.post(
             f"{base.rstrip('/')}/api/committee/run",
             json={
                 "symbols": symbols,
-                "max_debate_rounds": int(os.getenv("INVEST_EVENT_MAX_ROUNDS", "2")),
+                "max_debate_rounds": load_config().event.max_rounds,
                 "note": f"triggered by event_watch event_ids={','.join(event_ids[:4])}",
                 "event_ids": event_ids,
             },
@@ -166,11 +167,14 @@ def run(
 
     rss_feeds = custom_rss_feeds if custom_rss_feeds is not None else load_default_feeds()
 
+    from core.config import load_config
+    cfg = load_config()
+
     raw_items = fetch_all(
         queries=ctx["queries"],
         symbols=watched,
         rss_feeds=rss_feeds,
-        max_per_source=int(os.getenv("INVEST_EVENT_MAX_PER_SOURCE", "15")),
+        max_per_source=cfg.event.max_per_source,
         extract_fulltext=False,  # 实时层不抓正文，省时间
     )
     log.info(f"[event_watch] fetched {len(raw_items)} raw items")
@@ -188,7 +192,7 @@ def run(
     log.info(f"[event_watch] normalized {len(normalized)} events")
 
     # 入库 + 收集新事件
-    min_sev = os.getenv("INVEST_EVENT_MIN_SEVERITY", "mid")
+    min_sev = cfg.event.min_severity
     min_sev_rank = _SEVERITY_RANK.get(min_sev, 2)
     watched_set = {s.lower() for s in watched}
     macro_tag_set = set(ctx["macro_tags"])

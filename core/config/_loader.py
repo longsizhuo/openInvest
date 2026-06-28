@@ -16,6 +16,7 @@ import yaml
 from .tunable import (
     DCAConfig,
     DreamingTunableConfig,
+    EventConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
     RegimeConfig,
@@ -23,6 +24,7 @@ from .tunable import (
     PathConfig,
     RewardConfig,
     SentimentConfig,
+    StalenessConfig,
     TunableConfig,
     ValuationConfig,
     VerdictConfig,
@@ -75,7 +77,7 @@ def _read_env_overrides() -> dict[str, Any]:
     # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
     _KNOWN_SECTIONS = sorted(
         ["regime_per_asset", "oracle_accuracy", "macro_buckets", "regime", "verdict",
-         "dreaming", "reward", "sentiment", "valuation", "path", "dca"],
+         "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event", "staleness"],
         key=len,
         reverse=True,
     )
@@ -85,6 +87,17 @@ def _read_env_overrides() -> dict[str, Any]:
         "INVEST_DREAMING_LOOKBACK_DAYS": "dreaming.lookback_days",
         # 旧裸 os.getenv 收进 config 后保留向后兼容（dreaming.llm_verify_enabled）
         "INVEST_DREAMING_LLM_VERIFY": "dreaming.llm_verify_enabled",
+        # 新增 event 映射
+        "INVEST_EVENT_RAG_ENABLED": "event.enabled",
+        "INVEST_EVENT_RAG_WINDOW_DAYS": "event.rag_window_days",
+        "INVEST_EVENT_RAG_MIN_SEVERITY": "event.rag_min_severity",
+        "INVEST_EVENT_RAG_TOP_K": "event.rag_top_k",
+        "INVEST_EVENT_MAX_PER_SOURCE": "event.max_per_source",
+        "INVEST_EVENT_MIN_SEVERITY": "event.min_severity",
+        "INVEST_EVENT_MAX_ROUNDS": "event.max_rounds",
+        # 新增 staleness 映射
+        "INVEST_PRICE_STALE_DAYS": "staleness.price_stale_days",
+        "INVEST_HARD_ABORT_STALE_DAYS": "staleness.hard_abort_stale_days",
     }
 
     for key, val in os.environ.items():
@@ -184,6 +197,9 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         dca_data["auto_dca_symbols"] = tuple(v)
     dca = DCAConfig(**{k: v for k, v in dca_data.items() if k in {f.name for f in fields(DCAConfig)}})
 
+    event = EventConfig(**{k: v for k, v in data.get("event", {}).items() if k in {f.name for f in fields(EventConfig)}})
+    staleness = StalenessConfig(**{k: v for k, v in data.get("staleness", {}).items() if k in {f.name for f in fields(StalenessConfig)}})
+
     return TunableConfig(
         regime=regime,
         regime_per_asset=per_asset,
@@ -196,6 +212,8 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         oracle_accuracy=oracle,
         reward=reward,
         dca=dca,
+        event=event,
+        staleness=staleness,
     )
 
 
@@ -344,6 +362,53 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "定投金额(CNY)",
         "help": "每个标的每次定投基准金额；智慧定投实际浮动，本系统按此估算记账、月度对账校准",
     },
+    "event.enabled": {
+        "type": "bool",
+        "label": "事件感知层 (Event RAG)",
+        "help": "是否启用盘中新闻事件向量召回并注入委员会决策（默认开）",
+    },
+    "event.rag_window_days": {
+        "type": "int",
+        "label": "事件召回时间窗(天)",
+        "help": "向量召回新闻事件的最长历史天数（默认 7 天）",
+    },
+    "event.rag_min_severity": {
+        "type": "enum",
+        "choices": ["low", "mid", "high"],
+        "label": "事件召回最低严重度",
+        "help": "向量召回新闻事件的最低严重度级别（默认 mid）",
+    },
+    "event.rag_top_k": {
+        "type": "int",
+        "label": "事件召回 Top-K",
+        "help": "每个标的召回的新闻事件最大数量（默认 8 条）",
+    },
+    "event.max_per_source": {
+        "type": "int",
+        "label": "单源抓取最大条数",
+        "help": "event_watch 每次拉取 RSS 等新闻源的最大条数（默认 15 条）",
+    },
+    "event.min_severity": {
+        "type": "enum",
+        "choices": ["low", "mid", "high"],
+        "label": "触发重跑最低严重度",
+        "help": "新增新闻事件触发委员会重跑的最低严重度级别（默认 mid）",
+    },
+    "event.max_rounds": {
+        "type": "int",
+        "label": "重跑最大辩论轮数",
+        "help": "触发重跑委员会时的最大辩论轮数（默认 2 轮）",
+    },
+    "staleness.price_stale_days": {
+        "type": "int",
+        "label": "价格陈旧警告天数",
+        "help": "价格数据超过此天数时，在日报中显示软警告（默认 3 天）",
+    },
+    "staleness.hard_abort_stale_days": {
+        "type": "int",
+        "label": "价格陈旧熔断天数",
+        "help": "所有价格数据均超过此天数时，硬熔断跳过日报运行（默认 7 天）",
+    },
 }
 
 
@@ -371,6 +436,14 @@ def _coerce_and_validate(key: str, value: Any) -> Any:
         if f < 0:
             raise ValueError(f"{key} 不能为负，得到 {f}")
         return f
+    if t == "int":
+        try:
+            val_int = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} 需 int，得到 {value!r}")
+        if val_int < 0:
+            raise ValueError(f"{key} 不能为负，得到 {val_int}")
+        return val_int
     raise ValueError(f"未知白名单 type: {t}")  # pragma: no cover
 
 

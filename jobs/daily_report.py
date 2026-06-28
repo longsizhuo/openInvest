@@ -49,16 +49,15 @@ from utils.gold_price import format_gold_report, get_gold_snapshot
 
 load_dotenv()
 
-# 数据陈旧阈值：DB 最新日期距今超过这个天数，仍然能跑但要在 LLM 上下文里
-# 显式标注"数据陈旧 N 天"，让 LLM 不要在过期价上面编今天的策略。
-STALE_THRESHOLD_DAYS = int(os.getenv("INVEST_PRICE_STALE_DAYS", "3"))
+# 数据陈旧阈值与硬熔断通过 load_config() 动态加载以支持运行时配置，env/默认只作 bootstrap
 
-# 硬熔断阈值：超过这个天数的数据**禁止参与决策**。
-# 阈值不同的层次：
-#   STALE_THRESHOLD_DAYS (3) — 软警告，注入 LLM 上下文里说"数据有点旧"
-#   STALE_HARD_ABORT_DAYS (7) — 硬熔断，所有资产都旧到这程度 → daily_report 整个跳过
-# 设 7 天因为周末 + 节假日最多 4-5 天没数据是正常的；超过一周是数据源真的挂了。
-STALE_HARD_ABORT_DAYS = int(os.getenv("INVEST_HARD_ABORT_STALE_DAYS", "7"))
+def get_stale_threshold_days() -> int:
+    from core.config import load_config
+    return load_config().staleness.price_stale_days
+
+def get_stale_hard_abort_days() -> int:
+    from core.config import load_config
+    return load_config().staleness.hard_abort_stale_days
 
 _MARKET_STORE = MarketStore()
 
@@ -97,7 +96,7 @@ def _get_last_close(
 
 def _format_staleness(label: str, age_days: Optional[int]) -> str:
     """告警文本委托给 daily_report_builder（见 ADR-005）"""
-    return format_staleness_warning(label, age_days, STALE_THRESHOLD_DAYS)
+    return format_staleness_warning(label, age_days, get_stale_threshold_days())
 
 
 # _gather_relevant_insights 已迁移到 core/committee_runner.py:load_prior_insights
@@ -161,7 +160,7 @@ def run() -> Dict[str, Any]:
     def _classify_freshness(price: Optional[float], age_days: Optional[int]) -> str:
         # 委托给 builder 的 stateless 版本（同参数传入）
         return classify_asset_freshness(
-            price, age_days, STALE_THRESHOLD_DAYS, STALE_HARD_ABORT_DAYS
+            price, age_days, get_stale_threshold_days(), get_stale_hard_abort_days()
         )
 
     # 通用价格采集 (B3): 遍历 target_assets，按 kind 分发取价
@@ -273,6 +272,7 @@ def run() -> Dict[str, Any]:
     rated_assets = list(asset_freshness.keys())
     deadly = {"missing", "very_stale"}
     if rated_assets and all(asset_freshness[s] in deadly for s in rated_assets):
+        hard_abort_days = get_stale_hard_abort_days()
         msg = (
             f"所有 {len(rated_assets)} 个目标资产数据全废："
             + ", ".join(f"{s}={asset_freshness[s]}" for s in rated_assets)
@@ -282,18 +282,18 @@ def run() -> Dict[str, Any]:
             "phase": "daily_report_aborted_stale",
             "reason": "all_assets_unusable",
             "asset_freshness": dict(asset_freshness),
-            "abort_threshold_days": STALE_HARD_ABORT_DAYS,
+            "abort_threshold_days": hard_abort_days,
             "date": today,
         })
         return {
             "status": "aborted",
             "reason": "stale_data_hard_abort",
             "asset_freshness": dict(asset_freshness),
-            "abort_threshold_days": STALE_HARD_ABORT_DAYS,
+            "abort_threshold_days": hard_abort_days,
             "skipped_assets": sorted(skipped_assets),
             "date": today,
             "next_step": (
-                f"所有数据源都过时超 {STALE_HARD_ABORT_DAYS} 天或全失败。"
+                f"所有数据源都过时超 {hard_abort_days} 天或全失败。"
                 "检查 yfinance 网络 / DB 是否被定期更新。强制跑（绕过熔断）："
                 "INVEST_HARD_ABORT_STALE_DAYS=999 重跑。"
             ),

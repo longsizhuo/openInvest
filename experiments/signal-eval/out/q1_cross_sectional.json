@@ -1,0 +1,69 @@
+{
+  "test": "Q1_cross_sectional_rank_IC",
+  "universe": "current S&P500 (survivorship-biased)",
+  "survivorship_caveat": {
+    "universe_n": 503,
+    "pulled_n": 501,
+    "note": "current constituents = survivors; IC 偏高。不显著=稳健负;显著需更干净宇宙确认。"
+  },
+  "rebalance": "W-FRI",
+  "fwd_days": 30,
+  "median_names_per_date": 498.0,
+  "n_rebalance_dates": 125,
+  "features": [
+    {
+      "feature": "return_30d",
+      "n_dates": 125,
+      "mean_ic": 0.038600063532106446,
+      "icir": 0.2138878058400292,
+      "nw_t": 1.6752648144135576,
+      "p_nw": 0.09388228571869583,
+      "p_holm": 0.3973930387092177
+    },
+    {
+      "feature": "rsi14",
+      "n_dates": 125,
+      "mean_ic": 0.024932367524710345,
+      "icir": 0.14873972898122403,
+      "nw_t": 1.2935774867925958,
+      "p_nw": 0.19581140300876565,
+      "p_holm": 0.3973930387092177
+    },
+    {
+      "feature": "price_quantile_2y",
+      "n_dates": 125,
+      "mean_ic": 0.03955862313454899,
+      "icir": 0.22798958268439612,
+      "nw_t": 1.8368491139614034,
+      "p_nw": 0.06623217311820295,
+      "p_holm": 0.3973930387092177
+    },
+    {
+      "feature": "volatility_annualized",
+      "n_dates": 125,
+      "mean_ic": 0.0669095309412803,
+      "icir": 0.2664995583872194,
+      "nw_t": 1.6327992786005228,
+      "p_nw": 0.10251121885846559,
+      "p_holm": 0.3973930387092177
+    },
+    {
+      "feature": "max_drawdown",
+      "n_dates": 125,
+      "mean_ic": -0.041645904178368644,
+      "icir": -0.24715601138220744,
+      "nw_t": -1.598876643333079,
+      "p_nw": 0.10984801475810824,
+      "p_holm": 0.3973930387092177
+    },
+    {
+      "feature": "atr_pct",
+      "n_dates": 125,
+      "mean_ic": 0.063510417110535,
+      "icir": 0.28289582309421,
+      "nw_t": 1.7883213432839682,
+      "p_nw": 0.07372417833551648,
+      "p_holm": 0.3973930387092177
+    }
+  ]
+}

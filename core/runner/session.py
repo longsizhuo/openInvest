@@ -241,7 +241,9 @@ def run_committee_for_symbol(
     # 中位右偏(典型涨不该禁)，用时间分散吃厚左尾(挤兑坑)。两条腿(VIX/ATR)已在
     # run_committee 里 OR 成单 defense_flag_on，故只算一份合成计划（非各腿独立分批，
     # 否则会叠成 1/9）。非黄金/未启用 → defense_dca=None → 旧全拦行为。
-    _vcfg = _load_config().verdict
+    # _force_reload：长驻 scheduler 经 /api/config 动态改 verdict 类开关后,这里必须重读
+    # 否则吃陈旧缓存静默失效（对齐 jobs/dca_daily.py 的写法）。
+    _vcfg = _load_config(_force_reload=True).verdict
     defense_dca = None
     if target.get("type") == "metal" and _vcfg.gold_defense_dca_enabled:
         try:

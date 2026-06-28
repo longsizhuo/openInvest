@@ -51,8 +51,9 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
     """
     if override is not None:
         return override
-    flag = os.getenv("INVEST_EVENT_RAG_ENABLED", "true").lower()
-    if flag in {"0", "false", "no", "off"}:
+    from core.config import load_config
+    cfg = load_config()
+    if not cfg.event.enabled:
         return ""
     try:
         from services.embeddings import embed_text
@@ -64,9 +65,9 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
         from services.symbol_map import proxy_symbols_for
         events = store.recall(
             symbol,
-            time_window_days=int(os.getenv("INVEST_EVENT_RAG_WINDOW_DAYS", "7")),
-            min_severity=os.getenv("INVEST_EVENT_RAG_MIN_SEVERITY", "mid"),
-            top_k=int(os.getenv("INVEST_EVENT_RAG_TOP_K", "8")),
+            time_window_days=cfg.event.rag_window_days,
+            min_severity=cfg.event.rag_min_severity,
+            top_k=cfg.event.rag_top_k,
             query_embedding=q_embed,
             aliases=sorted(proxy_symbols_for(symbol)),
         )

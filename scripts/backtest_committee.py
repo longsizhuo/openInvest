@@ -38,6 +38,9 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")  # 让 _create_agent 能拿到 DEEPSEEK_API_KEY
 
 from core.memory_store import MemoryStore  # noqa: E402
+# 污染 cutoff 单一可信源——落盘 `**Contaminated**` 标记与 verdict_review 分桶共用同一常量，
+# 不让 backtest 和聚合两处各自硬编码 "2024-12-31" 漂移（机器强制，见 CLAUDE.md）。
+from jobs.verdict_review import CONTAMINATION_CUTOFF  # noqa: E402
 
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
@@ -60,6 +63,23 @@ def _patch_tools_to_date(decision_date: str):
     next_day = (cutoff + _td(days=1)).strftime("%Y-%m-%d")
 
     stack = ExitStack()
+
+    # === 0. 根上截断 MarketStore.get_history_df ===
+    # 不再只 patch ef.get_history_data 包装层（那靠"path-profile/FX 恰好没被调用"才不漏，很脆）。
+    # 直接 patch 底层 store 方法：任何路径（get_path_profile / 汇率腿 / 技术面）直读 store 都按
+    # decision_date 截断。idempotent：先取全量 → 按 cutoff 过滤 → 再 tail(days)，语义不变。
+    import db.market_store as _ms
+    import pandas as _pd0
+    _real_ghdf = _ms.MarketStore.get_history_df
+
+    def _patched_ghdf(self, symbol, days=730):
+        df = _real_ghdf(self, symbol, days=100000)
+        if df is None or df.empty:
+            return df
+        df = df[df.index <= _pd0.to_datetime(decision_date)]
+        return df.tail(days)
+
+    stack.enter_context(patch.object(_ms.MarketStore, "get_history_df", _patched_ghdf))
 
     # === 1. get_history_data：传 as_of_date 让底层 DB cache 也按 cutoff 过滤 ===
     # 注：底层 _apply_cutoff 用 `df.index <= cutoff` (含当日)，跟旧逻辑等价
@@ -120,7 +140,9 @@ def _patch_tools_to_date(decision_date: str):
 
 
 def run_one_day(decision_date: str, asset_symbols: List[str],
-                *, resume: bool = True) -> Dict[str, Any]:
+                *, resume: bool = True,
+                portfolio_summary_override: "str | None" = None,
+                out_subdir: str = ".backtest") -> Dict[str, Any]:
     """对单个历史日期跑一次完整 committee（每个资产）
 
     resume=True（默认，CLI 分片回测用）：已写出 <symbol>.md 的资产跳过，支持断点续跑。
@@ -129,7 +151,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
         曲线/指标算在残缺成交集上（静默错误），所以它不能用断点续跑。
     """
     from core.committee import (
-        run_macro_view, run_committee, parse_cio_memo, _persist
+        run_macro_view, run_committee, parse_cio_memo, _persist, safe_symbol
     )
     # 必须用模块属性引用（ef.xxx），不能 `from utils.exchange_fee import get_history_data`。
     # 后者在 with _patch_tools_to_date 之前就把局部名绑到原始未 patch 函数，导致
@@ -142,7 +164,8 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
     from utils.market_metrics import compute_metrics
 
     store = MemoryStore()
-    out_dir_base = store.root / ".backtest" / decision_date
+    # out_subdir 让闭环回测写到独立目录(.backtest_closedloop),不覆盖空桩基线(.backtest)
+    out_dir_base = store.root / out_subdir / decision_date
     out_dir_base.mkdir(parents=True, exist_ok=True)
 
     results: Dict[str, Any] = {"date": decision_date, "verdicts": {}}
@@ -170,7 +193,10 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
         except Exception as e:
             macro_view = f"[backtest macro failed: {e}]"
 
-        for symbol in pending:
+        # 当日各资产相互独立(共享同一 macro_view + portfolio 快照),并行跑 = 3× 提速。
+        # 全在 _patch_tools_to_date 内(patch 是日期级 process-global,所有线程同一 cutoff);
+        # LLM 是 IO-bound(GIL 在 IO 释放);_persist 各资产独立路径;llm_usage append <4096B 原子。
+        def _run_symbol(symbol):
             asset = {
                 "symbol": symbol,
                 "display_name": symbol,
@@ -178,18 +204,27 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
             }
             try:
                 df = ef.get_history_data(symbol, "2y")
-                market_data = ef.analyze_multi_timeframe(df, symbol) if not df.empty else "(no data)"
+                if df is None or df.empty or len(df) < 30:
+                    print(f"  ⏭ {symbol}: skipped (insufficient history: {len(df) if df is not None else 0} rows)")
+                    return symbol, None
+                market_data = ef.analyze_multi_timeframe(df, symbol)
 
                 # 确定性 regime brief（双触发器 crash / recovery / per-asset 阈值），
                 # 用同一份已截断的 df 算 → 与 live 路径一致，注入委员会，不再让 LLM 瞎猜 REGIME。
                 regime_brief = format_regime_brief(compute_metrics(df), symbol=symbol) if not df.empty else ""
 
-                # 极简 portfolio_summary（backtest 不知道当时用户持仓）
-                portfolio_summary = (
-                    f"# Backtest Mode\n"
-                    f"该日期为历史回测，用户持仓上下文无法精确还原。\n"
-                    f"假设用户持仓中性（无极端集中度），focus 在技术 + 宏观信号。"
-                )
+                # 默认中性空桩(ADR-022 T3:委员会看不到持仓→从不减仓→verdict 不可外推 live)。
+                # 闭环回测传 portfolio_summary_override(模拟器当前真实仓位:含浮亏/集中度/剩余现金)
+                # → 委员会能像 live 一样 de-risk → 才测得出择时 skill。同一份 override 当日各资产共用
+                # (对齐 live:日内委员会都看当日开盘时的组合,执行在决策之后)。
+                if portfolio_summary_override is not None:
+                    portfolio_summary = portfolio_summary_override
+                else:
+                    portfolio_summary = (
+                        f"# Backtest Mode\n"
+                        f"该日期为历史回测，用户持仓上下文无法精确还原。\n"
+                        f"假设用户持仓中性（无极端集中度），focus 在技术 + 宏观信号。"
+                    )
 
                 # max_debate_rounds 从环境变量读（Optuna 训练用）
                 import os as _os
@@ -210,15 +245,33 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 verdict = result["verdict"]
                 _persist(report, verdict, output_dir=out_dir_base, date_override=decision_date)
 
-                results["verdicts"][symbol] = {
+                # 机器强制污染标记：决议日 ≤ cutoff = 落在 LLM 训练窗口（记忆穿越非业绩）。
+                # 追加一行到 _persist 刚写的 transcript（不改 _persist 共享格式），verdict_review
+                # 分桶靠决议日同一常量判定，这行是 transcript 自带的审计留痕。
+                md_path = out_dir_base / f"{safe_symbol(symbol)}.md"
+                contaminated = decision_date <= CONTAMINATION_CUTOFF
+                with md_path.open("a", encoding="utf-8") as f:
+                    f.write(
+                        f"\n\n---\n\n**Contaminated**: {str(contaminated).lower()} "
+                        f"(decision_date {decision_date} "
+                        f"{'<=' if contaminated else '>'} cutoff {CONTAMINATION_CUTOFF})\n"
+                    )
+
+                print(f"  ✓ {symbol}: {verdict['verdict']} (conf {verdict['confidence']:.2f})")
+                return symbol, {
                     "verdict": verdict["verdict"],
                     "confidence": verdict["confidence"],
                     "alloc_cny": verdict["alloc_cny"],
                 }
-                print(f"  ✓ {symbol}: {verdict['verdict']} (conf {verdict['confidence']:.2f})")
             except Exception as e:
                 print(f"  ✗ {symbol}: failed {type(e).__name__}: {e}")
-                results["verdicts"][symbol] = {"error": str(e)[:200]}
+                return symbol, {"error": str(e)[:200]}
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(pending), 4) or 1) as ex:
+            for symbol, vd in ex.map(_run_symbol, pending):
+                if vd is not None:
+                    results["verdicts"][symbol] = vd
 
     return results
 
@@ -234,8 +287,13 @@ def main():
     parser.add_argument("--limit", type=int, help="最多跑 N 个日期（debug 用）")
     parser.add_argument(
         "--allow-lookahead", action="store_true",
-        help="（不推荐）允许 backtest 日期超过 DeepSeek 训练数据截止（约 2024-06-30）。"
-             "默认拒绝，因为模型已经'见过'那段历史，命中率会虚高、不可信。",
+        help="（不推荐）允许 backtest 日期超过模型训练截止。默认拒绝，因为模型已经'见过'"
+             "那段历史，命中率会虚高、不可信（仅作行为一致性检查用，不是干净业绩）。",
+    )
+    parser.add_argument(
+        "--holdout", action="store_true",
+        help="干净验证模式：只跑模型训练截止【之后】且留够远期窗口能测实际收益的日期"
+             "（MiMo 没见过 → 无记忆穿越 → 这才是唯一可信的预测/业绩验证）。",
     )
     args = parser.parse_args()
 
@@ -263,19 +321,33 @@ def main():
     if args.limit:
         dates = dates[:args.limit]
 
-    # 防 LLM 训练数据穿越：DeepSeek-Chat 训练数据估算截止 2024-06-30，
-    # 之后的 backtest 模型已经"见过"市场走势，命中率虚高不可信
-    LLM_TRAINING_CUTOFF = "2024-06-30"
-    if not args.allow_lookahead and dates:
+    # 模型训练截止（防记忆穿越）。2026-06-25 实测 MiMo mimo-v2.5-pro：自报训练到 2024 末，
+    # 知 2024-11 大选 + Trump 47 任，但不知 2025 年中金价/真实 2025 市场事件 → cutoff 取 2024-12-31。
+    # （旧值 2024-06-30 + "DeepSeek" 注释是没核对过的臆测。）
+    # 穿越走绝对价位非日期(ADR-022);别把"prompt 无日期"当"早段干净"。cutoff 是 MiMo 自报非实证,若真实更晚则 holdout 头部被污染。
+    LLM_TRAINING_CUTOFF = CONTAMINATION_CUTOFF  # 单一可信源（同 verdict_review 分桶/落盘标记）
+    FORWARD_BUFFER_DAYS = 95  # 留够 90d 远期窗口，verdict_review 才能用实际后市收益评分
+
+    if args.holdout:
+        # 干净验证：只跑 cutoff 之后（模型没见过）+ 留够远期窗口（能测实际收益）的日期
+        hold_end = (today - timedelta(days=FORWARD_BUFFER_DAYS)).strftime("%Y-%m-%d")
+        dates = [d for d in dates if d > LLM_TRAINING_CUTOFF and d <= hold_end]
+        if not dates:
+            print(f"\n❌ holdout 窗口为空：需 {LLM_TRAINING_CUTOFF} < date ≤ {hold_end}")
+            return
+        print(f"\n🧪 HOLDOUT 干净验证：cutoff {LLM_TRAINING_CUTOFF} 之后 + 留 "
+              f"{FORWARD_BUFFER_DAYS}d 远期窗口 → {dates[0]} .. {dates[-1]}（MiMo 未见过，无记忆穿越）")
+    elif not args.allow_lookahead and dates:
         too_late = [d for d in dates if d > LLM_TRAINING_CUTOFF]
         if too_late:
             print(
-                f"\n❌ Refused：{len(too_late)} 个日期 (e.g. {too_late[0]}) 超过 "
-                f"DeepSeek 训练数据截止 {LLM_TRAINING_CUTOFF}。\n"
-                f"   LLM 已经'见过'这段市场，命中率会虚高、不可信。\n"
-                f"   选项：\n"
-                f"   - 把 --end 改到 {LLM_TRAINING_CUTOFF} 之前（推荐）\n"
-                f"   - 加 --allow-lookahead flag 强制跑（仅作上限估计）"
+                f"\n❌ Refused：{len(too_late)} 个日期 (e.g. {too_late[0]}) 超过模型训练截止 "
+                f"{LLM_TRAINING_CUTOFF}。\n"
+                f"   注意：cutoff【之前】= 模型已见过 = 有记忆穿越 → 只能当行为一致性检查，不是干净业绩；\n"
+                f"   cutoff【之后】才是干净验证。想跑可信的预测/业绩验证请用 --holdout。\n"
+                f"   - 把 --end 改到 {LLM_TRAINING_CUTOFF} 之前（污染，仅一致性检查）\n"
+                f"   - 用 --holdout（推荐：唯一可信的预测/业绩验证）\n"
+                f"   - 加 --allow-lookahead 强制跑（仅作上限估计）"
             )
             return
 

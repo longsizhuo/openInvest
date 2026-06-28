@@ -324,6 +324,7 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
     }
 
     rsi_str = f"{rsi_14:.2f}" if rsi_14 is not None else "N/A"
+    # CONTAMINATION CHANNEL (ADR-022): 绝对价位/宏观点位逐字进 prompt → 记忆过历史的 LLM 可反推年代;归一化能压低但杀纪律规则(VIX>20=fear 吃绝对值),不可消除。
     report_lines = [
         f"--- {title} ANALYSIS ---",
         # RSI(14) 为 Wilder 平滑（与 TradingView/券商口径一致）
@@ -382,6 +383,7 @@ def get_macro_data() -> str:
         vix_last = vix['Close'].iloc[-1] if not vix.empty else 0.0
         vix_change = _calc_change(vix['Close'].iloc[0], vix_last) if not vix.empty else 0.0
 
+        # CONTAMINATION CHANNEL (ADR-022): 绝对价位/宏观点位逐字进 prompt → 记忆过历史的 LLM 可反推年代;归一化能压低但杀纪律规则(VIX>20=fear 吃绝对值),不可消除。
         report = f"""
 --- MACRO INDICATORS (Reference) ---
 1. US 10Y Treasury Yield (^TNX): {tnx_last:.2f}% (MoM: {tnx_change:+.2%})

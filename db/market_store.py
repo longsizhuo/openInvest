@@ -1,8 +1,23 @@
+import datetime as _dt
 import os
 import sqlite3
 import threading
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "market_data.db")
+
+
+def _is_phantom_weekend(symbol: str, date_str: str) -> bool:
+    """周末日期的 bar 对【周一~周五交易】的标的是幽灵 —— 多半是 tz 错位造的(把 Asia/AU
+    的周一挂牌错位成周日)，且该 bar 收盘常 == 次日真实价 → 未来泄漏 + 滚动指标失真。
+    豁免:FX(``=X``,~24/5) 和加密(``-USD``,24/7) 真实有周末报价，放行。
+    这是写库 chokepoint 的后挡 —— 即便某条 ingestion 路径忘了用 tz_localize，也漏不出幽灵。"""
+    s = (symbol or "").upper()
+    if s.endswith("=X") or s.endswith("-USD"):
+        return False
+    try:
+        return _dt.date.fromisoformat(date_str).weekday() >= 5
+    except (ValueError, TypeError):
+        return False
 
 
 class MarketStore:
@@ -152,8 +167,10 @@ class MarketStore:
           （保留 betashares NAV 等权威收盘价，避免回填顺手改写历史决策依据）。
         - 不存在：整行 INSERT，close 用 yfinance。
 
-        返回 "updated" | "inserted"。
+        返回 "updated" | "inserted" | "skipped_weekend"。
         """
+        if _is_phantom_weekend(symbol, date_str):
+            return "skipped_weekend"
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
@@ -192,6 +209,8 @@ class MarketStore:
 
         向后兼容：只传 close 的老调用方行为不变（high/low/volume 落 NULL）。
         """
+        if _is_phantom_weekend(symbol, date_str):
+            return
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(

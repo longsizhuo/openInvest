@@ -15,8 +15,32 @@ from typing import Any, Dict
 from agents.skills_loader import load_skill
 
 
-def build_cio_prompt(asset: Dict[str, Any]) -> str:
-    """渲染 CIO prompt（含 asset 占位符 + config 阈值条件注入）"""
+# DeepSeek JSON Output 模式追加段——覆盖 SKILL.md 的 VERDICT: 文本格式，要求吐单个
+# JSON 对象。字段名与 cio_parse.parse_cio_memo 的 fields 抽取一一对应；额外 memo 字段
+# 承载完整 prose（GUI/transcript 展示用，不丢分析）。必含 "json" 字样（DeepSeek 要求）。
+_JSON_OUTPUT_ADDENDUM = """
+
+=== 输出格式覆盖（本次仅此一种）===
+忽略上方 `VERDICT: / CONFIDENCE: ...` 文本格式。只输出**一个 JSON 对象**（不要 markdown 代码围栏、不要任何额外文字），字段如下：
+{
+  "verdict": "BUY|ACCUMULATE|HOLD|TRIM|SELL",
+  "confidence": 0.0~1.0 的数字,
+  "dominant_view": "quant|macro|risk",
+  "suggested_alloc_cny": 整数金额（SELL/TRIM 用负数表示减仓）,
+  "trim_reason": "concentration|stop_loss|bearish"（非 TRIM 用 null）,
+  "reentry_price": 数字（非 TRIM 用 null，TRIM 必须低于现价）,
+  "reentry_condition": 字符串（非 TRIM 用 null）,
+  "expected_path": 字符串（非 TRIM 用 null）,
+  "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
+}
+上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到 [WORKER_UNAVAILABLE] 则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。"""
+
+
+def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
+    """渲染 CIO prompt（含 asset 占位符 + config 阈值条件注入）。
+
+    json_mode=True 追加 JSON 输出段（DeepSeek JSON Output，门控见 utils.llm.supports_json_output）。
+    """
     from core.config import load_config
     asset_name = asset.get("display_name", asset.get("symbol"))
     verdict_cfg = load_config().verdict
@@ -44,13 +68,16 @@ def build_cio_prompt(asset: Dict[str, Any]) -> str:
             "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。"
         )
 
-    return load_skill(
+    prompt = load_skill(
         "cio",
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
         TRIM_CONSTRAINT=trim_constraint,
         CONCENTRATION_DIRECTIVE=concentration_directive,
     )
+    if json_mode:
+        prompt += _JSON_OUTPUT_ADDENDUM
+    return prompt
 
 
 __all__ = ["build_cio_prompt"]
