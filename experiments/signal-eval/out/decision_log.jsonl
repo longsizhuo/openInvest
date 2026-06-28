@@ -2,3 +2,4 @@
 {"gate": "M3_step0_cutoff_probe", "effective_cutoff_lb": "<2024-07", "holdout_2025_leaks": true}
 {"gate": "M3_step0_cutoff_probe", "effective_cutoff_lb": "2025-01", "holdout_2025_leaks": true}
 {"gate": "Q1", "universe": "SP500_survivorship", "features_tested": 6, "holm_significant_<0.05": 0, "median_breadth": 498.0}
+{"gate": "M1_GBM", "mean_oos_ic": 0.0027056941599600975, "nw_t": 0.09437860705126212, "p_nw": 0.9248084090419397}
