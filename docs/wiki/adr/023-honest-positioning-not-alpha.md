@@ -5,9 +5,7 @@ status: accepted
 date: 2026-06-28
 tags: [positioning, product, verification, adr]
 intent: 产品定位
-schema_source:
-  - experiments/signal-eval/README.md
-  - docs/wiki/12-verification.md
+schema_source: []   # 定位决策,不绑定单一代码符号;证据见 experiments/signal-eval + docs/wiki/12
 documents:
   config_keys: []
   symbols: []
