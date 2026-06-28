@@ -33,6 +33,7 @@
 | **Q2 stress 躲跌** | 全不显著、偶反向 | de-risk 择时未显现 |
 | **Q2 A股/纳指** | 方向多对但 eff_n 7–67 | 欠功效,判不了 |
 | **趋势择时闸(trend_dca)** | 黄金 MA200 long/flat 扣成本控敞口:终值 **3.07 vs 买持 15.10**,Sharpe +0.36 vs +0.68,maxDD **−57% vs −44%**;10 变体 + 3 成本 + 3 资产**全不过 DSR>0.95**;DCA 顺势 tilt 三资产**全劣于**平均 DCA | ❌ **Q2 的"edge"扛不住交易** |
+| **每资产多信号族(signals_per_asset)** | 三资产 × {趋势/均值回归/波动率目标/突破} × 网格 = 每资产 24 变体,匹配敞口+扣成本+DSR deflate:**无一过 DSR>0.95**(全局最优 NDQ 均值回归 DSR=0.45);正向对照(作弊完美择时)DSR=1.00 证 harness 能识别真信号 | ❌ **不止黄金、不止趋势,仍无可交易信号** |
 | **cutoff 探针** | deepseek-v4-flash effective ≈ 2025-01 | 干净 holdout 须从 2025-06 起 |
 
 ## 趋势择时闸(trend_dca):Q2 的"edge"是 beta,扛不住交易
@@ -58,6 +59,23 @@ Q2 发现"黄金价在 MA200 上方 forward 收益更高"——但 Q2 忽略了�
 **含义:Q2 的趋势"信号"不是收益杠杆。** 单资产趋势择时是噪声(与 time-series momentum 文献不矛盾——
 那套靠 ~50 个市场跨资产分散才稳,单标的本就该输);本 3 资产篮子做不出真正分散的趋势组合。
 → 信号驱动定投技术方案的 §0 前提("唯一通过的是黄金 MA200 趋势")**被自身的上线闸否决**:战术 sleeve 不上线。
+
+## 每资产多信号族(signals_per_asset):不止黄金、不止趋势,仍无信号
+
+"系统不能只看黄金"——所以对**三资产各自**扫 4 个信号族 × 网格(每资产 24 变体):
+趋势(已知失败,留对照)、**均值回归**(z=(close−MA)/std,超卖做多;A股最可能响应)、
+**波动率目标**(敞口 ∝ target/realized)、**突破**(Donchian)。口径同 trend_dca:匹配平均敞口、
+扣成本、DSR 对该资产所有变体数 deflate。
+
+**结果:三资产、四信号族、72 个变体——无一过 DSR>0.95。** 每资产最优:
+- 黄金:全族最优 breakout DSR 0.083;
+- A股(510300.SS):trend/breakout DSR ~0.30(均值回归反而最弱 0.11——"A股 mean-revert" 假设被否);
+- 纳指(NDQ.AX):均值回归 DSR 0.45(全表最高,仍远不过闸,且回撤 −25% 比被动 −8% 更深)。
+
+**正向对照**:喂"明天涨就今天满仓"的作弊信号 → DSR=1.00、终值 ×百万 → 证明 harness **能**识别真信号,
+上面的全 null **不是**压制 bug(self-test + 与 trend_dca 数字一致 + 此对照,三重交叉验证)。
+
+→ 不止黄金、不止趋势:**这三个资产上,没有任何一族可交易信号扛得住诚实的成本+敞口+多重检验。**
 
 ## 结论(对"AI/委员会能不能跑赢")
 
@@ -85,6 +103,8 @@ uv run --with scipy --with statsmodels --with scikit-learn python experiments/si
 uv run python experiments/signal-eval/cutoff_probe.py   # cutoff(需 .env DEEPSEEK_API_KEY)
 uv run python -m pytest experiments/signal-eval/test_trend_dca.py -q                 # 趋势闸自测(无需 scipy)
 uv run --with scipy --with statsmodels python experiments/signal-eval/trend_dca.py   # 趋势择时闸(扣成本/控敞口/DSR)
+uv run python -m pytest experiments/signal-eval/test_signals_per_asset.py -q          # 多信号族生成器自测
+uv run --with scipy --with statsmodels python experiments/signal-eval/signals_per_asset.py  # 每资产×4信号族判决
 ```
 原始结果 + 决策审计在 `out/`(q1/q2/m1/cutoff json + decision_log.jsonl)。
 

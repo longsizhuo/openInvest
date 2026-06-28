@@ -4,3 +4,6 @@
 {"gate": "Q1", "universe": "SP500_survivorship", "features_tested": 6, "holm_significant_<0.05": 0, "median_breadth": 498.0}
 {"gate": "M1_GBM", "mean_oos_ic": 0.0027056941599600975, "nw_t": 0.09437860705126212, "p_nw": 0.9248084090419397}
 {"gate": "trend_dca", "asset": "GC=F", "window": "post2000", "primary_dsr": 0.00038628254519226964, "primary_passes_0.95": false}
+{"gate": "signals_per_asset", "asset": "GC=F", "n_trials": 24, "any_dsr_pass_0.95": false, "best_family": "breakout", "best_dsr": 0.08348529874888772}
+{"gate": "signals_per_asset", "asset": "510300.SS", "n_trials": 24, "any_dsr_pass_0.95": false, "best_family": "breakout", "best_dsr": 0.31565962643439505}
+{"gate": "signals_per_asset", "asset": "NDQ.AX", "n_trials": 24, "any_dsr_pass_0.95": false, "best_family": "meanrev", "best_dsr": 0.452877176411806}
