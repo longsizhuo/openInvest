@@ -499,6 +499,14 @@ def run() -> Dict[str, Any]:
         log.warning("翻译官失败 graceful 回落确定性一句话: %s", e)
 
     # 4) 拼报告（委托给 builder 的纯函数）
+    # 纪律台账(只读聚合,零 LLM;失败不阻断报告)
+    try:
+        from services.discipline import render_discipline_md
+        discipline_md = render_discipline_md()
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"纪律台账渲染失败 graceful: {e}")
+        discipline_md = ""
+
     full_report = assemble_full_report(
         today=today,
         macro_view=macro_view,
@@ -511,6 +519,7 @@ def run() -> Dict[str, Any]:
         final_decision_gemini=final_decision_gemini,
         wealth_context_view=wealth_view,
         plain_summaries=plain_summaries,
+        discipline_md=discipline_md,
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）

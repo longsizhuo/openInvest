@@ -287,3 +287,13 @@ async def get_tool_calls(
         count=len(records_sorted),
         records=[ToolCallRecord(**r) for r in records_sorted],
     )
+
+
+@router.get("/api/discipline", tags=["system"])
+async def get_discipline() -> dict:
+    """委员会纪律台账(只读):默认不作为率(HOLD 占比)+ 拦截冲动操作次数 + 反事实省/费钱。
+    对齐 ADR-023——委员会可证价值是纪律/透明,不是 alpha。GUI/agent 据此展示"它拦了什么"。
+    返回 {summary: {...}, markdown: "..."}(结构化 + 已渲染人话,任选其一用)。"""
+    from services.discipline import discipline_summary, render_discipline_md
+    s = discipline_summary()
+    return {"summary": s, "markdown": render_discipline_md(s)}

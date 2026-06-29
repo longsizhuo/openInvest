@@ -31,6 +31,7 @@ __all__ = [
     "cmd_what_if",
     "cmd_correlate",
     "cmd_live_prices",
+    "cmd_discipline",
     "cmd_event_check",
 ]
 
@@ -252,6 +253,14 @@ def cmd_live_prices(_: argparse.Namespace) -> None:
         "TNX": _safe_close("^TNX"),
     }
     _print_json(out)
+
+
+def cmd_discipline(_: argparse.Namespace) -> None:
+    """委员会纪律台账(只读,零 LLM):默认不作为率(HOLD 占比)+ 拦截冲动操作次数 + 反事实省/费钱。
+    对齐 ADR-023——委员会可证价值是纪律/透明,不是 alpha。等价 GET /api/discipline。"""
+    from services.discipline import discipline_summary, render_discipline_md
+    s = discipline_summary()
+    _print_json({"summary": s, "markdown": render_discipline_md(s)})
 
 
 def cmd_event_check(args: argparse.Namespace) -> None:

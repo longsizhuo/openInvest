@@ -279,6 +279,7 @@ def assemble_full_report(
     final_decision_gemini: str,
     wealth_context_view: str = "",
     plain_summaries: Optional[Dict[str, str]] = None,
+    discipline_md: str = "",
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -425,6 +426,12 @@ def assemble_full_report(
         else ""
     )
 
+    # 纪律台账(ADR-023:委员会可证价值=不作为+拦冲动,非 alpha)。entry 层算好传入,
+    # 本纯函数只渲染。空则不出 section(无数据时不留空壳)。
+    discipline_section = (
+        f"\n{discipline_md}\n\n---\n" if discipline_md.strip() else ""
+    )
+
     return f"""
 # 投资委员会日报 ({today})
 
@@ -443,7 +450,7 @@ def assemble_full_report(
 {asset_section}
 
 ---
-
+{discipline_section}
 ## {n+2}. 摩擦成本 (CNY → AUD 换汇)
 ```
 {friction_report}
