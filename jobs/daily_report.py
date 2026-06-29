@@ -581,5 +581,17 @@ def run() -> Dict[str, Any]:
     }
 
 
+def _report_exit_code(result: Dict[str, Any]) -> int:
+    """退出码契约：邮件真发出 → 0；其余(发送失败/无收件人/no_target_assets 早返回)→ 1。
+    自托管(GitHub Actions)唯一反馈通道是邮件 —— 没发出就必须红勾，否则委员会跑了、token
+    烧了、收件箱空、用户零感知(配错 Gmail 应用密码会每天静默烧)。"""
+    return 0 if (result.get("email") or {}).get("sent") is True else 1
+
+
 if __name__ == "__main__":
-    print(run())
+    # 仅影响 `python -m jobs.daily_report`(CLI/Actions)；APScheduler cron 走 run() 不受影响。
+    import json as _json
+    import sys as _sys
+    _r = run()
+    print(_json.dumps(_r, ensure_ascii=False, default=str))
+    _sys.exit(_report_exit_code(_r))

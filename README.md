@@ -119,6 +119,29 @@ bash ~/openInvest/skills/install.sh
 
 更多部署矩阵（Docker 容器化、本地独立 Web GUI 调试端口）参阅 [QUICK_START.md](https://www.google.com/search?q=docs/QUICK_START.md)。
 
+### 3. 零成本自托管（GitHub Actions，无需服务器）
+
+不想挂机器跑 cron？fork 一份，每天由 GitHub Actions 自动跑委员会并把报告发到你邮箱。
+
+> ⚠️ **fork 必须设为 private**：运行状态（持仓、决议）会被 commit 回你的 fork，含真实持仓数据。public fork 会泄露隐私。
+
+1. **Fork 本仓库**（Settings → 改为 Private）。
+2. 本地 `帮我初始化 invest` 生成 `memory/`，然后 `git add -f memory/ && git commit && git push` 推到你的私有 fork（Actions 靠它读你的持仓）。
+3. fork 的 **Settings → Secrets and variables → Actions** 填：
+
+   | Secret | 说明 |
+   |---|---|
+   | `LLM_API_KEY` 或 `DEEPSEEK_API_KEY` | 跑委员会的 LLM Key |
+   | `EMAIL_SENDER` / `EMAIL_PASSWORD` | Gmail 发信地址 + [应用专用密码](https://support.google.com/accounts/answer/185833) |
+   | `DIGEST_EMAIL_TO` | 收件邮箱 |
+
+4. **Actions 标签页 → 启用 workflow**。默认每天 10:00（北京）跑；也可在 `daily-report` 里手动 **Run workflow** 立即触发。
+
+每次运行后更新的 `memory/` 自动 commit 回 fork —— 你的决策历史天然进 git，可回溯。
+
+> 📖 **手把手详细教程**（含 Gmail 应用密码、LLM Key、排错、改时间/改资产、安全须知）：
+> [docs/SELF_HOST_ACTIONS.md](docs/SELF_HOST_ACTIONS.md)。
+
 ---
 
 ## 底层 LLM Provider 配置契约
