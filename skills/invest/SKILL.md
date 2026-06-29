@@ -169,6 +169,7 @@ GUI，他根本用不上。所以：
 | `strategy` | 通用 | 看策略 | target_assets + Dreaming insights |
 | `history [-n N]` | 通用 | 看流水 | 最近 N 笔交易 + 委员会决议 |
 | `live_prices` | 通用 | 背景行情 | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
+| `discipline` | 通用 | "委员会拦了什么/纪律如何" | 不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实省/费钱(只读零 LLM，对齐 ADR-023)。等价 `GET /api/discipline` |
 | `what_if [--symbol X --pct N \| --gold-pct N \| --ndq-pct N]` | 通用 | "X 跌 Y% 我亏多少" | 算术情景，无 LLM |
 | `correlate --symbols A,B[,C...] [--period 6mo] [--with-llm]` | "btw" 附带 | 用户**顺嘴问**"A 跟 B 像不像"（不写入 memory/.committee，纯查询返回）| pairwise 相关矩阵 + sector + macro 关联 |
 | `prepare_committee SYM` | Coordinator | 拿 brief 给 4 subagent | brief JSON + 6 段 prompts |
@@ -210,6 +211,7 @@ GUI，他根本用不上。所以：
 | `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
 | `POST /api/strategy/asset` | 加 target_assets 条目 | `{symbol, channel?, max_single_invest_cny}` |
 | `GET /api/events/recent?hours=24&min_severity=low&limit=50` | 列最近 N 小时事件层感知的新闻（ADR-006）。debug / "系统现在感知到什么" | — |
+| `GET /api/discipline` | 委员会纪律台账：不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实损益（对齐 ADR-023，GUI/agent 展示"它拦了什么"）| — |
 | `POST /api/events/check` | 手动跑一次 event_watch（拉新闻 + 归一化 + 入库 + 命中触发委员会）。同步 30-90s | — |
 | `GET /api/config` | 看可经 API 配置的白名单参数当前生效值（+ 是否被 override + 元信息）| — |
 | `PUT /api/config` | 改一条白名单 override（落盘持久、跨进程共读，优先级高于 env；ADR-017）| `{key, value}`，如 `{"key":"verdict.concentration_lens_enabled","value":false}` |
