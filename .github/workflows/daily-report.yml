@@ -7,7 +7,8 @@ name: daily-report
 on:
   schedule:
     - cron: "0 2 * * *"   # 02:00 UTC = 10:00 Asia/Shanghai。GH cron 只认 UTC。
-  workflow_dispatch: {}     # 允许手动触发(daily_report 只读出报告，重跑最多重发一封邮件)
+  workflow_dispatch: {}     # 允许手动触发。注意:会重跑整个委员会(消耗 token)，不只是重发邮件。
+                            # 现金/持仓账本不受影响、不重复入账(daily_report 只出建议不下单)。
 
 # 同一时间只跑一个，避免两次 push 撞 memory/
 concurrency:
@@ -20,7 +21,21 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
+    # 只在 fork 上跑：上游 public 仓自己有常驻 cron，不该被这个 workflow 每天点红。
+    if: github.repository != 'longsizhuo/openInvest'
     steps:
+      # 隐私 fail-fast：fork 是 public 就拒跑——memory/(真实持仓) 会被 push 进公开 git。
+      # 放在 checkout 前(gh 预装、无需代码)，漏设 private 时零 token 浪费直接红勾。
+      - name: 确保 fork 为 private
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$(gh api "repos/$REPO" --jq .private)" != "true" ]; then
+            echo "::error::此 fork 是 public —— memory/(真实持仓/现金/裁决) 会被 push 到公开 git。请到 Settings → Make private 后再启用。"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
@@ -29,12 +44,18 @@ jobs:
 
       - run: uv sync
 
-      # secrets → .env(daily_report / notifier 都 load_dotenv())
+      # secrets → .env(daily_report / notifier 都 load_dotenv())。
+      # 定界符加引号(<<'EOF') → secret 值里的 $ / 反引号不被 shell 二次展开(Actions 已先替换好值)。
+      # LLM_BASE_URL/MODEL/PROVIDER 给非 DeepSeek 供应商(千问/智谱/任意 OpenAI 兼容端点)用，
+      # 没设就是空 → utils/llm.py 走 `or` 回退默认，无害。
       - name: 写 .env
         run: |
           umask 077
-          cat > .env <<EOF
+          cat > .env <<'EOF'
           LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL=${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL=${{ secrets.LLM_MODEL }}
+          LLM_PROVIDER=${{ secrets.LLM_PROVIDER }}
           DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
           EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}

@@ -101,22 +101,35 @@ uv run python scripts/skill.py init
 #   ——或者如果你用 Claude Code / 支持 Skill 的终端，直接说「帮我初始化 invest」更顺
 ```
 
-init 会写出 `memory/`（持仓 `portfolio.md`、策略 `strategy.md` 等）和 `user_profile.json`。
+init 会写出 `memory/`（持仓 `portfolio.md`、策略 `strategy.md` 等）。
 
-> **关键**：onboarding 里「你关注哪些资产」那一步决定了委员会每天分析谁
-> （写进 `strategy.md` 的 `target_assets`）。**如果留空，daily_report 会直接跳过、邮件里啥也没有**
-> （见[排错](#no_target_assets)）。
+> ⚠️ **必做：手动给 `memory/strategy.md` 加关注资产**。`init` **不会**问你"关注哪些资产"，
+> 生成的 `strategy.md` 里 `target_assets` 是**空的**。而 daily_report 每天分析的就是这个列表 ——
+> **空列表 = 委员会不分析任何东西 = 收不到报告**（首跑会直接 `no_target_assets`、Actions 红勾）。
+
+编辑 `memory/strategy.md`，在最上方 `---` 围起来的 YAML frontmatter 里加 `target_assets`
+（把 symbol 换成你关注的 [yfinance](https://finance.yahoo.com) 代码，A股/港股/美股/ETF/商品都行）：
+
+```yaml
+target_assets:
+- symbol: 510300.SS        # 沪深300 ETF（示例，换成你的）
+  max_single_invest_cny: 6000
+- symbol: GC=F             # 黄金（可留可删）
+  max_single_invest_cny: 0   # 0 = 不设单次上限
+```
+
+> 想要校验保护、不想手写 YAML？在本地临时起一下后端 `uv run python -m connectors.web_api`，
+> 然后 `curl -X POST localhost:8765/api/strategy/asset -H 'Content-Type: application/json'
+> -d '{"symbol":"510300.SS","max_single_invest_cny":6000}'`，它会安全地写进 `strategy.md`。
+> （这只是本地一次性配置，跑完 Ctrl+C；**云端 Actions 不需要后端**。）
 
 ```bash
 # 3) memory/ 默认在 .gitignore 里，必须 -f 强制加，推到你的私有 fork
-git add -f memory/ user_profile.json
-git commit -m "init: 我的持仓与画像"
+#    （只推 memory/ —— user_profile.json 含合规真名等 PII 且运行时用不到，不要 commit）
+git add -f memory/
+git commit -m "init: 我的持仓 + 关注资产"
 git push
 ```
-
-> 没装本地环境、跑不了 Python？退而求其次：在 GitHub 网页上手动建 `memory/portfolio.md`
-> 和 `memory/strategy.md`（结构参考 [docs/memory_layout.md](memory_layout.md)）。但**强烈建议**
-> 用本地 `init`，它有 schema 校验和事故防护，手写容易写错。
 
 ---
 
@@ -132,9 +145,12 @@ git push
 | `EMAIL_SENDER` | 你的 Gmail 地址 | ✅ |
 | `EMAIL_PASSWORD` | 步骤 4 的 16 位应用密码（**去空格**）| ✅ |
 | `DIGEST_EMAIL_TO` | 收报告的邮箱 | ✅ |
+| `LLM_BASE_URL` | 非 DeepSeek 供应商的端点（如千问/智谱）| 选填 |
+| `LLM_MODEL` | 非 DeepSeek 供应商的模型名 | 选填 |
 
 > Secrets 一旦保存就**看不到原文**（GitHub 会在日志里自动打码），改错了删掉重建即可。
-> 用非 DeepSeek 供应商时，再加一个 `LLM_BASE_URL`。
+> **用非 DeepSeek 供应商**（千问/智谱/任意 OpenAI 兼容端点）时：`LLM_BASE_URL` **和** `LLM_MODEL`
+> 都要设 —— 只设 base_url 不设 model，会默认用 `deepseek-v4-flash` 这个模型名去打你的端点而报错。
 
 ---
 
@@ -147,8 +163,9 @@ git push
 5. 刷新页面，点进正在跑的那次运行，看 **`报告` → 跑每日委员会报告** 这步的实时日志。
 
 跑完（2–5 分钟）后：
-- ✅ 你的收件箱应该收到一封委员会报告邮件。
-- ✅ Actions 日志最后会打印 `{'status': 'success', ...}`。
+- ✅ **Actions 绿勾 = 邮件已成功发出**（收件箱去收）。**红勾 = 报告没发出去**
+  （委员会可能跑了但邮件失败 / 没配 `target_assets`）—— 点进运行看日志最后一行的 JSON 找原因。
+  > 这是有意设计：自托管唯一反馈通道是邮件，发不出就让 job 红，避免"绿勾但收件箱空"的静默失败。
 - ✅ fork 里多一条 `github-actions[bot]` 的 commit（更新后的 `memory/`）。
 
 之后**全自动**：每天北京时间 10:00 自跑一次，不用你管。
@@ -157,11 +174,11 @@ git push
 
 ## 8. 排错（Troubleshooting）
 
-### `no_target_assets`
-日志出现 `{'status': 'skipped', 'reason': 'no_target_assets'}`、邮件没内容。
-→ 你的 `strategy.md` 里没有 `target_assets`（onboarding「关注哪些资产」留空了）。
-本地 `uv run python scripts/skill.py status` 确认持仓，用 GUI 或
-`POST /api/strategy/asset` 加上关注资产，再 `git add -f memory/ && git commit && git push`。
+### `no_target_assets`（Actions 红勾、收不到邮件）
+日志出现 `{"status": "skipped", "reason": "no_target_assets"}`、job 红勾、没发邮件。
+→ 你的 `memory/strategy.md` 里 `target_assets` 是空的（`init` 不会自动填，见[步骤 5](#5-生成你的持仓memory并推到-fork)）。
+修：编辑 `memory/strategy.md` 的 frontmatter 加上 `target_assets`（[步骤 5 有模板](#5-生成你的持仓memory并推到-fork)），
+然后 `git add -f memory/ && git commit && git push`。下次运行就有报告了。
 
 ### 邮件没收到 / SMTP 报错
 日志里 `跑每日委员会报告` 这步报 `SMTPAuthenticationError` 或连接失败：
@@ -193,14 +210,35 @@ GitHub 会在仓库 **60 天无活动**后自动禁用 scheduled workflow。本�
 例：想北京 08:00 跑 → `0 0 * * *`；想每个工作日跑 → `0 2 * * 1-5`。
 [crontab.guru](https://crontab.guru) 可以帮你算。
 
-**改分析哪些资产**：改本地 `memory/strategy.md` 的 `target_assets`（或用 GUI / CLI），
+**改分析哪些资产**：编辑本地 `memory/strategy.md` 的 `target_assets`（[步骤 5 模板](#5-生成你的持仓memory并推到-fork)），
 然后 `git add -f memory/ && git commit && git push`。下次运行就生效。
 
 **临时停用**：Actions → `daily-report` → 右上 **`···` → Disable workflow**。想恢复再 Enable。
 彻底不用就删掉 `.github/workflows/daily-report.yml`。
 
-**手动随时跑一次**：Actions → `daily-report` → **Run workflow**（`daily_report` 是只读出报告，
-重跑安全，最多重发一封邮件，不会重复记账）。
+**手动随时跑一次**：Actions → `daily-report` → **Run workflow**。注意它会**重新跑一遍委员会**
+（消耗 token，不只是重发邮件）；**现金/持仓账本不受影响、不会重复入账**（daily_report 只出建议、
+不下单）。当天已经出过报告就不必重复点，除非你刚改了 `target_assets` 或 secrets。
+
+**跟上游更新**（代码迭代很快，建议偶尔同步）：
+```bash
+git remote add upstream https://github.com/longsizhuo/openInvest.git   # 只需加一次
+git fetch upstream && git merge upstream/main
+```
+你的 `memory/` 是上游不跟踪的文件，**不会**和上游冲突（放心合）。唯一可能要手解的是你改过
+`.github/workflows/daily-report.yml`（比如改了 cron）时——按提示选你的版本即可。合完 `git push`。
+
+---
+
+## 9.5 它跑什么、不跑什么（重要）
+
+这套 Actions 方案**只跑「每日委员会报告」这一件事**。openInvest 完整版还有一批常驻 cron
+（自动定投执行、事件/新闻告警、PnL 快照、券商邮件同步、Dreaming 复盘等）——**那些需要一台常驻
+服务器，Actions 不跑**。所以：
+
+- 你**不会**因为开了这个 workflow 就自动下单/自动定投 —— daily_report 只给**建议**，不动账本。
+- 想要全套自动化（含自动定投 / 实时事件告警），得自己挂一台机器跑 `connectors.web_api` + cron，
+  或用 hub-and-spoke 远端模式（见 [SKILL.md「远端模式」](../skills/invest/SKILL.md)）。
 
 ---
 
