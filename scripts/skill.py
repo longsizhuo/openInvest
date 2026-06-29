@@ -79,6 +79,7 @@ def main() -> None:
     sub.add_parser("status").set_defaults(func=cmd_status)
     sub.add_parser("strategy").set_defaults(func=cmd_strategy)
     sub.add_parser("live_prices").set_defaults(func=cmd_live_prices)
+    sub.add_parser("discipline", help="委员会纪律台账(不作为率+拦冲动+反事实损益)").set_defaults(func=cmd_discipline)
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("init")
