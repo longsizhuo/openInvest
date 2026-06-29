@@ -139,6 +139,9 @@ bash ~/openInvest/skills/install.sh
 
 每次运行后更新的 `memory/` 自动 commit 回 fork —— 你的决策历史天然进 git，可回溯。
 
+> 📖 **手把手详细教程**（含 Gmail 应用密码、LLM Key、排错、改时间/改资产、安全须知）：
+> [docs/SELF_HOST_ACTIONS.md](docs/SELF_HOST_ACTIONS.md)。
+
 ---
 
 ## 底层 LLM Provider 配置契约
