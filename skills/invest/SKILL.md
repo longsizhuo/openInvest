@@ -181,6 +181,7 @@ GUI，他根本用不上。所以：
 | `buy --symbol S --units N --price P [-c CCY] [--kind etf/equity/...]` | 通用 写 | 加仓 / 建仓（加权平均成本） | JSON action + 估算成本 |
 | `sell --symbol S --units N --price P` | 通用 写 | 减仓（按 holding cost_currency 还现金） | JSON 剩余 units |
 | `delete_holding --symbol S [--force]` | 通用 写 | 删除持仓行（units 必须 0 或 --force） | JSON 已删 |
+| `import [--file F \| --text T] [--commit]` | 通用 读/写 | 自由文本/CSV 持仓描述 → LLM 解析成结构化持仓（券商持仓粘贴、批量录入）。默认只预览；`--commit` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种，重复导入幂等）。等价 POST /api/holdings/import | JSON `{parsed, committed, summary?}` |
 | `config [--set KEY VALUE] [--clear KEY]` | 通用 读/写 | 读/改可经 API 配置的白名单参数（concentration_lens / risk_profile / gold_defense_dca / dreaming.llm_verify / **dca.auto_dca_enabled / dca.auto_dca_amount_cny**——自动定投开关与金额，ADR-018）。无参=读全部。等价 GET/PUT /api/config（ADR-017）| JSON 全部生效值 |
 
 **子命令名是封闭集合 —— 上表之外的命令都不存在**。看到自己想调
@@ -206,6 +207,7 @@ GUI，他根本用不上。所以：
 | `GET /api/trades?limit=N` | 看最近 N 笔意向 / 已成交 | — |
 | `PATCH /api/trades/{id}/status` | **标记成交**（status: "executed"）→ 自动同步 portfolio.md（更新 holdings + 扣 cash）| `{status: "executed"}` |
 | `POST /api/holdings` | 新增 yfinance 跟踪资产（不下单，只录入持仓数据）| `{symbol, kind, units, avg_cost, cost_currency, channel?}` |
+| `POST /api/holdings/import` | 自由文本/CSV 持仓描述 → LLM 解析（GUI 粘贴券商持仓、批量录入）。`commit:false` 只预览不落盘；`commit:true` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）。需后端 LLM key | `{content, commit?}` |
 | `PUT /api/holdings/{symbol}` | 改持仓字段 | `{units?, avg_cost?, channel?}` |
 | `POST /api/deposit` / `/api/withdraw` | 调 cash 现金 | `{currency: "CNY"\|"AUD"\|..., amount}` |
 | `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
