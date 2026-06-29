@@ -22,6 +22,7 @@ __all__ = [
     "cmd_buy",
     "cmd_sell",
     "cmd_delete_holding",
+    "cmd_import_holdings",
 ]
 
 
@@ -137,4 +138,42 @@ def cmd_delete_holding(args: argparse.Namespace) -> None:
         raise SystemExit(json.dumps({
             "status": "error", "error": str(e),
         }, ensure_ascii=False))
+    _print_json(out)
+
+
+def cmd_import_holdings(args: argparse.Namespace) -> None:
+    """把自由文本/CSV 持仓描述用 LLM 解析成结构化持仓（等价 POST /api/holdings/import）。
+
+    示例:
+        skill import --file holdings.csv            # 只预览解析结果，不落盘
+        skill import --text "510300 ETF 3000股 4.2元 + 余额宝 5万" --commit
+        cat brokerage.csv | skill import --commit   # 不给 --file/--text 则读 stdin
+
+    --commit 走**非破坏**写入：只加 portfolio 里还没有的 symbol、cash 只填当前为 0 的币种，
+    已存在的跳过并在 summary 报告（重复导入幂等，不覆盖真实数据）。需要 LLM_API_KEY / DEEPSEEK_API_KEY。
+    """
+    from pathlib import Path
+
+    from services.holdings_import import commit_parsed, parse_holdings
+
+    if args.file:
+        content = Path(args.file).read_text(encoding="utf-8")
+    elif args.text:
+        content = args.text
+    else:
+        content = sys.stdin.read()
+    if not content.strip():
+        _print_json({"status": "error", "error": "无输入（用 --file / --text，或管道喂 stdin）"})
+        sys.exit(1)
+
+    try:
+        parsed = parse_holdings(content)
+    except ValueError as e:  # 无 LLM key
+        _print_json({"status": "error", "error": str(e)})
+        sys.exit(1)
+
+    out = {"status": "ok", "parsed": parsed, "committed": False}
+    if args.commit:
+        out["summary"] = commit_parsed(_resolve_pm(), parsed)
+        out["committed"] = True
     _print_json(out)

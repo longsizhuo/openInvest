@@ -8,13 +8,43 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from core.portfolio_manager import PortfolioManager
 
-from connectors.web_api.models import HoldingCreateRequest, HoldingPatchRequest, HoldingV2
+from connectors.web_api.models import (
+    HoldingCreateRequest,
+    HoldingPatchRequest,
+    HoldingsImportRequest,
+    HoldingsImportResponse,
+    HoldingV2,
+)
 from connectors.web_api.deps import get_pm
 
 log = logging.getLogger("web_api")
 from connectors.web_api.routers.read import _build_holding_v2
 
 router = APIRouter()
+
+
+@router.post("/api/holdings/import", response_model=HoldingsImportResponse, tags=["holdings_write"])
+async def import_holdings(
+    body: HoldingsImportRequest = Body(...), pm: PortfolioManager = Depends(get_pm)
+) -> HoldingsImportResponse:
+    """自由文本/CSV 持仓描述 → LLM 解析成结构化持仓。GUI 小白粘贴券商持仓、agent 批量录入都走这。
+
+    commit=false（默认）：只返回解析预览，**不落盘**（让用户/GUI 先确认）。
+    commit=true：**非破坏**写入 —— 只加 portfolio 里还没有的 symbol、cash 只填当前为 0 的币种，
+    已存在的 symbol / 已有余额的币种跳过并在 summary 里报告，绝不覆盖真实数据（重复导入幂等）。
+    需要后端配 LLM key（无 key → 400）。等价 CLI `run.sh import`。
+    """
+    from services.holdings_import import commit_parsed, parse_holdings
+
+    try:
+        parsed = parse_holdings(body.content)
+    except ValueError as e:  # 无 LLM key
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001  LLM 调用/解析失败
+        raise HTTPException(status_code=502, detail=f"LLM 解析失败: {e}")
+
+    summary = commit_parsed(pm, parsed) if body.commit else None
+    return HoldingsImportResponse(parsed=parsed, committed=body.commit, summary=summary)
 
 
 @router.post("/api/holdings", response_model=HoldingV2, tags=["holdings_write"])

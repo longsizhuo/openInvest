@@ -67,6 +67,7 @@ jobs:
           uv run python -c "from connectors.web_api import app"
           uv run python -c "from jobs.path_review import run, realized_path, score_one"
           uv run python -c "from jobs.intervention_review import load_interventions, score, summarize"
+          uv run python -c "from services.holdings_import import parse_holdings, commit_parsed, _normalize_holding"
           uv run python -c "from scripts.backfill_history import backfill, main, _num, COMMODITY_DEEP_HISTORY"
           uv run python -c "from core.regime_probability import forward_return"
           uv run python -c "from core.committee_runner import rule_family, _intervention_record, _gold_defense_dca_gate"

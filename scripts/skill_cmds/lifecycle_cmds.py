@@ -50,89 +50,13 @@ def cmd_doctor(_: argparse.Namespace) -> None:
 
 # ---------- init ----------
 
-# 自然语言持仓解析的 system prompt —— 喂 DeepSeek-Chat
-_HOLDINGS_PARSE_SYSTEM_PROMPT = """你是金融数据解析助手。把用户的自然语言持仓描述解析成严格 JSON。
-
-输出 schema（无 markdown 无解释）：
-{
-  "cash": {"<currency_code>": <number>},
-  "holdings": [
-    {
-      "symbol": "<yfinance ticker>",
-      "kind": "<stock|etf|fund|metal|crypto|bond|other>",
-      "units": <number>,
-      "unit_label": "<股|份|克|个|盎司>",
-      "avg_cost": <number>,
-      "cost_currency": "<currency_code>",
-      "channel": "<券商/银行渠道，没说就 '未指定'>",
-      "display_name": "<易读名>"
-    }
-  ]
-}
-
-Symbol 映射规则：
-- 沪市股票/ETF: 6 位代码 + .SS  (510300 → 510300.SS, 600519 → 600519.SS)
-- 深市: 6 位 + .SZ
-- 港股: 5 位 + .HK
-- 美股: 直接 ticker (AAPL, TSLA)
-- 澳股: ticker + .AX (NDQ.AX)
-- 加密: 大写 + -USD (BTC-USD, ETH-USD)
-- 黄金/纸黄金/积存金: GC=F (浙商/工行/招行积存金都映射到 GC=F，渠道写银行名)
-- 货币基金/余额宝/朝朝宝/银行理财: 不放 holdings，并入 cash
-
-币种规则：
-- 用户没说币种 → CNY
-- 美元/USD → USD; 澳元/AUD → AUD; 港元/HKD → HKD
-
-数值规则：
-- 用户没说均价 → avg_cost: 0
-- 用户没说渠道 → channel: "未指定"
-- 缺字段就用合理默认，不要抛错
-
-只输出 JSON 对象本身。"""
-
-
-def _parse_holdings_with_llm(
-    description: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
-) -> Dict[str, Any]:
-    """调 LLM（默认 DeepSeek，可换千问/智谱）把"510300 ETF 3000股 4.2元 + 余额宝 5万"
-    这种自然语言转成 v2 持仓 JSON。
-
-    返回 {"cash": {...}, "holdings": [...]}.
-    出错时抛异常，让 cmd_init 决定回退策略（不阻塞 onboarding）。
-
-    base_url / model 不传 → 走 utils.llm 默认值（LLM_*，fallback DEEPSEEK_*）
-    """
-    from openai import OpenAI
-    from utils.llm import get_llm_config_safe, needs_thinking_disabled
-    _ak, _bu, _m, _p = get_llm_config_safe()
-    base_url = base_url or _bu
-    model = model or _m
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-    # DeepSeek v4 默认 thinking 模式，关掉走旧 chat 行为；千问/智谱不需要
-    extra_body = {}
-    if needs_thinking_disabled(model):
-        extra_body["thinking"] = {"type": "disabled"}
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": _HOLDINGS_PARSE_SYSTEM_PROMPT},
-            {"role": "user", "content": description},
-        ],
-        temperature=0.0,
-        response_format={"type": "json_object"},
-        extra_body=extra_body or None,
-    )
-    raw = resp.choices[0].message.content or "{}"
-    parsed = json.loads(raw)
-    # 兜底归一化：保证两个顶层 key 都在
-    parsed.setdefault("cash", {})
-    parsed.setdefault("holdings", [])
-    return parsed
+# 自然语言/CSV 持仓解析已抽到 services/holdings_import.py（单一可信源，onboarding +
+# Web API /api/holdings/import + CLI `import` 共用，防 prompt/解析漂移）。这里 re-export
+# 保持 cmd_init 的 bare-name 调用 + 历史 monkeypatch(tests/test_skill_init_downgrade)命中。
+from services.holdings_import import (  # noqa: E402
+    _HOLDINGS_PARSE_SYSTEM_PROMPT,
+    _parse_holdings_with_llm,
+)
 
 
 def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) -> None:
