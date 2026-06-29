@@ -239,6 +239,19 @@ class HoldingPatchRequest(BaseModel):
     is_tracking_only: Optional[bool] = None
 
 
+class HoldingsImportRequest(BaseModel):
+    """POST /api/holdings/import body — 自由文本/CSV 持仓描述 → 结构化持仓"""
+    content: str = Field(..., min_length=1, max_length=20000, description="自然语言或 CSV 持仓描述")
+    commit: bool = Field(default=False, description="false=只预览解析结果不落盘；true=非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）")
+
+
+class HoldingsImportResponse(BaseModel):
+    """POST /api/holdings/import 返回 — parsed 预览 +（commit 时）写入 summary"""
+    parsed: Dict[str, Any] = Field(..., description="LLM 解析出的 {cash, holdings}")
+    committed: bool = Field(..., description="是否已落盘")
+    summary: Optional[Dict[str, Any]] = Field(None, description="commit 时的 {added_holdings, skipped_holdings, cash_set, cash_skipped}")
+
+
 # 注：v2 通用 cash CRUD（/api/cash/{currency}/deposit|withdraw）放在文件末尾，
 # 因为它依赖 WriteResponse 定义（在 PR 2 区域）
 

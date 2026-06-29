@@ -176,6 +176,16 @@ def main() -> None:
     p.set_defaults(func=cmd_delete_holding)
 
     p = sub.add_parser(
+        "import",
+        help="自由文本/CSV 持仓描述 → LLM 解析成结构化持仓。默认只预览，--commit 才落盘（非破坏）。",
+    )
+    p.add_argument("--file", help="读文件（CSV/txt）")
+    p.add_argument("--text", help="直接给文本（与 --file 二选一；都不给则读 stdin）")
+    p.add_argument("--commit", action="store_true",
+                   help="非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）；默认只预览")
+    p.set_defaults(func=cmd_import_holdings)
+
+    p = sub.add_parser(
         "event_check",
         help="事件层（第一层）—— 拉多源新闻 / 归一化 / 入库 / 触发委员会 + 邮件。"
              "默认 dry-run（只入库，不发邮件不触委员会）。"
