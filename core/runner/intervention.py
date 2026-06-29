@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
@@ -96,14 +97,33 @@ def _intervention_record(
     }
 
 
-def _log_intervention(record: Dict[str, Any]) -> None:
-    """append 进 memory/.dreams/interventions.jsonl（与 verdict_review 同目录）。"""
+def _log_intervention(record: Dict[str, Any], path: Optional[Path] = None) -> None:
+    """append 进 memory/.dreams/interventions.jsonl（与 verdict_review 同目录）。
+
+    幂等（ADR-016）：同一 (date, asset, rule) 当天已记则跳过。daily_report 无同日
+    cache，每次调用都重跑委员会 → 手动重跑 / GH Actions 重触发 / 重试会对**同一**
+    干预重复 append，而 intervention_review.summarize 无去重直接求和 → 反事实 PnL 翻倍。
+    """
     import json
 
-    from core.memory_store import MemoryStore
-
-    path = MemoryStore().root / ".dreams" / "interventions.jsonl"
+    if path is None:
+        from core.memory_store import MemoryStore
+        path = MemoryStore().root / ".dreams" / "interventions.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    key = (record.get("date"), record.get("asset"), record.get("rule"))
+    # ponytail: O(n) 全扫；interventions 稀疏(每资产每天≤几条)，到万行级再换索引
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # 坏行不挡写入
+                if (r.get("date"), r.get("asset"), r.get("rule")) == key:
+                    return  # 同日同资产同规则已记，幂等跳过
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
