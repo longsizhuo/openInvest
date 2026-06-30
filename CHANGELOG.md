@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.15.0](https://github.com/longsizhuo/openInvest/compare/v0.14.1...v0.15.0) (2026-06-30)
+
+
+### Features
+
+* **deploy:** GitHub Actions 零成本自托管——fork+secrets 每日委员会邮件 ([155a13b](https://github.com/longsizhuo/openInvest/commit/155a13b5d2591280328e452106054bd2cf2ea94b))
+* **deploy:** GitHub Actions 零成本自托管(fork+secrets 每日委员会邮件) ([f240e78](https://github.com/longsizhuo/openInvest/commit/f240e78657a59ce9657b3425db42993d8b7a5bc9))
+* **discipline:** 纪律台账——委员会可证价值(不作为+拦冲动)落邮件/CLI/API ([80f9a08](https://github.com/longsizhuo/openInvest/commit/80f9a08a9e45d38d08acf88cde4dcb720e0e2438))
+* **discipline:** 纪律台账——委员会可证价值(不作为+拦冲动)落邮件/CLI/API ([1bd8c0f](https://github.com/longsizhuo/openInvest/commit/1bd8c0f26caf0a449bc3209e0aad3e437abdddae))
+* **holdings:** 自由文本/CSV 持仓导入 (POST /api/holdings/import + CLI import) ([a7ce60c](https://github.com/longsizhuo/openInvest/commit/a7ce60cd8481d031fbdecf199bd72cbf47a9ac37))
+* **holdings:** 自由文本/CSV 持仓导入(POST /api/holdings/import + CLI import) ([b3edddd](https://github.com/longsizhuo/openInvest/commit/b3eddddd4735d73992f16bc3167c50eda240a6d6))
+
+
+### Bug Fixes
+
+* **docs:** ADR-023 schema_source 置空(定位 ADR 不绑代码符号)——修 OKF lint CI 红 ([44bc434](https://github.com/longsizhuo/openInvest/commit/44bc434d4da7f914ff3e2a21ca168b6dd01689ab))
+* **eval:** 处理 [#112](https://github.com/longsizhuo/openInvest/issues/112) 自审 review——修 DCA tilt 暖机 bug + 可复现 + 去陈旧数字 ([4386ef6](https://github.com/longsizhuo/openInvest/commit/4386ef61665ea2247f054fc8357b97b279831c8c))
+* **ledger:** intervention.jsonl 同日重跑幂等 (closes [#118](https://github.com/longsizhuo/openInvest/issues/118)) ([d8d4dc3](https://github.com/longsizhuo/openInvest/commit/d8d4dc371558095d04a87bd6dbdfddacfcd91b41))
+* **ledger:** intervention.jsonl 同日重跑幂等(closes [#118](https://github.com/longsizhuo/openInvest/issues/118)) ([404d686](https://github.com/longsizhuo/openInvest/commit/404d686290234f3bdd8ddf958f6e3d407f7a412e))
+
+
+### Docs
+
+* **deploy:** 补 GitHub Actions 自托管手把手详细教程 ([0dc9c35](https://github.com/longsizhuo/openInvest/commit/0dc9c352ed5ec8733841ebbd6795eb95bbe343ec))
+* **positioning:** ADR-023 诚实定位(非 alpha 机器)+ README 首屏去 alpha 措辞 ([83f6af1](https://github.com/longsizhuo/openInvest/commit/83f6af100809cffe6d0f8e79f3b14a99bef48c58))
+* **skill:** SKILL.md 加 import 子命令 + POST /api/holdings/import ([1c01391](https://github.com/longsizhuo/openInvest/commit/1c0139141a68ec3fb4b55c479ef7d456296c47ef))
+* **skill:** SKILL.md 补 discipline 子命令 + GET /api/discipline ([3fa643d](https://github.com/longsizhuo/openInvest/commit/3fa643d2e748253abf78478df0dfc8a8e8705925))
+* **wiki:** API 参考补 /api/holdings/import + /api/discipline ([29852f7](https://github.com/longsizhuo/openInvest/commit/29852f7239c031dd212c0ec72acc920567e5f7a6))
+* **wiki:** API 参考补 /api/holdings/import + /api/discipline ([3ef21d2](https://github.com/longsizhuo/openInvest/commit/3ef21d20f6f3823f69e2ea59d9d40b627cc92dd6))
+
 ## [0.14.1](https://github.com/longsizhuo/openInvest/compare/v0.14.0...v0.14.1) (2026-06-28)
 
 
