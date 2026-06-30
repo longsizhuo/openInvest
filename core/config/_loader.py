@@ -336,6 +336,11 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "集中度 lens",
         "help": "关闭=单资产/刻意集中策略不再因持仓集中度被建议减仓（仍保留波动/回撤/止损/估值风险）",
     },
+    "verdict.cash_opportunity_cost_rule_enabled": {
+        "type": "bool",
+        "label": "现金机会成本规则",
+        "help": "开启=低集中度时不许 HOLD、默认至少建试探仓（激进部署）；关闭（默认）=HOLD 任何仓位都合法，纯按信号/估值决定（ADR-024）",
+    },
     "verdict.risk_profile": {
         "type": "enum",
         "choices": ["steady", "aggressive"],

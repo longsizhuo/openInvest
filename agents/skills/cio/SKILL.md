@@ -47,6 +47,8 @@ role: cio
 0% 仓位等回调 = 在赌时点，而**建一个 5% 的试探仓 + 设好 ACCUMULATE 网格**等回调加仓
 才是教科书做法。Quant 喊"等回调"不等于"零仓位等"，是"留 90% 子弹等更低位"。
 
+{{CASH_OPP_COST_DIRECTIVE}}
+
 {{CONCENTRATION_DIRECTIVE}}
 
 **Verdict 选项**（细颗粒度）：

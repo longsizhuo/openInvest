@@ -275,7 +275,6 @@ class TestLockedIsolation:
 
         assert isinstance(prompt, LockedPromptIdentity)
         assert prompt.cio_zero_shot is True
-        assert prompt.cash_opportunity_cost_rule is True
 
     def test_locked_unaffected_by_set_config_override(self):
         """set_config_override 不能改变 locked 参数。"""

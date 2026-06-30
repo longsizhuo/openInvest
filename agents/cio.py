@@ -68,12 +68,25 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
             "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。"
         )
 
+    # 现金仓位机会成本规则关闭时（默认）压掉"低集中度不许 HOLD、默认至少 ACCUMULATE"。
+    # 空串=开启时零改动。纯 prompt 软层（无确定性后处理强制 ACCUMULATE，所以不需要硬兜底）。
+    cash_opp_cost_directive = ""
+    if not verdict_cfg.cash_opportunity_cost_rule_enabled:
+        cash_opp_cost_directive = (
+            "**🚫 现金仓位机会成本规则已被用户关闭**：忽略上方整段「现金仓位机会成本规则」——"
+            "`HOLD` 在**任何仓位 / 任何现金比例**都是合法 default，**不得**仅因 CONCENTRATION_PCT 低 / "
+            "子弹充足就强制 `ACCUMULATE` 或禁止 `HOLD`。是否加仓纯按 Quant/Macro/Risk 信号 + 估值 / "
+            "趋势证据决定。下方 Verdict 选项里「ACCUMULATE=100% 现金时的 default」与「HOLD 只在 20%+ "
+            "时合法」同样作废。"
+        )
+
     prompt = load_skill(
         "cio",
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
         TRIM_CONSTRAINT=trim_constraint,
         CONCENTRATION_DIRECTIVE=concentration_directive,
+        CASH_OPP_COST_DIRECTIVE=cash_opp_cost_directive,
     )
     if json_mode:
         prompt += _JSON_OUTPUT_ADDENDUM
