@@ -147,6 +147,22 @@ curl -X POST http://127.0.0.1:8765/api/holdings -d '{
 }'
 ```
 
+### 智能持仓导入（自由文本 / CSV）
+
+| Method | Path | 用途 |
+|--------|------|------|
+| POST | `/api/holdings/import` | `{content, commit}` — 自由文本/CSV → 后端 LLM 解析成结构化持仓 |
+
+`commit:false` 只解析返回预览（`parsed.{cash,holdings}`），`commit:true` **非破坏写入**：
+只新增 portfolio 里还没有的 symbol、cash 只填当前为 0 的币种，已存在的跳过
+（`summary.{added_holdings,skipped_holdings,cash_set,cash_skipped}`）。无 LLM key → 400。
+单一可信源 `services/holdings_import.py`，GUI「导入持仓」、CLI `skill.py import`、onboarding 共用。
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/holdings/import \
+  -d '{"content": "510300 ETF 3000股 成本4.2元（支付宝）\n余额宝 5万", "commit": false}'
+```
+
 ### 旧的专用端点（兼容保留）
 
 ```
@@ -240,6 +256,15 @@ POST body schema：
 | GET | `/api/verdict_review/summary` | 1d / 7d / 30d 命中率 × verdict 类型 |
 | GET | `/api/verdict_review/data` | 原始数据点 |
 | GET | `/api/verdict_review/report` | docs/verdict_accuracy.md 完整 markdown |
+
+### 纪律台账（ADR-023）
+
+| Method | Path | 用途 |
+|--------|------|------|
+| GET | `/api/discipline` | 委员会纪律量化：不作为率 + 拦冲动次数 + 反事实损益 |
+
+返回 `{summary:{inaction:{total_verdicts,by_verdict,hold,hold_rate}, interventions:{total,by_family,...}}, markdown}`。
+诚实定位（不吹 alpha，量化「少做错事」），见 [adr/023](adr/023-honest-positioning-not-alpha.md)。GUI「纪律」页消费。
 
 ### 数据源健康
 
