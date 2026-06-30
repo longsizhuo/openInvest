@@ -147,6 +147,26 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
     assert "10.0%" in prompt
 
 
+# ---------- 现金仓位机会成本规则开关（ADR-024）----------
+
+def test_cio_prompt_cash_opp_cost_directive_when_off_by_default():
+    """默认（rule OFF）→ 注入"机会成本规则已被用户关闭"directive，作废低集中度强制加仓"""
+    from agents.cio import build_cio_prompt
+    prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
+    assert "现金仓位机会成本规则已被用户关闭" in prompt
+    assert "任何仓位 / 任何现金比例" in prompt
+
+
+def test_cio_prompt_no_cash_opp_cost_directive_when_enabled():
+    """显式开启 → directive 不出现，原硬编码规则照常生效"""
+    set_config_override({"verdict": {"cash_opportunity_cost_rule_enabled": True}})
+    from agents.cio import build_cio_prompt
+    prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
+    assert "现金仓位机会成本规则已被用户关闭" not in prompt
+    # 原规则文本仍在（占位符为空串，规则段保留）
+    assert "现金仓位机会成本规则" in prompt
+
+
 # ---------- Sanity check 4: 集中度 lens 关 → concentration-TRIM 强制 HOLD ----------
 # 2026-06-23：solvency 自动兜底（"兜底充足 ⇒ 账户内集中度高不算风险"）已移除——它在
 # 事后悄悄反转 CIO 的减仓、掩盖真实集中度风险，且只在 parse 层动手、prompt 层不知情，

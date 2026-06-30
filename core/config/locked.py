@@ -61,7 +61,8 @@ class LockedPromptIdentity:
     ADR: 改动需要新 ADR 推翻 ADR 007
     """
     cio_zero_shot: bool = True
-    cash_opportunity_cost_rule: bool = True
+    # cash_opportunity_cost_rule 移除（ADR-024）：原是死 flag（无代码读它），规则改为
+    # API 可关的 verdict.cash_opportunity_cost_rule_enabled（默认 OFF）。
 
 
 # === 模块级单例（代码直接读这个） ===

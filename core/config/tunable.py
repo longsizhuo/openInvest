@@ -60,6 +60,14 @@ class VerdictConfig:
     #   True = 把全部净资产都录进系统、想要「超配减仓」视角的用户显式开启。
     # env: INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
     concentration_lens_enabled: bool = False
+    # 现金仓位机会成本规则开关（2026-06-30 用户裁决，默认 OFF，见 ADR-024）：
+    # 旧硬编码规则「CONCENTRATION_PCT < 20% → 不允许 HOLD，默认至少 ACCUMULATE」是激进部署
+    # 杠杆（"持币观望不是免费的"），对默认用户过于强势。改为 opt-in：
+    #   False（默认）= 不强制部署：HOLD 在任何仓位/任何现金比例都是合法 default，是否加仓纯按
+    #     Quant/Macro/Risk 信号 + 估值/趋势证据决定。
+    #   True = 想要"低集中度就至少建试探仓"行为的用户显式开启。
+    # env: INVEST_VERDICT_CASH_OPPORTUNITY_COST_RULE_ENABLED=true
+    cash_opportunity_cost_rule_enabled: bool = False
     # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
     # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
     trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
