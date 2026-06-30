@@ -192,6 +192,15 @@ GUI，他根本用不上。所以：
 输出都是 JSON。**始终从 JSON 引用数字**，不从 `memory/*.md` markdown 读
 （markdown body 是 frontmatter 的渲染产物，可能略滞后）。
 
+### 从券商 App **截图**导入持仓（你来 OCR，后端零依赖）
+
+用户发券商持仓**截图**时：**你自己读图**（你有视觉能力），把每行转成
+`symbol/数量/成本/币种/渠道` 的文字，再走 `import --text "..."`（或 POST
+/api/holdings/import）。后端 `import` 的 LLM 只解析**文字**——不要把图片塞给它
+（DeepSeek/多数 chat 模型不收图，会报错）。即：截图 → 你转文字 → import，
+比让后端 OCR 更准、且不挑后端模型。先 `--text`（不带 `--commit`）让用户核对预览，
+确认后再 `--commit` 非破坏写入。
+
 ## Web API 写操作端点（agent 也能调）
 
 **产品哲学**：agent（你）拥有 openInvest 全部功能。CLI 不够时，直接调 Web API
