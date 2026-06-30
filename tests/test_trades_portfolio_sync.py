@@ -367,6 +367,48 @@ class TestPatchStatusIdempotency:
         assert pm2.cash_amount("AUD") == pytest.approx(3700.0)  # 仍 3700，非 2400
 
 
+class TestConcurrentClaim:
+    """#109 并发重复入账：原子 CAS 跃迁保证只有一个请求赢得 planned→executed"""
+
+    def test_concurrent_claim_exactly_one_winner(self, tmp_path):
+        """16 个线程同时 claim executed → 恰好 1 个 True，其余 False（无锁三步会多个 True）"""
+        import threading
+
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(
+            symbol="NDQ.AX", direction="BUY", units=10.0, price=130.0,
+            cost_currency="AUD",
+        )
+        results: list[bool] = []
+        results_lock = threading.Lock()
+        barrier = threading.Barrier(16)
+
+        def worker() -> None:
+            barrier.wait()  # 尽量让 16 个 claim 同时打到 db
+            won = db.claim_status_transition(trade_id, "executed")
+            with results_lock:
+                results.append(won)
+
+        threads = [threading.Thread(target=worker) for _ in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sum(results) == 1  # 只有一个赢家
+        assert db.get_trade(trade_id)["status"] == "executed"
+
+    def test_claim_after_executed_is_idempotent(self, tmp_path):
+        """已 executed 再 claim → False（顺序重放：双击 / 超时重试 / agent 重发）"""
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(
+            symbol="NDQ.AX", direction="BUY", units=10.0, price=130.0,
+            cost_currency="AUD",
+        )
+        assert db.claim_status_transition(trade_id, "executed") is True
+        assert db.claim_status_transition(trade_id, "executed") is False
+
+
 class TestEdgeCases:
     """边缘情况"""
 

@@ -250,55 +250,60 @@ async def patch_trade_status(
     if trade_before is None:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
 
-    # ---- 幂等闸：已是 executed 的单子再次 PATCH executed → 不重复入账 ----
-    # _sync_trade_to_portfolio 累加而非幂等，必须靠当前状态判定是否真的发生
-    # →executed 跃迁。否则双击 / 客户端超时重试 / agent 重发会把持仓和现金重复
-    # 计算（实测：units 10→20、AUD cash 3700→2400）。
-    if status == "executed" and trade_before.get("status") == "executed":
+    # ---- 非 executed（planned / cancelled）：无 portfolio 副作用，直接改状态 ----
+    if status != "executed":
+        try:
+            patched = _get_trades_db().patch_status(trade_id, status)
+            if not patched:
+                raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"trades.db 更新失败: {e}") from e
+        return {
+            "id": trade_id,
+            "status": status,
+            "ok": True,
+            "portfolio_synced": False,
+            "synced_holding": None,
+        }
+
+    # ---- executed：原子 claim 跃迁，只有赢家同步 portfolio（防 #109 并发重复入账）----
+    # 旧实现先 get_trade 读状态再 patch，check/set 之间无锁，两个并发 PATCH 都读到
+    # planned 各同步一次（实测 units 10→20、AUD cash 3700→2400）。改为单条 SQL 原子
+    # CAS：仅 rowcount==1 的请求赢得 planned→executed 跃迁并独占同步；其余幂等返回。
+    # 同样覆盖顺序重放（双击 / 客户端超时重试 / agent 重发）。
+    won = await asyncio.to_thread(
+        _get_trades_db().claim_status_transition, trade_id, "executed"
+    )
+    if not won:
+        # 已是 executed（并发赢家已抢到 / 重放）→ 首次已同步，本次幂等跳过
         return {
             "id": trade_id,
             "status": "executed",
             "ok": True,
-            "portfolio_synced": False,  # 首次 executed 时已同步，本次幂等跳过
+            "portfolio_synced": False,
             "synced_holding": None,
         }
 
-    # ---- executed 时先同步 portfolio.md，成功后再提交 status ----
-    portfolio_synced = False
-    synced_holding: Optional[Dict[str, Any]] = None
-
-    if status == "executed":
-        # 先同步 portfolio（幂等操作），失败则不提交 status
-        loop = asyncio.get_event_loop()
-        portfolio_synced, synced_holding = await loop.run_in_executor(
-            None, _sync_trade_to_portfolio, trade_before
+    # 赢得跃迁 → 同步 portfolio.md。失败则把状态回退到原值（释放 claim），让重试
+    # 能重新 claim+同步，不丢账。trade_before 是 claim 前读的原始行，含同步所需的
+    # direction/units/price/symbol（不依赖 status 字段）。
+    portfolio_synced, synced_holding = await asyncio.to_thread(
+        _sync_trade_to_portfolio, trade_before
+    )
+    if not portfolio_synced:
+        await asyncio.to_thread(
+            _get_trades_db().patch_status, trade_id, trade_before.get("status", "planned")
         )
-        if not portfolio_synced:
-            raise HTTPException(
-                status_code=500,
-                detail=f"portfolio 同步失败，trade 保持 planned 状态。请重试。"
-                       f"trade_id={trade_id}, symbol={trade_before.get('symbol')}",
-            )
-        log.info(
-            f"portfolio.md 已同步: trade_id={trade_id} "
-            f"{trade_before.get('direction')} {trade_before.get('units')} "
-            f"{trade_before.get('symbol')}"
+        raise HTTPException(
+            status_code=500,
+            detail=f"portfolio 同步失败，trade 已回退至 {trade_before.get('status')} 状态。请重试。"
+                   f"trade_id={trade_id}, symbol={trade_before.get('symbol')}",
         )
-
-    # portfolio 同步成功（或非 executed 状态），提交 trades.db
-    try:
-        patched = _get_trades_db().patch_status(trade_id, status)
-        if not patched:
-            raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
-    except ValueError as e:
-        # portfolio 已同步但 status 提交失败 — 记录异常但不回滚 portfolio
-        # （portfolio 同步是幂等的，下次重试不会出问题）
-        log.error(
-            f"portfolio 已同步但 trades.db patch_status 失败: {e} "
-            f"trade_id={trade_id}，需手动重试 status 更新",
-            exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail=f"trades.db 更新失败: {e}") from e
+    log.info(
+        f"portfolio.md 已同步: trade_id={trade_id} "
+        f"{trade_before.get('direction')} {trade_before.get('units')} "
+        f"{trade_before.get('symbol')}"
+    )
 
     return {
         "id": trade_id,

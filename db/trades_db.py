@@ -163,6 +163,32 @@ class TradesDB:
             self.conn.commit()
             return cur.rowcount > 0  # rowcount==0 → 该 id 不存在
 
+    def claim_status_transition(self, trade_id: int, to_status: str) -> bool:
+        """原子状态跃迁 compare-and-set：仅当当前状态 != to_status 时改写。
+
+        Returns:
+            True  → 本次调用赢得了真实跃迁（rowcount==1），调用方独占后续副作用
+                    （如 portfolio 同步）。
+            False → 状态已是 to_status（并发/重放的另一方已抢到）或 id 不存在，
+                    调用方应幂等返回，不得重复入账。
+
+        防 #109 并发重复入账：旧的 get_trade()→sync→patch_status() 三步在 check 与
+        set 之间无锁，两个并发 PATCH executed 都读到 planned 各同步一次。本方法把
+        判定+写下沉为单条 SQL 原子 CAS，只有 rowcount==1 的请求才允许同步。
+        """
+        if to_status not in ("planned", "executed", "cancelled"):
+            raise ValueError(
+                f"status 必须是 planned / executed / cancelled，收到 {to_status!r}"
+            )
+        with self._lock:
+            cur = self.conn.cursor()
+            cur.execute(
+                "UPDATE trades SET status = ? WHERE id = ? AND status != ?",
+                (to_status, trade_id, to_status),
+            )
+            self.conn.commit()
+            return cur.rowcount == 1
+
     # ------------------------------------------------------------------
     # 读操作
     # ------------------------------------------------------------------
