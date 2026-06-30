@@ -1172,6 +1172,7 @@ def test_config_endpoints_roundtrip(client):
     items = {it["key"]: it for it in r.json()["items"]}
     assert set(items) == {
         "verdict.concentration_lens_enabled", "verdict.risk_profile",
+        "verdict.cash_opportunity_cost_rule_enabled",  # ADR-024
         "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",
         "dca.auto_dca_enabled", "dca.auto_dca_amount_cny",
         # ADR-017: event RAG + staleness 阈值也进 config API 白名单(558d9e9)
