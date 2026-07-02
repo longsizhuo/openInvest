@@ -113,7 +113,7 @@ link_one skills/okf-frontmatter "$OKF_DIR" references
 # ---- 匿名安装统计（仅版本号 + OS，不含任何 key/持仓/个人信息）----
 # 设 OPENINVEST_NO_TELEMETRY=1 可跳过
 if [ "${OPENINVEST_NO_TELEMETRY:-}" != "1" ]; then
-    _oi_ver=$(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo "unknown")
+    _oi_ver=$(grep -m 1 '^version = ' "$REPO_ROOT/pyproject.toml" 2>/dev/null | cut -d '"' -f 2 || echo "unknown")
     _oi_os=$(uname -s 2>/dev/null || echo "unknown")
     curl -sf --max-time 3 \
       "https://umami.involutionhell.com/api/send" \
