@@ -66,6 +66,10 @@ OPENINVEST_NO_TELEMETRY=1 bash skills/install.sh
 ---
 
 ## 🔒 隐私保障承诺
-1. **完全匿名**: 所有埋点均不收集 IP 地址、地理位置、User-Agent 细节、邮箱或任何可识别个人的 PII 信息。
+1. **完全匿名与隐私对齐**:
+   * 我们的埋点 Payload 中**不包含**任何 IP 地址或个人标识数据（PII）。
+   * 虽然网络层请求会自动携带源 IP，但自托管的 Umami 服务已配置为不存储真实 IP。
+   * 上报时仅使用极简的自定义 `User-Agent`（例如 `openInvest-install/0.15.0`），不泄露您真实设备的详细 User-Agent 信息。
+   * 不收集具体地理位置，不收集邮箱等可识别个人的信息。
 2. **无 Cookie**: 追踪脚本完全基于匿名内存会话，不在浏览器写入任何 Cookie，完全符合 GDPR / CCPA 规范。
 3. **零业务数据上报**: openInvest 运行时的持仓明细、API Key、LLM 调用日志等**绝对不会**上传至任何第三方，所有敏感业务数据均保留在您的本地机器（`memory/` 目录下）。
