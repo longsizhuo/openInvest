@@ -468,6 +468,29 @@ class TestApiConfig:
         reset_config()
         assert load_config().dreaming.llm_verify_enabled in (True, 1)
 
+    # ---------- event.watch_schedule（cron 类型，2026-07-03 扫描窗口修正）----------
+
+    def test_watch_schedule_default(self):
+        """默认窗口=北京 8:00-次日 2:30（修正旧值实跑北京 0-7:30 错开美盘的 bug）。"""
+        assert load_config().event.watch_schedule == "*/30 0-2,8-23 * * *"
+
+    def test_watch_schedule_roundtrip(self):
+        cfg = set_persisted_override("event.watch_schedule", "*/15 8-23 * * 1-5")
+        assert cfg.event.watch_schedule == "*/15 8-23 * * 1-5"
+        reset_config()
+        assert load_config().event.watch_schedule == "*/15 8-23 * * 1-5"
+
+    def test_watch_schedule_rejects_bad_cron(self):
+        for bad in ("not a cron", "", "99 99 * * *", 123):
+            with pytest.raises(ValueError):
+                set_persisted_override("event.watch_schedule", bad)
+
+    def test_watch_schedule_env_comma_split_repaired(self, monkeypatch):
+        """env 层通用强转把含逗号值拆成 list——构造层必须拼回字符串。"""
+        monkeypatch.setenv("INVEST_EVENT_WATCH_SCHEDULE", "*/30 0-2,8-23 * * *")
+        reset_config()
+        assert load_config().event.watch_schedule == "*/30 0-2,8-23 * * *"
+
 
 # ---------- 自动定投配置（DCAConfig，子弹池模型）----------
 

@@ -238,6 +238,11 @@ class EventConfig:
     max_per_source: int = 15                    # 每次拉取新闻的最大条数
     min_severity: str = "mid"                   # 触发重跑委员会的最低严重度级别
     max_rounds: int = 2                         # 触发重跑委员会时的最大辩论轮数
+    # event_watch 扫描窗口（5 字段 crontab，按 jobs/event_watch.yml 的 timezone=Asia/Shanghai 解释）。
+    # 默认北京 8:00-次日 2:30 每半小时——覆盖 A股/ASX 白天 + 美盘（含 ADP/非农/Fed 讲话时段）。
+    # 2026-07-03 修正：旧 yml "*/30 0-7 * * 1-5" 实际跑在北京 0-7:30（注释误标成 UTC），
+    # 错开美盘上半场 → 黄金 10 分钟垂直拉升无报警。scheduler 每 10 分钟自动拾取此值改动。
+    watch_schedule: str = "*/30 0-2,8-23 * * *"
 
 
 @dataclass(frozen=True)

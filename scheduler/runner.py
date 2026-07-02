@@ -150,16 +150,49 @@ def build_scheduler() -> BackgroundScheduler:
     return sched
 
 
-def register_jobs(sched: BackgroundScheduler) -> List[Dict[str, Any]]:
-    """从 jobs/*.yml 注册所有 enabled 任务"""
+def _resolve_schedule(name: str, yml_schedule: str) -> str:
+    """job 的 schedule 解析：event_watch 优先读 config override（ADR-017，API/GUI/CLI 可改）。
+
+    _force_reload：scheduler 是长驻进程，不强制重读会命中本进程旧缓存 →
+    用户经 API 改了不生效（同 jobs/dca_daily.py 的先例）。
+    config 层任何异常都不该拦住调度器启动，一律退回 yml 兜底值。
+    """
+    if name != "event_watch":
+        return yml_schedule
+    try:
+        from core.config import load_config
+        sched_str = (load_config(_force_reload=True).event.watch_schedule or "").strip()
+        if sched_str:
+            CronTrigger.from_crontab(sched_str)  # 白名单写入时已校验；这里兜底防手改 overrides json
+            return sched_str
+    except Exception as e:
+        log.warning(f"[{name}] 读 config watch_schedule 失败，退回 yml 默认: {e}")
+    return yml_schedule
+
+
+def register_jobs(sched: BackgroundScheduler, quiet: bool = False) -> List[Dict[str, Any]]:
+    """从 jobs/*.yml 注册所有 enabled 任务。
+
+    replace_existing=True 使其幂等——定期重跑本函数即可拾取 yml / config 的
+    schedule 改动（cron 触发器重算 next fire 不影响正在运行的实例）。
+    quiet=True 给周期刷新用，仅在 schedule 真的变了时打 INFO，避免每 10 分钟刷日志。
+    """
     configs = _load_job_configs()
     registered = []
     for cfg in configs:
         if not cfg.get("enabled", False):
-            log.info(f"[{cfg['name']}] disabled，跳过")
+            if not quiet:
+                log.info(f"[{cfg['name']}] disabled，跳过")
             continue
 
-        trigger = CronTrigger.from_crontab(cfg["schedule"], timezone=cfg.get("timezone", "Asia/Shanghai"))
+        schedule = _resolve_schedule(cfg["name"], cfg["schedule"])
+        # 变更检测：仅当该 job 的 cron 表达式与上次注册不同才重注册 + 打日志
+        prev = _LAST_SCHEDULES.get(cfg["name"])
+        if quiet and prev == schedule:
+            registered.append(cfg)
+            continue
+
+        trigger = CronTrigger.from_crontab(schedule, timezone=cfg.get("timezone", "Asia/Shanghai"))
         sched.add_job(
             _wrap_job(cfg["name"], cfg["entry"]),
             trigger=trigger,
@@ -170,9 +203,17 @@ def register_jobs(sched: BackgroundScheduler) -> List[Dict[str, Any]]:
             coalesce=True,
             misfire_grace_time=600,  # 重启后 10 分钟内的 misfire 也补跑
         )
+        _LAST_SCHEDULES[cfg["name"]] = schedule
         registered.append(cfg)
-        log.info(f"[{cfg['name']}] 已注册: {cfg['schedule']} @ {cfg.get('timezone')}")
+        if prev is not None and prev != schedule:
+            log.info(f"[{cfg['name']}] schedule 变更: {prev} → {schedule}")
+        elif not quiet:
+            log.info(f"[{cfg['name']}] 已注册: {schedule} @ {cfg.get('timezone')}")
     return registered
+
+
+# 上次注册的 schedule 快照（变更检测用；仅 daemon 进程内有效）
+_LAST_SCHEDULES: Dict[str, str] = {}
 
 
 # ---------- CLI ----------
@@ -201,6 +242,15 @@ def cmd_daemon() -> int:
     _ensure_run_log_table()
     sched = build_scheduler()
     register_jobs(sched)
+    # 配置热拾取：每 10 分钟重跑 register_jobs（quiet 模式，schedule 没变时零日志零操作）。
+    # 用户经 API/GUI 改 event.watch_schedule 后 ≤10 分钟生效，无需重启 daemon（ADR-017 跨进程共读）。
+    sched.add_job(
+        lambda: register_jobs(sched, quiet=True),
+        "interval",
+        minutes=10,
+        id="_config_refresh",
+        name="_config_refresh",
+    )
     sched.start()
     log.info("调度器已启动。Ctrl+C 退出。")
 

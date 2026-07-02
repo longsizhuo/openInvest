@@ -10,6 +10,7 @@ documents:
     - POST /api/committee/run
   config_keys:
     - INVEST_EVENT_RAG_ENABLED
+    - event.watch_schedule
   symbols:
     - _resolve_event_brief
     - resolve_event_brief_multi
@@ -35,10 +36,16 @@ openInvest 在本次提交前是**纯定时驱动**：`daily_report` 10:00、`we
 
 加一个事件层，两条腿共享同一个 sqlite event store：
 
-1. **Trigger 路径**（盘中实时）—— `jobs/event_watch.py` cron `*/30`：
+1. **Trigger 路径**（盘中实时）—— `jobs/event_watch.py` cron 默认 `*/30 0-2,8-23 * * *`（按 Asia/Shanghai，即北京 8:00-次日 2:30；可经 config `event.watch_schedule` 运行时改，ADR-017，scheduler ≤10 分钟自动拾取）：
    - 多源拉新闻（DDGS news / RSS / yfinance.Ticker.news）
    - flash LLM 归一化为结构化事件（一次批调用）
    - 维度命中（severity ≥ mid + 影响到 holdings/target_assets + stance ≠ neutral）→ 发 digest 邮件 + POST `/api/committee/run`
+
+   > **2026-07-03 窗口修正**：上线至今实跑北京 0:00-7:30（旧 yml 注释把 cron 误标成
+   > UTC 语义，实际 `CronTrigger.from_crontab(..., timezone="Asia/Shanghai")` 按北京解释）——
+   > 错开 A股/ASX 白天与美盘上半场（ADP/非农/Fed 讲话都在北京 20:15-21:30），
+   > 黄金 10 分钟垂直拉升无人报警后被用户发现。窗口改为北京 8:00-次日 2:30 并进
+   > config 白名单；末段 2:30-8:00 的新闻由次日 8:00 首扫补上（有延迟、不丢失）。
 2. **RAG 路径**（committee 召回）—— `core/committee_runner.py` 准备 macro 前：
    - 维度 hard filter (entity ∩ time window ∩ severity) → 向量精排 → 时效冲突标注
    - 结构化 brief **只注入 Macro 的 prompt**（事件 RAG 严格隔离）
