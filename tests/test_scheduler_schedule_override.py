@@ -15,13 +15,14 @@ YML_DEFAULT = "*/30 0-2,8-23 * * *"
 
 
 class _FakeEvent:
-    def __init__(self, watch_schedule):
+    def __init__(self, watch_schedule, sentinel_schedule="*/5 0-2,8-23 * * *"):
         self.watch_schedule = watch_schedule
+        self.sentinel_schedule = sentinel_schedule
 
 
 class _FakeCfg:
-    def __init__(self, watch_schedule):
-        self.event = _FakeEvent(watch_schedule)
+    def __init__(self, watch_schedule, sentinel_schedule="*/5 0-2,8-23 * * *"):
+        self.event = _FakeEvent(watch_schedule, sentinel_schedule)
 
 
 def test_other_jobs_use_yml(monkeypatch):
@@ -108,3 +109,12 @@ class TestRegisterJobsRemovesDisabled:
         )
         register_jobs(sched, quiet=True)  # 不抛异常即通过
         assert sched.get_job("fake_job") is None
+
+
+def test_price_sentinel_prefers_config(monkeypatch):
+    """price_sentinel 同样走 config 映射（_CONFIG_SCHEDULES 泛化）。"""
+    monkeypatch.setattr(
+        "core.config.load_config",
+        lambda *a, **k: _FakeCfg(YML_DEFAULT, sentinel_schedule="*/10 8-23 * * *"),
+    )
+    assert _resolve_schedule("price_sentinel", "*/5 0-2,8-23 * * *") == "*/10 8-23 * * *"

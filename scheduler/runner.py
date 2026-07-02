@@ -150,23 +150,31 @@ def build_scheduler() -> BackgroundScheduler:
     return sched
 
 
+# schedule 可经 config 覆盖的 job → EventConfig 字段名映射（ADR-017 白名单 cron key）
+_CONFIG_SCHEDULES: Dict[str, str] = {
+    "event_watch": "watch_schedule",
+    "price_sentinel": "sentinel_schedule",
+}
+
+
 def _resolve_schedule(name: str, yml_schedule: str) -> str:
-    """job 的 schedule 解析：event_watch 优先读 config override（ADR-017，API/GUI/CLI 可改）。
+    """job 的 schedule 解析：映射表内的 job 优先读 config override（API/GUI/CLI 可改）。
 
     _force_reload：scheduler 是长驻进程，不强制重读会命中本进程旧缓存 →
     用户经 API 改了不生效（同 jobs/dca_daily.py 的先例）。
     config 层任何异常都不该拦住调度器启动，一律退回 yml 兜底值。
     """
-    if name != "event_watch":
+    attr = _CONFIG_SCHEDULES.get(name)
+    if attr is None:
         return yml_schedule
     try:
         from core.config import load_config
-        sched_str = (load_config(_force_reload=True).event.watch_schedule or "").strip()
+        sched_str = (getattr(load_config(_force_reload=True).event, attr, "") or "").strip()
         if sched_str:
             CronTrigger.from_crontab(sched_str)  # 白名单写入时已校验；这里兜底防手改 overrides json
             return sched_str
     except Exception as e:
-        log.warning(f"[{name}] 读 config watch_schedule 失败，退回 yml 默认: {e}")
+        log.warning(f"[{name}] 读 config {attr} 失败，退回 yml 默认: {e}")
     return yml_schedule
 
 

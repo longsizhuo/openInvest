@@ -243,6 +243,11 @@ class EventConfig:
     # 2026-07-03 修正：旧 yml "*/30 0-7 * * 1-5" 实际跑在北京 0-7:30（注释误标成 UTC），
     # 错开美盘上半场 → 黄金 10 分钟垂直拉升无报警。scheduler 每 10 分钟自动拾取此值改动。
     watch_schedule: str = "*/30 0-2,8-23 * * *"
+    # ---- 价格异动哨兵（ADR-025，jobs/price_sentinel.py）----
+    sentinel_enabled: bool = True               # 垂直线哨兵总开关
+    sentinel_atr_mult: float = 0.8              # 触发倍数：|10min 涨跌| ≥ mult × 日ATR%
+    sentinel_cooldown_min: int = 120            # 同 symbol 同方向冷却分钟数
+    sentinel_schedule: str = "*/5 0-2,8-23 * * *"  # 哨兵扫描窗口 crontab（Asia/Shanghai）
 
 
 @dataclass(frozen=True)

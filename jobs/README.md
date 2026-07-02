@@ -12,6 +12,8 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `dreaming.py` | 每天 3am | 三阶段记忆整合（Light → REM → Deep Sleep），insights/ 沉淀长期模式 |
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |
 | `verdict_review.py` | 每天 2am（`enabled: false`，Phase 3 待开） | 委员会决策命中率刷进 verdict_review.jsonl（dreaming 上游训练源） |
+| `event_watch.py` | 北京 8:00-次日 2:30 每 30min（config `event.watch_schedule` 可改）| 扫多源新闻 → LLM 归一化 → 命中持仓则邮件 + 触发委员会（ADR-006）|
+| `price_sentinel.py` | 同窗口每 5min（config `event.sentinel_schedule` 可改）| 价格垂直线检测（10min vs 日ATR%，零 LLM）→ **先报警邮件后触发委员会**（ADR-025）|
 
 > `verdict_review.yml`（cron `0 2 * * *`，`enabled: false`）：把 `.committee` live 委员会快照刷进 `.dreams/verdict_review.jsonl`，是 `dreaming` 的上游训练源。Phase 3 自学习开火时由用户确认频率后，与 `dreaming.yml` 一并改 `enabled: true`。
 
