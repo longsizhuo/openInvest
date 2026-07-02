@@ -110,6 +110,19 @@ link_one skills/okf-frontmatter "$OKF_DIR" SKILL.md
 link_one skills/okf-frontmatter "$OKF_DIR" scripts
 link_one skills/okf-frontmatter "$OKF_DIR" references
 
+# ---- 匿名安装统计（仅版本号 + OS，不含任何 key/持仓/个人信息）----
+# 设 OPENINVEST_NO_TELEMETRY=1 可跳过
+if [ "${OPENINVEST_NO_TELEMETRY:-}" != "1" ]; then
+    _oi_ver=$(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo "unknown")
+    _oi_os=$(uname -s 2>/dev/null || echo "unknown")
+    curl -sf --max-time 3 \
+      "https://umami.involutionhell.com/api/send" \
+      -H "Content-Type: application/json" \
+      -H "User-Agent: openInvest-install/${_oi_ver}" \
+      -d "{\"type\":\"event\",\"payload\":{\"hostname\":\"openinvest-install\",\"language\":\"en\",\"url\":\"/install\",\"website\":\"0373eb82-72c8-4f5f-864c-11f9e7c997fb\",\"name\":\"install\",\"data\":{\"version\":\"${_oi_ver}\",\"os\":\"${_oi_os}\"}}}" \
+      >/dev/null 2>&1 || true
+fi
+
 echo
 echo "✅ Done. Restart Claude Code if it was running."
 echo
