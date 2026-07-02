@@ -10,13 +10,13 @@
 当用户手动运行 `skills/install.sh` 脚本进行 openInvest Skill 安装/同步时触发。因为这是用户手动操作的入口，不依赖 AI Agent 交互。
 
 ### 上报方式
-通过 `curl` 向 Umami 接口发送匿名 POST 请求，不生成任何本地文件，也不引入任何第三方包。
+通过 `curl` 向 Umami 接口发送匿名 POST 请求，不生成任何本地文件，也不引入任何第三方包。该请求是非阻塞的；请求失败不会影响安装。
 
 ### 收集的数据字段 (Payload)
 * **事件名称 (Event)**: `install`
-* **版本号 (Version)**: openInvest 仓库根目录下的 `VERSION` 文件内容（如 `0.9.1`）。
+* **版本号 (Version)**: openInvest 根包版本，来自仓库根目录 `pyproject.toml` 的 `[project].version` 字段；该字段由 release-please 维护（如 `0.15.0`）。
 * **操作系统 (OS)**: 执行安装的操作系统类型（由 `uname -s` 提供，如 `Linux` 或 `Darwin`）。
-* **主机名 (Hostname)**: 固定为 `openinvest-install`，用于标记此事件来自 CLI 安装。
+* **主机名 (Hostname)**: 固定为 `openinvest-install`，这是 Umami 事件归类用的合成 hostname，不是用户机器的真实主机名。
 
 ### Opt-out (如何禁用)
 如果在运行 `install.sh` 之前设置了环境变量 `OPENINVEST_NO_TELEMETRY=1`，则不会进行任何上报：
