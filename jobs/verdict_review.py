@@ -78,30 +78,9 @@ class VerdictReview:
 
 # ---------- 解析 ----------
 
-def _parse_committee_file(path: Path) -> Optional[Dict[str, Any]]:
-    """从 committee md 文件抽 verdict + macro snapshot"""
-    if not path.exists():
-        return None
-    text = path.read_text(encoding="utf-8")
-    verdict_m = re.search(r"\*\*Verdict\*\*:\s*(\w+)\s*\(confidence\s+([\d.]+)\)", text)
-    if not verdict_m:
-        return None
-    macro_m = re.search(r"## Macro Context Snapshot.*?```json\n(.*?)\n```", text, re.DOTALL)
-    macro = {}
-    if macro_m:
-        try:
-            macro = json.loads(macro_m.group(1))
-        except json.JSONDecodeError:
-            pass
-    # 新文件带 `**Symbol**: GC=F`（真实 yfinance symbol）。旧文件没有 → None，
-    # 由 review_all 用 holdings 转义名映射兜底。
-    sym_m = re.search(r"\*\*Symbol\*\*:\s*(\S+)", text)
-    return {
-        "verdict": verdict_m.group(1).upper(),
-        "confidence": float(verdict_m.group(2)),
-        "macro_at_decision": macro,
-        "symbol": sym_m.group(1) if sym_m else None,
-    }
+# 单一可信源上移 core/decision_ledger.py（decision accounting 同用，issue #133）。
+# 返回 dict 是原格式超集（多 alloc_cny 键），本文件用法不变。
+from core.decision_ledger import parse_committee_file as _parse_committee_file  # noqa: E402
 
 
 # ---------- 事后涨跌 ----------

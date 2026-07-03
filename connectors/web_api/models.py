@@ -798,6 +798,83 @@ class TradesListResponse(BaseModel):
     trades: List[TradeRecord]
 
 
+class DecisionIntervention(BaseModel):
+    """决议被确定性规则改写的摘要（源 interventions.jsonl）"""
+    rule: Optional[str] = None
+    rule_family: Optional[str] = None
+    original_verdict: Optional[str] = None
+    original_alloc: Optional[float] = None
+
+
+class DecisionMatchedTrade(BaseModel):
+    """自动匹配到的成交（源 trades.db）"""
+    id: int
+    ts: str
+    direction: str
+    units: float
+    price: Optional[float] = None
+    status: Optional[str] = None
+
+
+class DecisionOutcome(BaseModel):
+    """事后结果（源 verdict_review.jsonl，cron 回填）"""
+    actual_returns: Optional[Dict[str, float]] = None
+    hits: Optional[Dict[str, bool]] = None
+    macro_shock: Optional[bool] = None
+
+
+class DecisionExecution(BaseModel):
+    """用户执行/拒绝声明（源 executions.jsonl）"""
+    decision_id: str
+    executed: bool
+    reason: Optional[str] = None
+    trade_ids: Optional[List[int]] = None
+    recorded_at: Optional[str] = None
+
+
+class DecisionRecord(BaseModel):
+    """统一决策视图单条（issue #133 Decision 9，读时 join 五份账本）"""
+    decision_id: str                 # "<date>/<symbol>"，同 trades.verdict_id 口径
+    date: str
+    symbol: str
+    verdict: str
+    confidence: float
+    alloc_cny: Optional[float] = None
+    intervention: Optional[DecisionIntervention] = None
+    executed: Optional[bool] = None  # None=未知（HOLD 或无声明无匹配依据）
+    execution: Optional[DecisionExecution] = None
+    matched_trades: List[DecisionMatchedTrade] = []
+    outcome: Optional[DecisionOutcome] = None
+
+
+class DecisionsSummary(BaseModel):
+    """采纳率汇总"""
+    total: int
+    directional: int
+    executed: int
+    not_executed: int
+    unknown: int
+    overridden_by_rule: int
+    with_reason: int
+    adoption_rate: Optional[float] = None
+
+
+class DecisionsResponse(BaseModel):
+    """GET /api/decisions 响应"""
+    count: int
+    summary: DecisionsSummary
+    decisions: List[DecisionRecord]
+
+
+class RecordExecutionRequest(BaseModel):
+    """POST /api/decisions/execution body —— 宿主 Agent 回写执行/拒绝"""
+    decision_id: str = Field(..., max_length=256, description='"<date>/<symbol>"')
+    executed: bool
+    reason: Optional[str] = Field(None, max_length=2000,
+                                  description="未执行原因 / 执行备注（宿主 Agent 采集）")
+    trade_ids: Optional[List[int]] = None
+
+
 class SkillWhatIfRequest(BaseModel):
     """POST /api/skill/what_if body —— 字段与 CLI what_if 参数一一对应"""
     symbol: Optional[str] = None
@@ -952,6 +1029,14 @@ __all__ = [
     "RecordTradeRequest",
     "TradeRecord",
     "TradesListResponse",
+    "DecisionIntervention",
+    "DecisionMatchedTrade",
+    "DecisionOutcome",
+    "DecisionExecution",
+    "DecisionRecord",
+    "DecisionsSummary",
+    "DecisionsResponse",
+    "RecordExecutionRequest",
     "SkillWhatIfRequest",
     "SkillBuyRequest",
     "SkillSellRequest",

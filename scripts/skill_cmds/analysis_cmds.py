@@ -33,6 +33,8 @@ __all__ = [
     "cmd_live_prices",
     "cmd_discipline",
     "cmd_event_check",
+    "cmd_decisions",
+    "cmd_record_execution",
 ]
 
 
@@ -261,6 +263,27 @@ def cmd_discipline(_: argparse.Namespace) -> None:
     from services.discipline import discipline_summary, render_discipline_md
     s = discipline_summary()
     _print_json({"summary": s, "markdown": render_discipline_md(s)})
+
+
+def cmd_decisions(args: argparse.Namespace) -> None:
+    """统一决策视图(只读,零 LLM)：决议 ↔ 规则干预 ↔ 用户执行 ↔ 事后结果 读时 join。
+    等价 GET /api/decisions。issue #133 Decision 9。"""
+    from core.decision_ledger import list_decisions, summarize_decisions
+    ds = list_decisions(days=args.days)
+    _print_json({"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds})
+
+
+def cmd_record_execution(args: argparse.Namespace) -> None:
+    """记录用户对某决议的执行/拒绝 + 原因（宿主 Agent 采集后回写）。
+    等价 POST /api/decisions/execution。"""
+    from core.decision_ledger import record_execution
+    rec = record_execution(
+        decision_id=args.decision_id,
+        executed=not args.rejected,
+        reason=args.reason,
+        trade_ids=[int(t) for t in args.trade_ids.split(",")] if args.trade_ids else None,
+    )
+    _print_json(rec)
 
 
 def cmd_event_check(args: argparse.Namespace) -> None:

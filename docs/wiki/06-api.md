@@ -266,6 +266,18 @@ POST body schema：
 返回 `{summary:{inaction:{total_verdicts,by_verdict,hold,hold_rate}, interventions:{total,by_family,...}}, markdown}`。
 诚实定位（不吹 alpha，量化「少做错事」），见 [adr/023](adr/023-honest-positioning-not-alpha.md)。GUI「纪律」页消费。
 
+### Decision Accounting（issue #133 Decision 9）
+
+| Method | Path | 用途 |
+|--------|------|------|
+| GET | `/api/decisions?days=90` | 统一决策视图：决议↔规则干预↔用户执行↔事后结果 读时 join + 采纳率汇总 |
+| POST | `/api/decisions/execution` | 宿主 Agent 回写执行/拒绝+原因（`executions.jsonl` 追加账本，幂等 ADR-016）|
+
+`decision_id = "<date>/<symbol>"`（committee md 天然主键）；`trades.db` 现有 `verdict_id`
+列填同一格式即完成硬关联；无显式关联时按「决议日起 7 天内同标的同向成交」自动匹配。
+数据源全是既有账本（committee md / interventions / verdict_review / trades.db / executions），
+不物化新视图文件。CLI 等价：`decisions` / `record_execution`。
+
 ### 数据源健康
 
 | Method | Path | 用途 |
