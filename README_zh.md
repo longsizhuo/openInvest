@@ -44,7 +44,10 @@ Claude Code、OpenClaw、Codex 或未来智能体的每一次进步，都将自�
   <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，系统将依据您在 `memory/` 中定义的专属账户持仓自动渲染对应的净值曲线。</sub>
 </div>
 
-*   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/03-benchmarks.md](docs/wiki/README.md)。
+<!-- OUTPERFORM_FEED_START -->
+<!-- OUTPERFORM_FEED_END -->
+
+*   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/README.md](docs/wiki/README.md)。
 *   **系统统计自我披露**：本系统是**消除人类投资认知偏差、强化推理透明度**的审计工具，而非收益放大黑盒。最新自动审计（`docs/verdict_accuracy.md`）：方向性 Verdict（剔除 HOLD）真实命中率 **42.2%**（n=56，**低于随机**）；`HOLD`（不作为）占 **56%**；含 HOLD 的 7d 命中率 70.7% 系"HOLD 算 hit"灌水。即系统价值在透明/纪律（多数时候不作为、低换手），**不在方向预测**。完整流水详见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。
 
 ---
@@ -129,7 +132,7 @@ bash ~/openInvest/skills/install.sh
 
 > 💡 **零成本运行声明**：在内置 Skill 交互模式下，委员会的底层推理完全依托宿主 Agent（如 Claude Code）的推理管道，**无需消耗您个人的第三方 API Key 额度**。仅在配置 Cron 独立日报任务或运行外部服务调用时，才需声明底层 API 供应。
 
-更多部署矩阵（Docker 容器化、本地独立 Web GUI 调试端口）参阅 [QUICK_START.md](docs/wiki/README.md)。
+更多部署矩阵（Docker 容器化、本地独立 Web GUI 调试端口）参阅 [docs/QUICK_START.md](docs/QUICK_START.md)。
 
 ### 3. 零成本自托管（GitHub Actions，无需服务器）
 不想挂机器跑 cron？fork 一份，每天由 GitHub Actions 自动跑委员会并把报告发到你邮箱。
@@ -149,7 +152,7 @@ bash ~/openInvest/skills/install.sh
 
 ## 系统拓扑与多 Agent 编排机制
 
-`openInvest` 拒绝在单一 LLM Session 中通过多角色 Prompt 进行伪辩论。系统在 `core/committee/` 层强行实施**信息隔离契约（Information Isolation Contract）**，通过有向无学图（DAG）驱动 4 个完全独立的 LLM 进程进行多轮交叉质询：
+`openInvest` 拒绝在单一 LLM Session 中通过多角色 Prompt 进行伪辩论。系统在 `core/committee/` 层强行实施**信息隔离契约（Information Isolation Contract）**，通过有向无环图（DAG）驱动 4 个完全独立的 LLM 进程进行多轮交叉质询：
 
 ```
                 [ 宏观数据注入 ]
@@ -186,7 +189,7 @@ bash ~/openInvest/skills/install.sh
 2.  **Quant Analyst (量化分析师)**：纯粹的数学动量与技术指标过滤器。**严格被阻断在持仓 Context 之外**，从根源消除人类在亏损持仓时的心理高估。
 3.  **Risk Officer (风险控制官)**：专注于组合尾部风险（最大回撤缓冲、流动性集中度、Solvency 杠杆因子）。**严格被阻断在技术信号之外**，仅对资产暴露进行冷酷裁决。
 4.  **Round 2 Rebuttal (交叉辩论机制)**：Quant 与 Risk 在第二轮被强制注入对方的 Round 1 报告，进行边界碰撞，直到两个 Agent 的信号和强度达成收敛，或触发收敛安全阀。
-5.  **CIO (首席投资官)**：汇总经过多轮过滤的质询追踪，输出结构化 `Verdict`（BUY / ACCUMULATE / HOLD / TRIM / SELL）与置信度。系统保持强克制，**不具备任何自动自动下单原语**，最终执行交由人类审计。
+5.  **CIO (首席投资官)**：汇总经过多轮过滤的质询追踪，输出结构化 `Verdict`（BUY / ACCUMULATE / HOLD / TRIM / SELL）与置信度。系统保持强克制，**不具备任何自动下单原语**，最终执行交由人类审计。
 
 ---
 
@@ -228,7 +231,7 @@ openInvest 提供了极高内聚的运行时参数配置开关。依据 [ADR-017
 | 统一配置键 (Config Key) | 数据类型 & 默认值 | 工程行为后果描述 |
 | --- | --- | --- |
 | `verdict.concentration_lens_enabled` | `bool` (`true`) | **持仓集中度过滤器**。当单一标的暴露过高时强行触发安全减仓阈值。若关闭，则单资产或全额风险池将**不因过度集中而被 CIO 建议减仓**（但波动率、估值风险、最大回撤风控依旧生效）。详见 [ADR-019](docs/wiki/adr/019-remove-solvency-concentration-override.md) |
-| `verdict.risk_profile` | `str` (`"steady"`) | 风险偏好特征描述符。`steady`（稳健稳健）/ `aggressive`（在 Downtime 阶段允许激活高顺势加仓弹性）。 |
+| `verdict.risk_profile` | `str` (`"steady"`) | 风险偏好特征描述符。`steady`（稳健）/ `aggressive`（在 Downtime 阶段允许激活高顺势加仓弹性）。 |
 | `verdict.gold_defense_dca_enabled` | `bool` (`true`) | 黄金防御机制。在 VIX / ATR 骤增阶段，强行将单次大额加仓原语拆分为多期 DCA（分批放行）。 |
 | `dca.auto_dca_enabled` | `bool` (`false`) | 全自动定期定投决策开关。 |
 | `dca.auto_dca_amount_cny` | `float` (`0.0`) | 触发自动定投时的单期基准人民币资本配置额度。详见 [ADR-018](docs/wiki/adr/018-dca-dip-reserve.md) |
@@ -240,7 +243,7 @@ openInvest 提供了极高内聚的运行时参数配置开关。依据 [ADR-017
 uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
 
 # 途径 2: 通过运行时 REST API 注入
-curl -X PUT localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
+curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
 
 # 途径 3: 宿主 GUI 交互控制
 # 前往 invest-gui「Settings → Committee Configuration」面板直接热切换

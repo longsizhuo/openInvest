@@ -44,7 +44,10 @@ Every improvement in Claude Code, OpenClaw, Codex, or future agents automaticall
   <sub>📌 <b>Note</b>: The current chart shows the author's live production portfolio. After self-hosting, the system will automatically render your own equity curve based on the holdings defined in your `memory/` directory.</sub>
 </div>
 
-*   **Benchmark Portfolio**: The system introduces 8 standard control benchmarks across 4 quadrants (AI advisors / Mutual funds / Wealth management / Broad market index). For details on the comparison methodology and data cleaning logic, see [docs/wiki/03-benchmarks.md](docs/wiki/README.md).
+<!-- OUTPERFORM_FEED_START -->
+<!-- OUTPERFORM_FEED_END -->
+
+*   **Benchmark Portfolio**: The system introduces 8 standard control benchmarks across 4 quadrants (AI advisors / Mutual funds / Wealth management / Broad market index). For details on the comparison methodology and data cleaning logic, see [docs/wiki/README.md](docs/wiki/README.md).
 *   **System Self-Disclosure**: This system is an **auditing tool to eliminate human investment cognitive biases and enforce reasoning transparency**, not a return-amplifying black box. Latest automated audit (`docs/verdict_accuracy.md`): Directional verdicts (excluding HOLD) have a true hit rate of **42.2%** (n=56, **below random**); `HOLD` accounts for **56%** of all decisions. The system's value lies in transparency and discipline (mostly staying inactive, low turnover), **not directional prediction**. Detailed log stream can be found in [docs/verdict_accuracy.md](docs/verdict_accuracy.md).
 
 ---
@@ -129,7 +132,7 @@ Send `set up invest` (or `帮我初始化 invest`) to any skill-enabled AI termi
 
 > 💡 **Zero-Cost Execution**: In skill interactive mode, the committee's underlying reasoning relies entirely on the host agent's (e.g. Claude Code) reasoning pipeline. **No third-party API Key is consumed**. You only need to configure an API key when setting up automated crons or calling independent Web APIs.
 
-For containerized deployment or Web GUI debugging, see [QUICK_START.md](docs/wiki/README.md).
+For containerized deployment or Web GUI debugging, see [docs/QUICK_START.md](docs/QUICK_START.md).
 
 ### 3. Serverless Self-Hosting (GitHub Actions)
 Run the committee automatically via GitHub Actions and receive daily digest emails.
@@ -195,7 +198,7 @@ openInvest does not run a mock debate in a single LLM session. The system enforc
 
 *   **Coordinator-Worker Pattern**: Workers operate in isolated namespaces. Boundary constraints are hardcoded at the framework layer in Python to prevent attention contamination in large multi-role prompts.
 *   **Markdown-as-a-Database**: The system uses Frontmatter (YAML) + Markdown (Body) as the single source of truth. Leveraging `fcntl.flock` process file locks and temporary atomic file replacement, it provides a tamper-proof investment audit trail natively tracked by Git.
-*   **Three-Phase Dreaming Consolidation**: Distills daily decisions against actual market outcomes nightly (Light Sleep $\rightarrow$ REM $\rightarrow$ Deep Sleep) to consolidate long-term insights, preventing大模型 (LLMs) context drift over long execution spans.
+*   **Three-Phase Dreaming Consolidation**: Distills daily decisions against actual market outcomes nightly (Light Sleep $\rightarrow$ REM $\rightarrow$ Deep Sleep) to consolidate long-term insights, preventing Large Language Model (LLM) context drift over long execution spans.
 
 ---
 
@@ -238,7 +241,7 @@ Pursuant to [ADR-017](docs/wiki/adr/017-config-via-api.md), runtime overrides pe
 uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
 
 # Method 2: REST API Call
-curl -X PUT localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
+curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
 
 # Method 3: Web GUI Configuration
 # Hot-swap configurations in invest-gui under Settings -> Committee Configuration
