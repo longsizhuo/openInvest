@@ -146,7 +146,7 @@ uv run pytest tests/test_xxx.py -v   # 单跑
 | 改动 | 测试位置 |
 |------|---------|
 | `core/*` | `tests/test_<module>.py` 直接测函数 |
-| `agents/*` | mock LLM client，测 prompt 渲染 + parse |
+| `capabilities/*` | mock LLM client，测 prompt 渲染 + parse |
 | `connectors/web_api.py` | `tests/test_web_api.py`，FastAPI TestClient |
 | `connectors/napcat_bot.py` | `tests/test_napcat_v2.py`，CommandContext fixture |
 | 前端 | invest-gui 暂未配单测，至少 build 过 + 浏览器手测 |

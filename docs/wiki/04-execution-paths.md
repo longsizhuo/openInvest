@@ -183,7 +183,7 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  agents/{macro,quant,risk,cio}.py 的 prompt                    │ ← 共享
+│  capabilities/committee/{macro,quant,risk,cio}.py 的 prompt                    │ ← 共享
 ├────────────────────────────────────────────────────────────────┤
 │  core/regime.py REGIME 分类 + 概率口径                         │ ← 共享
 ├────────────────────────────────────────────────────────────────┤
@@ -191,7 +191,7 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 │  skills/invest/scripts/run.sh prepare_committee 提示生成       │ ← 仅 Coordinator 用
 │  skills/invest/scripts/run.sh run_committee（包 run_committee）│ ← Direct 在 skill 里的入口
 ├────────────────────────────────────────────────────────────────┤
-│  agents/sdk_agent.py SDKAgent (DeepSeek HTTP)                  │ ← 仅 Direct 用
+│  capabilities/sdk_agent.py SDKAgent (DeepSeek HTTP)                  │ ← 仅 Direct 用
 │  Claude Agent({...}) tool                                      │ ← 仅 Coordinator 用
 └────────────────────────────────────────────────────────────────┘
 ```

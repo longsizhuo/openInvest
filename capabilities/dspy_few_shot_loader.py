@@ -1,7 +1,7 @@
 """DSPy optimized few-shot demos 加载器 —— 给 production CIO prompt 用
 
 2026-05-18 加入。从 experiments/dspy_optimized_v2.json 读 demos，format 成
-markdown examples block，给 agents/cio.py:build_cio_prompt 注入到 SKILL.md
+markdown examples block，给 capabilities/committee/cio.py:build_cio_prompt 注入到 SKILL.md
 的 {{few_shot_examples}} 占位符。
 
 为什么需要这层

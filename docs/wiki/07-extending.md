@@ -113,7 +113,7 @@ documents:
 
 ### 改动清单
 
-1. **新建 `agents/esg_analyst.py`**
+1. **新建 `capabilities/committee/esg_analyst.py`**
    ```python
    PROMPT_ESG_ANALYST = """
    你是 ESG 分析师...
@@ -291,7 +291,7 @@ documents:
 
 ### 必做的事
 
-- ✅ 加新代码必须更新对应子目录 README（如 `agents/README.md`）
+- ✅ 加新代码必须更新对应子目录 README（如 `capabilities/README.md`）
 - ✅ 加新概念必须更新本 wiki 对应章节（避免 docs 飘）
 - ✅ 加新决策必须开 ADR
 - ✅ 跑 `uv run pytest tests/ -v` 必须全绿

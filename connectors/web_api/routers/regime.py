@@ -77,11 +77,11 @@ async def get_regime_rules() -> RegimeRulesResponse:
     - 5 个可被 LLM 调用的 tool
     """
     from core.regime import get_thresholds
-    from agents.macro_strategist import PROMPT_MACRO_STRATEGIST
-    from agents.quant import build_quant_prompt
-    from agents.risk_officer import build_risk_officer_prompt
-    from agents.cio import build_cio_prompt
-    from agents.tools import TOOL_DEFINITIONS
+    from capabilities.committee.macro_strategist import PROMPT_MACRO_STRATEGIST
+    from capabilities.committee.quant import build_quant_prompt
+    from capabilities.committee.risk_officer import build_risk_officer_prompt
+    from capabilities.committee.cio import build_cio_prompt
+    from capabilities.tools import TOOL_DEFINITIONS
 
     sample_asset = {
         "symbol": "<SYMBOL>",

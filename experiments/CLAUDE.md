@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `experiments/` 是**冻结的、可复现的研究产物 archive**——训练集、调参结果、prompt
 历史版本、消融复现包。**不影响生产**：production 代码从不 import 这里的任何东西。
-反方向才对——这里的脚本 `from core.* / agents.*` 调生产代码来跑实验。
+反方向才对——这里的脚本 `from core.* / capabilities.*` 调生产代码来跑实验。
 
 改这里的东西**不会触发后端版本 bump**（除非也碰了根目录代码）；commit 用
 `research(scope):` / `chore(experiments):`，别用 `feat:`。

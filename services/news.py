@@ -11,7 +11,7 @@
 - ⚠️ **`_extract_main_text` 被 `news_sources/ddgs_news.py` lazy import 复用**
   （extract_fulltext=True 时）——cleanup 删本文件会打断那条路径，别删。
 
-历史：原 caller 是 agents/agent.py 的 `finance_news` langchain tool，被
+历史：原 caller 是 capabilities/sdk_agent.py 的 `finance_news` langchain tool，被
 commit 934ff7a (2026-05-08, "chore(deps): 删 langchain") 连带移除。
 
 恢复 finance_news tool 的方案经 2026-06 待办5 评审**搁置**，原因：
@@ -19,7 +19,7 @@ commit 934ff7a (2026-05-08, "chore(deps): 删 langchain") 连带移除。
 - 给 Macro 一个生肉 DDG 搜索 tool = 旁路事件层的归一化/去重/severity 过滤
   （anti-noise 管线），且在委员会跑动中引入非确定性 IO
 - Macro 已通过 run_macro_view(event_brief=...) 看到策划后的事件
-如未来确有按需搜索需求，参照 agents/tools.py 的 TOOL_DEFINITIONS/_impl_* 模式，
+如未来确有按需搜索需求，参照 capabilities/tools.py 的 TOOL_DEFINITIONS/_impl_* 模式，
 且只给 Macro 角色。
 """
 

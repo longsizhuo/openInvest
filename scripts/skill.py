@@ -1,8 +1,8 @@
-"""统一 Skill 入口 - 复用 invest 项目本体的 agents/core 模块
+"""统一 Skill 入口 - 复用 invest 项目本体的 capabilities/core 模块
 
 设计要点：
 - 不再复制 invest 主流程逻辑，所有 prompt / debate 编排都走项目里现有的代码
-  (agents.bull, agents.bear, agents.judge, core.debate, core.memory_store)
+  (capabilities.committee 各角色, core.debate, core.memory_store)
 - Skill 模式下"答辩"的 LLM 不是 DeepSeek，而是 Claude 自己
   → prepare_debate 吐出 prompt 给 Claude 看
   → Claude 在主对话里依次扮演 bull/bear/judge

@@ -243,7 +243,7 @@ def parse_cio_memo(
     # 2026-06-23 移除 solvency 自动兜底（曾："兜底充足 ⇒ 账户内集中度高不算风险"）：它只在
     # parse 层事后反转 CIO 减仓、prompt 层却不知情 → 既自相矛盾又掩盖真实集中度风险。现在
     # 集中度是否构成约束只由这一个显式开关说了算。本检查是硬兜底；lens 关时 prompt 层
-    # （agents/cio.py + risk_officer.py）同步软抑制，防 LLM 把超配换标签成 bearish 绕过。
+    # （capabilities/committee/cio.py + risk_officer.py）同步软抑制，防 LLM 把超配换标签成 bearish 绕过。
     _lens_off = not _verdict_cfg.concentration_lens_enabled
     if (_lens_off
             and out["verdict"] == "TRIM"

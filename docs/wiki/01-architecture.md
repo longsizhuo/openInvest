@@ -260,8 +260,8 @@ holdings:
 每层都设计成可独立替换：
 
 - **加 connector**（如 Telegram bot）：照 napcat_bot.py 模式新建一个文件，**不要碰 core**
-- **加 agent 角色**（如 ESG 分析师）：在 `agents/` 加 prompt 文件，在 `core/committee/debate.py:run_committee` 注册
-- **换 LLM provider**（DeepSeek → OpenAI）：改 `agents/agent.py` 的 client init，prompt 不动
+- **加 agent 角色**（如 ESG 分析师）：在 `capabilities/committee/` 加 prompt 文件，在 `core/committee/debate.py:run_committee` 注册
+- **换 LLM provider**（DeepSeek → OpenAI）：改 `capabilities/sdk_agent.py` 的 client init，prompt 不动
 - **换持久化**（Markdown → SQLite）：实现 `MemoryStore` 同接口，core 不动
 
 详见 [07-extending.md](07-extending.md)。

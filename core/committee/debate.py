@@ -20,9 +20,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from agents.cio import build_cio_prompt
-from agents.quant import build_quant_prompt
-from agents.risk_officer import build_risk_officer_prompt
+from capabilities.committee.cio import build_cio_prompt
+from capabilities.committee.quant import build_quant_prompt
+from capabilities.committee.risk_officer import build_risk_officer_prompt
 from core.committee.agent_io import _ask, _create_agent, _parallel_ask
 from core.committee.cio_parse import (
     _extract_concentration_from_summary,

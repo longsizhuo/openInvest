@@ -74,7 +74,7 @@ sweep 找到的最优参数要写回 defaults.yaml，必须满足：
 training_report 已证明"prompt 内容是真天花板，hyperparameter 顶不破"。
 如果 sweep 找不到显著改善，应该先考虑 prompt 改动。
 
-**明确范围**：本条"prompt 改动"指修改 `agents/*/` 下的 SKILL.md 或 prompt 文本，
+**明确范围**：本条"prompt 改动"指修改 `capabilities/committee/prompts/` 下的 SKILL.md 或 prompt 文本，
 **不含** few-shot demos（ADR 007 已钉死 CIO zero-shot，few-shot 路线已验证不通）。
 不允许以"prompt 改动"为由重启 few-shot 实验。
 

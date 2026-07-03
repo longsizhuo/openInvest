@@ -102,7 +102,7 @@ openInvest 有三个调用层，每层服务不同对象：
 
 | Component | Tag 格式 | 控制文件 | 触发路径 |
 |---|---|---|---|
-| 后端 | `v0.1.x` | `pyproject.toml` `version` | 改 `core/` / `agents/` / `jobs/` / `connectors/` / `services/` / `scripts/` 等根目录代码 |
+| 后端 | `v0.1.x` | `pyproject.toml` `version` | 改 `core/` / `capabilities/` / `jobs/` / `connectors/` / `services/` / `scripts/` 等根目录代码 |
 | invest skill | `invest-skill-v0.9.x` | `skills/invest/SKILL.md` `version:` | 改 `skills/invest/**` |
 | invest-setup skill | `invest-setup-skill-v0.1.x` | `skills/invest-setup/SKILL.md` `version:` | 改 `skills/invest-setup/**` |
 

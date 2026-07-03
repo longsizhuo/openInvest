@@ -138,7 +138,7 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
 
 约束闭环：
 
-- CIO SKILL（`agents/skills/cio/SKILL.md`）强制 `EXPECTED_PATH` 引用这些数字
+- CIO SKILL（`capabilities/committee/prompts/cio/SKILL.md`）强制 `EXPECTED_PATH` 引用这些数字
   （形状占比/回踩深度/见底时点），**禁止凭空编路径**
 - TRIM 的 `REENTRY_PRICE ≥ 现价` 仍被 parse_cio_memo Sanity 5 确定性打回 HOLD
 - 概率口径同源：`regime_brief` 的 STRATEGY_HINT（30d 中性概率）与本路径参考来自

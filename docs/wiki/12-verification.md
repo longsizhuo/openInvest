@@ -156,7 +156,7 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 
 ⚠️ Caveat：dev set +10pp 不直接等于回测 reward 突破 0.42。需要手工把
 `experiments/dspy_optimized_v1_full.json` 里的 10 个 best demos 注入
-`agents/cio.py` 重跑 walk-forward 才知道。这一步**没做**。
+`capabilities/committee/cio.py` 重跑 walk-forward 才知道。这一步**没做**。
 
 ---
 
@@ -178,7 +178,7 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 | 建议动作 | 立即减仓 60% | 加仓上限 ≤¥50（10% 子弹）|
 | ONE_LINER | "可用子弹仅¥500 **无补仓能力**" | "**虽家族兜底消除流动性风险**，但集中度仍高" |
 
-**关键语义**（commit 待 / agents/wealth_context_officer.py）：
+**关键语义**（commit 待 / capabilities/committee/wealth_context_officer.py）：
 - `INVESTABLE_CASH_CNY = portfolio cash`（永远不加 backup）
 - `BACKUP_BUFFER_CNY = off-portfolio 应急金`（**仅风险兜底，不可投资**）
 - 家族 ¥4M 只让 SIGNAL 从 high_risk → concerned，**不让 CIO 喊"BUY ¥1M"**

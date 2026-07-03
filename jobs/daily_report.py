@@ -487,7 +487,7 @@ def run() -> Dict[str, Any]:
                 "cio_memo": r["report"].cio_memo,
             })
         if t_inputs:
-            from agents.sdk_agent import SDKAgent
+            from capabilities.sdk_agent import SDKAgent
             translator = SDKAgent(
                 system_prompt=TRANSLATOR_SYSTEM_PROMPT,
                 enable_tools=False, temperature=0.3,

@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
-from agents.tools import TOOL_DEFINITIONS, execute_tool_call
+from capabilities.tools import TOOL_DEFINITIONS, execute_tool_call
 from core.llm_telemetry import TelemetryMeta, record_llm_call, record_tool_call
 from utils.llm import get_thinking_disable_kwargs
 

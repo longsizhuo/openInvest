@@ -1,8 +1,8 @@
-"""SKILL.md 加载器 —— 跟 OpenClaw / Hermes-Agent 一致的 prompt 组织模式
+"""Prompt 模板加载器 —— 跟 OpenClaw / Hermes-Agent 一致的 prompt 组织模式
 
 为什么
 ======
-之前 prompt 全在 .py 里写成 f-string，DSPy 优化要 wrap。改成 SKILL.md 后：
+之前 prompt 全在 .py 里写成 f-string，DSPy 优化要 wrap。改成 .md 后：
 - prompt 跟代码解耦
 - 非 dev 能改（只改 markdown）
 - DSPy/GEPA 直接读写 .md 文件（不需要 wrap，参考
@@ -11,9 +11,9 @@
 
 设计
 ====
-每个角色 = `agents/skills/<role>/` 目录：
-- SKILL.md             ← 主 prompt（opening round 用）
-- SKILL_<label>.md     ← 可选：其他轮次 prompt（如 rebuttal）
+每个 capability 下 `<role>/` 目录自包含 .py + .md：
+- <role>.md             ← 主 prompt（opening round 用）
+- <role>_<label>.md     ← 可选：其他轮次 prompt（如 rebuttal）
 
 格式：
     ---
@@ -33,7 +33,7 @@
 ========
 - **零模板引擎依赖**：纯 str.replace，避免引入 jinja2 等
 - **frontmatter 是契约**：name/description/role 必填，让 DSPy 能识别哪个角色
-- **fallback 友好**：找不到对应 round_label 的文件回退到 SKILL.md
+- **fallback 友好**：找不到对应 round_label 的文件回退到 <role>.md
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 
-SKILLS_ROOT = Path(__file__).parent / "skills"
+CAPABILITIES_ROOT = Path(__file__).parent
 
 
 def _split_frontmatter(raw: str) -> Tuple[Dict[str, str], str]:
@@ -84,69 +84,77 @@ def _render_placeholders(body: str, variables: Dict[str, Any]) -> str:
 def load_skill(
     role: str,
     round_label: str = "opening",
+    capability: str = "committee",
     **variables: Any,
 ) -> str:
-    """读取并渲染 SKILL.md，返回完整 prompt 字符串。
+    """读取并渲染 <role>.md，返回完整 prompt 字符串。
 
     Args:
         role: 角色目录名，如 "cio" / "macro_strategist" / "quant" / "risk_officer"
-              / "wealth_context_officer"
-        round_label: 轮次。"opening" 读 SKILL.md，其他读 SKILL_<round_label>.md
+              / "wealth_context_officer"。目录下必须有 <role>.py + <role>.md。
+        round_label: 轮次。"opening" 读 <role>.md，其他读 <role>_<round_label>.md
+        capability: capability 目录名，默认 "committee"
         **variables: 占位符变量，e.g. asset_name="NDQ.AX", asset_symbol="NDQ.AX"
 
     Returns:
         渲染好的 prompt 字符串（不含 frontmatter）。
 
     Raises:
-        FileNotFoundError: 角色目录 / SKILL.md 不存在
+        FileNotFoundError: 角色目录 / <role>.md 不存在
     """
-    skill_dir = SKILLS_ROOT / role
-    if not skill_dir.is_dir():
-        raise FileNotFoundError(f"角色 skill 目录不存在: {skill_dir}")
+    role_dir = CAPABILITIES_ROOT / capability / role
+    if not role_dir.is_dir():
+        raise FileNotFoundError(f"角色目录不存在: {role_dir}")
 
-    # 找文件：先尝试 SKILL_<round>.md，没有就回退 SKILL.md
+    # 找文件：先尝试 <role>_<round>.md，没有就回退 <role>.md
     candidates = []
     if round_label and round_label != "opening":
-        candidates.append(skill_dir / f"SKILL_{round_label}.md")
-    candidates.append(skill_dir / "SKILL.md")
+        candidates.append(role_dir / f"{role}_{round_label}.md")
+    candidates.append(role_dir / f"{role}.md")
 
-    skill_path: Optional[Path] = None
+    prompt_path: Optional[Path] = None
     for p in candidates:
         if p.exists():
-            skill_path = p
+            prompt_path = p
             break
 
-    if skill_path is None:
+    if prompt_path is None:
         raise FileNotFoundError(
-            f"未找到 SKILL.md（尝试了 {[str(p) for p in candidates]}）",
+            f"未找到 {role}.md（尝试了 {[str(p) for p in candidates]}）",
         )
 
-    raw = skill_path.read_text(encoding="utf-8")
+    raw = prompt_path.read_text(encoding="utf-8")
     _meta, body = _split_frontmatter(raw)
 
     return _render_placeholders(body, variables)
 
 
-def load_skill_metadata(role: str, round_label: str = "opening") -> Dict[str, str]:
+def load_skill_metadata(role: str, round_label: str = "opening", capability: str = "committee") -> Dict[str, str]:
     """只读 frontmatter（给 DSPy 用，能 enumerate 所有 role 的 metadata）"""
-    skill_dir = SKILLS_ROOT / role
+    role_dir = CAPABILITIES_ROOT / capability / role
     candidates = []
     if round_label and round_label != "opening":
-        candidates.append(skill_dir / f"SKILL_{round_label}.md")
-    candidates.append(skill_dir / "SKILL.md")
+        candidates.append(role_dir / f"{role}_{round_label}.md")
+    candidates.append(role_dir / f"{role}.md")
     for p in candidates:
         if p.exists():
             raw = p.read_text(encoding="utf-8")
             meta, _ = _split_frontmatter(raw)
             return meta
-    raise FileNotFoundError(f"未找到 SKILL.md for role={role}")
+    raise FileNotFoundError(f"未找到 {role}.md for role={role}")
 
 
-def list_skills() -> list[str]:
-    """列出 skills/ 下所有角色目录名"""
-    if not SKILLS_ROOT.exists():
+def list_skills(capability: str = "committee") -> list[str]:
+    """列出 capabilities/<capability>/ 下所有含 .md 的角色目录名"""
+    cap_dir = CAPABILITIES_ROOT / capability
+    if not cap_dir.exists():
         return []
-    return sorted([d.name for d in SKILLS_ROOT.iterdir() if d.is_dir()])
+    roles = []
+    for d in sorted(cap_dir.iterdir()):
+        if d.is_dir() and not d.name.startswith("_") and d.name != "__pycache__":
+            if (d / f"{d.name}.md").exists():
+                roles.append(d.name)
+    return roles
 
 
-__all__ = ["load_skill", "load_skill_metadata", "list_skills", "SKILLS_ROOT"]
+__all__ = ["load_skill", "load_skill_metadata", "list_skills"]

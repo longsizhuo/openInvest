@@ -114,7 +114,7 @@ total_cny = (
 - `connectors/web_api.py:271-273,905-906,944-945,1768-1769,3015-3016` — `WriteResponse(cash_cny=..., aud_cash=...)`: v1 API schema 兼容前端用，前端已经长这样。可在 v3 schema 升级时一并改。
 - `connectors/napcat_bot.py:129-145` — `/balance`：先打 CNY + AUD，再循环 `pm.cash` 列其他币种。已经通用化，OK。
 - `connectors/napcat_bot.py:141-142` — `if ccy in ("CNY", "AUD"): continue` 用来跳过已打印的两个 → display 合理。
-- `core/committee.py:668-669` + `agents/tools.py:163-164` + `connectors/web_api.py:2481-2486` + `scripts/skill.py:382` — VIX/TNX/USDCNY/AUDCNY macro 面板硬编码：是"通用宏观背景，所有 fork 用户都关心" (web_api 注释明说)。可加 env 让 fork 用户追加更多 FX，但 4 个 baseline 保留是合理 default。
+- `core/committee.py:668-669` + `capabilities/tools.py:163-164` + `connectors/web_api.py:2481-2486` + `scripts/skill.py:382` — VIX/TNX/USDCNY/AUDCNY macro 面板硬编码：是"通用宏观背景，所有 fork 用户都关心" (web_api 注释明说)。可加 env 让 fork 用户追加更多 FX，但 4 个 baseline 保留是合理 default。
 - `core/paper_trade_simulator.py:65-78,82-83` — `ASSET_CURRENCY` 静态映射: 已经手写常见美/澳/港/中股，未知 default USD。Backtest 工具，可接受。
 - `services/commsec_reader.py:175` — `"currency": "AUD"`: CommSec 是澳洲券商，写死 AUD 正确。
 - `core/portfolio_manager.py:286` — `currency = ... or "AUD"`: 默认 AUD 是历史选择（CommSec only path）。改成 `"USD"` 或要求显式传都行，但当前 caller 都显式传 currency 所以不致命。

@@ -68,7 +68,7 @@ PR #14（已合入）在 CIO prompt 层加了"零花钱账户 TRIM 约束"，但
 > 靠填假的 `emergency_buffer_cny` 触发 strong 来规避，现在有真 toggle。`out["_concentration_lens"]`
 > 标记区分两种触发（`disabled` vs `sanity4_solvency`），供 intervention 反事实账本分桶
 > （`config_concentration_lens_off` vs `sanity4_solvency_concentration`），别混淆统计。
-> prompt 层（`agents/cio.py` / `agents/risk_officer.py`）同步软抑制超配规则。详见
+> prompt 层（`capabilities/committee/cio.py` / `capabilities/committee/risk_officer.py`）同步软抑制超配规则。详见
 > [017-config-via-api](017-config-via-api.md)。
 >
 > **2026-06-23（ADR-019）后续**：上面的"双触发"已收敛为**单触发**——solvency 那条删了，
@@ -106,7 +106,7 @@ TRIM 信号当前是纯静态快照决策，缺"卖出后预期路径 / 买回�
 | 文件 | 改动 |
 |---|---|
 | `utils/portfolio_summary.py` | `backup_cny` 参数 + 真实财富占比附注 |
-| `agents/skills/cio/SKILL.md` | `TRIM_REASON` 输出字段 |
+| `capabilities/committee/prompts/cio/SKILL.md` | `TRIM_REASON` 输出字段 |
 | `core/committee.py`（现 `core/committee/cio_parse.py`）| `parse_cio_memo()` TRIM_REASON 提取 + Sanity 4 |
 | `core/committee_runner.py` | wealth_view 提前加载 + 传 backup_cny |
 | `jobs/daily_report.py` | cron 路径传 backup_cny |
