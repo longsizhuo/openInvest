@@ -42,7 +42,8 @@ documents:
 8. [16-ta-analysts-experiment.md](16-ta-analysts-experiment.md) —— TradingAgents 式分析师实验：预注册 Gate 0/3 过线
 9. [17-asset-feature-sets.md](17-asset-feature-sets.md) —— 资产类别特征集显式契约（黄金 ≠ 股票语义）
 10. [18-governance-conventions.md](18-governance-conventions.md) —— 治理章程：口径/判据/脏数据红线/否决权（用户签字）
-9. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
+11. [19-telemetry-and-analytics.md](19-telemetry-and-analytics.md) —— 埋点与数据收集：匿名安装统计 / Opt-out / 隐私承诺
+12. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
 ### 🎨 我是设计师 / 前端，想改 GUI
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA
@@ -72,6 +73,7 @@ documents:
 | 16 | [TA 分析师实验](16-ta-analysts-experiment.md) | 信号存在性两阶段实验，3 分析师 0/3 过预注册 Gate |
 | 17 | [资产特征集契约](17-asset-feature-sets.md) | 特征×资产类别矩阵；黄金 VIX 语义审查；反事实记账 |
 | 18 | [治理章程](18-governance-conventions.md) | 三原则(冻结快照/否决权/判据裁决) + 口径单源 + 合并前置 + 审计log |
+| 19 | [埋点与数据收集](19-telemetry-and-analytics.md) | 一次性匿名安装统计 + 三个 opt-out 环境变量 + 隐私承诺 |
 
 ## 架构决策记录 (ADR)
 

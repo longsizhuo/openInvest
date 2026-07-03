@@ -111,18 +111,25 @@ link_one skills/okf-frontmatter "$OKF_DIR" scripts
 link_one skills/okf-frontmatter "$OKF_DIR" references
 
 # ---- 匿名安装统计（仅版本号 + OS，不含任何 key/持仓/个人信息）----
-# 设 OPENINVEST_NO_TELEMETRY=1 可跳过
-if [ "${OPENINVEST_NO_TELEMETRY:-}" != "1" ]; then
-    _oi_ver=$(grep -m 1 '^version = ' "$REPO_ROOT/pyproject.toml" 2>/dev/null | cut -d '"' -f 2 | tr -cd '[:alnum:]._+-' || echo "unknown")
-    _oi_os=$(uname -s 2>/dev/null | tr -cd '[:alnum:]._+-' || echo "unknown")
+# 仅首次安装上报一次（marker 文件防重跑重复计数）；设 OPENINVEST_NO_TELEMETRY /
+# INVEST_NO_TELEMETRY / DO_NOT_TRACK 任一非空即跳过。
+_oi_marker="$CLAUDE_SKILLS_DIR/.openinvest-install-reported"
+if [ -z "${OPENINVEST_NO_TELEMETRY:-}${INVEST_NO_TELEMETRY:-}${DO_NOT_TRACK:-}" ] && [ ! -f "$_oi_marker" ]; then
+    _oi_ver=$(grep -m 1 '^version = ' "$REPO_ROOT/pyproject.toml" 2>/dev/null | cut -d '"' -f 2 | tr -cd '[:alnum:]._+-')
+    _oi_os=$(uname -s 2>/dev/null | tr -cd '[:alnum:]._+-')
     _oi_ver="${_oi_ver:-unknown}"
     _oi_os="${_oi_os:-unknown}"
-    curl -sf --max-time 3 \
+    echo
+    echo "📡 一次性匿名安装统计（仅版本号 + OS，可用 OPENINVEST_NO_TELEMETRY=1 关闭）"
+    # UA 必须是 Mozilla/5.0 开头的浏览器样式，否则被 Umami 的 isbot 过滤静默丢弃；
+    # 后台化保证断网/被墙环境不阻塞安装
+    ( curl -sf --max-time 3 \
       "https://umami.involutionhell.com/api/send" \
       -H "Content-Type: application/json" \
-      -H "User-Agent: openInvest-install/${_oi_ver}" \
+      -H "User-Agent: Mozilla/5.0 (compatible; openInvest-install/${_oi_ver})" \
       -d "{\"type\":\"event\",\"payload\":{\"hostname\":\"openinvest-install\",\"language\":\"en\",\"url\":\"/install\",\"website\":\"0373eb82-72c8-4f5f-864c-11f9e7c997fb\",\"name\":\"install\",\"data\":{\"version\":\"${_oi_ver}\",\"os\":\"${_oi_os}\"}}}" \
-      >/dev/null 2>&1 || true
+      >/dev/null 2>&1 & )
+    touch "$_oi_marker" 2>/dev/null || true
 fi
 
 echo
