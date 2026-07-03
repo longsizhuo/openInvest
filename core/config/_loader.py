@@ -414,6 +414,26 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "event_watch 扫描窗口",
         "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认 */30 0-2,8-23 * * * = 北京 8:00-次日 2:30 每半小时；scheduler 每 10 分钟自动拾取改动，无需重启",
     },
+    "event.sentinel_enabled": {
+        "type": "bool",
+        "label": "价格异动哨兵",
+        "help": "垂直线检测：10 分钟涨跌超过日 ATR% 阈值 → 先发报警邮件（含最近 verdict 锚点）再触发委员会重跑（ADR-025，默认开）",
+    },
+    "event.sentinel_atr_mult": {
+        "type": "float",
+        "label": "哨兵触发倍数(×日ATR)",
+        "help": "|10 分钟涨跌| ≥ 此倍数 × 日 ATR% 才报警。越小越敏感；0.8 ≈ 10 分钟走完日常波动的八成（默认 0.8）",
+    },
+    "event.sentinel_cooldown_min": {
+        "type": "int",
+        "label": "哨兵冷却(分钟)",
+        "help": "同 symbol 同方向报警后的静默期，防报警疲劳（默认 120 分钟；急涨后急跌属不同方向不受此限）",
+    },
+    "event.sentinel_schedule": {
+        "type": "cron",
+        "label": "哨兵扫描窗口",
+        "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认 */5 0-2,8-23 * * * = 与 event_watch 同窗口、5 分钟一次；空扫零 LLM 成本",
+    },
     "staleness.price_stale_days": {
         "type": "int",
         "label": "价格陈旧警告天数",

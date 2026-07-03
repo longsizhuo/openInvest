@@ -83,6 +83,7 @@ jobs:
           uv run python -c "from services.news_sources import fetch_all, RawNewsItem"
           uv run python -c "from services.news_sources.rss_feed import load_default_feeds"
           uv run python -c "from jobs.event_watch import run as event_watch_run"
+          uv run python -c "from jobs.price_sentinel import run as price_sentinel_run"
           uv run python -c "from core.committee_runner import _resolve_event_brief, format_event_brief"
           uv run python -c "from services.skill_views import build_status_view, build_strategy_view, build_history_view, build_what_if_view, build_doctor_view"
           uv run python -c "from core.committee_runner import prepare_committee_brief, save_committee_transcript"
