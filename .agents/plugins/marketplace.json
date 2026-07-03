@@ -8,7 +8,7 @@
       "name": "invest",
       "source": {
         "source": "local",
-        "path": "./plugin"
+        "path": "."
       },
       "category": "Productivity",
       "description": "Self-hosted AI investment committee — portfolio + live prices, any yfinance symbol, 4-role LLM committee for buy/sell verdicts. Backend self-bootstraps on first call."
