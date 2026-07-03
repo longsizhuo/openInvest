@@ -32,11 +32,24 @@ writes your config. After that just ask things like *"show my portfolio"*,
 
 ## What actually gets installed
 
-The plugin ships **only the agent skill layer** (`invest` + `invest-setup`).
-On your first call, `run.sh` **self-bootstraps the backend**: it `git clone`s
-`longsizhuo/openInvest` into `~/openInvest`, runs `uv sync`, and pulls the GUI
-dist. Nothing is installed system-wide, and the plugin never bundles a copy of
-the backend.
+The plugin ships the **agent skill layer** (`invest` + `invest-setup`) plus an
+**MCP server** (`.mcp.json`, auto-registered on install — 14 tools: `status`,
+`live_prices`, `decisions`, `explain_decision`, `record_execution`, `buy`,
+`sell`, `run_committee`, …). On your first call, `run.sh` **self-bootstraps the
+backend**: it `git clone`s `longsizhuo/openInvest` into `~/openInvest`, runs
+`uv sync`, and pulls the GUI dist. Nothing is installed system-wide, and the
+plugin never bundles a copy of the backend.
+
+> **First-run note**: the MCP server reuses the same bootstrap. If the backend
+> isn't cloned yet, the very first MCP connect may exceed the client startup
+> timeout while `git clone + uv sync` run — just say **"set up invest"** first
+> (the skill path does the bootstrap), or retry the connect once. After that,
+> MCP starts on the warm path in ~1s.
+
+Division of labor (per [issue #133](https://github.com/longsizhuo/openInvest/issues/133)):
+**MCP tools** = what the agent can call; **skills** = how to orchestrate the
+committee (Coordinator protocol, decision discipline). Your agent keeps
+conversation, memory, and personalization; openInvest keeps the investing.
 
 Two ways to run the committee:
 
