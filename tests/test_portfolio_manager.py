@@ -667,3 +667,25 @@ class TestBuyFundingSource:
         with pytest.raises(ValueError):
             pm2.buy("510300.SS", units=100.0, price=5.0, currency="CNY",
                     kind="etf", source_type="nonsense")
+
+    def test_cash_deduct_insufficient_rejected(self, tmp_path):
+        """#108 防穿透：cash_deduct 现金不足抛 ValueError，且不落盘（holdings/cash 都不变）"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 400.0}, holdings=[])
+        pm2 = PortfolioManager(s)
+        with pytest.raises(ValueError):
+            pm2.buy("NDQ.AX", units=10.0, price=130.0, currency="CNY", kind="etf")
+        pm2._reload()
+        # with_portfolio_tx commit-on-success：抛异常 → 整笔不落盘
+        assert pm2.cash_amount("CNY") == pytest.approx(400.0)
+        assert pm2.find_holding("NDQ.AX") is None
+
+    def test_external_funding_bypasses_cash_check(self, tmp_path):
+        """external_funding 不扣 cash → 即便现金为 0 也能建仓（防穿透只管 cash_deduct）"""
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 0.0}, holdings=[])
+        pm2 = PortfolioManager(s)
+        pm2.buy("NDQ.AX", units=10.0, price=130.0, currency="CNY", kind="etf",
+                source_type="external_funding")
+        pm2._reload()
+        assert pm2.find_holding("NDQ.AX")["units"] == 10.0

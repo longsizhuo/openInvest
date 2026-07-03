@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -105,7 +106,7 @@ from connectors.state_bus import (
 )
 
 
-async def _run_committee_task(
+def _run_committee_task(
     task_id: str,
     symbols: Optional[List[str]],
     max_rounds: int,
@@ -154,16 +155,13 @@ async def _run_committee_task(
         # dispatch 都在 run_committee_session 内部一处实现，避免跟 Cron/Skill 漂移。
         # 历史：之前这里 90 行手搓的 orchestrator 跟 daily_report 复制了一份，
         # 加新参数总漏一处。修复 2026-05-16: 整段迁移到 service 层。
-        # 同步调 session（session 内部已串行/并行 dispatch，本身处理跨资产）。
-        #
-        # 已知限制：此同步调用阻塞 uvicorn 事件循环 5-10 分钟。
-        # 尝试过的方案（均在 anyio TestClient 嵌套 ThreadPool 下失败）：
-        #   - asyncio.get_event_loop().run_in_executor() → future 不 resolve
-        #   - asyncio.to_thread() → 同上
-        #   - threading.Thread + asyncio.Event → Event.wait 不唤醒
-        #   - threading.Thread + asyncio.Queue → Queue.get 不返回
-        # 根因：Starlette TestClient 用 anyio 在独立线程跑事件循环，与标准 asyncio 不兼容。
-        # 生产环境建议：用 --workers 2+ 多进程部署，或 Caddy 反代 + 超时保护。
+        # 本函数是纯同步体（无 await），由 committee_run 用 daemon 线程拉起
+        # （见调用处），故这里直接同步调 session 不会阻塞 uvicorn 事件循环。
+        # 历史（#105）：曾是 async def + asyncio.create_task，同步 session 在事件
+        # 循环线程上跑 → 整服务假死 5-10 分钟。之前试过 run_in_executor/to_thread/
+        # Event/Queue 都在 anyio TestClient 下失败，根因是它们都想把结果桥回事件
+        # 循环；本任务只通过 status.json 文件通信、不回桥任何 asyncio 原语，所以
+        # 改成"独立 OS 线程跑纯同步体"彻底绕开该不兼容，测试与生产行为一致。
         session = run_committee_session(
             symbols=symbols,
             max_debate_rounds=max_rounds,
@@ -257,12 +255,20 @@ async def committee_run(body: CommitteeRunRequest = Body(default=CommitteeRunReq
         "events": [],
     })
 
-    asyncio.create_task(_run_committee_task(
-        task_id,
-        symbols=body.symbols,
-        max_rounds=body.max_debate_rounds,
-        event_ids=body.event_ids,
-    ))
+    # 在独立 daemon 线程跑同步委员会任务，不占用 uvicorn 事件循环（修复 #105 假死）。
+    # 任务只通过 status.json 文件回报进度，客户端轮询 poll_url 获取结果，无需把结果
+    # 桥回事件循环——这正是能绕开 anyio TestClient 不兼容的原因（见 _run_committee_task）。
+    threading.Thread(
+        target=_run_committee_task,
+        args=(task_id,),
+        kwargs={
+            "symbols": body.symbols,
+            "max_rounds": body.max_debate_rounds,
+            "event_ids": body.event_ids,
+        },
+        daemon=True,
+        name=f"committee-{task_id}",
+    ).start()
 
     return CommitteeRunResponse(
         task_id=task_id,

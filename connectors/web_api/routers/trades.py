@@ -205,15 +205,22 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
                     f"{sign}{cash_delta_amount:,.2f} {cash_delta_currency}"
                 )
 
-        # with_portfolio_tx 退出后自动落盘
-        pm._reload()  # 刷新 pm 的内存视图（保持和 record_external_trade 一致）
+        # with_portfolio_tx 退出即已落盘（fsync + atomic rename），此处已经成功。
+        # _reload() 只是刷新 pm 的内存视图（保持和 record_external_trade 一致），
+        # 失败也不代表 portfolio.md 没写成功——绝不能让它把 True 变回 False，
+        # 否则调用方会误判"未同步"而回退状态 + 允许重试，导致同一笔 delta 在
+        # 已经落盘一次之后再被重放一次（双花）。
+        try:
+            pm._reload()
+        except Exception as e:
+            log.warning(f"_sync_trade_to_portfolio: portfolio.md 已落盘但 _reload 失败（不影响结果）: {e}")
         return True, synced_holding
 
     except _SkipSync:
         # SELL 但无持仓：不同步，但也不报错（业务上允许"账本有、持仓无"）
         return False, None
     except Exception as e:
-        # 同步失败不能阻断状态更新——记日志后降级
+        # with_portfolio_tx 内部（落盘前）异常 → portfolio.md 确实未变动，安全降级
         log.error(f"_sync_trade_to_portfolio 异常，portfolio.md 未变动: {e}", exc_info=True)
         return False, None
 
@@ -250,55 +257,70 @@ async def patch_trade_status(
     if trade_before is None:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
 
-    # ---- 幂等闸：已是 executed 的单子再次 PATCH executed → 不重复入账 ----
-    # _sync_trade_to_portfolio 累加而非幂等，必须靠当前状态判定是否真的发生
-    # →executed 跃迁。否则双击 / 客户端超时重试 / agent 重发会把持仓和现金重复
-    # 计算（实测：units 10→20、AUD cash 3700→2400）。
-    if status == "executed" and trade_before.get("status") == "executed":
+    # ---- 非 executed（planned / cancelled）：无 portfolio 副作用，直接改状态 ----
+    if status != "executed":
+        try:
+            patched = _get_trades_db().patch_status(trade_id, status)
+            if not patched:
+                raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"trades.db 更新失败: {e}") from e
+        return {
+            "id": trade_id,
+            "status": status,
+            "ok": True,
+            "portfolio_synced": False,
+            "synced_holding": None,
+        }
+
+    # ---- executed：原子 claim 跃迁，只有赢家同步 portfolio（防 #109 并发重复入账）----
+    # 旧实现先 get_trade 读状态再 patch，check/set 之间无锁，两个并发 PATCH 都读到
+    # planned 各同步一次（实测 units 10→20、AUD cash 3700→2400）。改为单条 SQL 原子
+    # CAS：仅 rowcount==1 的请求赢得 planned→executed 跃迁并独占同步；其余幂等返回。
+    # 同样覆盖顺序重放（双击 / 客户端超时重试 / agent 重发）。
+    won = await asyncio.to_thread(
+        _get_trades_db().claim_status_transition, trade_id, "executed"
+    )
+    if not won:
+        # 已是 executed（并发赢家已抢到 / 重放）→ 首次已同步，本次幂等跳过
         return {
             "id": trade_id,
             "status": "executed",
             "ok": True,
-            "portfolio_synced": False,  # 首次 executed 时已同步，本次幂等跳过
+            "portfolio_synced": False,
             "synced_holding": None,
         }
 
-    # ---- executed 时先同步 portfolio.md，成功后再提交 status ----
-    portfolio_synced = False
-    synced_holding: Optional[Dict[str, Any]] = None
-
-    if status == "executed":
-        # 先同步 portfolio（幂等操作），失败则不提交 status
-        loop = asyncio.get_event_loop()
-        portfolio_synced, synced_holding = await loop.run_in_executor(
-            None, _sync_trade_to_portfolio, trade_before
+    # 赢得跃迁 → 同步 portfolio.md。失败则把状态回退到原值（释放 claim），让重试
+    # 能重新 claim+同步，不丢账。trade_before 是 claim 前读的原始行，含同步所需的
+    # direction/units/price/symbol（不依赖 status 字段）。
+    portfolio_synced, synced_holding = await asyncio.to_thread(
+        _sync_trade_to_portfolio, trade_before
+    )
+    if not portfolio_synced:
+        # 用 release_claim 而非无条件 patch_status 回退：如果这段时间里有另一个
+        # 并发请求把这笔单子改成了别的状态（如 cancelled），release_claim 检测到
+        # 行已不是本请求刚 claim 到的 "executed" 就不写，避免无条件 UPDATE 把
+        # 别人的合法状态改动静默覆盖回去。
+        released = await asyncio.to_thread(
+            _get_trades_db().release_claim,
+            trade_id, "executed", trade_before.get("status", "planned"),
         )
-        if not portfolio_synced:
-            raise HTTPException(
-                status_code=500,
-                detail=f"portfolio 同步失败，trade 保持 planned 状态。请重试。"
-                       f"trade_id={trade_id}, symbol={trade_before.get('symbol')}",
+        if not released:
+            log.error(
+                f"trade_id={trade_id} portfolio 同步失败且回退被并发改动抢占——"
+                f"状态未回退，需人工核对 trades.db 与 portfolio.md 是否一致"
             )
-        log.info(
-            f"portfolio.md 已同步: trade_id={trade_id} "
-            f"{trade_before.get('direction')} {trade_before.get('units')} "
-            f"{trade_before.get('symbol')}"
+        raise HTTPException(
+            status_code=500,
+            detail=f"portfolio 同步失败，trade 已回退至 {trade_before.get('status')} 状态。请重试。"
+                   f"trade_id={trade_id}, symbol={trade_before.get('symbol')}",
         )
-
-    # portfolio 同步成功（或非 executed 状态），提交 trades.db
-    try:
-        patched = _get_trades_db().patch_status(trade_id, status)
-        if not patched:
-            raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
-    except ValueError as e:
-        # portfolio 已同步但 status 提交失败 — 记录异常但不回滚 portfolio
-        # （portfolio 同步是幂等的，下次重试不会出问题）
-        log.error(
-            f"portfolio 已同步但 trades.db patch_status 失败: {e} "
-            f"trade_id={trade_id}，需手动重试 status 更新",
-            exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail=f"trades.db 更新失败: {e}") from e
+    log.info(
+        f"portfolio.md 已同步: trade_id={trade_id} "
+        f"{trade_before.get('direction')} {trade_before.get('units')} "
+        f"{trade_before.get('symbol')}"
+    )
 
     return {
         "id": trade_id,

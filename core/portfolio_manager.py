@@ -522,7 +522,17 @@ class PortfolioManager:
             # 资金来源决定是否扣现金：external_funding = 外部新钱，子弹池现金不动
             if source_type == "cash_deduct":
                 cash = dict(p.get("cash") or {})
-                cash[ccy] = round(float(cash.get(ccy, 0) or 0) - units * price, 2)
+                current = float(cash.get(ccy, 0) or 0)
+                # 防穿透：主动建仓不得把子弹池现金扣成负数（与 withdraw_cash 对称，
+                # 锁内校验防 TOCTOU）。钱不来自子弹池的合法场景走 source_type=
+                # 'external_funding'（不动 cash）。存储层仍容忍负现金——那是给
+                # record_external_trade 券商真实结算回灌用的，与主动 buy 无关。
+                if current < cost_cny:
+                    raise ValueError(
+                        f"{ccy} 现金 {current} < 买入成本 {cost_cny}"
+                        f"（子弹不足；外部新钱建仓请用 source_type='external_funding'）"
+                    )
+                cash[ccy] = round(current - cost_cny, 2)
                 p["cash"] = cash
         self._reload()
         self.store.append_history({

@@ -163,6 +163,54 @@ class TradesDB:
             self.conn.commit()
             return cur.rowcount > 0  # rowcount==0 → 该 id 不存在
 
+    def claim_status_transition(self, trade_id: int, to_status: str) -> bool:
+        """原子状态跃迁 compare-and-set：仅当当前状态 != to_status 时改写。
+
+        Returns:
+            True  → 本次调用赢得了真实跃迁（rowcount==1），调用方独占后续副作用
+                    （如 portfolio 同步）。
+            False → 状态已是 to_status（并发/重放的另一方已抢到）或 id 不存在，
+                    调用方应幂等返回，不得重复入账。
+
+        防 #109 并发重复入账：旧的 get_trade()→sync→patch_status() 三步在 check 与
+        set 之间无锁，两个并发 PATCH executed 都读到 planned 各同步一次。本方法把
+        判定+写下沉为单条 SQL 原子 CAS，只有 rowcount==1 的请求才允许同步。
+        """
+        if to_status not in ("planned", "executed", "cancelled"):
+            raise ValueError(
+                f"status 必须是 planned / executed / cancelled，收到 {to_status!r}"
+            )
+        with self._lock:
+            cur = self.conn.cursor()
+            cur.execute(
+                "UPDATE trades SET status = ? WHERE id = ? AND status != ?",
+                (to_status, trade_id, to_status),
+            )
+            self.conn.commit()
+            return cur.rowcount == 1
+
+    def release_claim(self, trade_id: int, from_status: str, to_status: str) -> bool:
+        """释放一个 claim_status_transition 抢到的状态（同步失败后回退用）。
+
+        与 patch_status 的关键区别：本方法只在当前状态**仍是 from_status**（即
+        本请求自己刚 claim 到的状态）时才改写；如果状态已经被别的并发请求改动
+        （例如 A claim 了 executed 但 sync 失败要回退时，B 已经把它 PATCH 成
+        cancelled），本方法不会覆盖 B 的写入，直接返回 False 让调用方感知冲突,
+        而不是像无条件 UPDATE 那样静默把 B 的结果踩掉。
+
+        Returns:
+            True  → 成功释放（回退到 to_status，行还处于本请求的 from_status）
+            False → 状态已被并发改动，未做任何写入；调用方不应假设回退生效
+        """
+        with self._lock:
+            cur = self.conn.cursor()
+            cur.execute(
+                "UPDATE trades SET status = ? WHERE id = ? AND status = ?",
+                (to_status, trade_id, from_status),
+            )
+            self.conn.commit()
+            return cur.rowcount == 1
+
     # ------------------------------------------------------------------
     # 读操作
     # ------------------------------------------------------------------

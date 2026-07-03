@@ -49,10 +49,26 @@ superseded_by: []
 | # | 路径 | 触发 | 根因 | 修复 |
 |---|---|---|---|---|
 | 1 | `PortfolioManager.record_external_trade`（CommSec 邮件导入）| 邮件轮询重跑 / 并发 `commsec_apply` | `processed_emails` 在 portfolio-tx 外标记，check→mark 有 TOCTOU | #62：动账本前原子 `state_claim(email_id)`，失败 `state_unclaim` 重试 |
-| 2 | `web_api patch_trade_status → _sync_trade_to_portfolio`（web/GUI/agent 手动 PATCH executed）| 双击 / 客户端超时重试 / agent 重发 | endpoint 只看目标 status、不看当前 status；`_sync` 是累加的，docstring 却谎称"幂等" | 本 PR：用 `trade_before["status"]` 做转移判定，已 executed 再 PATCH executed 直接幂等返回 |
+| 2 | `web_api patch_trade_status → _sync_trade_to_portfolio`（web/GUI/agent 手动 PATCH executed）| 双击 / 客户端超时重试 / agent 重发 | endpoint 只看目标 status、不看当前 status；`_sync` 是累加的，docstring 却谎称"幂等" | 状态机守卫：`trade_before["status"]` 判定跃迁，已 executed 再 PATCH 直接幂等返回 |
+| 3 | 同上（并发场景，#109）| 两个并发 PATCH executed 同时到达 | 状态机守卫的 check（读 `trade_before.status`）与 set（`patch_status`）之间无锁，是三步 read-modify-write，非原子 | #127：`TradesDB.claim_status_transition` 单条 SQL `UPDATE ... WHERE status != ?` 原子 CAS，取代状态机守卫成为本路径现行机制 |
 
-#1 修完，2026-06-16 全量审计所有账本写路径，又揪出第三处（payday TOCTOU）。本 ADR 把
-**这一类不变量**正式落档，并附完整审计表，避免第四次。
+#1 修完，2026-06-16 全量审计所有账本写路径，又揪出第三处（payday TOCTOU）。#127 里
+对同一条 `patch_trade_status` 路径又发现第四处子问题（见下）。本 ADR 把
+**这一类不变量**正式落档，并附完整审计表，避免第五次。
+
+### #127 一并修的两处子问题（同一路径，非独立事故计数，记在此备查）
+
+1. **CAS 赢家 sync 失败后的回退曾是无条件 `UPDATE`**——`patch_status(trade_id, trade_before.status)`
+   不检查当前状态，若回退期间另一并发请求已把该行改成别的状态（如 `cancelled`），
+   无条件回退会静默覆盖对方的合法写入。改用 `TradesDB.release_claim(trade_id,
+   from_status="executed", to_status=trade_before.status)`——只在行仍是本请求刚
+   claim 到的 `executed` 时才回退，否则返回 False + 记错误日志，绝不覆盖别人的写。
+2. **`_sync_trade_to_portfolio` 把"落盘后的 `pm._reload()` 失败"也算作"同步失败"**——
+   `with_portfolio_tx` 退出即已 fsync+atomic rename 落盘，之后的 `pm._reload()`
+   只是刷新内存视图，与本次写入是否成功无关；若把它的异常也归为 `return False,
+   None`，调用方会把已经生效的写入误判为"未同步"→回退状态→允许重试→重放
+   同一笔 delta（在已经落盘一次之上再叠一次，构成新的双花窗口）。修复：
+   `pm._reload()` 单独 try/except，失败只记 warning，不影响 `(True, ...)` 返回值。
 
 ## 决策
 
@@ -82,7 +98,7 @@ superseded_by: []
 |---|---|---|---|---|
 | `record_external_trade` | 邮件轮询 / `commsec_apply` | 累加 | `state_claim(email_id)` | ✅ #62 |
 | `commsec_apply` 端点 | HTTP POST | — | 透传上面 | ✅ |
-| `patch_trade_status → _sync_trade_to_portfolio` | PATCH 重试 / 双击 | 累加 | 状态机守卫（本 PR）| ✅ 本 PR |
+| `patch_trade_status → _sync_trade_to_portfolio` | PATCH 重试 / 双击 / 并发 | 累加 | 原子 `claim_status_transition` CAS（#127，取代原状态机守卫）+ 回退用 `release_claim` CAS（#127）| ✅ #127 |
 | `payday_check.run → add_income` | cron + 手动 `/payday` 并发 | 累加 | 原子 `state_claim(YYYY-MM)`（本 PR）| ✅ 本 PR |
 | `POST /api/holdings` | HTTP POST | append | symbol 已存在 → 409 | ✅ |
 | `PUT /api/holdings/{symbol}` | HTTP PUT | SET | 覆盖 | ✅ |
