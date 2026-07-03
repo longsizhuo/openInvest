@@ -189,6 +189,28 @@ class TradesDB:
             self.conn.commit()
             return cur.rowcount == 1
 
+    def release_claim(self, trade_id: int, from_status: str, to_status: str) -> bool:
+        """释放一个 claim_status_transition 抢到的状态（同步失败后回退用）。
+
+        与 patch_status 的关键区别：本方法只在当前状态**仍是 from_status**（即
+        本请求自己刚 claim 到的状态）时才改写；如果状态已经被别的并发请求改动
+        （例如 A claim 了 executed 但 sync 失败要回退时，B 已经把它 PATCH 成
+        cancelled），本方法不会覆盖 B 的写入，直接返回 False 让调用方感知冲突,
+        而不是像无条件 UPDATE 那样静默把 B 的结果踩掉。
+
+        Returns:
+            True  → 成功释放（回退到 to_status，行还处于本请求的 from_status）
+            False → 状态已被并发改动，未做任何写入；调用方不应假设回退生效
+        """
+        with self._lock:
+            cur = self.conn.cursor()
+            cur.execute(
+                "UPDATE trades SET status = ? WHERE id = ? AND status = ?",
+                (to_status, trade_id, from_status),
+            )
+            self.conn.commit()
+            return cur.rowcount == 1
+
     # ------------------------------------------------------------------
     # 读操作
     # ------------------------------------------------------------------

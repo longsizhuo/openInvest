@@ -103,6 +103,32 @@ class TestBuySync:
         assert h["units"] == pytest.approx(10.0)
         assert h["avg_cost"] == pytest.approx(130.0)
 
+    def test_reload_failure_after_commit_still_reports_synced(self, tmp_path):
+        """#127 code review 发现：with_portfolio_tx 已落盘后，pm._reload() 若抛异常，
+        不能让 _sync_trade_to_portfolio 误报 synced=False——那会让调用方回退状态 +
+        允许重试，对已经落盘一次的 delta 重放第二次（双花）。"""
+        pm = _make_pm(tmp_path)
+
+        trade = {
+            "symbol": "NDQ.AX",
+            "direction": "BUY",
+            "units": 10.0,
+            "price": 130.0,
+            "cost_currency": "AUD",
+        }
+        with patch.object(PortfolioManager, "_reload", side_effect=RuntimeError("boom")):
+            synced, holding = _call_sync(trade, pm)
+
+        # 落盘已经发生（with_portfolio_tx 正常退出），_reload 失败不该让结果变 False
+        assert synced is True
+        assert holding is not None
+
+        # 用一个全新的 pm（不共享内存态）验证写入真的落盘了，且只应用了一次
+        pm2 = PortfolioManager(pm.store)
+        h = pm2.find_holding("NDQ.AX")
+        assert h is not None
+        assert h["units"] == pytest.approx(10.0)
+
     def test_buy_deducts_cash_in_cost_currency(self, tmp_path):
         """金融视角红线：BUY 同步扣 cash[cost_currency]，避免账本失衡
 
@@ -407,6 +433,34 @@ class TestConcurrentClaim:
         )
         assert db.claim_status_transition(trade_id, "executed") is True
         assert db.claim_status_transition(trade_id, "executed") is False
+
+    def test_release_claim_rolls_back_when_uncontested(self, tmp_path):
+        """release_claim: 没人插手 → 正常回退到 from_status 指定的原状态"""
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(
+            symbol="NDQ.AX", direction="BUY", units=10.0, price=130.0,
+            cost_currency="AUD",
+        )
+        assert db.claim_status_transition(trade_id, "executed") is True
+        assert db.release_claim(trade_id, from_status="executed", to_status="planned") is True
+        assert db.get_trade(trade_id)["status"] == "planned"
+
+    def test_release_claim_refuses_to_clobber_concurrent_write(self, tmp_path):
+        """release_claim: A claim 到 executed 后，B 并发把行改成 cancelled；
+        A 的 sync 失败要回退时 release_claim 必须发现行已不是 executed，拒绝覆盖
+        B 的写入（#127 code review 发现：无条件 patch_status 回退会静默吞掉 B 的改动）"""
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(
+            symbol="NDQ.AX", direction="BUY", units=10.0, price=130.0,
+            cost_currency="AUD",
+        )
+        assert db.claim_status_transition(trade_id, "executed") is True
+        # 模拟并发请求 B：把行改成 cancelled（B 走的是非 executed 分支，直接 patch_status）
+        assert db.patch_status(trade_id, "cancelled") is True
+        # A 的同步失败，尝试回退到 "planned" —— 但行已经不是 A claim 到的 "executed" 了
+        assert db.release_claim(trade_id, from_status="executed", to_status="planned") is False
+        # B 的写入必须保持不变，没有被 A 的回退覆盖
+        assert db.get_trade(trade_id)["status"] == "cancelled"
 
 
 class TestEdgeCases:

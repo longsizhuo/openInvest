@@ -205,15 +205,22 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
                     f"{sign}{cash_delta_amount:,.2f} {cash_delta_currency}"
                 )
 
-        # with_portfolio_tx 退出后自动落盘
-        pm._reload()  # 刷新 pm 的内存视图（保持和 record_external_trade 一致）
+        # with_portfolio_tx 退出即已落盘（fsync + atomic rename），此处已经成功。
+        # _reload() 只是刷新 pm 的内存视图（保持和 record_external_trade 一致），
+        # 失败也不代表 portfolio.md 没写成功——绝不能让它把 True 变回 False，
+        # 否则调用方会误判"未同步"而回退状态 + 允许重试，导致同一笔 delta 在
+        # 已经落盘一次之后再被重放一次（双花）。
+        try:
+            pm._reload()
+        except Exception as e:
+            log.warning(f"_sync_trade_to_portfolio: portfolio.md 已落盘但 _reload 失败（不影响结果）: {e}")
         return True, synced_holding
 
     except _SkipSync:
         # SELL 但无持仓：不同步，但也不报错（业务上允许"账本有、持仓无"）
         return False, None
     except Exception as e:
-        # 同步失败不能阻断状态更新——记日志后降级
+        # with_portfolio_tx 内部（落盘前）异常 → portfolio.md 确实未变动，安全降级
         log.error(f"_sync_trade_to_portfolio 异常，portfolio.md 未变动: {e}", exc_info=True)
         return False, None
 
@@ -291,9 +298,19 @@ async def patch_trade_status(
         _sync_trade_to_portfolio, trade_before
     )
     if not portfolio_synced:
-        await asyncio.to_thread(
-            _get_trades_db().patch_status, trade_id, trade_before.get("status", "planned")
+        # 用 release_claim 而非无条件 patch_status 回退：如果这段时间里有另一个
+        # 并发请求把这笔单子改成了别的状态（如 cancelled），release_claim 检测到
+        # 行已不是本请求刚 claim 到的 "executed" 就不写，避免无条件 UPDATE 把
+        # 别人的合法状态改动静默覆盖回去。
+        released = await asyncio.to_thread(
+            _get_trades_db().release_claim,
+            trade_id, "executed", trade_before.get("status", "planned"),
         )
+        if not released:
+            log.error(
+                f"trade_id={trade_id} portfolio 同步失败且回退被并发改动抢占——"
+                f"状态未回退，需人工核对 trades.db 与 portfolio.md 是否一致"
+            )
         raise HTTPException(
             status_code=500,
             detail=f"portfolio 同步失败，trade 已回退至 {trade_before.get('status')} 状态。请重试。"
