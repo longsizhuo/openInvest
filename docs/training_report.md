@@ -42,7 +42,7 @@ documents:
 
 ### 根因分析
 
-读 4 个 prompt 文件（`capabilities/committee/cio.py` 等）发现关键 bias：
+读 4 个 prompt 文件（`capabilities/committee/cio/cio.py` 等）发现关键 bias：
 
 1. **CIO BUY 触发是 3-AND 强约束**：`BUY 仅在 Quant + Macro 强 bullish + Risk ok 时`
 2. **ACCUMULATE 完全没有触发条件**，只有描述 "逆势分批建仓"
@@ -55,7 +55,7 @@ LLM 完美避开"待观察"但选了 HOLD——技术上不违反任何规则，
 
 ## 2. v1 Prompt 改动（commit `2b69c83`）
 
-`capabilities/committee/cio.py` 加 **"现金机会成本"硬规则**：
+`capabilities/committee/cio/cio.py` 加 **"现金机会成本"硬规则**：
 
 ```
 CONCENTRATION_PCT < 20%（仓位 < 20%，子弹 ≥ 80%）：
@@ -215,7 +215,7 @@ DSPy 改善的是**单步 verdict 预测准确率**（dev set 上的 metric scor
 **不直接等于回测 reward**。要真正反映到 reward 0.42 → 0.5+，需要：
 
 1. 把 `experiments/dspy_optimized_v1_full.json` 里的 best demos 提取出来
-2. 写进 `capabilities/committee/cio.py` 的 system prompt（作为 "## 历史成功决策参考" 段）
+2. 写进 `capabilities/committee/cio/cio.py` 的 system prompt（作为 "## 历史成功决策参考" 段）
 3. 重跑 walk-forward + Optuna 验证 reward 是否真突破 0.42
 
 这一步**没做**（手工合并 + 验证另一轮 walk-forward 约 1h）。但 dev set +10pp
@@ -231,7 +231,7 @@ DSPy 改善的是**单步 verdict 预测准确率**（dev set 上的 metric scor
 ## 7. 文件清单
 
 ### 新增
-- `capabilities/committee/cio.py` — v1 修改版（commit `2b69c83`）
+- `capabilities/committee/cio/cio.py` — v1 修改版（commit `2b69c83`）
 - `experiments/prompt_variants/cio_baseline_v0.py` — v0 archive
 - `experiments/prompt_variants/cio_v1_cash_opportunity_cost.py` — v1 archive
 - `experiments/optuna_final_summary.json` — 30 trial 完整数据

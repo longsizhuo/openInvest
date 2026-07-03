@@ -378,7 +378,7 @@ prompt 组织模式，**已切到 SKILL.md**。
 ```
 capabilities/
 ├── committee/
-│   ├── prompts/                     ← prompt 本体（markdown，跟代码解耦）
+│   ├── <role>/                     ← prompt + 实现 自包含（markdown，跟代码解耦）
 │   │   ├── cio/SKILL.md
 │   │   ├── macro_strategist/SKILL.md
 │   │   ├── quant/
@@ -416,7 +416,7 @@ role: cio
 
 ### 改 prompt 的流程
 
-1. 直接编辑对应 `capabilities/committee/prompts/<role>/SKILL.md`
+1. 直接编辑对应 `capabilities/committee/<role>/<role>.md`
 2. 不动 `.py`（除非加新角色 / 新占位符）
 3. `pytest tests/test_skills_loader.py` 确认 frontmatter 解析无误
 4. commit 仅 .md diff —— **跟代码改动完全分离**

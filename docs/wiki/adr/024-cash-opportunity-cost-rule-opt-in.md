@@ -6,7 +6,7 @@
 
 ## Context
 
-CIO prompt（`capabilities/committee/prompts/cio/SKILL.md`）里有一段「🔥 现金仓位机会成本规则（强制，必读）」：
+CIO prompt（`capabilities/committee/cio/cio.md`）里有一段「🔥 现金仓位机会成本规则（强制，必读）」：
 
 > CONCENTRATION_PCT < 20% → **不允许给 HOLD**，默认至少 `ACCUMULATE`，alloc 取 DRY_POWDER_CNY × 5%~10%（建小试探仓）。唯一豁免：Macro=risk_off **且** Risk=high_risk。
 

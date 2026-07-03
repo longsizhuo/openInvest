@@ -34,11 +34,11 @@ documents:
 
 | Role | 能看到 | 被屏蔽 | 输出格式 | 文件 |
 |------|--------|--------|----------|------|
-| **Macro Strategist** | VIX / TNX / 全球宏观 brief + **盘中事件上下文 event_brief（仅 Macro 看得到，事件 RAG 严格隔离）** | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `capabilities/committee/macro_strategist.py` |
-| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 中性概率口径 + 确定性事实块（估值/情绪） | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `capabilities/committee/quant.py` |
-| **Wealth Context Officer**（第 5 角色，跨资产共享） | user.md 的 wealth_context（家族 backup / 应急金 / 账户性质）+ portfolio cash | 技术指标、Macro view、个股持仓明细 | 真实流动性评级（给 Risk + CIO 用） | `capabilities/committee/wealth_context_officer.py` |
-| **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights + **Wealth Context Officer 真实流动性视角** | 技术指标、Macro view | 风险等级 + 集中度评分 | `capabilities/committee/risk_officer.py` |
-| **CIO** | 三人完整 transcript + Wealth Context 视角 + 用户 risk_level（含在 portfolio_summary 文本里） | — | 5 选 1 verdict + confidence + alloc | `capabilities/committee/cio.py` |
+| **Macro Strategist** | VIX / TNX / 全球宏观 brief + **盘中事件上下文 event_brief（仅 Macro 看得到，事件 RAG 严格隔离）** | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `capabilities/committee/macro_strategist/macro_strategist.py` |
+| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 中性概率口径 + 确定性事实块（估值/情绪） | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `capabilities/committee/quant/quant.py` |
+| **Wealth Context Officer**（第 5 角色，跨资产共享） | user.md 的 wealth_context（家族 backup / 应急金 / 账户性质）+ portfolio cash | 技术指标、Macro view、个股持仓明细 | 真实流动性评级（给 Risk + CIO 用） | `capabilities/committee/wealth_context_officer/wealth_context_officer.py` |
+| **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights + **Wealth Context Officer 真实流动性视角** | 技术指标、Macro view | 风险等级 + 集中度评分 | `capabilities/committee/risk_officer/risk_officer.py` |
+| **CIO** | 三人完整 transcript + Wealth Context 视角 + 用户 risk_level（含在 portfolio_summary 文本里） | — | 5 选 1 verdict + confidence + alloc | `capabilities/committee/cio/cio.py` |
 
 **信息隔离的目的**：避免 LLM 在同一 context 里相互污染观点。Quant 不知道用户亏了多少（不会偏向"赶紧补仓"），Risk Officer 不知道 RSI（不会被技术信号牵着鼻子走）。**注意这种"物理隔离"只在 Round 1 严格成立**——见下文 [Cross-Challenge 协议](#cross-challenge-协议) 的轮次说明。
 

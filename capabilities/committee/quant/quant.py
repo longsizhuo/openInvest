@@ -2,7 +2,7 @@
 
 不看宏观，不看用户持仓。专注"市场本身在告诉我什么"。
 
-⚠️ Prompt 本体在 `capabilities/committee/prompts/quant/SKILL.md`（opening）+ `SKILL_rebuttal.md`
+⚠️ Prompt 本体在 `capabilities/committee/quant/quant.md`（opening）+ `SKILL_rebuttal.md`
    （round 2 cross-challenge）。SKILL.md 模式跟 OpenClaw/Hermes 一致。
 
 REGIME 上下文由 core.regime.format_regime_brief 在外层注入到 user message，

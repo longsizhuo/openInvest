@@ -58,11 +58,11 @@ uv run --with dspy python -m scripts.rl_optimize_prompts_v2 \
 
 ## 接入 production
 
-`capabilities/committee/cio.py:build_cio_prompt` 已经在用 `load_skill("cio")` 读 SKILL.md。
+`capabilities/committee/cio/cio.py:build_cio_prompt` 已经在用 `load_skill("cio")` 读 SKILL.md。
 接入 v2 demos 的两步：
 
-1. 改 `capabilities/committee/prompts/cio/SKILL.md`，末尾加 `{{few_shot_examples}}` 占位符
-2. 改 `capabilities/committee/cio.py:build_cio_prompt`，调 `load_v2_few_shot_examples()` 拿 demos，作为 `few_shot_examples=...` 传给 `load_skill()`
+1. 改 `capabilities/committee/cio/cio.md`，末尾加 `{{few_shot_examples}}` 占位符
+2. 改 `capabilities/committee/cio/cio.py:build_cio_prompt`，调 `load_v2_few_shot_examples()` 拿 demos，作为 `few_shot_examples=...` 传给 `load_skill()`
 
 graceful 退化：v2 artifact 不存在时 `load_v2_few_shot_examples()` 返回 ""，
 SKILL.md 渲染时 `{{few_shot_examples}}` 替换成空字符串，CIO 用纯 SKILL.md prompt 跑。

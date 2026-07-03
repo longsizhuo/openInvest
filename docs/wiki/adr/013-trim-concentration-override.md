@@ -106,7 +106,7 @@ TRIM 信号当前是纯静态快照决策，缺"卖出后预期路径 / 买回�
 | 文件 | 改动 |
 |---|---|
 | `utils/portfolio_summary.py` | `backup_cny` 参数 + 真实财富占比附注 |
-| `capabilities/committee/prompts/cio/SKILL.md` | `TRIM_REASON` 输出字段 |
+| `capabilities/committee/cio/cio.md` | `TRIM_REASON` 输出字段 |
 | `core/committee.py`（现 `core/committee/cio_parse.py`）| `parse_cio_memo()` TRIM_REASON 提取 + Sanity 4 |
 | `core/committee_runner.py` | wealth_view 提前加载 + 传 backup_cny |
 | `jobs/daily_report.py` | cron 路径传 backup_cny |

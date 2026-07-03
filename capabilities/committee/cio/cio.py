@@ -3,7 +3,7 @@
 CIO 不重做分析，只综合 + 决策 + 输出执行方案。
 强制读三方的 SIGNAL/ONE_LINER + 用户上下文，给完整的投行级 memo。
 
-⚠️ Prompt 本体在 `capabilities/committee/prompts/cio/SKILL.md`。
+⚠️ Prompt 本体在 `capabilities/committee/cio/cio.md`。
 
 2026-05-18: DSPy v2 few-shot demos 经 sandbox A/B + MIPROv2 train 双重验证后**不接入**
 production——zero-shot baseline 已接近天花板 (67% verdict accuracy)，random demos

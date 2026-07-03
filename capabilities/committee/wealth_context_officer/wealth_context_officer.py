@@ -1,6 +1,6 @@
 """WealthContextOfficer — 解读用户 off-portfolio 真实财务背景
 
-⚠️ Prompt 本体在 `capabilities/committee/prompts/wealth_context_officer/SKILL.md`（SKILL.md 模式）。
+⚠️ Prompt 本体在 `capabilities/committee/wealth_context_officer/wealth_context_officer.md`（SKILL.md 模式）。
    这里只 re-export 加载结果，保持向后兼容旧 import。
 
 为什么需要这个角色？

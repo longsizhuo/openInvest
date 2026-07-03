@@ -7,7 +7,7 @@ openInvest 的能力域。每个 capability 是一个自包含的领域包，包
 ```
 capabilities/
 ├── committee/               ← 4 角色 AI 投资委员会辩论
-│   ├── prompts/             ← 各角色的 SKILL.md prompt 模板
+│   ├── cio/ 等角色目录       ← .py 实现 + .md prompt 模板
 │   ├── cio.py               ← CIO 决策者（综合各方意见出 verdict）
 │   ├── macro_strategist.py  ← 宏观分析师（跨资产共享）
 │   ├── quant.py             ← 量化分析师（技术指标、信号强度）

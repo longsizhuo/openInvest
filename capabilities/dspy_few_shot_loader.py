@@ -1,19 +1,19 @@
 """DSPy optimized few-shot demos 加载器 —— 给 production CIO prompt 用
 
 2026-05-18 加入。从 experiments/dspy_optimized_v2.json 读 demos，format 成
-markdown examples block，给 capabilities/committee/cio.py:build_cio_prompt 注入到 SKILL.md
+markdown examples block，给 capabilities/committee/cio.py:build_cio_prompt 注入到 cio.md
 的 {{few_shot_examples}} 占位符。
 
 为什么需要这层
 ==============
-- DSPy 训出的 demos 直接当 few-shot 拼到现有 SKILL.md 是最低风险的接入方式
+- DSPy 训出的 demos 直接当 few-shot 拼到现有 cio.md 是最低风险的接入方式
 - 不动 production 5 角色架构（committee debate）
 - demos 来自 5565 样本 × forward-window Sharpe-MDD reward 训练，verdict 分布
   覆盖全 5 种（不是 v1 的 HOLD/ACC 塌缩）
 
 graceful 退化
 =============
-找不到 v2 artifact / 解析失败 → 返回空字符串，CIO 用纯 SKILL.md prompt 跑，
+找不到 v2 artifact / 解析失败 → 返回空字符串，CIO 用纯 cio.md prompt 跑，
 不影响 production。
 """
 from __future__ import annotations
@@ -76,12 +76,12 @@ def load_v2_few_shot_examples(
         return _format_demos_markdown(picked)
 
     except Exception as exc:  # noqa: BLE001
-        log.warning(f"加载 v2 demos 失败，CIO 用纯 SKILL.md prompt: {type(exc).__name__}: {exc}")
+        log.warning(f"加载 v2 demos 失败，CIO 用纯 cio.md prompt: {type(exc).__name__}: {exc}")
         return ""
 
 
 def _format_demos_markdown(demos: List[Dict[str, Any]]) -> str:
-    """format demos 成 markdown，跟 SKILL.md 风格对齐"""
+    """format demos 成 markdown，跟 cio.md 风格对齐"""
     lines: List[str] = [
         "",
         "---",
