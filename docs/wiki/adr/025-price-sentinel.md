@@ -4,7 +4,7 @@ title: "ADR-025：价格异动哨兵——垂直线先报警后委员会"
 tags: [event-layer, price-action, sentinel, alert, fomo]
 intent: 纯价格异动的感知与报警时序决策
 schema_source:
-  - jobs/price_sentinel.py
+  - jobs/price_sentinel.py:_detect_move
 documents:
   endpoints:
     - POST /api/committee/run
