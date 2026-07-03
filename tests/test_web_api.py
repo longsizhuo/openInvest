@@ -1179,6 +1179,8 @@ def test_config_endpoints_roundtrip(client):
         "event.enabled", "event.min_severity", "event.max_rounds",
         "event.max_per_source", "event.rag_top_k", "event.rag_window_days",
         "event.rag_min_severity",
+        # 2026-07-03: event_watch 扫描窗口修正，进白名单可运行时改（#128）
+        "event.watch_schedule",
         "staleness.price_stale_days", "staleness.hard_abort_stale_days",
     }
     assert items["verdict.concentration_lens_enabled"]["value"] is False  # ADR-020: default OFF

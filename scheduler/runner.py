@@ -176,6 +176,10 @@ def register_jobs(sched: BackgroundScheduler, quiet: bool = False) -> List[Dict[
     replace_existing=True 使其幂等——定期重跑本函数即可拾取 yml / config 的
     schedule 改动（cron 触发器重算 next fire 不影响正在运行的实例）。
     quiet=True 给周期刷新用，仅在 schedule 真的变了时打 INFO，避免每 10 分钟刷日志。
+
+    disabled 任务会主动 sched.remove_job()——否则"改 yml enabled: false 无需重启
+    生效"这个卖点对禁用操作是假的：本函数只 add/replace，从不 remove，之前注册
+    过的 job 会在 disabled 之后继续按旧 trigger 跑到天荒地老，直到进程重启。
     """
     configs = _load_job_configs()
     registered = []
@@ -183,6 +187,10 @@ def register_jobs(sched: BackgroundScheduler, quiet: bool = False) -> List[Dict[
         if not cfg.get("enabled", False):
             if not quiet:
                 log.info(f"[{cfg['name']}] disabled，跳过")
+            if sched.get_job(cfg["name"]) is not None:
+                sched.remove_job(cfg["name"])
+                _LAST_SCHEDULES.pop(cfg["name"], None)
+                log.info(f"[{cfg['name']}] 已从调度器移除（disabled）")
             continue
 
         schedule = _resolve_schedule(cfg["name"], cfg["schedule"])
