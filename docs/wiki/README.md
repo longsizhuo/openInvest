@@ -74,6 +74,7 @@ documents:
 | 17 | [资产特征集契约](17-asset-feature-sets.md) | 特征×资产类别矩阵；黄金 VIX 语义审查；反事实记账 |
 | 18 | [治理章程](18-governance-conventions.md) | 三原则(冻结快照/否决权/判据裁决) + 口径单源 + 合并前置 + 审计log |
 | 19 | [埋点与数据收集](19-telemetry-and-analytics.md) | 一次性匿名安装统计 + 三个 opt-out 环境变量 + 隐私承诺 |
+| 20 | [使用教程](20-agent-usage-tutorial.md) | 安装（plugin/MCP）→ onboarding → 日常自然语言用法 → 决策闭环 record_execution/decisions |
 
 ## 架构决策记录 (ADR)
 
