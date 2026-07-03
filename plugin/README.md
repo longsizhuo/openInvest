@@ -20,10 +20,13 @@ written memo.
 **Codex** (same plugin, via the Codex marketplace):
 ```
 codex plugin marketplace add longsizhuo/openInvest
+codex plugin add invest@openinvest
 ```
-then enable **invest** from `/plugins`. Codex reads the same `SKILL.md`
-(agentskills.io) from `.codex-plugin/`; skills can also be dropped straight into
-`~/.claude/skills/invest/`.
+Codex reads the same `SKILL.md` (agentskills.io). For the MCP tools, register
+the server once after the backend bootstraps:
+```
+codex mcp add openinvest -- bash ~/openInvest/skills/invest/scripts/run.sh mcp
+```
 
 Then in chat say **"set up invest" / 帮我初始化 invest** — a 5-question
 onboarding (name, risk tolerance, income, current holdings, optional API key)
