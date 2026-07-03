@@ -52,7 +52,9 @@ def _detect_move(
     """从 5m 收盘价序列检测 10 分钟异动。
 
     返回 {move_pct, ratio, direction} 或 None（不足以触发）。
-    ratio = |move| / 日ATR%；ATR 缺失时按绝对兜底阈值判，ratio 记 0 表示未归一化。
+    ratio = |move| / 日ATR%；ATR 缺失时按绝对兜底阈值判，ratio 记 None 表示未归一化
+    （不能记 0.0——那会和"真算出 0 倍"混淆，且下游 severity 判断会把巨幅异动误判成
+    最低档：ATR 缺失时的 severity 改用 move_pct 本身判断，见 run()）。
     """
     if len(closes) < _WINDOW_BARS + 1:
         return None
@@ -61,12 +63,12 @@ def _detect_move(
         return None
     move_pct = (last / prev - 1.0) * 100.0
     if atr_pct and atr_pct > 0:
-        ratio = abs(move_pct) / atr_pct
+        ratio: Optional[float] = abs(move_pct) / atr_pct
         if ratio < mult:
             return None
     else:
         # ATR 拿不到（新上市/数据缺口）→ 绝对阈值兜底
-        ratio = 0.0
+        ratio = None
         if abs(move_pct) < _ABS_FALLBACK_PCT:
             return None
     return {
@@ -182,7 +184,15 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
             continue
 
         verb = "急涨" if hit["direction"] == "up" else "急跌"
-        ratio_txt = f"{hit['ratio']:.1f}× 日ATR" if hit["ratio"] else "ATR 缺失,绝对阈值"
+        if hit["ratio"] is not None:
+            ratio_txt = f"{hit['ratio']:.1f}× 日ATR"
+            # ATR 归一化：≥1.5× 日常波动才算 high
+            severity = "high" if hit["ratio"] >= 1.5 else "mid"
+        else:
+            ratio_txt = "ATR 缺失,绝对阈值"
+            # ATR 不可得时按绝对涨跌幅本身判 severity，不能读 ratio（已是 None，
+            # 不再是旧版的哨兵值 0.0——旧版会把巨幅异动错判成最低档 mid）
+            severity = "high" if abs(hit["move_pct"]) >= _ABS_FALLBACK_PCT * 3 else "mid"
         claim = (
             f"{sym} 10 分钟{verb} {hit['move_pct']:+.2f}%（{ratio_txt}），"
             f"现价 {frames['price']:.2f}；{_latest_verdict(sym)}"
@@ -192,7 +202,7 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
             "event_type": "price_action",
             # 急跌=风险（接 DCA/防御），急涨=机会措辞但语义上主要是 FOMO 拦截
             "stance": "risk" if hit["direction"] == "down" else "opportunity",
-            "severity": "high" if hit["ratio"] >= 1.5 else "mid",
+            "severity": severity,
             "affected_symbols": [sym],
             "entities": ["price_action", sym.lower()],
             "ts": now.isoformat(timespec="seconds"),
@@ -203,8 +213,16 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
             alerted.append(sym)
             continue
 
-        store = EventStore()
-        _, eid = store.upsert_event(event, embedding=None)  # 纯价格事件无文本向量
+        try:
+            store = EventStore()
+            _, eid = store.upsert_event(event, embedding=None)  # 纯价格事件无文本向量
+        except Exception as e:
+            # EventStore 写入失败：既没发报警也没触发委员会，本 symbol 这轮直接
+            # 跳过（不落冷却，下个 5min tick 会重试）——不能让它中断整个 for 循环，
+            # 否则本轮已经成功报警、冷却状态还没来得及处理的其它 symbol 会被一起
+            # 拖下水（异常直接冒出 run()，跳过它们后面的冷却落盘）。
+            log.warning(f"[{sym}] EventStore 写入失败，本轮跳过: {e}")
+            continue
         ev_email = {**event, "event_id": eid}
 
         # === 时序契约：报警永远先于委员会（且不因委员会失败而丢失） ===
@@ -222,8 +240,10 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
 
         state[f"{sym}:{hit['direction']}"] = now.isoformat(timespec="seconds")
         alerted.append(sym)
-
-    if alerted and not dry_run:
+        # 每报警一个 symbol 立即落盘一次——不要攒到循环结束才写（dry_run 已在上面
+        # continue 掉，走到这里必然是真实报警）。冷却状态是防重复报警的唯一闸门，
+        # 立即持久化比"等全部处理完再一次性写"更安全：即便后面某个 symbol 抛出
+        # 未预期异常导致 run() 提前退出，已经报过的 symbol 的冷却时间也不会丢。
         ms.state_set(_STATE_NAME, state)
 
     return {"status": "ok", "checked": len(symbols), "alerted": len(alerted),

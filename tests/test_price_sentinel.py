@@ -38,6 +38,12 @@ class TestDetectMove:
         assert ps._detect_move([100.0, 100.6, 101.2], atr_pct=None, mult=0.8) is not None
         assert ps._detect_move([100.0, 100.2, 100.5], atr_pct=None, mult=0.8) is None
 
+    def test_atr_missing_ratio_is_none_not_zero(self):
+        """code review 发现：ratio 曾经用 0.0 当"ATR 缺失"哨兵值，和真实算出 0 倍
+        混淆，且会让 run() 里的 severity 判断把巨幅异动错判成最低档。改用 None。"""
+        hit = ps._detect_move([100.0, 100.6, 101.2], atr_pct=None, mult=0.8)
+        assert hit["ratio"] is None
+
     def test_insufficient_bars(self):
         assert ps._detect_move([100.0, 101.0], atr_pct=1.0, mult=0.8) is None
 
@@ -152,3 +158,63 @@ class TestRun:
         out = ps.run(dry_run=False)
         assert out["status"] == "disabled"
         sentinel_env.alert.assert_not_called()
+
+    def test_atr_missing_large_move_gets_high_severity(self, sentinel_env, monkeypatch):
+        """code review 发现：ATR 缺失时旧版 ratio 哨兵值 0.0 会让 severity 永远判 mid，
+        哪怕涨跌幅巨大（如新上市标的闪崩 15%）。改用 None 后 severity 该按绝对涨跌幅判。"""
+        monkeypatch.setattr(ps, "_fetch_frames", lambda sym: {
+            "closes": [100.0, 105.0, 115.0],  # 10 分钟 +15%，ATR 缺失
+            "last_bar_utc": datetime.now(timezone.utc) - timedelta(minutes=10),
+            "price": 115.0, "atr_pct": None,
+        })
+        captured = {}
+        from db.event_store import EventStore
+        real_upsert = EventStore.upsert_event
+
+        def spy_upsert(self, event, embedding=None):
+            captured["event"] = event
+            return real_upsert(self, event, embedding=embedding)
+
+        monkeypatch.setattr(EventStore, "upsert_event", spy_upsert)
+        ps.run(dry_run=False)
+        assert captured["event"]["severity"] == "high"
+
+    def test_upsert_failure_on_later_symbol_does_not_lose_earlier_cooldown(self, monkeypatch, tmp_path):
+        """code review 发现：旧版把 ms.state_set 攒到整个 for 循环跑完才调一次；
+        如果后面某个 symbol 的 EventStore.upsert_event 抛异常，前面已经成功报警的
+        symbol 的冷却状态因为从未持久化而丢失，下个 tick 会被重复报警。"""
+        monkeypatch.setattr("db.event_store.DB_PATH", str(tmp_path / "events.sqlite"))
+        from core import memory_store as ms_mod
+        monkeypatch.setattr(ms_mod, "MEMORY_ROOT", tmp_path / "memory")
+        monkeypatch.setattr(
+            "jobs.event_watch._load_user_context",
+            lambda: {"holdings": ["AAA", "BBB"], "watching": [], "macro_tags": [], "queries": []},
+        )
+        now = datetime.now(timezone.utc)
+        frames = {
+            "closes": [100.0, 100.5, 101.77], "last_bar_utc": now - timedelta(minutes=10),
+            "price": 101.77, "atr_pct": 1.16,
+        }
+        monkeypatch.setattr(ps, "_fetch_frames", lambda sym: frames)
+        monkeypatch.setattr(ps, "_latest_verdict", lambda sym, committee_root=None: "近期无委员会 verdict")
+        monkeypatch.setattr("jobs.event_watch._trigger_committee", lambda *a, **k: "task-1")
+        monkeypatch.setattr("jobs.event_watch._holdings_snapshot", lambda syms: {})
+        monkeypatch.setattr("services.event_notifier.send_event_alert", lambda *a, **k: None)
+
+        from db.event_store import EventStore
+        real_upsert = EventStore.upsert_event
+
+        def flaky_upsert(self, event, embedding=None):
+            if event["affected_symbols"] == ["BBB"]:
+                raise RuntimeError("simulated DB failure on BBB")
+            return real_upsert(self, event, embedding=embedding)
+
+        monkeypatch.setattr(EventStore, "upsert_event", flaky_upsert)
+
+        out = ps.run(dry_run=False)
+        assert out["alerted"] == 1 and out["symbols"] == ["AAA"]  # BBB 失败被跳过
+
+        # 第二轮：AAA 应该仍在冷却期内（不重复报），即便上一轮 BBB 抛了异常
+        monkeypatch.setattr(EventStore, "upsert_event", real_upsert)
+        out2 = ps.run(dry_run=False)
+        assert "AAA" not in out2["symbols"]
