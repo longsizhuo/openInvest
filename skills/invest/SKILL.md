@@ -182,7 +182,7 @@ GUI，他根本用不上。所以：
 | `sell --symbol S --units N --price P` | 通用 写 | 减仓（按 holding cost_currency 还现金） | JSON 剩余 units |
 | `delete_holding --symbol S [--force]` | 通用 写 | 删除持仓行（units 必须 0 或 --force） | JSON 已删 |
 | `import [--file F \| --text T] [--commit]` | 通用 读/写 | 自由文本/CSV 持仓描述 → LLM 解析成结构化持仓（券商持仓粘贴、批量录入）。默认只预览；`--commit` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种，重复导入幂等）。等价 POST /api/holdings/import | JSON `{parsed, committed, summary?}` |
-| `config [--set KEY VALUE] [--clear KEY]` | 通用 读/写 | 读/改可经 API 配置的白名单参数（concentration_lens / **cash_opportunity_cost_rule**（机会成本规则，默认 OFF，ADR-024）/ risk_profile / gold_defense_dca / dreaming.llm_verify / **dca.auto_dca_enabled / dca.auto_dca_amount_cny**——自动定投开关与金额，ADR-018）。无参=读全部。等价 GET/PUT /api/config（ADR-017）| JSON 全部生效值 |
+| `config [--set KEY VALUE] [--clear KEY]` | 通用 读/写 | 读/改可经 API 配置的白名单参数（concentration_lens / **cash_opportunity_cost_rule**（机会成本规则，默认 OFF，ADR-024）/ risk_profile / gold_defense_dca / dreaming.llm_verify / **dca.auto_dca_enabled / dca.auto_dca_amount_cny**——自动定投开关与金额，ADR-018 / **event.watch_schedule**——event_watch 扫描窗口 crontab（按 Asia/Shanghai 解释，默认北京 8:00-次日 2:30；scheduler ≤10 分钟自动拾取，改完无需重启），另有 event.*/staleness.* 若干，全量见 GET /api/config）。无参=读全部。等价 GET/PUT /api/config（ADR-017）| JSON 全部生效值 |
 
 **子命令名是封闭集合 —— 上表之外的命令都不存在**。看到自己想调
 `get_committee_context` / `analyze_asset` / `pull_brief` 这种名字时，停下，

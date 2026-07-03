@@ -197,7 +197,12 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         dca_data["auto_dca_symbols"] = tuple(v)
     dca = DCAConfig(**{k: v for k, v in dca_data.items() if k in {f.name for f in fields(DCAConfig)}})
 
-    event = EventConfig(**{k: v for k, v in data.get("event", {}).items() if k in {f.name for f in fields(EventConfig)}})
+    event_data = dict(data.get("event", {}))
+    # watch_schedule 是含逗号的 cron 串（如 "*/30 0-2,8-23 * * *"）——env 层通用强转
+    # 会把逗号值拆成 list，这里拼回字符串（split(",") 的精确逆操作，无损还原）
+    if isinstance(event_data.get("watch_schedule"), list):
+        event_data["watch_schedule"] = ",".join(event_data["watch_schedule"])
+    event = EventConfig(**{k: v for k, v in event_data.items() if k in {f.name for f in fields(EventConfig)}})
     staleness = StalenessConfig(**{k: v for k, v in data.get("staleness", {}).items() if k in {f.name for f in fields(StalenessConfig)}})
 
     return TunableConfig(
@@ -404,6 +409,11 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "重跑最大辩论轮数",
         "help": "触发重跑委员会时的最大辩论轮数（默认 2 轮）",
     },
+    "event.watch_schedule": {
+        "type": "cron",
+        "label": "event_watch 扫描窗口",
+        "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认 */30 0-2,8-23 * * * = 北京 8:00-次日 2:30 每半小时；scheduler 每 10 分钟自动拾取改动，无需重启",
+    },
     "staleness.price_stale_days": {
         "type": "int",
         "label": "价格陈旧警告天数",
@@ -449,6 +459,22 @@ def _coerce_and_validate(key: str, value: Any) -> Any:
         if val_int < 0:
             raise ValueError(f"{key} 不能为负，得到 {val_int}")
         return val_int
+    if t == "cron":
+        # crontab 字符串（如 event.watch_schedule）。用 APScheduler 自己的解析器校验，
+        # 保证"能写进 config 的一定能被 scheduler 注册"，不自造二套 cron 语法。
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} 需非空 crontab 字符串，得到 {value!r}")
+        v = value.strip()
+        try:
+            # 惰性 import：apscheduler 是本仓依赖（scheduler 用），但 core.config 不常驻加载它
+            from apscheduler.triggers.cron import CronTrigger
+            CronTrigger.from_crontab(v)
+        except ImportError:  # pragma: no cover - 生产 venv 必有 apscheduler
+            if len(v.split()) != 5:
+                raise ValueError(f"{key} 需 5 字段 crontab，得到 {value!r}")
+        except ValueError as e:
+            raise ValueError(f"{key} 非法 crontab 表达式: {e}")
+        return v
     raise ValueError(f"未知白名单 type: {t}")  # pragma: no cover
 
 

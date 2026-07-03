@@ -1,8 +1,13 @@
 name: event_watch
 description: 每 30 分钟扫多源新闻 → flash 归一化 → 维度命中则邮件 + 触发委员会重跑
-# 美股 + ASX 盘中（UTC 转 SH 时区已由 timezone 字段处理）
-# 周一到周五 0-7 UTC 每 30 分钟（≈ 北京时间 8:00-15:00），可按用户实际市场调
-schedule: "*/30 0-7 * * 1-5"
+# 扫描窗口默认北京 8:00-次日 2:30 每 30 分钟。注意 cron 按下方 timezone 字段
+# （Asia/Shanghai）解释，不是 UTC——2026-07-03 前的旧注释"0-7 UTC ≈ 北京 8-15"
+# 是错的：旧值实际跑在北京 0:00-7:30，错开 A股/ASX 白天与美盘上半场
+# （ADP/非农/Fed 都在北京 20:15-21:30 发布），黄金 10 分钟垂直拉升无人报警。
+# 实际生效值以 config `event.watch_schedule` 为准（API/GUI/CLI 运行时可改，
+# ADR-017；scheduler 每 10 分钟自动拾取），此行仅作无 config 时的兜底，
+# 两处默认值保持一致。
+schedule: "*/30 0-2,8-23 * * *"
 timezone: Asia/Shanghai
 entry: jobs.event_watch:run
 enabled: true  # 2026-05-15 default-on：用户记不住开关流程。无 DEEPSEEK_API_KEY 时
