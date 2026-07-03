@@ -109,6 +109,8 @@ bash ~/openInvest/skills/install.sh
 
 ```
 
+> 📡 首次安装会向自托管统计服务发送**一次**匿名事件（仅版本号 + 操作系统，无任何个人信息）。设 `OPENINVEST_NO_TELEMETRY=1`（或 `DO_NOT_TRACK=1`）即完全关闭，详见 [埋点与隐私文档](docs/wiki/19-telemetry-and-analytics.md)。
+
 在支持 Skill 的 AI 终端中发送 `帮我初始化 invest`。系统将触发交互式 Bootstrap 原语，指导完成以下初始化：
 
 1. 检测 `memory/` 状态存储路径及 `.env` 环境变量契约。

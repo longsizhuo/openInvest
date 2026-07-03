@@ -18,6 +18,8 @@ cd $INVEST_HOME              # 默认 ~/openInvest
 bash skills/install.sh
 ```
 
+> 📡 首次运行会发送一次匿名安装统计（仅版本号 + OS）。`OPENINVEST_NO_TELEMETRY=1` / `DO_NOT_TRACK=1` 可关闭，详见 [docs/wiki/19-telemetry-and-analytics.md](../docs/wiki/19-telemetry-and-analytics.md)。
+
 `install.sh` 用 symlink 把两个 skill 装到：
 - `~/.claude/skills/invest/`
 - `~/.claude/skills/invest-setup/`
