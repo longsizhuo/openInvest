@@ -6,7 +6,7 @@
 
 ## Context
 
-CIO prompt（`agents/skills/cio/SKILL.md`）里有一段「🔥 现金仓位机会成本规则（强制，必读）」：
+CIO prompt（`capabilities/committee/cio/cio.md`）里有一段「🔥 现金仓位机会成本规则（强制，必读）」：
 
 > CONCENTRATION_PCT < 20% → **不允许给 HOLD**，默认至少 `ACCUMULATE`，alloc 取 DRY_POWDER_CNY × 5%~10%（建小试探仓）。唯一豁免：Macro=risk_off **且** Risk=high_risk。
 
@@ -24,7 +24,7 @@ CIO prompt（`agents/skills/cio/SKILL.md`）里有一段「🔥 现金仓位机�
 把它从「硬编码 + 死 flag」改成**真正的 config-via-API 开关**，对齐 ADR-020 集中度 lens 范式：
 
 - 新增 `verdict.cash_opportunity_cost_rule_enabled`（`core/config/tunable.py`），**默认 `False`（规则关）**。
-- 关闭（默认）：`agents/cio.py` 注入 `CASH_OPP_COST_DIRECTIVE` 软层 directive，明确「HOLD 在任何仓位/任何现金比例都合法，不得仅因低集中度/子弹多强制 ACCUMULATE 或禁止 HOLD；下方 Verdict 选项里『ACCUMULATE=100% 现金 default』『HOLD 只在 20%+ 合法』同样作废」。是否加仓纯按 Quant/Macro/Risk 信号 + 估值/趋势证据决定。
+- 关闭（默认）：`capabilities/committee/cio.py` 注入 `CASH_OPP_COST_DIRECTIVE` 软层 directive，明确「HOLD 在任何仓位/任何现金比例都合法，不得仅因低集中度/子弹多强制 ACCUMULATE 或禁止 HOLD；下方 Verdict 选项里『ACCUMULATE=100% 现金 default』『HOLD 只在 20%+ 合法』同样作废」。是否加仓纯按 Quant/Macro/Risk 信号 + 估值/趋势证据决定。
 - 开启：directive 为空串，SKILL.md 原规则段照常生效（想要"低集中度就至少建试探仓"行为的用户显式 opt-in）。
 - 进 `API_SETTABLE` 白名单（GUI 委员会配置区 + skill `config` 子命令 + `PUT /api/config` 自动可调，落盘持久跨进程共读）。
 - 移除 `locked.py` 的死 flag `cash_opportunity_cost_rule` 及其测试断言（误导性：名字像开关但读不到）。

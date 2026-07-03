@@ -14,7 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple
 
-from agents.sdk_agent import SDKAgent
+from capabilities.sdk_agent import SDKAgent
 
 log = logging.getLogger(__name__)
 

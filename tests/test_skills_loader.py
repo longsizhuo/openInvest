@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
-from agents.skills_loader import (
+from capabilities.loader import (
     load_skill,
     load_skill_metadata,
     list_skills,

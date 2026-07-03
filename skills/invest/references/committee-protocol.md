@@ -53,7 +53,7 @@ ls "$INVEST_HOME/memory/.committee/$(date +%F)/<SYMBOL>.md" 2>/dev/null
 | `market_data` | Quant prompt |
 | `regime_brief` | **关键** —— Quant Round 1 + Round 2 prompt 都要塞（见警告）|
 | `prior_insights` | Risk Officer prompt（如果 Dreaming 没跑过会是空）|
-| `prompts.{...}` | `agents/*.py` 里的 prompt 模板（原样用）|
+| `prompts.{...}` | `capabilities/committee/<role>/<role>.py` 里的 prompt 模板（原样用）|
 | `instructions` | 单资产 orchestration tip（**读它**！）|
 
 **⚠ regime_brief 警告**：这是 Python 算出来的市场 regime（uptrend / downtrend /

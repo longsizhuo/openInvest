@@ -13,6 +13,6 @@
 
 ## 与其他目录的关系
 
-- 上游：被 `agents/` `core/committee.py` `jobs/` `connectors/` 调用
+- 上游：被 `capabilities/` `core/committee.py` `jobs/` `connectors/` 调用
 - 下游：原生 yfinance / `db/market_store.py` 兜底
 - 测试：`tests/test_gold_price.py` 覆盖兜底链路

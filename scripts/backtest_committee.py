@@ -111,7 +111,7 @@ def _patch_tools_to_date(decision_date: str):
     # === 3. get_macro_snapshot 内部用 get_history_data，已自动截断 ===
 
     # === 4. query_dreaming_insights：filter insight 写入时间 ===
-    import agents.tools as tools
+    import capabilities.tools as tools
 
     real_dreaming = tools._impl_query_dreaming_insights
 

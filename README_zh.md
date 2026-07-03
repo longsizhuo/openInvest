@@ -261,7 +261,7 @@ curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_l
 ## 核心系统代码库纵览
 
 ```
-agents/      # 多角色决策 Prompt 与行为契约定义
+c apabilities/      # 多角色决策 Prompt 与行为契约定义
 core/        # 核心协调器（Coordinator）编排层、持久化文件文件锁与状态总线
 jobs/        # 定时自动化任务体系（ APScheduler，含 event_watch 感知层）
 connectors/  # 外部协议桥接（FastAPI Web API / 终端交互 Skill 适配）

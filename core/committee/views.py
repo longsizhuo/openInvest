@@ -3,13 +3,13 @@
 职责：`run_macro_view`（跑一次 Macro Strategist）+ `run_wealth_context_view`
 （跑一次 WealthContextOfficer，wealth_context 为空时返回 portfolio_only stub 不调 LLM）。
 两者都通过 agent_io 的 `_create_agent` + `_ask` 发起 LLM 调用；
-run_wealth_context_view 保留内部 `from agents.wealth_context_officer import ...` inner import。
+run_wealth_context_view 保留内部 `from capabilities.committee.wealth_context_officer import ...` inner import。
 """
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from agents.macro_strategist import PROMPT_MACRO_STRATEGIST
+from capabilities.committee.macro_strategist import PROMPT_MACRO_STRATEGIST
 from core.committee.agent_io import _ask, _create_agent
 
 
@@ -41,7 +41,7 @@ def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
     **production 调用方走 load_wealth_context_view()** —— 它会自动读 user.md
     + portfolio cash 后调本函数. 本函数留 explicit 接口给测试 / backtest 注入用.
     """
-    from agents.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
+    from capabilities.committee.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
 
     if not wealth_context:
         return (

@@ -197,7 +197,7 @@ reward = annualized_return
 
 ### v1 prompt 改动了什么
 
-CIO prompt（`agents/cio.py`）加 **"现金机会成本"硬规则**：
+CIO prompt（`capabilities/committee/cio.py`）加 **"现金机会成本"硬规则**：
 
 ```
 CONCENTRATION_PCT < 20%（仓位 < 20%，子弹 ≥ 80%）：
@@ -337,7 +337,7 @@ docs/training_report.md                         ← 完整一轮训练报告
   **baseline 0.725 → optimized 0.825（+10pp / +13.8% 相对）**
   - archive: `experiments/dspy_optimized_v1_full.json`（含 10 个 best demos）
   - summary: `experiments/dspy_optimized_v1_full.summary.json`
-- ⏳ 把 optimized few-shot 注入回 `agents/cio.py` 待手工合并 → 重跑 walk-forward 验证 reward 突破 0.42
+- ⏳ 把 optimized few-shot 注入回 `capabilities/committee/cio.py` 待手工合并 → 重跑 walk-forward 验证 reward 突破 0.42
 
 ### 跑 DSPy
 
@@ -361,7 +361,7 @@ python -m scripts.rl_optimize_prompts \
 
 当前 DSPy module 只 wrap "market context → verdict" **单步预测**，不重做 4 角色
 cross-challenge。如果要更深度优化（让 DSPy 学每个 role 怎么独立 reasoning + 怎么 synthesis），
-需要 refactor `agents/sdk_agent.py` 改成 `dspy.Module`，工作量 1-2 天。
+需要 refactor `capabilities/sdk_agent.py` 改成 `dspy.Module`，工作量 1-2 天。
 
 当前 minimal viable 已能产生 +10pp 改进，不一定值得做大 refactor。
 
@@ -376,24 +376,28 @@ prompt 组织模式，**已切到 SKILL.md**。
 ### 目录结构
 
 ```
-agents/
-├── skills/                          ← prompt 本体（markdown，跟代码解耦）
-│   ├── cio/SKILL.md
-│   ├── macro_strategist/SKILL.md
-│   ├── quant/
-│   │   ├── SKILL.md                 # round_label="opening"
-│   │   └── SKILL_rebuttal.md        # round_label="rebuttal"
-│   ├── risk_officer/
-│   │   ├── SKILL.md
-│   │   └── SKILL_rebuttal.md
-│   ├── wealth_context_officer/SKILL.md
-│   └── README.md
-├── skills_loader.py                 ← load_skill() + 占位符渲染（零依赖）
-├── cio.py                           ← 薄 wrapper：build_cio_prompt() = load_skill("cio", ...)
-├── macro_strategist.py
-├── quant.py
-├── risk_officer.py
-└── wealth_context_officer.py
+capabilities/
+├── committee/
+│   ├── <role>/                     ← prompt + 实现 自包含（markdown，跟代码解耦）
+│   │   ├── cio/SKILL.md
+│   │   ├── macro_strategist/SKILL.md
+│   │   ├── quant/
+│   │   │   ├── SKILL.md                 # round_label="opening"
+│   │   │   └── SKILL_rebuttal.md        # round_label="rebuttal"
+│   │   ├── risk_officer/
+│   │   │   ├── SKILL.md
+│   │   │   └── SKILL_rebuttal.md
+│   │   ├── wealth_context_officer/SKILL.md
+│   │   └── README.md
+│   ├── cio.py                           ← 薄 wrapper：build_cio_prompt() = load_skill("cio", ...)
+│   ├── macro_strategist.py
+│   ├── quant.py
+│   ├── risk_officer.py
+│   └── wealth_context_officer.py
+├── loader.py                            ← load_skill() + 占位符渲染（零依赖）
+├── tools.py
+├── sdk_agent.py
+└── dspy_few_shot_loader.py
 ```
 
 ### SKILL.md 格式
@@ -408,11 +412,11 @@ role: cio
 你是首席投资官 (CIO)，刚听完 ... {{asset_name}} ({{asset_symbol}}) ...
 ```
 
-运行时占位符（`{{asset_name}}` / `{{asset_symbol}}`）由 `skills_loader.load_skill()` 替换。
+运行时占位符（`{{asset_name}}` / `{{asset_symbol}}`）由 `loader.load_skill()` 替换。
 
 ### 改 prompt 的流程
 
-1. 直接编辑对应 `agents/skills/<role>/SKILL.md`
+1. 直接编辑对应 `capabilities/committee/<role>/<role>.md`
 2. 不动 `.py`（除非加新角色 / 新占位符）
 3. `pytest tests/test_skills_loader.py` 确认 frontmatter 解析无误
 4. commit 仅 .md diff —— **跟代码改动完全分离**

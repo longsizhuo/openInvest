@@ -31,7 +31,7 @@
   • core.committee.debate._persist → no-op：**绝不写 memory/.committee/**（零污染，也不会
     回流进 get_recent_committee_verdicts）。
   • core.runner.session.load_prior_insights → ""：不读今天的 Dreaming insights。
-  • agents.tools query_dreaming_insights / get_recent_committee_verdicts → []：
+  • capabilities.tools query_dreaming_insights / get_recent_committee_verdicts → []：
     LLM 工具调用也拿不到未来 insight / 别的采样点的决议（每点独立）。
   • **概率表 + 买回点参考也钉到 D**：patch db.market_store.MarketStore.get_history_df
     → 截 <= D。这是 look-ahead bug 修复，不是"改概率表逻辑"：
@@ -148,7 +148,7 @@ def _pin_to_date_and_isolate(decision_date: str):
     """把生产委员会路径钉到历史日 D + 隔离所有副作用/未来泄漏。详见模块 docstring。"""
     import pandas as pd
 
-    import agents.tools as tools
+    import capabilities.tools as tools
     # _persist 已搬进 core/committee/debate.py；run_committee 在 debate 命名空间解析它，
     # 必须 patch debate._persist（patch façade core.committee._persist 打不到）。
     import core.committee.debate as cm_debate

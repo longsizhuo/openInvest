@@ -49,7 +49,7 @@ dev = [
 # CI 已配（.github/workflows/ci.yml smoke section）
 # ============================================================================
 [tool.importlinter]
-root_packages = ["jobs", "connectors", "scripts", "core", "agents", "services", "db", "utils"]
+root_packages = ["jobs", "connectors", "scripts", "core", "capabilities", "services", "db", "utils"]
 
 [[tool.importlinter.contracts]]
 name = "Entry 不直接调 run_committee（必经 service layer / shared loaders）"

@@ -17,7 +17,7 @@ superseded_by: []
 
 **日期**: 2026-05-27
 **状态**: Accepted
-**关联**: [004-v1-fallback-retirement](004-v1-fallback-retirement.md) · `agents/cio.py`（docstring 记录了 v2 不接入）· `experiments/archive_few_shot_failed/`
+**关联**: [004-v1-fallback-retirement](004-v1-fallback-retirement.md) · `capabilities/committee/cio.py`（docstring 记录了 v2 不接入）· `experiments/archive_few_shot_failed/`
 
 ## 背景
 
@@ -44,7 +44,7 @@ few-shot 的另一独立伤害（v2 实测）：random/optimized demos 都会**�
 
 ## 决策
 
-1. **CIO 保持 zero-shot**（`agents/cio.py:build_cio_prompt` 走纯 `load_skill("cio")`）。
+1. **CIO 保持 zero-shot**（`capabilities/committee/cio.py:build_cio_prompt` 走纯 `load_skill("cio")`）。
    verdict 命中率天花板实测 ~67%，few-shot 顶不破。
 2. **反保守改走 Dreaming insight 注入**（caution/reliable pattern，见 [03-dreaming](../03-dreaming.md)），
    不再走 few-shot。Dreaming 的踏空告诫（如"震荡市 HOLD 30d 踏空率高"）是压低过度 HOLD 的正确杠杆。

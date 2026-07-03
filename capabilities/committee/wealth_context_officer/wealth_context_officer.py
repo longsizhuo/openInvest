@@ -1,6 +1,6 @@
 """WealthContextOfficer — 解读用户 off-portfolio 真实财务背景
 
-⚠️ Prompt 本体在 `agents/skills/wealth_context_officer/SKILL.md`（SKILL.md 模式）。
+⚠️ Prompt 本体在 `capabilities/committee/wealth_context_officer/wealth_context_officer.md`（SKILL.md 模式）。
    这里只 re-export 加载结果，保持向后兼容旧 import。
 
 为什么需要这个角色？
@@ -12,7 +12,7 @@ Risk Officer 只看 portfolio.md 里的 cash 数字。如果用户的 portfolio 
 
 这是个**用户上下文缺失**问题——LLM 推理逻辑没错，但前提条件错。
 """
-from agents.skills_loader import load_skill
+from capabilities.loader import load_skill
 
 
 PROMPT_WEALTH_CONTEXT_OFFICER = load_skill("wealth_context_officer")

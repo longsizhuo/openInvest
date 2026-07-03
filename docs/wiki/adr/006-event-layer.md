@@ -30,7 +30,7 @@ superseded_by: []
 
 openInvest 在本次提交前是**纯定时驱动**：`daily_report` 10:00、`weekly_review` 周日，没有事件驱动入口。盘中突发事件相关时，verdict 滞后到次日，而且基于的是事件**前**的行情。
 
-同时验证发现：`services/news.py` 是孤儿模块（0 caller），`agents/tools.py` 的 5 个 tool 不含 news，`jobs/verdict_review.py:376` 自己写"新闻/宏观叙事不在 tool 里…Macro Strategist 仅靠数值指标"。也就是说 **Macro 一直都没在看新闻** —— "加新闻"是新增能力，不是优化旧管线。
+同时验证发现：`services/news.py` 是孤儿模块（0 caller），`capabilities/tools.py` 的 5 个 tool 不含 news，`jobs/verdict_review.py:376` 自己写"新闻/宏观叙事不在 tool 里…Macro Strategist 仅靠数值指标"。也就是说 **Macro 一直都没在看新闻** —— "加新闻"是新增能力，不是优化旧管线。
 
 ## Decision
 

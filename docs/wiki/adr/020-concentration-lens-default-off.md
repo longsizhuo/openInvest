@@ -23,7 +23,7 @@
 - **默认（False）**：不因持仓集中度建议减仓——`TRIM_REASON=concentration` 无条件 force-HOLD，Risk/CIO prompt 压掉超配规则。仍保留**波动 / 回撤 / 止损 / 估值 / 压力测试 / 现金流动性**风险维度。
 - **想要的人**（把全部净资产录入系统、确实关心组合集中度）显式开启：`/api/config` 设 `verdict.concentration_lens_enabled=true`，或 env `INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true`。
 
-既有的 3 层 disable 实现（`agents/risk_officer.py` + `agents/cio.py` prompt 软抑制 + `core/committee/cio_parse.py` Sanity 4 硬 force-HOLD）**不变**——只是默认值翻了。
+既有的 3 层 disable 实现（`capabilities/committee/risk_officer.py` + `capabilities/committee/cio.py` prompt 软抑制 + `core/committee/cio_parse.py` Sanity 4 硬 force-HOLD）**不变**——只是默认值翻了。
 
 ## Consequences
 

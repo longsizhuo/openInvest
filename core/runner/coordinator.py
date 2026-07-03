@@ -57,10 +57,10 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     返回自包含 dict（brief + 6 段 prompt 全内联），coordinator 的 4 个 subagent
     不需要读任何磁盘文件。symbol 不在 target_assets 时返回 status=error dict。
     """
-    from agents.cio import build_cio_prompt
-    from agents.macro_strategist import PROMPT_MACRO_STRATEGIST
-    from agents.quant import build_quant_prompt
-    from agents.risk_officer import build_risk_officer_prompt
+    from capabilities.committee.cio import build_cio_prompt
+    from capabilities.committee.macro_strategist import PROMPT_MACRO_STRATEGIST
+    from capabilities.committee.quant import build_quant_prompt
+    from capabilities.committee.risk_officer import build_risk_officer_prompt
     from core.portfolio_manager import PortfolioManager
     from utils.exchange_fee import (
         analyze_multi_timeframe, get_history_data, get_macro_data,

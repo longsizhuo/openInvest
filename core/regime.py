@@ -12,7 +12,7 @@
   能被 committee 直接消费。
 
 接入方:
-- agents/quant.py（committee Round 1）：把 regime 当事实塞进 prompt
+- capabilities/committee/quant.py（committee Round 1）：把 regime 当事实塞进 prompt
 - jobs/dreaming.py（REM sleep）：聚合时按 regime 分桶
 - 任何下游想加新阈值 → 改这里的 THRESHOLDS，不要在自己代码里硬编码
 

@@ -7,7 +7,7 @@ DSPy 怎么帮：
 - 给它 metric（方向对 +1 / 错 -1 / 中性 0）
 - 它自动选最有效的 few-shot examples（BootstrapFewShotWithRandomSearch）
 - 输出 optimized prompt（含被选中的 few-shot demos）
-- 把这些 demos 注入回 agents/cio.py 的 system prompt
+- 把这些 demos 注入回 capabilities/committee/cio/cio.py 的 system prompt
 
 ⚠️ 当前是 minimal viable scaffold：
 - module 只 wrap "market context → verdict" 单步预测
