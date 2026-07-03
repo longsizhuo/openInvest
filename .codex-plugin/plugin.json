@@ -8,5 +8,13 @@
   },
   "homepage": "https://github.com/longsizhuo/openInvest",
   "repository": "https://github.com/longsizhuo/openInvest",
-  "keywords": ["investing", "portfolio", "finance", "llm", "committee", "yfinance"]
+  "keywords": [
+    "investing",
+    "portfolio",
+    "finance",
+    "llm",
+    "committee",
+    "yfinance"
+  ],
+  "mcpServers": "./plugin/.mcp.json"
 }
