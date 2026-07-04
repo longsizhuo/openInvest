@@ -43,6 +43,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/openinvest"]
 
+[tool.hatch.build.targets.sdist]
+# 只打包源码 + 元数据——默认会把整仓（docs/static/experiments，20MB）都塞进 sdist
+only-include = ["src/openinvest", "README.md", "LICENSE", "pyproject.toml"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
