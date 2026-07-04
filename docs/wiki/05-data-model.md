@@ -299,10 +299,13 @@ memory/
 │       ├── status.json
 │       └── tool_calls.jsonl
 ├── .runs/                     # （预留）run/session 数据模型
-├── .dreams/                   # Dreaming 子系统私有
+├── .dreams/                   # Dreaming 子系统私有 + 复盘账本
 │   ├── short-term-recall.json
 │   ├── candidates.json
-│   └── events.jsonl
+│   ├── events.jsonl
+│   ├── interventions.jsonl    # 规则干预账本（原始 verdict → 最终 verdict，反事实记账）
+│   ├── verdict_review.jsonl   # 决议事后命中率（verdict_review cron 回填）
+│   └── executions.jsonl       # 用户执行/拒绝声明（decision accounting，issue #133 Decision 9）
 └── .state/                    # 简单 KV
     └── processed_emails.json
 ```

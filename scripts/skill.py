@@ -80,6 +80,19 @@ def main() -> None:
     sub.add_parser("strategy").set_defaults(func=cmd_strategy)
     sub.add_parser("live_prices").set_defaults(func=cmd_live_prices)
     sub.add_parser("discipline", help="委员会纪律台账(不作为率+拦冲动+反事实损益)").set_defaults(func=cmd_discipline)
+
+    p = sub.add_parser("decisions",
+        help="统一决策视图：决议↔干预↔执行↔结果 join + 采纳率（等价 GET /api/decisions）")
+    p.add_argument("--days", type=int, default=90, help="回看天数，默认 90")
+    p.set_defaults(func=cmd_decisions)
+
+    p = sub.add_parser("record_execution",
+        help="记录你对某条决议的执行/拒绝 + 原因（等价 POST /api/decisions/execution）")
+    p.add_argument("decision_id", help='形如 "2026-07-03/GC=F"（decisions 输出里的 decision_id）')
+    p.add_argument("--rejected", action="store_true", help="标记为未执行（默认=已执行）")
+    p.add_argument("--reason", help="原因（估值过高/资金不足/不同意委员会/...），宿主 Agent 采集")
+    p.add_argument("--trade-ids", dest="trade_ids", help="关联 trades.db id，逗号分隔（可选）")
+    p.set_defaults(func=cmd_record_execution)
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("init")

@@ -269,6 +269,7 @@ def save_committee_transcript(symbol: str, raw: str) -> Dict[str, Any]:
     lines = [
         f"# Committee: {symbol}",
         f"\n**Date**: {today}",
+        f"**Symbol**: {symbol}",
         "**Provider**: claude (skill mode)",
         f"**Verdict**: {verdict['verdict']} (confidence {verdict['confidence']:.2f})",
         f"**Dominant view**: {verdict['dominant_view']}",

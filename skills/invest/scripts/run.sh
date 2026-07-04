@@ -15,6 +15,13 @@
 
 set -euo pipefail
 
+# mcp 模式：stdout 是 JSON-RPC 通道，bootstrap 期间的任何 stdout（结构化错误 JSON /
+# 工具输出）都会被 MCP client 当协议消息解析。先把 stdout 借道 stderr（真 stdout 存 fd3），
+# 进 server 前再还原
+if [ "${1:-}" = "mcp" ]; then
+    exec 3>&1 1>&2
+fi
+
 INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
 INVEST_REPO="${INVEST_REPO:-https://github.com/longsizhuo/openInvest.git}"
 INVEST_BRANCH="${INVEST_BRANCH:-main}"
@@ -92,6 +99,32 @@ if [ "${1:-}" = "gui" ]; then
     exec .venv/bin/python -m uvicorn connectors.web_api:app --host "$HOST" --port "$PORT"
 fi
 
+# MCP stdio server（plugin 的 .mcp.json 走这条；bootstrap 已在上面完成）
+# stdout 是 JSON-RPC 通道——本分支之前的输出必须全部走 >&2（现状如此，别改坏）
+if [ "${1:-}" = "mcp" ]; then
+    # 旧 clone 无 MCP adapter（bootstrap 只 clone 不 pull）→ 尝试一次 ff-only 自愈更新
+    if [ ! -f connectors/mcp_server.py ]; then
+        echo "⬆️  $INVEST_HOME 缺 MCP adapter（旧版后端），尝试 git pull 更新..." >&2
+        if git pull --ff-only >&2 && uv sync --frozen --python 3.13 >&2 \
+           && [ -f connectors/mcp_server.py ]; then
+            echo "✅ 后端已更新" >&2
+        else
+            echo "❌ 自动更新失败/更新后仍缺模块。手动跑：cd $INVEST_HOME && git pull && uv sync" >&2
+            exit 1
+        fi
+    fi
+    # 老 venv 缺 mcp 依赖（git pull 过但没重新 sync 的 clone）→ 补一次 uv sync
+    if ! .venv/bin/python -c "import mcp" >/dev/null 2>&1; then
+        echo "⬆️  venv 缺 mcp 依赖，uv sync..." >&2
+        uv sync --frozen --python 3.13 >&2 || {
+            echo "❌ uv sync 失败。手动跑：cd $INVEST_HOME && uv sync" >&2
+            exit 1
+        }
+    fi
+    exec 1>&3 3>&-   # 还原真 stdout 给 JSON-RPC（对应文件头部的借道）
+    exec .venv/bin/python -m connectors.mcp_server
+fi
+
 if [ -z "${1:-}" ]; then
     cat >&2 <<'EOF'
 Usage: run.sh <subcommand> [args]
@@ -110,6 +143,9 @@ Onboarding（首次必跑）:
 
 Web GUI:
   gui                      启动 uvicorn 前端（http://127.0.0.1:8765，Ctrl+C 退出）
+
+MCP（plugin .mcp.json 自动走这条，一般不手动跑）:
+  mcp                      起 stdio MCP server（14 工具，JSON-RPC over stdin/stdout）
 
 委员会 — Coordinator 路径（仅 Claude Code，不烧 DeepSeek token）:
   prepare_committee SYM    输出 brief + 4 角色 prompt 给 Claude 做 fan-out

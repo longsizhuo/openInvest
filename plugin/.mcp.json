@@ -1,0 +1,6 @@
+{
+  "openinvest": {
+    "command": "bash",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/skills/invest/scripts/run.sh", "mcp"]
+  }
+}

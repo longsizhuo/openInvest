@@ -93,13 +93,13 @@ from connectors.web_api.routers import (  # noqa: E402
     meta, read, holdings_write, user, write, cash_write, strategy_write,
     committee, events, commsec, trades, skill,
     insights, observability, verdict_review, committee_sessions, regime, state,
-    config,
+    config, decisions,
 )
 
 for _m in (meta, read, holdings_write, user, write, cash_write, strategy_write,
            committee, events, commsec, trades, skill,
            insights, observability, verdict_review, committee_sessions, regime, state,
-           config):
+           config, decisions):
     app.include_router(_m.router)
 
 # 顶层 re-export：保持 `from connectors.web_api import app / get_pm /

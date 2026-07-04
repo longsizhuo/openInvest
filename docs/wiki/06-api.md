@@ -266,6 +266,18 @@ POST body schema：
 返回 `{summary:{inaction:{total_verdicts,by_verdict,hold,hold_rate}, interventions:{total,by_family,...}}, markdown}`。
 诚实定位（不吹 alpha，量化「少做错事」），见 [adr/023](adr/023-honest-positioning-not-alpha.md)。GUI「纪律」页消费。
 
+### Decision Accounting（issue #133 Decision 9）
+
+| Method | Path | 用途 |
+|--------|------|------|
+| GET | `/api/decisions?days=90` | 统一决策视图：决议↔规则干预↔用户执行↔事后结果 读时 join + 采纳率汇总 |
+| POST | `/api/decisions/execution` | 宿主 Agent 回写执行/拒绝+原因（`executions.jsonl` 追加账本，幂等 ADR-016）|
+
+`decision_id = "<date>/<symbol>"`（committee md 天然主键）；`trades.db` 现有 `verdict_id`
+列填同一格式即完成硬关联；无显式关联时按「决议日起 7 天内同标的同向成交」自动匹配。
+数据源全是既有账本（committee md / interventions / verdict_review / trades.db / executions），
+不物化新视图文件。CLI 等价：`decisions` / `record_execution`。
+
 ### 数据源健康
 
 | Method | Path | 用途 |
@@ -424,6 +436,24 @@ INVEST_WEB_DEV_CORS=1 uv run uvicorn ...
 部署拓扑见 [08-deployment.md](08-deployment.md) 的 hub-and-spoke 章节。
 
 ---
+
+## MCP adapter（stdio，issue #133 Phase 3）
+
+REST 之外的第三个 adapter（CLI / REST / MCP 同吃 service 层，零业务逻辑）：
+
+```bash
+claude mcp add openinvest -e INVEST_HOME=<数据目录> -- \
+  uv --directory <repo> run python -m connectors.mcp_server
+```
+
+- **transport = stdio**：MCP client 按 session spawn 子进程，无端口无 daemon；
+  写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
+- **14 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
+  strategy / history / live_prices / what_if / discipline / decisions /
+  explain_decision / record_execution / buy / sell / deposit / withdraw /
+  run_committee（Direct 路径，当天已跑读缓存）
+- 刻意不把 81 个 REST 端点全暴露（撑爆 agent context）；Coordinator 委员会
+  workflow 也不在这里——那是 Skill 的职责（issue #133 Decision 5/6）
 
 ## 下一步
 
