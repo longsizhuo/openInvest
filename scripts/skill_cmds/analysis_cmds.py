@@ -277,12 +277,19 @@ def cmd_record_execution(args: argparse.Namespace) -> None:
     """记录用户对某决议的执行/拒绝 + 原因（宿主 Agent 采集后回写）。
     等价 POST /api/decisions/execution。"""
     from core.decision_ledger import record_execution
-    rec = record_execution(
-        decision_id=args.decision_id,
-        executed=not args.rejected,
-        reason=args.reason,
-        trade_ids=[int(t) for t in args.trade_ids.split(",")] if args.trade_ids else None,
-    )
+    try:
+        trade_ids = ([int(t) for t in args.trade_ids.split(",")]
+                     if args.trade_ids else None)
+        rec = record_execution(
+            decision_id=args.decision_id,
+            executed=not args.rejected,
+            reason=args.reason,
+            trade_ids=trade_ids,
+        )
+    except ValueError as e:
+        # 与其它子命令同契约：错误也走 stdout 结构化 JSON，不吐 traceback
+        _print_json({"status": "error", "error": str(e)})
+        sys.exit(1)
     _print_json(rec)
 
 

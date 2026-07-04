@@ -78,3 +78,40 @@ def test_match_trades():
     assert [t["id"] for t in got] == [1]
     # HOLD 无方向 → 不匹配
     assert _match_trades(trades[:3], "2026-07-03/GC=F", "2026-07-03", "GC=F", "HOLD") == []
+
+
+def test_match_trades_utc_same_day_morning():
+    """UTC+8 用户决议日早晨的成交（UTC 还是前一天）必须落进窗口（review finding #4）。"""
+    import os, time
+    if time.strftime("%z") in ("+0000", ""):
+        import pytest
+        pytest.skip("本地时区为 UTC，场景不成立")
+    # 本地 2026-07-03 06:00（东八区）= UTC 2026-07-02T22:00
+    trades = [{"id": 1, "verdict_id": None, "symbol": "GC=F", "direction": "SELL",
+               "units": 1, "ts": "2026-07-02T22:00:00+00:00", "status": "executed"}]
+    got = _match_trades(trades, "2026-07-03/GC=F", "2026-07-03", "GC=F", "TRIM")
+    assert [t["id"] for t in got] == [1]
+
+
+def test_vid_matches_legacy_transcript_path():
+    """旧文档口径（transcript 路径）也要能显式关联（review finding #5）。"""
+    from core.decision_ledger import _vid_matches
+    assert _vid_matches("memory/.committee/2026-07-03/GC_F.md",
+                        "2026-07-03/GC=F", "2026-07-03", "GC=F")
+    assert _vid_matches("2026-07-03/GC=F", "2026-07-03/GC=F", "2026-07-03", "GC=F")
+    assert not _vid_matches("memory/.committee/2026-07-02/GC_F.md",
+                            "2026-07-03/GC=F", "2026-07-03", "GC=F")
+
+
+def test_record_execution_concurrent_no_double_append(tmp_path):
+    """并发相同重放只落一行（ADR-016 原子幂等闸，review finding #9）。"""
+    from concurrent.futures import ThreadPoolExecutor
+    p = tmp_path / "e.jsonl"
+
+    def w(_):
+        # 每次调用独立 open → 独立 open-file-description → flock 真实互斥
+        record_execution("2026-07-01/GC=F", False, reason="x", path=p)
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(w, range(16)))
+    assert len(p.read_text().splitlines()) == 1

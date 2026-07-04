@@ -116,7 +116,8 @@ class TradesDB:
             units:         数量（股数 / 克数）
             price:         每单位价格，None 表示市价
             cost_currency: 计价货币，默认 CNY
-            verdict_id:    关联的 committee transcript 路径（可选）
+            verdict_id:    关联决议 decision_id（"<date>/<symbol>"，如 "2026-07-03/GC=F"；
+                           历史 transcript 路径写法仍被 decision_ledger 兼容匹配）（可选）
             note:          备注（可选）
             ts:            记录意向时刻（ISO 8601 时间戳，默认 UTC now）
             intended_date: 计划成交日期（ISO 日期 YYYY-MM-DD，可空）

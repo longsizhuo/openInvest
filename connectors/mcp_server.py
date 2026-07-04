@@ -109,14 +109,19 @@ def explain_decision(decision_id: str) -> Dict[str, Any]:
     from core.decision_ledger import parse_committee_file
     from core.memory_store import MemoryStore
     if "/" not in decision_id:
-        return {"error": f'decision_id 应为 "<date>/<symbol>"，收到 {decision_id!r}'}
+        return {"status": "error",
+                "error": f'decision_id 应为 "<date>/<symbol>"，收到 {decision_id!r}'}
     date, symbol = decision_id.split("/", 1)
+    # date 段必须是日期字面量——否则 "../.." 之类会拼进路径逃出 .committee/
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        return {"status": "error", "error": f"decision_id 日期段非法: {date!r}"}
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
     base = MemoryStore().root / ".committee" / date
     md = base / f"{safe}.md"
     parsed = parse_committee_file(md)
     if not parsed:
-        return {"error": f"未找到决议 {decision_id}（{md} 不存在或无 verdict）"}
+        return {"status": "error",
+                "error": f"未找到决议 {decision_id}（{md} 不存在或无 verdict）"}
     path_json = base / f"{safe}_path.json"
     path_snapshot = None
     if path_json.exists():
@@ -144,7 +149,7 @@ def record_execution(decision_id: str, executed: bool,
     try:
         return _rec(decision_id, executed, reason=reason, trade_ids=trade_ids)
     except ValueError as e:
-        return {"error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------

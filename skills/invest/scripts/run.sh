@@ -15,6 +15,13 @@
 
 set -euo pipefail
 
+# mcp 模式：stdout 是 JSON-RPC 通道，bootstrap 期间的任何 stdout（结构化错误 JSON /
+# 工具输出）都会被 MCP client 当协议消息解析。先把 stdout 借道 stderr（真 stdout 存 fd3），
+# 进 server 前再还原
+if [ "${1:-}" = "mcp" ]; then
+    exec 3>&1 1>&2
+fi
+
 INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
 INVEST_REPO="${INVEST_REPO:-https://github.com/longsizhuo/openInvest.git}"
 INVEST_BRANCH="${INVEST_BRANCH:-main}"
@@ -106,6 +113,15 @@ if [ "${1:-}" = "mcp" ]; then
             exit 1
         fi
     fi
+    # 老 venv 缺 mcp 依赖（git pull 过但没重新 sync 的 clone）→ 补一次 uv sync
+    if ! .venv/bin/python -c "import mcp" >/dev/null 2>&1; then
+        echo "⬆️  venv 缺 mcp 依赖，uv sync..." >&2
+        uv sync --frozen --python 3.13 >&2 || {
+            echo "❌ uv sync 失败。手动跑：cd $INVEST_HOME && uv sync" >&2
+            exit 1
+        }
+    fi
+    exec 1>&3 3>&-   # 还原真 stdout 给 JSON-RPC（对应文件头部的借道）
     exec .venv/bin/python -m connectors.mcp_server
 fi
 

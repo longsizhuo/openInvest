@@ -764,7 +764,9 @@ class RecordTradeRequest(BaseModel):
     cost_currency: str = Field("CNY", pattern=r"^[A-Za-z]{3,5}$",
                                description="计价货币，默认 CNY")
     verdict_id: Optional[str] = Field(None, max_length=256,
-                                      description="关联 committee transcript 路径（可选）")
+                                      description='关联决议 decision_id："<date>/<symbol>" 如 '
+                                                  '"2026-07-03/GC=F"（可选；历史 transcript '
+                                                  '路径写法仍兼容）')
     note: Optional[str] = Field(None, max_length=512, description="备注（可选）")
     intended_date: Optional[str] = Field(
         None,
