@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 sys.path.insert(0, str(ROOT))
 
@@ -81,7 +82,6 @@ class VerdictReview:
 # 单一可信源上移 core/decision_ledger.py（decision accounting 同用，issue #133）。
 # 返回 dict 是原格式超集（多 alloc_cny 键），本文件用法不变。
 from openinvest.core.decision_ledger import parse_committee_file as _parse_committee_file  # noqa: E402
-from openinvest.paths import INVEST_ROOT
 
 
 # ---------- 事后涨跌 ----------

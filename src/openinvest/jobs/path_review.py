@@ -29,6 +29,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 sys.path.insert(0, str(ROOT))
 
@@ -37,7 +38,6 @@ import pandas as pd  # noqa: E402
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402
 from openinvest.core.regime_probability import forward_return  # noqa: E402
-from openinvest.paths import INVEST_ROOT
 
 log = logging.getLogger(__name__)
 

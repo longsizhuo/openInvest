@@ -96,7 +96,7 @@ if [ "${1:-}" = "gui" ]; then
 
     echo "🚀 启动 Web GUI 在 http://$HOST:$PORT （Ctrl+C 退出）" >&2
     echo "   API: http://$HOST:$PORT/api/...  Swagger: http://$HOST:$PORT/docs" >&2
-    exec .venv/bin/python -m uvicorn connectors.web_api:app --host "$HOST" --port "$PORT"
+    exec .venv/bin/python -m uvicorn openinvest.connectors.web_api:app --host "$HOST" --port "$PORT"
 fi
 
 # MCP stdio server（plugin 的 .mcp.json 走这条；bootstrap 已在上面完成）
@@ -122,7 +122,7 @@ if [ "${1:-}" = "mcp" ]; then
         }
     fi
     exec 1>&3 3>&-   # 还原真 stdout 给 JSON-RPC（对应文件头部的借道）
-    exec .venv/bin/python -m connectors.mcp_server
+    exec .venv/bin/python -m openinvest.connectors.mcp_server
 fi
 
 if [ -z "${1:-}" ]; then
@@ -158,4 +158,4 @@ EOF
     exit 1
 fi
 
-exec .venv/bin/python -m scripts.skill "$@"
+exec .venv/bin/python -m openinvest.cli "$@"

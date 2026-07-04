@@ -57,7 +57,8 @@ dev = [
 # (core.committee_runner) 调委员会，不许直接 import core.committee 的 run_committee
 # 跳过 wealth_context_view / event_brief 等共享 input loader。
 #
-# 跑：  lint-imports
+# 跑：  lint-imports --no-cache（grimp 缓存对 src/ editable 布局有 bug：缓存路径下
+#        函数级 import 边丢失 → ignore 报 No matches。CI 已固定 --no-cache）
 # CI 已配（.github/workflows/ci.yml smoke section）
 # ============================================================================
 [tool.importlinter]

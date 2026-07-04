@@ -30,6 +30,7 @@ router = APIRouter()
 # ============ 委员会异步任务 ============
 
 # task store 落盘根目录（fcntl 锁由 MemoryStore 复用）
+from openinvest.paths import INVEST_ROOT
 COMMITTEE_DIR = INVEST_ROOT / "memory" / ".committee"
 
 
@@ -101,7 +102,6 @@ def _build_audit_meta(
 # _status_locks / write / read 已抽到 connectors/state_bus.py 单例模块，
 # 这里只做 import alias，让后续 web_api 内部代码不需要改变调用名。
 from openinvest.connectors.state_bus import (
-from openinvest.paths import INVEST_ROOT
     write_committee_status as _write_committee_status,
     read_committee_status as _read_committee_status,
 )

@@ -7,5 +7,5 @@ name: verdict_review
 description: 消费 .committee live 快照刷新 .dreams/verdict_review.jsonl（dreaming 上游）；Phase 3 前 enabled=false
 schedule: "0 2 * * *"
 timezone: Asia/Shanghai
-entry: jobs.verdict_review:run
+entry: openinvest.jobs.verdict_review:run
 enabled: false  # Phase 3 开火前由用户确认 cron 频率后改 true，与 dreaming.yml 一并启用

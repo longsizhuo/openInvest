@@ -2,5 +2,5 @@ name: dca_daily
 description: 每日自动定投（external_funding，不扣子弹池现金）；标的/金额经 config.dca 配置
 schedule: "0 15 * * 1-5"   # 平日 15:00 A 股收盘后，拿当日收盘价记账
 timezone: Asia/Shanghai
-entry: jobs.dca_daily:run
+entry: openinvest.jobs.dca_daily:run
 enabled: true   # 调度照常跑；真正开关是 config.dca.auto_dca_enabled（默认 False=no-op）

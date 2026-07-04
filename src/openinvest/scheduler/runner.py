@@ -34,10 +34,11 @@ from apscheduler.triggers.cron import CronTrigger
 from openinvest.paths import INVEST_ROOT
 
 ROOT = INVEST_ROOT
-JOBS_DIR = ROOT / "jobs"
+import openinvest.jobs as _jobs_pkg
+JOBS_DIR = Path(_jobs_pkg.__file__).parent  # job yml 是包资源，跟包走
 DB_DIR = ROOT / "db"
 DB_DIR.mkdir(parents=True, exist_ok=True)
-RUN_LOG_DB = DB_DIR / "openinvest.jobs.sqlite"
+RUN_LOG_DB = DB_DIR / "jobs.sqlite"
 LOG_DIR = ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 # 不再用 SQLAlchemyJobStore 持久化 APScheduler job：YAML 是唯一事实来源，

@@ -14,8 +14,8 @@ from fastapi import APIRouter, Query
 
 from openinvest.core.memory_store import MemoryStore
 
-from openinvest.connectors.web_api.models import (
 from openinvest.paths import INVEST_ROOT
+from openinvest.connectors.web_api.models import (
     VerdictReviewDataResponse,
     VerdictReviewItem,
     VerdictReviewReportResponse,

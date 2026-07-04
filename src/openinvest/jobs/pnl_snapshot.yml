@@ -4,5 +4,5 @@ description: 工作日交易时段每 2h 打一次 PnL 快照，渲染 docs/pnl_
 # 美股盘前），周末和节假日跳过；非交易时段 yfinance 数据不会变，跑了浪费。
 schedule: "0 9-23/2 * * 1-5"
 timezone: Asia/Shanghai
-entry: jobs.pnl_snapshot:run
+entry: openinvest.jobs.pnl_snapshot:run
 enabled: true

@@ -6,5 +6,5 @@ description: 价格异动哨兵——10 分钟涨跌 vs 日 ATR%，垂直线先�
 # 空扫零 LLM 成本（纯 yfinance 算术），触发时也只发邮件+触发委员会，本身不调 LLM。
 schedule: "*/5 0-2,8-23 * * *"
 timezone: Asia/Shanghai
-entry: jobs.price_sentinel:run
+entry: openinvest.jobs.price_sentinel:run
 enabled: true  # 与 event_watch 同理 default-on；关闭走 config event.sentinel_enabled

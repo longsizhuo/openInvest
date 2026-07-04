@@ -65,7 +65,7 @@ jobs:
       - name: 跑每日委员会报告
         env:
           INVEST_HOME: ${{ github.workspace }}
-        run: uv run python -m jobs.daily_report
+        run: uv run python -m openinvest.jobs.daily_report
 
       # memory/ 在 .gitignore 里 → 必须 -f 强加。无改动则跳过(fresh fork 未 init 时 daily_report skip)。
       - name: 持久化 memory/ 回 fork

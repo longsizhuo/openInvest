@@ -28,12 +28,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402
-from openinvest.paths import INVEST_ROOT
 
 WINDOWS = (30, 60, 90)   # 日历天（非交易日）；JSON key fwd_{w}d / pnl_{w}d_cny
 

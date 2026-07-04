@@ -23,6 +23,7 @@ from openinvest.core.memory_store import MemoryStore
 from openinvest.skill_cmds._helpers import _print_json
 
 # 本模块必须自有 ROOT：cmd_doctor / cmd_init 在全局读 ROOT，是 test patch 重定向主目标
+from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 
 __all__ = [
@@ -54,7 +55,6 @@ def cmd_doctor(_: argparse.Namespace) -> None:
 # Web API /api/holdings/import + CLI `import` 共用，防 prompt/解析漂移）。这里 re-export
 # 保持 cmd_init 的 bare-name 调用 + 历史 monkeypatch(tests/test_skill_init_downgrade)命中。
 from openinvest.services.holdings_import import (  # noqa: E402
-from openinvest.paths import INVEST_ROOT
     _HOLDINGS_PARSE_SYSTEM_PROMPT,
     _parse_holdings_with_llm,
 )

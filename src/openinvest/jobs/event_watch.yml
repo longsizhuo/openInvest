@@ -9,6 +9,6 @@ description: 每 30 分钟扫多源新闻 → flash 归一化 → 维度命中�
 # 两处默认值保持一致。
 schedule: "*/30 0-2,8-23 * * *"
 timezone: Asia/Shanghai
-entry: jobs.event_watch:run
+entry: openinvest.jobs.event_watch:run
 enabled: true  # 2026-05-15 default-on：用户记不住开关流程。无 DEEPSEEK_API_KEY 时
                # normalizer 失败 → scheduler 记 job_runs failed，不影响其他 job
