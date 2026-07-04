@@ -7,8 +7,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.paper_trade_simulator import PaperTradeSimulator
-from core.strategy_metrics import evaluate_strategy
+from openinvest.core.paper_trade_simulator import PaperTradeSimulator
+from openinvest.core.strategy_metrics import evaluate_strategy
 from scripts.run_walk_forward import _trading_days_between, _generate_decision_dates
 from holdout_perf import build_benchmarks
 

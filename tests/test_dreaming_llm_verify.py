@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.config import reset_config, set_config_override
-import jobs.dreaming as dreaming_mod
+from openinvest.core.config import reset_config, set_config_override
+import openinvest.jobs.dreaming as dreaming_mod
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ def _make_candidate(asset="GC=F", action="bought", verdict=None,
 @pytest.fixture
 def store(tmp_path):
     """tmp memory store"""
-    from core.memory_store import MemoryStore
+    from openinvest.core.memory_store import MemoryStore
     return MemoryStore(tmp_path / "memory")
 
 

@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 
 import subprocess
 
-from jobs.pnl_snapshot import (
+from openinvest.jobs.pnl_snapshot import (
     _auto_push_svg,
     _is_trading_window,
     _outperform_feed_attribution,
@@ -332,15 +332,15 @@ def test_pct_label_full_width_positive_user_bar_uses_dark():
 
 def test_ensure_benchmarks_fresh_skips_when_cached_covers(monkeypatch):
     """缓存数据覆盖 start_date 时不调用 refresh"""
-    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+    from openinvest.jobs.pnl_snapshot import _ensure_benchmarks_fresh
 
     refresh_calls = []
     monkeypatch.setattr(
-        "jobs.pnl_snapshot.load_benchmark",
+        "openinvest.jobs.pnl_snapshot.load_benchmark",
         lambda key: {"end": "2026-06-30"},
     )
     monkeypatch.setattr(
-        "jobs.pnl_snapshot.refresh_benchmark",
+        "openinvest.jobs.pnl_snapshot.refresh_benchmark",
         lambda k, s, e: refresh_calls.append(k),
     )
     _ensure_benchmarks_fresh("2026-06-01", "2026-06-27")
@@ -349,44 +349,44 @@ def test_ensure_benchmarks_fresh_skips_when_cached_covers(monkeypatch):
 
 def test_ensure_benchmarks_fresh_refreshes_stale(monkeypatch):
     """缓存 end < start_date 时自动刷新"""
-    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+    from openinvest.jobs.pnl_snapshot import _ensure_benchmarks_fresh
 
     refresh_calls = []
     monkeypatch.setattr(
-        "jobs.pnl_snapshot.load_benchmark",
+        "openinvest.jobs.pnl_snapshot.load_benchmark",
         lambda key: {"end": "2026-04-27"},  # stale
     )
     monkeypatch.setattr(
-        "jobs.pnl_snapshot.refresh_benchmark",
+        "openinvest.jobs.pnl_snapshot.refresh_benchmark",
         lambda k, s, e: refresh_calls.append(k),
     )
     _ensure_benchmarks_fresh("2026-05-28", "2026-06-27")
-    from core.benchmarks import BENCHMARKS
+    from openinvest.core.benchmarks import BENCHMARKS
     assert len(refresh_calls) == len(BENCHMARKS)
 
 
 def test_ensure_benchmarks_fresh_handles_no_cache(monkeypatch):
     """无缓存时自动刷新"""
-    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+    from openinvest.jobs.pnl_snapshot import _ensure_benchmarks_fresh
 
     refresh_calls = []
-    monkeypatch.setattr("jobs.pnl_snapshot.load_benchmark", lambda key: None)
+    monkeypatch.setattr("openinvest.jobs.pnl_snapshot.load_benchmark", lambda key: None)
     monkeypatch.setattr(
-        "jobs.pnl_snapshot.refresh_benchmark",
+        "openinvest.jobs.pnl_snapshot.refresh_benchmark",
         lambda k, s, e: refresh_calls.append(k),
     )
     _ensure_benchmarks_fresh("2026-05-28", "2026-06-27")
-    from core.benchmarks import BENCHMARKS
+    from openinvest.core.benchmarks import BENCHMARKS
     assert len(refresh_calls) == len(BENCHMARKS)
 
 
 def test_ensure_benchmarks_fresh_swallows_errors(monkeypatch):
     """单个基准 refresh 失败不影响其他基准"""
-    from jobs.pnl_snapshot import _ensure_benchmarks_fresh
+    from openinvest.jobs.pnl_snapshot import _ensure_benchmarks_fresh
 
     refresh_calls = []
     fail_count = [0]
-    monkeypatch.setattr("jobs.pnl_snapshot.load_benchmark", lambda key: None)
+    monkeypatch.setattr("openinvest.jobs.pnl_snapshot.load_benchmark", lambda key: None)
 
     def _mock_refresh(k, s, e):
         if fail_count[0] == 0:
@@ -394,9 +394,9 @@ def test_ensure_benchmarks_fresh_swallows_errors(monkeypatch):
             raise ConnectionError("network down")
         refresh_calls.append(k)
 
-    monkeypatch.setattr("jobs.pnl_snapshot.refresh_benchmark", _mock_refresh)
+    monkeypatch.setattr("openinvest.jobs.pnl_snapshot.refresh_benchmark", _mock_refresh)
     _ensure_benchmarks_fresh("2026-05-28", "2026-06-27")
-    from core.benchmarks import BENCHMARKS
+    from openinvest.core.benchmarks import BENCHMARKS
     # 1 个失败，其余成功
     assert len(refresh_calls) == len(BENCHMARKS) - 1
 

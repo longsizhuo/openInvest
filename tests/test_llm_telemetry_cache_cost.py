@@ -1,6 +1,6 @@
 """estimate_cost_cny 缓存命中计价（P2/P4）：命中 token 按 input_cache_hit 价，
 其余按未命中价；不传 cache_hit 时全按未命中（保守上界，旧行为）。"""
-from core.llm_telemetry import estimate_cost_cny
+from openinvest.core.llm_telemetry import estimate_cost_cny
 
 
 def test_cache_hit_cheaper_than_miss():

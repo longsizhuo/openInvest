@@ -26,8 +26,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.portfolio_manager import PortfolioManager  # noqa: E402
-from services.commsec_reader import CommSecReader  # noqa: E402
+from openinvest.core.portfolio_manager import PortfolioManager  # noqa: E402
+from openinvest.services.commsec_reader import CommSecReader  # noqa: E402
 
 
 def _print_trade(t: Dict[str, Any]) -> None:

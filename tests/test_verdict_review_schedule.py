@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 from apscheduler.triggers.cron import CronTrigger
 
-from scheduler import runner
+from openinvest.scheduler import runner
 
 
 def _verdict_cfg():
@@ -53,7 +53,7 @@ def test_verdict_review_schedule_is_valid_crontab():
 # ---------- c. entry 可解析到 callable ----------
 
 def test_verdict_review_entry_resolves_to_callable():
-    """entry 'jobs.verdict_review:run' 能 import 到一个 callable（注册时不会炸）"""
+    """entry 'openinvest.jobs.verdict_review:run' 能 import 到一个 callable（注册时不会炸）"""
     cfg = _verdict_cfg()
     assert cfg is not None
     fn = runner._resolve_entry(cfg["entry"])
@@ -86,8 +86,8 @@ def test_review_all_live_path_parses_seeded_snapshots(monkeypatch, tmp_path):
     """
     from pathlib import Path  # noqa: F401  仅给上面 _write_committee 的类型注释用
 
-    from core import memory_store as ms
-    from jobs import verdict_review as vr
+    from openinvest.core import memory_store as ms
+    from openinvest.jobs import verdict_review as vr
 
     # tmp MEMORY_ROOT → MemoryStore()/_build_symbol_resolver 全部指向它（不碰生产 memory/）
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)

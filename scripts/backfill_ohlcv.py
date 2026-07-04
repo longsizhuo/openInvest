@@ -28,7 +28,7 @@ import time
 import numpy as np
 import yfinance as yf
 
-from db.market_store import MarketStore
+from openinvest.db.market_store import MarketStore
 
 
 def _nan_to_none(v):

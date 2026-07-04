@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.benchmarks import BENCHMARKS  # noqa: E402
+from openinvest.core.benchmarks import BENCHMARKS  # noqa: E402
 
 
 def main() -> None:

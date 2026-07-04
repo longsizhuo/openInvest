@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from core.committee.cio_parse import parse_cio_memo
-from utils.llm import supports_json_output
+from openinvest.core.committee.cio_parse import parse_cio_memo
+from openinvest.utils.llm import supports_json_output
 
 
 def test_fields_basic_same_shape_as_regex():

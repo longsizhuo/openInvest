@@ -12,8 +12,8 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.betashares_scraper import scrape_full_ndq_data
-from db.market_store import MarketStore
+from openinvest.utils.betashares_scraper import scrape_full_ndq_data
+from openinvest.db.market_store import MarketStore
 
 
 def sync_data():

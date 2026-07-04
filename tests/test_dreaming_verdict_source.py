@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from core.config import reset_config, set_config_override
-from core.memory_store import MemoryStore
-from jobs import dreaming
+from openinvest.core.config import reset_config, set_config_override
+from openinvest.core.memory_store import MemoryStore
+from openinvest.jobs import dreaming
 
 
 @pytest.fixture(autouse=True)
@@ -171,7 +171,7 @@ def test_crash_sample_kept_in_jsonl_but_exempt_from_rem(store):
 def test_verdict_review_serializes_regime_marker():
     """VerdictReview.regime_at_decision 会随 asdict 落进 jsonl（下游可读可排除）"""
     from dataclasses import asdict
-    from jobs.verdict_review import VerdictReview
+    from openinvest.jobs.verdict_review import VerdictReview
     rv = VerdictReview(
         date="2026-05-20", asset="NDQ.AX", verdict="HOLD", confidence=0.7,
         expected_direction="flat", macro_at_decision={}, regime_at_decision="crash",
@@ -189,7 +189,7 @@ def test_llm_verify_payload_uses_verdict_key(monkeypatch):
     """
     # 无 key → 走 fallback 全 KEEP，不发真请求；只验 payload 构造不炸
     monkeypatch.setattr(
-        "utils.llm.get_llm_config_safe", lambda: (None, None, None, None)
+        "openinvest.utils.llm.get_llm_config_safe", lambda: (None, None, None, None)
     )
     cand = [{
         "asset": "NDQ.AX", "verdict": "ACCUMULATE", "regime": ["downtrend"],

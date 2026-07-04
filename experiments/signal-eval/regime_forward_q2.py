@@ -107,7 +107,7 @@ def run_asset(sym: str, df: pd.DataFrame) -> List[dict]:
 
 
 def main() -> dict:
-    from db.market_store import MarketStore
+    from openinvest.db.market_store import MarketStore
     ms = MarketStore()
     all_rows: List[dict] = []
     for sym in BASKET_ASSETS:

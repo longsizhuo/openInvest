@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
 
 PROFILE_PATH = ROOT / "user_profile.json"
 

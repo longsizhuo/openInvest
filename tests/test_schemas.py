@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from core.schemas import (
+from openinvest.core.schemas import (
     Holding,
     PortfolioData,
     StrategyData,

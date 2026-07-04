@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.config import reset_config, set_config_override
-from core.committee import (
+from openinvest.core.config import reset_config, set_config_override
+from openinvest.core.committee import (
     AGENT_UNAVAILABLE_MARKER,
     parse_cio_memo,
 )
@@ -128,7 +128,7 @@ def test_config_override_changes_alloc_ceiling():
 
 def test_cio_prompt_trim_constraint_disabled_by_default():
     """默认阈值 0 → TRIM 约束段不出现在 prompt 里"""
-    from capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "TRIM 约束" not in prompt
     assert "不允许 TRIM" not in prompt
@@ -140,7 +140,7 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
         "trim_no_trim_loss_pct": 5.0,
         "trim_caution_loss_pct": 10.0,
     }})
-    from capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "TRIM 约束" in prompt
     assert "5.0%" in prompt
@@ -151,7 +151,7 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
 
 def test_cio_prompt_cash_opp_cost_directive_when_off_by_default():
     """默认（rule OFF）→ 注入"机会成本规则已被用户关闭"directive，作废低集中度强制加仓"""
-    from capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "现金仓位机会成本规则已被用户关闭" in prompt
     assert "任何仓位 / 任何现金比例" in prompt
@@ -160,7 +160,7 @@ def test_cio_prompt_cash_opp_cost_directive_when_off_by_default():
 def test_cio_prompt_no_cash_opp_cost_directive_when_enabled():
     """显式开启 → directive 不出现，原硬编码规则照常生效"""
     set_config_override({"verdict": {"cash_opportunity_cost_rule_enabled": True}})
-    from capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "现金仓位机会成本规则已被用户关闭" not in prompt
     # 原规则文本仍在（占位符为空串，规则段保留）
@@ -252,7 +252,7 @@ def test_concentration_lens_off_keeps_stop_loss_trim():
 def test_cio_prompt_no_concentration_directive_when_lens_on():
     """lens 显式开 → CIO prompt 不含关闭指令"""
     set_config_override({"verdict": {"concentration_lens_enabled": True}})
-    from capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "集中度 lens 已被用户关闭" not in prompt
 
@@ -260,14 +260,14 @@ def test_cio_prompt_no_concentration_directive_when_lens_on():
 def test_cio_prompt_concentration_directive_on_when_lens_disabled():
     """lens 关 → CIO prompt 注入关闭指令"""
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
-    from capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "集中度 lens 已被用户关闭" in prompt
 
 
 def test_risk_officer_prompt_concentration_directive_both_rounds():
     """lens 关 → Risk Officer opening + rebuttal 两轮 prompt 都注入关闭指令"""
-    from capabilities.committee.risk_officer import build_risk_officer_prompt
+    from openinvest.capabilities.committee.risk_officer import build_risk_officer_prompt
     asset = {"symbol": "GC=F", "display_name": "黄金"}
     set_config_override({"verdict": {"concentration_lens_enabled": True}})
     assert "集中度 lens 已关闭" not in build_risk_officer_prompt(asset)

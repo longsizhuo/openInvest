@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from core.decision_ledger import (
+from openinvest.core.decision_ledger import (
     MATCH_WINDOW_DAYS,
     _match_trades,
     parse_committee_file,
@@ -95,7 +95,7 @@ def test_match_trades_utc_same_day_morning():
 
 def test_vid_matches_legacy_transcript_path():
     """旧文档口径（transcript 路径）也要能显式关联（review finding #5）。"""
-    from core.decision_ledger import _vid_matches
+    from openinvest.core.decision_ledger import _vid_matches
     assert _vid_matches("memory/.committee/2026-07-03/GC_F.md",
                         "2026-07-03/GC=F", "2026-07-03", "GC=F")
     assert _vid_matches("2026-07-03/GC=F", "2026-07-03/GC=F", "2026-07-03", "GC=F")

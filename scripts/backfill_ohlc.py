@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 
 import yfinance as yf
 
-from db.market_store import MarketStore
+from openinvest.db.market_store import MarketStore
 
 # 默认 backfill 全集：可投资产 + 宏观因子。period="max" = yfinance 能给的最长。
 DEFAULT_SYMBOLS = ["GC=F", "NDQ.AX", "^VIX", "^TNX"]

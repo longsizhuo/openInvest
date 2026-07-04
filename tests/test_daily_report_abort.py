@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import jobs.daily_report as daily_report_mod
+import openinvest.jobs.daily_report as daily_report_mod
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ def test_no_abort_when_one_asset_fresh(mock_pm, monkeypatch):
     class _PastAbortSignal(Exception):
         pass
 
-    import core.committee_runner as cr_mod
+    import openinvest.core.committee_runner as cr_mod
     monkeypatch.setattr(
         cr_mod, "run_committee_session",
         lambda *a, **kw: (_ for _ in ()).throw(_PastAbortSignal()),

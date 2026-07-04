@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-import scripts.remote_dispatch as rd
+import openinvest.remote_dispatch as rd
 
 BASE = "http://hub.test:8765"
 

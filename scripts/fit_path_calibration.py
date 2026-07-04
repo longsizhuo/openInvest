@@ -24,8 +24,8 @@ import numpy as np
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore  # noqa: E402
-from core.regime_probability import calibrate_profile  # noqa: E402
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.regime_probability import calibrate_profile  # noqa: E402
 
 WINDOWS = ("30d", "60d", "90d")
 FIT_END = "2017-12-31"

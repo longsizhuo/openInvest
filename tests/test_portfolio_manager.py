@@ -22,8 +22,8 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore
-from core.portfolio_manager import HoldingsView, PortfolioManager, _render_portfolio_body_v2
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import HoldingsView, PortfolioManager, _render_portfolio_body_v2
 
 
 # ============ Fixture 工厂 ============
@@ -414,8 +414,8 @@ class TestGetUserStatus:
 def _deposit_worker(root_str: str, amount: float) -> None:
     """子进程里执行一次 deposit，用 with_portfolio_tx 保证 RMW 原子"""
     from pathlib import Path
-    from core.memory_store import MemoryStore
-    from core.portfolio_manager import PortfolioManager
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.core.portfolio_manager import PortfolioManager
 
     store = MemoryStore(Path(root_str))
     # PortfolioManager 构造会读 memory，但我们只需要 with_portfolio_tx

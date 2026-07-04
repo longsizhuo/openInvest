@@ -1,5 +1,5 @@
 [project]
-name = "invest"
+name = "openinvest"
 version = "0.15.0"
 description = "多资产 AI 投资委员会 + 组合管理后端"
 license = "MIT"
@@ -32,6 +32,17 @@ dependencies = [
     "mcp>=1.28.1",
 ]
 
+[project.scripts]
+openinvest = "openinvest.cli:main"
+openinvest-mcp = "openinvest.connectors.mcp_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openinvest"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
@@ -50,22 +61,22 @@ dev = [
 # CI 已配（.github/workflows/ci.yml smoke section）
 # ============================================================================
 [tool.importlinter]
-root_packages = ["jobs", "connectors", "scripts", "core", "capabilities", "services", "db", "utils"]
+root_packages = ["openinvest", "scripts"]
 
 [[tool.importlinter.contracts]]
 name = "Entry 不直接调 run_committee（必经 service layer / shared loaders）"
 type = "forbidden"
-source_modules = ["jobs", "connectors", "scripts"]
-forbidden_modules = ["core.committee"]
+source_modules = ["openinvest.jobs", "openinvest.connectors", "openinvest.skill_cmds", "openinvest.cli", "scripts"]
+forbidden_modules = ["openinvest.core.committee"]
 # 只查直接 import；committee_runner 作为 service layer 合法转手 import core.committee
 allow_indirect_imports = "true"
 # allow list: 这些是合法直调（用 shared loader, 或者 daily_report 已经显式 prep）
 ignore_imports = [
     # backtest_committee 是研究用，跟 production 委员会不共享 service layer
-    "scripts.backtest_committee -> core.committee",
+    "scripts.backtest_committee -> openinvest.core.committee",
     # full_validation 是开卷下限验证（研究用），需 patch core.committee.debate._persist 防污染
     # （committee 拆包后 _persist 搬进 debate 子模块，import 目标随之变 core.committee.debate）
-    "scripts.full_validation -> core.committee.debate",
+    "scripts.full_validation -> openinvest.core.committee.debate",
 ]
 # 已删的孤儿 dep：
 # - duckduckgo-search: 被 ddgs 取代

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.config import reset_config, set_config_override
-from core.regime import (
+from openinvest.core.config import reset_config, set_config_override
+from openinvest.core.regime import (
     ASSET_OVERRIDES,
     THRESHOLDS,
     _per_asset_thresholds,
@@ -191,7 +191,7 @@ def test_crash_preempts_recovery():
 
 def test_recovery_in_strategy_hint():
     """拆方向锁后：recovery 的提示是中性数据口径，不含方向预设措辞"""
-    from core.regime import regime_strategy_hint
+    from openinvest.core.regime import regime_strategy_hint
     hint = regime_strategy_hint("recovery", 0.3)
     # 不再有人写方向预设（谨慎看多/顺势/不抄底…），改成引用概率口径 + 当前分位
     assert "不预设方向" in hint
@@ -202,7 +202,7 @@ def test_recovery_in_strategy_hint():
 
 def test_strategy_hint_with_prob_hint_numbers():
     """传入 prob_hint 时，提示里出现概率口径数字（中位/跌破概率/样本数）"""
-    from core.regime import regime_strategy_hint
+    from openinvest.core.regime import regime_strategy_hint
     hint = regime_strategy_hint(
         "uptrend", 0.5,
         prob_hint={"median_pct": 1.4, "p_below": 0.42, "n": 1423, "effective_n": 47},
@@ -215,7 +215,7 @@ def test_strategy_hint_with_prob_hint_numbers():
 
 def test_crash_and_unknown_hints_kept():
     """crash（可执行性）/ unknown（保守默认）两条非方向约束保留"""
-    from core.regime import regime_strategy_hint
+    from openinvest.core.regime import regime_strategy_hint
     assert "离场观望" in regime_strategy_hint("crash", 0.3)
     assert "维持原计划" in regime_strategy_hint("unknown", None)
 

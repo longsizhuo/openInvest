@@ -2,7 +2,7 @@
 跑:uv run pytest tests/test_intervention_idempotency.py -q"""
 import json
 
-from core.runner.intervention import _log_intervention
+from openinvest.core.runner.intervention import _log_intervention
 
 
 def _rows(p):

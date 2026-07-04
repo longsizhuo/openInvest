@@ -37,8 +37,8 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.config import load_config  # noqa: E402
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.core.config import load_config  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 W_PROD = 730   # get_history_df 默认 = 生产真实窗口（已 transcript 校验）
 W_CANON = 504  # TRADING_DAYS_2Y = 回测/canonical 口径

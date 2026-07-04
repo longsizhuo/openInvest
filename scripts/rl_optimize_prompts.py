@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def _configure_dspy():
     """配 DSPy 用任意 OpenAI 兼容 LLM（默认 DeepSeek，可换千问/智谱/Kimi）"""
     import dspy
-    from utils.llm import get_dspy_lm, get_llm_config
+    from openinvest.utils.llm import get_dspy_lm, get_llm_config
     _api_key, base_url, model, _provider = get_llm_config()
     lm = get_dspy_lm(temperature=0.2)
     dspy.configure(lm=lm)

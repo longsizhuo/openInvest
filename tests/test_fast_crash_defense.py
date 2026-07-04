@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.committee import atr_defense_from_text, parse_cio_memo
-from core.config import reset_config
+from openinvest.core.committee import atr_defense_from_text, parse_cio_memo
+from openinvest.core.config import reset_config
 
 
 @pytest.fixture(autouse=True)
@@ -149,7 +149,7 @@ def test_atr_defense_from_text_below_threshold():
 
 def test_atr_defense_from_text_threshold_from_config():
     """防御线走 config（sentiment.atr_defense_spike_ratio），抬线后同文本不触发"""
-    from core.config import set_config_override
+    from openinvest.core.config import set_config_override
     set_config_override({"sentiment": {"atr_defense_spike_ratio": 3.0}})
     assert atr_defense_from_text(BRIEF_TRIGGERED) is False  # 2.5 < 3.0
 
@@ -167,8 +167,8 @@ def test_atr_defense_from_text_missing_graceful():
 
 def test_defense_spike_ratio_decoupled_from_crash_classification():
     """调 sentiment.atr_defense_spike_ratio 不影响 classify_regime"""
-    from core.config import set_config_override
-    from core.regime import classify_regime
+    from openinvest.core.config import set_config_override
+    from openinvest.core.regime import classify_regime
 
     metrics = {
         "ma20": 100.0, "ma120": 96.0, "atr_pct": 2.0, "atr_spike_ratio": 2.4,
@@ -186,7 +186,7 @@ def test_atr_spike_ratio_metric_computed():
     """compute_metrics 输出 atr_spike_ratio：波动翻倍场景 ratio 显著 >1"""
     import numpy as np
     import pandas as pd
-    from utils.market_metrics import compute_metrics
+    from openinvest.utils.market_metrics import compute_metrics
 
     n = 400
     rng = np.random.default_rng(7)

@@ -34,7 +34,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-from db.market_store import MarketStore
+from openinvest.db.market_store import MarketStore
 
 ROOT = Path(__file__).resolve().parent.parent
 INPUTS = ROOT / "experiments" / "ta-analysts" / "inputs"

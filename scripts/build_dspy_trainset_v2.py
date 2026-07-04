@@ -25,8 +25,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.regime import format_regime_brief  # noqa: E402
-from utils.market_metrics import compute_metrics  # noqa: E402
+from openinvest.core.regime import format_regime_brief  # noqa: E402
+from openinvest.utils.market_metrics import compute_metrics  # noqa: E402
 
 
 DEFAULT_SYMBOLS = [

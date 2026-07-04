@@ -14,9 +14,9 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from connectors import web_api
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
+from openinvest.connectors import web_api
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
 
 
 # ---------- 测试数据 ----------
@@ -119,17 +119,17 @@ def client(tmp_store, monkeypatch):
         offset_pct: float = 0.012
         is_stale: bool = False
 
-    monkeypatch.setattr("connectors.web_api.routers.read.get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
+    monkeypatch.setattr("openinvest.connectors.web_api.routers.read.get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
 
     # 假 NDQ.AX K 线（5d）
     fake_df = pd.DataFrame(
         {"Close": [40.0, 41.0, 42.0, 41.5, 42.5]},
         index=pd.date_range("2026-04-28", periods=5, freq="D"),
     )
-    monkeypatch.setattr("connectors.web_api.routers.read.get_history_data", lambda symbol, period="5d": fake_df)
+    monkeypatch.setattr("openinvest.connectors.web_api.routers.read.get_history_data", lambda symbol, period="5d": fake_df)
 
     # 委员会任务落盘目录切到 tmp，避免污染真实 memory/.committee/
-    monkeypatch.setattr("connectors.web_api.routers.committee.COMMITTEE_DIR", tmp_store.root / ".committee")
+    monkeypatch.setattr("openinvest.connectors.web_api.routers.committee.COMMITTEE_DIR", tmp_store.root / ".committee")
 
     return TestClient(web_api.app)
 
@@ -362,7 +362,7 @@ def test_gold_set_no_history(client, tmp_store):
 def test_gold_offset_writes_strategy(client, tmp_store, monkeypatch):
     """报浙商克价 → 反推 offset → 写回 strategy.md"""
     # mock infer_offset_pct 返回固定值
-    monkeypatch.setattr("connectors.web_api.routers.write.infer_offset_pct", lambda bank_price: 0.025)
+    monkeypatch.setattr("openinvest.connectors.web_api.routers.write.infer_offset_pct", lambda bank_price: 0.025)
 
     r = client.post("/api/gold/offset", json={"bank_price": 1130.0})
     assert r.status_code == 200
@@ -408,7 +408,7 @@ def test_committee_run_and_status_done(client, monkeypatch):
         "debate": {"max_rounds": 1, "final_round": 1, "converged": True,
                    "quant_history": ["q1"], "risk_history": ["r1"]},
     }
-    import core.runner.session as cr_mod
+    import openinvest.core.runner.session as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol",
                         lambda sym, **kw: fake_result)
     # macro_view 也 mock（session 在 dispatch 之前调一次共享 macro，避免真 LLM）
@@ -453,7 +453,7 @@ def test_committee_run_error_path(client, monkeypatch):
     def _boom(sym, **kw):
         raise RuntimeError("LLM API down")
 
-    import core.runner.session as cr_mod
+    import openinvest.core.runner.session as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", _boom)
     # session 共享 prep 也 mock（避免真 LLM）
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
@@ -763,7 +763,7 @@ def test_holdings_reads_disk_no_cache(client, tmp_store):
     assert syms_before == {"NDQ.AX", "GC=F"}
 
     # 模拟 NapCat 在锁内追加一个 AAPL 持仓（绕过 web_api 走 PortfolioManager 的写路径）
-    from core.portfolio_manager import PortfolioManager as _PM
+    from openinvest.core.portfolio_manager import PortfolioManager as _PM
     pm = _PM(store=tmp_store)
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
@@ -878,9 +878,9 @@ def skill_client(client, monkeypatch):
     utils.gold_price / utils.fx），所以要 patch 源模块属性，client fixture 只 patch
     了 web_api 命名空间里的别名。
     """
-    import utils.exchange_fee as ef
-    import utils.fx as fx
-    import utils.gold_price as gp
+    import openinvest.utils.exchange_fee as ef
+    import openinvest.utils.fx as fx
+    import openinvest.utils.gold_price as gp
 
     @dataclass
     class FakeSnap:
@@ -1028,11 +1028,11 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
 
     mock 口径对齐 tests/test_prepare_committee.py:_mock_world（同一个 service 函数）
     """
-    import core.runner.coordinator as cr
-    import core.regime_probability as rp
-    import jobs.daily_report_builder as drb
-    import utils.exchange_fee as ef
-    import utils.fx as fx
+    import openinvest.core.runner.coordinator as cr
+    import openinvest.core.regime_probability as rp
+    import openinvest.jobs.daily_report_builder as drb
+    import openinvest.utils.exchange_fee as ef
+    import openinvest.utils.fx as fx
 
     fake_df = pd.DataFrame(
         {"Close": [100.0 + i for i in range(200)]},
@@ -1105,7 +1105,7 @@ def test_committee_run_summary_includes_cio_memo(client, monkeypatch):
         "debate": {"max_rounds": 1, "final_round": 1, "converged": True,
                    "quant_history": ["q1"], "risk_history": ["r1"]},
     }
-    import core.runner.session as cr_mod
+    import openinvest.core.runner.session as cr_mod
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", lambda sym, **kw: fake_result)
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
@@ -1163,7 +1163,7 @@ def test_auth_enforced_when_token_set(client, monkeypatch):
 
 def test_config_endpoints_roundtrip(client):
     """GET/PUT/DELETE /api/config：白名单生效 + 校验 + 落盘往返（tmp store 隔离）。"""
-    from core.config import reset_config
+    from openinvest.core.config import reset_config
     reset_config()
 
     # GET 默认

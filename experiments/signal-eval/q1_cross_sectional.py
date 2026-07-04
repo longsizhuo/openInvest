@@ -79,7 +79,7 @@ def pull() -> None:
 
 
 def compute() -> dict:
-    from utils.market_metrics import compute_metrics
+    from openinvest.utils.market_metrics import compute_metrics
     blob = pd.read_pickle(PRICES_CACHE)
     frames = blob["frames"]
     dates = pd.date_range(TEST_START, pd.Timestamp.today(), freq=REBALANCE_FREQ)

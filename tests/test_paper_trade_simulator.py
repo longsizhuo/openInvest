@@ -18,9 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 @pytest.fixture
 def mock_market(monkeypatch):
     """Mock get_history_data + get_fx_rate，返回稳定可预测的价格 + 汇率"""
-    import utils.exchange_fee as ef
-    import utils.fx as fx
-    import core.paper_trade_simulator as pts
+    import openinvest.utils.exchange_fee as ef
+    import openinvest.utils.fx as fx
+    import openinvest.core.paper_trade_simulator as pts
 
     # 价格表：每个 (symbol, date) → close 价
     # 模拟 NDQ.AX 在 AUD 计价，AAPL 在 USD 计价
@@ -65,7 +65,7 @@ def mock_market(monkeypatch):
 # ============ PaperTradeSimulator 单测 ============
 
 def test_initial_account(mock_market):
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02", initial_cash_cny=100000)
     assert sim.account.cash["CNY"] == 100000.0
     assert sim.account.cash["AUD"] == 0.0
@@ -73,7 +73,7 @@ def test_initial_account(mock_market):
 
 
 def test_hold_verdict_no_action(mock_market):
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02")
     tx = sim.execute_verdict("2024-01-02", "NDQ.AX",
                               {"verdict": "HOLD", "confidence": 0.5, "alloc_cny": 0})
@@ -84,7 +84,7 @@ def test_hold_verdict_no_action(mock_market):
 
 def test_buy_uses_fx_to_convert_cny(mock_market):
     """BUY NDQ.AX 5000 CNY → 换汇 5000/4.7 ≈ 1063.83 AUD → 买 21.28 股 @ $50"""
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02")
     tx = sim.execute_verdict("2024-01-02", "NDQ.AX",
                               {"verdict": "BUY", "confidence": 0.8, "alloc_cny": 5000})
@@ -107,7 +107,7 @@ def test_buy_uses_fx_to_convert_cny(mock_market):
 
 def test_buy_then_sell_round_trip(mock_market):
     """买 5000 CNY NDQ → 卖等额 → cash 守恒（无手续费）"""
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02")
     sim.execute_verdict("2024-01-02", "NDQ.AX",
                         {"verdict": "BUY", "confidence": 0.8, "alloc_cny": 5000})
@@ -123,7 +123,7 @@ def test_buy_then_sell_round_trip(mock_market):
 
 def test_buy_weighted_avg_cost(mock_market):
     """两笔 BUY 不同价位 → avg_cost 是加权平均"""
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02")
     # 第一笔 @ 50：单价低
     sim.execute_verdict("2024-01-02", "NDQ.AX",
@@ -138,7 +138,7 @@ def test_buy_weighted_avg_cost(mock_market):
 
 def test_sell_no_holding_skips(mock_market):
     """没持仓时 SELL → SKIP，不报错"""
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02")
     tx = sim.execute_verdict("2024-01-02", "NDQ.AX",
                               {"verdict": "SELL", "confidence": 0.5, "alloc_cny": 5000})
@@ -150,7 +150,7 @@ def test_sell_no_holding_skips(mock_market):
 
 def test_buy_insufficient_cash_skips(mock_market):
     """现金不够时 SKIP"""
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02", initial_cash_cny=100)  # 只有 100 CNY
     tx = sim.execute_verdict("2024-01-02", "NDQ.AX",
                               {"verdict": "BUY", "confidence": 0.8, "alloc_cny": 5000})
@@ -160,7 +160,7 @@ def test_buy_insufficient_cash_skips(mock_market):
 
 def test_mark_to_market(mock_market):
     """买入后 mark-to-market 反映涨价"""
-    from core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
     sim = PaperTradeSimulator(start_date="2024-01-02")
     sim.execute_verdict("2024-01-02", "NDQ.AX",
                         {"verdict": "BUY", "confidence": 0.8, "alloc_cny": 5000})
@@ -176,14 +176,14 @@ def test_mark_to_market(mock_market):
 # ============ strategy_metrics 单测 ============
 
 def test_total_return_pct():
-    from core.strategy_metrics import total_return_pct
+    from openinvest.core.strategy_metrics import total_return_pct
     # 起始 100k → 120k：+20%
     daily = [("2024-01-01", 100000), ("2024-12-31", 120000)]
     assert total_return_pct(daily) == 20.0
 
 
 def test_max_drawdown_pct():
-    from core.strategy_metrics import max_drawdown_pct
+    from openinvest.core.strategy_metrics import max_drawdown_pct
     daily = [("2024-01-01", 100), ("2024-02-01", 120),
              ("2024-03-01", 90), ("2024-04-01", 110)]
     # max=120 → drawdown 到 90 = -25%
@@ -192,7 +192,7 @@ def test_max_drawdown_pct():
 
 def test_vs_benchmark_alpha():
     """策略 +20%，基准 +10% → alpha = 10%"""
-    from core.strategy_metrics import vs_benchmark
+    from openinvest.core.strategy_metrics import vs_benchmark
     strat = [("2024-01-01", 100), ("2024-12-31", 120)]
     bench = [("2024-01-01", 100), ("2024-12-31", 110)]
     result = vs_benchmark(strat, bench)
@@ -201,8 +201,8 @@ def test_vs_benchmark_alpha():
 
 def test_evaluate_strategy_full():
     """完整 evaluate_strategy 跑通不报错"""
-    from core.strategy_metrics import evaluate_strategy
-    from core.paper_trade_simulator import Transaction
+    from openinvest.core.strategy_metrics import evaluate_strategy
+    from openinvest.core.paper_trade_simulator import Transaction
 
     daily = [("2024-01-01", 100000), ("2024-06-30", 110000), ("2024-12-31", 115000)]
     txs = [
@@ -228,7 +228,7 @@ def test_evaluate_strategy_full():
 
 def test_sortino_doesnt_explode():
     """回归：之前 Sortino 在 downside 样本少时 1e15 爆掉"""
-    from core.strategy_metrics import sortino_ratio
+    from openinvest.core.strategy_metrics import sortino_ratio
     # 60 天 54 天涨 + 6 天跌，downside 样本 = 6 个
     daily = []
     val = 100000.0

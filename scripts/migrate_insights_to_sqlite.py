@@ -24,8 +24,8 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore
-from db.insights_db import InsightsDB
+from openinvest.core.memory_store import MemoryStore
+from openinvest.db.insights_db import InsightsDB
 
 
 def migrate(

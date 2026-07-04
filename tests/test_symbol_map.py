@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from services.symbol_map import canonical_symbols_for_entities, proxy_symbols_for
+from openinvest.services.symbol_map import canonical_symbols_for_entities, proxy_symbols_for
 
 
 # ---------- 第一层：实体 → canonical ----------
@@ -68,7 +68,7 @@ def test_proxy_empty_graceful():
 # ---------- 接线验收：normalizer 兜底 ----------
 
 def test_normalizer_fallback_maps_nasdaq_event():
-    from services.event_normalizer import _sanitize_event
+    from openinvest.services.event_normalizer import _sanitize_event
 
     ne = _sanitize_event({
         "idx": 0, "one_line_claim": "Nasdaq 100 rallies on chip earnings",
@@ -85,7 +85,7 @@ def test_normalizer_fallback_maps_nasdaq_event():
 def test_recall_alias_matches_index_event(tmp_path):
     """标 ^NDX 的事件，持 NDQ.AX 的用户经 aliases 召回命中"""
     from datetime import datetime, timezone
-    from db.event_store import EventStore
+    from openinvest.db.event_store import EventStore
 
     store = EventStore(db_path=tmp_path / "ev.db", embedding_dim=4)
     store.upsert_event({
@@ -97,7 +97,7 @@ def test_recall_alias_matches_index_event(tmp_path):
         "affected_symbols": ["^NDX"],
     }, embedding=None)
 
-    from services.symbol_map import proxy_symbols_for
+    from openinvest.services.symbol_map import proxy_symbols_for
     hits = store.recall("NDQ.AX", aliases=sorted(proxy_symbols_for("NDQ.AX")))
     assert len(hits) == 1, "aliases 没让 NDQ.AX 命中 ^NDX 事件"
     # 不带 aliases 的旧行为：不命中（守对照）
@@ -107,7 +107,7 @@ def test_recall_alias_matches_index_event(tmp_path):
 # ---------- 接线验收：per-asset EVENT_STANCE ----------
 
 def test_event_stance_line_matches_proxied_event():
-    from utils.sentiment import event_stance_line_for_symbol
+    from openinvest.utils.sentiment import event_stance_line_for_symbol
 
     brief = (
         "[2026-06-10T08:00:00+00:00] [risk/high] [^NDX] (sources: reuters)\n"

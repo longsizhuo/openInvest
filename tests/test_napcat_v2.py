@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 import frontmatter
 
-from connectors import napcat_bot
-from connectors.napcat_bot import (
+from openinvest.connectors import napcat_bot
+from openinvest.connectors.napcat_bot import (
     CommandContext,
     _balance,
     _deposit,
@@ -29,8 +29,8 @@ from connectors.napcat_bot import (
     _gold_set,
     _withdraw,
 )
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
 
 
 # ---------- helpers ----------

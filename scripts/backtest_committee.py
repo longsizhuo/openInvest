@@ -37,10 +37,10 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")  # 让 _create_agent 能拿到 DEEPSEEK_API_KEY
 
-from core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
 # 污染 cutoff 单一可信源——落盘 `**Contaminated**` 标记与 verdict_review 分桶共用同一常量，
 # 不让 backtest 和聚合两处各自硬编码 "2024-12-31" 漂移（机器强制，见 CLAUDE.md）。
-from jobs.verdict_review import CONTAMINATION_CUTOFF  # noqa: E402
+from openinvest.jobs.verdict_review import CONTAMINATION_CUTOFF  # noqa: E402
 
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
@@ -68,7 +68,7 @@ def _patch_tools_to_date(decision_date: str):
     # 不再只 patch ef.get_history_data 包装层（那靠"path-profile/FX 恰好没被调用"才不漏，很脆）。
     # 直接 patch 底层 store 方法：任何路径（get_path_profile / 汇率腿 / 技术面）直读 store 都按
     # decision_date 截断。idempotent：先取全量 → 按 cutoff 过滤 → 再 tail(days)，语义不变。
-    import db.market_store as _ms
+    import openinvest.db.market_store as _ms
     import pandas as _pd0
     _real_ghdf = _ms.MarketStore.get_history_df
 
@@ -83,7 +83,7 @@ def _patch_tools_to_date(decision_date: str):
 
     # === 1. get_history_data：传 as_of_date 让底层 DB cache 也按 cutoff 过滤 ===
     # 注：底层 _apply_cutoff 用 `df.index <= cutoff` (含当日)，跟旧逻辑等价
-    import utils.exchange_fee as ef
+    import openinvest.utils.exchange_fee as ef
     real_get_history = ef.get_history_data
 
     def patched_get_history(symbol: str, period: str = "2y", as_of_date=None):
@@ -111,7 +111,7 @@ def _patch_tools_to_date(decision_date: str):
     # === 3. get_macro_snapshot 内部用 get_history_data，已自动截断 ===
 
     # === 4. query_dreaming_insights：filter insight 写入时间 ===
-    import capabilities.tools as tools
+    import openinvest.capabilities.tools as tools
 
     real_dreaming = tools._impl_query_dreaming_insights
 
@@ -150,18 +150,18 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
         PaperTradeSimulator，必须拿到每天真实 verdict 才能正确回放成交，跳过会让权益
         曲线/指标算在残缺成交集上（静默错误），所以它不能用断点续跑。
     """
-    from core.committee import (
+    from openinvest.core.committee import (
         run_macro_view, run_committee, parse_cio_memo, _persist, safe_symbol
     )
     # 必须用模块属性引用（ef.xxx），不能 `from utils.exchange_fee import get_history_data`。
     # 后者在 with _patch_tools_to_date 之前就把局部名绑到原始未 patch 函数，导致
     # cutoff patch 逃逸 → 每个决议日都拿最新数据（未来函数泄漏）。走 ef.get_history_data
     # 在调用时按模块属性查找，命中 patch.object(ef, "get_history_data", ...) 的替换。
-    import utils.exchange_fee as ef
+    import openinvest.utils.exchange_fee as ef
     # 确定性 regime（与 live 路径同款 classify_regime）。纯函数，从已按 decision_date
     # 截断的 df 算，无穿越。
-    from core.regime import format_regime_brief
-    from utils.market_metrics import compute_metrics
+    from openinvest.core.regime import format_regime_brief
+    from openinvest.utils.market_metrics import compute_metrics
 
     store = MemoryStore()
     # out_subdir 让闭环回测写到独立目录(.backtest_closedloop),不覆盖空桩基线(.backtest)
@@ -173,7 +173,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
     # 断点续跑（仅 resume=True）：已写出 <symbol>.md 的资产跳过；全部已跑则连 macro 都
     # 不跑直接返回。文件名口径用 persist.safe_symbol 单一可信源（避免与 _persist 漂移）。
     if resume:
-        from core.committee import safe_symbol  # 走 façade（与本文件其它 core.committee 导入同口径，import-linter 例外覆盖）
+        from openinvest.core.committee import safe_symbol  # 走 façade（与本文件其它 core.committee 导入同口径，import-linter 例外覆盖）
         pending = [s for s in asset_symbols
                    if not (out_dir_base / f"{safe_symbol(s)}.md").exists()]
         if not pending:

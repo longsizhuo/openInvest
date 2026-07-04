@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.benchmarks import BENCHMARKS, refresh_benchmark  # noqa: E402
+from openinvest.core.benchmarks import BENCHMARKS, refresh_benchmark  # noqa: E402
 
 BACKFILL_DAYS = 60  # 与 scripts/backfill_pnl_history.py 对齐
 

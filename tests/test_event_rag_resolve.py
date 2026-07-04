@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.committee_runner import _resolve_event_brief, format_event_brief
+from openinvest.core.committee_runner import _resolve_event_brief, format_event_brief
 
 
 # ============================================================================
@@ -56,7 +56,7 @@ def test_resolve_default_on_when_env_unset(monkeypatch):
     """env 未设 → 当 true（PR #6 default-on 决策）。recall 失败 graceful 返空"""
     monkeypatch.delenv("INVEST_EVENT_RAG_ENABLED", raising=False)
     # 让 _get_event_store 返 None 模拟 init 失败 → 应该 graceful 返 ""
-    with patch("core.runner.event_brief._get_event_store", return_value=None):
+    with patch("openinvest.core.runner.event_brief._get_event_store", return_value=None):
         result = _resolve_event_brief("AAPL", override=None)
         assert result == ""
 
@@ -71,7 +71,7 @@ def test_resolve_graceful_on_recall_exception(monkeypatch):
         def recall(self, *a, **kw):
             raise RuntimeError("DB locked or whatever")
 
-    with patch("core.runner.event_brief._get_event_store",
+    with patch("openinvest.core.runner.event_brief._get_event_store",
                return_value=FakeBrokenStore()):
         result = _resolve_event_brief("AAPL", override=None)
         assert result == ""
@@ -94,7 +94,7 @@ def test_resolve_calls_recall_with_env_params(monkeypatch):
             captured.update(kwargs)
             return []
 
-    with patch("core.runner.event_brief._get_event_store", return_value=FakeStore()):
+    with patch("openinvest.core.runner.event_brief._get_event_store", return_value=FakeStore()):
         _resolve_event_brief("NVDA", override=None)
 
     assert captured["symbol"] == "NVDA"
@@ -188,7 +188,7 @@ def test_format_output_parseable_by_sentiment_parser():
     utils.sentiment._parse_event_brief_entries 解析（EVENT_STANCE 聚合行依赖）。
     改任何一边的格式必须同步另一边——本测试防单边漂移。
     """
-    from utils.sentiment import _parse_event_brief_entries
+    from openinvest.utils.sentiment import _parse_event_brief_entries
 
     events = [
         {

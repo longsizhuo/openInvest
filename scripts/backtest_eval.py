@@ -28,7 +28,7 @@ import pandas as pd
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 TRADING_DAYS = 252
 LAST_HOLD_DAYS = 30  # 最后一个决策持有多久（让其持有期能 realized）

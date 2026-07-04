@@ -23,8 +23,8 @@ import pandas as pd
 import pytest
 
 from scripts.backtest_committee import _patch_tools_to_date
-import utils.exchange_fee as ef
-from db.market_store import MarketStore
+import openinvest.utils.exchange_fee as ef
+from openinvest.db.market_store import MarketStore
 
 CUT = "2020-01-01"
 _cut_ts = pd.Timestamp(CUT)
@@ -56,7 +56,7 @@ def test_root_store_cut_covers_pathprofile_and_fx():
 @pytest.mark.skipif(not _has_data("GC=F"), reason="store 无 GC=F 历史（未回填）")
 def test_pathprofile_under_patch_is_cut():
     """直接验 get_path_profile（带 asof 与否都不能引入未来）——这是当年最脆的那条。"""
-    from core.regime_probability import get_path_profile
+    from openinvest.core.regime_probability import get_path_profile
     with _patch_tools_to_date(CUT):
         prof = get_path_profile("GC=F", "downtrend")  # 不传 asof，靠根级 patch 兜
     # 拿不到 profile 也算通过（无样本），关键是不能因为读到未来数据而"样本虚多"。
@@ -93,7 +93,7 @@ def test_prompt_has_no_decision_date(monkeypatch, tmp_path):
     价位与宏观点位，记忆过那段历史的 LLM 仍能反推年代（ADR-022 T1）。prompt 没有字面日期
     只是关掉了最蠢的一个泄漏通道，主泄漏（价位指纹）还在，结构上无法用断言消除。
     """
-    import core.committee.debate as debate
+    import openinvest.core.committee.debate as debate
 
     captured: list[tuple[str, str, str]] = []  # (role, system_prompt, user_msg)
 
@@ -114,7 +114,7 @@ def test_prompt_has_no_decision_date(monkeypatch, tmp_path):
     # 钉 debate 命名空间（run_committee 在那里解析 _create_agent，patch façade 无效）。
     monkeypatch.setattr(debate, "_create_agent", _fake_create_agent)
     # 别污染真实 memory/.backtest/ —— persist 设成 no-op。
-    import core.committee as cc
+    import openinvest.core.committee as cc
     monkeypatch.setattr(cc, "_persist", lambda *a, **k: None)
 
     import scripts.backtest_committee as bt

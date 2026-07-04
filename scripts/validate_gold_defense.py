@@ -29,8 +29,8 @@ sys.path.insert(0, str(ROOT))
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from core.config import load_config  # noqa: E402
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.core.config import load_config  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 # 验收当前部署的防御分位（读 config，tune 后验收自动跟随，不脱节）
 DEFENSE_Q = load_config().sentiment.vix_defense_quantile  # 默认 0.85

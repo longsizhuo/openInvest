@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from core.memory_store import (
+from openinvest.core.memory_store import (
     MemoryStore,
     _atomic_write_text,
     _DocTx,
@@ -173,7 +173,7 @@ def test_doctx_existed_flag():
     assert tx_new.existed is False
 
     # 用真 doc 模拟"已存在"
-    from core.memory_store import MemoryDoc
+    from openinvest.core.memory_store import MemoryDoc
     doc = MemoryDoc(name="x", type="state", metadata={"k": 1}, body="body")
     tx_old = _DocTx(name="x", doc=doc)
     assert tx_old.existed is True
