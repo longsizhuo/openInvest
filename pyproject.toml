@@ -35,6 +35,7 @@ dependencies = [
 [project.scripts]
 openinvest = "openinvest.cli:main"
 openinvest-mcp = "openinvest.connectors.mcp_server:main"
+openinvest-web = "openinvest.connectors.web_api.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

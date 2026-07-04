@@ -7,7 +7,8 @@ connectors/web_api/memory/；src/ 重排如果沿用会把用户账本静默换�
 解析顺序：
 1. env `INVEST_HOME`（run.sh / 部署显式指定）
 2. 从本文件向上找仓库标记（editable / git clone 开发场景）
-3. cwd 兜底（wheel 安装 + run.sh cd 到数据目录的场景）
+3. `~/openInvest` 兜底（wheel/uvx 形态的默认数据目录——不用 cwd，否则用户在
+   任意目录裸跑 `uvx openinvest status` 会在当前目录撒 memory/）
 
 包内资源（capabilities 角色 .md / defaults.yaml / rss_feeds.yml）不走这里——
 它们跟包走，继续 __file__ 相对。
@@ -26,7 +27,7 @@ def _detect_root() -> Path:
     for parent in here.parents:
         if (parent / "pyproject.toml").exists() and (parent / "skills").is_dir():
             return parent
-    return Path.cwd()
+    return Path.home() / "openInvest"
 
 
 INVEST_ROOT = _detect_root()

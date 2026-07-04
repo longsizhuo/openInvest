@@ -33,14 +33,13 @@ documents:
 | **invest skill** | agent 怎么编排委员会（Coordinator 协议、决策纪律） |
 | **invest-setup skill** | 首次 5 问 onboarding |
 
-后端在首次调用时自举：`git clone` 到 `~/openInvest` + `uv sync`（需要 `git` / `uv` / Python 3.13）。
-**首次 MCP 连接可能超时**（在等 clone+sync）——先说一句 "set up invest" 让 skill 路径完成自举，之后 MCP 秒连。
+后端从 PyPI 分发（[`openinvest`](https://pypi.org/project/openinvest/)）：首次调用时 `uvx` 自动拉包（只需要 `uv`），数据放 `~/openInvest`（memory/ db/ .env）。更新跑 `run.sh update`。
+**首次 MCP 连接可能超时**（在等 PyPI 下载）——重试一次即可，之后 uvx 走缓存秒连。
 
-不用 plugin 也可以只挂 MCP（已 clone 仓库的情况）：
+不用 plugin 也可以只挂 MCP：
 
 ```bash
-claude mcp add openinvest -e INVEST_HOME=~/openInvest -- \
-  uv --directory ~/openInvest run python -m connectors.mcp_server
+claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 ```
 
 ## 2. 初始化
