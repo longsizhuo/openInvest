@@ -26,6 +26,47 @@ INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
 INVEST_REPO="${INVEST_REPO:-https://github.com/longsizhuo/openInvest.git}"
 INVEST_BRANCH="${INVEST_BRANCH:-main}"
 
+# ============ 后端自动保鲜（节流）============
+# 问题：bootstrap 只在目录不存在时 clone，之后永不 pull → 用户后端永久冻结在首装 commit。
+#       /plugin marketplace update 只更新 skill/MCP manifest，不动这个 clone。
+# 方案：每次调用最多每 24h 做一次 fetch + ff-only pull。ff-only 保证绝不覆盖本地未提交改动
+#       （memory/ 与 .env 在 clone 外 / gitignore，pull 不碰）；lockfile 变了才补 uv sync。
+# 安全：全程静默容错 + `|| true` 调用，任何一步失败都绝不阻塞真正的子命令；离线/非 ff/本地脏
+#       都只是跳过。关掉自动保鲜：export INVEST_AUTO_UPDATE=0。强制立即更新：run.sh update。
+# stamp 放 .git/ 内——git 不追踪 .git 自身，不会让工作树变脏、不会挡 ff-only pull。
+_invest_auto_refresh() {
+    [ "${INVEST_AUTO_UPDATE:-1}" = "1" ] || return 0
+    local force="${1:-}"
+    command -v git >/dev/null 2>&1 || return 0
+    [ -d .git ] || return 0
+    local now last stamp lock_before lock_after
+    stamp=".git/.last_autoupdate"
+    now=$(date +%s 2>/dev/null) || return 0
+    if [ "$force" != "force" ]; then
+        last=0
+        [ -f "$stamp" ] && last=$(cat "$stamp" 2>/dev/null || echo 0)
+        case "$last" in ''|*[!0-9]*) last=0 ;; esac
+        [ $((now - last)) -ge 86400 ] || return 0
+    fi
+    echo "🔄 后端保鲜检查：git fetch + ff-only pull..." >&2
+    lock_before=""
+    [ -f uv.lock ] && lock_before=$(git hash-object uv.lock 2>/dev/null || echo "")
+    if git fetch -q origin "$INVEST_BRANCH" >/dev/null 2>&1 && git pull --ff-only -q >/dev/null 2>&1; then
+        lock_after=""
+        [ -f uv.lock ] && lock_after=$(git hash-object uv.lock 2>/dev/null || echo "")
+        if [ -n "$lock_after" ] && [ "$lock_before" != "$lock_after" ]; then
+            echo "📦 uv.lock 有变，uv sync..." >&2
+            uv sync --frozen --python 3.13 >/dev/null 2>&1 \
+                || echo "⚠️ uv sync 失败——后端代码已更新但依赖可能不同步，手动跑 uv sync" >&2
+        fi
+        echo "✅ 后端已保鲜" >&2
+    else
+        echo "⚠️ 保鲜跳过（离线 / 非 ff / 本地有未提交改动）——不影响本次调用" >&2
+    fi
+    echo "$now" > "$stamp" 2>/dev/null || true
+    return 0
+}
+
 # ============ Bootstrap ============
 
 # 1) clone 仓库（如果不存在）
@@ -42,6 +83,9 @@ if [ ! -d "$INVEST_HOME" ]; then
 fi
 
 cd "$INVEST_HOME"
+
+# 1.5) 节流自动保鲜：距上次 >24h 才 fetch + ff-only pull（首次 clone 刚拿到最新，pull 是 no-op）
+_invest_auto_refresh || true
 
 # 2) uv sync 装依赖
 if [ ! -d ".venv" ]; then
@@ -70,6 +114,19 @@ if [ -z "${INVEST_API_BASE:-}" ] && [ ! -f "static/index.html" ]; then
 fi
 
 # ============ 子命令分发 ============
+
+# update 子命令：强制立即保鲜（绕过 24h 节流）。agent / 用户想立刻拿最新后端时显式调。
+if [ "${1:-}" = "update" ]; then
+    before=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+    INVEST_AUTO_UPDATE=1 _invest_auto_refresh force || true
+    after=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+    if [ "$before" = "$after" ]; then
+        echo "{\"status\":\"ok\",\"changed\":false,\"sha\":\"$after\",\"hint\":\"后端已是最新（$after）\"}"
+    else
+        echo "{\"status\":\"ok\",\"changed\":true,\"old_sha\":\"$before\",\"new_sha\":\"$after\",\"hint\":\"后端已从 $before 更新到 $after\"}"
+    fi
+    exit 0
+fi
 
 # 处理本 wrapper 自带的 gui 子命令（不进 Python skill.py）
 if [ "${1:-}" = "gui" ]; then
@@ -133,6 +190,10 @@ Onboarding（首次必跑）:
   doctor                   健康检查 memory + .env + GUI 状态（JSON 输出给 Claude 读）
   init [--from-stdin]      从 stdin JSON 完成 onboarding（Claude 走这条）
   init                     交互式 CLI onboarding（手动用）
+
+维护:
+  update                   强制拉取最新后端（ff-only pull + 按需 uv sync）。平时每 24h
+                           自动保鲜一次，无需手动；关掉自动：export INVEST_AUTO_UPDATE=0
 
 只读 / 快速（无 LLM 调用）:
   status                   持仓 + 实时价 + 浮盈
