@@ -4,8 +4,8 @@ title: Memory 目录布局 (OpenClaw-style)
 tags: [memory, portfolio, schema, dreaming, concurrency]
 intent: 记忆目录布局与数据模型
 schema_source:
-  - core/memory_store.py:MemoryStore
-  - core/portfolio_manager.py:PortfolioManager
+  - src/openinvest/core/memory_store.py:MemoryStore
+  - src/openinvest/core/portfolio_manager.py:PortfolioManager
 documents:
   endpoints:
     - GET /api/committee_sessions

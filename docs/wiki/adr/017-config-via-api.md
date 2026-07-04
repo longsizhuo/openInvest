@@ -6,8 +6,8 @@ date: 2026-06-17
 tags: [config, governance, adr]
 intent: 决策参数
 schema_source:
-  - core/config/_loader.py:API_SETTABLE
-  - connectors/web_api/models.py:ConfigItem
+  - src/openinvest/core/config/_loader.py:API_SETTABLE
+  - src/openinvest/connectors/web_api/models.py:ConfigItem
 documents:
   endpoints:
     - GET /api/config

@@ -4,11 +4,11 @@ title: openInvest 参数调优可行性诊断
 tags: [param-tuning, regime, committee, backtest, calibration]
 intent: 决策参数
 schema_source:
-  - core/regime.py:THRESHOLDS
-  - core/regime.py:ASSET_OVERRIDES
-  - core/committee/cio_parse.py:THRESHOLDS
-  - core/backtest_reward.py:compute_strategy_reward
-  - core/backtest_reward.py:verdict_oracle_accuracy
+  - src/openinvest/core/regime.py:THRESHOLDS
+  - src/openinvest/core/regime.py:ASSET_OVERRIDES
+  - src/openinvest/core/committee/cio_parse.py:THRESHOLDS
+  - src/openinvest/core/backtest_reward.py:compute_strategy_reward
+  - src/openinvest/core/backtest_reward.py:verdict_oracle_accuracy
 documents:
   endpoints: []
   config_keys: []

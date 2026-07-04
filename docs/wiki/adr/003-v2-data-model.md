@@ -4,8 +4,8 @@ title: "ADR-003: portfolio.md 升 v2 通用 schema"
 tags: [data-model, portfolio, schema, migration]
 intent: 数据模型
 schema_source:
-  - core/schemas.py:PortfolioData
-  - core/schemas.py:Holding
+  - src/openinvest/core/schemas.py:PortfolioData
+  - src/openinvest/core/schemas.py:Holding
 documents:
   endpoints: []
   config_keys: []

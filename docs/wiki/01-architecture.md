@@ -68,7 +68,7 @@ documents:
 违反这条 → connector 之间会出现行为飘移（已有教训：早期 napcat 自己改 portfolio dict 导致 Web 写入失败）。
 
 详见各 connector 子目录 README：
-- [connectors/README.md](../../connectors/README.md)
+- [connectors/README.md](../../src/openinvest/connectors/README.md)
 - [skills/README.md](../../skills/README.md)
 
 ---

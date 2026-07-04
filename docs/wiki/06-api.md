@@ -4,10 +4,10 @@ title: Web API 参考
 tags: [api, rest, fastapi, openapi]
 intent: API Contract
 schema_source:
-  - connectors/web_api/models.py:PortfolioResponse
-  - connectors/web_api/models.py:HoldingsListResponse
-  - connectors/web_api/models.py:TotalValueResponse
-  - connectors/web_api/models.py:ConfigResponse
+  - src/openinvest/connectors/web_api/models.py:PortfolioResponse
+  - src/openinvest/connectors/web_api/models.py:HoldingsListResponse
+  - src/openinvest/connectors/web_api/models.py:TotalValueResponse
+  - src/openinvest/connectors/web_api/models.py:ConfigResponse
 documents:
   endpoints:
     - GET /api/portfolio

@@ -4,9 +4,9 @@ title: 15 — 概率表路径化：多窗分布 + 四类路径形状
 tags: [regime, probability, path-distribution, calibration, committee]
 intent: 路径形状分布算法与校准
 schema_source:
-  - core/regime_probability.py:compute_regime_return_frame
-  - core/regime_probability.py:get_path_profile
-  - core/regime_probability.py:build_reentry_reference_text
+  - src/openinvest/core/regime_probability.py:compute_regime_return_frame
+  - src/openinvest/core/regime_probability.py:get_path_profile
+  - src/openinvest/core/regime_probability.py:build_reentry_reference_text
 documents:
   endpoints: []
   config_keys:
