@@ -18,6 +18,12 @@ import re
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+# client（Claude Code 等）靠这些 hint 决定要不要弹确认：
+# 读工具零确认放行；动钱工具必须过 destructiveHint 闸——status 和 sell 不能同级
+_RO = ToolAnnotations(readOnlyHint=True)
+_MONEY = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False)
 
 mcp = FastMCP(
     "openinvest",
@@ -36,28 +42,28 @@ def _pm():
 
 # ---------- 只读 ----------
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def status() -> Dict[str, Any]:
     """当前持仓全景：现金（各币种）+ holdings + 实时价 + P&L。"""
     from openinvest.services.skill_views import build_status_view
     return build_status_view()
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def strategy() -> Dict[str, Any]:
     """投资策略：target_assets + Dreaming 长期洞察。"""
     from openinvest.services.skill_views import build_strategy_view
     return build_strategy_view()
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def history(n: int = 10) -> Dict[str, Any]:
     """最近 n 笔交易流水 + 委员会决议记录。"""
     from openinvest.services.skill_views import build_history_view
     return build_history_view(n)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def live_prices() -> Dict[str, Any]:
     """背景行情一次拉齐：金价（USD/oz + CNY/克）/ USDCNY / AUDCNY / NDQ.AX / VIX / TNX。"""
     from datetime import datetime
@@ -76,7 +82,7 @@ def live_prices() -> Dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def what_if(symbol: str, pct: Optional[float] = None,
             price: Optional[float] = None) -> Dict[str, Any]:
     """P&L 情景模拟："symbol 涨跌 pct% / 到 price 我的组合怎样"。纯算术零 LLM。"""
@@ -84,7 +90,7 @@ def what_if(symbol: str, pct: Optional[float] = None,
     return build_what_if_view(symbol=symbol, pct=pct, price=price)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def discipline() -> Dict[str, Any]:
     """委员会纪律台账：不作为率（HOLD 占比）+ 拦截冲动操作次数 + 反事实省/费钱（ADR-023）。"""
     from openinvest.services.discipline import discipline_summary, render_discipline_md
@@ -92,7 +98,7 @@ def discipline() -> Dict[str, Any]:
     return {"summary": s, "markdown": render_discipline_md(s)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def decisions(days: int = 90) -> Dict[str, Any]:
     """统一决策视图：每条委员会决议 join 规则干预/用户执行/事后结果 + 采纳率汇总。
     回答"我听了几次建议""哪些建议我没执行""被规则改写过什么"。"""
@@ -101,7 +107,7 @@ def decisions(days: int = 90) -> Dict[str, Any]:
     return {"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_RO)
 def explain_decision(decision_id: str) -> Dict[str, Any]:
     """某条决议的完整依据：委员会 transcript（4 角色辩论 + CIO memo）+ 路径预测快照。
     decision_id 形如 "2026-07-03/GC=F"（decisions 输出里的 decision_id）。"""
@@ -139,7 +145,7 @@ def explain_decision(decision_id: str) -> Dict[str, Any]:
 
 # ---------- 决策账本写 ----------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def record_execution(decision_id: str, executed: bool,
                      reason: Optional[str] = None,
                      trade_ids: Optional[List[int]] = None) -> Dict[str, Any]:
@@ -154,7 +160,7 @@ def record_execution(decision_id: str, executed: bool,
 
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------
 
-@mcp.tool()
+@mcp.tool(annotations=_MONEY)
 def buy(symbol: str, units: float, price: float, currency: str = "CNY",
         kind: str = "equity", unit_label: str = "股") -> Dict[str, Any]:
     """加仓/建仓：已有 symbol 加权平均成本，新 symbol 直接建仓。price 与 currency 同币种。"""
@@ -165,7 +171,7 @@ def buy(symbol: str, units: float, price: float, currency: str = "CNY",
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_MONEY)
 def sell(symbol: str, units: float, price: float) -> Dict[str, Any]:
     """减仓：units 减少、cost_avg 不变，按 holding 的 cost_currency 还现金。"""
     if units <= 0 or price <= 0:
@@ -176,7 +182,7 @@ def sell(symbol: str, units: float, price: float) -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_MONEY)
 def deposit(currency: str, amount: float) -> Dict[str, Any]:
     """存入现金（任意币种）。"""
     try:
@@ -185,7 +191,7 @@ def deposit(currency: str, amount: float) -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_MONEY)
 def withdraw(currency: str, amount: float) -> Dict[str, Any]:
     """取出现金（任意币种），余额不足报错。"""
     if amount <= 0:
@@ -198,7 +204,7 @@ def withdraw(currency: str, amount: float) -> Dict[str, Any]:
 
 # ---------- 委员会（Direct 路径） ----------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def run_committee(symbol: str, force: bool = False,
                   max_rounds: int = 1) -> Dict[str, Any]:
     """跑 4 角色 LLM 投资委员会（Direct 路径，需 DEEPSEEK_API_KEY，30-90s）。
