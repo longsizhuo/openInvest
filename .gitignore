@@ -51,3 +51,4 @@ docs/path_calibration.md
 docs/.okf-index.json
 experiments/reference/
 .grimp_cache/
+dist/
