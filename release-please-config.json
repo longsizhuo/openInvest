@@ -56,7 +56,18 @@
       "include-component-in-tag": false,
       "extra-files": []
     },
-    "skills/invest": {
+    "skills/okf-frontmatter": {
+      "release-type": "simple",
+      "component": "okf-frontmatter-skill",
+      "package-name": "okf-frontmatter-skill",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "SKILL.md"
+        }
+      ]
+    },
+    "plugin/skills/invest": {
       "release-type": "simple",
       "component": "invest-skill",
       "package-name": "invest-skill",
@@ -67,21 +78,10 @@
         }
       ]
     },
-    "skills/invest-setup": {
+    "plugin/skills/invest-setup": {
       "release-type": "simple",
       "component": "invest-setup-skill",
       "package-name": "invest-setup-skill",
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "SKILL.md"
-        }
-      ]
-    },
-    "skills/okf-frontmatter": {
-      "release-type": "simple",
-      "component": "okf-frontmatter-skill",
-      "package-name": "okf-frontmatter-skill",
       "extra-files": [
         {
           "type": "generic",

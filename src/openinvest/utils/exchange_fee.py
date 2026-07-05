@@ -8,11 +8,36 @@ import pandas as pd
 import yfinance as yf
 from openinvest.db.market_store import MarketStore
 
-# B6: betashares_scraper 历史上做 NDQ.AX 专用爬取，但 BetaShares 站点长期 403
-# + 它返的 etf_holdings/sectors/stats 全仓零消费 → 改成统一 yfinance 路径，
-# 文件保留作 optional plugin（万一未来想看 ETF top10 持仓再启用）。
-
 _STORE = MarketStore()
+
+# BetaShares 官网可兜底现价的 symbol（yfinance 被墙/抓空时的最后一道）。
+# 目前 scraper 只实现 NDQ；扩品种时加 symbol + 给 scraper 加对应 fund 页。
+_BETASHARES_SYMBOLS = {"NDQ.AX"}
+
+
+def _betashares_fallback(symbol: str) -> bool:
+    """yfinance 失败时从 BetaShares 官网抓当前 NAV 写进 MarketStore。
+
+    只兜现价（官网无免费历史序列，历史缺口不硬造）。成功返回 True。
+    失败静默退化——保持"取不到价就没价"的原行为。
+    """
+    if symbol not in _BETASHARES_SYMBOLS:
+        return False
+    try:
+        from openinvest.utils.betashares_scraper import scrape_full_ndq_data
+        snap = scrape_full_ndq_data()
+        if snap and snap.get("nav") and snap.get("date"):
+            _STORE.save_generic_price(
+                symbol, snap["date"], snap["nav"], source="betashares_fallback"
+            )
+            print(
+                f"🛟 [betashares_fallback] {symbol} NAV {snap['nav']} @ {snap['date']}"
+                " (yfinance unavailable, scraped betashares.com.au)"
+            )
+            return True
+    except Exception:
+        pass  # ponytail: 兜底的兜底不存在——抓不到就退回原"无数据"行为
+    return False
 
 # 历史行数低于此阈值 → 视为深度不足，触发 2y 全量回填。取 250 = 最长指标 MA250 的窗口，
 # 保证 RSI/MA120/MA250/regime 全部算得出（仅 60 会让 60~249 根的 symbol 仍缺 MA120/MA250
@@ -183,11 +208,13 @@ def get_history_data(
                 pass  # 日期格式错误就不拉
 
     if should_fetch_yf:
+        yf_got_data = False
         try:
             print(f"🔄 [yfinance] Refreshing {symbol} (period={fetch_period})...")
             ticker = yf.Ticker(symbol)
             df_yf = ticker.history(period=fetch_period)
             if not df_yf.empty:
+                yf_got_data = True
                 for idx, row in df_yf.iterrows():
                     # 数据源闸：close=NaN（yfinance 收盘前半成型 bar）不落库。
                     # 否则它以 NULL 入 daily_prices，下游读价 float(NULL)→NaN，穿过
@@ -206,6 +233,12 @@ def get_history_data(
                 df_db = _STORE.get_history_df(symbol)
         except Exception as e:
             print(f"❌ yfinance sync failed for {symbol}: {e}")
+
+        # yfinance 失败/返回空（被墙/被限流）→ BetaShares 官网兜底当前 NAV。
+        # 只在实盘路径（as_of_date=None）触发：scraper 只有"现在"这一个点，
+        # 对历史 cutoff 无意义。
+        if not yf_got_data and as_of_date is None and _betashares_fallback(symbol):
+            df_db = _STORE.get_history_df(symbol)
 
     if not df_db.empty:
         return _apply_cutoff(df_db, as_of_date)
