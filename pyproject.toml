@@ -1,6 +1,6 @@
 [project]
 name = "openinvest"
-version = "0.15.0"
+version = "0.16.0"
 description = "多资产 AI 投资委员会 + 组合管理后端"
 license = "MIT"
 
