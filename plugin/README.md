@@ -68,8 +68,8 @@ The system never places orders — decisions stay with you.
 ## Requirements
 
 - Claude Code
-- `git`, [`uv`](https://docs.astral.sh/uv/), Python 3.13 — the bootstrap checks
-  for these and tells you how to install any that are missing
+- [`uv`](https://docs.astral.sh/uv/) — the launcher checks for it and tells you
+  how to install if missing (backend + Python come from PyPI via uvx)
 - Optional: `DEEPSEEK_API_KEY` (only for the Direct path / cron daily report)
 
 ## Disclaimer

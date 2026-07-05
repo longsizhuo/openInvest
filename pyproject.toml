@@ -1,8 +1,19 @@
 [project]
 name = "openinvest"
 version = "0.16.0"
-description = "多资产 AI 投资委员会 + 组合管理后端"
+description = "Investment runtime built for AI agents — 4-role LLM investment committee, portfolio ledger, decision accounting, MCP server"
+readme = "PYPI_README.md"
 license = "MIT"
+keywords = ["investing", "llm", "agent", "mcp", "portfolio", "trading-journal", "investment-committee", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+]
 
 requires-python = ">=3.13"
 dependencies = [
@@ -20,7 +31,6 @@ dependencies = [
     "python-frontmatter>=1.1.0",
     "apscheduler>=3.11.2",
     "websockets>=15.0.1",
-    "exchange-calendars>=4.13.2",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "croniter>=6.2.2",
@@ -30,6 +40,13 @@ dependencies = [
     "sqlite-vec>=0.1.6",   # 事件层向量精排（SQLite 扩展，不需要独立向量库）
     "mcp>=1.28.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/longsizhuo/openInvest"
+Documentation = "https://github.com/longsizhuo/openInvest/tree/main/docs/wiki"
+Repository = "https://github.com/longsizhuo/openInvest"
+Issues = "https://github.com/longsizhuo/openInvest/issues"
+Changelog = "https://github.com/longsizhuo/openInvest/blob/main/CHANGELOG.md"
 
 [project.scripts]
 openinvest = "openinvest.cli:main"
@@ -45,7 +62,7 @@ packages = ["src/openinvest"]
 
 [tool.hatch.build.targets.sdist]
 # 只打包源码 + 元数据——默认会把整仓（docs/static/experiments，20MB）都塞进 sdist
-only-include = ["src/openinvest", "README.md", "LICENSE", "pyproject.toml"]
+only-include = ["src/openinvest", "PYPI_README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
 dev = [

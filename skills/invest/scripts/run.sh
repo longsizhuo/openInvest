@@ -31,9 +31,6 @@ case "${1:-}" in
     # stdout 是 JSON-RPC 通道；uvx 的安装进度本来就走 stderr，无需借道
     exec uvx --from "$SPEC" openinvest-mcp
     ;;
-  gui)
-    exec uvx --from "$SPEC" openinvest-web
-    ;;
   update)
     echo "⬆️  刷新 openinvest 到 PyPI 最新..." >&2
     exec uvx --refresh --from "$SPEC" openinvest doctor
@@ -56,7 +53,6 @@ Onboarding（首次必跑）:
   run_committee SYM [--force]                  （Direct，需 DEEPSEEK_API_KEY）
 
 其他:
-  gui      启动 Web GUI（http://127.0.0.1:8765）
   mcp      MCP stdio server（plugin .mcp.json 自动走这条）
   update   更新后端到 PyPI 最新版
 

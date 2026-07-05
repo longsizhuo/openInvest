@@ -109,37 +109,7 @@ from openinvest.connectors.web_api.routers.trades import _sync_trade_to_portfoli
 from openinvest.paths import INVEST_ROOT
 
 
-# 一键部署模式：跑完 `python -m scripts.sync_gui_dist` 后，static/ 含 invest-gui 构建产物
-# FastAPI 把它挂到 /，所有非 /api/* 请求自动 serve GUI（含 SPA 路由 fallback）
-#
-# 生产 Caddy 部署时这块不会被触发——Caddy 优先 file_server /srv/invest-gui，
-# 只把 /api/* 反代到本服务，根本不会到这条 mount。共存无冲突。
-#
-# 必须放在所有路由声明之后；StaticFiles(html=True) 让 / 自动 serve index.html
-# NOTE: 本文件在 connectors/web_api/ 包内，repo root 要往上三级（拆包前是
-# connectors/web_api.py 只需两级；refactor 后漏改导致指向不存在的 connectors/static，
-# GUI 一直没挂——生产走 Caddy 没暴露，docker compose 一键部署才会踩到）。
-# 必须与 scripts/sync_gui_dist.py 的写入目标（repo_root/static）一致。
-_STATIC_DIR = INVEST_ROOT / "static"
-if _STATIC_DIR.exists() and (_STATIC_DIR / "index.html").exists():
-    from fastapi.staticfiles import StaticFiles
-    from starlette.exceptions import HTTPException as _StarletteHTTPException
-    from starlette.responses import FileResponse
-
-    class _SPAStaticFiles(StaticFiles):
-        """SPA 路由 fallback：未找到的路径回退到 index.html，让 React Router 接管"""
-        async def get_response(self, path: str, scope):  # type: ignore[override]
-            try:
-                return await super().get_response(path, scope)
-            except _StarletteHTTPException as e:
-                if e.status_code == 404:
-                    return FileResponse(str(Path(self.directory or "") / "index.html"))
-                raise
-
-    app.mount("/", _SPAStaticFiles(directory=str(_STATIC_DIR), html=True), name="gui")
-    log.info(f"✓ GUI 已挂载（SPA fallback 模式）: / → {_STATIC_DIR}")
-else:
-    log.info(
-        "⚠️  GUI 未挂载（static/ 不存在或缺 index.html）。"
-        "跑 `openinvest-web --sync-only` 拉 GUI 构建产物。"
-    )
+# GUI 壳层已退役（2026-07-05）：static/ SPA 挂载、gui_dist 同步、run.sh gui 全部删除。
+# 本 REST API 标记 **deprecated**——不再新增端点；存量端点服务 remote hub 模式
+# （INVEST_API_BASE 转发）与 event_watch 内部触发，待 MCP 覆盖 remote 场景后整体退役。
+# GUI 若重做，走独立前端直连 MCP/新通道，不再由本进程 serve 静态文件。

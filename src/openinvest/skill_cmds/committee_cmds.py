@@ -132,41 +132,20 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     report = asset_result.get("report")
     cio_memo = report.cio_memo if report is not None else ""
 
-    # 检测用户是否配了 NapCat（白名单 QQ 不为 0）—— 没配的话别推 NapCat 命令，
-    # 改走 Web GUI / API 路径。多数小白用户没装 NapCat，硬塞会让他们一脸懵
-    napcat_qq = os.getenv("INVEST_WHITELIST_QQ", "0").strip()
-    has_napcat = napcat_qq and napcat_qq != "0"
-
-    # 顺带把 cio_memo 是 Markdown 这件事再叮嘱一句，agent 拿到后必须 render
+    # GUI/NapCat 已退役（2026-07-05）——登记入口统一为 CLI 子命令 / MCP 工具
     cio_render_hint = (
         "⚠️ `cio_memo` 字段是 Markdown 字符串（含 `## verdict` `**confidence**` 等格式），"
         "**直接当 Markdown 渲染给用户看**，不要把整个 JSON 原样打印。"
     )
-    gui_url = f"http://{os.getenv('INVEST_WEB_HOST', '127.0.0.1')}:{os.getenv('INVEST_WEB_PORT', '8765')}"
-    gui_troubleshoot = (
-        f"如果 {gui_url} 打不开（端口没起 / 网页加载不出来），告诉用户另开终端跑 "
-        "`~/.claude/skills/invest/scripts/run.sh gui` 启动后端，然后浏览器刷新。"
+    next_step = (
+        f"{cio_render_hint}\n\n"
+        "已生成 verdict。如果用户同意，按三步走：\n"
+        "1) 用户打开自己的证券/银行 App，按 verdict 的 alloc_cny 金额 + symbol 真实下单"
+        "（openInvest 不接交易所，只做决策）\n"
+        "2) 回来登记这笔：CLI `buy`/`sell` 子命令或 MCP `buy`/`sell` 工具\n"
+        "3) 用 `record_execution` 关联决议（拒绝执行也记，附原因）\n\n"
+        "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
     )
-
-    if has_napcat:
-        next_step = (
-            f"{cio_render_hint}\n\n"
-            "已生成 verdict。如果用户同意：黄金/现金交易告诉用户用 NapCat 命令"
-            "（如 `/gold_buy 5g @1040`）；其他 yfinance symbol 走 GUI HoldingDialog "
-            f"（{gui_url}）或 `POST/PUT /api/holdings/{{symbol}}`。**不要直接写 "
-            f"memory/**——所有状态变更必须走带审计的入口。\n\n{gui_troubleshoot}"
-        )
-    else:
-        next_step = (
-            f"{cio_render_hint}\n\n"
-            "已生成 verdict。如果用户同意，告诉他按下面三步走：\n"
-            f"1) 在 openInvest 里登记这笔（最方便：浏览器开 {gui_url} → 持仓页 → "
-            "编辑/新增 holding；或 `POST/PUT /api/holdings/{symbol}` API）\n"
-            "2) 打开他自己的证券 App / 银行 App，按 verdict 里的 alloc_cny 金额 + "
-            "资产 symbol 真实下单（openInvest 本身不接交易所，只做决策）\n"
-            f"3) 回 openInvest 标记成交\n\n{gui_troubleshoot}\n\n"
-            "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
-        )
 
     _print_json({
         "status": "ok",
