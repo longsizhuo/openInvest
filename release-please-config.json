@@ -7,15 +7,47 @@
   "bootstrap-sha": "763e62c6690eb5a36958277b7f54a8bde41bbe1e",
   "pull-request-title-pattern": "chore${scope}: release ${version}",
   "changelog-sections": [
-    { "type": "feat", "section": "Features" },
-    { "type": "fix", "section": "Bug Fixes" },
-    { "type": "perf", "section": "Performance" },
-    { "type": "refactor", "section": "Refactor" },
-    { "type": "docs", "section": "Docs", "hidden": false },
-    { "type": "chore", "section": "Chore", "hidden": true },
-    { "type": "test", "section": "Tests", "hidden": true },
-    { "type": "ci", "section": "CI", "hidden": true },
-    { "type": "build", "section": "Build", "hidden": true }
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "perf",
+      "section": "Performance"
+    },
+    {
+      "type": "refactor",
+      "section": "Refactor"
+    },
+    {
+      "type": "docs",
+      "section": "Docs",
+      "hidden": false
+    },
+    {
+      "type": "chore",
+      "section": "Chore",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "CI",
+      "hidden": true
+    },
+    {
+      "type": "build",
+      "section": "Build",
+      "hidden": true
+    }
   ],
   "packages": {
     ".": {
@@ -29,7 +61,10 @@
       "component": "invest-skill",
       "package-name": "invest-skill",
       "extra-files": [
-        { "type": "generic", "path": "SKILL.md" }
+        {
+          "type": "generic",
+          "path": "SKILL.md"
+        }
       ]
     },
     "skills/invest-setup": {
@@ -37,7 +72,10 @@
       "component": "invest-setup-skill",
       "package-name": "invest-setup-skill",
       "extra-files": [
-        { "type": "generic", "path": "SKILL.md" }
+        {
+          "type": "generic",
+          "path": "SKILL.md"
+        }
       ]
     },
     "skills/okf-frontmatter": {
@@ -45,8 +83,13 @@
       "component": "okf-frontmatter-skill",
       "package-name": "okf-frontmatter-skill",
       "extra-files": [
-        { "type": "generic", "path": "SKILL.md" }
+        {
+          "type": "generic",
+          "path": "SKILL.md"
+        }
       ]
     }
-  }
+  },
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false
 }
