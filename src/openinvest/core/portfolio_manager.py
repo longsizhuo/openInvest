@@ -689,6 +689,6 @@ def _render_portfolio_body_v2(p) -> str:
     lines.extend([
         "## 说明",
         "",
-        f"_schema_version: {p.get('schema_version', 2)}_  此文件由 daily_report / commsec_sync / payday_check / web_api / napcat_bot 自动更新；不要手动编辑。",
+        f"_schema_version: {p.get('schema_version', 2)}_  此文件由 daily_report / commsec_sync / payday_check / web_api 自动更新；不要手动编辑。",
     ])
     return "\n".join(lines) + "\n"

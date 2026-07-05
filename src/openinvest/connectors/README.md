@@ -4,7 +4,6 @@
 
 ## 内容
 
-- `napcat_bot.py` — QQ 私聊命令式入口（NapCat OneBot 11 协议）。白名单 QQ 触发，命令格式 `/cmd args`，零 LLM 解析成本。
 - `web_api.py` — FastAPI REST 层（GUI / 外部 agent 用）。同源部署 + Cloudflare Access 鉴权（生产）/ localhost-only（开源默认）。
 
 ## 与其他目录的关系

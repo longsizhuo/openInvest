@@ -12,7 +12,6 @@ from openinvest.db.market_store import MarketStore
 # + 它返的 etf_holdings/sectors/stats 全仓零消费 → 改成统一 yfinance 路径，
 # 文件保留作 optional plugin（万一未来想看 ETF top10 持仓再启用）。
 
-CACHE_DIR = "cache_data"
 _STORE = MarketStore()
 
 # 历史行数低于此阈值 → 视为深度不足，触发 2y 全量回填。取 250 = 最长指标 MA250 的窗口，
@@ -211,20 +210,6 @@ def get_history_data(
     if not df_db.empty:
         return _apply_cutoff(df_db, as_of_date)
 
-    # 3. 兜底：读旧 CSV 缓存同步至 DB
-    safe_symbol = symbol.replace("=", "").replace(".", "_").replace("/", "")
-    csv_path = os.path.join(CACHE_DIR, f"{safe_symbol}_{period}.csv")
-    if os.path.exists(csv_path):
-        print(f"⚠️ [Emergency] DB Empty. Using legacy CSV for {symbol}")
-        try:
-            df_csv = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-            if not df_csv.empty:
-                for idx, row in df_csv.iterrows():
-                    _STORE.save_generic_price(symbol, idx.strftime('%Y-%m-%d'), row['Close'], source="legacy_csv")
-                return _apply_cutoff(df_csv, as_of_date)
-        except Exception:
-            pass
-
     return pd.DataFrame()
 
 
@@ -268,16 +253,6 @@ def _calc_max_drawdown(series: pd.Series) -> float:
 def _calc_volatility(series: pd.Series) -> float:
     if len(series) < 2: return 0.0
     return series.pct_change().std() * np.sqrt(252)
-
-
-def _calc_rsi(series: pd.Series, period: int = 14) -> float:
-    if len(series) < period + 1: return 50.0
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    if loss.iloc[-1] == 0: return 100.0
-    rs = gain.iloc[-1] / loss.iloc[-1]
-    return 100 - (100 / (1 + rs))
 
 
 def _analyze_slice(df_slice: pd.DataFrame, label: str, current_price: float) -> str:
@@ -447,18 +422,7 @@ def get_cost_snapshot(
         if not df_fx.empty:
             spot_rate = df_fx['Close'].iloc[-1]
         else:
-            # Last resort: Try stale cache from file
-            safe_symbol = "AUDCNY=X".replace("=", "").replace(".", "_").replace("/", "")
-            stale_path = os.path.join(CACHE_DIR, f"{safe_symbol}_2y.csv")
-            if os.path.exists(stale_path):
-                print("⚠️ [Emergency] Using stale cache for spot rate.")
-                try:
-                    df_stale = pd.read_csv(stale_path, index_col=0, parse_dates=True)
-                    spot_rate = float(df_stale['Close'].iloc[-1])
-                except:
-                    spot_rate = 0.0
-            else:
-                spot_rate = 0.0
+            spot_rate = 0.0
 
     fx_data = calc.calculate_forex_friction(invest_cny, spot_rate)
 

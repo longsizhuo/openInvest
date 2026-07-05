@@ -46,15 +46,6 @@ def _lock_path(memory_root: Path) -> Path:
     return memory_root / ".dreams" / LOCK_FILE
 
 
-def read_last_consolidated_at(memory_root: Path) -> float:
-    """返回上次完成的 mtime（毫秒）；不存在返回 0"""
-    p = _lock_path(memory_root)
-    try:
-        return p.stat().st_mtime * 1000
-    except FileNotFoundError:
-        return 0
-
-
 def try_acquire_consolidation_lock(memory_root: Path) -> Optional[float]:
     """
     成功 → 返回 prior mtime（用于 rollback）
@@ -128,16 +119,6 @@ def rollback_consolidation_lock(memory_root: Path, prior_mtime: float) -> None:
         os.utime(path, (secs, secs))
     except OSError as e:
         print(f"[autoDream] rollback 失败: {e}")
-
-
-def record_manual_consolidation(memory_root: Path) -> None:
-    """手动 /dream 触发时打个时间戳（best-effort，不抢锁）"""
-    path = _lock_path(memory_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.write_text(str(os.getpid()))
-    except OSError as e:
-        print(f"[autoDream] manual stamp 失败: {e}")
 
 
 __all__ = [

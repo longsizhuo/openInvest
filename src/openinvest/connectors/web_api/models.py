@@ -276,7 +276,7 @@ class SymbolSearchResponse(BaseModel):
 # ============================================================
 # 设计：
 # - 所有写端点都走 PortfolioManager.with_portfolio_tx()（fcntl + 原子写）
-# - 业务逻辑直接复用 connectors/napcat_bot.py 里 _deposit/_gold_buy 等的写法，
+#
 #   不重新发明轮子（保证 NapCat 与 Web 写入语义一致，包括 history 字段）
 # - 委员会触发是长任务（~6 min），用 asyncio.run_in_executor 跑同步入口，
 #   状态落盘到 memory/.committee/<task_id>/status.json，前端 SWR 轮询查

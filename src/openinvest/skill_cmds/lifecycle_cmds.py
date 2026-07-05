@@ -229,14 +229,17 @@ def cmd_init(args: argparse.Namespace) -> None:
     import io
     from types import SimpleNamespace
     _out, _err, _rc = io.StringIO(), io.StringIO(), 0
-    try:
-        from contextlib import redirect_stderr, redirect_stdout
-        from openinvest.migrate_profile import main as _migrate_main
-        with redirect_stdout(_out), redirect_stderr(_err):
-            _migrate_main()
-    except Exception as e:  # noqa: BLE001
-        _err.write(f"{type(e).__name__}: {e}")
-        _rc = 1
+    # 新装用户没有 v1 user_profile.json，migrate 必然 no-op——跳过。
+    # 升级路径保留：2026-05 前老 clone 带该文件的仍会走迁移。
+    if (ROOT / "user_profile.json").exists():
+        try:
+            from contextlib import redirect_stderr, redirect_stdout
+            from openinvest.migrate_profile import main as _migrate_main
+            with redirect_stdout(_out), redirect_stderr(_err):
+                _migrate_main()
+        except Exception as e:  # noqa: BLE001
+            _err.write(f"{type(e).__name__}: {e}")
+            _rc = 1
     result = SimpleNamespace(stdout=_out.getvalue(), stderr=_err.getvalue(),
                              returncode=_rc)
 
