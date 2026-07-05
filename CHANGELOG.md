@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.17.0](https://github.com/longsizhuo/openInvest/compare/v0.16.0...v0.17.0) (2026-07-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **gui:** run.sh gui 子命令移除；web_api 不再挂载 GUI 静态文件
+
+### Bug Fixes
+
+* **build:** 回滚 [#143](https://github.com/longsizhuo/openInvest/issues/143) 误捎带的 uv.lock 全量重解析 ([2cd2e3e](https://github.com/longsizhuo/openInvest/commit/2cd2e3e08311519f36decbec812bafb5c3e47d26))
+* **build:** 回滚误重解析的 uv.lock——元数据 commit 不该捎带依赖全量升级 ([ed53a0f](https://github.com/longsizhuo/openInvest/commit/ed53a0f2cbecbcda201730d9d8f071949b69c78e))
+
+
+### Refactor
+
+* **gui:** GUI 壳层退役——后端不再 serve 静态文件，Web API 标记 deprecated ([390c87d](https://github.com/longsizhuo/openInvest/commit/390c87d6c43775d03abe3dfd42df10bf74cc1679))
+
 ## [0.16.0](https://github.com/longsizhuo/openInvest/compare/v0.15.0...v0.16.0) (2026-07-05)
 
 
