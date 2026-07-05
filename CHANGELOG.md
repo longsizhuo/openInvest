@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/longsizhuo/openInvest/compare/v0.19.0...v0.19.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **db:** WAL 膨胀治理——启动 checkpoint(TRUNCATE) + 读路径 rollback + 回填收尾截断 ([5e900e0](https://github.com/longsizhuo/openInvest/commit/5e900e03f9f3f5057f3e558e460ad5bd10339464)), closes [#104](https://github.com/longsizhuo/openInvest/issues/104)
+
 ## [0.19.0](https://github.com/longsizhuo/openInvest/compare/v0.18.1...v0.19.0) (2026-07-05)
 
 
