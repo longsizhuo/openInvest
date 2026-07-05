@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.16.0](https://github.com/longsizhuo/openInvest/compare/v0.15.0...v0.16.0) (2026-07-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **dist:** run.sh 不再 clone/更新后端仓库，后端版本由 PyPI 管理
+* **pkg:** Python 包名 core/db/utils/... → openinvest.*；直接 import 老包名的外部脚本需改 openinvest.<pkg> 或走根目录 shim
+
+### Features
+
+* add anonymous installation telemetry and wiki documentation ([#130](https://github.com/longsizhuo/openInvest/issues/130)) ([0a79e71](https://github.com/longsizhuo/openInvest/commit/0a79e718fefcdfae338fdbea3c056dcdff83de71))
+* **decisions:** decision accounting 闭环——决议↔执行↔结果读时 join (issue [#133](https://github.com/longsizhuo/openInvest/issues/133) Decision 9) ([8860e2f](https://github.com/longsizhuo/openInvest/commit/8860e2fbe020e2dce8c196f1bd05b6da22b4518d))
+* **dist:** run.sh 收敛为 uvx 薄转发——退役 clone/uv sync/自愈 180 行 bash ([c64ba2a](https://github.com/longsizhuo/openInvest/commit/c64ba2ab5280ff9a297859d9cef38924463e8d77))
+* **event-watch:** 扫描窗口修正为北京 8:00-次日2:30 并进 config 白名单 ([#128](https://github.com/longsizhuo/openInvest/issues/128)) ([54ad4e0](https://github.com/longsizhuo/openInvest/commit/54ad4e0e38c7afe23b8b40be32266cf0d1ef59fe))
+* **mcp:** 14 工具全量打 tool annotations——status 和 sell 不再同级 ([6d8b334](https://github.com/longsizhuo/openInvest/commit/6d8b3345264b7fd1e8869f025f3dd32b1fb6b00f))
+* **mcp:** MCP 工具危险等级标注（readOnly/destructive/idempotent hints） ([d3d82a3](https://github.com/longsizhuo/openInvest/commit/d3d82a34fdba0c90a041ae40ae3723ee32f510b0))
+* **mcp:** stdio MCP adapter——14 工具复用 service 层 (issue [#133](https://github.com/longsizhuo/openInvest/issues/133) Phase 3) ([13e48d5](https://github.com/longsizhuo/openInvest/commit/13e48d55b80fa7fc689e07aec9aa1decb80391a2))
+* **plugin:** Codex plugin.json 声明 mcpServers——装 plugin 即自动注册 MCP（与 Claude 对齐） ([fe54e28](https://github.com/longsizhuo/openInvest/commit/fe54e28209552eef5ce83e627450ce269d3ae0bf))
+* **plugin:** 捆绑 MCP server——装 plugin 即得 14 工具零配置 (issue [#133](https://github.com/longsizhuo/openInvest/issues/133) Phase 4) ([d046d7c](https://github.com/longsizhuo/openInvest/commit/d046d7c6a00fa12c0bdfb05f388335dfb0289e0e))
+* **sentinel:** 价格异动哨兵——垂直线先报警后触发委员会 (ADR-025) ([#129](https://github.com/longsizhuo/openInvest/issues/129)) ([b9ef160](https://github.com/longsizhuo/openInvest/commit/b9ef160e9f50ca1531579ec13004bf37413c2df1))
+* **skill:** run.sh 加 mcp 子命令——plugin .mcp.json 的 stdio 启动入口 ([e0b27c9](https://github.com/longsizhuo/openInvest/commit/e0b27c9847ad1ae0fa30ab27f039e5028ac751fe))
+* **verdict:** 现金机会成本规则改 opt-in,默认 OFF (ADR-024) ([5320926](https://github.com/longsizhuo/openInvest/commit/532092615a33bc263e9040e32c56f9f928edd42b))
+* **verdict:** 现金机会成本规则改 opt-in,默认 OFF(ADR-024) ([8ea8a73](https://github.com/longsizhuo/openInvest/commit/8ea8a731087ee16827e92a1c0458fea1caaa5edc))
+
+
+### Bug Fixes
+
+* add missing __init__.py files for capabilities/ packages ([4af6d03](https://github.com/longsizhuo/openInvest/commit/4af6d03b2c56ff880adefde0391df6cdd2a3f259))
+* **decisions:** 修复 code review 全部 10 项发现 ([81822d5](https://github.com/longsizhuo/openInvest/commit/81822d52cec924cb1476b07089795a497daf5300))
+* **dist:** code review [#139](https://github.com/longsizhuo/openInvest/issues/139) 全部 10 项发现——uvx 纯数据目录形态的 onboarding/.env/提示链 ([41b6054](https://github.com/longsizhuo/openInvest/commit/41b6054eb16bf06ea1e29a56c13ec4040a0c39ab))
+* **pkg:** __version__ 从包元数据读——不再与 release-please 管的 pyproject 双源 ([441555e](https://github.com/longsizhuo/openInvest/commit/441555e81081970a4881c2c37821bf8b2f23695c))
+* **pkg:** 重排收尾——补 __init__.py / yml entry 路径 / JOBS_DIR 包内解析 / CI smoke+lint 更新 ([d3f05fd](https://github.com/longsizhuo/openInvest/commit/d3f05fd41972f7d1ab5e821e4eb5bad6147d2214))
+* **plugin:** Codex 安装 skills 为空——marketplace source 改指仓库根 ([28e61d2](https://github.com/longsizhuo/openInvest/commit/28e61d26b001446337e28b327827b5f35e0bede7))
+* remove eager import cascade in committee __init__.py + stale doc paths ([b8e84ab](https://github.com/longsizhuo/openInvest/commit/b8e84ab1a147c94ad7297bd9181c405c29938892))
+* 修复优先级最高的三个真 bug([#105](https://github.com/longsizhuo/openInvest/issues/105) 假死 / [#108](https://github.com/longsizhuo/openInvest/issues/108) 现金穿透 / [#109](https://github.com/longsizhuo/openInvest/issues/109) 并发重复入账) ([#127](https://github.com/longsizhuo/openInvest/issues/127)) ([6ec98a9](https://github.com/longsizhuo/openInvest/commit/6ec98a9c2d75a523c67df478645b1380310b9b00))
+
+
+### Refactor
+
+* agents/skills/ → capabilities/committee/&lt;role&gt;/ (co-located .py + .md) ([838a834](https://github.com/longsizhuo/openInvest/commit/838a8347fdb0f2ab472b546d265ac331aa0ccd5f))
+* agents/skills/ → capabilities/committee/&lt;role&gt;/ (co-located .py + .md) ([#135](https://github.com/longsizhuo/openInvest/issues/135)) ([a4b6465](https://github.com/longsizhuo/openInvest/commit/a4b6465b593718af3f78f093ec829edc07e6303d))
+* **pkg:** src/openinvest 布局——8 顶层包收进命名空间，PyPI 可发布 ([052aff7](https://github.com/longsizhuo/openInvest/commit/052aff71565735d766f229d9eb61e37d4c66306a))
+* **skill:** SKILL.md 收缩为 workflow——工具表移交 references/tools.md (issue [#133](https://github.com/longsizhuo/openInvest/issues/133) Decision 6) ([23eb04c](https://github.com/longsizhuo/openInvest/commit/23eb04c05eb94740e31f7c9bb0ed7eae3eae5c38))
+
+
+### Docs
+
+* address Copilot code review comments on README and README_zh ([21185db](https://github.com/longsizhuo/openInvest/commit/21185db260abc5e10771b97b7a2d58b0a822dfa4))
+* **okf:** frontmatter schema_source 路径跟随 src/ 搬迁（41 处 dangling 修复） ([72c8273](https://github.com/longsizhuo/openInvest/commit/72c8273249f36a67c4a523cd1d52be0892af18a0))
+* **pkg:** CLAUDE.md 关键文件速查换 src/ 布局 + INVEST_ROOT 纪律；dist/ 入 gitignore ([5235250](https://github.com/longsizhuo/openInvest/commit/523525049d359cf0905bee9fe8b0e0f18d7d8c68))
+* **plugin:** Codex 安装命令改为实测通过的两步式 + codex mcp add 注册说明 ([92d6794](https://github.com/longsizhuo/openInvest/commit/92d6794dd134d3bdd1d28b3665451b87ac83439d))
+* refactor README and add README_zh.md for double-language support ([#131](https://github.com/longsizhuo/openInvest/issues/131)) ([ff08e46](https://github.com/longsizhuo/openInvest/commit/ff08e4695b7d66245bb9ae1a3e53864cf3727321))
+* **skill:** B2 截图持仓导入(agent-OCR 路径) ([2e4c83a](https://github.com/longsizhuo/openInvest/commit/2e4c83a2ce547e7b4ef3eb5b3a9a7e5ce3a44a8b))
+* **skill:** config 子命令列出 cash_opportunity_cost_rule(ADR-024) ([5288dc5](https://github.com/longsizhuo/openInvest/commit/5288dc58edfcaadf7ae0abcb8622c50b42569c27))
+* **skill:** decisions / record_execution 子命令 + /api/decisions 端点进 SKILL.md ([800ab61](https://github.com/longsizhuo/openInvest/commit/800ab6115f40df810e457e6c24853eb97138e11a))
+* **skill:** 截图持仓导入走 agent-OCR(你读图→转文字→import) ([d294fbf](https://github.com/longsizhuo/openInvest/commit/d294fbf101f86bf2e0ebf52095eba667aa6f5e0d))
+* **wiki:** 第 20 章使用教程——安装(plugin/MCP)→onboarding→日常→决策闭环 ([258bbc2](https://github.com/longsizhuo/openInvest/commit/258bbc275786be6c98d8c1e762333014dad7d903))
+
 ## [0.15.0](https://github.com/longsizhuo/openInvest/compare/v0.14.1...v0.15.0) (2026-06-30)
 
 
