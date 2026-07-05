@@ -29,7 +29,7 @@ def run_holdout(
     """从 Optuna study 拿 best params，在 hold-out 范围跑一次 walk-forward"""
     import optuna
     from scripts.run_walk_forward import run_walk_forward
-    from core.backtest_reward import compute_strategy_reward, explain_reward
+    from openinvest.core.backtest_reward import compute_strategy_reward, explain_reward
 
     assets = assets or ["NDQ.AX", "GC=F"]
 
@@ -42,7 +42,7 @@ def run_holdout(
     print(f"   params: {best.params}")
 
     # 2. config override + env vars
-    from core.config import set_config_override
+    from openinvest.core.config import set_config_override
     set_config_override({
         "regime": {
             "trend_ma_spread_pct": best.params["regime_uptrend"],
@@ -54,11 +54,11 @@ def run_holdout(
     os.environ["INVEST_ALLOC_AGGRESSIVENESS"] = str(best.params["alloc_aggressiveness"])
 
     # 3. setup hold-out workspace
-    import core.memory_store as ms
+    import openinvest.core.memory_store as ms
     ms.MEMORY_ROOT = holdout_workspace / "memory"
-    import db.trades_db as t
+    import openinvest.db.trades_db as t
     t.DB_PATH = str(holdout_workspace / "db" / "trades.db")
-    import db.insights_db as i
+    import openinvest.db.insights_db as i
     i.DEFAULT_DB_PATH = str(holdout_workspace / "db" / "insights.db")
     (holdout_workspace / "memory").mkdir(parents=True, exist_ok=True)
     (holdout_workspace / "db").mkdir(parents=True, exist_ok=True)

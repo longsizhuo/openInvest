@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from services import event_notifier
+from openinvest.services import event_notifier
 
 
 def _patch_email(monkeypatch, sink: dict):

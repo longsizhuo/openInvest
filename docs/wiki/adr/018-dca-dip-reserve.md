@@ -6,10 +6,10 @@ date: 2026-06-23
 tags: [portfolio, dca, cash, ledger, adr]
 intent: 决策参数
 schema_source:
-  - core/portfolio_manager.py:PortfolioManager
-  - core/config/tunable.py:DCAConfig
-  - core/config/_loader.py:API_SETTABLE
-  - jobs/dca_daily.py:run
+  - src/openinvest/core/portfolio_manager.py:PortfolioManager
+  - src/openinvest/core/config/tunable.py:DCAConfig
+  - src/openinvest/core/config/_loader.py:API_SETTABLE
+  - src/openinvest/jobs/dca_daily.py:run
 documents:
   endpoints:
     - GET /api/config

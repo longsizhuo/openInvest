@@ -38,7 +38,7 @@ import yfinance as yf
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from core.strategy_metrics import (  # noqa: E402
+from openinvest.core.strategy_metrics import (  # noqa: E402
     annualized_return_pct,
     max_drawdown_pct,
     sharpe_ratio,

@@ -33,7 +33,7 @@ import yfinance as yf
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
 
 HISTORY_PATH = ROOT / "memory" / ".state" / "pnl_history.jsonl"
 

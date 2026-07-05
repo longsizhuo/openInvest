@@ -9,7 +9,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import utils.exchange_fee as ef
+import openinvest.utils.exchange_fee as ef
 
 
 class _RecordingTicker:

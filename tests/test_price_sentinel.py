@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jobs import price_sentinel as ps
+from openinvest.jobs import price_sentinel as ps
 
 
 # ---------- 纯函数 ----------
@@ -85,13 +85,13 @@ class TestLatestVerdict:
 @pytest.fixture
 def sentinel_env(tmp_path, monkeypatch):
     """隔离 EventStore / MemoryStore 到 tmp，mock 行情与外设。"""
-    monkeypatch.setattr("db.event_store.DB_PATH", str(tmp_path / "events.sqlite"))
-    from core import memory_store as ms
+    monkeypatch.setattr("openinvest.db.event_store.DB_PATH", str(tmp_path / "events.sqlite"))
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
 
     # run() 内是 `from jobs.event_watch import _load_user_context`（调用时解析），打源模块
     monkeypatch.setattr(
-        "jobs.event_watch._load_user_context",
+        "openinvest.jobs.event_watch._load_user_context",
         lambda: {"holdings": ["GC=F"], "watching": [], "macro_tags": [], "queries": []},
     )
     now = datetime.now(timezone.utc)
@@ -106,10 +106,10 @@ def sentinel_env(tmp_path, monkeypatch):
 
     # 用同一个 manager 录制调用顺序（时序契约的关键断言点）
     manager = MagicMock()
-    monkeypatch.setattr("services.event_notifier.send_event_alert", manager.alert)
-    monkeypatch.setattr("jobs.event_watch._trigger_committee", manager.trigger)
+    monkeypatch.setattr("openinvest.services.event_notifier.send_event_alert", manager.alert)
+    monkeypatch.setattr("openinvest.jobs.event_watch._trigger_committee", manager.trigger)
     manager.trigger.return_value = "task-123"
-    monkeypatch.setattr("jobs.event_watch._holdings_snapshot", lambda syms: {})
+    monkeypatch.setattr("openinvest.jobs.event_watch._holdings_snapshot", lambda syms: {})
     return manager
 
 
@@ -154,7 +154,7 @@ class TestRun:
     def test_disabled_short_circuits(self, sentinel_env, monkeypatch):
         fake_cfg = SimpleNamespace(event=SimpleNamespace(
             sentinel_enabled=False, sentinel_atr_mult=0.8, sentinel_cooldown_min=120))
-        monkeypatch.setattr("core.config.load_config", lambda *a, **k: fake_cfg)
+        monkeypatch.setattr("openinvest.core.config.load_config", lambda *a, **k: fake_cfg)
         out = ps.run(dry_run=False)
         assert out["status"] == "disabled"
         sentinel_env.alert.assert_not_called()
@@ -168,7 +168,7 @@ class TestRun:
             "price": 115.0, "atr_pct": None,
         })
         captured = {}
-        from db.event_store import EventStore
+        from openinvest.db.event_store import EventStore
         real_upsert = EventStore.upsert_event
 
         def spy_upsert(self, event, embedding=None):
@@ -183,11 +183,11 @@ class TestRun:
         """code review 发现：旧版把 ms.state_set 攒到整个 for 循环跑完才调一次；
         如果后面某个 symbol 的 EventStore.upsert_event 抛异常，前面已经成功报警的
         symbol 的冷却状态因为从未持久化而丢失，下个 tick 会被重复报警。"""
-        monkeypatch.setattr("db.event_store.DB_PATH", str(tmp_path / "events.sqlite"))
-        from core import memory_store as ms_mod
+        monkeypatch.setattr("openinvest.db.event_store.DB_PATH", str(tmp_path / "events.sqlite"))
+        from openinvest.core import memory_store as ms_mod
         monkeypatch.setattr(ms_mod, "MEMORY_ROOT", tmp_path / "memory")
         monkeypatch.setattr(
-            "jobs.event_watch._load_user_context",
+            "openinvest.jobs.event_watch._load_user_context",
             lambda: {"holdings": ["AAA", "BBB"], "watching": [], "macro_tags": [], "queries": []},
         )
         now = datetime.now(timezone.utc)
@@ -197,11 +197,11 @@ class TestRun:
         }
         monkeypatch.setattr(ps, "_fetch_frames", lambda sym: frames)
         monkeypatch.setattr(ps, "_latest_verdict", lambda sym, committee_root=None: "近期无委员会 verdict")
-        monkeypatch.setattr("jobs.event_watch._trigger_committee", lambda *a, **k: "task-1")
-        monkeypatch.setattr("jobs.event_watch._holdings_snapshot", lambda syms: {})
-        monkeypatch.setattr("services.event_notifier.send_event_alert", lambda *a, **k: None)
+        monkeypatch.setattr("openinvest.jobs.event_watch._trigger_committee", lambda *a, **k: "task-1")
+        monkeypatch.setattr("openinvest.jobs.event_watch._holdings_snapshot", lambda syms: {})
+        monkeypatch.setattr("openinvest.services.event_notifier.send_event_alert", lambda *a, **k: None)
 
-        from db.event_store import EventStore
+        from openinvest.db.event_store import EventStore
         real_upsert = EventStore.upsert_event
 
         def flaky_upsert(self, event, embedding=None):

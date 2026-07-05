@@ -30,13 +30,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_load_wealth_context_view_graceful_on_missing_memory(monkeypatch, tmp_path):
     """memory 文件缺失时 load_wealth_context_view 返回 ""，不抛异常"""
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
 
     empty_dir = tmp_path / "empty_memory"
     empty_dir.mkdir()
     monkeypatch.setattr(ms, "MEMORY_ROOT", empty_dir)
 
-    from core.committee import load_wealth_context_view
+    from openinvest.core.committee import load_wealth_context_view
     result = load_wealth_context_view()
     assert result == "", (
         "load_wealth_context_view 在 memory 缺失时应 graceful 退化空字符串，"
@@ -135,7 +135,7 @@ updated: '2024-05-15T00:00:00+00:00'
 
 def test_assemble_full_report_renders_wealth_section_when_view_nonempty():
     """非空 wealth_context_view 必须出现在邮件 markdown 正文（而不是只进 transcript）"""
-    from jobs.daily_report_builder import assemble_full_report
+    from openinvest.jobs.daily_report_builder import assemble_full_report
 
     SENTINEL = "WEALTH_SECTION_SENTINEL_abc123"
 
@@ -162,7 +162,7 @@ def test_assemble_full_report_renders_wealth_section_when_view_nonempty():
 
 def test_assemble_full_report_omits_wealth_section_when_view_empty():
     """空字符串（fork 用户没填 wealth_context）→ 不应出现空 section 标题"""
-    from jobs.daily_report_builder import assemble_full_report
+    from openinvest.jobs.daily_report_builder import assemble_full_report
 
     md = assemble_full_report(
         today="2026-05-16",
@@ -204,7 +204,7 @@ def test_gemini_prompt_includes_wealth_view():
 
     任何形式的硬编码 / 漏传都会让 SENTINEL 不出现在 prompt 里，测试立即红。
     """
-    from jobs.daily_report_builder import build_gemini_prompt
+    from openinvest.jobs.daily_report_builder import build_gemini_prompt
 
     SENTINEL = "WEALTH_VIEW_SENTINEL_gemini_abc"
 
@@ -230,7 +230,7 @@ def test_gemini_prompt_includes_event_brief():
 
     任何形式的硬编码 / 漏传都会让 SENTINEL 不出现在 prompt 里，测试立即红。
     """
-    from jobs.daily_report_builder import build_gemini_prompt
+    from openinvest.jobs.daily_report_builder import build_gemini_prompt
 
     SENTINEL = "EVENT_BRIEF_SENTINEL_gemini_xyz"
 
@@ -257,7 +257,7 @@ def test_gemini_prompt_omits_empty_sections():
     避免 Gemini 看到"# 用户真实流动性 (WealthContextOfficer)\n\n"这种无内容的空 section，
     会让 Gemini 产生"为什么这里是空的"的困惑。
     """
-    from jobs.daily_report_builder import build_gemini_prompt
+    from openinvest.jobs.daily_report_builder import build_gemini_prompt
 
     prompt = build_gemini_prompt(
         portfolio_summary="mock portfolio",
@@ -305,7 +305,7 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
 
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     SENTINEL_W = "WEALTH_SENTINEL_session_abc"
@@ -313,14 +313,14 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
     SENTINEL_M = "MACRO_SENTINEL_session_ghi"
 
     # 锚定 3 个 loader 的输出
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view",
                         lambda: SENTINEL_W)
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: SENTINEL_E)
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: SENTINEL_M)
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.runner.session.load_prior_insights",
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     # mock 行情，让 run_committee_for_symbol 能跑到 run_committee
@@ -329,9 +329,9 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.runner.session.get_history_data",
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -345,9 +345,9 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
 
     assert captured, "run_committee 未被调用 — session dispatch 失败"
@@ -375,15 +375,15 @@ def test_run_committee_session_continues_on_single_asset_error(
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
 
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
 
     # 一个资产成功一个抛异常
     def fake_run_committee_for_symbol(symbol, **kw):
@@ -396,10 +396,10 @@ def test_run_committee_session_continues_on_single_asset_error(
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee_for_symbol",
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee_for_symbol",
                         fake_run_committee_for_symbol)
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     result = run_committee_session(
         symbols=["GOOD.AX", "BAD.SYM"], max_debate_rounds=1,
     )
@@ -420,26 +420,26 @@ def test_run_committee_session_event_brief_override_takes_priority(
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
 
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     SENTINEL_OVERRIDE = "OVERRIDE_BRIEF_xxx"
     SENTINEL_MULTI = "MULTI_RECALL_BRIEF_yyy"
 
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: SENTINEL_MULTI)  # 不应被调
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "M")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
     monkeypatch.setattr(
-        "core.runner.session.run_committee_for_symbol",
+        "openinvest.core.runner.session.run_committee_for_symbol",
         lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
                                        "alloc_cny": 0, "dominant_view": "macro",
                                        "raw": ""}, "report": None},
     )
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     result = run_committee_session(
         symbols=["TEST.AX"],
         event_brief_override=SENTINEL_OVERRIDE,
@@ -460,17 +460,17 @@ def test_run_committee_session_event_ids_translates_via_event_store(
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
 
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "M")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
 
     # multi_recall 不应被调（event_ids 优先于它）
     multi_called = []
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: (multi_called.append(syms), "SHOULD_NOT_BE_USED")[1])
 
     # 锚定 EventStore: 仅"ev_1" 反查得到
@@ -484,17 +484,17 @@ def test_run_committee_session_event_ids_translates_via_event_store(
             return None
         def get_sources(self, eid):
             return [{"src_name": "reuters", "url": "http://x/y"}]
-    monkeypatch.setattr("core.runner.session._get_event_store",
+    monkeypatch.setattr("openinvest.core.runner.session._get_event_store",
                         lambda: FakeStore())
 
     monkeypatch.setattr(
-        "core.runner.session.run_committee_for_symbol",
+        "openinvest.core.runner.session.run_committee_for_symbol",
         lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
                                        "alloc_cny": 0, "dominant_view": "macro",
                                        "raw": ""}, "report": None},
     )
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     result = run_committee_session(
         symbols=["TEST.AX"],
         event_ids=["ev_1"],
@@ -523,7 +523,7 @@ def test_run_committee_session_event_ids_translates_via_event_store(
 
 def test_extract_concentration_from_summary_picks_correct_asset():
     """portfolio_summary 含多个 asset 时按 (SYM) 锚定，不混淆"""
-    from core.committee import _extract_concentration_from_summary
+    from openinvest.core.committee import _extract_concentration_from_summary
 
     summary = (
         "用户风险偏好: Aggressive\n"
@@ -547,7 +547,7 @@ def test_extract_concentration_from_summary_picks_correct_asset():
 
 def test_override_concentration_rewrites_hallucinated_value():
     """LLM 输出 70.2% 但真实 33.6% → 强制改回 33.6%"""
-    from core.committee import _override_concentration_in_risk_output
+    from openinvest.core.committee import _override_concentration_in_risk_output
 
     risk_output = (
         "SIGNAL: high_risk\n"
@@ -573,7 +573,7 @@ def test_override_concentration_rewrites_hallucinated_value():
 
 def test_override_concentration_noop_when_within_tolerance():
     """LLM 输出 33.4% 真实 33.6% → 0.2% 容差内不动（正常浮动）"""
-    from core.committee import _override_concentration_in_risk_output
+    from openinvest.core.committee import _override_concentration_in_risk_output
 
     risk_output = "CONCENTRATION_PCT: 33.4%\nSIGNAL: ok\n"
     fixed = _override_concentration_in_risk_output(risk_output, 33.6)
@@ -584,7 +584,7 @@ def test_override_concentration_noop_when_within_tolerance():
 
 def test_override_concentration_noop_when_true_pct_none():
     """portfolio_summary 没给数字（None）→ 不动 LLM 输出"""
-    from core.committee import _override_concentration_in_risk_output
+    from openinvest.core.committee import _override_concentration_in_risk_output
 
     risk_output = "CONCENTRATION_PCT: 70.2%\n"
     fixed = _override_concentration_in_risk_output(risk_output, None)
@@ -593,7 +593,7 @@ def test_override_concentration_noop_when_true_pct_none():
 
 def test_override_concentration_noop_when_field_missing():
     """LLM 完全没输出该字段 → 不凭空注入（避免脏数据）"""
-    from core.committee import _override_concentration_in_risk_output
+    from openinvest.core.committee import _override_concentration_in_risk_output
 
     risk_output = "SIGNAL: ok\nSTRENGTH: 3\nONE_LINER: 无风险\n"
     fixed = _override_concentration_in_risk_output(risk_output, 33.6)
@@ -615,25 +615,25 @@ def test_override_concentration_noop_when_field_missing():
 
 def test_load_sentiment_brief_graceful_on_failure(monkeypatch):
     """build_sentiment_brief 抛异常 → load_sentiment_brief 退化 ""，不抛"""
-    import utils.sentiment as st
+    import openinvest.utils.sentiment as st
 
     def boom(*a, **k):
         raise RuntimeError("VIX source down")
     monkeypatch.setattr(st, "build_sentiment_brief", boom)
 
-    from core.committee_runner import load_sentiment_brief
+    from openinvest.core.committee_runner import load_sentiment_brief
     assert load_sentiment_brief("") == ""
 
 
 def test_load_valuation_brief_graceful_on_failure(monkeypatch):
     """build_valuation_brief 抛异常 → load_valuation_brief 退化 ""，不抛"""
-    import utils.valuation as val
+    import openinvest.utils.valuation as val
 
     def boom(*a, **k):
         raise RuntimeError("yfinance .info down")
     monkeypatch.setattr(val, "build_valuation_brief", boom)
 
-    from core.committee_runner import load_valuation_brief
+    from openinvest.core.committee_runner import load_valuation_brief
     assert load_valuation_brief("NDQ.AX", 0.5) == ""
 
 
@@ -651,25 +651,25 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
 
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     SENTINEL_SENT = "SENTIMENT_SENTINEL_xyz"
     SENTINEL_VAL = "VALUATION_SENTINEL_abc"
 
     # 锚定新 loader 的输出
-    monkeypatch.setattr("core.runner.session.load_sentiment_brief",
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief",
                         lambda *a, **k: SENTINEL_SENT)
-    monkeypatch.setattr("core.runner.session.load_valuation_brief",
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief",
                         lambda *a, **k: SENTINEL_VAL)
     # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.runner.session.load_prior_insights",
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     import pandas as pd
@@ -677,9 +677,9 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.runner.session.get_history_data",
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -693,9 +693,9 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
 
     assert captured, "run_committee 未被调用 — session dispatch 失败"
@@ -714,7 +714,7 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
 
 def test_to_cio_brief_renders_sentiment_and_valuation():
     """to_cio_brief 必须把 sentiment_brief + valuation_brief 渲染进 CIO 输入"""
-    from core.committee import CommitteeReport
+    from openinvest.core.committee import CommitteeReport
 
     SENTINEL_SENT = "SENT_CIO_SENTINEL_111"
     SENTINEL_VAL = "VAL_CIO_SENTINEL_222"
@@ -731,7 +731,7 @@ def test_to_cio_brief_renders_sentiment_and_valuation():
 
 def test_to_cio_brief_omits_empty_new_dimensions():
     """空 sentiment/valuation → 不出现对应 section 标题（避免空 section 干扰）"""
-    from core.committee import CommitteeReport
+    from openinvest.core.committee import CommitteeReport
 
     report = CommitteeReport(
         asset={"symbol": "GC=F", "display_name": "Gold"},
@@ -748,7 +748,7 @@ def test_run_committee_injects_sentiment_and_valuation_into_agents(monkeypatch):
 
     SENTINEL 守卫：未来有人删了 quant_input/cio_brief 的注入，本测立即红。
     """
-    from core import committee as cmt
+    from openinvest.core import committee as cmt
 
     SENT = "SENT_E2E_SENTINEL_777"
     VAL = "VAL_E2E_SENTINEL_888"
@@ -778,9 +778,9 @@ def test_run_committee_injects_sentiment_and_valuation_into_agents(monkeypatch):
 
     # run_committee 搬进 core/committee/debate.py 后在该命名空间解析 _create_agent /
     # _persist，façade 属性 cmt._x 的 patch 打不到 → 必须钉 core.committee.debate.*
-    monkeypatch.setattr("core.committee.debate._create_agent",
+    monkeypatch.setattr("openinvest.core.committee.debate._create_agent",
                         lambda _p, **kw: RecordingAgent(kw.get("role")))
-    monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
+    monkeypatch.setattr("openinvest.core.committee.debate._persist", lambda *a, **kw: None)
 
     cmt.run_committee(
         asset={"symbol": "NDQ.AX", "display_name": "Test"},
@@ -804,7 +804,7 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
 
     这是真正的 SENTINEL 守卫——如果未来有人删了 _override 调用，本测会红。
     """
-    from core import committee as cmt
+    from openinvest.core import committee as cmt
 
     # 构造典型 portfolio_summary（与 utils.portfolio_summary 输出格式一致）
     fake_summary = (
@@ -859,9 +859,9 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
         return FakeAgent("")
 
     # run_committee 在 core/committee/debate.py 命名空间解析这两个名字 → 钉 debate.*
-    monkeypatch.setattr("core.committee.debate._create_agent", fake_create_agent)
+    monkeypatch.setattr("openinvest.core.committee.debate._create_agent", fake_create_agent)
     # 跳过 persist（写文件 + DB）—— 单测不关心
-    monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
+    monkeypatch.setattr("openinvest.core.committee.debate._persist", lambda *a, **kw: None)
 
     result = cmt.run_committee(
         asset={"symbol": "NDQ.AX", "display_name": "BetaShares Nasdaq 100 ETF"},
@@ -916,16 +916,16 @@ def _make_hold_cio_agent_factory(captured: dict):
 
 def test_run_committee_applies_aggressive_risk_profile(monkeypatch):
     """aggressive + uptrend regime_brief → 最终 verdict 升级 ACCUMULATE（端到端）"""
-    from core import committee as cmt
-    from core.config import reset_config, set_config_override
+    from openinvest.core import committee as cmt
+    from openinvest.core.config import reset_config, set_config_override
 
     reset_config()
     set_config_override({"verdict": {"risk_profile": "aggressive"}})
     try:
         captured: dict = {}
         # run_committee 在 core/committee/debate.py 命名空间解析 → 钉 debate.*
-        monkeypatch.setattr("core.committee.debate._create_agent", _make_hold_cio_agent_factory(captured))
-        monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
+        monkeypatch.setattr("openinvest.core.committee.debate._create_agent", _make_hold_cio_agent_factory(captured))
+        monkeypatch.setattr("openinvest.core.committee.debate._persist", lambda *a, **kw: None)
         result = cmt.run_committee(
             asset={"symbol": "NDQ.AX", "display_name": "Test"},
             market_data="fake market",
@@ -946,16 +946,16 @@ def test_run_committee_applies_aggressive_risk_profile(monkeypatch):
 
 def test_run_committee_defense_flag_blocks_aggressive(monkeypatch):
     """sentiment_brief 含 INDEP_DEFENSE_FLAG: on → aggressive 杠杆被哨兵拦下（端到端）"""
-    from core import committee as cmt
-    from core.config import reset_config, set_config_override
+    from openinvest.core import committee as cmt
+    from openinvest.core.config import reset_config, set_config_override
 
     reset_config()
     set_config_override({"verdict": {"risk_profile": "aggressive"}})
     try:
         captured: dict = {}
         # run_committee 在 core/committee/debate.py 命名空间解析 → 钉 debate.*
-        monkeypatch.setattr("core.committee.debate._create_agent", _make_hold_cio_agent_factory(captured))
-        monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
+        monkeypatch.setattr("openinvest.core.committee.debate._create_agent", _make_hold_cio_agent_factory(captured))
+        monkeypatch.setattr("openinvest.core.committee.debate._persist", lambda *a, **kw: None)
         result = cmt.run_committee(
             asset={"symbol": "NDQ.AX", "display_name": "Test"},
             market_data="fake market",
@@ -989,28 +989,28 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_spike_ratio: float):
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi", lambda syms: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.runner.session.load_prior_insights", lambda *a, **kw: "")
-    monkeypatch.setattr("core.runner.session.load_sentiment_brief", lambda *a, **k: "")
-    monkeypatch.setattr("core.runner.session.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights", lambda *a, **kw: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief", lambda *a, **k: "")
 
     import pandas as pd
     fake_df = pd.DataFrame(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.runner.session.get_history_data", lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data", lambda *a, **kw: fake_df)
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
     # metrics.atr_spike_ratio 可控 → ATR 腿确定性可测（通用线 2.0，无 per-asset）
     monkeypatch.setattr(
-        "core.runner.session.compute_metrics",
+        "openinvest.core.runner.session.compute_metrics",
         lambda df: {
             "ma20": 100.0, "ma120": 96.0, "atr_pct": 1.5,
             "atr_spike_ratio": atr_spike_ratio,
@@ -1030,14 +1030,14 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_spike_ratio: float):
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
     return captured
 
 
 def test_service_layer_computes_atr_defense_leg(monkeypatch, tmp_path):
     """突变比 2.5 ≥ 通用线 2.0 → run_committee 收到 atr_defense_on=True"""
     captured = _setup_session_mocks(monkeypatch, tmp_path, atr_spike_ratio=2.5)
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
     assert captured, "run_committee 未被调用"
     assert captured[0].get("atr_defense_on") is True, (
@@ -1048,7 +1048,7 @@ def test_service_layer_computes_atr_defense_leg(monkeypatch, tmp_path):
 def test_service_layer_atr_defense_off_when_calm(monkeypatch, tmp_path):
     """突变比 1.1 < 通用线 2.0 → atr_defense_on=False（防御不乱触发）"""
     captured = _setup_session_mocks(monkeypatch, tmp_path, atr_spike_ratio=1.1)
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
     assert captured, "run_committee 未被调用"
     assert captured[0].get("atr_defense_on") is False
@@ -1056,7 +1056,7 @@ def test_service_layer_atr_defense_off_when_calm(monkeypatch, tmp_path):
 
 def test_run_committee_atr_defense_downgrades_accumulate(monkeypatch):
     """端到端：atr_defense_on=True + CIO 给 ACCUMULATE → 最终 HOLD（确定性降级）"""
-    from core import committee as cmt
+    from openinvest.core import committee as cmt
 
     class FakeAgent:
         def __init__(self, role):
@@ -1075,8 +1075,8 @@ def test_run_committee_atr_defense_downgrades_accumulate(monkeypatch):
             return ""
 
     # run_committee 在 core/committee/debate.py 命名空间解析 → 钉 debate.*
-    monkeypatch.setattr("core.committee.debate._create_agent", lambda _p, **kw: FakeAgent(kw.get("role")))
-    monkeypatch.setattr("core.committee.debate._persist", lambda *a, **kw: None)
+    monkeypatch.setattr("openinvest.core.committee.debate._create_agent", lambda _p, **kw: FakeAgent(kw.get("role")))
+    monkeypatch.setattr("openinvest.core.committee.debate._persist", lambda *a, **kw: None)
     result = cmt.run_committee(
         asset={"symbol": "NDQ.AX", "display_name": "Test"},
         market_data="fake market",
@@ -1106,7 +1106,7 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     SENTINEL_SENT = "SENTIMENT_BASE_SENTINEL_qqq"
@@ -1117,17 +1117,17 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
         "irrelevant good news\n"
     )
 
-    monkeypatch.setattr("core.runner.session.load_sentiment_brief",
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief",
                         lambda *a, **k: SENTINEL_SENT)
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: FAKE_BRIEF)
-    monkeypatch.setattr("core.runner.session.load_valuation_brief",
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.runner.session.load_prior_insights",
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     import pandas as pd
@@ -1135,9 +1135,9 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.runner.session.get_history_data",
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -1151,9 +1151,9 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
 
     assert captured, "run_committee 未被调用"
@@ -1172,21 +1172,21 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     FAKE_BRIEF = "[2026-06-10T08:00:00+00:00] [risk/high] [TEST.AX]\nbad\n"
-    monkeypatch.setattr("core.runner.session.load_sentiment_brief",
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi",
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: FAKE_BRIEF)
-    monkeypatch.setattr("core.runner.session.load_valuation_brief",
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view",
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.runner.session.load_prior_insights",
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights",
                         lambda *a, **kw: "")
 
     import pandas as pd
@@ -1194,9 +1194,9 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.runner.session.get_history_data",
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     captured: list[dict] = []
@@ -1210,9 +1210,9 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
 
     assert captured
@@ -1231,32 +1231,32 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
 
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
     SENTINEL_PATH = "- PATH_REFERENCE_SENTINEL_30d 跌破现价概率 42%"
 
     monkeypatch.setattr(
-        "core.regime_probability.build_reentry_reference",
+        "openinvest.core.regime_probability.build_reentry_reference",
         lambda *a, **k: (SENTINEL_PATH, {"windows": {}}),
     )
     # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
-    monkeypatch.setattr("core.runner.session.load_sentiment_brief", lambda *a, **k: "")
-    monkeypatch.setattr("core.runner.session.load_valuation_brief", lambda *a, **k: "")
-    monkeypatch.setattr("core.runner.session.load_wealth_context_view", lambda: "")
-    monkeypatch.setattr("core.runner.session.resolve_event_brief_multi", lambda syms: "")
-    monkeypatch.setattr("core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
-    monkeypatch.setattr("core.runner.session.get_macro_data", lambda: "MOCK")
-    monkeypatch.setattr("core.runner.session.load_prior_insights", lambda *a, **kw: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights", lambda *a, **kw: "")
 
     import pandas as pd
     fake_df = pd.DataFrame(
         {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
         index=pd.date_range("2024-05-10", periods=5),
     )
-    monkeypatch.setattr("core.runner.session.get_history_data",
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data",
                         lambda *a, **kw: fake_df)
-    monkeypatch.setattr("core.runner.session.analyze_multi_timeframe",
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
                         lambda *a, **kw: "MOCK_MARKET_DATA")
 
     def fake_run_committee(*args, **kwargs):
@@ -1267,9 +1267,9 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
             "report": None,
         }
 
-    monkeypatch.setattr("core.runner.session.run_committee", fake_run_committee)
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
 
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
     result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
 
     sym_result = result["asset_committees"]["TEST.AX"]

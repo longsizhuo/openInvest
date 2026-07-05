@@ -37,7 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-from core.config.tunable import RewardConfig
+from openinvest.core.config.tunable import RewardConfig
 
 
 @dataclass(frozen=True)

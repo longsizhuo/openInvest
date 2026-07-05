@@ -19,9 +19,9 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
-from jobs.daily_report_builder import (
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.jobs.daily_report_builder import (
     assemble_full_report,
     classify_asset_freshness,
     format_staleness_warning,
@@ -203,7 +203,7 @@ class TestPortfolioSummaryText:
         Risk Officer 据假 0% 决策（关闭集中度风控）。修复后应输出可见降级标记，
         促人工复核而非沉默归零。
         """
-        from core.config import set_config_override
+        from openinvest.core.config import set_config_override
         set_config_override({"verdict": {"concentration_lens_enabled": True}})  # 测集中度计算→显式开 lens
         holdings = [
             {"symbol": "NDQ.AX", "kind": "etf", "units": 100.0, "unit_label": "股",
@@ -225,7 +225,7 @@ class TestPortfolioSummaryText:
         """传入已修正的合法 total（只含可解析腿），缺价 holding 只显示均价不被归零，
         有价 holding 显示正确非零集中度。
         """
-        from core.config import set_config_override
+        from openinvest.core.config import set_config_override
         set_config_override({"verdict": {"concentration_lens_enabled": True}})  # 测集中度计算→显式开 lens
         holdings = [
             # 黄金：1 单位 * 134 CNY = 134 CNY 市值
@@ -284,18 +284,18 @@ class TestLoadBackupCny:
         return pm
 
     def test_reads_emergency_buffer_cny(self, tmp_path):
-        from core.committee_runner import load_backup_cny
+        from openinvest.core.committee_runner import load_backup_cny
         pm = self._pm_with_wealth(tmp_path, {"emergency_buffer_cny": 400000.0})
         assert load_backup_cny(pm) == 400000.0
 
     def test_missing_wealth_context_returns_zero(self, tmp_path):
-        from core.committee_runner import load_backup_cny
+        from openinvest.core.committee_runner import load_backup_cny
         pm = _make_pm(tmp_path)  # 无 wealth_context
         assert load_backup_cny(pm) == 0.0
 
     def test_legacy_wrong_key_returns_zero(self, tmp_path):
         """历史误用的 backup_amount_cny 已废弃；只认 emergency_buffer_cny"""
-        from core.committee_runner import load_backup_cny
+        from openinvest.core.committee_runner import load_backup_cny
         pm = self._pm_with_wealth(tmp_path, {"backup_amount_cny": 999999.0})
         assert load_backup_cny(pm) == 0.0
 
@@ -577,7 +577,7 @@ class TestAssembleFullReport:
 
 class TestTranslator:
     def test_parse_well_formed_output(self):
-        from jobs.daily_report_builder import parse_translator_output
+        from openinvest.jobs.daily_report_builder import parse_translator_output
         raw = (
             "@@GC=F\n继续持有。历史上 408 个类似日子里……\n第二句。\n"
             "@@0700.HK\n建议小额加仓 ¥2,500。\n"
@@ -588,13 +588,13 @@ class TestTranslator:
         assert "第二句" in out["GC=F"]
 
     def test_parse_garbage_returns_empty(self):
-        from jobs.daily_report_builder import parse_translator_output
+        from openinvest.jobs.daily_report_builder import parse_translator_output
         assert parse_translator_output("我不会遵守格式，直接说：持有吧") == {}
         assert parse_translator_output("") == {}
         assert parse_translator_output("@@GC=F\n   \n") == {}  # 有头无正文
 
     def test_prompt_contains_data_and_defense_note(self):
-        from jobs.daily_report_builder import build_translator_prompt
+        from openinvest.jobs.daily_report_builder import build_translator_prompt
         prompt = build_translator_prompt([{
             "symbol": "GC=F", "display_name": "伦敦金",
             "verdict_line": "HOLD，置信度 0.65，建议金额 ¥0",

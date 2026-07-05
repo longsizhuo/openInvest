@@ -4,7 +4,7 @@ title: "ADR-006：事件感知层（第一层）+ 轻量新闻 RAG"
 tags: [event-layer, rag, news, committee, feature-flag]
 intent: 事件驱动架构决策
 schema_source:
-  - db/event_store.py:EventStore
+  - src/openinvest/db/event_store.py:EventStore
 documents:
   endpoints:
     - POST /api/committee/run

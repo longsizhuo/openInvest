@@ -6,7 +6,7 @@ import math
 import pandas as pd
 import pytest
 
-from utils import fx
+from openinvest.utils import fx
 
 
 @pytest.fixture(autouse=True)

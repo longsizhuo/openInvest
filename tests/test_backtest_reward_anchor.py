@@ -1,7 +1,7 @@
 """R1 / ADR-022 T5:reward 锚必须是 vs 同资产 buy-and-hold,不是余额宝/现金。
 旧锚=余额宝 → 牛市跑赢现金 trivial 且可同时输给 buy-hold,优化器被奖励"坐现金避险"。
 """
-from core.backtest_reward import compute_strategy_reward
+from openinvest.core.backtest_reward import compute_strategy_reward
 
 
 def _metrics(buy_hold_alpha, yuebao_alpha):

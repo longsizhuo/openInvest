@@ -28,7 +28,7 @@ import pandas as pd
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 CACHE = ROOT / "memory" / ".ta_experiment"
 CACHE.mkdir(parents=True, exist_ok=True)

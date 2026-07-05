@@ -26,7 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # 复用 production 的 compute_metrics，确保比较公平
-from utils.market_metrics import compute_metrics  # noqa: E402
+from openinvest.utils.market_metrics import compute_metrics  # noqa: E402
 
 TRAINSET = ROOT / "experiments" / "dspy_trainset_v2.json"
 OUTPUT = ROOT / "experiments" / "audits" / "v1_trainset_audit.json"

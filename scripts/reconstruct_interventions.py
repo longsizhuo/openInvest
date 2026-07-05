@@ -26,8 +26,8 @@ from typing import Dict, Optional, Tuple
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.committee_runner import rule_family  # noqa: E402
-from core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.committee_runner import rule_family  # noqa: E402
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
 
 # transcript 里 CIO memo 的原话字段
 RE_VERDICT = re.compile(r"^VERDICT:\s*([A-Z]+)", re.M)

@@ -6,9 +6,9 @@ date: 2026-06-23
 tags: [concentration, trim, solvency, lens, cio, adr]
 intent: 决策参数
 schema_source:
-  - core/committee/cio_parse.py:parse_cio_memo
-  - core/config/tunable.py:VerdictConfig
-  - core/config/_loader.py:API_SETTABLE
+  - src/openinvest/core/committee/cio_parse.py:parse_cio_memo
+  - src/openinvest/core/config/tunable.py:VerdictConfig
+  - src/openinvest/core/config/_loader.py:API_SETTABLE
 documents:
   endpoints:
     - GET /api/config

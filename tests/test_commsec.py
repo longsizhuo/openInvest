@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # 添加项目根目录到 path 以便导入
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from services.commsec_reader import CommSecReader
+from openinvest.services.commsec_reader import CommSecReader
 
 class TestCommSecParsing(unittest.TestCase):
     def setUp(self):

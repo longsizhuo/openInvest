@@ -130,9 +130,9 @@ _VERDICT_RAW_RE = re.compile(r"VERDICT:\s*(BUY|ACCUMULATE|HOLD|TRIM|SELL)", re.I
 log = logging.getLogger("full_validation")
 
 # ---- 只读 import：OHLC 源（regime + forward return）、hit 定义、生产委员会入口 ----
-from core.regime_probability import compute_regime_return_frame  # noqa: E402
-from db.market_store import MarketStore  # noqa: E402
-from jobs.verdict_review import (  # noqa: E402  口径一致的 hit 定义，直接复用
+from openinvest.core.regime_probability import compute_regime_return_frame  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
+from openinvest.jobs.verdict_review import (  # noqa: E402  口径一致的 hit 定义，直接复用
     EXPECTED_DIRECTION,
     _atr_pct_cached,
     _flat_band,
@@ -148,13 +148,13 @@ def _pin_to_date_and_isolate(decision_date: str):
     """把生产委员会路径钉到历史日 D + 隔离所有副作用/未来泄漏。详见模块 docstring。"""
     import pandas as pd
 
-    import capabilities.tools as tools
+    import openinvest.capabilities.tools as tools
     # _persist 已搬进 core/committee/debate.py；run_committee 在 debate 命名空间解析它，
     # 必须 patch debate._persist（patch façade core.committee._persist 打不到）。
-    import core.committee.debate as cm_debate
-    import core.runner.session as cr
-    import db.market_store as ms
-    import utils.exchange_fee as ef
+    import openinvest.core.committee.debate as cm_debate
+    import openinvest.core.runner.session as cr
+    import openinvest.db.market_store as ms
+    import openinvest.utils.exchange_fee as ef
 
     cutoff_ts = pd.to_datetime(decision_date)
     real_get_history = ef.get_history_data
@@ -266,7 +266,7 @@ def lookup_regime_and_fwd(frame, D: str) -> Tuple[Optional[str], Optional[float]
 # ============================================================================
 def run_committee_at_date(symbol: str, D: str) -> Dict[str, Any]:
     """钉到 D 跑 run_committee_session（与 skill.py 同款），返回 parse_cio_memo dict + 元信息。"""
-    from core.committee_runner import run_committee_session
+    from openinvest.core.committee_runner import run_committee_session
 
     with _pin_to_date_and_isolate(D):
         session = run_committee_session(

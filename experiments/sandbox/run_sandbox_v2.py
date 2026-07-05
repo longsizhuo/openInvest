@@ -76,7 +76,7 @@ ALLOC_BY_VERDICT = {
 def configure_dspy():
     """配 DSPy + 任意 OpenAI 兼容 LLM（默认 DeepSeek，可换千问/智谱/Kimi）"""
     import dspy
-    from utils.llm import get_dspy_lm, get_llm_config
+    from openinvest.utils.llm import get_dspy_lm, get_llm_config
     _api_key, base_url, model, _provider = get_llm_config()
     lm = get_dspy_lm(temperature=0.2, max_tokens=MAX_TOKENS)
     dspy.configure(lm=lm)
@@ -350,7 +350,7 @@ def run_arm(program, eval_set: list[dict], arm_label: str, n_threads: int) -> li
 # ---------- Metrics 聚合 ----------
 
 def compute_metrics(eval_set: list[dict], results: list[CallResult]) -> dict[str, Any]:
-    from core.backtest_reward import verdict_oracle_accuracy
+    from openinvest.core.backtest_reward import verdict_oracle_accuracy
 
     n = len(results)
     n_success = sum(1 for r in results if r.success)

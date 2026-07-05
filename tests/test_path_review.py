@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import jobs.path_review as pr
+import openinvest.jobs.path_review as pr
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +105,7 @@ def test_summarize_math():
 
 
 def test_collect_live_snapshots(tmp_path, monkeypatch):
-    import core.memory_store as ms
+    import openinvest.core.memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
     d = tmp_path / ".committee" / "2026-06-01"
     d.mkdir(parents=True)

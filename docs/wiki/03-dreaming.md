@@ -4,10 +4,10 @@ title: Dreaming 记忆整合
 tags: [dreaming, memory, committee, regime, insights]
 intent: 记忆整合
 schema_source:
-  - jobs/dreaming.py:light_sleep
-  - jobs/dreaming.py:rem_sleep
-  - jobs/dreaming.py:deep_sleep
-  - core/runner/loaders.py:load_prior_insights
+  - src/openinvest/jobs/dreaming.py:light_sleep
+  - src/openinvest/jobs/dreaming.py:rem_sleep
+  - src/openinvest/jobs/dreaming.py:deep_sleep
+  - src/openinvest/core/runner/loaders.py:load_prior_insights
 documents:
   endpoints: []
   config_keys: []

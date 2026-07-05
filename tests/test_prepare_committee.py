@@ -41,10 +41,10 @@ REENTRY = "REENTRY_PREP_SENTINEL"
 
 @pytest.fixture()
 def _mock_world(monkeypatch):
-    import core.portfolio_manager as pm_mod
+    import openinvest.core.portfolio_manager as pm_mod
     monkeypatch.setattr(pm_mod, "PortfolioManager", _FakePM)
 
-    import utils.exchange_fee as ef
+    import openinvest.utils.exchange_fee as ef
     fake_df = pd.DataFrame(
         {"Close": [100.0 + i for i in range(200)]},
         index=pd.date_range("2024-01-01", periods=200),
@@ -53,25 +53,25 @@ def _mock_world(monkeypatch):
     monkeypatch.setattr(ef, "analyze_multi_timeframe", lambda *a, **k: "MOCK_MARKET")
     monkeypatch.setattr(ef, "get_macro_data", lambda: "MOCK_MACRO")
 
-    import utils.gold_price as gp
+    import openinvest.utils.gold_price as gp
     monkeypatch.setattr(gp, "get_gold_snapshot", lambda **k: None)
 
     # 确定性事实块 loaders（与 direct 路径同源）锚定 SENTINEL
-    import core.runner.coordinator as cr
+    import openinvest.core.runner.coordinator as cr
     monkeypatch.setattr(cr, "load_sentiment_brief", lambda *a, **k: SENT)
     monkeypatch.setattr(cr, "load_valuation_brief", lambda *a, **k: VAL)
     monkeypatch.setattr(cr, "load_wealth_context_view", lambda: "")
     monkeypatch.setattr(cr, "load_prior_insights", lambda *a, **k: "")
     monkeypatch.setattr(cr, "load_backup_cny", lambda pm: 0.0)
 
-    import core.regime_probability as rp
+    import openinvest.core.regime_probability as rp
     monkeypatch.setattr(rp, "get_regime_forward_summary", lambda *a, **k: None)
     # coordinator 改用 build_reentry_reference（取回结构化 profile，与 session 路径对齐）
     monkeypatch.setattr(rp, "build_reentry_reference", lambda *a, **k: (REENTRY, None))
 
-    import jobs.daily_report_builder as drb
+    import openinvest.jobs.daily_report_builder as drb
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
-    import utils.fx as fx
+    import openinvest.utils.fx as fx
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, "ok"))
 
 
@@ -81,7 +81,7 @@ def test_prepare_committee_emits_deterministic_blocks(_mock_world, capfd):
 
     用 capfd 而非 capsys：_print_json 直写 sys.__stdout__（fd 级）绕过 capsys。
     """
-    from scripts.skill import cmd_prepare_committee
+    from openinvest.cli import cmd_prepare_committee
 
     cmd_prepare_committee(argparse.Namespace(symbol="TEST.AX"))
     raw = capfd.readouterr().out

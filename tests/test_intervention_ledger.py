@@ -15,7 +15,7 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.committee_runner import _intervention_record  # noqa: E402
+from openinvest.core.committee_runner import _intervention_record  # noqa: E402
 
 
 def _v(**kw):
@@ -123,9 +123,9 @@ class TestInterventionRecord:
 
 class TestLogIntervention:
     def test_appends_jsonl(self, tmp_path, monkeypatch):
-        from core import memory_store as ms
+        from openinvest.core import memory_store as ms
         monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
-        from core.committee_runner import _log_intervention
+        from openinvest.core.committee_runner import _log_intervention
         _log_intervention({"schema": 1, "date": "2026-06-12", "asset": "GC=F",
                            "rule": "defense_accumulate_to_hold"})
         _log_intervention({"schema": 1, "date": "2026-06-13", "asset": "GC=F",
@@ -139,7 +139,7 @@ class TestLogIntervention:
 class TestReviewArithmetic:
     def test_counterfactual_pnl_signs(self, monkeypatch):
         """被拦买入遇涨=正（拦错踏空）；被拦减仓遇跌=正（拦错多亏）"""
-        import jobs.intervention_review as ir
+        import openinvest.jobs.intervention_review as ir
         # 30d +10%，60d -5%，90d 未到期
         monkeypatch.setattr(ir, "fwd_return",
                             lambda sym, d, w: {30: 0.10, 60: -0.05, 90: None}[w])
@@ -160,7 +160,7 @@ class TestReviewArithmetic:
 
     def test_preview_fields(self, monkeypatch):
         """未结算预览：决策日→最新收盘的浮动反事实"""
-        import jobs.intervention_review as ir
+        import openinvest.jobs.intervention_review as ir
         monkeypatch.setattr(ir, "fwd_return", lambda sym, d, w: None)  # 全未结算
         monkeypatch.setattr(ir, "latest_return",
                             lambda sym, d: {"ret": 0.02, "days": 5})
@@ -173,7 +173,7 @@ class TestReviewArithmetic:
         assert scored[0]["counterfactual_pnl_30d_cny"] is None
 
     def test_summarize_aggregates(self, monkeypatch):
-        import jobs.intervention_review as ir
+        import openinvest.jobs.intervention_review as ir
         monkeypatch.setattr(ir, "fwd_return", lambda sym, d, w: 0.10)
         rows = [{"date": "2026-01-01", "asset": "GC=F",
                  "rule": "defense_accumulate_to_hold", "delta_exposure_cny": 1000.0}] * 3
@@ -187,7 +187,7 @@ class TestReviewArithmetic:
 
 class TestRuleFamily:
     def test_live_and_reconstructed_map_to_same_family(self):
-        from core.committee_runner import rule_family
+        from openinvest.core.committee_runner import rule_family
         # 拦减仓家族
         assert rule_family("sanity4_solvency_concentration") == "trim_blocked"
         assert rule_family("sanity5_reentry_missing") == "trim_blocked"
@@ -215,7 +215,7 @@ class TestRuleFamily:
         assert rec["rule_family"] == "trim_blocked"
 
     def test_summarize_by_family_merges_live_and_reconstructed(self, monkeypatch):
-        import jobs.intervention_review as ir
+        import openinvest.jobs.intervention_review as ir
         monkeypatch.setattr(ir, "fwd_return", lambda sym, d, w: 0.05)
         monkeypatch.setattr(ir, "latest_return", lambda sym, d: None)
         rows = [
@@ -241,14 +241,14 @@ class TestGoldDcaGate:
 
     @staticmethod
     def _seed(tmp_path, monkeypatch, records):
-        from core import memory_store as ms
+        from openinvest.core import memory_store as ms
         monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
-        from core.committee_runner import _log_intervention
+        from openinvest.core.committee_runner import _log_intervention
         for r in records:
             _log_intervention(r)
 
     def _gate(self, **kw):
-        from core.committee_runner import _gold_defense_dca_gate
+        from openinvest.core.committee_runner import _gold_defense_dca_gate
         base = dict(n_tranches=3, fraction=0.3333, min_spacing_days=5, window_days=20)
         base.update(kw)
         return _gold_defense_dca_gate("GC=F", self.CAL, **base)

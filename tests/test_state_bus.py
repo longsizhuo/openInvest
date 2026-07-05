@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-import connectors.state_bus as sb
+import openinvest.connectors.state_bus as sb
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +42,7 @@ def test_lru_eviction_at_501():
 
     assert sb._current_size() == 500  # 总量仍是 500
     # 直接访问内部 dict 确认 first_key 已消失
-    import connectors.state_bus as _sb_internal
+    import openinvest.connectors.state_bus as _sb_internal
     with _sb_internal._meta_lock:
         assert first_key not in _sb_internal._status_locks
 
@@ -66,7 +66,7 @@ def test_lru_eviction_evicts_oldest_not_newest():
     """连续加 501 个时，被驱逐的应该是第 1 个，而不是第 500 / 501 个"""
     for i in range(1, 502):
         sb._get_status_lock(f"task-{i:06d}")
-    import connectors.state_bus as _sb_internal
+    import openinvest.connectors.state_bus as _sb_internal
     with _sb_internal._meta_lock:
         assert "task-000001" not in _sb_internal._status_locks
         assert "task-000501" in _sb_internal._status_locks

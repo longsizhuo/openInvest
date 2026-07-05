@@ -40,7 +40,7 @@ import pandas as pd
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 EVENTS_DB = ROOT / "db" / "events.db"
 WINDOW_DAYS = 7          # 对齐 event_store.recall 默认时间窗

@@ -30,7 +30,7 @@ PANEL_CACHE = os.path.join(OUT_DIR, "q1_panel.pkl")  # 自写本地缓存(非外
 def build_panel() -> pd.DataFrame:
     if os.path.exists(PANEL_CACHE):
         return pd.read_pickle(PANEL_CACHE)
-    from utils.market_metrics import compute_metrics
+    from openinvest.utils.market_metrics import compute_metrics
     blob = pd.read_pickle(PRICES_CACHE)
     frames = blob["frames"]
     dates = pd.date_range(TEST_START, pd.Timestamp.today(), freq=REBALANCE_FREQ)

@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from services.holdings_import import _normalize_holding, commit_parsed, parse_holdings
+from openinvest.services.holdings_import import _normalize_holding, commit_parsed, parse_holdings
 
 
 class FakePM:
@@ -22,7 +22,7 @@ class FakePM:
 
 
 def test_parse_holdings_no_key_raises(monkeypatch):
-    monkeypatch.setattr("utils.llm.get_llm_config_safe", lambda *a, **k: (None, "", "", ""))
+    monkeypatch.setattr("openinvest.utils.llm.get_llm_config_safe", lambda *a, **k: (None, "", "", ""))
     with pytest.raises(ValueError, match="LLM_API_KEY"):
         parse_holdings("510300 ETF 3000股")
 

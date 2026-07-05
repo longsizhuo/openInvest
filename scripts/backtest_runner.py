@@ -54,15 +54,15 @@ def _setup_isolated_paths(workspace: Path) -> None:
         )
 
     # 1. core.memory_store.MEMORY_ROOT
-    import core.memory_store as _ms
+    import openinvest.core.memory_store as _ms
     _ms.MEMORY_ROOT = workspace / "memory"
 
     # 2. db.trades_db.DB_PATH
-    import db.trades_db as _trades
+    import openinvest.db.trades_db as _trades
     _trades.DB_PATH = str(workspace / "db" / "trades.db")
 
     # 3. db.insights_db.DEFAULT_DB_PATH
-    import db.insights_db as _insights
+    import openinvest.db.insights_db as _insights
     _insights.DEFAULT_DB_PATH = str(workspace / "db" / "insights.db")
 
     # 注：market_data.db (yfinance 行情缓存) 故意**共享**真实 db/ —— 行情缓存
@@ -146,7 +146,7 @@ def _warmup_market_data(symbols: list) -> None:
     import math
 
     import yfinance as yf
-    from db.market_store import MarketStore
+    from openinvest.db.market_store import MarketStore
     store = MarketStore()
     macro_symbols = ["^VIX", "^TNX", "USDCNY=X", "AUDCNY=X"]
     all_syms = list(set(symbols + macro_symbols))

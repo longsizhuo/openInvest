@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # _metrics.py 同目录
 
 from _metrics import metrics  # noqa: E402  共享指标，避免逐字复制漂移
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 SYMBOL = "GC=F"
 # 注意：各窗的 _s1/_s2 文件是主跑的分片（verdict 逐位相同，2026-06-12 核验），
@@ -66,7 +66,7 @@ def main() -> None:
     df = MarketStore().get_history_df(SYMBOL, days=100000)
     close = df["Close"]
     asset_ret = close.pct_change()
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
     frame = compute_regime_return_frame(df, SYMBOL, windows=("30d",))
     regime = frame["regime"].reindex(close.index)
     free = {

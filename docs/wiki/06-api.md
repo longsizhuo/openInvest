@@ -4,10 +4,10 @@ title: Web API 参考
 tags: [api, rest, fastapi, openapi]
 intent: API Contract
 schema_source:
-  - connectors/web_api/models.py:PortfolioResponse
-  - connectors/web_api/models.py:HoldingsListResponse
-  - connectors/web_api/models.py:TotalValueResponse
-  - connectors/web_api/models.py:ConfigResponse
+  - src/openinvest/connectors/web_api/models.py:PortfolioResponse
+  - src/openinvest/connectors/web_api/models.py:HoldingsListResponse
+  - src/openinvest/connectors/web_api/models.py:TotalValueResponse
+  - src/openinvest/connectors/web_api/models.py:ConfigResponse
 documents:
   endpoints:
     - GET /api/portfolio
@@ -442,8 +442,7 @@ INVEST_WEB_DEV_CORS=1 uv run uvicorn ...
 REST 之外的第三个 adapter（CLI / REST / MCP 同吃 service 层，零业务逻辑）：
 
 ```bash
-claude mcp add openinvest -e INVEST_HOME=<数据目录> -- \
-  uv --directory <repo> run python -m connectors.mcp_server
+claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
 ```
 
 - **transport = stdio**：MCP client 按 session spawn 子进程，无端口无 daemon；

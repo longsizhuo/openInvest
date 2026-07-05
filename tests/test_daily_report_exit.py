@@ -1,6 +1,6 @@
 """daily_report 退出码契约：邮件发出=0、其余=1(自托管 Actions 红勾信号)。
 跑：uv run pytest tests/test_daily_report_exit.py -q"""
-from jobs.daily_report import _report_exit_code
+from openinvest.jobs.daily_report import _report_exit_code
 
 
 def test_email_sent_is_green():

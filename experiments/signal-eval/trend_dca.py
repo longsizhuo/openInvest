@@ -182,7 +182,7 @@ def run_asset(sym: str, close: pd.Series, label: str, cost: float = PRIMARY_COST
 
 
 def main() -> Dict:
-    from db.market_store import MarketStore
+    from openinvest.db.market_store import MarketStore
     ms = MarketStore()
     out: Dict = {"test": "trend_dca_gate",
                  "design": "MA-trend long/flat vs matched-exposure passive, net cost, DSR deflated over MA grid",

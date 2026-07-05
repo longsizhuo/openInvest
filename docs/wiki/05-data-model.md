@@ -4,10 +4,10 @@ title: 数据模型
 tags: [data-model, portfolio, schema, concurrency]
 intent: 数据模型
 schema_source:
-  - core/schemas.py:Holding
-  - core/schemas.py:PortfolioData
-  - core/portfolio_manager.py:PortfolioManager
-  - core/portfolio_manager.py:HoldingsView
+  - src/openinvest/core/schemas.py:Holding
+  - src/openinvest/core/schemas.py:PortfolioData
+  - src/openinvest/core/portfolio_manager.py:PortfolioManager
+  - src/openinvest/core/portfolio_manager.py:HoldingsView
 documents:
   endpoints: []
   config_keys: []

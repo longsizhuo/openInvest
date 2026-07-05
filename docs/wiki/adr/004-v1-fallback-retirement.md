@@ -4,8 +4,8 @@ title: "ADR-004: v1 Portfolio Fallback 正式退场"
 tags: [portfolio, migration, v2, schema, refactor]
 intent: 记录 v1 portfolio 兼容 fallback 正式删除的决策
 schema_source:
-  - core/schemas.py:PortfolioData
-  - core/portfolio_manager.py:PortfolioManager
+  - src/openinvest/core/schemas.py:PortfolioData
+  - src/openinvest/core/portfolio_manager.py:PortfolioManager
 documents:
   endpoints: []
   config_keys: []

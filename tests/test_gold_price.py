@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
-from utils.gold_price import (
+from openinvest.utils.gold_price import (
     GoldPriceSnapshot,
     _get_db_fallback_snapshot,
     get_gold_snapshot,
@@ -23,7 +23,7 @@ def test_snapshot_dataclass_has_is_stale_field():
 
 def test_db_fallback_returns_stale_snapshot():
     """yfinance 都挂时 DB 兜底返回 is_stale=True"""
-    with patch("utils.gold_price.MarketStore" if False else "db.market_store.MarketStore") as MockStore:
+    with patch("openinvest.utils.gold_price.MarketStore" if False else "openinvest.db.market_store.MarketStore") as MockStore:
         instance = MockStore.return_value
         instance.get_latest_price.side_effect = lambda sym: {
             "GC=F": 4600.0, "USDCNY=X": 6.85,
@@ -36,7 +36,7 @@ def test_db_fallback_returns_stale_snapshot():
 
 
 def test_db_fallback_returns_none_if_no_db_data():
-    with patch("db.market_store.MarketStore") as MockStore:
+    with patch("openinvest.db.market_store.MarketStore") as MockStore:
         instance = MockStore.return_value
         instance.get_latest_price.return_value = None
         result = _get_db_fallback_snapshot(offset_pct=0.0)
@@ -53,7 +53,7 @@ def test_get_gold_snapshot_yfinance_success_returns_fresh():
     fake_usdcny_df.empty = False
     fake_usdcny_df.__getitem__.return_value.iloc = [6.85]
 
-    with patch("utils.gold_price.yf.Ticker") as MockTicker:
+    with patch("openinvest.utils.gold_price.yf.Ticker") as MockTicker:
         # yf.Ticker(sym).history(period="1d") 链
         def history_side_effect(period):
             return MagicMock(empty=False, **{
@@ -79,8 +79,8 @@ def test_get_gold_snapshot_offset_applied():
 
 def test_get_gold_snapshot_falls_back_when_yfinance_raises():
     """yfinance 抛异常时走 DB 兜底"""
-    with patch("utils.gold_price.yf.Ticker") as MockTicker, \
-         patch("db.market_store.MarketStore") as MockStore:
+    with patch("openinvest.utils.gold_price.yf.Ticker") as MockTicker, \
+         patch("openinvest.db.market_store.MarketStore") as MockStore:
         MockTicker.side_effect = ConnectionError("yahoo down")
         instance = MockStore.return_value
         instance.get_latest_price.side_effect = lambda sym: {
@@ -94,8 +94,8 @@ def test_get_gold_snapshot_falls_back_when_yfinance_raises():
 
 def test_get_gold_snapshot_returns_none_when_all_fail():
     """yfinance + DB 都挂时返回 None，不抛异常"""
-    with patch("utils.gold_price.yf.Ticker") as MockTicker, \
-         patch("db.market_store.MarketStore") as MockStore:
+    with patch("openinvest.utils.gold_price.yf.Ticker") as MockTicker, \
+         patch("openinvest.db.market_store.MarketStore") as MockStore:
         MockTicker.side_effect = ConnectionError("yahoo down")
         instance = MockStore.return_value
         instance.get_latest_price.return_value = None

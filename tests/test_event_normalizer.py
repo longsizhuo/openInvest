@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from services.event_normalizer import (
+from openinvest.services.event_normalizer import (
     _parse_events_json,
     _sanitize_event,
     normalize,
 )
-from services.news_sources import RawNewsItem
+from openinvest.services.news_sources import RawNewsItem
 
 
 def _make_resp(json_obj):

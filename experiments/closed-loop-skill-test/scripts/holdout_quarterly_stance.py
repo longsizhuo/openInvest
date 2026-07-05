@@ -4,8 +4,8 @@
 """
 import re
 from collections import defaultdict
-from core.memory_store import MemoryStore
-from core.committee import safe_symbol
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.committee import safe_symbol
 
 ASSETS = ["GC=F", "510300.SS", "NDQ.AX"]
 CMB_GOLD = {"2025Q1": "标配(↓from中高配)", "2025Q2": "标配", "2025Q3": "标配", "2025Q4": "标配", "2026Q1": "标配"}

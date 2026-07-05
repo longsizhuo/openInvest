@@ -1,0 +1,6 @@
+name: path_review
+description: 周日 11:30 路径预测后验校准（live 快照 + 成熟度过滤；与 verdict_review 互补）
+schedule: "30 11 * * 0"
+timezone: Asia/Shanghai
+entry: openinvest.jobs.path_review:run
+enabled: false  # live 快照攒到 n≥30 再启用；当前用 --recompute-weekly-since 出校准基线

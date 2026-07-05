@@ -136,14 +136,26 @@ openInvest 有三个调用层，每层服务不同对象：
 
 ## 关键文件速查
 
+> 2026-07-04（issue #133 PyPI 路线）：全部后端包物理挪到 `src/openinvest/`（`openinvest.*`
+> 命名空间，hatchling 打包，console scripts `openinvest` / `openinvest-mcp`）。数据目录
+> （memory/ db/ docs/ static/ logs/）留在仓库根，代码统一经 `openinvest.paths.INVEST_ROOT`
+> 解析（INVEST_HOME env > 仓库标记探测 > cwd）——**新代码禁止再用 `__file__` 相对路径
+> 找数据目录**（#55 拆 routers 时这么干过，task store 静默漂进 web_api/memory/）。
+> 旧入口留 shim：`scripts/skill.py`、`python -m connectors.mcp_server`、
+> `uvicorn connectors.web_api:app` 仍可用（shim 只在 git clone 形态存在，不进 wheel）。
+> lint-imports 必须带 `--no-cache`（grimp 缓存对 src/ editable 布局丢函数级 import 边）。
+
 ```
 skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，不是"用户怎么用"）
-scripts/skill.py           CLI 入口薄壳 façade（保留 main + ROOT；cmd 实现已拆到 scripts/skill_cmds/ 包）
-scripts/skill_cmds/        skill 各 cmd 实现子包（_helpers/analysis/committee/portfolio/lifecycle 5 模块）
-connectors/web_api/         FastAPI 端点包（GUI + CLI 共享）；app factory 在 __init__.py，端点按域拆在 routers/（insights/observability/verdict_review/committee_sessions/regime/state/read/write/...），响应模型在 models.py
-core/portfolio_manager.py  持仓 façade，with_portfolio_tx fcntl 锁
-core/committee/            委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
-db/trades_db.py            内部账本 SQLite WAL（不连真实支付）
+src/openinvest/cli.py              CLI 入口（console script `openinvest`；旧 scripts/skill.py 是兼容 shim）
+src/openinvest/skill_cmds/         skill 各 cmd 实现子包（_helpers/analysis/committee/portfolio/lifecycle/config）
+src/openinvest/connectors/web_api/ FastAPI 端点包（GUI + CLI 共享）；app factory 在 __init__.py，端点按域拆在 routers/，响应模型在 models.py
+src/openinvest/connectors/mcp_server.py  MCP stdio adapter（14 工具，console script `openinvest-mcp`）
+src/openinvest/core/portfolio_manager.py 持仓 façade，with_portfolio_tx fcntl 锁
+src/openinvest/core/committee/     委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
+src/openinvest/core/decision_ledger.py   决策账本读时 join（issue #133 Decision 9）
+src/openinvest/db/trades_db.py     内部账本 SQLite WAL（不连真实支付；数据文件在仓库根 db/）
+src/openinvest/paths.py            INVEST_ROOT 数据目录单一可信源
 docs/wiki/                 完整文档
 docs/wiki/adr/             关键决策记录（v1 退场 / daily_report 拆 / 双路径）
 ```

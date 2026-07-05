@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from services.news_sources import RawNewsItem, fetch_all
+from openinvest.services.news_sources import RawNewsItem, fetch_all
 
 
 def _stub_items(prefix: str, n: int):
@@ -17,9 +17,9 @@ def _stub_items(prefix: str, n: int):
 
 
 def test_fetch_all_runs_each_source_and_dedups_urls():
-    with patch("services.news_sources.ddgs_news.fetch_ddgs_news") as m_ddgs, \
-         patch("services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
-         patch("services.news_sources.rss_feed.fetch_rss") as m_rss:
+    with patch("openinvest.services.news_sources.ddgs_news.fetch_ddgs_news") as m_ddgs, \
+         patch("openinvest.services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
+         patch("openinvest.services.news_sources.rss_feed.fetch_rss") as m_rss:
         m_ddgs.return_value = _stub_items("ddgs", 3)
         m_yf.return_value = _stub_items("yf", 2)
         m_rss.return_value = [
@@ -37,10 +37,10 @@ def test_fetch_all_runs_each_source_and_dedups_urls():
 
 
 def test_fetch_all_continues_on_per_source_failure():
-    with patch("services.news_sources.ddgs_news.fetch_ddgs_news",
+    with patch("openinvest.services.news_sources.ddgs_news.fetch_ddgs_news",
                side_effect=RuntimeError("boom")), \
-         patch("services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
-         patch("services.news_sources.rss_feed.fetch_rss") as m_rss:
+         patch("openinvest.services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
+         patch("openinvest.services.news_sources.rss_feed.fetch_rss") as m_rss:
         m_yf.return_value = _stub_items("yf", 2)
         m_rss.return_value = _stub_items("rss", 1)
         out = fetch_all(
@@ -57,7 +57,7 @@ def test_fetch_all_empty_inputs():
 
 def test_rss_feed_parses_minimal_feed():
     """单测 rss_feed.fetch_rss 自身 —— mock feedparser.parse"""
-    from services.news_sources.rss_feed import fetch_rss
+    from openinvest.services.news_sources.rss_feed import fetch_rss
     fake = MagicMock()
     fake.entries = [
         {"link": "https://r.com/a", "title": "<b>A</b>",

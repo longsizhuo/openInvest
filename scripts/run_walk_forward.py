@@ -68,8 +68,8 @@ def _build_benchmark_curves(
 ) -> Dict[str, List[Tuple[str, float]]]:
     """基准曲线:`buy_hold`(实际交易资产的等权 buy-and-hold,T2 正确的 headline,reward 锚=它)
     + 余额宝 + 沪深300 + 纯现金 + 等权组合(legacy,含 AAPL,勿当 headline)。"""
-    from utils.exchange_fee import get_history_data
-    from core.paper_trade_simulator import get_asset_currency
+    from openinvest.utils.exchange_fee import get_history_data
+    from openinvest.core.paper_trade_simulator import get_asset_currency
     trading_days = _trading_days_between(start, end)
     if not trading_days:
         return {}
@@ -126,8 +126,8 @@ def _buy_and_hold_curve(
     symbol: str, ccy: str, start: str, end: str, initial_cash_cny: float,
 ) -> List[Tuple[str, float]]:
     """在 start 当天 all-in 买入 symbol，到 end 每天 mark-to-market"""
-    from utils.exchange_fee import get_history_data
-    from utils.fx import get_fx_rate
+    from openinvest.utils.exchange_fee import get_history_data
+    from openinvest.utils.fx import get_fx_rate
 
     trading_days = _trading_days_between(start, end)
     if not trading_days:
@@ -153,7 +153,7 @@ def _buy_and_hold_curve(
 
 
 def _safe_close(symbol: str, date_str: str) -> Optional[float]:
-    from utils.exchange_fee import get_history_data
+    from openinvest.utils.exchange_fee import get_history_data
     df = get_history_data(symbol, "5d", as_of_date=date_str)
     if df is None or df.empty:
         return None
@@ -176,8 +176,8 @@ def run_walk_forward(
 
     必须在 backtest workspace 隔离环境内调用（数据路径已被 backtest_runner monkey-patch）
     """
-    from core.paper_trade_simulator import PaperTradeSimulator
-    from core.strategy_metrics import evaluate_strategy
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
+    from openinvest.core.strategy_metrics import evaluate_strategy
     from scripts.backtest_committee import run_one_day
 
     log.info(f"📅 walk-forward {start} → {end} 每 {step_days} 天 × {len(assets)} 资产")

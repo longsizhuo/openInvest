@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from db.insights_db import InsightsDB
+from openinvest.db.insights_db import InsightsDB
 
 
 @pytest.fixture

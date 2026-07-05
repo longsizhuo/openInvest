@@ -5,7 +5,7 @@ alloc_cny(如 -5000),旧 execute_verdict 的 `if alloc_cny <= 0: HOLD` 把它全
 SELL/TRIM 从不成交(16 次 TRIM 全 no-op),曾被误判成"委员会会 de-risk"。修复:取
 qty_cny = abs(alloc_cny),方向由 direction 决定。详见 docs/wiki/17。
 """
-from core.paper_trade_simulator import PaperTradeSimulator
+from openinvest.core.paper_trade_simulator import PaperTradeSimulator
 
 
 def test_trim_negative_alloc_executes_sell(monkeypatch):

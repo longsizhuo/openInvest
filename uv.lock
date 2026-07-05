@@ -752,79 +752,6 @@ wheels = [
 ]
 
 [[package]]
-name = "invest"
-version = "0.15.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "apscheduler" },
-    { name = "beautifulsoup4" },
-    { name = "croniter" },
-    { name = "ddgs" },
-    { name = "exchange-calendars" },
-    { name = "fastapi" },
-    { name = "feedparser" },
-    { name = "lxml" },
-    { name = "markdown" },
-    { name = "mcp" },
-    { name = "openai" },
-    { name = "optuna" },
-    { name = "pandas" },
-    { name = "pandas-stubs" },
-    { name = "python-dotenv" },
-    { name = "python-frontmatter" },
-    { name = "readability-lxml" },
-    { name = "requests" },
-    { name = "requests-cache" },
-    { name = "sqlite-vec" },
-    { name = "trafilatura" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "websockets" },
-    { name = "yfinance" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "import-linter" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "apscheduler", specifier = ">=3.11.2" },
-    { name = "beautifulsoup4", specifier = ">=4.14.3" },
-    { name = "croniter", specifier = ">=6.2.2" },
-    { name = "ddgs", specifier = ">=9.10.0" },
-    { name = "exchange-calendars", specifier = ">=4.13.2" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "feedparser", specifier = ">=6.0.10" },
-    { name = "lxml", specifier = ">=6.0.2" },
-    { name = "markdown", specifier = ">=3.10" },
-    { name = "mcp", specifier = ">=1.28.1" },
-    { name = "openai", specifier = ">=1.45" },
-    { name = "optuna", specifier = ">=4.0" },
-    { name = "pandas", specifier = ">=2.3.3" },
-    { name = "pandas-stubs", specifier = "~=2.3.3" },
-    { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "python-frontmatter", specifier = ">=1.1.0" },
-    { name = "readability-lxml", specifier = ">=0.8.1" },
-    { name = "requests", specifier = ">=2.32.5" },
-    { name = "requests-cache", specifier = ">=1.2.1" },
-    { name = "sqlite-vec", specifier = ">=0.1.6" },
-    { name = "trafilatura", specifier = ">=2.0.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-    { name = "websockets", specifier = ">=15.0.1" },
-    { name = "yfinance", specifier = ">=0.2.66" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "import-linter", specifier = ">=2.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
-]
-
-[[package]]
 name = "jiter"
 version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1196,6 +1123,79 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d8/b1/12fe1c196bea326261718eb037307c1c1fe1dedc2d2d4de777df822e6238/openai-2.14.0.tar.gz", hash = "sha256:419357bedde9402d23bf8f2ee372fca1985a73348debba94bddff06f19459952", size = 626938, upload-time = "2025-12-19T03:28:45.742Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/4b/7c1a00c2c3fbd004253937f7520f692a9650767aa73894d7a34f0d65d3f4/openai-2.14.0-py3-none-any.whl", hash = "sha256:7ea40aca4ffc4c4a776e77679021b47eec1160e341f42ae086ba949c9dcc9183", size = 1067558, upload-time = "2025-12-19T03:28:43.727Z" },
+]
+
+[[package]]
+name = "openinvest"
+version = "0.15.0"
+source = { editable = "." }
+dependencies = [
+    { name = "apscheduler" },
+    { name = "beautifulsoup4" },
+    { name = "croniter" },
+    { name = "ddgs" },
+    { name = "exchange-calendars" },
+    { name = "fastapi" },
+    { name = "feedparser" },
+    { name = "lxml" },
+    { name = "markdown" },
+    { name = "mcp" },
+    { name = "openai" },
+    { name = "optuna" },
+    { name = "pandas" },
+    { name = "pandas-stubs" },
+    { name = "python-dotenv" },
+    { name = "python-frontmatter" },
+    { name = "readability-lxml" },
+    { name = "requests" },
+    { name = "requests-cache" },
+    { name = "sqlite-vec" },
+    { name = "trafilatura" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
+    { name = "yfinance" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "import-linter" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "apscheduler", specifier = ">=3.11.2" },
+    { name = "beautifulsoup4", specifier = ">=4.14.3" },
+    { name = "croniter", specifier = ">=6.2.2" },
+    { name = "ddgs", specifier = ">=9.10.0" },
+    { name = "exchange-calendars", specifier = ">=4.13.2" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "feedparser", specifier = ">=6.0.10" },
+    { name = "lxml", specifier = ">=6.0.2" },
+    { name = "markdown", specifier = ">=3.10" },
+    { name = "mcp", specifier = ">=1.28.1" },
+    { name = "openai", specifier = ">=1.45" },
+    { name = "optuna", specifier = ">=4.0" },
+    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pandas-stubs", specifier = "~=2.3.3" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "python-frontmatter", specifier = ">=1.1.0" },
+    { name = "readability-lxml", specifier = ">=0.8.1" },
+    { name = "requests", specifier = ">=2.32.5" },
+    { name = "requests-cache", specifier = ">=1.2.1" },
+    { name = "sqlite-vec", specifier = ">=0.1.6" },
+    { name = "trafilatura", specifier = ">=2.0.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "websockets", specifier = ">=15.0.1" },
+    { name = "yfinance", specifier = ">=0.2.66" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "import-linter", specifier = ">=2.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
 ]
 
 [[package]]

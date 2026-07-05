@@ -4,7 +4,7 @@ run_committee 必须【优雅回退】文本模式重问一次、regex 解析出
 
 钉 core.committee.debate._create_agent —— run_committee 在该命名空间解析工厂
 （façade patch 无效，见 CLAUDE.md）。不真调 LLM。"""
-import core.committee.debate as debate
+import openinvest.core.committee.debate as debate
 
 
 class _StubAgent:
