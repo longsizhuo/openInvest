@@ -1,5 +1,7 @@
 # openInvest
 
+<!-- mcp-name: io.github.longsizhuo/openinvest -->
+
 **An investment runtime built for AI agents.** Your agent knows you — openInvest knows investing.
 
 openInvest runs a 4-role LLM investment committee (Macro Strategist, Quant Analyst, Risk Officer, CIO) that debates any asset and returns a BUY / ACCUMULATE / HOLD / TRIM / SELL verdict with a written memo — plus portfolio tracking, a decision ledger, and full decision-accounting (which advice you followed, what happened after).

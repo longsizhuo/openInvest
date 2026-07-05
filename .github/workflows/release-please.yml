@@ -23,6 +23,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write   # MCP Registry OIDC 认证
 
 concurrency:
   group: release-please-${{ github.ref }}
@@ -80,3 +81,18 @@ jobs:
           uv build
           uv publish
           echo "✅ published $(grep '^version' pyproject.toml)"
+
+      - name: Publish to MCP Registry
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
+        run: |
+          VERSION=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          # 等 PyPI 索引可见（registry 会校验包存在 + README 里的 mcp-name 标记）
+          for i in $(seq 1 20); do
+            curl -sf "https://pypi.org/pypi/openinvest/$VERSION/json" >/dev/null && break
+            sleep 15
+          done
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > s.tmp && mv s.tmp server.json
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+          echo "✅ MCP Registry: io.github.longsizhuo/openinvest@$VERSION"

@@ -70,6 +70,12 @@ from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 # ---------- main ----------
 
 def main() -> None:
+    # mcp 子命令最先分流：stdout 是 JSON-RPC 通道，不能进下面的重定向/argparse 输出
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from openinvest.connectors.mcp_server import main as _mcp_main
+        _mcp_main()
+        return
+
     # 把 sys.stdout 重定向到 stderr，让 utils/* 里的 print() noise 走 stderr。
     # _print_json 用 sys.__stdout__ 写真正的 JSON。
     sys.stdout = sys.stderr

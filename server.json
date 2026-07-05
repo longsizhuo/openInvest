@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.longsizhuo/openinvest",
+  "title": "openInvest",
+  "description": "Investment runtime built for AI agents — 4-role LLM investment committee, portfolio ledger, decision accounting. 14 stdio tools.",
+  "repository": {
+    "url": "https://github.com/longsizhuo/openInvest",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "openinvest",
+      "version": "0.0.0",
+      "runtimeHint": "uvx",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Run the stdio MCP server (14 tools)"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "INVEST_HOME",
+          "description": "Data directory for portfolio/ledgers/.env (default: ~/openInvest)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
