@@ -37,20 +37,22 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Auto-merge release PRs
-        if: ${{ steps.rp.outputs.prs_created == 'true' }}
+        # 不用 prs_created 门（它只在新建时为 true，更新已有 PR 时是 false）——
+        # 直接扫 open 的 release-please 分支 PR，幂等
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PRS: ${{ steps.rp.outputs.prs }}
         run: |
-          echo "$PRS" | jq -r '.[].number' | while read -r n; do
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,headRefName \
+            -q '.[] | select(.headRefName | startswith("release-please--")) | .number' \
+          | while read -r n; do
             gh pr merge "$n" --merge --repo "$GITHUB_REPOSITORY" \
               && echo "merged #$n" \
-              || echo "skip #$n（冲突/已合，下轮 release-please 会刷新）"
+              || echo "skip #$n（冲突，下轮 release-please 刷新后自愈）"
           done
 
       - id: rp2
         name: Cut tags/releases for just-merged PRs
-        if: ${{ steps.rp.outputs.prs_created == 'true' }}
         uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
