@@ -16,6 +16,9 @@ name: release-please
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 1 * * *"   # 每日兜底：清掉因 manifest 冲突滞留的 release PR
+  workflow_dispatch:
 
 permissions:
   contents: write
