@@ -25,7 +25,6 @@
 | `prepare_committee SYM` | Coordinator | 拿 brief 给 4 subagent | brief JSON + 6 段 prompts |
 | `save_committee SYM` | Coordinator | 落盘 transcript | stdin 4 段输出 → markdown |
 | `run_committee SYM [--force]` | Direct | 一键完整委员会 | verdict JSON + CIO memo |
-| `gui` | 通用 | 启动 Web GUI | uvicorn :8765，Ctrl+C 退出 |
 | `deposit -c CCY -a N` | 通用 写 | 存入现金（任意币种） | JSON 新余额 |
 | `withdraw -c CCY -a N` | 通用 写 | 取出现金，余额不足报错 | JSON 新余额 |
 | `buy --symbol S --units N --price P [-c CCY] [--kind etf/equity/...]` | 通用 写 | 加仓 / 建仓（加权平均成本） | JSON action + 估算成本 |
@@ -54,7 +53,7 @@
 ## Web API 写操作端点（agent 也能调）
 
 **产品哲学**：agent（你）拥有 openInvest 全部功能。CLI 不够时，直接调 Web API
-（默认 :8765）。GUI 是给小白用户的展示层，agent 不需要走 GUI。
+（默认 :8765）。Web API 已标记 deprecated（GUI 退役，存量端点服务 remote hub 模式）。
 
 用户说"记一笔交易"/"我打算买 X"/"标记成交"/"加新资产"时调这些：
 

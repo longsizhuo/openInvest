@@ -8,9 +8,9 @@ openInvest 有三个调用层，每层服务不同对象：
 
 | 层 | 服务对象 | 目的 |
 |----|---------|------|
-| **GUI**（invest-gui，挂 :8765 静态文件） | **小白用户** | 可视化看持仓 / 批量录入 / 系统状态 |
+| ~~GUI~~（已退役 2026-07-05，等重做） | ~~小白用户~~ | 前端不再由后端 serve；重做时走独立前端直连 MCP |
 | **CLI / Skill**（`scripts/skill.py` + `skills/invest/scripts/run.sh`）| **AI agent**（Claude / Gemini / Cursor / Cline / Codex / 任意脚本）| Agent 跑全链路：查询 + 记账 + 改持仓 + 触发委员会 |
-| **Web API**（`connectors/web_api.py`，挂 :8765 `/api/*`）| **共享底层** | GUI 和 CLI 都通过它写数据 |
+| **Web API**（deprecated）| remote hub 模式 | 存量端点服务 INVEST_API_BASE 转发与内部触发；不再新增端点，待 MCP 覆盖 remote 后退役 |
 
 ### 关键原则
 
@@ -149,7 +149,7 @@ openInvest 有三个调用层，每层服务不同对象：
 skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，不是"用户怎么用"）
 src/openinvest/cli.py              CLI 入口（console script `openinvest`；旧 scripts/skill.py 是兼容 shim）
 src/openinvest/skill_cmds/         skill 各 cmd 实现子包（_helpers/analysis/committee/portfolio/lifecycle/config）
-src/openinvest/connectors/web_api/ FastAPI 端点包（GUI + CLI 共享）；app factory 在 __init__.py，端点按域拆在 routers/，响应模型在 models.py
+src/openinvest/connectors/web_api/ FastAPI 端点包（**deprecated**，只服务 remote hub 模式）；不再新增端点
 src/openinvest/connectors/mcp_server.py  MCP stdio adapter（14 工具，console script `openinvest-mcp`）
 src/openinvest/core/portfolio_manager.py 持仓 façade，with_portfolio_tx fcntl 锁
 src/openinvest/core/committee/     委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）

@@ -169,19 +169,12 @@ LLM_MODEL=qwen-max         # ← 别忘了
 只改 API key + base_url 但 model 还是 `deepseek-chat` → 上游返回 400
 "model not found"。每家 provider 的 model 名都不一样，去对应官网查。
 
-### Q: NapCat 同步成功了但 GUI 不显示新持仓
-A: 当前 GUI 是 beta，可能不实时刷新。先用 `run.sh status` 验证后端数据在
-（CLI 永远是 source of truth），然后**刷新浏览器**或者切到 `invest` skill
-通过 AI 看持仓。
-
 ### Q: 跑完委员会决策回放空白
-A: 看 `memory/.committee/<today>/<asset>.md` 文件是否生成。如果生成了但
-GUI 看不到，是 GUI 已知 bug；如果没生成，调用过程出错了——跑 `run.sh doctor`
-看哪一项 hint 红了。
+A: 看 `memory/.committee/<today>/<asset>.md` 文件是否生成。没生成说明
+调用过程出错了——跑 `run.sh doctor` 看哪一项 hint 红了。
 
 ### Q: 代码好像比示例网站旧
-A: `cd ~/openInvest && git pull` 拉最新代码。openInvest 还在快速迭代，
-每天可能有 GUI / oracle 修复，不一定发 release tag。
+A: 跑 `run.sh update`（从 PyPI 拉最新版）。openInvest 还在快速迭代。
 
 ## References
 

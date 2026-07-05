@@ -141,7 +141,7 @@ def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) 
         "",
         "## 说明",
         "",
-        "由 onboarding 写入。之后通过 GUI / NapCat / `POST /api/holdings` 调整，"
+        "由 onboarding 写入。之后通过 CLI `buy`/`sell` 或 MCP 工具调整，"
         "不要手动编辑 frontmatter。",
     ]
     store.write("portfolio", "state", portfolio_data, "\n".join(body_lines) + "\n")
@@ -335,7 +335,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         next_step_text = (
             "Profile 已写入，但 .env 凭据不完整。**告诉用户**：你现在还能在 Claude "
             "Code 对话里直接说 '看看我的持仓' / '该不该加仓 X' —— Claude 帮你跑分析"
-            "不烧任何 token；之后想用网页/手机看面板，再跑 `run.sh gui` 启动；"
+            "不烧任何 token；"
             "想让服务器后台每天自动跑，那时候再去 platform.deepseek.com 注册 key 填 .env。"
         )
 
@@ -406,7 +406,7 @@ def _interactive_prompt() -> Dict[str, Any]:
             "用一句话描述当前所有持仓 + 现金。例：\n"
             "  '510300 沪深300ETF 3000 股 4.2 元，工行积存金 50 克 750 均价，"
             "余额宝 5 万，AUD 现金 800'\n"
-            "留空就跳过，之后用 GUI 或 NapCat 命令补。",
+            "留空就跳过，之后用 `buy` 子命令补。",
             file=sys.stderr,
         )
         desc = ask("持仓描述（留空跳过）", "")
@@ -420,7 +420,7 @@ def _interactive_prompt() -> Dict[str, Any]:
     else:
         print(
             "\n--- 持仓字段（手动模式 —— 没给 DeepSeek key 没法解析自然语言）---\n"
-            "持仓只问现金；新加 yfinance symbol 之后用 GUI / `POST /api/holdings` 补。",
+            "持仓只问现金；新加 yfinance symbol 之后用 `buy` 子命令补。",
             file=sys.stderr,
         )
         profile["current_assets"]["cash_cny"] = float(ask("CNY 现金", "0"))
