@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.16.0...invest-skill-v0.16.1) (2026-07-05)
+
+
+### Docs
+
+* 全量文档对齐 2026-07-05 现实——GUI/NapCat 退役、PyPI+uvx 分发、Web API deprecated ([f828195](https://github.com/longsizhuo/openInvest/commit/f8281951fd270d844c0986e28a34995b758b1ce3))
+
 ## [0.16.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.15.0...invest-skill-v0.16.0) (2026-07-05)
 
 
