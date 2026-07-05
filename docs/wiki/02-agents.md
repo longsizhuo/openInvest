@@ -4,9 +4,9 @@ title: 4 角色委员会
 tags: [committee, agents, regime, llm, cross-challenge]
 intent: 委员会角色设计与辩论协议
 schema_source:
-  - core/regime.py:THRESHOLDS
-  - core/committee/debate.py:run_committee
-  - core/committee/cio_parse.py:parse_cio_memo
+  - src/openinvest/core/regime.py:THRESHOLDS
+  - src/openinvest/core/committee/debate.py:run_committee
+  - src/openinvest/core/committee/cio_parse.py:parse_cio_memo
 documents:
   endpoints:
     - GET /api/regime_rules

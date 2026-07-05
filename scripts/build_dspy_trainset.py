@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 def _get_price_at(symbol: str, target_date: str) -> Optional[float]:
     """从 DB 拿 target_date 的收盘价（不在则拿之后最近的）"""
-    from db.market_store import MarketStore
+    from openinvest.db.market_store import MarketStore
     import pandas as pd
     store = MarketStore()
     df = store.get_history_df(symbol)

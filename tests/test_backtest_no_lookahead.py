@@ -26,7 +26,7 @@ def fake_db_with_future(monkeypatch, tmp_path) -> Iterator[None]:
     用 monkeypatch 替换 _STORE.get_history_df 直接返回 fake df，绕过真实
     SQLite。yfinance 实际调用也被禁掉（防 backtest 误拉网络）。
     """
-    import utils.exchange_fee as ef
+    import openinvest.utils.exchange_fee as ef
     import yfinance as yf
 
     # 构造一份"DB 内已含未来数据"的 df：2024-01-01 → 2024-12-31 每日一条
@@ -56,7 +56,7 @@ def test_no_lookahead_with_as_of_date(fake_db_with_future):
     cutoff 过滤会保证不穿越——这才是核心 invariant。yfinance 被禁后失败
     会被 try/except 吞掉，回退到 DB 数据 + cutoff 过滤，最终结果一致。
     """
-    from utils.exchange_fee import get_history_data
+    from openinvest.utils.exchange_fee import get_history_data
 
     df = get_history_data("FAKE", as_of_date="2024-05-15")
     assert not df.empty
@@ -67,7 +67,7 @@ def test_no_lookahead_with_as_of_date(fake_db_with_future):
 
 def test_no_as_of_date_keeps_full_df(fake_db_with_future):
     """as_of_date=None（正常 daily_report 路径）→ 不截断 + yfinance 会被尝试"""
-    from utils.exchange_fee import get_history_data
+    from openinvest.utils.exchange_fee import get_history_data
 
     yfinance_called = fake_db_with_future
     df = get_history_data("FAKE", as_of_date=None)
@@ -78,7 +78,7 @@ def test_no_as_of_date_keeps_full_df(fake_db_with_future):
 
 def test_cutoff_inclusive_semantics(fake_db_with_future):
     """as_of_date 当天数据应**包含**（用户晚间决策能看 T 日 close）"""
-    from utils.exchange_fee import get_history_data
+    from openinvest.utils.exchange_fee import get_history_data
 
     df = get_history_data("FAKE", as_of_date="2024-06-15")
     # 应包含 2024-06-15 这一行（晚间已收盘）
@@ -89,7 +89,7 @@ def test_cutoff_inclusive_semantics(fake_db_with_future):
 
 def test_backtest_patch_routes_through_as_of_date(monkeypatch):
     """backtest_committee._patch_tools_to_date 应让所有 get_history_data 调用透传 as_of_date"""
-    import utils.exchange_fee as ef
+    import openinvest.utils.exchange_fee as ef
 
     calls = []
     real = ef.get_history_data
@@ -118,7 +118,7 @@ def test_backtest_patch_routes_through_as_of_date(monkeypatch):
 
 def test_empty_df_passes_through():
     """空 df 应原样返回，不爆"""
-    from utils.exchange_fee import _apply_cutoff
+    from openinvest.utils.exchange_fee import _apply_cutoff
 
     empty = pd.DataFrame()
     assert _apply_cutoff(empty, "2024-05-01").empty
@@ -126,7 +126,7 @@ def test_empty_df_passes_through():
 
 def test_apply_cutoff_with_tz_aware_index():
     """yfinance 返回的 index 带时区 → cutoff 也要 tz-aware 不然 pandas 报错"""
-    from utils.exchange_fee import _apply_cutoff
+    from openinvest.utils.exchange_fee import _apply_cutoff
 
     # 带美东时区的 daily index
     dates = pd.date_range("2024-01-01", "2024-01-10", freq="D", tz="America/New_York")
@@ -146,8 +146,8 @@ def test_capture_macro_context_uses_decision_date(monkeypatch):
     1. captured_at 字段 = '2024-05-01'（不是 datetime.now()）
     2. 内部 get_history_data 传 as_of_date='2024-05-01'
     """
-    import core.committee as cm
-    import utils.exchange_fee as ef
+    import openinvest.core.committee as cm
+    import openinvest.utils.exchange_fee as ef
 
     calls = []
     fake_df = pd.DataFrame(
@@ -175,8 +175,8 @@ def test_capture_macro_context_uses_decision_date(monkeypatch):
 
 def test_capture_macro_context_live_mode_uses_now(monkeypatch):
     """实盘模式 (as_of_date=None)：captured_at 用 ISO timestamp 含时分秒"""
-    import core.committee as cm
-    import utils.exchange_fee as ef
+    import openinvest.core.committee as cm
+    import openinvest.utils.exchange_fee as ef
 
     monkeypatch.setattr(ef, "get_history_data",
                         lambda *a, **kw: pd.DataFrame())

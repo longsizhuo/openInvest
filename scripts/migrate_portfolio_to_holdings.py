@@ -30,8 +30,8 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from core.memory_store import MemoryStore
-from core.schemas import validate_portfolio
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.schemas import validate_portfolio
 
 
 def render_portfolio_body_v2(cash: Dict[str, float], holdings: List[Dict[str, Any]]) -> str:

@@ -26,7 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import scripts.snapshot as snap
-from db.trades_db import TradesDB
+from openinvest.db.trades_db import TradesDB
 
 
 # ============ 测试辅助 ============

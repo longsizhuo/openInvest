@@ -26,8 +26,8 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
 
 
 def _make_pm(tmp_path: Path, holdings: Optional[list] = None) -> PortfolioManager:

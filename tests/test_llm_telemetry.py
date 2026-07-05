@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from core import llm_telemetry as t
+from openinvest.core import llm_telemetry as t
 
 
 @pytest.fixture(autouse=True)

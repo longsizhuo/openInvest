@@ -14,10 +14,8 @@ CLI 脚本入口 + 一次性维护工具。**不在生产 cron 里跑**（生产
 | `import_gold_trades.py` | 从用户截图记录的浙商交易批量导入 history.jsonl | 按需 |
 | `backfill_pnl_history.py` | 重跑历史 PnL 快照（pnl_history.jsonl 损坏时） | 按需 |
 | `backfill_ohlcv.py` | 从 yfinance 回填 daily_prices 的 High/Low/Volume（ATR 真 TR + RVOL 的数据根；schema 扩列后跑一次） | 一次/按需 |
-| `clean_pnl_history.py` `check_benchmark_freshness.py` | PnL 数据维护工具 | 按需 |
 | `backtest_committee.py` | 历史窗口内回测委员会决策（offline） | 研究用 |
 | `diagnose.py` | 健康检查（memory / .env / DB / yfinance 全链路 ping） | 排错用 |
-| `test_gemini_cli.py` | Gemini CLI 集成 smoke test | 偶尔 |
 
 ## 与其他目录的关系
 

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import pytest
 
-from jobs import verdict_review as vr
+from openinvest.jobs import verdict_review as vr
 
 
 def _df(rows):

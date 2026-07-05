@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from db.trades_db import TradesDB
+from openinvest.db.trades_db import TradesDB
 
 
 # ---------- fixture ----------

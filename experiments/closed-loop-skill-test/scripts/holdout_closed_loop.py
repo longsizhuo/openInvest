@@ -15,11 +15,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 同目录的 holdout_perf
 
-from core.paper_trade_simulator import PaperTradeSimulator
-from core.strategy_metrics import evaluate_strategy
+from openinvest.core.paper_trade_simulator import PaperTradeSimulator
+from openinvest.core.strategy_metrics import evaluate_strategy
 from scripts.backtest_committee import run_one_day
 from scripts.run_walk_forward import _trading_days_between, _generate_decision_dates, _safe_close
-from utils.portfolio_summary import portfolio_summary_text
+from openinvest.utils.portfolio_summary import portfolio_summary_text
 from holdout_perf import build_benchmarks
 
 ASSETS = ["GC=F", "510300.SS", "NDQ.AX"]
@@ -52,7 +52,7 @@ def build_summary(sim, d):
 
 
 import pandas as _pd
-from db.market_store import MarketStore as _MS
+from openinvest.db.market_store import MarketStore as _MS
 
 
 def vol_target_factor(sym, d):

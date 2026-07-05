@@ -149,10 +149,10 @@ def _evaluate_event(
     df_cache: dict[str, Any] | None = None,
 ) -> EventResult:
     """评估单个 asset 在单个 ground truth 事件上的 regime 分类准确率。"""
-    from core.config import load_config
-    from core.regime import classify_regime
-    from db.market_store import MarketStore
-    from utils.market_metrics import compute_metrics
+    from openinvest.core.config import load_config
+    from openinvest.core.regime import classify_regime
+    from openinvest.db.market_store import MarketStore
+    from openinvest.utils.market_metrics import compute_metrics
 
     expected = event["expected_regime"]
     event_start = event["start"]
@@ -222,7 +222,7 @@ def run_arithmetic_sweep(
     ground_truth_path: Path,
 ) -> SweepResult:
     """纯算术 sweep — 只跑 classify_regime() 等纯函数，不需要 LLM。"""
-    from core.config import reset_config, set_config_override
+    from openinvest.core.config import reset_config, set_config_override
 
     events = _validate_ground_truth(ground_truth_path)
 
@@ -239,7 +239,7 @@ def run_arithmetic_sweep(
         override = {section: {key: value}}
         # 如果是 regime 参数，也覆盖所有 asset 的 per-asset override
         if section == "regime":
-            from core.config import load_config
+            from openinvest.core.config import load_config
             cfg = load_config()
             pa_overrides = {}
             for sym in cfg.regime_per_asset:

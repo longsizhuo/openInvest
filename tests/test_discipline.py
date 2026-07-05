@@ -1,6 +1,6 @@
-"""services.discipline 自测:渲染逻辑(纯函数)+ 空台账优雅 + summary smoke。
+"""openinvest.services.discipline 自测:渲染逻辑(纯函数)+ 空台账优雅 + summary smoke。
 跑:uv run pytest tests/test_discipline.py -q"""
-from services.discipline import discipline_summary, render_discipline_md
+from openinvest.services.discipline import discipline_summary, render_discipline_md
 
 
 def test_render_inaction_and_interventions():

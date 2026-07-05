@@ -36,11 +36,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 # 路径走单一可信源（跟着代码走，别写死）
 try:
-    from core.memory_store import MEMORY_ROOT
+    from openinvest.core.memory_store import MEMORY_ROOT
 except Exception:  # pragma: no cover - 仓库未装依赖时退回约定路径
     MEMORY_ROOT = REPO_ROOT / "memory"
 try:
-    from db.trades_db import DB_PATH as _TRADES_DB_PATH
+    from openinvest.db.trades_db import DB_PATH as _TRADES_DB_PATH
     TRADES_DB_PATH = Path(_TRADES_DB_PATH)
 except Exception:  # pragma: no cover
     TRADES_DB_PATH = REPO_ROOT / "db" / "trades.db"

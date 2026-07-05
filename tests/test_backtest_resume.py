@@ -9,10 +9,10 @@ from __future__ import annotations
 
 def test_resume_true_skips_when_md_exists(monkeypatch, tmp_path):
     """resume=True + 已存在 <symbol>.md → 返回 {skipped:True}，不跑委员会（无 LLM）。"""
-    import core.memory_store as ms
+    import openinvest.core.memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
 
-    from core.committee.persist import safe_symbol
+    from openinvest.core.committee.persist import safe_symbol
     d = "2024-03-15"
     bt = tmp_path / "memory" / ".backtest" / d
     bt.mkdir(parents=True)
@@ -25,7 +25,7 @@ def test_resume_true_skips_when_md_exists(monkeypatch, tmp_path):
 
 def test_safe_symbol_single_source_matches_persist():
     """backtest 续跑探测的文件名口径 == _persist 写文件名口径（单一可信源，防漂移）。"""
-    from core.committee.persist import safe_symbol
+    from openinvest.core.committee.persist import safe_symbol
     assert safe_symbol("510300.SS") == "510300_SS"
     assert safe_symbol("GC=F") == "GC_F"
     assert safe_symbol("NDQ.AX") == "NDQ_AX"

@@ -307,9 +307,7 @@ uv run python -m scripts.import_commsec --lookback 30 --apply
 2. Caddy 反代 invest.your-domain.com → 127.0.0.1:8765
 3. Cloudflare Access 在边缘验证你的邮箱
 
-### NapCat QQ 命令（移动端）
 
-`/balance` `/deposit 1000` `/gold_buy 5g 720` 等 11 个命令在 QQ 私聊里就能跑。装 NapCat → `uv run python -m connectors.napcat_bot` 启动即可（建议 nohup / systemd 长跑）。命令清单见 `connectors/napcat_bot.py`。
 
 ---
 

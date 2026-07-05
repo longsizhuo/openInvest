@@ -19,7 +19,7 @@ def _df(values):
 
 
 def _fake_get_history(monkeypatch, mapping):
-    import utils.exchange_fee as ef
+    import openinvest.utils.exchange_fee as ef
 
     def fake(symbol, period="1mo", as_of_date=None):
         return mapping.get(symbol, pd.DataFrame())
@@ -34,7 +34,7 @@ def test_macro_data_includes_dxy_and_real_rate(monkeypatch):
         "DX-Y.NYB": _df([99.0, 100.0]),   # 美元走强
         "TIP": _df([110.0, 108.9]),       # TIP 跌 → 实际利率上行 → 利空黄金
     })
-    from utils.exchange_fee import get_macro_data
+    from openinvest.utils.exchange_fee import get_macro_data
 
     out = get_macro_data()
     assert "US Dollar Index (DXY" in out
@@ -51,7 +51,7 @@ def test_macro_data_tip_up_is_tailwind(monkeypatch):
         "DX-Y.NYB": _df([100.0, 99.0]),
         "TIP": _df([108.0, 110.0]),       # TIP 涨
     })
-    from utils.exchange_fee import get_macro_data
+    from openinvest.utils.exchange_fee import get_macro_data
 
     out = get_macro_data()
     assert "falling (gold tailwind)" in out
@@ -64,7 +64,7 @@ def test_macro_data_graceful_when_dxy_missing(monkeypatch):
         "^VIX": _df([15.0, 18.0]),
         # DX-Y.NYB / TIP 缺失 → 返回空 df
     })
-    from utils.exchange_fee import get_macro_data
+    from openinvest.utils.exchange_fee import get_macro_data
 
     out = get_macro_data()
     assert "10Y Treasury Yield" in out      # 核心仍在

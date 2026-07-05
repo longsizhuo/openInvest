@@ -17,7 +17,7 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=TZ=Asia/Shanghai
 Environment=UV_CACHE_DIR=%h/openInvest/.uv-cache
 # 仅绑 127.0.0.1，公网由 Caddy 反代，CF Access 在边缘鉴权
-ExecStart=%h/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+ExecStart=%h/.local/bin/uv run --no-sync uvicorn openinvest.connectors.web_api:app --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=15
 StandardOutput=journal

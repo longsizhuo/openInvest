@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from core.config import reset_config
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
-from utils.quotes import QuoteSnapshot
-import jobs.dca_daily as dca
+from openinvest.core.config import reset_config
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.utils.quotes import QuoteSnapshot
+import openinvest.jobs.dca_daily as dca
 
 
 def _seed(tmp_path: Path, cash=None, holdings=None) -> MemoryStore:
@@ -51,7 +51,7 @@ def seeded(tmp_path, monkeypatch):
         {"symbol": "510300.SS", "kind": "etf", "units": 300.0, "avg_cost": 5.0,
          "unit_label": "股", "cost_currency": "CNY", "proxy_kind": "direct"},
     ])
-    from core import memory_store as ms
+    from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
     return s
 

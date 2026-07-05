@@ -41,7 +41,7 @@ def _build_objective(
     """生成 Optuna objective function 闭包，使用指定 workspace + 日期范围"""
     import optuna
     from scripts.run_walk_forward import run_walk_forward
-    from core.backtest_reward import compute_strategy_reward, explain_reward
+    from openinvest.core.backtest_reward import compute_strategy_reward, explain_reward
 
     # 单一可信源：experiments/train_config.py
     # 改参数空间去改那里，不要 hardcode 在这里
@@ -56,7 +56,7 @@ def _build_objective(
         alloc_aggressiveness = _cfg.alloc_aggressiveness.suggest(trial, "alloc_aggressiveness")
 
         # === apply 参数到代码（config override 替代 monkey-patch）===
-        from core.config import set_config_override
+        from openinvest.core.config import set_config_override
         set_config_override({
             "regime": {
                 "trend_ma_spread_pct": regime_uptrend,

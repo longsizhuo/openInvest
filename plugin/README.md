@@ -25,7 +25,7 @@ codex plugin add invest@openinvest
 Codex reads the same `SKILL.md` (agentskills.io). For the MCP tools, register
 the server once after the backend bootstraps:
 ```
-codex mcp add openinvest -- bash ~/openInvest/skills/invest/scripts/run.sh mcp
+codex mcp add openinvest --env INVEST_HOME=$HOME/openInvest -- uvx openinvest-mcp
 ```
 
 Then in chat say **"set up invest" / 帮我初始化 invest** — a 5-question
@@ -38,16 +38,15 @@ writes your config. After that just ask things like *"show my portfolio"*,
 The plugin ships the **agent skill layer** (`invest` + `invest-setup`) plus an
 **MCP server** (`.mcp.json`, auto-registered on install — 14 tools: `status`,
 `live_prices`, `decisions`, `explain_decision`, `record_execution`, `buy`,
-`sell`, `run_committee`, …). On your first call, `run.sh` **self-bootstraps the
-backend**: it `git clone`s `longsizhuo/openInvest` into `~/openInvest`, runs
-`uv sync`, and pulls the GUI dist. Nothing is installed system-wide, and the
-plugin never bundles a copy of the backend.
+`sell`, `run_committee`, …). The backend ships on **PyPI**
+([`openinvest`](https://pypi.org/project/openinvest/)): on first call `run.sh`
+fetches it via `uvx` (cached by uv, no clone, no venv juggling) and keeps your
+data in `~/openInvest` (portfolio, ledgers, `.env`). Update anytime with
+`run.sh update`. Nothing is installed system-wide.
 
-> **First-run note**: the MCP server reuses the same bootstrap. If the backend
-> isn't cloned yet, the very first MCP connect may exceed the client startup
-> timeout while `git clone + uv sync` run — just say **"set up invest"** first
-> (the skill path does the bootstrap), or retry the connect once. After that,
-> MCP starts on the warm path in ~1s.
+> **First-run note**: the very first call downloads the package from PyPI
+> (a few seconds); if the first MCP connect times out, just retry once — after
+> that uvx serves from cache and MCP starts in ~1s.
 
 Division of labor (per [issue #133](https://github.com/longsizhuo/openInvest/issues/133)):
 **MCP tools** = what the agent can call; **skills** = how to orchestrate the
@@ -69,8 +68,8 @@ The system never places orders — decisions stay with you.
 ## Requirements
 
 - Claude Code
-- `git`, [`uv`](https://docs.astral.sh/uv/), Python 3.13 — the bootstrap checks
-  for these and tells you how to install any that are missing
+- [`uv`](https://docs.astral.sh/uv/) — the launcher checks for it and tells you
+  how to install if missing (backend + Python come from PyPI via uvx)
 - Optional: `DEEPSEEK_API_KEY` (only for the Direct path / cron daily report)
 
 ## Disclaimer

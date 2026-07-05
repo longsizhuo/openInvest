@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture
 def _isolated_market_db(monkeypatch, tmp_path):
-    import db.market_store as ms
+    import openinvest.db.market_store as ms
     monkeypatch.setattr(ms, "DB_PATH", str(tmp_path / "market_data.db"))
     return ms
 

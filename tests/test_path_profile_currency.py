@@ -8,8 +8,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import db.market_store as ms
-from core.regime_probability import (
+import openinvest.db.market_store as ms
+from openinvest.core.regime_probability import (
     quote_currency_iso,
     convert_ccy_for,
     _fx_forward_returns,

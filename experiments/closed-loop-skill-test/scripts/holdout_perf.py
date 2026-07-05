@@ -5,10 +5,10 @@
 """
 import re
 import sys
-from core.memory_store import MemoryStore
-from core.committee import safe_symbol
-from core.paper_trade_simulator import PaperTradeSimulator, get_asset_currency
-from core.strategy_metrics import evaluate_strategy
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.committee import safe_symbol
+from openinvest.core.paper_trade_simulator import PaperTradeSimulator, get_asset_currency
+from openinvest.core.strategy_metrics import evaluate_strategy
 from scripts.run_walk_forward import _buy_and_hold_curve, _trading_days_between
 
 
@@ -50,7 +50,7 @@ def parse_md(p):
 
 import os as _os
 import pandas as _pd
-from db.market_store import MarketStore as _MS
+from openinvest.db.market_store import MarketStore as _MS
 
 
 _VOL_CACHE = {}

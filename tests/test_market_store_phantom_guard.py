@@ -2,7 +2,7 @@
 weekday 交易标的(股/ETF/指数/期货)的周末 bar 是 tz 错位幽灵(收盘=次日价→未来泄漏),
 必须在写库入口拦掉;FX(=X,~24/5)/加密(-USD,24/7)真实有周末报价,放行。
 """
-from db.market_store import _is_phantom_weekend, MarketStore
+from openinvest.db.market_store import _is_phantom_weekend, MarketStore
 
 
 def test_classification():

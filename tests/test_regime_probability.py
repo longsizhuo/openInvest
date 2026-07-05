@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from core.regime_probability import (
+from openinvest.core.regime_probability import (
     RegimeProbability,
     build_probability_table,
     get_regime_probability,
@@ -167,7 +167,7 @@ def _write_reviews(tmp_path, recs):
 
 
 def test_get_reentry_estimate_basic(tmp_path):
-    from core.regime_probability import get_reentry_estimate
+    from openinvest.core.regime_probability import get_reentry_estimate
     recs = [
         {"asset": "GC=F", "regime_at_decision": "range_bound",
          "actual_returns": {"30d": r / 100}}
@@ -185,7 +185,7 @@ def test_get_reentry_estimate_basic(tmp_path):
 
 def test_get_reentry_estimate_unavailable_window_returns_none(tmp_path):
     """90d 窗口无样本 → None（unavailable）"""
-    from core.regime_probability import get_reentry_estimate
+    from openinvest.core.regime_probability import get_reentry_estimate
     recs = [{"asset": "GC=F", "regime_at_decision": "range_bound",
              "actual_returns": {"30d": -0.05}}]
     p = _write_reviews(tmp_path, recs)
@@ -195,7 +195,7 @@ def test_get_reentry_estimate_unavailable_window_returns_none(tmp_path):
 
 
 def test_get_reentry_estimate_no_price_returns_none(tmp_path):
-    from core.regime_probability import get_reentry_estimate
+    from openinvest.core.regime_probability import get_reentry_estimate
     p = _write_reviews(tmp_path, [{"asset": "GC=F",
                                    "regime_at_decision": "range_bound",
                                    "actual_returns": {"30d": -0.05}}])
@@ -204,7 +204,7 @@ def test_get_reentry_estimate_no_price_returns_none(tmp_path):
 
 
 def test_build_reentry_reference_text_marks_unavailable(tmp_path):
-    from core.regime_probability import build_reentry_reference_text
+    from openinvest.core.regime_probability import build_reentry_reference_text
     recs = [
         {"asset": "GC=F", "regime_at_decision": "range_bound",
          "actual_returns": {"30d": r / 100}}
@@ -223,7 +223,7 @@ def test_compute_regime_return_frame_synthetic():
     """compute_regime_return_frame 在合成 OHLC 上产出 regime + forward return"""
     import numpy as np
     import pandas as pd
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
 
     # 300 天稳步上行 + 噪声 → 应出现 uptrend，且 forward return 多为正
     idx = pd.date_range("2015-01-01", periods=300, freq="D")
@@ -242,7 +242,7 @@ def test_compute_regime_return_frame_synthetic():
 
 def test_compute_regime_return_frame_empty():
     import pandas as pd
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
     assert compute_regime_return_frame(pd.DataFrame(), "TEST").empty
 
 
@@ -255,7 +255,7 @@ def test_compute_regime_return_frame_forward_return_exact():
     """
     import numpy as np
     import pandas as pd
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
 
     n = 120
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
@@ -275,7 +275,7 @@ def test_compute_regime_return_frame_forward_return_exact():
 
 def test_make_regime_probability_aggregation():
     """p_up/p_down/p_flat/median/mean 聚合正确性（verdict_review 与 OHLC 共用）。"""
-    from core.regime_probability import _make_regime_probability
+    from openinvest.core.regime_probability import _make_regime_probability
 
     # 阈值 5%：>5 只有 10 → p_up=1/5；<-5 只有 -10 → p_down=1/5；其余 flat
     rp = _make_regime_probability("X", "uptrend", [10.0, -10.0, 1.0, -1.0, 5.0], 5.0)
@@ -295,7 +295,7 @@ def test_effective_n_overlapping_window_downweights_confidence():
     守住 CR 🔴#1：原始 n=200 的重叠日度样本会被误判为高置信；按 30d 窗口折算后
     独立样本仅 6 → 应标 low_confidence。
     """
-    from core.regime_probability import _make_regime_probability
+    from openinvest.core.regime_probability import _make_regime_probability
 
     rp_hi = _make_regime_probability("X", "uptrend", [1.0] * 300, 5.0, window_days=30)
     assert rp_hi.n == 300
@@ -314,8 +314,8 @@ def test_build_probability_table_from_ohlc_stubbed(monkeypatch):
     """生产默认路径 build_probability_table_from_ohlc（原零覆盖）：stub MarketStore。"""
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import build_probability_table_from_ohlc, RegimeProbability
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import build_probability_table_from_ohlc, RegimeProbability
 
     idx = pd.date_range("2015-01-01", periods=400, freq="D")
     close = np.linspace(100, 260, 400)  # 稳步上行
@@ -352,8 +352,8 @@ def test_ohlc_forward_returns_values_exact(monkeypatch):
     """
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import _ohlc_forward_returns, compute_regime_return_frame
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import _ohlc_forward_returns, compute_regime_return_frame
 
     # n 要够长：ma120 需 120 行 warmup，非 unknown 的行还得有 30d lookahead，故用 300
     n = 300
@@ -395,7 +395,7 @@ def test_compute_regime_return_frame_path_columns_exact():
     """min_/tmin_/atr_pct 列数值正确：严格递增序列 → 窗口内最低点=次日，tmin=1"""
     import numpy as np
     import pandas as pd
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
 
     n = 200
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
@@ -426,8 +426,8 @@ def test_get_path_profile_multi_window_and_shape(monkeypatch):
     """get_path_profile：多窗分布齐全 + 形状占比构成完备分布（和=1）"""
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import get_path_profile
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import get_path_profile
 
     n = 600
     idx = pd.date_range("2015-01-01", periods=n, freq="D")
@@ -443,7 +443,7 @@ def test_get_path_profile_multi_window_and_shape(monkeypatch):
     monkeypatch.setattr(ms, "MarketStore", _StubStore)
 
     # 找一个有样本的 regime
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
     frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
     regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
 
@@ -473,8 +473,8 @@ def test_get_path_profile_straight_up_no_dip(monkeypatch):
     """严格单边上行（无任何回踩）→ 直接涨=100%，先跌后涨=0，收跌=0"""
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import get_path_profile
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import get_path_profile
 
     n = 400
     idx = pd.date_range("2018-01-01", periods=n, freq="D")
@@ -504,8 +504,8 @@ def test_get_path_profile_pop_then_down(monkeypatch):
     """
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import get_path_profile
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import get_path_profile
 
     # 锯齿：60 个交易日一个周期，前 25 天 +8%、后 35 天 −12%（期末低于起点），
     # 叠加在缓慢下行的大趋势上 → 多数 90d 窗"先给高点再收跌"
@@ -524,7 +524,7 @@ def test_get_path_profile_pop_then_down(monkeypatch):
 
     monkeypatch.setattr(ms, "MarketStore", _StubStore)
 
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
     frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
     regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
 
@@ -545,8 +545,8 @@ def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
     """OHLC 源路径参考：30/60/90 三窗都出 + 路径形状/回踩深度/见底时点行"""
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import build_reentry_reference_text
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import build_reentry_reference_text
 
     n = 600
     idx = pd.date_range("2015-01-01", periods=n, freq="D")
@@ -560,7 +560,7 @@ def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
 
     monkeypatch.setattr(ms, "MarketStore", _StubStore)
 
-    from core.regime_probability import compute_regime_return_frame
+    from openinvest.core.regime_probability import compute_regime_return_frame
     frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
     regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
 
@@ -594,13 +594,13 @@ def _mini_profile():
 
 
 def test_calibrate_profile_disabled_is_noop():
-    from core.regime_probability import calibrate_profile
+    from openinvest.core.regime_probability import calibrate_profile
     p = _mini_profile()
     assert calibrate_profile(p, shrinkage_k=0, band_gamma=1.0) is p
 
 
 def test_calibrate_profile_shrinkage_math():
-    from core.regime_probability import calibrate_profile
+    from openinvest.core.regime_probability import calibrate_profile
     p = calibrate_profile(_mini_profile(), shrinkage_k=2, band_gamma=1.0)
     w = p["windows"]["30d"]
     # λ = 2/(2+2) = 0.5 → 各统计量 = 条件/无条件均值
@@ -611,7 +611,7 @@ def test_calibrate_profile_shrinkage_math():
 
 
 def test_calibrate_profile_band_widening_math():
-    from core.regime_probability import calibrate_profile
+    from openinvest.core.regime_probability import calibrate_profile
     p = calibrate_profile(_mini_profile(), shrinkage_k=0, band_gamma=1.5)
     w = p["windows"]["30d"]
     # 围绕中位扩张：p10' = 2 + 1.5×(-3-2) = -5.5；p90' = 2 + 1.5×4 = 8
@@ -621,8 +621,8 @@ def test_calibrate_profile_band_widening_math():
 
 
 def test_calibrate_profile_reads_config():
-    from core.config import reset_config, set_config_override
-    from core.regime_probability import calibrate_profile
+    from openinvest.core.config import reset_config, set_config_override
+    from openinvest.core.regime_probability import calibrate_profile
     reset_config()
     try:
         # 显式禁用 override → no-op（2026-06-11 起 defaults 已启用校准，
@@ -639,8 +639,8 @@ def test_calibrate_profile_reads_config():
 def test_get_path_profile_includes_uncond(monkeypatch):
     import numpy as np
     import pandas as pd
-    import db.market_store as ms
-    from core.regime_probability import get_path_profile
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import get_path_profile
 
     n = 400
     idx = pd.date_range("2018-01-01", periods=n, freq="D")
@@ -661,7 +661,7 @@ def test_get_path_profile_includes_uncond(monkeypatch):
 
 def test_quote_currency_prefix_by_suffix():
     """报价币种符号按 ticker 后缀判定（display 用；2026-06-12 ¥/$ 混标修复）"""
-    from core.regime_probability import quote_currency_prefix
+    from openinvest.core.regime_probability import quote_currency_prefix
     assert quote_currency_prefix("GC=F") == "$"      # COMEX 美元/盎司
     assert quote_currency_prefix("NDQ.AX") == "A$"
     assert quote_currency_prefix("0700.HK") == "HK$"
@@ -672,7 +672,7 @@ def test_quote_currency_prefix_by_suffix():
 
 def test_reentry_estimate_uses_currency_symbol():
     """summary_line 用 currency 字段而非硬编码 ¥"""
-    from core.regime_probability import ReentryEstimate
+    from openinvest.core.regime_probability import ReentryEstimate
     est = ReentryEstimate(
         asset="GC=F", regime="downtrend", window="30d", n=100,
         current_price=4100.0, threshold_pct=5.0,
@@ -696,7 +696,7 @@ def _mk_closes():
 
 def test_forward_return_calendar_day_horizon():
     """30 日历天 ≈ 21-22 个交易日，不是 30 个交易日（口径核心）"""
-    from core.regime_probability import forward_return
+    from openinvest.core.regime_probability import forward_return
     s = _mk_closes()
     # asof = 第一个交易日 2024-01-01（周一）
     fr = forward_return("X", "2024-01-01", 30, closes=s)
@@ -712,7 +712,7 @@ def test_forward_return_calendar_day_horizon():
 
 def test_forward_return_base_is_last_close_le_asof():
     """base = ≤asof 最后收盘；asof 落在周末 → 取前一交易日"""
-    from core.regime_probability import forward_return
+    from openinvest.core.regime_probability import forward_return
     s = _mk_closes()
     # 2024-01-06 是周六；≤它的最后交易日是 01-05（周五）
     fr_sat = forward_return("X", "2024-01-06", 30, closes=s)
@@ -723,7 +723,7 @@ def test_forward_return_base_is_last_close_le_asof():
 
 def test_forward_return_immature_returns_none():
     """窗口未走完 → None（不补值）"""
-    from core.regime_probability import forward_return
+    from openinvest.core.regime_probability import forward_return
     s = _mk_closes()
     last = s.index[-1].strftime("%Y-%m-%d")
     assert forward_return("X", last, 90, closes=s) is None

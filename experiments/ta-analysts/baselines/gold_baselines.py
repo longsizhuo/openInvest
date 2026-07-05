@@ -28,8 +28,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # _metrics.py 同目录
 
 from _metrics import metrics  # noqa: E402  共享指标，避免逐字复制漂移
-from core.regime_probability import compute_regime_return_frame  # noqa: E402
-from db.market_store import MarketStore  # noqa: E402
+from openinvest.core.regime_probability import compute_regime_return_frame  # noqa: E402
+from openinvest.db.market_store import MarketStore  # noqa: E402
 
 SYMBOL = "GC=F"
 RECENT_START = "2024-01-01"

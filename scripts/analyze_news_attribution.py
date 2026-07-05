@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
-from core.memory_store import MemoryStore
+from openinvest.core.memory_store import MemoryStore
 
 ROOT_CAUSES = (
     "data_stale",       # 决策时数据已经过期（节假日/周末/抓取失败）
@@ -128,7 +128,7 @@ def _append_attribution(rec: Dict[str, Any]) -> None:
 def annotate_auto(misses: List[Dict[str, Any]], existing: Dict[str, str]) -> List[Dict[str, Any]]:
     """LLM 自动标注（v4-flash，无 ground truth 只能粗略归因）"""
     # 统一从 utils.llm 读 LLM 配置（默认 DeepSeek，可通过 LLM_* env 换千问/智谱）
-    from utils.llm import get_llm_config_safe
+    from openinvest.utils.llm import get_llm_config_safe
     api_key, base_url, model, _provider = get_llm_config_safe()
     if not api_key:
         print("❌ --auto 需要 LLM_API_KEY 或 DEEPSEEK_API_KEY，跳过")

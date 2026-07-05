@@ -4,7 +4,7 @@ title: 17 — 资产类别特征集声明（显式契约）
 tags: [asset-features, regime, gold, dca, feature-matrix]
 intent: 资产类别特征集单一可信源
 schema_source:
-  - core/config/tunable.py:VerdictConfig
+  - src/openinvest/core/config/tunable.py:VerdictConfig
 documents:
   endpoints: []
   config_keys:

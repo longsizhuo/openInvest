@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from capabilities.committee.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
-from connectors.web_api.models import WealthContextRequest
+from openinvest.capabilities.committee.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
+from openinvest.connectors.web_api.models import WealthContextRequest
 
 
 class TestWealthContextRequestModel:

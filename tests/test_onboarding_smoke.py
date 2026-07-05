@@ -38,15 +38,15 @@ def _run_cmd_doctor(fake_root: Path) -> Dict[str, Any]:
     所以必须**同时** patch `scripts.skill.ROOT` + `core.memory_store.MEMORY_ROOT`，
     否则 CI 环境（memory/ 目录干净）下 doctor 永远报 "memory_initialized: missing"。
     """
-    from scripts.skill import cmd_doctor
-    import core.memory_store as ms_module
+    from openinvest.cli import cmd_doctor
+    import openinvest.core.memory_store as ms_module
 
     captured = io.StringIO()
     fake_memory_root = fake_root / "memory"
 
     # cmd_doctor 实现已搬到 scripts.skill_cmds.lifecycle_cmds，在自身模块全局读 ROOT，
     # patch façade(scripts.skill) 的 ROOT 不再生效 → 必须 patch lifecycle_cmds.ROOT
-    with patch("scripts.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
+    with patch("openinvest.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
          patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
          patch("sys.__stdout__", captured):
         cmd_doctor(SimpleNamespace())
@@ -60,15 +60,15 @@ def _run_cmd_init_from_payload(fake_root: Path, payload: Dict[str, Any]) -> Dict
 
     同时 patch core.memory_store.MEMORY_ROOT，让 MemoryStore() 默认路径指向 fake_root。
     """
-    from scripts.skill import cmd_init
-    import core.memory_store as ms_module
+    from openinvest.cli import cmd_init
+    import openinvest.core.memory_store as ms_module
 
     stdin_data = json.dumps(payload)
     captured = io.StringIO()
     fake_memory_root = fake_root / "memory"
 
     # cmd_init 实现已搬到 scripts.skill_cmds.lifecycle_cmds，在自身模块全局读 ROOT
-    with patch("scripts.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
+    with patch("openinvest.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
          patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
          patch("sys.__stdout__", captured), \
          patch("sys.stdin", io.StringIO(stdin_data)), \
@@ -87,7 +87,7 @@ def _run_cmd_init_from_payload(fake_root: Path, payload: Dict[str, Any]) -> Dict
 
 def _seed_minimal_memory(root: Path) -> None:
     """在 root/memory/ 下写最小可用的三份文档（v2 结构），绕过 migrate_profile.py"""
-    from core.memory_store import MemoryStore
+    from openinvest.core.memory_store import MemoryStore
 
     store = MemoryStore(root / "memory")
     store.write("user", "user", {
@@ -236,8 +236,8 @@ class TestOnboardingSmoke:
         fake_root.mkdir()
         _seed_minimal_memory(fake_root)
 
-        from scripts.skill import cmd_status
-        import core.memory_store as ms_module
+        from openinvest.cli import cmd_status
+        import openinvest.core.memory_store as ms_module
 
         captured = io.StringIO()
 
@@ -249,11 +249,11 @@ class TestOnboardingSmoke:
         # cmd_status 实现已搬到 scripts.skill_cmds.analysis_cmds。注意 cmd_status
         # 实际不读 ROOT（此 patch 历史上是 no-op，真正生效的是 MEMORY_ROOT），
         # 但为保持字面一致且不抛 AttributeError，analysis_cmds 也定义了 ROOT。
-        with patch("scripts.skill_cmds.analysis_cmds.ROOT", fake_root), \
+        with patch("openinvest.skill_cmds.analysis_cmds.ROOT", fake_root), \
              patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
              patch("sys.__stdout__", captured), \
-             patch("utils.exchange_fee.get_history_data", return_value=fake_df), \
-             patch("utils.gold_price.get_gold_snapshot", return_value=None):
+             patch("openinvest.utils.exchange_fee.get_history_data", return_value=fake_df), \
+             patch("openinvest.utils.gold_price.get_gold_snapshot", return_value=None):
             cmd_status(SimpleNamespace())
 
         output = captured.getvalue().strip()
@@ -280,21 +280,21 @@ class TestOnboardingDataIntegrity:
 
         payload = _build_init_payload(fake_root)
 
-        import core.memory_store as ms_module
+        import openinvest.core.memory_store as ms_module
         fake_memory_root = fake_root / "memory"
 
         # cmd_init 实现已搬到 scripts.skill_cmds.lifecycle_cmds，在自身模块全局读 ROOT
-        with patch("scripts.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
+        with patch("openinvest.skill_cmds.lifecycle_cmds.ROOT", fake_root), \
              patch.object(ms_module, "MEMORY_ROOT", fake_memory_root), \
              patch("sys.__stdout__", io.StringIO()), \
              patch("sys.stdin", io.StringIO(json.dumps(payload))), \
              patch("subprocess.run") as mock_run:
             mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
-            from scripts.skill import cmd_init
+            from openinvest.cli import cmd_init
             cmd_init(SimpleNamespace(from_stdin=True, force=False))
 
         # 读取 portfolio.md 验证 schema_version=2
-        from core.memory_store import MemoryStore
+        from openinvest.core.memory_store import MemoryStore
         store = MemoryStore(fake_root / "memory")
         port_doc = store.read("portfolio")
         assert port_doc is not None, "portfolio.md 应被写入"

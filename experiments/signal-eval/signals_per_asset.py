@@ -171,7 +171,7 @@ def run_asset(sym: str, close: pd.Series) -> Dict:
 
 
 def main() -> Dict:
-    from db.market_store import MarketStore
+    from openinvest.db.market_store import MarketStore
     ms = MarketStore()
     out = {"test": "signals_per_asset",
            "design": "per-asset × {trend,meanrev,voltarget,breakout} vs matched-exposure passive, net cost, DSR deflated over all variants tried",

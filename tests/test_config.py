@@ -1,4 +1,4 @@
-"""core.config 模块测试
+"""openinvest.core.config 模块测试
 
 验证:
 - 默认值 = 硬编码值（与 core/regime.py, jobs/dreaming.py 等一致）
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config import (
+from openinvest.core.config import (
     DCAConfig,
     DreamingTunableConfig,
     LockedCommitteeDefaults,
@@ -402,7 +402,7 @@ class TestApiConfig:
 
     @pytest.fixture(autouse=True)
     def _tmp_memory(self, tmp_path, monkeypatch):
-        from core import memory_store as ms
+        from openinvest.core import memory_store as ms
         monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
         yield
 
@@ -503,7 +503,7 @@ class TestDCAConfig:
 
     @pytest.fixture(autouse=True)
     def _tmp_memory(self, tmp_path, monkeypatch):
-        from core import memory_store as ms
+        from openinvest.core import memory_store as ms
         monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
         yield
 
@@ -577,7 +577,7 @@ class TestEventAndStalenessConfig:
 
     @pytest.fixture(autouse=True)
     def _tmp_memory(self, tmp_path, monkeypatch):
-        from core import memory_store as ms
+        from openinvest.core import memory_store as ms
         monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
         yield
 

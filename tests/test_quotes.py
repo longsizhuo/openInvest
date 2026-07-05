@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import pandas as pd
 import pytest
 
-from utils import quotes
+from openinvest.utils import quotes
 
 
 @dataclass

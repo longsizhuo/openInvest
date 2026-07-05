@@ -11,6 +11,8 @@ documents:
 
 # openInvest Wiki
 
+> **2026-07-05**：Web GUI 已退役（等重做），Web API 标记 deprecated（存量端点服务 remote hub 模式）。文档中 GUI/:8765 面板相关描述均为历史内容；当前入口 = CLI 子命令 + MCP 工具。
+
 > 多资产 AI 投资委员会系统的完整文档。
 > 主仓库 [longsizhuo/openInvest](https://github.com/longsizhuo/openInvest) · GUI [longsizhuo/invest-gui](https://github.com/longsizhuo/invest-gui)
 > 主页 [README.md](../../README.md) · 30 分钟 fork [QUICK_START.md](../QUICK_START.md)

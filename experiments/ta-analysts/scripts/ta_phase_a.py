@@ -124,7 +124,7 @@ _usage = {"in": 0, "out": 0}
 
 def _llm_call(prompt: str) -> Tuple[str, int, int]:
     from openai import OpenAI
-    from utils.llm import get_llm_config_safe
+    from openinvest.utils.llm import get_llm_config_safe
 
     api_key, base_url, model, _p = get_llm_config_safe(default_model="deepseek-v4-flash")
     client = OpenAI(api_key=api_key, base_url=base_url)

@@ -1,0 +1,10 @@
+name: price_sentinel
+description: 价格异动哨兵——10 分钟涨跌 vs 日 ATR%，垂直线先报警后触发委员会（ADR-025）
+# 每 5 分钟一次，窗口默认与 event_watch 相同（北京 8:00-次日 2:30，按 timezone 字段解释）。
+# 实际生效值以 config `event.sentinel_schedule` 为准（API/GUI/CLI 可改，ADR-017，
+# scheduler 每 10 分钟自动拾取），此行仅作无 config 时的兜底，两处默认值保持一致。
+# 空扫零 LLM 成本（纯 yfinance 算术），触发时也只发邮件+触发委员会，本身不调 LLM。
+schedule: "*/5 0-2,8-23 * * *"
+timezone: Asia/Shanghai
+entry: openinvest.jobs.price_sentinel:run
+enabled: true  # 与 event_watch 同理 default-on；关闭走 config event.sentinel_enabled

@@ -20,9 +20,9 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
-import jobs.payday_check as payday
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
+import openinvest.jobs.payday_check as payday
 
 
 def _make_pm(tmp_path, *, last_payday="1970-01-01", income=10000.0, expense=3000.0):

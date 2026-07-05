@@ -1,14 +1,14 @@
 ---
 name: invest
-version: 0.15.0 # x-release-please-version
-description: openInvest 多资产 AI 投资委员会 **日常使用**。读取持仓 / 实时行情 / 策略 / 历史决议 / 加减仓 / 跑 4 角色 LLM 委员会给投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Cursor / Cline / Codex / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**："show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"加仓 / 减仓 / 记一笔交易"。**首次安装走另一个 skill `invest-setup`**（doctor 返回 needs_setup 时切过去）。后端 longsizhuo/openInvest，前端 longsizhuo/invest-gui。
+version: 0.16.0 # x-release-please-version
+description: openInvest 多资产 AI 投资委员会 **日常使用**。读取持仓 / 实时行情 / 策略 / 历史决议 / 加减仓 / 跑 4 角色 LLM 委员会给投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Cursor / Cline / Codex / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**："show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"加仓 / 减仓 / 记一笔交易"。**首次安装走另一个 skill `invest-setup`**（doctor 返回 needs_setup 时切过去）。后端 longsizhuo/openInvest。
 ---
 
 # Invest Skill
 
-**新手 fork 用户**：先跑 `invest-setup` skill 初始化。Web GUI 是 beta，
-主流程走本 skill（通过 AI agent 调 CLI 看持仓 / 跑委员会 / 查决策回放）。
-代码迭代频繁，定期 `cd ~/openInvest && git pull` 拉最新。
+**新手 fork 用户**：先跑 `invest-setup` skill 初始化。主流程走本 skill（AI agent 调 CLI/MCP 看持仓 / 跑委员会 / 查决策回放）。
+Web GUI 已退役（2026-07）——所有能力经 CLI 子命令 / MCP 工具暴露。
+后端从 PyPI 分发（uvx 按需拉），更新跑 `run.sh update` 即可。
 
 openInvest 多资产 AI 投资委员会。**这个 skill 不是 Claude 专属**——任何能跑
 shell 命令的 agent 都能用，看下面 "选路径"。
@@ -124,7 +124,6 @@ INVEST_API_TOKEN=<hub 的同名 token>             # hub 开了鉴权才需要
 |------|--------------|
 | `doctor` | 返回 **hub 视角**检查 + 多一个 `remote` 段（api_base / 鉴权方式 / 连通性）|
 | `init` | **禁用**（数据在 hub；连接 hub 只需上面两行 .env）。报错带 hint |
-| `gui` | 不本机起 uvicorn，直接输出 hub 的 `gui_url`（浏览器开它即可）|
 | `live_prices` / `correlate` | 仍**本地**跑（纯 yfinance，不碰数据）|
 | `run_committee` | 在 **hub** 上跑（DeepSeek key 在 hub），CLI 自动轮询到完成；同日 cache 用 hub 日期口径 |
 | `prepare/save_committee` | 经 hub RPC——Coordinator 协议（spawn 4 subagent）**完全不变** |
@@ -134,30 +133,6 @@ INVEST_API_TOKEN=<hub 的同名 token>             # hub 开了鉴权才需要
 **纪律**：远端模式下本机没有 `memory/`，更不存在"直接读写 memory 文件"——
 一切经 `run.sh` 或 hub API。下面 Web API 表里的 `:8765` 在远端模式下替换为
 `$INVEST_API_BASE`，curl 时带 `Authorization: Bearer $INVEST_API_TOKEN`。
-
-## Web GUI 是小白的主入口（**第一次回答必须提一句**）
-
-GUI 是设计给**小白用户**的——CLI/skill 是给 agent 和极客的。如果用户没听说
-GUI，他根本用不上。所以：
-
-**你的职责**：第一次回答用户时**必须**附一句 GUI 入口（按 doctor 给的 hint），
-之后同会话别复读。这不是推销，是引导用户看到他主面板该有的东西。
-
-按 `doctor` 输出里 `web_gui` check 的状态分别处理：
-
-| 状态 | 怎么处理 |
-|------|----------|
-| `gui_running: true` | 第一次回答末尾顺带："顺便：浏览器开 http://127.0.0.1:8765 可以看完整面板" |
-| `gui_dist_ready: true` 但没在跑 | 第一次回答末尾："项目自带 Web GUI，想看持仓/委员会面板的话另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui`" |
-| `status: "missing"`（dist 没装）| **直接帮用户跑** `cd $INVEST_HOME && uv run python -m scripts.sync_gui_dist`——这是 bootstrap 失败的信号，不是用户该解的问题 |
-
-**例外**：用户在 `.env` 设了 `INVEST_GUI_NUDGE=off` → `hint: null`，这种用户
-明确不想看 GUI 字眼，绝对不提。
-
-**关键纪律**：
-- 第一次回答提**一次**就够，同会话别复读"还可以打开 GUI 哦"——那是噪音
-- 用户主动问"GUI/dashboard/网页"时直接给 URL，不需要先扯铺垫
-- 用户说"我不需要 GUI" / "只用 CLI"时记住，之后别再提
 
 ## 工具怎么查（MCP 优先，长尾看 references/tools.md）
 

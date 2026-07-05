@@ -30,7 +30,7 @@ documents:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  CONNECTORS（外部触发器，多消费者模式）                       │
-│  napcat_bot.py · web_api.py · skills/invest/scripts/run.sh  │
+│  mcp_server.py · web_api.py · skills/invest/scripts/run.sh  │
 └────────────────┬────────────────────────────────────────────┘
                  │  调用业务函数（不直接接 LLM）
                  ▼
@@ -60,15 +60,14 @@ documents:
 
 | Connector | 触发协议 | 适合 |
 |-----------|---------|------|
-| `connectors/napcat_bot.py` | QQ WebSocket 私聊命令（`/balance` `/deposit 100`）| 移动端快速操作 |
 | `connectors/web_api.py` | HTTP REST + SSE | Web GUI / 程序化集成 |
 | `skills/invest/scripts/run.sh` (CLI) | Claude Code Skill | 让 Claude 自己当协调者跑 |
 
 **关键约束**：connector 必须**只做协议转换**，业务逻辑全部 forward 给 `core/`。
-违反这条 → connector 之间会出现行为飘移（已有教训：早期 napcat 自己改 portfolio dict 导致 Web 写入失败）。
+违反这条 → connector 之间会出现行为飘移（已有教训：早期 QQ bot connector 自己改 portfolio dict 导致 Web 写入失败——该 connector 已于 2026-07 退役）。
 
 详见各 connector 子目录 README：
-- [connectors/README.md](../../connectors/README.md)
+- [connectors/README.md](../../src/openinvest/connectors/README.md)
 - [skills/README.md](../../skills/README.md)
 
 ---
@@ -240,9 +239,9 @@ holdings:
 
 | 场景 | 风险 | 缓解 |
 |------|------|------|
-| napcat 存款 + scheduler 扣款同时跑 | TOCTOU 丢更新 | `MemoryStore.transaction()` 单锁 RMW |
+| 两个写入方同时跑（如 web 写 + scheduler 扣款） | TOCTOU 丢更新 | `MemoryStore.transaction()` 单锁 RMW |
 | 多线程 ThreadPool 同时调 LLM | （只读不冲突）| — |
-| Web API 写 + napcat 写同时 | TOCTOU | 同上，fcntl 是进程级锁 |
+| Web API 两个并发写 | TOCTOU | 同上，fcntl 是进程级锁 |
 | 多个 committee task 同时跑 | status.json 互踩 | 每 task_id 一个独立 dir |
 
 并发压测（`tests/test_memory_store.py`）：

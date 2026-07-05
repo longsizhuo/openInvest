@@ -1,0 +1,10 @@
+name: commsec_sync
+description: |
+  CommSec 成交回报 IMAP 同步。
+  ⚠️ 默认 disabled：自动同步在 IMAP 失败 / 邮件丢失场景下会和真实成交对不上，
+  改为「**手动导入**」模式 —— 用 `uv run python -m scripts.import_commsec` 或
+  Web GUI 的 [Import] 按钮触发，让用户先确认拉到的成交再写入 portfolio。
+schedule: "0 */2 * * *"
+timezone: Asia/Shanghai
+entry: openinvest.jobs.commsec_sync:run
+enabled: false

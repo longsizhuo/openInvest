@@ -27,7 +27,7 @@ def _isolate_invest_env(monkeypatch):
     所以 yield 前后各 reset_config() 一次：清缓存 + 清 persistent overrides，让本 fixture
     成为真正的 per-test config 隔离闸（不再只隔离 env 一半）。
     """
-    from core.config import reset_config
+    from openinvest.core.config import reset_config
     for key in [k for k in os.environ if k.startswith("INVEST_")]:
         monkeypatch.delenv(key, raising=False)
     reset_config()

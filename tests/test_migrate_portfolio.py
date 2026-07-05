@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from core.memory_store import MemoryStore
+from openinvest.core.memory_store import MemoryStore
 from scripts.migrate_portfolio_to_holdings import migrate, render_portfolio_body_v2
 
 

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.committee import parse_cio_memo, regime_label_from_text
-from core.config import reset_config, set_config_override
+from openinvest.core.committee import parse_cio_memo, regime_label_from_text
+from openinvest.core.config import reset_config, set_config_override
 
 HOLD_MEMO = (
     "VERDICT: HOLD\nCONFIDENCE: 0.7\nDOMINANT_VIEW: macro\nSUGGESTED_ALLOC_CNY: 0"

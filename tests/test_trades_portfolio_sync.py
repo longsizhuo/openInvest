@@ -23,9 +23,9 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore
-from core.portfolio_manager import PortfolioManager
-from db.trades_db import TradesDB
+from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.db.trades_db import TradesDB
 
 
 # ============ 测试辅助：构建临时 MemoryStore + PortfolioManager ============
@@ -68,9 +68,9 @@ def _make_pm(tmp_path: Path, holdings: Optional[list] = None) -> PortfolioManage
 def _call_sync(trade: Dict[str, Any], pm: PortfolioManager):
     """把 _sync_trade_to_portfolio 的逻辑抽出来，用真实 pm 跑"""
     # 复现 web_api 中的 _sync_trade_to_portfolio 逻辑，但注入真实 pm
-    from connectors.web_api import _sync_trade_to_portfolio as _web_sync
+    from openinvest.connectors.web_api import _sync_trade_to_portfolio as _web_sync
     # 通过 patch PortfolioManager() 构造函数，注入已准备好的 pm
-    with patch("connectors.web_api.routers.trades.PortfolioManager", return_value=pm):
+    with patch("openinvest.connectors.web_api.routers.trades.PortfolioManager", return_value=pm):
         return _web_sync(trade)
 
 
@@ -359,7 +359,7 @@ class TestPatchStatusIdempotency:
         """同一笔 BUY 连续两次 PATCH executed → 持仓 + 现金只入账一次"""
         import asyncio
 
-        from connectors.web_api.routers import trades as trades_mod
+        from openinvest.connectors.web_api.routers import trades as trades_mod
 
         # 1. 临时 trades.db + 一笔 planned BUY（10 股 @ 130 AUD）
         db = TradesDB(db_path=str(tmp_path / "trades.db"))
@@ -482,11 +482,11 @@ class TestEdgeCases:
 
     def test_portfolio_manager_init_fail_returns_not_synced(self, tmp_path):
         """PortfolioManager 初始化失败（无 memory 文件）→ synced=False，不崩溃"""
-        from connectors.web_api import _sync_trade_to_portfolio
+        from openinvest.connectors.web_api import _sync_trade_to_portfolio
 
         trade = {"symbol": "NDQ.AX", "direction": "BUY", "units": 5.0, "price": 100.0}
         # 让 PortfolioManager() 抛 FileNotFoundError
-        with patch("connectors.web_api.routers.trades.PortfolioManager",
+        with patch("openinvest.connectors.web_api.routers.trades.PortfolioManager",
                    side_effect=FileNotFoundError("memory missing")):
             synced, holding = _sync_trade_to_portfolio(trade)
 

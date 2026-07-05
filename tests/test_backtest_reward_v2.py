@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from core.backtest_reward import (
+from openinvest.core.backtest_reward import (
     compute_strategy_reward,
     forward_window_reward,
     verdict_oracle_accuracy,
 )
-from core.config import reset_config, set_config_override
+from openinvest.core.config import reset_config, set_config_override
 
 
 @pytest.fixture(autouse=True)

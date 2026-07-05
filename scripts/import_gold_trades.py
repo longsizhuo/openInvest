@@ -16,7 +16,7 @@ from typing import Dict, List
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
 
 PRIVATE_TRADES_PATH = ROOT / "memory" / ".state" / "gold_trades.private.json"
 

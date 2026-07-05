@@ -53,7 +53,7 @@ def _configure_dspy():
     返回 lm 引用以供 MIPROv2 复用为 prompt_model
     """
     import dspy
-    from utils.llm import get_dspy_lm, get_llm_config
+    from openinvest.utils.llm import get_dspy_lm, get_llm_config
     _api_key, base_url, model, _provider = get_llm_config()
     lm = get_dspy_lm(temperature=0.2)
     dspy.configure(lm=lm)
@@ -160,7 +160,7 @@ def _make_metric():
     DSPy metric 期望 0~1（or 0~∞），故映射为 (score + 1) / 2.0 → 1.0 / 0.5 / 0.0
     """
     # 延迟 import：由另一个 subagent 实现，import 在脚本启动时不存在不影响 --help
-    from core.backtest_reward import verdict_oracle_accuracy
+    from openinvest.core.backtest_reward import verdict_oracle_accuracy
 
     def metric(gold, pred, trace=None) -> float:
         predicted = str(getattr(pred, "verdict", "")).upper()

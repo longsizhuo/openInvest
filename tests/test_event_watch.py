@@ -11,16 +11,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jobs import event_watch
-from services.event_normalizer import NormalizedEvent
-from services.news_sources import RawNewsItem
+from openinvest.jobs import event_watch
+from openinvest.services.event_normalizer import NormalizedEvent
+from openinvest.services.news_sources import RawNewsItem
 
 
 @pytest.fixture
 def tmp_event_db(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "events.db")
-        monkeypatch.setattr("db.event_store.DB_PATH", path)
+        monkeypatch.setattr("openinvest.db.event_store.DB_PATH", path)
         yield path
 
 
@@ -160,7 +160,7 @@ def test_holdings_snapshot_pnl_uses_quote_currency(monkeypatch):
     跟 CNY/克 成本（≈1008）相除，把真实浮亏 -1% 算成了 +348%。
     现在统一走 get_quote(holding)，price 保证与 avg_cost 同币种同单位。
     """
-    from utils.quotes import QuoteSnapshot
+    from openinvest.utils.quotes import QuoteSnapshot
 
     gold = {
         "symbol": "GC=F",
@@ -174,11 +174,11 @@ def test_holdings_snapshot_pnl_uses_quote_currency(monkeypatch):
     fake_pm = MagicMock()
     fake_pm.holdings.find.side_effect = lambda s: gold if s == "GC=F" else None
     monkeypatch.setattr(
-        "core.portfolio_manager.PortfolioManager", lambda *a, **kw: fake_pm,
+        "openinvest.core.portfolio_manager.PortfolioManager", lambda *a, **kw: fake_pm,
     )
     # get_quote 返回换算后的 CNY/克 现价（不是原始 4523 USD/oz）
     monkeypatch.setattr(
-        "utils.quotes.get_quote",
+        "openinvest.utils.quotes.get_quote",
         lambda h: QuoteSnapshot(
             symbol="GC=F", price=1000.28, currency="CNY", unit="克",
         ),
@@ -213,7 +213,7 @@ class _FakePM:
 
 
 def test_gold_standing_queries_added_when_holding_gold(monkeypatch):
-    import core.portfolio_manager as pm_mod
+    import openinvest.core.portfolio_manager as pm_mod
     monkeypatch.setattr(pm_mod, "PortfolioManager", lambda: _FakePM(holdings=["GC=F"]))
     ctx = event_watch._load_user_context()
     for q in event_watch._GOLD_STANDING_QUERIES:
@@ -222,7 +222,7 @@ def test_gold_standing_queries_added_when_holding_gold(monkeypatch):
 
 def test_gold_standing_queries_added_for_gold_etf_watcher(monkeypatch):
     """关注（未必持有）金 ETF 代理（如 GLD）也算持金语义"""
-    import core.portfolio_manager as pm_mod
+    import openinvest.core.portfolio_manager as pm_mod
     monkeypatch.setattr(pm_mod, "PortfolioManager",
                         lambda: _FakePM(watching=["GLD", "AAPL"]))
     ctx = event_watch._load_user_context()
@@ -231,7 +231,7 @@ def test_gold_standing_queries_added_for_gold_etf_watcher(monkeypatch):
 
 def test_gold_standing_queries_absent_without_gold(monkeypatch):
     """不持金的用户不抓金新闻（anti-noise）"""
-    import core.portfolio_manager as pm_mod
+    import openinvest.core.portfolio_manager as pm_mod
     monkeypatch.setattr(pm_mod, "PortfolioManager",
                         lambda: _FakePM(holdings=["AAPL"], watching=["NVDA"]))
     ctx = event_watch._load_user_context()

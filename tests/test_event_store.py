@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from db.event_store import EventStore, claim_to_event_id
+from openinvest.db.event_store import EventStore, claim_to_event_id
 
 
 def _utc_iso(offset_days: int = 0) -> str:

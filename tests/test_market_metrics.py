@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from utils.market_metrics import (
+from openinvest.utils.market_metrics import (
     _calc_atr_pct,
     _calc_price_quantile,
     _calc_rebound_off_low,
@@ -176,7 +176,7 @@ def test_compute_metrics_empty_has_new_keys():
 def test_price_quantile_uses_only_last_504():
     """传入超长序列时，分位只对最后 504 根算（不对全量）——根因 bug 修正"""
     import pandas as pd
-    from utils.market_metrics import _calc_price_quantile, TRADING_DAYS_2Y
+    from openinvest.utils.market_metrics import _calc_price_quantile, TRADING_DAYS_2Y
     assert TRADING_DAYS_2Y == 504
     # 前 600 根全是高价(1000)，后 504 根递增 1..504；当前价=504 在近504窗里是最高=100%
     old = [1000.0] * 600
@@ -190,7 +190,7 @@ def test_price_quantile_uses_only_last_504():
 
 def test_price_quantile_window_param_overridable():
     import pandas as pd
-    from utils.market_metrics import _calc_price_quantile
+    from openinvest.utils.market_metrics import _calc_price_quantile
     s = pd.Series([float(i) for i in range(1, 101)])  # 1..100 递增
     # window=10 → 当前价 100 在近10根(91..100)里最大 = 100%
     assert _calc_price_quantile(s, window=10) == 1.0
@@ -198,6 +198,6 @@ def test_price_quantile_window_param_overridable():
 
 def test_trading_days_2y_single_source():
     """regime_probability 与 market_metrics 引同一个 504（单一可信源）"""
-    from utils.market_metrics import TRADING_DAYS_2Y
-    from core.regime_probability import _TRADING_DAYS_2Y
+    from openinvest.utils.market_metrics import TRADING_DAYS_2Y
+    from openinvest.core.regime_probability import _TRADING_DAYS_2Y
     assert TRADING_DAYS_2Y is _TRADING_DAYS_2Y or TRADING_DAYS_2Y == _TRADING_DAYS_2Y == 504
