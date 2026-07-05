@@ -141,5 +141,5 @@ if _STATIC_DIR.exists() and (_STATIC_DIR / "index.html").exists():
 else:
     log.info(
         "⚠️  GUI 未挂载（static/ 不存在或缺 index.html）。"
-        "跑 `python -m scripts.sync_gui_dist` 拉 GUI 构建产物。"
+        "跑 `openinvest-web --sync-only` 拉 GUI 构建产物。"
     )

@@ -500,7 +500,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         gui_detail = "static/index.html 不存在 — bootstrap 阶段 GUI dist 没拉成功"
         gui_hint = (
             "GUI dist 应该在 skill 第一次跑时自动拉，没拉到大概率是 GitHub 网络问题。"
-            "**直接帮用户跑** `cd $INVEST_HOME && uv run python -m scripts.sync_gui_dist` "
+            "**直接帮用户跑** `bash run.sh gui` 或 `uvx --from openinvest openinvest-web --sync-only` "
             "把 dist 装好（不要让用户自己 google 怎么修）；装好后告诉他 GUI 入口在 "
             f"http://{gui_host}:{gui_port}。"
         )

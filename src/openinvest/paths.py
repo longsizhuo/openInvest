@@ -31,3 +31,11 @@ def _detect_root() -> Path:
 
 
 INVEST_ROOT = _detect_root()
+
+# .env 单点加载：wheel/uvx 形态下模块文件在 uv 缓存里，散落各处的裸 load_dotenv()
+# 向上遍历永远找不到数据目录的 .env——在这里（所有入口的公共依赖）加载一次
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(INVEST_ROOT / ".env")
+except ImportError:
+    pass

@@ -65,6 +65,12 @@ EOF
     exit 1
     ;;
   *)
-    exec uvx --from "$SPEC" openinvest "$@"
+    # 不 exec：uvx 拉包失败（首跑断网 / PyPI 故障）时给 agent 结构化错误
+    # （if 形式对 set -e 安全；CLI 子命令自身的业务错误 JSON 由 Python 层输出）
+    if ! uvx --from "$SPEC" openinvest "$@"; then
+        rc=$?
+        echo "{\"status\":\"error\",\"error\":\"openinvest 执行失败 (exit $rc)\",\"hint\":\"首次运行需网络从 PyPI 拉包；检查网络后重试，或跑 uvx openinvest doctor 看完整输出\"}"
+        exit $rc
+    fi
     ;;
 esac

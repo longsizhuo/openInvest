@@ -224,16 +224,21 @@ def cmd_init(args: argparse.Namespace) -> None:
         env_lines.append(f"{k}={v}")
     env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
 
-    # 3) 触发 migrate_profile.py
-    migrate_script = ROOT / "scripts" / "migrate_profile.py"
-    venv_python = ROOT / ".venv" / "bin" / "python"
-    py = str(venv_python) if venv_python.exists() else sys.executable
-    result = subprocess.run(
-        [py, str(migrate_script)],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-    )
+    # 3) 触发 migrate（进程内调用——uvx/wheel 形态数据目录里没有 scripts/，
+    # 不能再 subprocess 数据目录下的脚本路径；review #139 finding #1）
+    import io
+    from types import SimpleNamespace
+    _out, _err, _rc = io.StringIO(), io.StringIO(), 0
+    try:
+        from contextlib import redirect_stderr, redirect_stdout
+        from openinvest.migrate_profile import main as _migrate_main
+        with redirect_stdout(_out), redirect_stderr(_err):
+            _migrate_main()
+    except Exception as e:  # noqa: BLE001
+        _err.write(f"{type(e).__name__}: {e}")
+        _rc = 1
+    result = SimpleNamespace(stdout=_out.getvalue(), stderr=_err.getvalue(),
+                             returncode=_rc)
 
     # 3b) v2 持仓覆盖：如果 profile 带了 holdings_description（自然语言）或
     # holdings_v2（结构化），优先用它们生成完整 v2 portfolio.md。这一步在

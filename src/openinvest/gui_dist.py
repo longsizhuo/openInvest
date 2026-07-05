@@ -40,7 +40,7 @@ def _download(url: str, timeout: int = 60) -> bytes:
         return resp.read()
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--owner", default=DEFAULT_OWNER)
     parser.add_argument("--repo", default=DEFAULT_REPO)
@@ -48,7 +48,7 @@ def main() -> int:
     parser.add_argument("--dest", default=str(STATIC_DIR), help="解压目标目录")
     parser.add_argument("--keep-existing", action="store_true",
                         help="不清空目标目录（默认会先清空）")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     url = (
         f"https://github.com/{args.owner}/{args.repo}/releases/download/"

@@ -26,9 +26,7 @@ def main() -> None:
         print("🎨 static/ 缺 GUI dist，自动拉取...", file=sys.stderr)
         try:
             from openinvest.gui_dist import main as sync_dist
-            sync_dist()
-        except SystemExit:
-            pass
+            sync_dist([])  # 显式空 argv——不能让它误吞本进程的 --sync-only 等参数
         except Exception as e:  # noqa: BLE001
             print(f"⚠️  GUI dist 拉取失败（{e}），跳过——API/Swagger 仍可用", file=sys.stderr)
 
@@ -37,6 +35,14 @@ def main() -> None:
 
     host = os.getenv("INVEST_WEB_HOST", "127.0.0.1")
     port = int(os.getenv("INVEST_WEB_PORT", "8765"))
+
+    # 端口已被占 = GUI 大概率已在跑——给 URL 优雅退出，别甩 uvicorn traceback
+    import socket
+    with socket.socket() as _s:
+        if _s.connect_ex((host, port)) == 0:
+            print(f"ℹ️  端口 {port} 已有服务在跑，直接打开 http://{host}:{port} 即可；"
+                  f"要重启先停掉占用进程。", file=sys.stderr)
+            return
     print(f"🚀 http://{host}:{port} （API: /api/…  Swagger: /docs，Ctrl+C 退出）",
           file=sys.stderr)
     import uvicorn
