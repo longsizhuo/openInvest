@@ -8,7 +8,8 @@ CIO 不重做分析，只综合 + 决策 + 输出执行方案。
 2026-05-18: DSPy v2 few-shot demos 经 sandbox A/B + MIPROv2 train 双重验证后**不接入**
 production——zero-shot baseline 已接近天花板 (67% verdict accuracy)，random demos
 压制 reasoning quality (REGIME mention 64%→1.8%)，DSPy optimized 也 0pp improvement。
-helper 函数 `agents/dspy_few_shot_loader.py` 保留作未来 path c 重训后的接入路径。
+few-shot 注入路线已退役（ADR-007，v1-v4 均输 zero-shot；loader 删于 2026-07-05 #141）。
+未来若做校准目标（Brier）的 prompt 优化，是新实验新接线——门槛与判据见 issue #141。
 """
 from typing import Any, Dict
 
