@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/longsizhuo/openInvest/compare/v0.17.1...v0.18.0) (2026-07-05)
+
+
+### Features
+
+* **mcp:** openinvest mcp 子命令 + 官方 MCP Registry 自动发布（issue [#133](https://github.com/longsizhuo/openInvest/issues/133) P0） ([256573e](https://github.com/longsizhuo/openInvest/commit/256573e1125244cba4225e868264144b54029bca))
+
 ## [0.17.1](https://github.com/longsizhuo/openInvest/compare/v0.17.0...v0.17.1) (2026-07-05)
 
 
