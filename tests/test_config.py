@@ -27,7 +27,6 @@ from openinvest.core.config import (
     MacroBucketConfig,
     OracleAccuracyConfig,
     RegimeConfig,
-    RegimePerAssetConfig,
     RewardConfig,
     TunableConfig,
     VerdictConfig,
@@ -62,8 +61,8 @@ class TestDefaultsMatchHardcoded:
     def test_regime_defaults(self):
         """RegimeConfig 默认值 = core/regime.py:35-55 THRESHOLDS"""
         cfg = RegimeConfig()
-        assert cfg.trend_ma_spread_pct == 3.0
-        assert cfg.crash_atr_pct_min == 5.0
+        assert cfg.trend_spread_atr_ratio == 3.6
+        assert cfg.crash_atr_spike_ratio_min == 2.0
         assert cfg.crash_drawdown_30d_pct == 20.0
         assert cfg.crash_deep_drawdown_30d_pct == 30.0
         assert cfg.recovery_rebound_pct == 10.0
@@ -130,33 +129,18 @@ class TestLoadConfigDefaults:
     def test_load_config_returns_defaults(self):
         cfg = load_config()
         assert isinstance(cfg, TunableConfig)
-        assert cfg.regime.trend_ma_spread_pct == 3.0
-        assert cfg.regime.crash_atr_pct_min == 5.0
+        assert cfg.regime.trend_spread_atr_ratio == 3.6
+        assert cfg.regime.crash_atr_spike_ratio_min == 2.0
         assert cfg.verdict.buy_confidence_overdrive == 0.95
         assert cfg.dreaming.lookback_days == 90
         assert cfg.macro_buckets.vix_low == 18.0
         assert cfg.oracle_accuracy.buy_positive == 5.0
         assert cfg.reward.weight_max_drawdown == -0.5
 
-    def test_load_config_has_per_asset_defaults(self):
-        """defaults.yaml 里的 per_asset 应该被加载。"""
+    def test_per_asset_keys_silently_ignored(self):
+        """#113：regime_per_asset 已删——老 .env/override 残留键不再报错，静默忽略。"""
         cfg = load_config()
-        assert "GC=F" in cfg.regime_per_asset
-        assert cfg.regime_per_asset["GC=F"].trend_ma_spread_pct == 5.0
-        assert cfg.regime_per_asset["GC=F"].crash_atr_pct_min == 3.5
-        assert "NDQ.AX" in cfg.regime_per_asset
-        assert cfg.regime_per_asset["NDQ.AX"].trend_ma_spread_pct == 4.0
-        assert cfg.regime_per_asset["NDQ.AX"].crash_atr_pct_min is None
-        assert "BTC-USD" in cfg.regime_per_asset
-        assert cfg.regime_per_asset["BTC-USD"].trend_ma_spread_pct == 8.0
-        assert cfg.regime_per_asset["BTC-USD"].crash_atr_pct_min == 8.0
-        assert "ETH-USD" in cfg.regime_per_asset
-        assert cfg.regime_per_asset["ETH-USD"].trend_ma_spread_pct == 8.0
-        assert cfg.regime_per_asset["ETH-USD"].crash_atr_pct_min == 8.0
-
-
-# ---------- YAML 覆盖 ----------
-
+        assert not hasattr(cfg, "regime_per_asset")
 
 class TestYamlOverride:
     """验证 YAML 覆盖生效。"""
@@ -165,12 +149,12 @@ class TestYamlOverride:
         yaml_file = tmp_path / "custom.yaml"
         yaml_file.write_text(textwrap.dedent("""\
             regime:
-              trend_ma_spread_pct: 4.5
+              trend_spread_atr_ratio: 4.5
         """))
         cfg = load_config(yaml_path=yaml_file)
-        assert cfg.regime.trend_ma_spread_pct == 4.5
+        assert cfg.regime.trend_spread_atr_ratio == 4.5
         # 其他字段保持默认
-        assert cfg.regime.crash_atr_pct_min == 5.0
+        assert cfg.regime.crash_atr_spike_ratio_min == 2.0
 
     def test_yaml_override_nested(self, tmp_path):
         yaml_file = tmp_path / "custom.yaml"
@@ -193,9 +177,9 @@ class TestEnvOverride:
     """验证 INVEST_* 环境变量覆盖生效。"""
 
     def test_env_override_regime(self, monkeypatch):
-        monkeypatch.setenv("INVEST_REGIME_TREND_MA_SPREAD_PCT", "4.5")
+        monkeypatch.setenv("INVEST_REGIME_TREND_SPREAD_ATR_RATIO", "4.5")
         cfg = load_config()
-        assert cfg.regime.trend_ma_spread_pct == 4.5
+        assert cfg.regime.trend_spread_atr_ratio == 4.5
 
     def test_env_override_dreaming(self, monkeypatch):
         monkeypatch.setenv("INVEST_DREAMING_LOOKBACK_DAYS", "180")
@@ -215,10 +199,10 @@ class TestCliOverride:
     """验证 cli_overrides dict 覆盖生效。"""
 
     def test_cli_override_regime(self):
-        cfg = set_config_override({"regime": {"trend_ma_spread_pct": 5.5}})
-        assert cfg.regime.trend_ma_spread_pct == 5.5
+        cfg = set_config_override({"regime": {"trend_spread_atr_ratio": 5.5}})
+        assert cfg.regime.trend_spread_atr_ratio == 5.5
         # 其他字段保持默认
-        assert cfg.regime.crash_atr_pct_min == 5.0
+        assert cfg.regime.crash_atr_spike_ratio_min == 2.0
 
     def test_cli_override_reward(self):
         cfg = set_config_override({"reward": {"weight_max_drawdown": -1.0}})
@@ -234,14 +218,14 @@ class TestInjectionPriority:
 
     def test_cli_overrides_yaml(self, tmp_path):
         yaml_file = tmp_path / "custom.yaml"
-        yaml_file.write_text("regime:\n  trend_ma_spread_pct: 4.0\n")
-        cfg = load_config(yaml_path=yaml_file, cli_overrides={"regime": {"trend_ma_spread_pct": 6.0}})
-        assert cfg.regime.trend_ma_spread_pct == 6.0
+        yaml_file.write_text("regime:\n  trend_spread_atr_ratio: 4.0\n")
+        cfg = load_config(yaml_path=yaml_file, cli_overrides={"regime": {"trend_spread_atr_ratio": 6.0}})
+        assert cfg.regime.trend_spread_atr_ratio == 6.0
 
     def test_env_overrides_cli(self, monkeypatch):
-        monkeypatch.setenv("INVEST_REGIME_TREND_MA_SPREAD_PCT", "7.0")
-        cfg = set_config_override({"regime": {"trend_ma_spread_pct": 6.0}})
-        assert cfg.regime.trend_ma_spread_pct == 7.0
+        monkeypatch.setenv("INVEST_REGIME_TREND_SPREAD_ATR_RATIO", "7.0")
+        cfg = set_config_override({"regime": {"trend_spread_atr_ratio": 6.0}})
+        assert cfg.regime.trend_spread_atr_ratio == 7.0
 
 
 # ---------- Locked 参数不受注入链影响 ----------
@@ -312,12 +296,12 @@ class TestFrozenDataclass:
     def test_regime_frozen(self):
         cfg = RegimeConfig()
         with pytest.raises(AttributeError):
-            cfg.trend_ma_spread_pct = 99.0  # type: ignore[misc]
+            cfg.trend_spread_atr_ratio = 99.0  # type: ignore[misc]
 
     def test_tunable_frozen(self):
         cfg = TunableConfig()
         with pytest.raises(AttributeError):
-            cfg.regime = RegimeConfig(trend_ma_spread_pct=99.0)  # type: ignore[misc]
+            cfg.regime = RegimeConfig(trend_spread_atr_ratio=99.0)  # type: ignore[misc]
 
 
 # ---------- reset_config ----------
@@ -328,15 +312,15 @@ class TestResetConfig:
 
     def test_reset_restores_defaults(self):
         # 修改 config
-        cfg1 = set_config_override({"regime": {"trend_ma_spread_pct": 9.0}})
-        assert cfg1.regime.trend_ma_spread_pct == 9.0
+        cfg1 = set_config_override({"regime": {"trend_spread_atr_ratio": 9.0}})
+        assert cfg1.regime.trend_spread_atr_ratio == 9.0
 
         # reset
         reset_config()
 
         # 重新加载应该回到默认值
         cfg2 = load_config()
-        assert cfg2.regime.trend_ma_spread_pct == 3.0
+        assert cfg2.regime.trend_spread_atr_ratio == 3.6
 
     def test_reset_clears_cache(self):
         """reset 后 load_config 应该重新构建（不是返回旧缓存）。"""
@@ -360,21 +344,21 @@ class TestCaching:
 
     def test_different_yaml_path_rebuilds(self, tmp_path):
         yaml_a = tmp_path / "a.yaml"
-        yaml_a.write_text("regime:\n  trend_ma_spread_pct: 4.0\n")
+        yaml_a.write_text("regime:\n  trend_spread_atr_ratio: 4.0\n")
         yaml_b = tmp_path / "b.yaml"
-        yaml_b.write_text("regime:\n  trend_ma_spread_pct: 5.0\n")
+        yaml_b.write_text("regime:\n  trend_spread_atr_ratio: 5.0\n")
 
         cfg_a = load_config(yaml_path=yaml_a)
         cfg_b = load_config(yaml_path=yaml_b)
         assert cfg_a is not cfg_b
-        assert cfg_a.regime.trend_ma_spread_pct == 4.0
-        assert cfg_b.regime.trend_ma_spread_pct == 5.0
+        assert cfg_a.regime.trend_spread_atr_ratio == 4.0
+        assert cfg_b.regime.trend_spread_atr_ratio == 5.0
 
     def test_force_reload(self):
         cfg1 = load_config()
         cfg2 = load_config(_force_reload=True)
         assert cfg1 is not cfg2
-        assert cfg1.regime.trend_ma_spread_pct == cfg2.regime.trend_ma_spread_pct
+        assert cfg1.regime.trend_spread_atr_ratio == cfg2.regime.trend_spread_atr_ratio
 
 
 # ---------- autouse fixture 隔离 ----------
@@ -385,13 +369,13 @@ class TestFixtureIsolation:
 
     def test_first_test_modifies_config(self):
         """这个 test 修改 config — 下一个 test 应该看不到。"""
-        cfg = set_config_override({"regime": {"trend_ma_spread_pct": 99.0}})
-        assert cfg.regime.trend_ma_spread_pct == 99.0
+        cfg = set_config_override({"regime": {"trend_spread_atr_ratio": 99.0}})
+        assert cfg.regime.trend_spread_atr_ratio == 99.0
 
     def test_second_test_sees_defaults(self):
         """这个 test 应该看到默认值，不受上一个 test 影响。"""
         cfg = load_config()
-        assert cfg.regime.trend_ma_spread_pct == 3.0
+        assert cfg.regime.trend_spread_atr_ratio == 3.6
 
 
 # ---------- config-via-API 持久层（ADR-017）----------

@@ -800,6 +800,9 @@ def compute_regime_return_frame(
     else:
         tr = close.diff().abs()
     atr_pct = tr.ewm(alpha=1.0 / 14, adjust=False).mean() / close * 100.0
+    # #113 尺度无关分类需要的两个归一化序列（口径同 market_metrics：252 窗 / ≥120 样本中位）
+    atr_med = atr_pct.rolling(252, min_periods=120).median()
+    atr_spike = atr_pct / atr_med
 
     def _v(x):
         return None if pd.isna(x) else float(x)
@@ -810,6 +813,8 @@ def compute_regime_return_frame(
             "ma20": _v(ma20.iat[i]),
             "ma120": _v(ma120.iat[i]),
             "atr_pct": _v(atr_pct.iat[i]),
+            "atr_spike_ratio": _v(atr_spike.iat[i]),
+            "atr_pct_median_1y": _v(atr_med.iat[i]),
             "price_quantile_2y": _v(quantile.iat[i]),
             "return_30d": _v(ret30.iat[i]),
             "rebound_off_30d_low": _v(rebound.iat[i]),

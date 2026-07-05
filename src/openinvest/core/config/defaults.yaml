@@ -3,19 +3,15 @@
 # locked 参数不进这个文件 — 它们在 locked.py 里，改需要 ADR。
 
 regime:
-  crash_atr_pct_min: 5.0
+  # #113 尺度无关阈值：任意资产零配置自动适配，per_asset 表已删
+  crash_atr_spike_ratio_min: 2.0     # 波动较自身 1 年常态翻倍
+  trend_spread_atr_ratio: 3.6        # 趋势强度 ≥3.6 个自身典型日波（NDQ 校准）
   crash_drawdown_30d_pct: 20.0
   crash_deep_drawdown_30d_pct: 30.0
-  trend_ma_spread_pct: 3.0
   recovery_rebound_pct: 10.0
   recovery_quantile_max: 0.50
   low_quantile_threshold: 0.20
   high_quantile_threshold: 0.80
-  per_asset:
-    GC=F: { trend_ma_spread_pct: 5.0, crash_atr_pct_min: 3.5 }
-    NDQ.AX: { trend_ma_spread_pct: 4.0 }
-    BTC-USD: { trend_ma_spread_pct: 8.0, crash_atr_pct_min: 8.0 }
-    ETH-USD: { trend_ma_spread_pct: 8.0, crash_atr_pct_min: 8.0 }
 
 verdict:
   buy_confidence_overdrive: 0.95

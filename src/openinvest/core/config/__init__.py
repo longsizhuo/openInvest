@@ -31,7 +31,6 @@ from .tunable import (
     MacroBucketConfig,
     OracleAccuracyConfig,
     RegimeConfig,
-    RegimePerAssetConfig,
     PathConfig,
     RewardConfig,
     SentimentConfig,
@@ -55,7 +54,6 @@ __all__ = [
     # Tunable dataclasses
     "TunableConfig",
     "RegimeConfig",
-    "RegimePerAssetConfig",
     "VerdictConfig",
     "DreamingTunableConfig",
     "MacroBucketConfig",
