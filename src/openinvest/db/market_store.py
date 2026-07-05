@@ -28,7 +28,7 @@ class MarketStore:
     跨进程：journal_mode=WAL（默认 DELETE 模式锁整个文件，多进程会饿死）
             + busy_timeout=5000（被锁时最多等 5s 而不是立即 OperationalError）
 
-    场景：scheduler / web_api / napcat_bot 三个进程同时读写时不再互相阻塞。
+    场景：scheduler / web_api 多个进程同时读写时不再互相阻塞。
     """
 
     def __init__(self):

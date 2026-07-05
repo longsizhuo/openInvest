@@ -8,8 +8,6 @@ import pytest
 
 from openinvest.capabilities.loader import (
     load_skill,
-    load_skill_metadata,
-    list_skills,
     _split_frontmatter,
     _render_placeholders,
 )
@@ -49,20 +47,6 @@ def test_render_placeholders_missing_var_preserved():
     assert out == "Hello Alice, {{unknown}}"
 
 
-def test_list_skills_returns_all_roles():
-    """确认 5 个角色 SKILL.md 都在"""
-    skills = list_skills()
-    expected = {"cio", "macro_strategist", "quant", "risk_officer", "wealth_context_officer"}
-    assert expected.issubset(set(skills)), f"missing: {expected - set(skills)}"
-
-
-@pytest.mark.parametrize("role", ["cio", "macro_strategist", "quant", "risk_officer", "wealth_context_officer"])
-def test_load_skill_all_roles_have_metadata(role):
-    """每个 role 的 SKILL.md frontmatter 必须有 name + description + role"""
-    meta = load_skill_metadata(role)
-    assert "name" in meta
-    assert "description" in meta
-    assert "role" in meta
 
 
 def test_load_skill_renders_asset_placeholders():

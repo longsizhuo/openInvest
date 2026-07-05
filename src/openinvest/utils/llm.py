@@ -114,22 +114,6 @@ def get_dspy_lm(temperature: float = 0.2, max_tokens: int = 1500):
     )
 
 
-def get_openai_client(timeout: Optional[float] = None):
-    """返回配置好的 ``openai.OpenAI`` 实例（直接调 chat.completions 用）
-
-    DeepSeek / 千问 / 智谱 等所有 OpenAI 兼容 API 都用这一个客户端。
-
-    Args:
-        timeout: 单次请求超时秒数；None 用 SDK 默认。
-    """
-    from openai import OpenAI
-    api_key, base_url, _model, _provider = get_llm_config()
-    kwargs = {"api_key": api_key, "base_url": base_url}
-    if timeout is not None:
-        kwargs["timeout"] = timeout
-    return OpenAI(**kwargs)
-
-
 def needs_thinking_disabled(model: Optional[str] = None) -> bool:
     """DeepSeek v4 系列 / MiMo v2.5 系列默认 thinking 模式，
     在 invest committee 这种"已有 4 worker 思考"场景下应 disable。

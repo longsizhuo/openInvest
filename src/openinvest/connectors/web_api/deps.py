@@ -11,7 +11,7 @@ from openinvest.core.portfolio_manager import PortfolioManager
 
 
 def get_pm() -> PortfolioManager:
-    """每请求新建 PortfolioManager（仿 napcat_bot.route 内的做法），
+    """每请求新建 PortfolioManager，
     保证读到 scheduler 刚写完的最新 memory，避免缓存陈旧
 
     fork 用户初次部署时 memory/*.md 还没生成 → PortfolioManager 抛 FileNotFoundError

@@ -129,32 +129,4 @@ def load_skill(
     return _render_placeholders(body, variables)
 
 
-def load_skill_metadata(role: str, round_label: str = "opening", capability: str = "committee") -> Dict[str, str]:
-    """只读 frontmatter（给 DSPy 用，能 enumerate 所有 role 的 metadata）"""
-    role_dir = CAPABILITIES_ROOT / capability / role
-    candidates = []
-    if round_label and round_label != "opening":
-        candidates.append(role_dir / f"{role}_{round_label}.md")
-    candidates.append(role_dir / f"{role}.md")
-    for p in candidates:
-        if p.exists():
-            raw = p.read_text(encoding="utf-8")
-            meta, _ = _split_frontmatter(raw)
-            return meta
-    raise FileNotFoundError(f"未找到 {role}.md for role={role}")
-
-
-def list_skills(capability: str = "committee") -> list[str]:
-    """列出 capabilities/<capability>/ 下所有含 .md 的角色目录名"""
-    cap_dir = CAPABILITIES_ROOT / capability
-    if not cap_dir.exists():
-        return []
-    roles = []
-    for d in sorted(cap_dir.iterdir()):
-        if d.is_dir() and not d.name.startswith("_") and d.name != "__pycache__":
-            if (d / f"{d.name}.md").exists():
-                roles.append(d.name)
-    return roles
-
-
-__all__ = ["load_skill", "load_skill_metadata", "list_skills"]
+__all__ = ["load_skill"]
