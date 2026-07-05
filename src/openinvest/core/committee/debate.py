@@ -160,7 +160,7 @@ def run_committee(
     Args:
         regime_brief: core.regime.format_regime_brief 的输出
         atr_defense_on: 独立快崩防御的 ATR 腿（资产级，atr_pct ≥ per-asset
-            crash_atr_spike_ratio_min，调用方 run_committee_for_symbol 算好传入）。
+            sentiment.atr_defense_spike_ratio，判定在 core/runner/session.py，调用方算好传入）。
             与 sentiment_brief 里的 VIX 哨兵（市场级）OR 后进 parse_cio_memo
             做确定性买侧降级。
         defense_dca: 黄金防御分批 DCA 闸（2026-06-13 裁决，wiki18 §5）。非 None =

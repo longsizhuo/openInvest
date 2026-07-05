@@ -6,8 +6,8 @@ intent: 参数 sweep 工具使用指南
 documents:
   endpoints: []
   config_keys:
-    - regime.trend_ma_spread_pct
-    - regime.crash_atr_pct_min
+    - regime.trend_spread_atr_ratio
+    - regime.crash_atr_spike_ratio_min
     - verdict.buy_confidence_overdrive
     - reward.weight_max_drawdown
     - oracle_accuracy.buy_positive
@@ -26,7 +26,7 @@ documents:
 
 ```bash
 uv run python -m scripts.sweep_runner --mode arithmetic \
-  --param regime.trend_ma_spread_pct \
+  --param regime.trend_spread_atr_ratio \
   --range 2.0,8.0,0.5 \
   --train-start 2018-01-01 --train-end 2023-12-31 \
   --assets NDQ.AX,GC=F \
@@ -50,8 +50,8 @@ uv run python -m scripts.sweep_runner --mode pnl \
 ## 参数格式
 
 `--param` 使用 `section.key` 格式，对应 `core/config/tunable.py` 的字段：
-- `regime.trend_ma_spread_pct`
-- `regime.crash_atr_pct_min`
+- `regime.trend_spread_atr_ratio`
+- `regime.crash_atr_spike_ratio_min`
 - `verdict.buy_confidence_overdrive`
 - `reward.weight_max_drawdown`
 - `oracle_accuracy.buy_positive`

@@ -45,8 +45,8 @@ def run_holdout(
     from openinvest.core.config import set_config_override
     set_config_override({
         "regime": {
-            "trend_ma_spread_pct": best.params["regime_uptrend"],
-            "crash_atr_pct_min": best.params["regime_atr"],
+            "trend_spread_atr_ratio": best.params["regime_uptrend"],
+            "crash_atr_spike_ratio_min": best.params["regime_atr"],
         },
     })
     os.environ["INVEST_MAX_DEBATE_ROUNDS"] = str(best.params["max_rounds"])

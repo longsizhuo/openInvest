@@ -98,14 +98,14 @@ uptrend 杠杆效应保留为显式 `verdict.risk_profile=aggressive` 开关（�
 
 ### 6 类 regime（uptrend / downtrend / range_bound / crash / recovery / unknown）
 
-源：`core/regime.py:THRESHOLDS`（默认阈值 + `ASSET_OVERRIDES` per-asset 覆盖）
+源：`core/regime.py:THRESHOLDS`（#113 起尺度无关比值口径，任意资产零配置自动适配，per-asset 覆盖已删）
 
 | Regime | 触发条件 | 给 Quant 的口径 |
 |--------|---------|-------------------|
-| `uptrend` | `(MA20 − MA120) / MA120 ≥ +trend_ma_spread_pct%`（默认 3%，per-asset 覆盖：金 5% / 纳指 4% / 加密 8%） | 中性概率口径（30d 中位/跌破概率/n），方向自决 |
-| `downtrend` | `(MA20 − MA120) / MA120 ≤ −trend_ma_spread_pct%` | 中性概率口径，方向自决 |
+| `uptrend` | `MA spread% ÷ 自身1年中位ATR% ≥ +trend_spread_atr_ratio`（默认 3.6——趋势强度须盖过自身噪声地板） | 中性概率口径（30d 中位/跌破概率/n），方向自决 |
+| `downtrend` | 同上 ≤ −trend_spread_atr_ratio | 中性概率口径，方向自决 |
 | `range_bound` | MA 纠缠（spread 在 ±阈值内）+ 波动正常 | 中性概率口径 + 当前分位，方向自决 |
-| `crash` | **双触发器（任一即触发）**：① 急跌 `atr_pct ≥ crash_atr_pct_min`（per-asset）**且** `return_30d ≤ −20%`；② 深跌 `return_30d ≤ −30%`（不看波动） | **强制 neutral**（可执行性约束：崩盘期任何方向都难理性执行） |
+| `crash` | **双触发器（任一即触发）**：① 急跌 `atr_spike_ratio ≥ crash_atr_spike_ratio_min`（默认 2.0，波动较自身常态翻倍）**且** `return_30d ≤ −20%`；② 深跌 `return_30d ≤ −30%`（不看波动） | **强制 neutral**（可执行性约束：崩盘期任何方向都难理性执行） |
 | `recovery` | crash 未触发 + 从近 30 日低点反弹 ≥ 10% + 价格仍在低位（真百分位 < 50%） | 中性概率口径，方向自决 |
 
 > 说明（与 `core/regime.py` 实现对齐，2026-05-26）：
@@ -142,7 +142,7 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 ```
 # 资产: BetaShares Nasdaq 100 ETF (NDQ.AX)
 # 市场 Regime（事实背景 + 历史概率参考）：
-  uptrend · MA20 高于 MA120 +8.5% (≥ 4%) · 价格百分位 78%
+  uptrend · MA20 高于 MA120 +8.5%，折合 7.7 个典型日波 (≥ 3.6×) · 价格百分位 78%
   → 该 regime 历史 30d forward return：中位 +1.4%、跌破现价概率 35%、n=1423
     （结合分位 / RSI 自行判断方向，不预设方向）
 # 市场数据（技术指标 + 多周期）：

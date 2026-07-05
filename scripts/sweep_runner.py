@@ -8,7 +8,7 @@
 
 用法:
   uv run python -m scripts.sweep_runner --mode arithmetic \
-    --param regime.trend_ma_spread_pct --range 2.0,8.0,0.5 \
+    --param regime.trend_spread_atr_ratio --range 2.0,8.0,0.5 \
     --train-start 2018-01-01 --train-end 2023-12-31 \
     --assets NDQ.AX,GC=F \
     --ground-truth docs/wiki/sweep_ground_truth/regime_events.yaml
@@ -226,10 +226,10 @@ def run_arithmetic_sweep(
 
     events = _validate_ground_truth(ground_truth_path)
 
-    # 解析参数路径: "regime.trend_ma_spread_pct" → section="regime", key="trend_ma_spread_pct"
+    # 解析参数路径: "regime.trend_spread_atr_ratio" → section="regime", key="trend_spread_atr_ratio"
     parts = param.split(".")
     if len(parts) != 2:
-        raise ValueError(f"参数格式必须是 section.key，如 regime.trend_ma_spread_pct，实际: {param}")
+        raise ValueError(f"参数格式必须是 section.key，如 regime.trend_spread_atr_ratio，实际: {param}")
     section, key = parts
 
     results: List[TrialResult] = []
@@ -237,15 +237,7 @@ def run_arithmetic_sweep(
     for value in values:
         # 注入参数（同时覆盖全局 + 所有 per-asset，确保 sweep 生效）
         override = {section: {key: value}}
-        # 如果是 regime 参数，也覆盖所有 asset 的 per-asset override
-        if section == "regime":
-            from openinvest.core.config import load_config
-            cfg = load_config()
-            pa_overrides = {}
-            for sym in cfg.regime_per_asset:
-                pa_overrides[sym] = {key: value}
-            if pa_overrides:
-                override["regime_per_asset"] = pa_overrides
+        # #113：per-asset override 已删——regime 阈值尺度无关，单一 override 即全资产生效
         set_config_override(override)
 
         trial = TrialResult(value=value)
@@ -435,7 +427,7 @@ def main(argv: Optional[List[str]] = None):
     parser.add_argument("--mode", choices=["arithmetic", "pnl"], required=True,
                         help="sweep 模式: arithmetic (纯算术) / pnl (需要 LLM)")
     parser.add_argument("--param", required=True,
-                        help="要 sweep 的参数，格式: section.key (如 regime.trend_ma_spread_pct)")
+                        help="要 sweep 的参数，格式: section.key (如 regime.trend_spread_atr_ratio)")
     parser.add_argument("--range", required=True,
                         help="参数范围: start,end,step (如 2.0,8.0,0.5)")
     parser.add_argument("--train-start", required=True,

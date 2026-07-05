@@ -785,9 +785,12 @@ def compute_regime_return_frame(
 
     # ATR%（Wilder RMA，真 TR 含跳空）—— 复刻 utils.market_metrics._calc_atr_pct 口径，
     # 但保留为全序列（原函数只返回末值）
+    # 口径对齐 market_metrics._atr_pct_series：仅当 High/Low 近 15 根（period+1）
+    # 全非 NaN 才走真 TR，否则退化收盘价差——两路径必须同源（#113 后 atr 喂两条归一化腿）
     has_hl = (
         "High" in df.columns and "Low" in df.columns
-        and not df["High"].isna().all() and not df["Low"].isna().all()
+        and bool(df["High"].tail(15).notna().all())
+        and bool(df["Low"].tail(15).notna().all())
     )
     if has_hl:
         high, low = df["High"].astype(float), df["Low"].astype(float)
@@ -802,6 +805,8 @@ def compute_regime_return_frame(
     atr_pct = tr.ewm(alpha=1.0 / 14, adjust=False).mean() / close * 100.0
     # #113 尺度无关分类需要的两个归一化序列（口径同 market_metrics：252 窗 / ≥120 样本中位）
     atr_med = atr_pct.rolling(252, min_periods=120).median()
+    # 分母 ≤0（长期横盘/填充价）→ NaN → _v() 转 None，与 live _calc_atr_spike_ratio 同语义
+    atr_med = atr_med.where(atr_med > 0)
     atr_spike = atr_pct / atr_med
 
     def _v(x):

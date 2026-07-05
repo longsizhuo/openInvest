@@ -194,9 +194,9 @@ def classify_regime(
         }
     ma_spread_pct = (ma20 - ma120) / ma120 * 100
 
-    # 趋势腿尺度无关：spread 按自身典型日波归一。归一化因子缺失时 unknown——
-    # 理论上 ma120 可算（≥120 样本）则中位 ATR% 必可算（同 120 最小样本），
-    # 走到这里说明数据形态异常，保守处理。
+    # 趋势腿尺度无关：spread 按自身典型日波归一。归一化因子缺失时 unknown（保守）。
+    # 边界：Close-only 帧的 ATR 序列来自 diff（首行 NaN），恰好 120 行时 ma120 可算
+    # 而中位 ATR% 差 1 个样本 → unknown；多一天数据即自愈，可接受。
     if atr_med is None or atr_med <= 0:
         return {
             "regime": "unknown",

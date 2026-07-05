@@ -138,9 +138,21 @@ class TestLoadConfigDefaults:
         assert cfg.reward.weight_max_drawdown == -0.5
 
     def test_per_asset_keys_silently_ignored(self):
-        """#113：regime_per_asset 已删——老 .env/override 残留键不再报错，静默忽略。"""
-        cfg = load_config()
+        """#113：regime_per_asset 已删——老 override 残留键不再报错，静默忽略。"""
+        cfg = set_config_override({
+            "regime": {"per_asset": {"GC=F": {"trend_ma_spread_pct": 5.0}}},
+            "regime_per_asset": {"BTC-USD": {"crash_atr_pct_min": 8.0}},
+        })
         assert not hasattr(cfg, "regime_per_asset")
+        assert cfg.regime.trend_spread_atr_ratio == 3.6  # 残留键没有污染新阈值
+
+    def test_legacy_scalar_keys_dropped_with_warning(self, caplog):
+        """#113：老标量键（绝对%口径）被忽略并落 warning——用户调参无声失效是不可接受的。"""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="config"):
+            cfg = set_config_override({"regime": {"crash_atr_pct_min": 8.0, "trend_ma_spread_pct": 6.0}})
+        assert cfg.regime.crash_atr_spike_ratio_min == 2.0  # 回落默认
+        assert any("尺度无关化" in r.message for r in caplog.records)
 
 class TestYamlOverride:
     """验证 YAML 覆盖生效。"""

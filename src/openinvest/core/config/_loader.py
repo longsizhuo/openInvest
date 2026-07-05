@@ -141,10 +141,19 @@ def _read_env_overrides() -> dict[str, Any]:
 
 def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     """从 flat dict 构建 TunableConfig（处理嵌套结构）。"""
-    # #113：regime per_asset 已删——老 .env/override 里的残留键静默忽略
+    # #113：regime per_asset 已删；老标量键（trend_ma_spread_pct/crash_atr_pct_min）
+    # 不再生效——静默回落默认会让用户的调参无声失效，必须给一行 warning
     regime_data = data.get("regime", {})
     regime_data.pop("per_asset", None)
     data.pop("regime_per_asset", None)
+    _legacy = [k for k in ("trend_ma_spread_pct", "crash_atr_pct_min") if regime_data.pop(k, None) is not None]
+    if _legacy:
+        import logging
+        logging.getLogger("config").warning(
+            "regime 配置键 %s 已随 #113 尺度无关化删除，本次忽略（阈值用新默认）。"
+            "新键：trend_spread_atr_ratio / crash_atr_spike_ratio_min（比值口径，非绝对%%）",
+            _legacy,
+        )
 
     # 构建各子 config
     regime = RegimeConfig(**{k: v for k, v in regime_data.items() if k in {f.name for f in fields(RegimeConfig)}})
