@@ -48,17 +48,16 @@ if DEV_CORS:
 
 
 # ============ 可选鉴权（远端模式 hub-and-spoke） ============
-# INVEST_API_TOKEN 不设 → 行为完全不变（既有 127.0.0.1 + Caddy + CF Access
-# 边缘鉴权部署、demo 实例零影响）。设了 → 非 loopback 来源访问 /api/*
-# （/api/health 豁免，留给探活）必须带 `Authorization: Bearer <token>`。
+# INVEST_API_TOKEN 不设 → 行为完全不变。设了 → **所有来源**（含 loopback）访问
+# /api/*（/api/health 豁免，留给探活）都必须带 `Authorization: Bearer <token>`。
 #
-# loopback 豁免的原因：生产链路是 Caddy → 127.0.0.1:8765（已被 CF Access 保护），
-# 本机 GUI / curl 不应被自己的 token 卡住；token 只防"绑 0.0.0.0 裸跑局域网 /
-# 内网穿透"场景下的陌生访问。
+# 2026-07-05（#106）：loopback 豁免已删。原豁免假设"反代边缘另有 CF Access
+# 兜底"，但典型 Caddy/Nginx 反代下 request.client.host 恒为 127.0.0.1——外网
+# 请求被静默免密，token 形同虚设。现语义：设了 token 就当真；本机 curl 自己
+# 带上 `-H "Authorization: Bearer $INVEST_API_TOKEN"`，内部触发（event_watch）
+# 从同一 .env 读 token 自动附带。
 #
 # 红线：token 永不进日志、永不进任何响应体。
-
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 @app.middleware("http")
@@ -67,12 +66,7 @@ async def _bearer_token_auth(request, call_next):
     token = os.getenv("INVEST_API_TOKEN", "").strip()
     if token:
         path = request.url.path
-        client_host = request.client.host if request.client else ""
-        if (
-            path.startswith("/api/")
-            and path != "/api/health"
-            and client_host not in _LOOPBACK_HOSTS
-        ):
+        if path.startswith("/api/") and path != "/api/health":
             auth_header = request.headers.get("authorization", "")
             provided = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
             import secrets as _secrets

@@ -134,9 +134,13 @@ def _trigger_committee(symbols: List[str], event_ids: List[str]) -> Optional[str
     import requests
     from openinvest.core.config import load_config
     base = os.getenv("INVEST_EVENT_API_URL", "http://127.0.0.1:8765")
+    # hub 开了 INVEST_API_TOKEN 时 loopback 也要带（#106 起 token 全域强制）
+    _tok = os.getenv("INVEST_API_TOKEN", "").strip()
+    headers = {"Authorization": f"Bearer {_tok}"} if _tok else {}
     try:
         r = requests.post(
             f"{base.rstrip('/')}/api/committee/run",
+            headers=headers,
             json={
                 "symbols": symbols,
                 "max_debate_rounds": load_config().event.max_rounds,

@@ -1159,6 +1159,19 @@ def test_auth_enforced_when_token_set(client, monkeypatch):
     assert r.status_code == 401
 
 
+def test_auth_no_loopback_exemption(client, monkeypatch):
+    """#106：token 设置后 loopback 来源也强制鉴权——反代下 client.host 恒为
+    127.0.0.1，豁免等于把 token 变成摆设。"""
+    monkeypatch.setenv("INVEST_API_TOKEN", "hub-secret-123")
+    from starlette.testclient import TestClient
+    from openinvest.connectors.web_api import app
+    lo = TestClient(app, client=("127.0.0.1", 50000))
+    assert lo.get("/api/strategy").status_code == 401
+    assert lo.get("/api/strategy",
+                  headers={"Authorization": "Bearer hub-secret-123"}).status_code == 200
+    assert lo.get("/api/health").status_code == 200
+
+
 # ---------- /api/config（ADR-017 config-via-API）----------
 
 def test_config_endpoints_roundtrip(client):

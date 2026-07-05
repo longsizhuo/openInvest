@@ -330,12 +330,15 @@ POST body schema：
 → 加 JWT 校验是过度工程，但**前提是没人能直连源站 IP**。
 → 加固方案：Caddy 加 `@cloudflare` matcher 仅放行 CF IP 段（未来）。
 
-**可选应用层 token（2026-06，远端模式）**：设 `INVEST_API_TOKEN` 后，
-**非 loopback** 来源访问 `/api/*`（`/api/health` 豁免探活）必须带
-`Authorization: Bearer <token>`（`secrets.compare_digest` 恒时比较）。
-不设 = 行为完全不变，上面的边缘鉴权模型照旧。loopback 豁免保证
-Caddy→127.0.0.1 链路和本机调用不受影响；token 用于"绑 0.0.0.0 / 内网直连 /
-没有 CF 的局域网 hub"场景。token 永不进日志与响应体。
+**可选应用层 token（2026-06 引入，2026-07-05 #106 收紧）**：设
+`INVEST_API_TOKEN` 后，**所有来源**（含 loopback）访问 `/api/*`
+（`/api/health` 豁免探活）必须带 `Authorization: Bearer <token>`
+（`secrets.compare_digest` 恒时比较）。不设 = 行为完全不变。
+
+> 原 loopback 豁免已删：典型 Caddy/Nginx 反代下连接源恒为 127.0.0.1，
+> 外网请求会被静默免密——token 形同虚设。现语义 = 设了 token 就全域当真；
+> 本机 curl 自己带 `-H "Authorization: Bearer $INVEST_API_TOKEN"`，
+> event_watch 内部触发从同一 .env 自动附带。token 永不进日志与响应体。
 
 详见 [08-deployment.md#cloudflare-access](08-deployment.md#cloudflare-access)。
 
