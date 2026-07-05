@@ -120,10 +120,14 @@ Add the lightweight skill from the official registry. The host agent will automa
 /plugin install invest@openinvest
 ```
 
-### 2. Standalone Skill Installation
+### 2. Standalone — MCP server or CLI (no clone needed)
+The backend ships on [PyPI](https://pypi.org/project/openinvest/); `~/openInvest` holds only your data:
 ```bash
-git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
-bash ~/openInvest/skills/install.sh
+# MCP (14 tools, any MCP client)
+claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
+
+# or plain CLI
+INVEST_HOME=~/openInvest uvx openinvest status
 ```
 Send `set up invest` (or `帮我初始化 invest`) to any skill-enabled AI terminal. The system will trigger an interactive bootstrap wizard to guide you through:
 1. Detecting the `memory/` state storage path and `.env` configuration.
@@ -132,7 +136,7 @@ Send `set up invest` (or `帮我初始化 invest`) to any skill-enabled AI termi
 
 > 💡 **Zero-Cost Execution**: In skill interactive mode, the committee's underlying reasoning relies entirely on the host agent's (e.g. Claude Code) reasoning pipeline. **No third-party API Key is consumed**. You only need to configure an API key when setting up automated crons or calling independent Web APIs.
 
-For containerized deployment or Web GUI debugging, see [docs/QUICK_START.md](docs/QUICK_START.md).
+For self-hosting details, see [docs/QUICK_START.md](docs/QUICK_START.md). (The bundled Web GUI was retired on 2026-07-05 — all capabilities are exposed via CLI/MCP; a standalone frontend may return later.)
 
 ### 3. Serverless Self-Hosting (GitHub Actions)
 Run the committee automatically via GitHub Actions and receive daily digest emails.
@@ -225,7 +229,7 @@ LLM_MODEL=glm-4-flash
 ```
 
 ### Tunable Runtime Overrides
-Pursuant to [ADR-017](docs/wiki/adr/017-config-via-api.md), runtime overrides persist in `memory/.state/config_overrides.json` and share the same precedence priority across Web GUI, REST API, CLI, and `.env`:
+Pursuant to [ADR-017](docs/wiki/adr/017-config-via-api.md), runtime overrides persist in `memory/.state/config_overrides.json` and share the same precedence priority across CLI, REST API, and `.env`:
 
 | Config Key | Data Type (Default) | Architectural Effect |
 |---|---|---|
@@ -238,13 +242,10 @@ Pursuant to [ADR-017](docs/wiki/adr/017-config-via-api.md), runtime overrides pe
 #### Overriding Parameters at Runtime (e.g. Disabling Concentration Lens)
 ```bash
 # Method 1: Using the CLI
-uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
+uvx openinvest config --set verdict.concentration_lens_enabled false
 
-# Method 2: REST API Call
-curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
-
-# Method 3: Web GUI Configuration
-# Hot-swap configurations in invest-gui under Settings -> Committee Configuration
+# Method 2: REST API (deprecated surface — remote hub mode only)
+curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}' 
 ```
 
 ---

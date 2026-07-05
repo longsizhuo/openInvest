@@ -42,7 +42,7 @@ skill 失败模式。两条路径都喂 stdin：
 **回退路径**：
 - 如果用户**没有提供 DeepSeek key**（Q5 留空）：解析跑不了，cmd_init 会回退
   到 v1 字段，只把 `cash_cny`、`aud_cash` 写进 portfolio。这种用户之后必须
-  通过 GUI 或 `POST /api/holdings` 加追踪资产。**告诉用户这点**。
+  用 CLI `run.sh buy <SYM> ...`（或同名 MCP 工具）加追踪资产。**告诉用户这点**。
 - 如果用户**真的什么都没有**：可以填 `"什么都没有，CNY 现金 0"`，pipeline 跑通就行。
 
 ## 拼 payload
@@ -81,9 +81,9 @@ echo '{
 `init` 返回 JSON 里看 `holdings_parse_note`：
 - `"parsed via DeepSeek; portfolio.md overwritten with v2 schema"` → 成功
 - `"LLM parse failed (...); fell back to v1 fields"` → DeepSeek 出错，跑了 v1
-  兜底；告诉用户 + 让他用 GUI 重补
+  兜底；告诉用户 + 让他之后用 CLI `buy` 重补
 - `"DEEPSEEK_API_KEY 缺失"` → Q5 没填 key，回退 v1。要么让用户填，要么让他
-  之后用 GUI 加资产
+  之后用 CLI `buy` 加资产
 
 `status: "ok"` 后**马上**再跑一次 `run.sh doctor` 确认 `status: "ready"`，
 然后回去执行用户最初的请求。
@@ -96,7 +96,7 @@ echo '{
 
 ### DeepSeek key
 
-什么时候需要：用户想让服务器后台每天 03:00 自动跑、想用 GUI 触发委员会、
+什么时候需要：用户想让服务器后台每天 03:00 自动跑、
 或者用 Cursor / Cline / Codex 等非 Claude agent 跑。
 
 去哪开：[platform.deepseek.com](https://platform.deepseek.com) 注册 → API
@@ -116,7 +116,7 @@ keys 页面创建。复制以 `sk-` 开头的字符串。
 
 `init` 完了，告诉用户：
 > 现在你可以直接对我说"看看我的持仓"或"该不该加仓 X"，我会帮你跑 4 角色 AI
-> 委员会分析。想看图形化面板的话另开终端跑 `~/.claude/skills/invest/scripts/run.sh gui`。
+> 委员会分析。
 
 **不要**说 "Coordinator 模式 / Direct 模式" 这种术语 —— 小白听不懂。
 
@@ -156,7 +156,7 @@ keys 页面创建。复制以 `sk-` 开头的字符串。
 | `holdings_parse_note` 值（含以下关键词） | agent 必须对用户说的话（中文原文，不得改动要点） |
 |---|---|
 | `"DEEPSEEK_API_KEY 缺失"` | "你的持仓我暂时按基础模式记录了——只录了现金，没识别你说的具体股票。想让我自动识别 (510300 → 沪深300ETF 那种)，需要一个免费 DeepSeek API key，30 秒去 platform.deepseek.com 注册。要不要现在搞定？" |
-| `"LLM parse failed"` | "解析你说的持仓时出了点问题（DeepSeek 临时故障或网络超时），现在只录了现金部分。你可以等一会儿重跑 `run.sh init --force`，或者直接通过 GUI 手动加股票。" |
+| `"LLM parse failed"` | "解析你说的持仓时出了点问题（DeepSeek 临时故障或网络超时），现在只录了现金部分。你可以等一会儿重跑 `run.sh init --force`，或者让我用 `run.sh buy` 帮你手动加股票。" |
 | `"parsed via DeepSeek"` 且 `user_review_required: true` | 读出 `parsed_holdings_for_user_review` 里每条持仓让用户确认，例："我理解你持有：A 3000 股 4.2 元、B 50 克黄金 750 均价。对吗？" |
 | `"no holdings_description provided"` | 无需额外说（用户本来就没描述持仓） |
 
@@ -173,7 +173,7 @@ keys 页面创建。复制以 `sk-` 开头的字符串。
   https://myaccount.google.com/apppasswords。
 - **DeepSeek key 不以 `sk-` 开头** → 多半是页面标题误粘了。让用户重新复制 key。
 - **LLM 解析的 symbol 不对**（如把"宁德时代"映射成 `300750.SZ` 但用户其实买的
-  港股 `3750.HK`）→ 让用户跑 `run.sh status` 检查，不对就用 GUI 改一下。
+  港股 `3750.HK`）→ 让用户跑 `run.sh status` 检查，不对就用 CLI `sell` / `buy` 修正。
 - **Coordinator 路径用户没给 DeepSeek key** → 完全 OK，Coordinator 不调
   DeepSeek。但要告诉用户："你跳过 key 之后没法用 Direct 路径（Cron / 非
   Claude agent），如果只在 Claude Code 里用就够了。"

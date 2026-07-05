@@ -32,17 +32,17 @@ documents:
 3. [加新 agent 角色](#3-加新-agent-角色)
 4. [加新 connector（如 Telegram bot）](#4-加新-connector)
 5. [加新 cron job](#5-加新-cron-job)
-6. [加新 Web 端点](#6-加新-web-端点)
-7. [加新 GUI 路由 / tab](#7-加新-gui-路由--tab)
+6. [~~加新 Web 端点~~（deprecated，改加 CLI 子命令 / MCP 工具）](#6-加新-web-端点deprecated)
+7. [~~加新 GUI 路由 / tab~~（GUI 已退役 2026-07-05）](#7-加新-gui-路由--tab已退役)
 
 ---
 
 ## 1. 加新资产
 
-### 场景 A：用户想追踪一只股（GUI 操作，不改代码）
+### 场景 A：用户想追踪一只股（CLI / MCP 操作，不改代码）
 
-直接 GUI Dashboard 「新增资产」按钮 → 输入 symbol → 选追踪仓 → 提交。
-后端 `/api/holdings` POST → portfolio.md `holdings` list 自动追加。
+`uvx openinvest buy --symbol NDQ.AX --units 0 ...`（或对 agent 说"track NDQ.AX"，
+走 MCP `buy` 工具）→ portfolio.md `holdings` list 自动追加。
 
 → **0 代码改动**，任意 yfinance symbol 都行。
 
@@ -64,7 +64,6 @@ documents:
    ```
 2. **写 `utils/silver_price.py`**：仿 `utils/gold_price.py` 模式
 3. **改 `core/portfolio_manager.py:HOLDING_TEMPLATES`**：加一个 silver 模板
-4. **可选**：改 GUI HoldingDialog 启发式 kind 判断
 
 工时：~1 小时。
 
@@ -142,13 +141,11 @@ documents:
 
 3. **改 CIO prompt** 让它综合 ESG transcript
 
-4. **改 `connectors/web_api/routers/regime.py:get_regime_rules()` + `connectors/web_api/models.py:RegimeRulesResponse`** 注册新角色到 `/api/regime_rules`
+4. **改 `connectors/web_api/routers/regime.py:get_regime_rules()` + `connectors/web_api/models.py:RegimeRulesResponse`** 注册新角色到 `/api/regime_rules`（存量端点维护，非新增）
 
-5. **改 GUI `routes/committee/AgentsTab.tsx`** 让"4 角色 + 规则" tab 改名"5 角色"
+5. **更新 [02-agents.md](02-agents.md)** 角色矩阵
 
-6. **更新 [02-agents.md](02-agents.md)** 角色矩阵
-
-7. **同步 Coordinator 路径**：`skills/invest/scripts/run.sh prepare_committee` 也要 spawn 第 5 个 subagent
+6. **同步 Coordinator 路径**：`skills/invest/scripts/run.sh prepare_committee` 也要 spawn 第 5 个 subagent
    → 这是双路径的成本，详见 [04-execution-paths.md](04-execution-paths.md)
    （Direct 路径 `run_committee` 复用 `core/committee/`，第 4 步生效后自动跟上，不用单独改）
 
@@ -162,15 +159,19 @@ documents:
 
 ### 改动清单
 
-1. **新建 `connectors/telegram_bot.py`**
-   - 模仿 `napcat_bot.py` 的结构（@cmd 装饰器 + dispatch）
+> 先问一句：**真的要写 connector 吗？** 多数聊天/agent 场景直接接 MCP
+> （`openinvest-mcp`）就够了，零代码。只有目标平台不支持 MCP 才写。
+
+1. **新建 `src/openinvest/connectors/telegram_bot.py`**
+   - @cmd 装饰器 + dispatch 结构（历史上 NapCat QQ bot 用这个模式，已于 2026-07-05 删除；
+     考古可看 git history 里的 `connectors/napcat_bot.py`）
    - 收到 Telegram 消息 → 解析 `/balance` → 调 `core/portfolio_manager.PortfolioManager` 获取数据
    - 不要自己改 portfolio dict，必须走 `pm.cash_amount(...)` / `pm.holdings.find(...)`
 
 2. **systemd unit `systemd/invest-telegram.service`**
    ```ini
    [Service]
-   ExecStart=/path/uv run python -m connectors.telegram_bot
+   ExecStart=/path/python -m openinvest.connectors.telegram_bot
    ```
 
 3. **`.env.example` 加 `TELEGRAM_BOT_TOKEN`**
@@ -180,7 +181,8 @@ documents:
 工时：~半天。
 
 **关键约束**：connector 必须只做协议转换，业务逻辑全部 forward 给 `core/`。
-违反 → connector 间行为飘移（早期 napcat 改 dict 的教训）。
+违反 → connector 间行为飘移（早期 NapCat bot 直接改 dict 的教训——该 connector
+本身已删除，教训保留）。
 
 ---
 
@@ -213,69 +215,28 @@ documents:
 
 4. **写 `jobs/README.md` 加一行**
 
-5. **GUI `/system` Cron Jobs tab 自动展示**（无需改前端）
-
 工时：~1-2 小时。
 
 ---
 
-## 6. 加新 Web 端点
+## 6. 加新 Web 端点（deprecated）
 
-例：`GET /api/portfolio/by_currency?currency=CNY` 只返回该币种的资产。
-
-### 改动清单
-
-1. **在 `connectors/web_api/routers/` 选对应域的 router 加 endpoint + 在 `connectors/web_api/models.py` 加 Pydantic 响应模型**
-   ```python
-   class ByCurrencyResponse(BaseModel):
-       currency: str
-       cash: float
-       holdings: List[HoldingV2]
-       total: float
-
-   @app.get("/api/portfolio/by_currency", response_model=ByCurrencyResponse)
-   async def by_currency(currency: str = Query(...)):
-       pm = _new_pm()
-       # ... filter holdings by cost_currency ...
-       return ByCurrencyResponse(...)
-   ```
-
-2. **测试 `tests/test_web_api.py`**
-
-3. **重启 `invest-web.service`**（systemd 不会自动 hot reload）
-
-4. **前端同步类型**：
-   ```bash
-   cd invest-gui && pnpm gen-types
-   # 检查 TS 编译，加新组件用它
-   ```
-
-5. **更新 [06-api.md](06-api.md) 端点表**
-
-工时：~1 小时。
+> ⚠️ Web API 已 deprecated（2026-07-05）：存量端点只服务 remote hub 模式与内部触发，
+> **不再新增端点**。新功能面向用户/agent 的入口是：
+>
+> 1. **CLI 子命令**：`src/openinvest/cli.py` 注册 + `src/openinvest/skill_cmds/` 实现
+> 2. **MCP 工具**：`src/openinvest/connectors/mcp_server.py` 加工具定义
+> 3. 更新 `skills/invest/SKILL.md` 让非 Claude agent 也能调
+>
+> 只有维护存量 hub 端点（bug fix / schema 修正）才碰 `connectors/web_api/`，
+> 测试在 `tests/test_web_api.py`，改完重启 `invest-web.service`。
 
 ---
 
-## 7. 加新 GUI 路由 / tab
+## 7. 加新 GUI 路由 / tab（已退役）
 
-### 场景 A：加全新顶级路由（如 `/reports`）
-
-1. `invest-gui/src/routes/Reports.tsx` 新建
-2. `invest-gui/src/main.tsx` 加 `<Route path="reports" element={<Reports />} />`
-3. `invest-gui/src/App.tsx` 顶导加 link
-4. 决定属于「核心日常」还是「次级」（参考 [10-design-system.md](10-design-system.md)）
-
-### 场景 B：在 `/committee` 加新 tab
-
-1. `invest-gui/src/routes/committee/MyNewTab.tsx` 新建
-2. `invest-gui/src/routes/committee/index.tsx` 在 tabs 数组加一项
-3. 注意：tab 数已经 7 个，加之前思考"是否真的需要独立 tab"
-
-### 场景 C：在 `/system` 加新 tab
-
-同 B，改 `routes/System.tsx`。
-
-工时：~30 分钟（不含具体 tab 内容）。
+> ⚠️ 2026-07-05 GUI 已退役，invest-gui 仓库封存待重做（重做走独立前端连 MCP）。
+> 本节内容已删除；历史设计语言存档见 [10-design-system.md](10-design-system.md)。
 
 ---
 
@@ -286,7 +247,7 @@ documents:
 - ❌ 在 connector 里直接改 portfolio dict（必须走 `with_portfolio_tx()`）
 - ❌ 加新字段不更新 Pydantic schema（写盘会被 validation 拒）
 - ❌ 改 `_render_portfolio_body_v2()` 的输出格式（LLM 在读它，breaking change 影响 prompt）
-- ❌ 加 endpoint 不更新前端类型（运行时报 `undefined` 字段）
+- ❌ 加新用户功能只碰 Web API 不补 CLI / MCP（Web API 已 deprecated，agent 用不上）
 - ❌ 改完不写测试（166 测试是底线，新功能至少 3 测试覆盖 happy / error / 并发）
 
 ### 必做的事

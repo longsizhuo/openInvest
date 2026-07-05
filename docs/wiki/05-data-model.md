@@ -72,7 +72,7 @@ gold_avg_cost_cny_per_gram: 1008.79
 ```
 
 **问题**：
-- 加新资产（如苹果股票 AAPL）要改代码：portfolio.md 加 `aapl_shares` 字段、PortfolioManager 加 getter、render_body 加渲染逻辑、NapCat 加 `/aapl_set` 命令——**至少 4 处**
+- 加新资产（如苹果股票 AAPL）要改代码：portfolio.md 加 `aapl_shares` 字段、PortfolioManager 加 getter、render_body 加渲染逻辑、NapCat bot（历史 connector，2026-07-05 已删除）加 `/aapl_set` 命令——**至少 4 处**
 - 加新币种（如 USD/EUR）同理
 - 字段越来越多，schema 维护成本指数级
 
@@ -113,7 +113,7 @@ holdings:
 - `holdings`：`list[holding]`，每个 holding 自描述（symbol / kind / units / unit_label / cost / channel）
 
 **好处**：
-- 加新资产 = 用户在 GUI「新增资产」按 1 个按钮（无需改代码）
+- 加新资产 = 一条 CLI / MCP 调用（`uvx openinvest buy` 或对 agent 说 "track X"，无需改代码）
 - 加新币种 = `cash["USD"] = 100`（无需改代码）
 - 任何 yfinance symbol（NDQ.AX / AAPL / 005827.SS / BTC-USD）都能存
 
@@ -181,7 +181,7 @@ def holdings(self) -> HoldingsView:
 | `stock` / `etf` | quote 直接拿 yfinance Close 价 |
 | `metal` | 走 `yfinance_proxy` + FX 反推（黄金常用 GC=F + USDCNY → CNY/g）|
 | `crypto` | 走 BTC-USD / ETH-USD 等 |
-| `bond` / `fund` | 同 stock，但 GUI 标识不同 |
+| `bond` / `fund` | 同 stock，但展示标识不同 |
 | `other` | 兜底类型 |
 
 ### `proxy_kind` 是什么
@@ -203,7 +203,8 @@ def holdings(self) -> HoldingsView:
 
 ### `is_tracking_only`
 
-GUI 上勾选"追踪仓"复选框 → `is_tracking_only: true`。
+建仓时标记追踪仓（CLI / MCP `buy` 的追踪语义，或直接在 portfolio.md 设
+`is_tracking_only: true`）。
 影响：
 - `units` 可以为 0
 - 不计入总资产 / PnL
@@ -252,7 +253,7 @@ def _file_lock(path: Path):
             fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
 ```
 
-→ 同一文件 napcat_bot 进程 + invest-web 进程 + scheduler 进程同时写，**不会丢更新**。
+→ 同一文件多进程（CLI / MCP server / invest-web / scheduler）同时写，**不会丢更新**。
 
 ### 5.3 atomic write（防进程被 kill）
 
@@ -274,7 +275,7 @@ def _atomic_write_text(path: Path, text: str):
 
 ```
 50 线程并发 cash["CNY"] += 1   → 最终 delta = 50.0   (0 lost updates)
-20 轮 scheduler 扣款 + napcat 存款 race  → delta 精确 = -37880  (0 lost updates)
+20 轮 scheduler 扣款 + 并发存款 race     → delta 精确 = -37880  (0 lost updates)
 ```
 
 ---
@@ -319,9 +320,9 @@ memory/
 | 死法 | 修法 | 出处 |
 |------|------|------|
 | 进程被 kill 时 portfolio.md 写到一半，状态损坏 | atomic write 三步 | `core/memory_store.py:_atomic_write_text` |
-| napcat 存款 + scheduler 扣款 TOCTOU | 单锁 RMW + transaction | `core/memory_store.py:transaction` |
+| 并发存款 + scheduler 扣款 TOCTOU（NapCat bot 时代踩的坑，connector 已删、防御仍在）| 单锁 RMW + transaction | `core/memory_store.py:transaction` |
 | schema 飘字段（user 改了 portfolio.md 写了非法字段）| Pydantic v2 强校验 + render_body 用模板 | `core/schemas.py` |
-| 多 connector 实现飘移（napcat 自己改 dict）| 强制走 PortfolioManager 接口 | `core/portfolio_manager.py` |
+| 多 connector 实现飘移（历史 NapCat bot 自己改 dict）| 强制走 PortfolioManager 接口 | `core/portfolio_manager.py` |
 
 ---
 
@@ -329,6 +330,6 @@ memory/
 
 → [02-agents.md](02-agents.md) 看 holdings 数据怎么进入 Risk Officer prompt
 
-→ [07-extending.md#加新资产](07-extending.md#加新资产) 看怎么用 GUI 新增资产 / 程序化新增
+→ [07-extending.md#加新资产](07-extending.md#加新资产) 看怎么用 CLI / MCP 新增资产 / 程序化新增
 
 → [adr/003-v2-data-model.md](adr/003-v2-data-model.md) 看 v1 → v2 决策细节

@@ -19,7 +19,7 @@ GitHub Actions 每天 02:00 UTC (= 北京 10:00) 唤醒
         ├─ 1. checkout 你的 fork（连带 memory/ 持仓）
         ├─ 2. uv sync 装依赖
         ├─ 3. 用你填的 secrets 生成 .env
-        ├─ 4. 跑 `python -m jobs.daily_report`
+        ├─ 4. 跑 `python -m openinvest.jobs.daily_report`
         │       → 4 角色委员会辩论 → CIO 综合 verdict → 发邮件给你
         └─ 5. 把更新后的 memory/ commit 回你的 fork（决策历史进 git，可回溯）
 ```
@@ -92,12 +92,13 @@ Actions 在云端跑，它得能读到**你的**持仓。所以要先在本地 i
 
 ```bash
 # 1) 把你的私有 fork clone 下来（注意是 YOUR_NAME，不是 longsizhuo）
-git clone https://github.com/YOUR_NAME/openInvest.git ~/openInvest
-cd ~/openInvest
-uv sync
+#    这里 clone 只是为了把 memory/ 推回 fork——日常本地使用不需要 clone，
+#    直接 `uvx openinvest`（PyPI 分发）即可
+git clone https://github.com/YOUR_NAME/openInvest.git ~/openInvest-fork
+cd ~/openInvest-fork
 
 # 2) 初始化你的画像 + 持仓（交互式问答：合规名 / 风险 / 持仓 / 关注的资产 等）
-uv run python scripts/skill.py init
+INVEST_HOME=~/openInvest-fork uvx openinvest init
 #   ——或者如果你用 Claude Code / 支持 Skill 的终端，直接说「帮我初始化 invest」更顺
 ```
 
@@ -118,10 +119,11 @@ target_assets:
   max_single_invest_cny: 0   # 0 = 不设单次上限
 ```
 
-> 想要校验保护、不想手写 YAML？在本地临时起一下后端 `uv run python -m connectors.web_api`，
+> 想要校验保护、不想手写 YAML？在本地临时起一下 API server
+> `INVEST_HOME=~/openInvest-fork uvx openinvest-web`，
 > 然后 `curl -X POST localhost:8765/api/strategy/asset -H 'Content-Type: application/json'
 > -d '{"symbol":"510300.SS","max_single_invest_cny":6000}'`，它会安全地写进 `strategy.md`。
-> （这只是本地一次性配置，跑完 Ctrl+C；**云端 Actions 不需要后端**。）
+> （这只是本地一次性配置，跑完 Ctrl+C；**云端 Actions 不需要 API server**。）
 
 ```bash
 # 3) memory/ 默认在 .gitignore 里，必须 -f 强制加，推到你的私有 fork
@@ -237,8 +239,8 @@ git fetch upstream && git merge upstream/main
 服务器，Actions 不跑**。所以：
 
 - 你**不会**因为开了这个 workflow 就自动下单/自动定投 —— daily_report 只给**建议**，不动账本。
-- 想要全套自动化（含自动定投 / 实时事件告警），得自己挂一台机器跑 `connectors.web_api` + cron，
-  或用 hub-and-spoke 远端模式（见 [SKILL.md「远端模式」](../skills/invest/SKILL.md)）。
+- 想要全套自动化（含自动定投 / 实时事件告警），得自己挂一台机器跑 `openinvest-web` + scheduler cron，
+  或用 hub-and-spoke 远端模式（见 [SKILL.md「远端模式」](../skills/invest/SKILL.md)、[08-deployment](wiki/08-deployment.md)）。
 
 ---
 

@@ -184,8 +184,7 @@ EOF
 
 如果用户同意：
 1. **不要自己写 `memory/`**（见 SKILL.md Constraints）。
-2. 告诉用户 NapCat 命令（如 `/gold_buy 5g @1040`）——执行环节走他个人 QQ bot
-   留 audit trail。
-3. 非黄金/非现金的交易（任何其他 yfinance symbol），让用户走 Web GUI 的
-   HoldingDialog 或 `POST/PUT /api/holdings/{symbol}`。NapCat 专用命令只覆盖
-   黄金 + 现金。
+2. 用户确认成交后，用 CLI `buy` / `sell`（现金用 `deposit` / `withdraw`，
+   或同名 MCP 工具）记账——走账本留 audit trail。
+3. 用户对建议表态（买了 / 没买 / 拒绝）后，用 `record_execution <decision_id>`
+   回写决策账本（拒绝时先问一句原因）。

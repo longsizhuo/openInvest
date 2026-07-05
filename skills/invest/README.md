@@ -11,7 +11,7 @@ openInvest 的**日常使用 agent skill**。看持仓 / 跑委员会 / 加减�
 skills/invest/
 ├── SKILL.md          ← agent 触发指引（决策树 / 子命令 / Web API 端点）
 ├── scripts/
-│   └── run.sh        ← bootstrap + 子命令分发器（首次跑自动 git clone + uv sync）
+│   └── run.sh        ← 子命令分发器（内部走 `uvx openinvest` 从 PyPI 拉后端；更新 = `run.sh update`）
 ├── references/
 │   ├── committee-protocol.md     ← Coordinator 路径详细 stage
 │   ├── two-paths.md              ← Coordinator vs Direct 区别
@@ -31,8 +31,8 @@ bash skills/install.sh        # 同时装 invest + invest-setup
 ```
 
 `install.sh` 装到 `~/.claude/skills/invest/` 和 `~/.claude/skills/invest-setup/`，
-内容都是指向本仓库的 symlink —— 改 `SKILL.md` / `scripts/` 后 `git pull` 即生效，
-不需要重装。
+内容都是指向源目录的 symlink —— `SKILL.md` / `scripts/` 更新后立即生效，
+不需要重装。后端本体从 PyPI 分发，更新跑 `run.sh update`。
 
 ## 修改协议时的工作流
 
@@ -85,7 +85,8 @@ Claude Code / Cursor / OpenCode / OpenHands / Cline / Goose / Gemini CLI / Codex
 环境变量。
 
 OpenClaw 用户可以走 `clawhub install`（如果将来发布到 ClawHub registry）。
-当前最低公分母 = `git clone + bash skills/install.sh`。
+当前最低公分母 = 拿到 skills/ 目录后 `bash skills/install.sh`（后端不用 clone，
+`run.sh` 内部走 `uvx openinvest` 从 PyPI 拉）。
 
 ## 也读这些
 

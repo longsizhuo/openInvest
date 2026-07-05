@@ -24,8 +24,13 @@ documents:
 
 # Web API 参考
 
-> FastAPI 暴露的 40+ REST 端点 + SSE。同源部署，CF Access 边缘鉴权。
-> 这一章是按"读 / 写 / 委员会 / 系统 / 透明化"分组的端点速查 + 前端类型同步流程。
+> ⚠️ **2026-07-05 起 Web API 已 deprecated**：存量端点只服务 remote hub 模式
+> （`INVEST_API_BASE` 转发）与内部触发，**不再新增端点**；GUI 壳层已退役，后端
+> 不再 serve 静态文件。新功能一律走 CLI（`openinvest`）/ MCP（`openinvest-mcp`）。
+> 待 MCP 覆盖 remote 场景后本 API 退役。
+>
+> FastAPI 暴露的 40+ REST 端点 + SSE。CF Access 边缘鉴权。
+> 这一章是按"读 / 写 / 委员会 / 系统 / 透明化"分组的端点速查。
 
 [← 05-data-model](05-data-model.md) · [Wiki 索引](README.md) · [07-extending →](07-extending.md)
 
@@ -34,15 +39,18 @@ documents:
 ## 1. 启动
 
 ```bash
-# 本地开发
-uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+# console script（hub 部署用；host/port 走 INVEST_WEB_HOST / INVEST_WEB_PORT env）
+openinvest-web
 
 # Swagger 自动生成
 open http://127.0.0.1:8765/docs
 
-# OpenAPI schema（前端 gen-types 拉这个）
+# OpenAPI schema
 curl http://127.0.0.1:8765/openapi.json
 ```
+
+（开发仓形态 `uvicorn openinvest.connectors.web_api:app` 也可；旧
+`uvicorn connectors.web_api:app` 是兼容 shim，文档不再教。）
 
 生产部署：见 [08-deployment.md](08-deployment.md)。
 
@@ -104,7 +112,7 @@ curl http://127.0.0.1:8765/openapi.json
 |--------|------|------|
 | GET | `/api/strategy` | 完整策略 + target_assets |
 | GET | `/api/config` | 可经 API 配置的白名单 tunable 当前生效值 + 是否被 override + 元信息（ADR-017）|
-| GET | `/api/symbols/search?q=apple&limit=8` | yfinance Search 搜 symbol（GUI 新增资产用）|
+| GET | `/api/symbols/search?q=apple&limit=8` | yfinance Search 搜 symbol（原 GUI 新增资产用，存量保留）|
 | GET | `/api/regime/{symbol}` | 该 symbol 当前 regime + 算法输入 |
 | GET | `/api/regime_rules` | 全部硬规则 + 4 角色 prompt 全文 |
 
@@ -156,7 +164,7 @@ curl -X POST http://127.0.0.1:8765/api/holdings -d '{
 `commit:false` 只解析返回预览（`parsed.{cash,holdings}`），`commit:true` **非破坏写入**：
 只新增 portfolio 里还没有的 symbol、cash 只填当前为 0 的币种，已存在的跳过
 （`summary.{added_holdings,skipped_holdings,cash_set,cash_skipped}`）。无 LLM key → 400。
-单一可信源 `services/holdings_import.py`，GUI「导入持仓」、CLI `skill.py import`、onboarding 共用。
+单一可信源 `services/holdings_import.py`，CLI `openinvest import`、onboarding 共用（原 GUI「导入持仓」已随 GUI 退役）。
 
 ```bash
 curl -X POST http://127.0.0.1:8765/api/holdings/import \
@@ -264,7 +272,7 @@ POST body schema：
 | GET | `/api/discipline` | 委员会纪律量化：不作为率 + 拦冲动次数 + 反事实损益 |
 
 返回 `{summary:{inaction:{total_verdicts,by_verdict,hold,hold_rate}, interventions:{total,by_family,...}}, markdown}`。
-诚实定位（不吹 alpha，量化「少做错事」），见 [adr/023](adr/023-honest-positioning-not-alpha.md)。GUI「纪律」页消费。
+诚实定位（不吹 alpha，量化「少做错事」），见 [adr/023](adr/023-honest-positioning-not-alpha.md)。CLI `openinvest discipline` / MCP `discipline` 消费（原 GUI「纪律」页已退役）。
 
 ### Decision Accounting（issue #133 Decision 9）
 
@@ -326,68 +334,24 @@ POST body schema：
 **非 loopback** 来源访问 `/api/*`（`/api/health` 豁免探活）必须带
 `Authorization: Bearer <token>`（`secrets.compare_digest` 恒时比较）。
 不设 = 行为完全不变，上面的边缘鉴权模型照旧。loopback 豁免保证
-Caddy→127.0.0.1 链路和本机 GUI 不受影响；token 用于"绑 0.0.0.0 / 内网直连 /
+Caddy→127.0.0.1 链路和本机调用不受影响；token 用于"绑 0.0.0.0 / 内网直连 /
 没有 CF 的局域网 hub"场景。token 永不进日志与响应体。
 
 详见 [08-deployment.md#cloudflare-access](08-deployment.md#cloudflare-access)。
 
 ---
 
-## 8. 前端类型同步
+## 8. ~~前端类型同步~~（已随 GUI 退役 2026-07-05）
 
-### 自动生成
-
-```bash
-# 在 invest-gui 仓库
-pnpm gen-types
-# = openapi-typescript http://127.0.0.1:8765/openapi.json -o src/lib/api-types.ts
-```
-
-→ 后端改了 endpoint / Pydantic model → 前端跑 `pnpm gen-types` 一行同步类型。
-
-### 工作流
-
-1. 后端改 endpoint / 改 Pydantic schema
-2. 本地起 uvicorn 暴露 :8765
-3. invest-gui 仓库跑 `pnpm gen-types`
-4. TS 编译报错 = 前端代码该改的字段
-5. 改完 commit 类型产物（`src/lib/api-types.ts`）
-6. CI 不强制跑 gen-types（避免后端没起时阻塞构建）
-
-### `api-client.ts` 包装
-
-封装了 `fetcher`（给 SWR）+ `postJSON`（给 mutation）+ `ApiError` 类。
-所有路由代码用 hook 调用，不直接 `fetch()`。
-
-```typescript
-import useSWR from "swr";
-import { fetcher, type HoldingsListResponse } from "../lib/api-client";
-
-const { data, error, isLoading } = useSWR<HoldingsListResponse>(
-  "/api/holdings",
-  fetcher,
-  { refreshInterval: 30_000 },
-);
-```
+invest-gui 已封存，`pnpm gen-types` 工作流不再适用。存量端点的 schema 变更只做
+bug fix 级修正；hub 客户端（CLI remote dispatch）靠 `services/skill_views.py`
+共享形状，无需类型生成。前端重做时走独立仓库直连 MCP，不再消费 OpenAPI。
 
 ---
 
 ## 9. 错误协议
 
-后端 raise `HTTPException(status_code=N, detail=msg)`。前端 `ApiError`：
-
-```typescript
-class ApiError extends Error {
-  status: number
-  detail: string
-}
-
-try {
-  await postJSON(...)
-} catch (err) {
-  setError(err instanceof ApiError ? err.detail : String(err))
-}
-```
+后端 raise `HTTPException(status_code=N, detail=msg)`。
 
 常见错误码：
 - `400` 输入校验失败（金额 ≤ 0 / 币种格式错）
@@ -399,22 +363,17 @@ try {
 
 ## 10. CORS / 同源
 
-**生产**：完全同源（`/api/*` 和 `/*` 在同一 host）→ 不需要 CORS 头。
+**生产**：API 只被 hub 客户端 / Caddy 反代消费 → 不需要 CORS 头。
 
-**开发**：Vite dev server :5173 调本机 :8765 → 后端用 `INVEST_WEB_DEV_CORS=1` env 放行：
-
-```bash
-INVEST_WEB_DEV_CORS=1 uv run uvicorn ...
-```
-
-→ 后端会注入 CORS middleware 仅放行 `http://localhost:5173`。
+**遗留开关**：`INVEST_WEB_DEV_CORS=1` 会注入 CORS middleware 放行
+`http://localhost:5173`（原 Vite dev server 用；GUI 退役后仅历史遗留，别开）。
 
 ---
 
 ## 11. Skill-parity 端点（远端模式 hub-and-spoke）
 
-`scripts/skill.py` 设了 `INVEST_API_BASE` 时，CLI 子命令经
-`scripts/remote_dispatch.py` 转发到这些端点。**输出形状与本地 CLI 完全一致**
+CLI（`openinvest`）设了 `INVEST_API_BASE` 时，子命令经
+`openinvest/remote_dispatch.py` 转发到这些端点。**输出形状与本地 CLI 完全一致**
 （共享 `services/skill_views.py` / `PortfolioManager` 方法），所以 agent 协议
 （SKILL.md）零感知。
 

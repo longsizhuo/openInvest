@@ -3,18 +3,19 @@
 默认 onboarding 只配两个资产（NDQ.AX + GC=F）。v2 schema 支持任意 yfinance symbol。
 三种添加方式，按推荐度排：
 
-## 方式 1：Web GUI（首选）
+## 方式 1：CLI `buy`（首选，用户真的持有时）
 
-用户打开 `http://localhost:8765`（或部署后的 `invest.<域名>`）→ Dashboard →
-`[+ 新增资产]` 按钮 → 搜索框 → 选 yfinance 命中项 → 填表单 → 提交。
+```bash
+~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind stock
+```
 
-搜索框走 yfinance 免费 Search API（不用额外 key）。覆盖股票、ETF、公募基金、
-加密货币、汇率、期货。
+MCP 用户直接调 `buy` 工具，参数同名。加权平均成本自动算，symbol 自动进追踪。
 
 **"我只想看不想持有"** 场景：
-勾选 `is_tracking_only` 复选框。追踪仓不计入总资产 / PnL，但委员会照样能分析。
+走方式 2 的 `POST /api/holdings` 带 `is_tracking_only: true`（追踪仓不计入
+总资产 / PnL，但委员会照样能分析），或干脆不持久化直接分析（方式 3）。
 
-## 方式 2：REST API（GUI 没起时）
+## 方式 2：REST API（长尾：追踪仓 / remote hub）
 
 ```http
 POST /api/holdings
@@ -34,8 +35,8 @@ Content-Type: application/json
 
 `kind` 枚举：`stock` / `etf` / `metal` / `crypto` / `bond` / `fund` / `other`。
 
-GUI 推荐路径：让用户在浏览器 `http://127.0.0.1:8765/strategy` 直接加 holding，
-比 `curl` 友好。CLI 用户用 `curl http://127.0.0.1:8765/api/holdings/{symbol} -X POST ...`。
+Web API 已 deprecated（只服务 remote hub 模式）——能用 CLI `buy` 覆盖的场景
+优先 CLI，只有 `is_tracking_only` 这类 CLI 没暴露的字段才 curl。
 
 ## 方式 3：用户只想分析不想持久化
 
@@ -88,5 +89,5 @@ GUI 推荐路径：让用户在浏览器 `http://127.0.0.1:8765/strategy` 直接
 
 ## 确认添加成功
 
-用户通过 GUI/API 加完后，让他们（或你帮他）跑 `~/.claude/skills/invest/scripts/run.sh status`
+加完后，让用户（或你帮他）跑 `~/.claude/skills/invest/scripts/run.sh status`
 看 `all_holdings` 里有没有新 symbol。

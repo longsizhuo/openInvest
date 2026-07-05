@@ -12,8 +12,14 @@ documents:
 
 # 生产部署
 
-> Caddy + Cloudflare Access + systemd + GitHub Releases dist 分发。
-> 这一章是"我要把它跑在自己服务器上"的完整链路。
+> ⚠️ **2026-07-05 更新**：Web GUI 已退役——后端不再 serve 静态文件，没有网页面板；
+> `sync_gui_dist` / Caddy `file_server` 前端段已删（重做时走独立前端连 MCP）。
+> Web API 本身也已 **deprecated**：存量端点只服务 remote hub 模式（`INVEST_API_BASE`
+> 转发）与内部触发，不再新增端点。
+>
+> **多数用户不需要这一章**——单机用户直接 `pip install openinvest` / `uvx openinvest`
+> 即可（见 [QUICK_START](../QUICK_START.md)）。这一章只服务"我要跑一个 remote hub
+> 给多设备共享账本"的场景。
 
 [← 07-extending](07-extending.md) · [Wiki 索引](README.md) · [09-troubleshooting →](09-troubleshooting.md)
 
@@ -22,33 +28,32 @@ documents:
 ## 拓扑总览
 
 ```
-浏览器
+客户端（笔记本 CLI / agent skill，INVEST_API_BASE 转发）
   ↓ HTTPS
 Cloudflare（DNS 橙色云 + Access JWT 鉴权）
   ↓ HTTP（Flexible 模式，源站不需要 cert）
 你的服务器：80 / 443 端口
   ↓
 Caddy 反代 (caddy-gateway 容器)
-  ├─ /api/*  → reverse_proxy 127.0.0.1:8765   (FastAPI invest-web.service)
-  └─ /*      → file_server /srv/invest-gui/   (静态文件)
+  └─ /api/*  → reverse_proxy 127.0.0.1:8765   (FastAPI, openinvest-web)
 ```
 
 **为什么这套**：
 - 没有 SSR daemon → 一台 1G VPS 就能跑（参考 mc-website 教训：`next start` 整机三次挂死）
 - CF Access 在边缘鉴权 → 后端不写 auth 代码
 - `127.0.0.1` 绑定 → 公网扫不到 8765
-- Caddy 静态文件直 serve → GUI 升级 = rsync `dist/` 到 `/srv/invest-gui/`，无需 reload
 
 ---
 
 ## 0. 容器一键自托管（Docker Compose / GHCR）
 
 > 不想手装 uv / 配 systemd？用容器。镜像 `ghcr.io/longsizhuo/openinvest` 每个后端版本
-> tag（`v*`）由 `publish-image.yml` 自动发布，**GUI 已在 build 期烤进 `static/`**——
-> `docker compose up` 起来浏览器直接看完整看板。要 CF Access 保护，仍可在前面挂下面
-> 第 1–2 节的 Caddy（反代容器的 `127.0.0.1:8765`）。
+> tag（`v*`）由 `publish-image.yml` 自动发布。**GUI 已退役**——容器只跑 API + scheduler，
+> 没有网页面板。要 CF Access 保护，仍可在前面挂下面第 1–2 节的 Caddy（反代容器的
+> `127.0.0.1:8765`）。
 
-前置：Docker + Docker Compose v2。
+前置：Docker + Docker Compose v2。compose 文件在仓库里，所以这条路径要 clone
+（这是 hub 部署，不是普通用户安装——普通用户走 `uvx openinvest`）：
 
 ```bash
 git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
@@ -59,23 +64,23 @@ cp .env.example .env && $EDITOR .env       # 至少填 DEEPSEEK_API_KEY（没 .e
 一次性命令走 `invest-web`（`invest-agent` 的 `entrypoint: ["/bin/sh","-c"]` 会吞掉追加参数）：
 
 ```bash
-docker compose run --rm invest-web python -m scripts.skill init
+docker compose run --rm invest-web openinvest init
 # 或在 Claude Code 里说"帮我初始化 invest"走 5 个问题
 ```
 
 起服务：
 
 ```bash
-docker compose up -d --build                 # 本地构建（首次几分钟：uv sync + 烤 GUI）
+docker compose up -d --build                 # 本地构建（首次几分钟：uv sync）
 # —— 或拉预构建镜像（更快，需该 package 已 Public 或先 docker login ghcr.io）——
 docker compose pull && docker compose up -d
 ```
 
-浏览器开 <http://localhost:8765> → 完整 GUI。
+验证：`curl http://localhost:8765/api/health`。
 
 | 服务 | 作用 | 端口 |
 |------|------|------|
-| `invest-web` | FastAPI + GUI（uvicorn 绑 `0.0.0.0:8765`）| 宿主 `127.0.0.1:8765`（默认只绑 loopback）|
+| `invest-web` | FastAPI（deprecated，仅 hub 转发 + 内部触发）| 宿主 `127.0.0.1:8765`（默认只绑 loopback）|
 | `invest-agent` | scheduler：跑 `jobs/*.yml`（daily_report / pnl_snapshot…）| 无 |
 
 - **暴露到 LAN/公网**：把 `invest-web` 的 `ports` 改成 `"8765:8765"` 并设 `INVEST_API_TOKEN`；或保持 loopback、前面挂 Caddy + CF Access（见下文第 1–2 节）。
@@ -86,61 +91,52 @@ docker compose pull && docker compose up -d
 
 ## 1. 服务器一次性配置
 
-### 1.1 装 uv + clone 仓库
+### 1.1 装后端（PyPI）+ 数据目录
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
-cd ~/openInvest
-uv sync --frozen --python 3.13
-cp .env.example .env
-# 编辑 .env 填 DEEPSEEK_API_KEY / EMAIL_* / 等
+uv tool install openinvest      # 或 pip install openinvest
+mkdir -p ~/openInvest           # INVEST_HOME 数据目录（memory/ db/ .env）
+cp .env.example ~/openInvest/.env   # 或手写；填 DEEPSEEK_API_KEY / EMAIL_* / 等
+openinvest init                 # onboarding 建 memory/
 ```
 
-### 1.2 拉前端 dist
+> git clone 只用于开发后端本身。hub 服务器上装 wheel 即可；要 Docker compose /
+> 自定义 systemd unit 模板才需要 clone 仓库拿那几个文件。
 
-```bash
-uv run python -m scripts.sync_gui_dist
-# = 从 invest-gui dist-latest release 拉 invest-gui-dist.tar.gz
-# = 解压到 static/（FastAPI 自带 GUI mount 用）
-```
+### 1.2 ~~拉前端 dist~~（已退役）
 
-GUI 部署有两套，并存无冲突：
-
-| 路径 | 谁 serve | 升级方式 |
-|------|---------|----------|
-| `<repo>/static/` | FastAPI mount | `python -m scripts.sync_gui_dist`（拉 release）|
-| `/srv/invest-gui/` | Caddy file_server | `cd invest-gui && pnpm deploy`（rsync 本机 build）|
-
-**生产 Caddy 优先后者**，FastAPI mount 是单机一键场景用的。
+> 2026-07-05 起 GUI 退役：`scripts.sync_gui_dist` 已删，FastAPI 不再 mount
+> `static/`，Caddy 也不再需要 file_server 段。invest-gui 仓库封存待重做
+> （重做走独立前端连 MCP）。
 
 ### 1.3 systemd unit
 
-复制仓库自带的 unit：
+仓库自带 unit 模板（`systemd/invest-web.service`），核心就是起 `openinvest-web`：
 
-```bash
-sudo cp systemd/invest-web.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now invest-web
-sudo systemctl status invest-web
-```
-
-unit 关键字段：
 ```ini
-WorkingDirectory=%h/openInvest
+Environment=INVEST_HOME=%h/openInvest
 EnvironmentFile=%h/openInvest/.env
-ExecStart=%h/.local/bin/uv run --no-sync uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+ExecStart=%h/.local/bin/openinvest-web
+# host/port 走 env：INVEST_WEB_HOST（默认 127.0.0.1）/ INVEST_WEB_PORT（默认 8765）
 Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=%h/openInvest
 ```
 
-→ 仅写 invest 目录（systemd 加固）。
-→ Restart=on-failure：进程挂了自动起，但**改代码后必须手动 restart 拉新**。
+```bash
+sudo cp systemd/invest-web.service /etc/systemd/system/   # 按需改路径
+sudo systemctl daemon-reload
+sudo systemctl enable --now invest-web
+sudo systemctl status invest-web
+```
+
+→ 仅写 INVEST_HOME 目录（systemd 加固）。
+→ Restart=on-failure：进程挂了自动起，但**升级包后必须手动 restart 拉新**。
 
 ### 1.4 Caddy 站点配置
 
-`caddy-gateway/Caddyfile` 加：
+`caddy-gateway/Caddyfile` 加（只剩 API 反代，静态文件段已随 GUI 退役删除）：
 
 ```caddyfile
 http://invest.your-domain.com {
@@ -148,18 +144,6 @@ http://invest.your-domain.com {
 
     handle /api/* {
         reverse_proxy 127.0.0.1:8765
-    }
-
-    handle {
-        root * /srv/invest-gui
-
-        @viteAssets path /assets/*
-        header @viteAssets Cache-Control "public, max-age=31536000, immutable"
-        @html path *.html /
-        header @html Cache-Control "no-cache"
-
-        file_server
-        try_files {path} /index.html   # SPA 路由 fallback
     }
 }
 ```
@@ -203,54 +187,21 @@ Include: Emails → your-email@gmail.com
 ### 2.4 验证
 
 - 退出所有 CF 邮箱会话
-- 浏览器访问 `https://invest.your-domain.com`
-- 应跳到 CF 邮箱验证页 → 输 OTP → 进入 GUI
+- `curl -H "CF-Access-Client-Id: ..." -H "CF-Access-Client-Secret: ..." https://invest.your-domain.com/api/health`
+- 无 Service Token 的裸请求应被 CF 挡在边缘
 
 ---
 
 ## 3. 升级流程
 
-### 升级后端
-
 ```bash
-cd ~/openInvest
-git pull origin main
-uv sync   # 如果有依赖变化
+uv tool upgrade openinvest      # 或 pip install -U openinvest；uvx 用户 uvx --refresh openinvest doctor
 sudo systemctl restart invest-web
 ```
 
-**重要**：systemd unit 不会自动 reload 新代码。每次 push 完必须 `restart`。
+**重要**：systemd unit 不会自动 reload 新代码。每次升级完必须 `restart`。
 
-### 升级前端
-
-```bash
-# 方案 A：从 GitHub Releases 拉
-cd ~/openInvest
-uv run python -m scripts.sync_gui_dist
-# 注意：只更新 static/ 不动 /srv/invest-gui/
-
-# 方案 B：本机构建 + rsync 到 Caddy serve 目录（生产用）
-cd ~/invest-gui
-git pull origin main
-pnpm install
-pnpm deploy   # = scripts/deploy.sh，rsync dist/ → /srv/invest-gui/
-```
-
-**Caddy 不需要 reload**（静态文件变化）。
-**浏览器可能 cache HTML**（虽然 Caddyfile 设 no-cache）→ 用户硬刷一次。
-
-### 同时升级前后端
-
-最稳的顺序：
-
-1. push 前后端代码
-2. 服务器拉前端先（`pnpm deploy`）—— 用户拿到老 API 调老前端，正常
-3. `git pull` 后端
-4. `sudo systemctl restart invest-web` —— 切新 API
-5. 用户硬刷 → 前端拿新 hash 化 JS → 调新 API ✓
-
-**为什么前端先**：新前端调老 API 不会崩（向下兼容字段），老前端调新 API 也不会崩。
-反过来：老前端调新前端依赖的 endpoint 会 404。
+（前端升级流程已随 GUI 退役删除——invest-gui 仓库封存待重做。）
 
 ---
 
@@ -278,18 +229,13 @@ SMTP_USER=you@gmail.com
 SMTP_PASS=app-password
 SMTP_TO=you@gmail.com
 
-# NapCat QQ bot
-NAPCAT_WS_URL=ws://localhost:6101
-NAPCAT_HTTP_URL=http://localhost:6100
-INVEST_WHITELIST_QQ=12345678   # 必填，否则 napcat 拒绝所有
-
-# 委员会行为开关（也可运行时经 GUI/API/CLI 改，ADR-017；env 仅部署期默认）
+# 委员会行为开关（也可运行时经 API/CLI 改，ADR-017；env 仅部署期默认）
 # 集中度 lens：false=单资产/刻意集中/全可投资金池不因持仓集中度被建议减仓（ADR-019）
 INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
-
-# 开发环境（Vite 跨域调）
-INVEST_WEB_DEV_CORS=1   # 仅本机 dev 时用，生产别开
 ```
+
+> NapCat QQ bot connector 已于 2026-07-05 删除，相关 `NAPCAT_*` / `INVEST_WHITELIST_QQ`
+> env 不再生效。
 
 ### .env.example 是 source of truth
 
@@ -322,7 +268,8 @@ sudo systemctl list-units --type=service | grep invest
 `invest-scheduler.service`（如果你跑 cron）unit 类似：
 
 ```ini
-ExecStart=%h/.local/bin/uv run --no-sync python -m scheduler.runner
+ExecStart=%h/.local/bin/uv tool run --from openinvest python -m openinvest.scheduler.runner
+# 或 pip 安装环境里直接 python -m openinvest.scheduler.runner
 ```
 
 详见 `systemd/README.md` 和 `scheduler/README.md`。
@@ -347,15 +294,16 @@ ExecStart=%h/.local/bin/uv run --no-sync python -m scheduler.runner
 
 ### 一键快照 / 迁移（推荐）
 
-`scripts/snapshot.py` 把上面权威状态打成单个 tar.gz（WAL 安全的 sqlite online
-backup + sha256 校验），新机一条命令拉起。**迁移 hub 到新机器就用它**：
+`scripts/snapshot.py`（开发仓脚本，不进 wheel——hub 上 clone 一份仓库或单拷这个
+文件）把上面权威状态打成单个 tar.gz（WAL 安全的 sqlite online backup + sha256
+校验），新机一条命令拉起。**迁移 hub 到新机器就用它**：
 
 ```bash
 # 旧机：打包（不含 .env 密钥值，只在 manifest 列出要填哪些 key）
-uv run python -m scripts.snapshot snapshot --out ~/invest-snapshot.tar.gz
+INVEST_HOME=~/openInvest uv run python -m scripts.snapshot snapshot --out ~/invest-snapshot.tar.gz
 
-# 新机：clone + uv sync 后还原（默认拒绝覆盖已有账本，--force 才覆盖）
-uv run python -m scripts.snapshot restore --in ~/invest-snapshot.tar.gz
+# 新机：装好 openinvest 后还原（默认拒绝覆盖已有账本，--force 才覆盖）
+INVEST_HOME=~/openInvest uv run python -m scripts.snapshot restore --in ~/invest-snapshot.tar.gz
 ```
 
 ### 异地备份（每周自动）
@@ -368,7 +316,7 @@ uv run python -m scripts.snapshot restore --in ~/invest-snapshot.tar.gz
 
 ```bash
 # 每天 cron——直接复用 snapshot.py，一份 tar 含全部权威状态
-0 4 * * *  cd $HOME/openInvest && $HOME/.local/bin/uv run python -m scripts.snapshot snapshot --out /backup/invest-$(date +\%F).tar.gz
+0 4 * * *  cd $HOME/repos/openInvest && INVEST_HOME=$HOME/openInvest $HOME/.local/bin/uv run python -m scripts.snapshot snapshot --out /backup/invest-$(date +\%F).tar.gz
 ```
 
 ### Cloudflare Access 配置
@@ -380,7 +328,6 @@ CF Dashboard 端的 Access policy 没有 git 备份，建议手动截图保存�
 - `db/market_data.db` / `db/events.db` （行情 + 新闻缓存，可重新拉）
 - `db/chroma.sqlite3` / `db/jobs.sqlite` （向量库 / 调度器 job store，可重建）
 - `cache_data/` （HTTP cache）
-- `static/` （前端 dist，`scripts.sync_gui_dist` 重新拉）
 - `memory/.backtest*` （回测研究产物，非账本）
 
 ---
@@ -394,7 +341,7 @@ sudo journalctl -u invest-web -f --since "1 hour ago"
 
 CF Access 日志：CF Zero Trust → Logs → Access。
 
-GUI 数据源健康：`https://invest.your-domain.com/system` → "数据源" tab。
+数据源健康：`uvx openinvest doctor`（或 hub 上 `curl 127.0.0.1:8765/api/health`）。
 
 ---
 
@@ -430,7 +377,7 @@ token 语义：非 loopback 来源访问 `/api/*`（`/api/health` 豁免）要�
 ### 客户端侧（2 分钟）
 
 ```bash
-# clone + uv sync 照常（run.sh 首跑自动），然后 .env 只要：
+# 装 skill（run.sh 首跑自动从 PyPI 拉 openinvest），然后 $INVEST_HOME/.env 只要：
 INVEST_API_BASE=https://invest.your-domain.com   # 或 http://10.0.0.x:8765
 INVEST_API_TOKEN=...                             # hub 开了才需要
 ~/.claude/skills/invest/scripts/run.sh doctor    # 验证：status ready + remote 段

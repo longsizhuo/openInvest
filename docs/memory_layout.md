@@ -118,7 +118,7 @@ holdings:
 | type | 含义 | 更新频率 | 例子 |
 |------|------|---------|------|
 | `user` | 用户身份与偏好 | 几乎不变 | `user.md` |
-| `strategy` | 投资策略配置 | 偶尔（NapCat 命令调） | `strategy.md` |
+| `strategy` | 投资策略配置 | 偶尔（CLI / MCP 调） | `strategy.md` |
 | `portfolio` | 当前持仓 | 高频（每次交易后） | `portfolio.md` |
 | `log` | 日志 | append-only | `daily/<date>/<symbol>.md`, `*.jsonl` |
 | `insight` | 长期洞察 | Deep Sleep 写入 | `insights/*.md` |
@@ -147,7 +147,7 @@ uv run python scripts/import_commsec.py --lookback 30 --apply
 
 `core.memory_store.MemoryStore` 用 `fcntl.LOCK_EX` 文件锁保证：
 - 同进程多线程（agent ThreadPool）安全
-- 跨进程（scheduler runner + napcat_bot 同时跑）也安全
+- 跨进程（scheduler runner + CLI / MCP server / invest-web 同时跑）也安全
 
 `PortfolioManager.with_portfolio_tx()` 在锁内提供 RMW（read-modify-write）闭包：
 所有写操作（deposit / gold_buy / gold_sell / record_external_trade）必须走它，

@@ -18,8 +18,10 @@ documents:
 
 # 故障排查
 
-> 线上跑挂了去哪查、SSE 断了怎么 debug、sync_gui_dist 失败怎么办。
-> 按"症状 → 诊断步骤 → 修复"组织。
+> 线上跑挂了去哪查、SSE 断了怎么 debug。按"症状 → 诊断步骤 → 修复"组织。
+>
+> ⚠️ 2026-07-05 起 GUI 已退役、NapCat QQ bot 已删除——相关条目已标注（§1 改为 hub
+> API 排障，§7 / §9 仅存历史标题）。日常入口是 `uvx openinvest <cmd>` / MCP。
 
 [← 08-deployment](08-deployment.md) · [Wiki 索引](README.md) · [10-design-system →](10-design-system.md)
 
@@ -47,18 +49,18 @@ sudo journalctl -u invest-scheduler -f
 
 ---
 
-## 1. GUI 完全打不开
+## 1. Hub API 不通（原"GUI 完全打不开"，GUI 已退役）
 
 ### 症状
 
-- 浏览器访问 `invest.your-domain.com` 转圈、白屏、502
+- 客户端 `run.sh doctor` / `INVEST_API_BASE` 转发报连接失败、502
 
 ### 诊断顺序
 
 ```bash
 # 1. CF 能 reach 源站吗
-curl -I https://invest.your-domain.com
-# → 期望 302（CF Access 重定向到登录）
+curl -I https://invest.your-domain.com/api/health
+# → 期望 302（CF Access 重定向到登录）或带 Service Token 时 200
 
 # 2. Caddy 在跑吗
 docker ps | grep caddy
@@ -67,15 +69,11 @@ docker ps | grep caddy
 # 3. Caddy 配置对吗
 docker exec caddy cat /etc/caddy/Caddyfile | grep invest
 
-# 4. 静态文件存在吗
-ls -la /srv/invest-gui/index.html
-# → 期望 .html 存在 + 文件最近的修改时间合理
-
-# 5. 后端在监听吗
+# 4. 后端在监听吗
 curl -I http://127.0.0.1:8765/api/health
 # → 期望 HTTP 200
 
-# 6. systemd 状态
+# 5. systemd 状态
 sudo systemctl status invest-web
 ```
 
@@ -86,7 +84,6 @@ sudo systemctl status invest-web
 | `curl localhost:8765 Connection refused` | invest-web 没起 | `sudo systemctl restart invest-web` |
 | `502 Bad Gateway` | Caddy 反代到的端口没人监听 | 同上 |
 | Caddy 配置看着对但不生效 | bind mount + reload 不读新 inode | `docker restart caddy`（不是 reload）|
-| `/srv/invest-gui/index.html` 不存在 | 没部署 GUI | `cd invest-gui && pnpm deploy` |
 | CF Access 无限重定向 | Access policy 未包含你的邮箱 | CF Dashboard 加邮箱 |
 
 ---
@@ -100,11 +97,14 @@ curl http://127.0.0.1:8765/api/portfolio/total_value?base=CNY
 # → {"detail":"Not Found"}
 ```
 
-但代码里 `connectors/web_api.py` 明明有这个 endpoint。
+但代码里 `src/openinvest/connectors/web_api/` 明明有这个 endpoint。
+
+（注意：Web API 已 deprecated，**不再新增端点**——新功能只有 CLI / MCP 面，404 也可能
+是"这个功能本来就没有 HTTP 端点"。）
 
 ### 原因
 
-**99% 是 systemd 进程跑的是旧代码**：systemd `Restart=on-failure` 只在 crash 时 restart，git pull 后不会自动 reload。
+**99% 是 systemd 进程跑的是旧代码**：systemd `Restart=on-failure` 只在 crash 时 restart，升级包后不会自动 reload。
 
 ### 修复
 
@@ -115,11 +115,11 @@ curl http://127.0.0.1:8765/api/portfolio/total_value?base=CNY
 # → {"base_currency":"CNY","grand_total":...}
 ```
 
-→ **每次 push 后端必须手动 restart**。详见 [08-deployment.md#升级流程](08-deployment.md#升级流程)。
+→ **每次升级后端包必须手动 restart**。详见 [08-deployment.md#升级流程](08-deployment.md#升级流程)。
 
 ### 长期方案
 
-考虑加 git post-receive hook 或 deploy 脚本里固化 restart 步骤。
+deploy 脚本里固化"升级 + restart"两步。
 
 ---
 
@@ -127,7 +127,7 @@ curl http://127.0.0.1:8765/api/portfolio/total_value?base=CNY
 
 ### 症状
 
-GUI 「触发委员会」按钮按了，task_id 出来了，但状态一直 `queued` 或 `running` 不动。
+远端触发委员会（客户端 `run_committee` 经 hub / 内部触发）后 task_id 出来了，但状态一直 `queued` 或 `running` 不动。
 
 ### 诊断
 
@@ -152,7 +152,7 @@ curl -N http://127.0.0.1:8765/api/committee/live/<task_id>
 |------|------|------|
 | status.json 一直 queued | asyncio.create_task 没起 | 检查 journal 是否有 traceback；restart 后端 |
 | LLM 一直没 200 | DeepSeek API key 错 / 限速 / 余额不足 | `.env` 检查 / `journal` 看 401 / 429 |
-| status.json 跳到 done 但前端没收到 | SSE 连接被 CF Access 5min idle 切了 | 检查代码 keepalive 是否在跑（25s 一次）|
+| status.json 跳到 done 但 SSE 消费方没收到 | SSE 连接被 CF Access 5min idle 切了 | 检查代码 keepalive 是否在跑（25s 一次）|
 | running 但 LLM 一直没调 | 被锁住（其他 task 占了 fcntl 锁）| `lsof memory/portfolio.md.lock` 找出占用方 |
 
 ### v3 收敛检测看着像 bug
@@ -166,14 +166,15 @@ curl -N http://127.0.0.1:8765/api/committee/live/<task_id>
 
 ### 症状
 
-GUI HoldingCard 显示"⚠ 陈旧"标记，或行情字段是 `null`。
+`uvx openinvest status` / `live_prices` 报"⚠ 陈旧"，或行情字段是 `null`。
 
 ### 诊断
 
 ```bash
-# 用 Python 直接试
-cd ~/openInvest
-uv run python -c "from utils.exchange_fee import get_history_data; df = get_history_data('NDQ.AX', '5d'); print(df.tail())"
+# 直接试拉一个 symbol
+uvx openinvest live_prices
+# 开发仓形态：
+uv run python -c "from openinvest.utils.exchange_fee import get_history_data; df = get_history_data('NDQ.AX', '5d'); print(df.tail())"
 ```
 
 ### 常见原因
@@ -187,8 +188,8 @@ uv run python -c "from utils.exchange_fee import get_history_data; df = get_hist
 
 ### 数据源全景诊断
 
-GUI `/system` → "数据源" tab 一眼看所有数据源最后成功时间 + is_stale。
-对应 endpoint：`GET /api/data_sources/health`。
+`uvx openinvest doctor` 一眼看所有数据源最后成功时间 + is_stale
+（hub 上也可 `GET /api/data_sources/health`）。
 
 ---
 
@@ -208,8 +209,6 @@ uv run python -m scripts.import_commsec --lookback 30
 # 真正写入
 uv run python -m scripts.import_commsec --lookback 30 --apply
 ```
-
-或 GUI 「Import CommSec」按钮（如果加了）。
 
 ### 常见原因
 
@@ -244,7 +243,7 @@ tail -20 ~/openInvest/memory/pnl_history.jsonl
 
 | 症状 | 原因 | 修复 |
 |------|------|------|
-| 凌晨有数据点 | jobs/pnl_snapshot 在工作时段外被触发 | `python -m scripts.clean_pnl_history --dry-run` 然后真删 |
+| 凌晨有数据点 | pnl_snapshot job 在工作时段外被触发 | `python -m scripts.clean_pnl_history --dry-run` 然后真删 |
 | 未来日期 | 时区配置错（UTC vs Asia/Shanghai）| `.env` `TZ=Asia/Shanghai` 同步 |
 | 某天垂直跳变 | 用户没记账，scheduler 仍在跑 | 用 `/api/cash/CNY/deposit|withdraw` 补记 |
 
@@ -252,35 +251,15 @@ tail -20 ~/openInvest/memory/pnl_history.jsonl
 ```bash
 python -m scripts.clean_pnl_history --dry-run   # 预览
 python -m scripts.clean_pnl_history             # 实际执行（自动备份）
-python -m jobs.pnl_snapshot --render-only       # 重渲染 SVG
+python -m openinvest.jobs.pnl_snapshot --render-only   # 重渲染 SVG
 ```
 
 ---
 
-## 7. sync_gui_dist 失败
+## 7. ~~sync_gui_dist 失败~~（已退役 2026-07-05）
 
-### 症状
-
-```bash
-uv run python -m scripts.sync_gui_dist
-# ❌ 下载失败
-```
-
-### 诊断
-
-```bash
-# 直接试拉
-curl -I https://github.com/longsizhuo/invest-gui/releases/download/dist-latest/invest-gui-dist.tar.gz
-# 期望 302 → S3 → 200
-```
-
-### 常见原因
-
-| 症状 | 原因 | 修复 |
-|------|------|------|
-| `404 dist-latest tag 不存在` | 仓库刚 push 但 GHA 还没跑完 | 等 1-2 min，或去 [Actions](https://github.com/longsizhuo/invest-gui/actions) 看跑完没 |
-| `Connection timeout` | 服务器到 github.com 网络挡 | 用代理或 raw.githubusercontent.com 镜像 |
-| `403` | tag 不公开（私有仓库）| `gh auth login` 或用 access token |
+`scripts.sync_gui_dist` 已随 GUI 壳层删除，后端不再拉/serve 前端 dist。
+invest-gui 仓库封存待重做（重做走独立前端连 MCP）。
 
 ---
 
@@ -312,34 +291,11 @@ uv run pytest tests/test_xxx.py::test_yyy -v --tb=long
 
 ---
 
-## 9. NapCat QQ bot 不响应命令
+## 9. ~~NapCat QQ bot 不响应命令~~（connector 已删除 2026-07-05）
 
-### 症状
-
-QQ 私聊发 `/balance`，bot 不回。
-
-### 诊断
-
-```bash
-# 1. NapCat 在跑吗
-ps aux | grep -i napcat
-
-# 2. invest-napcat connector 在跑吗
-ps aux | grep "connectors.napcat_bot"
-
-# 3. journal 看接收事件
-sudo journalctl --since "5 min ago" | grep napcat
-```
-
-### 常见原因
-
-| 症状 | 原因 | 修复 |
-|------|------|------|
-| 收到消息但拒绝 | `INVEST_WHITELIST_QQ` 没设 / 不是你的 QQ 号 | `.env` 加 `INVEST_WHITELIST_QQ=你的QQ` |
-| 收不到事件 | NAPCAT_WS_URL 错 / NapCat 没开 WS | 检查 NapCat 启动参数 |
-| 收到但 reply 失败 | NAPCAT_HTTP_URL 错 | 检查 NapCat HTTP API 端口 |
-
-详见 `connectors/README.md`。
+NapCat QQ bot connector 已从代码库删除，`NAPCAT_*` / `INVEST_WHITELIST_QQ` env
+不再生效。要在聊天软件里用 openInvest，走 MCP（`openinvest-mcp`）接任意支持
+MCP 的 agent 宿主。
 
 ---
 

@@ -192,13 +192,12 @@ openInvest 记账，**你负责采集**——这是宿主 agent 的本职（issu
   那条路烧 DeepSeek token。Direct 路径单资产 `run_committee` 就够。
 - **不要编实时价**。永远走 `run.sh status` 或 `live_prices`。yfinance 可能返回
   陈旧数据，注意 `is_stale` flag。
-- **永远不直接写 `memory/`**。所有状态变更走 NapCat 或 Web API（atomic write +
+- **永远不直接写 `memory/`**。所有状态变更走 CLI 子命令 / MCP 工具（atomic write +
   fcntl 锁 + 审计 trail）。直接编辑会导致 schema drift + 并发写损坏。
 - **同一资产同一天不重复跑委员会**——`run_committee` 默认会读 cache；
   Coordinator 路径要先 `ls memory/.committee/<today>/<SYM>.md` 检查。
 - **不要编 CIO confidence**。worker 之间分歧严重时老实写 `confidence: 0.4-0.5`。
-- **不要泄露用户的 QQ / email**。NapCat 白名单是 per-user env var
-  （`INVEST_WHITELIST_QQ`），永远不在输出里写死。
+- **不要泄露用户的 email 等个人身份信息**，永远不在输出里写死。
 
 ## 出问题先看哪
 

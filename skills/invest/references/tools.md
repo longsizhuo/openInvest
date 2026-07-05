@@ -52,26 +52,27 @@
 
 ## Web API 写操作端点（agent 也能调）
 
-**产品哲学**：agent（你）拥有 openInvest 全部功能。CLI 不够时，直接调 Web API
-（默认 :8765）。Web API 已标记 deprecated（GUI 退役，存量端点服务 remote hub 模式）。
+**产品哲学**：agent（你）拥有 openInvest 全部功能。**优先走 CLI 子命令 / MCP 工具**；
+只有 CLI/MCP 没覆盖的长尾操作才 curl 下面端点（默认 :8765）。Web API 已标记
+deprecated（GUI 退役，存量端点服务 remote hub 模式，不再新增端点）。
 
 用户说"记一笔交易"/"我打算买 X"/"标记成交"/"加新资产"时调这些：
 
 | 端点 | 用在 | body 简例 |
 |------|------|-----------|
 | `GET /api/user` | **分析战况前必读**，拿 wealth_context（家族 backup / 账户性质 / 应急金）—— 决定怎么解释集中度 + 低现金 | — |
-| `PUT /api/user/wealth_context` | 用户改家族 backup / 账户性质 / **月度补充额（开口池）**等（GUI 在 /settings 页填，agent 一般不调）| `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?, monthly_contribution_cny?}` |
+| `PUT /api/user/wealth_context` | 用户改家族 backup / 账户性质 / **月度补充额（开口池）**等（用户口述后 agent 代填）| `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?, monthly_contribution_cny?}` |
 | `POST /api/trades/record` | **记一笔意向交易**（不连真实支付，只内部账本）| `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
 | `GET /api/trades?limit=N` | 看最近 N 笔意向 / 已成交 | — |
 | `PATCH /api/trades/{id}/status` | **标记成交**（status: "executed"）→ 自动同步 portfolio.md（更新 holdings + 扣 cash）| `{status: "executed"}` |
 | `POST /api/holdings` | 新增 yfinance 跟踪资产（不下单，只录入持仓数据）| `{symbol, kind, units, avg_cost, cost_currency, channel?}` |
-| `POST /api/holdings/import` | 自由文本/CSV 持仓描述 → LLM 解析（GUI 粘贴券商持仓、批量录入）。`commit:false` 只预览不落盘；`commit:true` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）。需后端 LLM key | `{content, commit?}` |
+| `POST /api/holdings/import` | 自由文本/CSV 持仓描述 → LLM 解析（券商持仓粘贴、批量录入）。`commit:false` 只预览不落盘；`commit:true` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）。需后端 LLM key | `{content, commit?}` |
 | `PUT /api/holdings/{symbol}` | 改持仓字段 | `{units?, avg_cost?, channel?}` |
 | `POST /api/deposit` / `/api/withdraw` | 调 cash 现金 | `{currency: "CNY"\|"AUD"\|..., amount}` |
 | `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
 | `POST /api/strategy/asset` | 加 target_assets 条目 | `{symbol, channel?, max_single_invest_cny}` |
 | `GET /api/events/recent?hours=24&min_severity=low&limit=50` | 列最近 N 小时事件层感知的新闻（ADR-006）。debug / "系统现在感知到什么" | — |
-| `GET /api/discipline` | 委员会纪律台账：不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实损益（对齐 ADR-023，GUI/agent 展示"它拦了什么"）| — |
+| `GET /api/discipline` | 委员会纪律台账：不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实损益（对齐 ADR-023，agent 展示"它拦了什么"）| — |
 | `GET /api/decisions?days=90` | 统一决策视图：决议↔干预↔执行↔结果 join + 采纳率（issue #133 Decision 9）| — |
 | `POST /api/decisions/execution` | 回写用户对某决议的执行/拒绝+原因（幂等，ADR-016）| `{decision_id: "2026-07-03/GC=F", executed: false, reason?: "..."}` |
 | `POST /api/events/check` | 手动跑一次 event_watch（拉新闻 + 归一化 + 入库 + 命中触发委员会）。同步 30-90s | — |

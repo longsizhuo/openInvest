@@ -87,13 +87,10 @@ agent → record_execution("2026-07-02/510300.SS", rejected, reason="现金留�
   拿 verdict（需 DEEPSEEK_API_KEY）；全部子命令见 [SKILL.md](../../skills/invest/SKILL.md)
 - **任意 MCP client**：stdio server 是标准 MCP，不挑 client
 
-## 6. Web GUI（可选，纯展示层）
+## 6. ~~Web GUI~~（已退役 2026-07-05）
 
-```bash
-run.sh gui          # http://127.0.0.1:8765
-```
-
-看持仓 / 批量录入 / 委员会直播用；不部署也不影响 agent 路径。
+GUI 壳层已退役：`run.sh gui` 已删除，后端不再 serve 网页面板。看持仓 / 录入 /
+跑委员会全部走上面的 CLI / MCP / skill 路径。前端重做时会以独立仓库直连 MCP。
 
 ## 下一步
 
