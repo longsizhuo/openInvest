@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/longsizhuo/openInvest/compare/v0.18.0...v0.18.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **mcp:** server.json description 压到 registry 100 字符上限内 ([d323020](https://github.com/longsizhuo/openInvest/commit/d323020e04a1ba20633a9c71d7bfb710ab126469))
+
 ## [0.18.0](https://github.com/longsizhuo/openInvest/compare/v0.17.1...v0.18.0) (2026-07-05)
 
 
