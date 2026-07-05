@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.19.0](https://github.com/longsizhuo/openInvest/compare/v0.18.1...v0.19.0) (2026-07-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **security:** 设置 INVEST_API_TOKEN 后 loopback 请求也需要 Bearer token
+
+### Bug Fixes
+
+* **security:** INVEST_API_TOKEN 全域强制——删 loopback 豁免（[#106](https://github.com/longsizhuo/openInvest/issues/106)） ([76d4d8e](https://github.com/longsizhuo/openInvest/commit/76d4d8e376a5c6d99fd9d5dd8fdad5cea9919c75))
+
 ## [0.18.1](https://github.com/longsizhuo/openInvest/compare/v0.18.0...v0.18.1) (2026-07-05)
 
 
