@@ -1,11 +1,18 @@
 {
   "name": "invest",
-  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. Ships an MCP server (14 tools incl. decision accounting: decisions / explain_decision / record_execution) + the committee-workflow skills. The backend self-bootstraps (git clone + uv sync) on first call.",
+  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. Ships an MCP server (14 tools incl. decision accounting: decisions / explain_decision / record_execution) + the committee-workflow skills. Backend installs from PyPI via uvx on first call — no clone, no venv. Never places real orders.",
   "author": {
     "name": "longsizhuo",
     "url": "https://github.com/longsizhuo"
   },
   "homepage": "https://github.com/longsizhuo/openInvest",
   "repository": "https://github.com/longsizhuo/openInvest",
-  "keywords": ["investing", "portfolio", "finance", "llm", "committee", "yfinance"]
+  "keywords": [
+    "investing",
+    "portfolio",
+    "finance",
+    "llm",
+    "committee",
+    "yfinance"
+  ]
 }
