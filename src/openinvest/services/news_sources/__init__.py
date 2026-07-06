@@ -41,7 +41,6 @@ def fetch_all(
     symbols: Optional[List[str]] = None,
     rss_feeds: Optional[List[Dict[str, str]]] = None,
     max_per_source: int = 20,
-    extract_fulltext: bool = False,
     timeout_sec: float = 30.0,
 ) -> List[RawNewsItem]:
     """并发拉所有源。任一源失败 log warning + 继续，不影响其他源。
@@ -51,7 +50,6 @@ def fetch_all(
         symbols:          给 yfinance_news 的 ticker 列表
         rss_feeds:        给 rss_feed 的 feed 列表 [{"name": "reuters", "url": "..."}]
         max_per_source:   每个源最多返回多少条
-        extract_fulltext: ddgs 是否抓正文（慢，dry-run 不建议）
         timeout_sec:      单源超时
     """
     from openinvest.services.news_sources.ddgs_news import fetch_ddgs_news
@@ -63,8 +61,7 @@ def fetch_all(
         for q in queries:
             tasks.append({
                 "fn": fetch_ddgs_news,
-                "kwargs": {"query": q, "max_results": max_per_source,
-                           "extract_fulltext": extract_fulltext},
+                "kwargs": {"query": q, "max_results": max_per_source},
                 "label": f"ddgs:{q[:30]}",
             })
     if symbols:
