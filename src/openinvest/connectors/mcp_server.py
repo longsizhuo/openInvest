@@ -4,7 +4,7 @@ Claude Code（或任意 MCP client）按 session spawn 本进程，stdin/stdout 
 JSON-RPC，无端口无 daemon。写安全与 CLI / web API 并存同一模型
 （with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在 ~15 个高频能力（81 个 REST 端点全暴露会撑爆 agent context），
+工具刻意克制在 ~15 个高频能力（现 15 个）（81 个 REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -156,6 +156,18 @@ def record_execution(decision_id: str, executed: bool,
         return _rec(decision_id, executed, reason=reason, trade_ids=trade_ids)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+def ingest_event(title: str, url: str, snippet: str = "",
+                 source: str = "", published_at: Optional[str] = None) -> Dict[str, Any]:
+    """把你（宿主 agent）搜到的财经新闻投喂进事件账本：后端 LLM 归一化 →
+    severity/symbol 判级 → 入库 → 供委员会 RAG 召回。**你有比自托管爬虫强得多的
+    搜索能力（含中文源）——看到与用户持仓相关的新闻就喂进来**，尤其 A 股/区域
+    市场（爬虫盲区）。幂等：同 url / 同 claim 重发不重复入账。需后端 LLM key。"""
+    from openinvest.services.event_ingest import ingest_events
+    return ingest_events([{"title": title, "url": url, "snippet": snippet,
+                           "source": source, "published_at": published_at}])
 
 
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------

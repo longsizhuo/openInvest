@@ -206,6 +206,17 @@ def main() -> None:
     p.set_defaults(func=cmd_import_holdings)
 
     p = sub.add_parser(
+        "ingest_event",
+        help="把 agent 搜到的新闻投喂进事件账本（归一化+判级+入库，幂等；需后端 LLM key）",
+    )
+    p.add_argument("--title", required=True)
+    p.add_argument("--url", required=True)
+    p.add_argument("--snippet", help="摘要（可选，给归一化 LLM 更多上下文）")
+    p.add_argument("--source", help="来源标注（如 caixin / 你的搜索渠道），入库为 agent:<source>")
+    p.add_argument("--ts", help="事件时间 ISO 8601（可选）")
+    p.set_defaults(func=cmd_ingest_event)
+
+    p = sub.add_parser(
         "event_check",
         help="事件层（第一层）—— 拉多源新闻 / 归一化 / 入库 / 触发委员会 + 邮件。"
              "默认 dry-run（只入库，不发邮件不触委员会）。"

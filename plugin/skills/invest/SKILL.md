@@ -156,6 +156,13 @@ events / holdings import / gold 专用端点）→ 读 `references/tools.md`（�
 /api/holdings/import）——后端 LLM 只解析文字，不收图。先不带 `--commit` 预览，
 用户核对后再 `--commit` 非破坏写入。
 
+## 新闻投喂（你的搜索 > 任何爬虫）
+
+你有比后端爬虫强得多的搜索能力（含中文源）。**浏览/搜索中看到与用户持仓相关的
+财经新闻时，主动调 `ingest_event` 喂进事件账本**（MCP 工具或 CLI `ingest_event
+--title --url [--snippet --source]`）——后端负责归一化/判级/去重/RAG 召回，
+重发同一条不会重复入账。尤其 A 股/区域市场新闻：那是爬虫盲区，你是唯一来源。
+
 ## 决策闭环 workflow（Decision Review + Reflection）
 
 openInvest 记账，**你负责采集**——这是宿主 agent 的本职（issue #133 Decision 2）。
