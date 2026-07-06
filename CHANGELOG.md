@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.21.0](https://github.com/longsizhuo/openInvest/compare/v0.20.0...v0.21.0) (2026-07-06)
+
+
+### Features
+
+* **events:** ingest_event agent 投喂 + RSS 泛头条预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) 方案①②） ([c4c9c34](https://github.com/longsizhuo/openInvest/commit/c4c9c34229126e7c43829b53186370e766c60888))
+* **events:** ingest_event agent 投喂 + RSS 预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) ①②） ([2740707](https://github.com/longsizhuo/openInvest/commit/2740707b1058824a53b81b8281d24d7c1446b79d))
+* **events:** 中文快讯 wire（akshare 东财+新浪7×24）——A 股 symbol 自动激活（[#153](https://github.com/longsizhuo/openInvest/issues/153)） ([f7857f3](https://github.com/longsizhuo/openInvest/commit/f7857f3fb73b17c67026b5d4540175f99933c9f0))
+* **events:** 中文快讯 wire（akshare）——A 股 symbol 自动激活（[#153](https://github.com/longsizhuo/openInvest/issues/153) ③） ([40831fe](https://github.com/longsizhuo/openInvest/commit/40831fee9a0957d1293eb7e6f3c399b599ccdbfb))
+
 ## [0.20.0](https://github.com/longsizhuo/openInvest/compare/v0.19.1...v0.20.0) (2026-07-05)
 
 
