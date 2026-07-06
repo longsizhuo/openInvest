@@ -236,6 +236,10 @@ class EventConfig:
     rag_min_severity: str = "mid"               # 向量召回新闻事件的最低严重度级别
     rag_top_k: int = 8                          # 每个标的召回的新闻事件最大数量
     max_per_source: int = 15                    # 每次拉取新闻的最大条数
+    # #153②：RSS 泛头条预过滤——标题/摘要含 watched 别名或 macro 关键词才进 LLM
+    # 归一化（审计：两个泛头条 feed 占 72% 产出、92% 事件与持仓无关）。
+    # env 开关 INVEST_EVENT_RSS_PREFILTER_ENABLED=0 可关。
+    rss_prefilter_enabled: bool = True
     min_severity: str = "mid"                   # 触发重跑委员会的最低严重度级别
     max_rounds: int = 2                         # 触发重跑委员会时的最大辩论轮数
     # event_watch 扫描窗口（5 字段 crontab，按 jobs/event_watch.yml 的 timezone=Asia/Shanghai 解释）。

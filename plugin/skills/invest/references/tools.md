@@ -19,6 +19,7 @@
 | `live_prices` | 通用 | 背景行情 | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
 | `discipline` | 通用 | "委员会拦了什么/纪律如何" | 不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实省/费钱(只读零 LLM，对齐 ADR-023)。等价 `GET /api/discipline` |
 | `decisions [--days N]` | 通用 | "我听了几次建议/哪些没执行" | 决议↔干预↔执行↔结果 join + 采纳率(只读零 LLM)。等价 `GET /api/decisions`（issue #133 Decision 9）|
+| `ingest_event` | 写 | agent 投喂新闻进事件账本（归一化+判级，幂等；需后端 LLM key）| `--title --url [--snippet --source --ts]` |
 | `record_execution DECISION_ID [--rejected] [--reason "..."]` | 通用 写 | 用户说"我没买/我买了"时回写 | 幂等追加 executions.jsonl。**用户拒绝建议时主动问一句原因再记**（Reason Loop 采集端在你这里）。等价 `POST /api/decisions/execution` |
 | `what_if [--symbol X --pct N \| --gold-pct N \| --ndq-pct N]` | 通用 | "X 跌 Y% 我亏多少" | 算术情景，无 LLM |
 | `correlate --symbols A,B[,C...] [--period 6mo] [--with-llm]` | "btw" 附带 | 用户**顺嘴问**"A 跟 B 像不像"（不写入 memory/.committee，纯查询返回）| pairwise 相关矩阵 + sector + macro 关联 |

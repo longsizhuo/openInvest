@@ -156,6 +156,41 @@ def _trigger_committee(symbols: List[str], event_ids: List[str]) -> Optional[str
         return None
 
 
+# #153②：RSS 泛头条预过滤的 symbol 别名表——RSS feed 不分 symbol 全量入库时，
+# 用廉价子串匹配拦在 LLM 归一化之前。别名覆盖常见英文/中文写法；未知 symbol
+# 回退用 ticker 主干（"GC=F"→"gc=f" 与 "gc"）。macro 关键词保泛市场事件不被误杀。
+_SYMBOL_ALIASES: Dict[str, List[str]] = {
+    "GC=F": ["gold", "xau", "bullion", "黄金", "金价"],
+    "510300.SS": ["csi 300", "csi300", "沪深300", "沪深 300", "a-share", "a股",
+                  "china stock", "chinese stock", "chinese equit", "shanghai composite"],
+    "NDQ.AX": ["nasdaq", "nasdaq 100", "ndq", "纳指", "纳斯达克", "asx"],
+    "BTC-USD": ["bitcoin", "btc", "比特币"],
+    "ETH-USD": ["ethereum", "eth", "以太坊"],
+}
+_MACRO_KEYWORDS = [
+    "fed", "fomc", "rate cut", "rate hike", "interest rate", "cpi", "inflation",
+    "tariff", "treasury", "recession", "pboc", "央行", "加息", "降息", "关税", "通胀",
+]
+
+
+def _rss_prefilter(items: List["RawNewsItem"], watched: List[str]) -> List["RawNewsItem"]:
+    """只过滤 rss:* 条目（ddgs/yfinance 通道本就按持仓定向）。"""
+    terms: List[str] = [k.lower() for k in _MACRO_KEYWORDS]
+    for sym in watched:
+        terms.extend(a.lower() for a in _SYMBOL_ALIASES.get(sym, []))
+        root = sym.split(".")[0].split("=")[0].lower()
+        terms.extend({sym.lower(), root} if len(root) >= 2 else {sym.lower()})
+    kept = []
+    for it in items:
+        if not it.src_name.startswith("rss:"):
+            kept.append(it)
+            continue
+        hay = f"{it.title} {it.snippet}".lower()
+        if any(t in hay for t in terms):
+            kept.append(it)
+    return kept
+
+
 def run(
     *,
     dry_run: bool = False,
@@ -181,6 +216,11 @@ def run(
         max_per_source=cfg.event.max_per_source,
     )
     log.info(f"[event_watch] fetched {len(raw_items)} raw items")
+    if cfg.event.rss_prefilter_enabled:
+        before = len(raw_items)
+        raw_items = _rss_prefilter(raw_items, watched)
+        log.info(f"[event_watch] rss 预过滤: {before} → {len(raw_items)}"
+                 f"（拦下 {before - len(raw_items)} 条与持仓/macro 无关的泛头条）")
     if not raw_items:
         return {"status": "ok", "fetched": 0, "new_events": 0, "triggered": 0}
 
