@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/longsizhuo/openInvest/compare/v0.21.2...v0.22.0) (2026-07-06)
+
+
+### Features
+
+* **hermes:** 仓库根 plugin manifest——hermes plugins install longsizhuo/openInvest 一键装 skills ([957952c](https://github.com/longsizhuo/openInvest/commit/957952c094fe237f4071bd5cd1be6d29d4349a22))
+
 ## [0.21.2](https://github.com/longsizhuo/openInvest/compare/v0.21.1...v0.21.2) (2026-07-06)
 
 
