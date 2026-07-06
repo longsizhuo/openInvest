@@ -100,8 +100,15 @@ mcp_servers:
       INVEST_HOME: ~/openInvest
 ```
 
-Hermes 自动发现 15 个工具并与内置工具并列注册。skills（委员会 Coordinator 协议）
-为 agentskills.io 标准格式，位于仓库 `plugin/skills/`，可拷入 Hermes 的 skills 目录使用。
+Hermes 自动发现 15 个工具并与内置工具并列注册。skills 一条命令装：
+
+```bash
+hermes plugins install longsizhuo/openInvest --enable
+```
+
+装完以 `openinvest:invest` / `openinvest:invest-setup` 命名空间加载（Hermes plugin
+skill 是显式加载制，不进自动索引）。注意 `hermes skills install` 路线会被其社区源
+安全扫描拦截（金融写操作 skill 必触发 dangerous verdict）——走 plugin 路线。
 
 **信息联动**：若装有 [Longbridge](https://github.com/longbridge/skills) 等行情/新闻
 skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本——券商级信息源
