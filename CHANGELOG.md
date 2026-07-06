@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/longsizhuo/openInvest/compare/v0.21.0...v0.21.1) (2026-07-06)
+
+
+### Docs
+
+* **agents:** Hermes 接入指南（config.yaml MCP + agentskills 拷入）+ 行情 skill 联动投喂；uv.lock 版本号同步 ([999214b](https://github.com/longsizhuo/openInvest/commit/999214bf6fde44fa03a030efead4387317975c72))
+
 ## [0.21.0](https://github.com/longsizhuo/openInvest/compare/v0.20.0...v0.21.0) (2026-07-06)
 
 
