@@ -179,7 +179,6 @@ def run(
         symbols=watched,
         rss_feeds=rss_feeds,
         max_per_source=cfg.event.max_per_source,
-        extract_fulltext=False,  # 实时层不抓正文，省时间
     )
     log.info(f"[event_watch] fetched {len(raw_items)} raw items")
     if not raw_items:

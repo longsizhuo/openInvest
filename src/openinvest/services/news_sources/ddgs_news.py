@@ -1,7 +1,8 @@
-"""DDGS news 适配器 —— 把 services/news.py 的核心抓取逻辑包成 RawNewsItem 形式
+"""DDGS news 适配器 —— DDGS 搜索包成 RawNewsItem 形式
 
 不复制 _truth_score 那套打分（事件归一化阶段交给 flash LLM 抽 source_reliability 字段），
-只保留：DDGS 搜索 + （可选）trafilatura 抓正文。
+只做 DDGS 搜索（标题+摘要）。正文抓取链路已删（#153）：生产始终不抓正文
+（event_watch 显式关、events.db 无正文列），trafilatura/readability 依赖随之出局。
 """
 from __future__ import annotations
 
@@ -29,11 +30,9 @@ def fetch_ddgs_news(
     max_results: int = 20,
     region: str = "wt-wt",
     safesearch: str = "off",
-    extract_fulltext: bool = False,
 ) -> List[RawNewsItem]:
     """DDGS news 搜索 → RawNewsItem 列表。
 
-    extract_fulltext=True 会用 trafilatura 抓正文（慢，~2s/条），dry-run / 大批量场景关掉。
     任何异常 catch 后返回 []，上层 fetch_all 已经 wrap 了，再 catch 也只是降噪。
     """
     try:
@@ -70,8 +69,6 @@ def fetch_ddgs_news(
             published_at=published,
             raw_meta={"query": query, "domain": domain},
         )
-        if extract_fulltext:
-            item.text = _try_extract_fulltext(url)
         items.append(item)
     return items
 
@@ -81,11 +78,3 @@ def _trim(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n].rstrip() + "..."
 
 
-def _try_extract_fulltext(url: str) -> str:
-    """复用 services/news.py 的 trafilatura 三策略；抓不到就返回空字符串"""
-    try:
-        from openinvest.services.news import _extract_main_text  # 复用现成实现
-        return _extract_main_text(url)
-    except Exception as e:
-        log.debug(f"_extract_main_text 失败 {url}: {e}")
-        return ""
