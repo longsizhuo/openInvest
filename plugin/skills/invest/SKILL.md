@@ -162,6 +162,7 @@ events / holdings import / gold 专用端点）→ 读 `references/tools.md`（�
 财经新闻时，主动调 `ingest_event` 喂进事件账本**（MCP 工具或 CLI `ingest_event
 --title --url [--snippet --source]`）——后端负责归一化/判级/去重/RAG 召回，
 重发同一条不会重复入账。尤其 A 股/区域市场新闻：那是爬虫盲区，你是唯一来源。
+若宿主装有行情/新闻类 skill（如 Longbridge），其新闻同样值得喂——账本只认信息不认出身。
 
 ## 决策闭环 workflow（Decision Review + Reflection）
 

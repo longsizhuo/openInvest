@@ -87,6 +87,26 @@ agent → record_execution("2026-07-02/510300.SS", rejected, reason="现金留�
   拿 verdict（需 DEEPSEEK_API_KEY）；全部子命令见 [SKILL.md](../../skills/invest/SKILL.md)
 - **任意 MCP client**：stdio server 是标准 MCP，不挑 client
 
+### Hermes Agent（Nous Research）
+
+MCP 声明式接入（`~/.hermes/config.yaml`）：
+
+```yaml
+mcp_servers:
+  openinvest:
+    command: uvx
+    args: ["openinvest", "mcp"]
+    env:
+      INVEST_HOME: ~/openInvest
+```
+
+Hermes 自动发现 15 个工具并与内置工具并列注册。skills（委员会 Coordinator 协议）
+为 agentskills.io 标准格式，位于仓库 `plugin/skills/`，可拷入 Hermes 的 skills 目录使用。
+
+**信息联动**：若装有 [Longbridge](https://github.com/longbridge/skills) 等行情/新闻
+skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本——券商级信息源
+接入决策管道，零额外集成。
+
 ## 6. ~~Web GUI~~（已退役 2026-07-05）
 
 GUI 壳层已退役：`run.sh gui` 已删除，后端不再 serve 网页面板。看持仓 / 录入 /
