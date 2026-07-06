@@ -41,6 +41,7 @@ def fetch_all(
     symbols: Optional[List[str]] = None,
     rss_feeds: Optional[List[Dict[str, str]]] = None,
     max_per_source: int = 20,
+    cn_wire: bool = False,
     timeout_sec: float = 30.0,
 ) -> List[RawNewsItem]:
     """并发拉所有源。任一源失败 log warning + 继续，不影响其他源。
@@ -49,6 +50,8 @@ def fetch_all(
         queries:          给 ddgs_news 的关键词列表（如 ['Fed rate', 'NDQ.AX']）
         symbols:          给 yfinance_news 的 ticker 列表
         rss_feeds:        给 rss_feed 的 feed 列表 [{"name": "reuters", "url": "..."}]
+        cn_wire:          拉中文快讯源（akshare 东财/新浪 7×24）——event_watch 在
+                          watched 含 A 股 symbol 时自动开
         max_per_source:   每个源最多返回多少条
         timeout_sec:      单源超时
     """
@@ -64,6 +67,13 @@ def fetch_all(
                 "kwargs": {"query": q, "max_results": max_per_source},
                 "label": f"ddgs:{q[:30]}",
             })
+    if cn_wire:
+        from openinvest.services.news_sources.akshare_news import fetch_cn_wire
+        tasks.append({
+            "fn": fetch_cn_wire,
+            "kwargs": {"max_items": max_per_source},
+            "label": "akshare:cn_wire",
+        })
     if symbols:
         for sym in symbols:
             tasks.append({

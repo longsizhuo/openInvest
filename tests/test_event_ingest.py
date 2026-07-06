@@ -107,3 +107,41 @@ def test_rss_prefilter_unknown_symbol_falls_back_to_root():
     items = [_raw("rss:ft_markets", "AAPL beats earnings expectations")]
     assert len(_rss_prefilter(items, ["AAPL"])) == 1
     assert len(_rss_prefilter([_raw("rss:ft_markets", "unrelated story")], ["AAPL"])) == 0
+
+
+# ---------- akshare 中文快讯（#153 A股盲区） ----------
+
+def test_cn_wire_adapter_maps_dataframes(monkeypatch):
+    import pandas as pd
+    import akshare as ak
+    monkeypatch.setattr(ak, "stock_info_global_em", lambda: pd.DataFrame([
+        {"标题": "央行开展 3000 亿逆回购", "摘要": "净投放...", "发布时间": "2026-07-07 09:00:00",
+         "链接": "https://finance.eastmoney.com/a/1.html"}]))
+    monkeypatch.setattr(ak, "stock_info_global_sina", lambda: pd.DataFrame([
+        {"时间": "2026-07-07 09:01:00", "内容": "沪深300开盘涨0.5%"}]))
+    from openinvest.services.news_sources.akshare_news import fetch_cn_wire
+    items = fetch_cn_wire(max_items=5)
+    assert len(items) == 2
+    em, sina = items
+    assert em.src_name == "akshare:em_global" and em.url.startswith("https://")
+    assert em.published_at == "2026-07-07T09:00:00+08:00"
+    assert sina.src_name == "akshare:sina_7x24" and sina.url.startswith("akshare://sina724/")
+
+
+def test_cn_wire_source_failure_degrades(monkeypatch):
+    import akshare as ak
+    def boom(): raise RuntimeError("上游改版")
+    monkeypatch.setattr(ak, "stock_info_global_em", boom)
+    monkeypatch.setattr(ak, "stock_info_global_sina", boom)
+    from openinvest.services.news_sources.akshare_news import fetch_cn_wire
+    assert fetch_cn_wire() == []  # 静默降级不抛
+
+
+def test_prefilter_covers_akshare_prefix():
+    from openinvest.jobs.event_watch import _rss_prefilter
+    items = [
+        _raw("akshare:sina_7x24", "沪深300开盘涨0.5%"),      # 命中别名
+        _raw("akshare:em_global", "某公司发布新款宠物食品"),   # 无关 → 拦
+    ]
+    kept = _rss_prefilter(items, ["510300.SS"])
+    assert [i.title for i in kept] == ["沪深300开盘涨0.5%"]
