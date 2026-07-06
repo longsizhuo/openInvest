@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.17.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.16.1...invest-skill-v0.17.0) (2026-07-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugin:** skill 源文件 git 路径变更 skills/* → plugin/skills/*（根 skills/ 符号链接保持磁盘兼容）
+
+### Features
+
+* **plugin:** Codex plugin cache 瘦身 44MB→156KB——真身入 plugin/，marketplace source 指回 ./plugin ([c3ad092](https://github.com/longsizhuo/openInvest/commit/c3ad0929960309afc90b0d822d8a0ad9d55c6ed4))
+
 ## [0.16.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.16.0...invest-skill-v0.16.1) (2026-07-05)
 
 
