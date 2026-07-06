@@ -174,7 +174,7 @@ _MACRO_KEYWORDS = [
 
 
 def _rss_prefilter(items: List["RawNewsItem"], watched: List[str]) -> List["RawNewsItem"]:
-    """只过滤 rss:* 条目（ddgs/yfinance 通道本就按持仓定向）。"""
+    """只过滤泛市场 wire 条目——rss:* 与 akshare:*（ddgs/yfinance 通道本就按持仓定向）。"""
     terms: List[str] = [k.lower() for k in _MACRO_KEYWORDS]
     for sym in watched:
         terms.extend(a.lower() for a in _SYMBOL_ALIASES.get(sym, []))
@@ -182,7 +182,7 @@ def _rss_prefilter(items: List["RawNewsItem"], watched: List[str]) -> List["RawN
         terms.extend({sym.lower(), root} if len(root) >= 2 else {sym.lower()})
     kept = []
     for it in items:
-        if not it.src_name.startswith("rss:"):
+        if not it.src_name.startswith(("rss:", "akshare:")):
             kept.append(it)
             continue
         hay = f"{it.title} {it.snippet}".lower()
@@ -209,11 +209,14 @@ def run(
     from openinvest.core.config import load_config
     cfg = load_config()
 
+    # A 股 symbol 自动激活中文快讯源（akshare）——海外用户零调用（#153）
+    has_cn = any(sym.upper().endswith((".SS", ".SZ", ".BJ")) for sym in watched)
     raw_items = fetch_all(
         queries=ctx["queries"],
         symbols=watched,
         rss_feeds=rss_feeds,
         max_per_source=cfg.event.max_per_source,
+        cn_wire=has_cn,
     )
     log.info(f"[event_watch] fetched {len(raw_items)} raw items")
     if cfg.event.rss_prefilter_enabled:
