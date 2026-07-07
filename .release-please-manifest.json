@@ -1,6 +1,6 @@
 {
   ".": "0.22.0",
-  "plugin/skills/invest": "0.18.0",
+  "plugin/skills/invest": "0.18.1",
   "plugin/skills/invest-setup": "0.3.1",
   "skills/okf-frontmatter": "0.3.0"
 }

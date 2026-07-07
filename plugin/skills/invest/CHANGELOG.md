@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.0...invest-skill-v0.18.1) (2026-07-07)
+
+
+### Docs
+
+* **agents:** Hermes 接入指南（config.yaml MCP + agentskills 拷入）+ 行情 skill 联动投喂；uv.lock 版本号同步 ([999214b](https://github.com/longsizhuo/openInvest/commit/999214bf6fde44fa03a030efead4387317975c72))
+* **skill:** SKILL.md 补 Hermes 原生元数据（platforms + metadata.hermes.tags）——增量字段，Claude/Codex 忽略 ([fa69fd7](https://github.com/longsizhuo/openInvest/commit/fa69fd79db744a6fdbf68fb42bd174098c06275a))
+
 ## [0.18.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.17.0...invest-skill-v0.18.0) (2026-07-06)
 
 
