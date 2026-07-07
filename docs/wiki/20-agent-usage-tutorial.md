@@ -114,6 +114,18 @@ skill 是显式加载制，不进自动索引）。注意 `hermes skills install
 skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本——券商级信息源
 接入决策管道，零额外集成。
 
+### OpenClaw
+
+OpenClaw 自动加载 workspace `skills/` 目录（无 MCP client，skills 经 uvx 驱动后端）：
+
+```bash
+git clone https://github.com/longsizhuo/openInvest ~/openInvest
+cp -r ~/openInvest/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace 路径以你的配置为准
+```
+
+注意别用 `openclaw plugins install`——截至 2026-07（openclaw-python 0.8.x）它是
+未实现的 stub，返回假 success 但什么都不装。
+
 ## 6. ~~Web GUI~~（已退役 2026-07-05）
 
 GUI 壳层已退役：`run.sh gui` 已删除，后端不再 serve 网页面板。看持仓 / 录入 /
