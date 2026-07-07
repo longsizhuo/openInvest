@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/longsizhuo/openInvest/compare/v0.22.0...v0.22.1) (2026-07-07)
+
+
+### Docs
+
+* **agents:** wiki 20 补 OpenClaw 接入（workspace skills 拷贝；plugins install 是 stub 勿用） ([05581e7](https://github.com/longsizhuo/openInvest/commit/05581e7264725304037e73cc8dc7fa5c780cb4ac))
+
 ## [0.22.0](https://github.com/longsizhuo/openInvest/compare/v0.21.2...v0.22.0) (2026-07-06)
 
 
