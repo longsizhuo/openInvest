@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.23.0](https://github.com/longsizhuo/openInvest/compare/v0.22.1...v0.23.0) (2026-07-08)
+
+
+### Features
+
+* **committee:** localize committee outputs ([723be05](https://github.com/longsizhuo/openInvest/commit/723be05f4b579b4a6a79a3e352598a639ab5297e))
+* **config:** add invest language setting ([18b094e](https://github.com/longsizhuo/openInvest/commit/18b094e7d03db5803a691ccaa9905122271aefec))
+* **skill:** 新增 invest-backup skill，备份/恢复不入 git 的关键数据 ([6c06dbc](https://github.com/longsizhuo/openInvest/commit/6c06dbc54a41c8c468a862ed82b8df74afa1439a))
+
+
+### Bug Fixes
+
+* **committee:** 补上语言覆盖面里剩余的早退分支 + zh-CN 配置一致性 ([5659588](https://github.com/longsizhuo/openInvest/commit/56595887c89427147544ef6937a9266e9175c0cc))
+* **committee:** 补全委员会语言覆盖面，修正 rebuttal 字数约束误删 ([f1af463](https://github.com/longsizhuo/openInvest/commit/f1af463f0b00f82b660e7d167ad901d4e2d2ceb3))
+* **migrate:** 给 migrate_profile.py 补 safety guard，防止误跑清空真实数据 ([588df10](https://github.com/longsizhuo/openInvest/commit/588df1059800b3b73a1d9e6279940948797376b1))
+* **skill:** dev-mode 分支保留真实退出码，不再吞掉非零状态 ([4052078](https://github.com/longsizhuo/openInvest/commit/4052078d0b07f8be8d4a25ec43e9a1b4dbc2405b))
+* **skill:** 修正 plugin/ 重排后 REPO_ROOT 相对路径少跳一层 ([48b9b20](https://github.com/longsizhuo/openInvest/commit/48b9b2077453dd0e2be1caecf6a60927eb582c17))
+
+
+### Docs
+
+* add issue 132 i18n implementation note ([de68f87](https://github.com/longsizhuo/openInvest/commit/de68f87d230e652310e4f6c5baf7c916d2cca5eb))
+
+## [0.22.1](https://github.com/longsizhuo/openInvest/compare/v0.22.0...v0.22.1) (2026-07-07)
+
+
+### Docs
+
+* **agents:** wiki 20 补 OpenClaw 接入（workspace skills 拷贝；plugins install 是 stub 勿用） ([05581e7](https://github.com/longsizhuo/openInvest/commit/05581e7264725304037e73cc8dc7fa5c780cb4ac))
+
+## [0.22.0](https://github.com/longsizhuo/openInvest/compare/v0.21.2...v0.22.0) (2026-07-06)
+
+
+### Features
+
+* **hermes:** 仓库根 plugin manifest——hermes plugins install longsizhuo/openInvest 一键装 skills ([957952c](https://github.com/longsizhuo/openInvest/commit/957952c094fe237f4071bd5cd1be6d29d4349a22))
+
+## [0.21.2](https://github.com/longsizhuo/openInvest/compare/v0.21.1...v0.21.2) (2026-07-06)
+
+
+### Docs
+
+* **skill:** SKILL.md 补 Hermes 原生元数据（platforms + metadata.hermes.tags）——增量字段，Claude/Codex 忽略 ([fa69fd7](https://github.com/longsizhuo/openInvest/commit/fa69fd79db744a6fdbf68fb42bd174098c06275a))
+
+## [0.21.1](https://github.com/longsizhuo/openInvest/compare/v0.21.0...v0.21.1) (2026-07-06)
+
+
+### Docs
+
+* **agents:** Hermes 接入指南（config.yaml MCP + agentskills 拷入）+ 行情 skill 联动投喂；uv.lock 版本号同步 ([999214b](https://github.com/longsizhuo/openInvest/commit/999214bf6fde44fa03a030efead4387317975c72))
+
+## [0.21.0](https://github.com/longsizhuo/openInvest/compare/v0.20.0...v0.21.0) (2026-07-06)
+
+
+### Features
+
+* **events:** ingest_event agent 投喂 + RSS 泛头条预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) 方案①②） ([c4c9c34](https://github.com/longsizhuo/openInvest/commit/c4c9c34229126e7c43829b53186370e766c60888))
+* **events:** ingest_event agent 投喂 + RSS 预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) ①②） ([2740707](https://github.com/longsizhuo/openInvest/commit/2740707b1058824a53b81b8281d24d7c1446b79d))
+* **events:** 中文快讯 wire（akshare 东财+新浪7×24）——A 股 symbol 自动激活（[#153](https://github.com/longsizhuo/openInvest/issues/153)） ([f7857f3](https://github.com/longsizhuo/openInvest/commit/f7857f3fb73b17c67026b5d4540175f99933c9f0))
+* **events:** 中文快讯 wire（akshare）——A 股 symbol 自动激活（[#153](https://github.com/longsizhuo/openInvest/issues/153) ③） ([40831fe](https://github.com/longsizhuo/openInvest/commit/40831fee9a0957d1293eb7e6f3c399b599ccdbfb))
+
 ## [0.20.0](https://github.com/longsizhuo/openInvest/compare/v0.19.1...v0.20.0) (2026-07-05)
 
 

@@ -1184,6 +1184,7 @@ def test_config_endpoints_roundtrip(client):
     assert r.status_code == 200
     items = {it["key"]: it for it in r.json()["items"]}
     assert set(items) == {
+        "language.invest_lang",
         "verdict.concentration_lens_enabled", "verdict.risk_profile",
         "verdict.cash_opportunity_cost_rule_enabled",  # ADR-024
         "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",

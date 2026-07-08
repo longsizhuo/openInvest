@@ -1,7 +1,11 @@
 ---
 name: invest
-version: 0.16.1 # x-release-please-version
+version: 0.18.2 # x-release-please-version
 description: openInvest 多资产 AI 投资委员会 **日常使用**。读取持仓 / 实时行情 / 策略 / 历史决议 / 加减仓 / 跑 4 角色 LLM 委员会给投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Cursor / Cline / Codex / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**："show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"加仓 / 减仓 / 记一笔交易"。**首次安装走另一个 skill `invest-setup`**（doctor 返回 needs_setup 时切过去）。后端 longsizhuo/openInvest。
+platforms: [linux, macos]
+metadata:
+  hermes:
+    tags: [investing, portfolio, committee, stocks, gold, etf, crypto, 投资, 持仓, 委员会, 行情]
 ---
 
 # Invest Skill
@@ -12,6 +16,8 @@ Web GUI 已退役（2026-07）——所有能力经 CLI 子命令 / MCP 工具�
 
 openInvest 多资产 AI 投资委员会。**这个 skill 不是 Claude 专属**——任何能跑
 shell 命令的 agent 都能用，看下面 "选路径"。
+
+Reply in the language the user is currently speaking unless they explicitly ask to switch languages.
 
 ## 选路径
 
@@ -155,6 +161,14 @@ events / holdings import / gold 专用端点）→ 读 `references/tools.md`（�
 `symbol/数量/成本/币种/渠道` 的文字，再走 `import --text "..."`（或 POST
 /api/holdings/import）——后端 LLM 只解析文字，不收图。先不带 `--commit` 预览，
 用户核对后再 `--commit` 非破坏写入。
+
+## 新闻投喂（你的搜索 > 任何爬虫）
+
+你有比后端爬虫强得多的搜索能力（含中文源）。**浏览/搜索中看到与用户持仓相关的
+财经新闻时，主动调 `ingest_event` 喂进事件账本**（MCP 工具或 CLI `ingest_event
+--title --url [--snippet --source]`）——后端负责归一化/判级/去重/RAG 召回，
+重发同一条不会重复入账。尤其 A 股/区域市场新闻：那是爬虫盲区，你是唯一来源。
+若宿主装有行情/新闻类 skill（如 Longbridge），其新闻同样值得喂——账本只认信息不认出身。
 
 ## 决策闭环 workflow（Decision Review + Reflection）
 

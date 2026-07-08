@@ -1,6 +1,6 @@
 [project]
 name = "openinvest"
-version = "0.20.0"
+version = "0.23.0"
 description = "Investment runtime built for AI agents — 4-role LLM investment committee, portfolio ledger, decision accounting, MCP server"
 readme = "PYPI_README.md"
 license = "MIT"
@@ -18,9 +18,7 @@ classifiers = [
 requires-python = ">=3.13"
 dependencies = [
     "ddgs>=9.10.0",
-    "trafilatura>=2.0.0",
     "yfinance>=0.2.66",
-    "readability-lxml>=0.8.1",
     "python-dotenv>=1.0.1",
     "pandas-stubs~=2.3.3",
     "markdown>=3.10",
@@ -39,6 +37,7 @@ dependencies = [
     "feedparser>=6.0.10",  # 事件层 RSS 源（Reuters/BBC/FT/财新 免费 feed）
     "sqlite-vec>=0.1.6",   # 事件层向量精排（SQLite 扩展，不需要独立向量库）
     "mcp>=1.28.1",
+    "akshare>=1.18.64",
 ]
 
 [project.urls]

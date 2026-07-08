@@ -106,6 +106,19 @@ documents:
 
 ---
 
+### 2.x 新闻/事件源自配（无需改代码）
+
+事件层三类源，按你的市场自由配：
+
+1. **RSS 自配**：`services/news_sources/rss_feeds.yml` 就是普通 feed 列表——加你市场的源即可。
+   没有原生 RSS 的站点推荐自建 [RSSHub](https://github.com/DIYgod/RSSHub)
+   （`docker run -d -p 1200:1200 diygod/rsshub`，5000+ 路由含财新/华尔街见闻/雪球等），
+   feed URL 指向自己的实例。泛市场 feed 会过持仓别名/macro 关键词预过滤（`event.rss_prefilter_enabled`）。
+2. **中文快讯 wire（内置）**：watched 含 A 股 symbol（.SS/.SZ/.BJ）时自动激活
+   akshare 东财快讯 + 新浪 7×24（`news_sources/akshare_news.py`）；境内部署可照样式加财联社电报。
+3. **agent 投喂（最通用）**：任何市场/语言，宿主 agent 搜到直接 `ingest_event` 喂进管道——
+   这是海外/小众市场的首选通道，见 SKILL.md 投喂纪律。
+
 ## 3. 加新 agent 角色
 
 例：加一个 "ESG Analyst"，看可持续投资指标。

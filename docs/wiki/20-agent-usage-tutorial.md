@@ -87,6 +87,45 @@ agent → record_execution("2026-07-02/510300.SS", rejected, reason="现金留�
   拿 verdict（需 DEEPSEEK_API_KEY）；全部子命令见 [SKILL.md](../../skills/invest/SKILL.md)
 - **任意 MCP client**：stdio server 是标准 MCP，不挑 client
 
+### Hermes Agent（Nous Research）
+
+MCP 声明式接入（`~/.hermes/config.yaml`）：
+
+```yaml
+mcp_servers:
+  openinvest:
+    command: uvx
+    args: ["openinvest", "mcp"]
+    env:
+      INVEST_HOME: ~/openInvest
+```
+
+Hermes 自动发现 15 个工具并与内置工具并列注册。skills 一条命令装：
+
+```bash
+hermes plugins install longsizhuo/openInvest --enable
+```
+
+装完以 `openinvest:invest` / `openinvest:invest-setup` 命名空间加载（Hermes plugin
+skill 是显式加载制，不进自动索引）。注意 `hermes skills install` 路线会被其社区源
+安全扫描拦截（金融写操作 skill 必触发 dangerous verdict）——走 plugin 路线。
+
+**信息联动**：若装有 [Longbridge](https://github.com/longbridge/skills) 等行情/新闻
+skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本——券商级信息源
+接入决策管道，零额外集成。
+
+### OpenClaw
+
+OpenClaw 自动加载 workspace `skills/` 目录（无 MCP client，skills 经 uvx 驱动后端）：
+
+```bash
+git clone https://github.com/longsizhuo/openInvest ~/openInvest
+cp -r ~/openInvest/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace 路径以你的配置为准
+```
+
+注意别用 `openclaw plugins install`——截至 2026-07（openclaw-python 0.8.x）它是
+未实现的 stub，返回假 success 但什么都不装。
+
 ## 6. ~~Web GUI~~（已退役 2026-07-05）
 
 GUI 壳层已退役：`run.sh gui` 已删除，后端不再 serve 网页面板。看持仓 / 录入 /

@@ -279,9 +279,13 @@ def _h_run_committee(args: argparse.Namespace) -> None:
             timeout=15, ok_404=True,
         )
         if r.status_code == 200:
+            from openinvest.capabilities.committee.i18n import bilingual
             _print_json({
                 "status": "cached",
-                "reason": "今天已经跑过这个资产了；用 --force 重跑",
+                "reason": bilingual(
+                    "今天已经跑过这个资产了；用 --force 重跑",
+                    "This asset already ran today; pass --force to rerun.",
+                ),
                 "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
                 "transcript_md": r.json().get("content", ""),
             })
@@ -338,12 +342,29 @@ def _h_run_committee(args: argparse.Namespace) -> None:
 
     gui_url = _api_base()
     today = _hub_today()
-    _print_json({
-        "status": "ok",
-        "verdict": asset_result.get("verdict", {}),
-        "cio_memo": asset_result.get("cio_memo") or "",
-        "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
-        "next_step": (
+    # 用 hub 实际跑委员会时的语言（result.language），而不是本机的 get_invest_lang()——
+    # remote hub 模式下 cio_memo/verdict 是 hub 生成的，语言由 hub 自己的 INVEST_LANG 决定，
+    # 跟本机配置可能不一致；next_step 提示必须跟着 memo 实际语言走，否则同一响应里两种语言。
+    # hub 没回传 language 字段 = hub 还没升级到这个 i18n 版本，那种旧 hub 固定只输出
+    # 中文 cio_memo，所以 fallback 到 "zh" 而不是本机配置——本机配置只描述本机意图，
+    # 不代表旧 hub 真的能生成英文。
+    hub_lang = (final.get("result") or {}).get("language")
+    if hub_lang not in ("zh", "en"):
+        hub_lang = "zh"
+    if hub_lang == "en":
+        next_step = (
+            "⚠️ The `cio_memo` field is a Markdown string. Render it directly as Markdown instead of printing the full JSON blob.\n\n"
+            "A verdict has been generated. If the user agrees, guide them through these steps:\n"
+            f"1) Record the trade in openInvest first (easiest path: open {gui_url} in a browser and use the holdings page; "
+            "or run remote-mode `run.sh buy/sell ...`, which writes to the hub automatically)\n"
+            "2) Open the real broker or banking app and place the order using the alloc_cny amount from the verdict "
+            "(openInvest does not connect to exchanges; it only produces decisions)\n"
+            "3) Return to openInvest and mark the execution outcome\n\n"
+            "**Do not write to memory/ directly.** In remote mode the local machine does not even own the memory/ directory; "
+            "all state changes must go through run.sh write commands or the hub API."
+        )
+    else:
+        next_step = (
             "⚠️ `cio_memo` 字段是 Markdown 字符串，**直接当 Markdown 渲染给用户看**，"
             "不要把整个 JSON 原样打印。\n\n"
             "已生成 verdict。如果用户同意，告诉他按下面三步走：\n"
@@ -354,7 +375,13 @@ def _h_run_committee(args: argparse.Namespace) -> None:
             "3) 回 openInvest 标记成交\n\n"
             "**不要直接写 memory/**——远端模式下本机根本没有 memory/，"
             "所有状态变更必须走 run.sh 写命令或 hub API。"
-        ),
+        )
+    _print_json({
+        "status": "ok",
+        "verdict": asset_result.get("verdict", {}),
+        "cio_memo": asset_result.get("cio_memo") or "",
+        "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
+        "next_step": next_step,
     })
 
 

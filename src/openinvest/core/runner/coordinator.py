@@ -58,7 +58,7 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     不需要读任何磁盘文件。symbol 不在 target_assets 时返回 status=error dict。
     """
     from openinvest.capabilities.committee.cio import build_cio_prompt
-    from openinvest.capabilities.committee.macro_strategist import PROMPT_MACRO_STRATEGIST
+    from openinvest.capabilities.committee.macro_strategist import build_macro_strategist_prompt
     from openinvest.capabilities.committee.quant import build_quant_prompt
     from openinvest.capabilities.committee.risk_officer import build_risk_officer_prompt
     from openinvest.core.portfolio_manager import PortfolioManager
@@ -184,7 +184,7 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
         "gold_snapshot": gold_ctx,
         "prior_insights": insights,
         "prompts": {
-            "macro_strategist": PROMPT_MACRO_STRATEGIST,
+            "macro_strategist": build_macro_strategist_prompt(),
             "quant_round1": build_quant_prompt(target, "opening"),
             "risk_round1": build_risk_officer_prompt(target, "opening"),
             "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),

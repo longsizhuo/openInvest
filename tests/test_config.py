@@ -20,6 +20,7 @@ import pytest
 from openinvest.core.config import (
     DCAConfig,
     DreamingTunableConfig,
+    LanguageConfig,
     LockedCommitteeDefaults,
     LockedDreamingScoring,
     LockedPromptIdentity,
@@ -119,6 +120,10 @@ class TestDefaultsMatchHardcoded:
         assert cfg.lam_mdd == 1.0
         assert cfg.lam_return == 0.05
 
+    def test_language_defaults(self):
+        cfg = LanguageConfig()
+        assert cfg.invest_lang == "zh"
+
 
 # ---------- load_config 默认值一致 ----------
 
@@ -129,6 +134,7 @@ class TestLoadConfigDefaults:
     def test_load_config_returns_defaults(self):
         cfg = load_config()
         assert isinstance(cfg, TunableConfig)
+        assert cfg.language.invest_lang == "zh"
         assert cfg.regime.trend_spread_atr_ratio == 3.6
         assert cfg.regime.crash_atr_spike_ratio_min == 2.0
         assert cfg.verdict.buy_confidence_overdrive == 0.95
@@ -202,6 +208,11 @@ class TestEnvOverride:
         monkeypatch.setenv("INVEST_VERDICT_BUY_CONFIDENCE_OVERDRIVE", "0.90")
         cfg = load_config()
         assert cfg.verdict.buy_confidence_overdrive == 0.90
+
+    def test_env_override_invest_lang(self, monkeypatch):
+        monkeypatch.setenv("INVEST_LANG", "en")
+        cfg = load_config()
+        assert cfg.language.invest_lang == "en"
 
 
 # ---------- CLI override ----------
@@ -405,6 +416,8 @@ class TestApiConfig:
     def test_effective_view_defaults(self):
         view = {it["key"]: it for it in effective_api_config()}
         assert set(view) == set(API_SETTABLE)
+        assert view["language.invest_lang"]["value"] == "zh"
+        assert view["language.invest_lang"]["choices"] == ["zh", "en", "zh-CN"]
         assert view["verdict.concentration_lens_enabled"]["value"] is False  # ADR-020: default OFF
         assert view["verdict.concentration_lens_enabled"]["overridden"] is False
         assert view["verdict.risk_profile"]["choices"] == ["steady", "aggressive"]
@@ -433,6 +446,17 @@ class TestApiConfig:
     def test_non_whitelist_rejected(self):
         with pytest.raises(ValueError):
             set_persisted_override("verdict.alloc_cny_ceiling", 1)
+
+    def test_language_enum_validation(self):
+        assert set_persisted_override("language.invest_lang", "en").language.invest_lang == "en"
+        with pytest.raises(ValueError):
+            set_persisted_override("language.invest_lang", "fr")
+
+    def test_language_zh_cn_alias_accepted_by_persisted_config(self):
+        """zh-CN 在 env 路径（get_invest_lang）和持久化 API 路径必须行为一致。"""
+        from openinvest.capabilities.committee.i18n import get_invest_lang
+        set_persisted_override("language.invest_lang", "zh-CN")
+        assert get_invest_lang() == "zh"
 
     def test_bad_bool_rejected(self):
         with pytest.raises(ValueError):
