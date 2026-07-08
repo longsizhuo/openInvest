@@ -9,6 +9,13 @@
 - memory/.state/processed_emails.json  已处理邮件 ID
 
 迁移完成后保留 user_profile.json.bak 作为兜底。
+
+**只应该跑一次**。2026-07-08 事故：这个脚本被直接重跑了一次（绕开 cmd_init），
+没有任何保护，无条件把 user.md/strategy.md/portfolio.md 覆盖成
+user_profile.json 里的旧/demo 数据，daily_report 因 target_assets 变空
+每天早退、邮件全断。现在加同款 safety guard（对齐
+skill_cmds/lifecycle_cmds.py:_write_v2_portfolio 在 2026-05-10 那次事故后
+补的模式）：目标文件已存在 → 拒绝并要求显式 force=True，覆盖前先备份。
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ import json
 import os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from openinvest.core.memory_store import MemoryStore
@@ -23,9 +31,33 @@ from openinvest.paths import INVEST_ROOT
 
 ROOT = INVEST_ROOT
 PROFILE_PATH = ROOT / "user_profile.json"
+_GUARDED_DOCS = ("user", "strategy", "portfolio")
 
 
-def main():
+def _refuse_if_already_migrated(store: MemoryStore, force: bool) -> None:
+    """这个脚本只该跑一次。目标文件任一已存在 = 之前跑过（真实数据或此前的
+    迁移结果），无条件覆盖等于重演 2026-07-08 那次数据丢失。"""
+    existing = [name for name in _GUARDED_DOCS if store.read(name) is not None]
+    if not existing:
+        return
+    if force:
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        for name in existing:
+            src = store.root / f"{name}.md"
+            if src.exists():
+                backup = store.root / f"{name}.md.bak.{ts}"
+                backup.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+                print(f"  已备份 {name}.md -> {backup.name}")
+        return
+    raise RuntimeError(
+        f"⚠️ {', '.join(f'{n}.md' for n in existing)} 已存在，拒绝覆盖。"
+        f"这个脚本只该跑一次（2026-07-08 事故：直接重跑过一次，把真实数据覆盖成"
+        f" user_profile.json 里的旧数据）。确认要重跑请传 force=True"
+        f"（CLI: `python -m openinvest.migrate_profile --force`），会先自动备份现有文件。"
+    )
+
+
+def main(force: bool = False):
     if not PROFILE_PATH.exists():
         print(f"❌ {PROFILE_PATH} 不存在，无需迁移")
         return
@@ -34,6 +66,7 @@ def main():
         profile = json.load(f)
 
     store = MemoryStore()
+    _refuse_if_already_migrated(store, force)
 
     # --- 1. user.md  身份和偏好 ---
     user_data = {
@@ -163,4 +196,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(force="--force" in sys.argv)
