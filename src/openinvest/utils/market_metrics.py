@@ -153,6 +153,25 @@ def _calc_atr_spike_ratio(
     return float(last_atr / last_base)
 
 
+def _calc_atr_pct_median_1y(
+    df: pd.DataFrame,
+    period: int = 14,
+    baseline_window: int = 252,
+    min_periods: int = 120,
+) -> Optional[float]:
+    """近 1 年滚动中位 ATR%（atr_spike_ratio 的分母，单独暴露）。
+
+    #113 regime 尺度无关化的趋势腿归一化因子：MA spread% ÷ 本值 =
+    "趋势强度折算成多少个典型日波"。窗口/最小样本与 spike ratio 同参，
+    保证 ma120 可算时本值几乎必可算（都要 ≥120 样本）。"""
+    series = _atr_pct_series(df, period=period)
+    if series is None or len(series.dropna()) < min_periods:
+        return None
+    baseline = series.rolling(baseline_window, min_periods=min_periods).median()
+    val = _safe_last(baseline)
+    return None if val is None or val <= 0 else float(val)
+
+
 def _calc_max_drawdown(close: pd.Series) -> Optional[float]:
     if close.empty:
         return None
@@ -262,7 +281,9 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
           price_quantile_2y: 真百分位排名（窗口内 ≤ 当前价的比例，0-1）—— 通常传 2 年数据
           atr_pct: 14 日 Wilder ATR 占当前价的百分比（真 TR，含跳空）
           atr_spike_ratio: 波动突变比（当日 ATR% / 近 1 年滚动中位 ATR%），
-            独立快崩防御 ATR 腿用；样本 <120 时 None
+            regime crash 波动腿 + 独立快崩防御共用；样本 <120 时 None
+          atr_pct_median_1y: 近 1 年滚动中位 ATR%（regime 趋势腿归一化因子）；
+            样本 <120 时 None
           volatility_annualized: 年化波动率（基于全部样本）
           max_drawdown: 最大回撤（负数）
           return_30d: 过去 30 交易日累计收益率（regime crash 跌幅腿）
@@ -280,6 +301,7 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
             "price_quantile_2y": None,
             "atr_pct": None,
             "atr_spike_ratio": None,
+            "atr_pct_median_1y": None,
             "volatility_annualized": None,
             "max_drawdown": None,
             "return_30d": None,
@@ -298,6 +320,7 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
         "price_quantile_2y": _calc_price_quantile(close),
         "atr_pct": _calc_atr_pct(df, period=14),
         "atr_spike_ratio": _calc_atr_spike_ratio(df, period=14),
+        "atr_pct_median_1y": _calc_atr_pct_median_1y(df, period=14),
         "volatility_annualized": _calc_volatility_annualized(close),
         "max_drawdown": _calc_max_drawdown(close),
         "return_30d": _calc_return_30d(close),

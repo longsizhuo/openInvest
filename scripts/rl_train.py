@@ -59,8 +59,8 @@ def _build_objective(
         from openinvest.core.config import set_config_override
         set_config_override({
             "regime": {
-                "trend_ma_spread_pct": regime_uptrend,
-                "crash_atr_pct_min": regime_atr,
+                "trend_spread_atr_ratio": regime_uptrend,
+                "crash_atr_spike_ratio_min": regime_atr,
             },
         })
 

@@ -72,18 +72,19 @@ class TrainConfig:
         consumed_by="core/committee.py:parse_cio_memo (via INVEST_ALLOC_AGGRESSIVENESS)",
     ))
 
+    # #113 尺度无关化：两个 regime 参数从绝对 % 换为比值单位，范围覆盖新默认（3.6 / 2.0）
     regime_uptrend: ParamRange = field(default_factory=lambda: ParamRange(
-        low=3.0, high=6.0, type="float",
-        description="REGIME=uptrend 触发阈值。MA20/MA120 spread 超此 % 判 uptrend",
-        confirmed_effective=False,  # 弱（trial 3.47 vs 5.59 reward 几乎相同）
-        consumed_by="core/regime.py:THRESHOLDS['trend_ma_spread_pct'] (via monkey-patch)",
+        low=2.0, high=6.0, type="float",
+        description="REGIME=uptrend 触发阈值。MA spread ÷ 自身中位 ATR%（典型日波数）超此比值判 uptrend",
+        confirmed_effective=False,  # 弱（旧 % 口径下 trial 3.47 vs 5.59 reward 几乎相同）
+        consumed_by="core/regime.py:THRESHOLDS['trend_spread_atr_ratio'] (via set_config_override)",
     ))
 
     regime_atr: ParamRange = field(default_factory=lambda: ParamRange(
-        low=2.5, high=5.0, type="float",
-        description="REGIME=crash 触发阈值。ATR pct 超此 % 判崩盘",
+        low=1.3, high=3.0, type="float",
+        description="REGIME=crash 波动腿。atr_spike_ratio（当日 ATR% ÷ 自身 1 年中位）超此倍数判崩盘",
         confirmed_effective=False,
-        consumed_by="core/regime.py:THRESHOLDS['crash_atr_pct_min'] (via monkey-patch)",
+        consumed_by="core/regime.py:THRESHOLDS['crash_atr_spike_ratio_min'] (via set_config_override)",
     ))
 
     max_rounds: ParamRange = field(default_factory=lambda: ParamRange(

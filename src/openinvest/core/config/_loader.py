@@ -21,7 +21,6 @@ from .tunable import (
     MacroBucketConfig,
     OracleAccuracyConfig,
     RegimeConfig,
-    RegimePerAssetConfig,
     PathConfig,
     RewardConfig,
     SentimentConfig,
@@ -55,7 +54,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _deep_set(d: dict, dotted_key: str, value: Any) -> None:
-    """用点分路径设置嵌套 dict 值。'regime.trend_ma_spread_pct' → d['regime']['trend_ma_spread_pct']"""
+    """用点分路径设置嵌套 dict 值。'regime.trend_spread_atr_ratio' → d['regime']['trend_spread_atr_ratio']"""
     parts = dotted_key.split(".")
     cur = d
     for part in parts[:-1]:
@@ -70,14 +69,13 @@ def _read_env_overrides() -> dict[str, Any]:
     特殊处理:
     - INVEST_DREAMING_LOOKBACK_DAYS → dreaming.lookback_days
     - INVEST_DREAMING_WINDOWS → dreaming.windows (逗号分隔)
-    - INVEST_REGIME_PER_ASSET_<SYMBOL>_<KEY> → regime_per_asset.<SYMBOL>.<key>
     """
     prefix = "INVEST_"
     overrides: dict[str, Any] = {}
 
     # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
     _KNOWN_SECTIONS = sorted(
-        ["regime_per_asset", "oracle_accuracy", "macro_buckets", "staleness", "language",
+        ["oracle_accuracy", "macro_buckets", "staleness", "language",
          "regime", "verdict", "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event"],
         key=len,
         reverse=True,
@@ -113,17 +111,8 @@ def _read_env_overrides() -> dict[str, Any]:
         else:
             suffix = key[len(prefix):].lower()
 
-            # 特殊处理: INVEST_REGIME_PER_ASSET_<SYMBOL>_<KEY>
-            if suffix.startswith("regime_per_asset_"):
-                rest = suffix[len("regime_per_asset_"):]
-                parts = rest.split("_", 1)
-                if len(parts) == 2:
-                    symbol, field_name = parts
-                    dotted = f"regime_per_asset.{symbol.upper()}.{field_name}"
-                else:
-                    continue
-            else:
-                # 匹配最长已知 section 前缀
+            # 匹配最长已知 section 前缀（#113 起 regime_per_asset 已删）
+            if True:
                 matched = False
                 for section in _KNOWN_SECTIONS:
                     if suffix.startswith(section + "_"):
@@ -153,26 +142,21 @@ def _read_env_overrides() -> dict[str, Any]:
     return overrides
 
 
-def _build_regime_per_asset(raw: dict[str, Any]) -> dict[str, RegimePerAssetConfig]:
-    """把 YAML 的 per_asset dict 转成 RegimePerAssetConfig 实例。"""
-    result = {}
-    for symbol, overrides in raw.items():
-        if isinstance(overrides, dict):
-            result[symbol] = RegimePerAssetConfig(**overrides)
-    return result
-
-
 def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     """从 flat dict 构建 TunableConfig（处理嵌套结构）。"""
-    # 提取 per_asset（可能来自两个位置，需要合并）
-    # 1. regime.per_asset（YAML 嵌套结构）
-    # 2. regime_per_asset（override 顶层 key，用于 set_config_override({"regime_per_asset": {...}})）
+    # #113：regime per_asset 已删；老标量键（trend_ma_spread_pct/crash_atr_pct_min）
+    # 不再生效——静默回落默认会让用户的调参无声失效，必须给一行 warning
     regime_data = data.get("regime", {})
-    per_asset_from_nested = regime_data.pop("per_asset", {})
-    per_asset_from_top = data.pop("regime_per_asset", {})
-    # 合并：顶层 override 优先
-    per_asset_raw = {**per_asset_from_nested, **per_asset_from_top}
-    per_asset = _build_regime_per_asset(per_asset_raw) if per_asset_raw else {}
+    regime_data.pop("per_asset", None)
+    data.pop("regime_per_asset", None)
+    _legacy = [k for k in ("trend_ma_spread_pct", "crash_atr_pct_min") if regime_data.pop(k, None) is not None]
+    if _legacy:
+        import logging
+        logging.getLogger("config").warning(
+            "regime 配置键 %s 已随 #113 尺度无关化删除，本次忽略（阈值用新默认）。"
+            "新键：trend_spread_atr_ratio / crash_atr_spike_ratio_min（比值口径，非绝对%%）",
+            _legacy,
+        )
 
     # 构建各子 config
     language = LanguageConfig(**{k: v for k, v in data.get("language", {}).items() if k in {f.name for f in fields(LanguageConfig)}})
@@ -212,7 +196,6 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     return TunableConfig(
         language=language,
         regime=regime,
-        regime_per_asset=per_asset,
         verdict=verdict,
         dreaming=dreaming,
         macro_buckets=macro,
@@ -318,7 +301,7 @@ def set_config_override(overrides: dict) -> TunableConfig:
     直到 reset_config() 清除。
 
     使用场景：
-    - sweep runner 每个 trial 注入参数：set_config_override({"regime": {"trend_ma_spread_pct": 4.0}})
+    - sweep runner 每个 trial 注入参数：set_config_override({"regime": {"trend_spread_atr_ratio": 4.0}})
     - scripts/rl_train.py 替代旧的 monkey-patch
     - 测试注入特定值
 

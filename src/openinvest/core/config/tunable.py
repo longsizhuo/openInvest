@@ -21,28 +21,20 @@ class RegimeConfig:
     来源: core/regime.py:35-55 THRESHOLDS dict
     """
     # 簇 1: Crash 触发器（紧密耦合，联合 sweep）
-    crash_atr_pct_min: float = 5.0
+    # #113 尺度无关化：波动腿改 spike ratio（当日 ATR% ÷ 自身 1 年中位）
+    crash_atr_spike_ratio_min: float = 2.0
     crash_drawdown_30d_pct: float = 20.0
     crash_deep_drawdown_30d_pct: float = 30.0
     # 簇 2: Trend 趋势（半独立）
-    trend_ma_spread_pct: float = 3.0
+    # #113：MA spread% ÷ 自身中位 ATR%（"多少个典型日波"）。R=3.6 在 NDQ 校准
+    # （新旧一致率 93.4%），恰好等于旧手调值在比值空间的收敛点
+    trend_spread_atr_ratio: float = 3.6
     # 簇 3: Recovery 判定（紧密耦合）
     recovery_rebound_pct: float = 10.0
     recovery_quantile_max: float = 0.50
     # 簇 4: 价格分位（弱耦合）
     low_quantile_threshold: float = 0.20
     high_quantile_threshold: float = 0.80
-
-
-@dataclass(frozen=True)
-class RegimePerAssetConfig:
-    """单资产 Regime 覆盖
-
-    来源: core/regime.py:69-85 ASSET_OVERRIDES dict
-    None = 无覆盖，fallback 到 RegimeConfig 默认值
-    """
-    trend_ma_spread_pct: float | None = None
-    crash_atr_pct_min: float | None = None
 
 
 @dataclass(frozen=True)
@@ -272,7 +264,6 @@ class TunableConfig:
     """所有可调参数的顶层容器"""
     language: LanguageConfig = field(default_factory=LanguageConfig)
     regime: RegimeConfig = field(default_factory=RegimeConfig)
-    regime_per_asset: dict[str, RegimePerAssetConfig] = field(default_factory=dict)
     verdict: VerdictConfig = field(default_factory=VerdictConfig)
     dreaming: DreamingTunableConfig = field(default_factory=DreamingTunableConfig)
     macro_buckets: MacroBucketConfig = field(default_factory=MacroBucketConfig)

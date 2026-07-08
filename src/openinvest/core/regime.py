@@ -18,9 +18,17 @@
 
 参数来源（Step 2 config 注入）:
 - 阈值从 core.config.load_config().regime 读取
-- Per-asset 覆盖从 core.config.load_config().regime_per_asset 读取
-- THRESHOLDS / ASSET_OVERRIDES 模块级 dict 保留向后兼容（从 config 构建）
 - sweep runner 用 set_config_override() 注入新参数，函数实时生效
+
+尺度无关化（2026-07-05 #113）：
+- crash 波动腿与趋势腿全部改为"相对自身波动"的比值，任意资产零配置自动适配：
+  · vol_leg:  atr_spike_ratio ≥ crash_atr_spike_ratio_min（当日 ATR% ÷ 自身 1 年中位）
+  · trend:    |MA spread%| ÷ atr_pct_median_1y ≥ trend_spread_atr_ratio
+- per-asset 配置表（ASSET_OVERRIDES / regime_per_asset）已删——旧手调值是
+  grid-search artifact（黄金 crash_atr_pct_min=3.5 在自身分布 p99 之上从不触发），
+  且在比值空间里三资产手调值本就收敛到同一量级（5/0.9≈5.6, 4/1.1≈3.6, 8/3≈2.7）。
+- 校准：R=3.6 在 NDQ.AX（手调最可信资产）上新旧一致率 93.4%；黄金 crash
+  新版命中 1973/1980/2006 史实崩盘窗（旧版波动腿 0 触发）。全量对照见 PR。
 """
 from __future__ import annotations
 
@@ -32,12 +40,12 @@ ALL_REGIMES = ("uptrend", "downtrend", "range_bound", "crash", "recovery", "unkn
 
 
 def _build_thresholds_from_config() -> Dict[str, float]:
-    """从 config 构建 THRESHOLDS dict（排除 per_asset 子键）。"""
+    """从 config 构建 THRESHOLDS dict。"""
     from openinvest.core.config import load_config
     cfg = load_config().regime
     return {
-        "trend_ma_spread_pct": cfg.trend_ma_spread_pct,
-        "crash_atr_pct_min": cfg.crash_atr_pct_min,
+        "trend_spread_atr_ratio": cfg.trend_spread_atr_ratio,
+        "crash_atr_spike_ratio_min": cfg.crash_atr_spike_ratio_min,
         "crash_drawdown_30d_pct": cfg.crash_drawdown_30d_pct,
         "crash_deep_drawdown_30d_pct": cfg.crash_deep_drawdown_30d_pct,
         "recovery_rebound_pct": cfg.recovery_rebound_pct,
@@ -47,67 +55,14 @@ def _build_thresholds_from_config() -> Dict[str, float]:
     }
 
 
-def _build_asset_overrides_from_config() -> Dict[str, Dict[str, float]]:
-    """从 config 构建 ASSET_OVERRIDES dict。"""
-    from openinvest.core.config import load_config
-    per_asset = load_config().regime_per_asset
-    result = {}
-    for symbol, pa_cfg in per_asset.items():
-        override = {}
-        if pa_cfg.trend_ma_spread_pct is not None:
-            override["trend_ma_spread_pct"] = pa_cfg.trend_ma_spread_pct
-        if pa_cfg.crash_atr_pct_min is not None:
-            override["crash_atr_pct_min"] = pa_cfg.crash_atr_pct_min
-        if override:
-            result[symbol] = override
-    return result
-
-
-# 向后兼容：旧代码 import THRESHOLDS / ASSET_OVERRIDES 仍可用
-# 但推荐用 get_thresholds() / get_asset_overrides() 实时读取（set_config_override 后生效）
+# 向后兼容：旧代码 import THRESHOLDS 仍可用（键已换尺度无关口径）
+# 推荐用 get_thresholds() 实时读取（set_config_override 后生效）
 THRESHOLDS: Dict[str, float] = _build_thresholds_from_config()
-ASSET_OVERRIDES: Dict[str, Dict[str, float]] = _build_asset_overrides_from_config()
 
 
 def get_thresholds() -> Dict[str, float]:
     """实时从 config 读取 regime 阈值（set_config_override 后立即生效）。"""
     return _build_thresholds_from_config()
-
-
-def get_asset_overrides() -> Dict[str, Dict[str, float]]:
-    """实时从 config 读取 per-asset 覆盖（set_config_override 后立即生效）。"""
-    return _build_asset_overrides_from_config()
-
-
-def _per_asset_thresholds(symbol: Optional[str]) -> Dict[str, float]:
-    """把默认阈值与该资产的 override 合并。
-
-    每次调用从 config 实时读取，set_config_override() 注入后立即生效。
-    没传 symbol 或 symbol 无 override → 完全用默认值。
-    传了 → 用 override 字段覆盖默认值。
-    """
-    from openinvest.core.config import load_config
-    cfg = load_config()
-    base = {
-        "trend_ma_spread_pct": cfg.regime.trend_ma_spread_pct,
-        "crash_atr_pct_min": cfg.regime.crash_atr_pct_min,
-        "crash_drawdown_30d_pct": cfg.regime.crash_drawdown_30d_pct,
-        "crash_deep_drawdown_30d_pct": cfg.regime.crash_deep_drawdown_30d_pct,
-        "recovery_rebound_pct": cfg.regime.recovery_rebound_pct,
-        "recovery_quantile_max": cfg.regime.recovery_quantile_max,
-        "low_quantile_threshold": cfg.regime.low_quantile_threshold,
-        "high_quantile_threshold": cfg.regime.high_quantile_threshold,
-    }
-    if not symbol:
-        return base
-    pa = cfg.regime_per_asset.get(symbol)
-    if pa is None:
-        return base
-    if pa.trend_ma_spread_pct is not None:
-        base["trend_ma_spread_pct"] = pa.trend_ma_spread_pct
-    if pa.crash_atr_pct_min is not None:
-        base["crash_atr_pct_min"] = pa.crash_atr_pct_min
-    return base
 
 
 def classify_regime(
@@ -119,8 +74,8 @@ def classify_regime(
     Args:
         metrics: utils.market_metrics.compute_metrics 返回的 dict
                  必需字段: ma20, ma120, atr_pct, price_quantile_2y
-        symbol: 资产 yfinance ticker（如 "GC=F"），传了则用 ASSET_OVERRIDES
-                 里该 symbol 的阈值覆盖默认；不传 = 用默认 THRESHOLDS。
+        symbol: 资产 yfinance ticker（如 "GC=F"）——仅用于 audit 回溯；
+                 阈值已尺度无关（#113），不再有 per-asset 覆盖。
 
     Returns:
         {
@@ -132,32 +87,35 @@ def classify_regime(
 
     判定优先级:
         1. crash      — 双触发器（满足任一即 crash，最高优先级）：
-                        · 路径一急跌：atr_pct ≥ crash_atr_pct_min **且** return_30d ≤ -crash_drawdown_30d_pct%
+                        · 路径一急跌：atr_spike_ratio ≥ crash_atr_spike_ratio_min（波动较自身
+                          常态翻倍）**且** return_30d ≤ -crash_drawdown_30d_pct%
                         · 路径二深跌：return_30d ≤ -crash_deep_drawdown_30d_pct%（不看波动）
         2. recovery   — crash 未触发 + 从近 30 日低点反弹 ≥ recovery_rebound_pct%
                         + 价格仍在低位（分位 < recovery_quantile_max）
-        3. uptrend    — (ma20 - ma120) / ma120 ≥ +trend_ma_spread_pct%
-        4. downtrend  — (ma20 - ma120) / ma120 ≤ -trend_ma_spread_pct%
+        3. uptrend    — MA spread% ÷ atr_pct_median_1y ≥ +trend_spread_atr_ratio
+        4. downtrend  — 同上 ≤ -trend_spread_atr_ratio（趋势必须盖过自身噪声地板）
         5. range_bound — 默认（MA 纠缠 + 波动正常）
         6. unknown    — 缺关键数据
     """
-    thresholds = _per_asset_thresholds(symbol)
+    thresholds = get_thresholds()
     ma20 = metrics.get("ma20")
     ma120 = metrics.get("ma120")
     atr_pct = metrics.get("atr_pct")
+    atr_spike_ratio = metrics.get("atr_spike_ratio")
+    atr_med = metrics.get("atr_pct_median_1y")
     quantile = metrics.get("price_quantile_2y")
     return_30d = metrics.get("return_30d")
     rebound = metrics.get("rebound_off_30d_low")
 
-    # 透明 audit：把判断用的输入回写
-    # atr_spike_ratio 不参与分类，但回写进 inputs_used → format_regime_brief 的
-    # INPUTS 行 → coordinator transcript，让 atr_defense_from_text 两路径同源
+    # 透明 audit：把判断用的输入回写（atr_spike_ratio 自 #113 起是 crash 波动腿本体，
+    # 同时供 format_regime_brief INPUTS 行 → coordinator transcript 两路径同源）
     inputs_used = {
         # 未归一化绝对 MA → format_regime_brief INPUTS 行 → 记忆穿越指纹(ADR-022)。其余分位/spread 已相对,唯独这俩漏绝对量。
         "ma20": ma20,
         "ma120": ma120,
         "atr_pct": atr_pct,
-        "atr_spike_ratio": metrics.get("atr_spike_ratio"),
+        "atr_spike_ratio": atr_spike_ratio,
+        "atr_pct_median_1y": atr_med,
         "price_quantile_2y": quantile,
         "return_30d": return_30d,
         "rebound_off_30d_low": rebound,
@@ -176,7 +134,8 @@ def classify_regime(
     #    路径一（急跌）：波动腿 AND 跌幅腿（高 ATR + 30 日跌 ≥ 20%）
     #    路径二（深跌）：return_30d ≤ -30%，**不看波动**（慢阴跌也算 crash）
     #    跌幅相关腿都需要 return_30d；数据不足（None）时该腿视为不满足（保守）。
-    vol_leg = atr_pct >= thresholds["crash_atr_pct_min"]
+    # 波动腿尺度无关：spike ratio 缺失（历史 <120d）时视为不满足（保守，与 return None 同款）
+    vol_leg = atr_spike_ratio is not None and atr_spike_ratio >= thresholds["crash_atr_spike_ratio_min"]
     drawdown_threshold = thresholds["crash_drawdown_30d_pct"] / 100.0
     deep_threshold = thresholds["crash_deep_drawdown_30d_pct"] / 100.0
     has_return = return_30d is not None
@@ -197,7 +156,8 @@ def classify_regime(
         return {
             "regime": "crash",
             "reason": (
-                f"急跌：ATR {atr_pct:.2f}% ≥ {thresholds['crash_atr_pct_min']}% 高波动 "
+                f"急跌：波动突变比 {atr_spike_ratio:.2f}× ≥ "
+                f"{thresholds['crash_atr_spike_ratio_min']}×（较自身常态）"
                 f"且 30 日跌 {return_30d * 100:.1f}% ≤ -{thresholds['crash_drawdown_30d_pct']:.0f}%"
             ),
             "inputs_used": inputs_used,
@@ -234,22 +194,35 @@ def classify_regime(
         }
     ma_spread_pct = (ma20 - ma120) / ma120 * 100
 
-    if ma_spread_pct >= thresholds["trend_ma_spread_pct"]:
+    # 趋势腿尺度无关：spread 按自身典型日波归一。归一化因子缺失时 unknown（保守）。
+    # 边界：Close-only 帧的 ATR 序列来自 diff（首行 NaN），恰好 120 行时 ma120 可算
+    # 而中位 ATR% 差 1 个样本 → unknown；多一天数据即自愈，可接受。
+    if atr_med is None or atr_med <= 0:
+        return {
+            "regime": "unknown",
+            "reason": "atr_pct_median_1y 缺失/非正，无法归一化趋势强度",
+            "inputs_used": inputs_used,
+            "thresholds_used": thresholds,
+        }
+    spread_norm = ma_spread_pct / atr_med
+    inputs_used["trend_spread_norm"] = round(spread_norm, 2)
+
+    if spread_norm >= thresholds["trend_spread_atr_ratio"]:
         return {
             "regime": "uptrend",
             "reason": (
-                f"MA20 高于 MA120 {ma_spread_pct:+.2f}% "
-                f"(≥ {thresholds['trend_ma_spread_pct']}%)"
+                f"MA20 高于 MA120 {ma_spread_pct:+.2f}%，折合 {spread_norm:.1f} 个典型日波 "
+                f"(≥ {thresholds['trend_spread_atr_ratio']}×)"
             ),
             "inputs_used": inputs_used,
             "thresholds_used": thresholds,
         }
-    if ma_spread_pct <= -thresholds["trend_ma_spread_pct"]:
+    if spread_norm <= -thresholds["trend_spread_atr_ratio"]:
         return {
             "regime": "downtrend",
             "reason": (
-                f"MA20 低于 MA120 {ma_spread_pct:+.2f}% "
-                f"(≤ -{thresholds['trend_ma_spread_pct']}%)"
+                f"MA20 低于 MA120 {ma_spread_pct:+.2f}%，折合 {spread_norm:.1f} 个典型日波 "
+                f"(≤ -{thresholds['trend_spread_atr_ratio']}×)"
             ),
             "inputs_used": inputs_used,
             "thresholds_used": thresholds,
@@ -258,7 +231,10 @@ def classify_regime(
     # 5. 默认震荡
     return {
         "regime": "range_bound",
-        "reason": f"MA 纠缠 ({ma_spread_pct:+.2f}%) 且 ATR {atr_pct:.2f}% 正常，无明确趋势",
+        "reason": (
+            f"趋势强度不足：MA spread {ma_spread_pct:+.2f}% 折合 {spread_norm:+.1f} 个典型日波"
+            f"（|{spread_norm:.1f}| < {thresholds['trend_spread_atr_ratio']}×），波动正常"
+        ),
         "inputs_used": inputs_used,
         "thresholds_used": thresholds,
     }
@@ -340,7 +316,7 @@ def format_regime_brief(
       REGIME: range_bound
       REASON: MA 纠缠 (+0.45%) 且 ATR 1.20% 正常，无明确趋势
       INPUTS: ma20=4625.30, ma120=4604.50, atr_pct=1.20, price_quantile_2y=0.05
-      THRESHOLDS: trend_ma_spread_pct=5.00 (per-asset GC=F), crash_atr_pct_min=3.50
+      THRESHOLDS: trend_spread_atr_ratio=3.60, crash_atr_spike_ratio_min=2.00
       STRATEGY_HINT: 震荡市底部 — 当前 2 年分位 5% (≤ 20%)，逢低分批是首选...
       ```
 
@@ -361,10 +337,7 @@ def format_regime_brief(
         for k, v in inputs.items()
     )
 
-    # 标记是否用了 per-asset 覆盖，让 LLM 看到"这个阈值不是默认值"
-    from openinvest.core.config import load_config
-    has_override = bool(symbol and load_config().regime_per_asset.get(symbol))
-    threshold_label = f" (per-asset {symbol})" if has_override else ""
+    # #113：阈值已尺度无关（比值口径），无 per-asset 覆盖
     threshold_str = ", ".join(
         f"{k}={v:.2f}" for k, v in thresholds_used.items()
     )
@@ -373,7 +346,7 @@ def format_regime_brief(
         f"REGIME: {regime}\n"
         f"REASON: {reason}\n"
         f"INPUTS: {inputs_str}\n"
-        f"THRESHOLDS{threshold_label}: {threshold_str}\n"
+        f"THRESHOLDS: {threshold_str}\n"
         f"STRATEGY_HINT: {hint}"
     )
 
@@ -382,7 +355,6 @@ __all__ = [
     "RegimeType",
     "ALL_REGIMES",
     "THRESHOLDS",
-    "ASSET_OVERRIDES",
     "classify_regime",
     "regime_strategy_hint",
     "format_regime_brief",

@@ -5,7 +5,6 @@ tags: [param-tuning, regime, committee, backtest, calibration]
 intent: 决策参数
 schema_source:
   - src/openinvest/core/regime.py:THRESHOLDS
-  - src/openinvest/core/regime.py:ASSET_OVERRIDES
   - src/openinvest/core/committee/cio_parse.py:THRESHOLDS
   - src/openinvest/core/backtest_reward.py:compute_strategy_reward
   - src/openinvest/core/backtest_reward.py:verdict_oracle_accuracy
@@ -14,10 +13,14 @@ documents:
   config_keys: []
   symbols:
     - THRESHOLDS
-    - ASSET_OVERRIDES
     - compute_strategy_reward
     - verdict_oracle_accuracy
 ---
+
+> **2026-07-05（#113）**：本章分析的 per-asset 阈值体系已退役——`trend_ma_spread_pct` /
+> `crash_atr_pct_min` / `ASSET_OVERRIDES` / `regime.per_asset` 全部删除，替换为尺度无关
+> 比值阈值（`trend_spread_atr_ratio=3.6` / `crash_atr_spike_ratio_min=2.0`，任意资产零配置
+> 自动适配）。下文的手调值考古与"不可被有原则派生"结论是本次退役的依据，保留作历史记录。
 
 # openInvest 参数调优可行性诊断
 

@@ -1,4 +1,8 @@
-"""独立快崩防御阈值调参脚本 — 纯确定性，零 LLM 调用，可重跑。
+"""⚠️ 已废弃（2026-07-05 #113）：本脚本 grid-search 的对象（per-asset 绝对阈值
+regime.per_asset.crash_atr_pct_min 等）已随尺度无关化删除，跑出的推荐值无处可填。
+保留作方法论参考；防御阈值如需再调，对象是 trend_spread_atr_ratio / crash_atr_spike_ratio_min。
+
+独立快崩防御阈值调参脚本 — 纯确定性，零 LLM 调用，可重跑。
 
 目标函数：捕获历史快崩（hard constraint）+ 最小化误报（ON 天数占比）。
 信号质量：ON vs OFF 后 30/60 日前向收益分布。
