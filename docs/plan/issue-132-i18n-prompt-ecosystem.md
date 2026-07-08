@@ -71,6 +71,63 @@
   - 配置说明、技能说明、README 至少覆盖 locale 设置与回退行为。
   - prompt preview 或调试接口能让开发者确认当前实际使用的是哪种 locale 资源。
 
+## Implementation Note
+
+基于实际复现结果（`run_committee AAPL` 已跑通，结构化字段英文但 `cio_memo` / `PERSONAL_NOTE`
+/ `next_step` 大段中文），v1 可以先走一个**两层拆分、低成本落地**的路径，而不是立即全量翻译
+所有角色 prompt：
+
+### 1. 宿主 Agent 回复语言
+
+- 不在 runtime 内做语言检测，交给宿主 agent（Claude/Codex/Cursor）决定。
+- 在 `skills/invest/SKILL.md` 增加纪律：
+  `Reply in the user's current language unless they explicitly ask to switch languages.`
+- 这一步零代码，优先解决宿主 agent 对用户的最终回复语言体感问题。
+- 对 issue 正文提到的“#83 类现象”只作为待验证假设，不在实现文案里写成既定根因。
+
+### 2. 委员会产物语言
+
+- 不翻译整套角色 prompt 正文，只在输出约束处注入语言指令，例如：
+  `Produce your analysis/memo in {lang}.`
+- 同时强制写死解析契约：
+  `Keep all required section headers and enum values exactly as specified.`
+- 结构化标记与枚举值继续固定英文，不随语言切换：
+  - `VERDICT`
+  - `CONFIDENCE`
+  - `DOMINANT_VIEW`
+  - `SIGNAL`
+  - `REGIME`
+  - 其他被 `parse_cio_memo` / decision ledger / verdict review 依赖的头部
+- 这样可以让 LLM 在读中文 prompt 的同时产出英文 memo，本体 prompt 暂时一个字都不用翻。
+
+### 3. 语言配置入口
+
+- 加 `INVEST_LANG`，纳入 config 白名单，并支持运行时覆盖。
+- 建议优先级从一开始就定为：
+  - request/runtime override
+  - stored config / onboarding 默认值
+  - env (`INVEST_LANG`)
+  - fallback 默认 `zh`
+- onboarding 时按用户输入语言写默认值，但后续可随时改，不做“一次定终身”的硬绑定。
+
+### 4. 先守解析契约，再改 prompt
+
+- 在动 prompt 前先补英文模式契约测试：
+  - `tests/test_committee_contract.py` 增加 `en` 模式契约测试
+  - `parse_cio_memo` 增加“正文英文、结构头英文固定”的最小解析测试
+- 另注意 config 白名单新增 key 后，需要同步更新 `tests/test_web_api.py` 的精确集合快照测试。
+
+### 5. 这个缩小版方案的边界
+
+- 目标是先解决：
+  - 宿主 agent 回复语言漂移
+  - `cio_memo` / transcript 中英混杂
+- 暂不承诺：
+  - 全量 prompt 双语翻译
+  - 所有角色说明文字 locale 化
+  - 多语言新闻抓取策略的完整本地化
+- 如果这条路线验证通过，再扩展到更完整的 prompt i18n 与 ecosystem i18n。
+
 ## Assumptions
 
 - 计划文件使用中文撰写，但实现目标是中英双语运行。
