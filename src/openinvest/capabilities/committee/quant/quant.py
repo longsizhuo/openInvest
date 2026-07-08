@@ -11,6 +11,11 @@ REGIME 上下文由 core.regime.format_regime_brief 在外层注入到 user mess
 """
 from typing import Any, Dict
 
+from openinvest.capabilities.committee.i18n import (
+    build_field_value_language_directive,
+    build_output_language_directive,
+    localize_prompt_output_requirements,
+)
 from openinvest.capabilities.loader import load_skill
 
 
@@ -21,12 +26,16 @@ def build_quant_prompt(asset: Dict[str, Any], round_label: str = "opening") -> s
     round_label="rebuttal" → SKILL_rebuttal.md (Round 2 cross-challenge)
     """
     asset_name = asset.get("display_name", asset.get("symbol"))
-    return load_skill(
+    prompt = load_skill(
         "quant",
         round_label=round_label,
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
     )
+    prompt = localize_prompt_output_requirements(prompt)
+    directive = build_output_language_directive(artifact="analysis")
+    field_value_directive = build_field_value_language_directive()
+    return f"{directive}\n{field_value_directive}\n\n{prompt}"
 
 
 __all__ = ["build_quant_prompt"]

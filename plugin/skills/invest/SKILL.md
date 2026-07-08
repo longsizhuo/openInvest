@@ -17,6 +17,8 @@ Web GUI 已退役（2026-07）——所有能力经 CLI 子命令 / MCP 工具�
 openInvest 多资产 AI 投资委员会。**这个 skill 不是 Claude 专属**——任何能跑
 shell 命令的 agent 都能用，看下面 "选路径"。
 
+Reply in the language the user is currently speaking unless they explicitly ask to switch languages.
+
 ## 选路径
 
 | 你是谁 | 走哪条路 | 跑什么 | 凭据 |

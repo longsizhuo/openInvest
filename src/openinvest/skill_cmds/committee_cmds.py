@@ -101,9 +101,13 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", args.symbol)
     transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
     if transcript_path.exists() and not args.force:
+        from openinvest.capabilities.committee.i18n import bilingual
         _print_json({
             "status": "cached",
-            "reason": "今天已经跑过这个资产了；用 --force 重跑",
+            "reason": bilingual(
+                "今天已经跑过这个资产了；用 --force 重跑",
+                "This asset already ran today; pass --force to rerun.",
+            ),
             "transcript_path": str(transcript_path),
             "transcript_md": transcript_path.read_text(encoding="utf-8"),
         })
@@ -131,21 +135,37 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     verdict = asset_result.get("verdict", {})
     report = asset_result.get("report")
     cio_memo = report.cio_memo if report is not None else ""
+    from openinvest.capabilities.committee.i18n import get_invest_lang
+    lang = get_invest_lang()
 
     # GUI/NapCat 已退役（2026-07-05）——登记入口统一为 CLI 子命令 / MCP 工具
-    cio_render_hint = (
-        "⚠️ `cio_memo` 字段是 Markdown 字符串（含 `## verdict` `**confidence**` 等格式），"
-        "**直接当 Markdown 渲染给用户看**，不要把整个 JSON 原样打印。"
-    )
-    next_step = (
-        f"{cio_render_hint}\n\n"
-        "已生成 verdict。如果用户同意，按三步走：\n"
-        "1) 用户打开自己的证券/银行 App，按 verdict 的 alloc_cny 金额 + symbol 真实下单"
-        "（openInvest 不接交易所，只做决策）\n"
-        "2) 回来登记这笔：CLI `buy`/`sell` 子命令或 MCP `buy`/`sell` 工具\n"
-        "3) 用 `record_execution` 关联决议（拒绝执行也记，附原因）\n\n"
-        "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
-    )
+    if lang == "en":
+        cio_render_hint = (
+            "⚠️ The `cio_memo` field is a Markdown string. Render it directly as Markdown instead of printing the full JSON blob."
+        )
+        next_step = (
+            f"{cio_render_hint}\n\n"
+            "A verdict has been generated. If the user agrees, follow these three steps:\n"
+            "1) The user opens their broker or banking app and places the real order using the verdict's alloc_cny amount and symbol "
+            "(openInvest does not connect to exchanges; it only produces decisions)\n"
+            "2) Come back and record the trade with the CLI `buy`/`sell` subcommands or the MCP `buy`/`sell` tools\n"
+            "3) Use `record_execution` to link the decision to the execution outcome (record rejections too, with a reason)\n\n"
+            "**Do not write to memory/ directly.** All state changes must go through audited entry points."
+        )
+    else:
+        cio_render_hint = (
+            "⚠️ `cio_memo` 字段是 Markdown 字符串（含 `## verdict` `**confidence**` 等格式），"
+            "**直接当 Markdown 渲染给用户看**，不要把整个 JSON 原样打印。"
+        )
+        next_step = (
+            f"{cio_render_hint}\n\n"
+            "已生成 verdict。如果用户同意，按三步走：\n"
+            "1) 用户打开自己的证券/银行 App，按 verdict 的 alloc_cny 金额 + symbol 真实下单"
+            "（openInvest 不接交易所，只做决策）\n"
+            "2) 回来登记这笔：CLI `buy`/`sell` 子命令或 MCP `buy`/`sell` 工具\n"
+            "3) 用 `record_execution` 关联决议（拒绝执行也记，附原因）\n\n"
+            "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
+        )
 
     _print_json({
         "status": "ok",

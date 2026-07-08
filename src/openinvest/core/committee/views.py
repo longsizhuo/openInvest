@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from openinvest.capabilities.committee.macro_strategist import PROMPT_MACRO_STRATEGIST
+from openinvest.capabilities.committee.macro_strategist import build_macro_strategist_prompt
 from openinvest.core.committee.agent_io import _ask, _create_agent
 
 
@@ -24,12 +24,19 @@ def run_macro_view(macro_data_brief: str, *, event_brief: str = "") -> str:
                  含 supersedes 标记）。空字符串 = 不注入，行为完全等价于现状。
                  只有 Macro 看到（事件 RAG 严格隔离原则）。
     """
-    agent = _create_agent(PROMPT_MACRO_STRATEGIST, role="macro", round_label="macro")
+    agent = _create_agent(build_macro_strategist_prompt(), role="macro", round_label="macro")
+    from openinvest.capabilities.committee.i18n import bilingual
     event_section = (
-        f"\n\n## 当前事件上下文（按时间排序，最新在前；可能含 supersedes 标记）\n{event_brief}\n"
+        bilingual(
+            f"\n\n## 当前事件上下文（按时间排序，最新在前；可能含 supersedes 标记）\n{event_brief}\n",
+            f"\n\n## Current event context (sorted by time, latest first; may include supersedes markers)\n{event_brief}\n",
+        )
         if event_brief else ""
     )
-    return _ask(agent, f"# 当前宏观数据参考:\n{macro_data_brief}{event_section}\n\n请按格式输出 Macro 评估。")
+    return _ask(agent, bilingual(
+        f"# 当前宏观数据参考:\n{macro_data_brief}{event_section}\n\n请按格式输出 Macro 评估。",
+        f"# Current macro data reference:\n{macro_data_brief}{event_section}\n\nPlease output the Macro assessment in the required format.",
+    ))
 
 
 def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
@@ -42,26 +49,47 @@ def run_wealth_context_view(wealth_context: Optional[Dict[str, Any]],
     + portfolio cash 后调本函数. 本函数留 explicit 接口给测试 / backtest 注入用.
     """
     from openinvest.capabilities.committee.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
+    from openinvest.capabilities.committee.i18n import (
+        bilingual,
+        build_field_value_language_directive,
+        build_output_language_directive,
+        localize_prompt_output_requirements,
+    )
 
     if not wealth_context:
-        return (
+        return bilingual(
             f"SOLVENCY_BUFFER_LEVEL: unknown\n"
             f"ACCOUNT_PURPOSE: N/A\n"
             f"PORTFOLIO_CASH_CNY: {portfolio_cash_cny:.2f}\n"
             f"INVESTABLE_CASH_CNY: {portfolio_cash_cny:.2f}\n"
             f"BACKUP_BUFFER_CNY: 0\n"
             f"EXPLANATION_TO_RISK: user.md 没填 wealth_context，按 portfolio cash 判断流动性 + 风险。\n"
-            f"EXPLANATION_TO_CIO: 加仓决策受 portfolio cash 限制。"
+            f"EXPLANATION_TO_CIO: 加仓决策受 portfolio cash 限制。",
+            f"SOLVENCY_BUFFER_LEVEL: unknown\n"
+            f"ACCOUNT_PURPOSE: N/A\n"
+            f"PORTFOLIO_CASH_CNY: {portfolio_cash_cny:.2f}\n"
+            f"INVESTABLE_CASH_CNY: {portfolio_cash_cny:.2f}\n"
+            f"BACKUP_BUFFER_CNY: 0\n"
+            f"EXPLANATION_TO_RISK: user.md has no wealth_context, so liquidity and risk are judged from portfolio cash only.\n"
+            f"EXPLANATION_TO_CIO: Any add-to-position decision remains constrained by current portfolio cash.",
         )
 
-    agent = _create_agent(PROMPT_WEALTH_CONTEXT_OFFICER,
-                          role="wealth_context", round_label="wealth_context")
+    wealth_prompt = localize_prompt_output_requirements(PROMPT_WEALTH_CONTEXT_OFFICER)
+    wealth_prompt = (
+        f"{build_output_language_directive(artifact='analysis')}\n"
+        f"{build_field_value_language_directive()}\n\n{wealth_prompt}"
+    )
+    agent = _create_agent(wealth_prompt, role="wealth_context", round_label="wealth_context")
     import json as _json
-    ctx_brief = (
+    ctx_brief = bilingual(
         f"# 用户 wealth_context（user.md frontmatter）：\n"
         f"```json\n{_json.dumps(wealth_context, ensure_ascii=False, indent=2)}\n```\n\n"
         f"# Portfolio cash 现状：¥{portfolio_cash_cny:.2f} CNY\n\n"
-        f"请按格式输出真实流动性评估。"
+        f"请按格式输出真实流动性评估。",
+        f"# User wealth_context (from user.md frontmatter):\n"
+        f"```json\n{_json.dumps(wealth_context, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"# Current portfolio cash: ¥{portfolio_cash_cny:.2f} CNY\n\n"
+        f"Please output the true-liquidity assessment in the required format.",
     )
     return _ask(agent, ctx_brief)
 

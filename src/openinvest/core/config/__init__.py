@@ -28,6 +28,7 @@ from .tunable import (
     DCAConfig,
     DreamingTunableConfig,
     EventConfig,
+    LanguageConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
     RegimeConfig,
@@ -54,6 +55,7 @@ __all__ = [
     "clear_persisted_override",
     # Tunable dataclasses
     "TunableConfig",
+    "LanguageConfig",
     "RegimeConfig",
     "RegimePerAssetConfig",
     "VerdictConfig",

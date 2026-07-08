@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class LanguageConfig:
+    """语言偏好配置（v1）"""
+    invest_lang: str = "zh"
+
+
+@dataclass(frozen=True)
 class RegimeConfig:
     """Regime 分类阈值 — 簇 1-4
 
@@ -264,6 +270,7 @@ class StalenessConfig:
 @dataclass(frozen=True)
 class TunableConfig:
     """所有可调参数的顶层容器"""
+    language: LanguageConfig = field(default_factory=LanguageConfig)
     regime: RegimeConfig = field(default_factory=RegimeConfig)
     regime_per_asset: dict[str, RegimePerAssetConfig] = field(default_factory=dict)
     verdict: VerdictConfig = field(default_factory=VerdictConfig)
