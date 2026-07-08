@@ -343,7 +343,9 @@ _PERSIST_STATE_NAME = "config_overrides"
 API_SETTABLE: Dict[str, Dict[str, Any]] = {
     "language.invest_lang": {
         "type": "enum",
-        "choices": ["zh", "en"],
+        # zh-CN 是 zh 的别名（get_invest_lang() 会归一化），两条配置路径（env /
+        # 持久化 API）必须接受同一组值，否则同一别名一条路径能用一条报错。
+        "choices": ["zh", "en", "zh-CN"],
         "label": "委员会产物语言",
         "help": "控制 committee memo / transcript 的自然语言输出；结构化 section headers 与枚举值始终保持英文",
     },

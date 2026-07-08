@@ -47,7 +47,15 @@ def test_cmd_run_committee_english_next_step(monkeypatch, capfd, tmp_path):
     out = json.loads(capfd.readouterr().out)
 
     assert out["status"] == "ok"
-    assert "The user opens their broker or banking app" in out["next_step"]
-    assert "Thhe user" not in out["next_step"]
+    next_step = out["next_step"]
+    # 三步流程全覆盖，不只测第一句——之前只断言步骤 1，步骤 2/3、render hint、
+    # memory 警告改错了也不会被这个测试抓到。
+    assert "The `cio_memo` field is a Markdown string" in next_step
+    assert "1) The user opens their broker or banking app" in next_step
+    assert "2) Come back and record the trade with the CLI `buy`/`sell` subcommands" in next_step
+    assert "3) Use `record_execution` to link the decision to the execution outcome" in next_step
+    assert "Do not write to memory/ directly" in next_step
+    assert "已生成 verdict" not in next_step
+    assert "直接写 memory/" not in next_step
 
     reset_config()

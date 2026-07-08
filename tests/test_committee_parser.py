@@ -312,6 +312,32 @@ def test_committee_prompts_default_to_chinese_mode():
     assert "请使用中文输出你的分析备忘。" in build_cio_prompt(asset)
 
 
+def test_rebuttal_char_limit_survives_language_localization():
+    """localize_prompt_output_requirements 只应删掉「必须中文回复」这个短语，
+    不应连累同一行捆绑的字数/格式约束（quant_rebuttal.md / risk_officer_rebuttal.md）。
+    这是回归测试：早期实现按整行删除，导致 Round 2 rebuttal 静默丢失 ≤150/≤120 字上限。"""
+    from openinvest.capabilities.committee.quant import build_quant_prompt
+    from openinvest.capabilities.committee.risk_officer import build_risk_officer_prompt
+
+    asset = {"symbol": "GC=F", "display_name": "黄金"}
+    quant_rebuttal = build_quant_prompt(asset, round_label="rebuttal")
+    risk_rebuttal = build_risk_officer_prompt(asset, round_label="rebuttal")
+
+    assert "必须中文回复" not in quant_rebuttal
+    assert "严格按下列格式" in quant_rebuttal
+    assert "≤150 字" in quant_rebuttal
+
+    assert "必须中文回复" not in risk_rebuttal
+    assert "严格按下列格式" in risk_rebuttal
+    assert "≤120 字" in risk_rebuttal
+
+    from openinvest.capabilities.committee.i18n import localize_prompt_output_requirements
+    from openinvest.capabilities.committee.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
+    wealth_prompt = localize_prompt_output_requirements(PROMPT_WEALTH_CONTEXT_OFFICER)
+    assert "必须中文回复" not in wealth_prompt
+    assert "≤200 字总长度" in wealth_prompt
+
+
 # ---------- Sanity check 5: TRIM 必须给低于现价的买回点，否则降级 HOLD ----------
 
 def _trim_reentry_text(reentry_price="950", reason="bearish") -> str:

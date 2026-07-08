@@ -101,9 +101,13 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", args.symbol)
     transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
     if transcript_path.exists() and not args.force:
+        from openinvest.capabilities.committee.i18n import bilingual
         _print_json({
             "status": "cached",
-            "reason": "今天已经跑过这个资产了；用 --force 重跑",
+            "reason": bilingual(
+                "今天已经跑过这个资产了；用 --force 重跑",
+                "This asset already ran today; pass --force to rerun.",
+            ),
             "transcript_path": str(transcript_path),
             "transcript_md": transcript_path.read_text(encoding="utf-8"),
         })

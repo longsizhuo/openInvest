@@ -421,7 +421,7 @@ class TestApiConfig:
         view = {it["key"]: it for it in effective_api_config()}
         assert set(view) == set(API_SETTABLE)
         assert view["language.invest_lang"]["value"] == "zh"
-        assert view["language.invest_lang"]["choices"] == ["zh", "en"]
+        assert view["language.invest_lang"]["choices"] == ["zh", "en", "zh-CN"]
         assert view["verdict.concentration_lens_enabled"]["value"] is False  # ADR-020: default OFF
         assert view["verdict.concentration_lens_enabled"]["overridden"] is False
         assert view["verdict.risk_profile"]["choices"] == ["steady", "aggressive"]
@@ -455,6 +455,12 @@ class TestApiConfig:
         assert set_persisted_override("language.invest_lang", "en").language.invest_lang == "en"
         with pytest.raises(ValueError):
             set_persisted_override("language.invest_lang", "fr")
+
+    def test_language_zh_cn_alias_accepted_by_persisted_config(self):
+        """zh-CN 在 env 路径（get_invest_lang）和持久化 API 路径必须行为一致。"""
+        from openinvest.capabilities.committee.i18n import get_invest_lang
+        set_persisted_override("language.invest_lang", "zh-CN")
+        assert get_invest_lang() == "zh"
 
     def test_bad_bool_rejected(self):
         with pytest.raises(ValueError):

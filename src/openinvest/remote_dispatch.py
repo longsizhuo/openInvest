@@ -279,9 +279,13 @@ def _h_run_committee(args: argparse.Namespace) -> None:
             timeout=15, ok_404=True,
         )
         if r.status_code == 200:
+            from openinvest.capabilities.committee.i18n import bilingual
             _print_json({
                 "status": "cached",
-                "reason": "今天已经跑过这个资产了；用 --force 重跑",
+                "reason": bilingual(
+                    "今天已经跑过这个资产了；用 --force 重跑",
+                    "This asset already ran today; pass --force to rerun.",
+                ),
                 "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
                 "transcript_md": r.json().get("content", ""),
             })
@@ -341,10 +345,12 @@ def _h_run_committee(args: argparse.Namespace) -> None:
     # 用 hub 实际跑委员会时的语言（result.language），而不是本机的 get_invest_lang()——
     # remote hub 模式下 cio_memo/verdict 是 hub 生成的，语言由 hub 自己的 INVEST_LANG 决定，
     # 跟本机配置可能不一致；next_step 提示必须跟着 memo 实际语言走，否则同一响应里两种语言。
+    # hub 没回传 language 字段 = hub 还没升级到这个 i18n 版本，那种旧 hub 固定只输出
+    # 中文 cio_memo，所以 fallback 到 "zh" 而不是本机配置——本机配置只描述本机意图，
+    # 不代表旧 hub 真的能生成英文。
     hub_lang = (final.get("result") or {}).get("language")
     if hub_lang not in ("zh", "en"):
-        from openinvest.capabilities.committee.i18n import get_invest_lang
-        hub_lang = get_invest_lang()
+        hub_lang = "zh"
     if hub_lang == "en":
         next_step = (
             "⚠️ The `cio_memo` field is a Markdown string. Render it directly as Markdown instead of printing the full JSON blob.\n\n"
