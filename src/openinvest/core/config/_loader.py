@@ -17,6 +17,7 @@ from .tunable import (
     DCAConfig,
     DreamingTunableConfig,
     EventConfig,
+    LanguageConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
     RegimeConfig,
@@ -76,8 +77,8 @@ def _read_env_overrides() -> dict[str, Any]:
 
     # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
     _KNOWN_SECTIONS = sorted(
-        ["regime_per_asset", "oracle_accuracy", "macro_buckets", "regime", "verdict",
-         "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event", "staleness"],
+        ["regime_per_asset", "oracle_accuracy", "macro_buckets", "staleness", "language",
+         "regime", "verdict", "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event"],
         key=len,
         reverse=True,
     )
@@ -98,6 +99,8 @@ def _read_env_overrides() -> dict[str, Any]:
         # 新增 staleness 映射
         "INVEST_PRICE_STALE_DAYS": "staleness.price_stale_days",
         "INVEST_HARD_ABORT_STALE_DAYS": "staleness.hard_abort_stale_days",
+        # 委员会产物语言（v1：zh/en）
+        "INVEST_LANG": "language.invest_lang",
     }
 
     for key, val in os.environ.items():
@@ -172,6 +175,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     per_asset = _build_regime_per_asset(per_asset_raw) if per_asset_raw else {}
 
     # 构建各子 config
+    language = LanguageConfig(**{k: v for k, v in data.get("language", {}).items() if k in {f.name for f in fields(LanguageConfig)}})
     regime = RegimeConfig(**{k: v for k, v in regime_data.items() if k in {f.name for f in fields(RegimeConfig)}})
     verdict = VerdictConfig(**{k: v for k, v in data.get("verdict", {}).items() if k in {f.name for f in fields(VerdictConfig)}})
 
@@ -206,6 +210,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     staleness = StalenessConfig(**{k: v for k, v in data.get("staleness", {}).items() if k in {f.name for f in fields(StalenessConfig)}})
 
     return TunableConfig(
+        language=language,
         regime=regime,
         regime_per_asset=per_asset,
         verdict=verdict,
@@ -257,7 +262,7 @@ def load_config(
     # 2. YAML（默认 defaults.yaml，可被 custom 覆盖）
     effective_yaml = yaml_path if yaml_path is not None else _DEFAULTS_YAML
     if effective_yaml.exists():
-        yaml_data = yaml.safe_load(effective_yaml.read_text()) or {}
+        yaml_data = yaml.safe_load(effective_yaml.read_text(encoding="utf-8")) or {}
         base = _deep_merge(base, yaml_data)
 
     # 3. CLI overrides（含持久 override）
@@ -336,6 +341,12 @@ _PERSIST_STATE_NAME = "config_overrides"
 
 # 白名单：dotted key → 元信息。只放"用户安全"的行为开关（GUI/agent 都经 /api/config 改）。
 API_SETTABLE: Dict[str, Dict[str, Any]] = {
+    "language.invest_lang": {
+        "type": "enum",
+        "choices": ["zh", "en"],
+        "label": "委员会产物语言",
+        "help": "控制 committee memo / transcript 的自然语言输出；结构化 section headers 与枚举值始终保持英文",
+    },
     "verdict.concentration_lens_enabled": {
         "type": "bool",
         "label": "集中度 lens",
