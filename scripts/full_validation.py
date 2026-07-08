@@ -48,7 +48,7 @@
 中性化无法还原的用户上下文（session override，等价 backtest 的中性持仓）:
   • portfolio_summary_override = 中性占位（历史日真实持仓无法还原；也避免
     _build_default_portfolio_summary 拉今天的实时金价 → 未来泄漏 + 非确定）。
-  • wealth_view_override = ""、event_brief_override = ""（不注入今天的财富/事件）。
+  • event_brief_override = ""（不注入今天的事件）。
 
 ────────────────────────────────────────────────────────────────────────────
 跑法
@@ -273,7 +273,6 @@ def run_committee_at_date(symbol: str, D: str) -> Dict[str, Any]:
             symbols=[symbol],
             max_debate_rounds=MAX_DEBATE_ROUNDS,
             event_brief_override="",  # 不注入今天的事件
-            wealth_view_override="",  # 不注入今天的财富上下文
             portfolio_summary_override=NEUTRAL_PORTFOLIO_SUMMARY,
             max_workers=1,  # 单资产串行，确定性，无 ThreadPool 嵌套
             on_asset_error="raise",  # 单资产失败 → 抛 → 上层重试逻辑接住

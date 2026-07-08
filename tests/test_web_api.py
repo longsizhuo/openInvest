@@ -416,7 +416,6 @@ def test_committee_run_and_status_done(client, monkeypatch):
     # 这是真正生效的 mock 点（committee_runner 拆包后 cr_mod 指向 core.runner.session）
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
-    # wealth_view loader 也 mock（避免读真 user.md / 触发 LLM）
     # event_brief multi 召回也 mock 掉（避免 EventStore init）
     monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
 
