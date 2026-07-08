@@ -11,6 +11,7 @@
 from typing import Any, Dict
 
 from openinvest.capabilities.committee.i18n import (
+    bilingual,
     build_field_value_language_directive,
     build_output_language_directive,
     localize_prompt_output_requirements,
@@ -41,11 +42,15 @@ def build_risk_officer_prompt(asset: Dict[str, Any], round_label: str = "opening
     # opening + rebuttal 两个 SKILL 文件，不会漏某一轮。配合 portfolio_summary 已不喂集中度数字
     # （单一源 gate），这里再令模型省略字段 + 不提及，OFF 时集中度从报告彻底消失。
     if not load_config().verdict.concentration_lens_enabled:
-        directive = (
+        directive = bilingual(
             "**🚫 集中度 lens 已关闭（单资产 / 刻意集中策略）**：用户上下文里已【不含】集中度数字。"
             "**不要输出 CONCENTRATION_PCT 字段，也不要在分析/理由里提及集中度、仓位占比、超配**"
             "（跳过下方模板的 CONCENTRATION_PCT 与 `>60% 至少 concerned` 规则）。"
-            "其余风险维度（波动 / 回撤 / 止损 / 现金流动性 / 追涨）照常评估。\n\n"
+            "其余风险维度（波动 / 回撤 / 止损 / 现金流动性 / 追涨）照常评估。\n\n",
+            "**🚫 The concentration lens has been disabled (single-asset / deliberately concentrated strategy)**: the user context no longer includes concentration figures. "
+            "**Do not output the CONCENTRATION_PCT field, and do not mention concentration, position share, or overweight in the analysis/reasoning** "
+            "(skip the CONCENTRATION_PCT and `>60% at least concerned` rules in the template below). "
+            "Evaluate the other risk dimensions (volatility / drawdown / stop-loss / cash liquidity / chasing rallies) as usual.\n\n",
         )
         prompt = directive + prompt
     return prompt

@@ -6,6 +6,8 @@ from openinvest.core.config import load_config
 def get_invest_lang() -> str:
     """归一化委员会产物语言；未知值回退英文。"""
     raw = str(load_config().language.invest_lang or "").strip().lower()
+    if raw == "zh-cn":
+        return "zh"
     return raw if raw in {"zh", "en"} else "en"
 
 
@@ -41,11 +43,20 @@ def build_field_value_language_directive() -> str:
     )
 
 
+def bilingual(zh: str, en: str) -> str:
+    """按 INVEST_LANG 二选一，收敛调用方到处复制粘贴的 `if get_invest_lang()=="en": ... else: ...`。"""
+    return en if get_invest_lang() == "en" else zh
+
+
 def localize_prompt_output_requirements(prompt: str) -> str:
-    """移除模板里写死的中文回复要求，避免覆盖运行时 locale 指令。"""
+    """移除模板里写死的「必须中文回复」，避免覆盖运行时 locale 指令；同一行内其余的
+    格式/字数约束（如 quant_rebuttal.md 的「严格按下列格式，≤150 字」）原样保留。"""
     lines = []
     for line in prompt.splitlines():
-        if "必须中文回复" in line:
+        if "必须中文回复" not in line:
+            lines.append(line)
             continue
-        lines.append(line)
+        stripped = line.replace("必须中文回复，", "").replace("必须中文回复", "")
+        if stripped.strip().strip("-").strip():
+            lines.append(stripped)
     return "\n".join(lines)

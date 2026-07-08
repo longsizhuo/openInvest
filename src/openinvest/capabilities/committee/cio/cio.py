@@ -14,6 +14,7 @@ few-shot 注入路线已退役（ADR-007，v1-v4 均输 zero-shot；loader 删�
 from typing import Any, Dict
 
 from openinvest.capabilities.committee.i18n import (
+    bilingual,
     build_field_value_language_directive,
     build_output_language_directive,
     get_invest_lang,
@@ -25,9 +26,9 @@ from openinvest.capabilities.loader import load_skill
 # DeepSeek JSON Output 模式追加段——覆盖 SKILL.md 的 VERDICT: 文本格式，要求吐单个
 # JSON 对象。字段名与 cio_parse.parse_cio_memo 的 fields 抽取一一对应；额外 memo 字段
 # 承载完整 prose（GUI/transcript 展示用，不丢分析）。必含 "json" 字样（DeepSeek 要求）。
-_JSON_OUTPUT_ADDENDUM = """
-
-=== 输出格式覆盖（本次仅此一种）===
+def _json_output_addendum() -> str:
+    return "\n\n" + bilingual(
+        """=== 输出格式覆盖（本次仅此一种）===
 忽略上方 `VERDICT: / CONFIDENCE: ...` 文本格式。只输出**一个 JSON 对象**（不要 markdown 代码围栏、不要任何额外文字），字段如下：
 {
   "verdict": "BUY|ACCUMULATE|HOLD|TRIM|SELL",
@@ -38,9 +39,24 @@ _JSON_OUTPUT_ADDENDUM = """
   "reentry_price": 数字（非 TRIM 用 null，TRIM 必须低于现价）,
   "reentry_condition": 字符串（非 TRIM 用 null）,
   "expected_path": 字符串（非 TRIM 用 null）,
-  "memo": "<full analysis memo in the requested output language>"
+  "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
 }
-上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到 [WORKER_UNAVAILABLE] 则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。"""
+上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到 [WORKER_UNAVAILABLE] 则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。""",
+        """=== Output format override (this is the only format for this call) ===
+Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSON object only** (no markdown code fences, no extra text), with the following fields:
+{
+  "verdict": "BUY|ACCUMULATE|HOLD|TRIM|SELL",
+  "confidence": a number between 0.0 and 1.0,
+  "dominant_view": "quant|macro|risk",
+  "suggested_alloc_cny": integer amount (negative for SELL/TRIM to indicate a reduction),
+  "trim_reason": "concentration|stop_loss|bearish" (null when not TRIM),
+  "reentry_price": number (null when not TRIM; must be below the current price for TRIM),
+  "reentry_condition": string (null when not TRIM),
+  "expected_path": string (null when not TRIM),
+  "memo": "your full investment-bank-grade analysis memo, multi-paragraph, matching the depth of the plain-text memo"
+}
+All rules above still apply (sanity checks / TRIM constraints / concentration / verdict=HOLD with confidence<=0.4 when [WORKER_UNAVAILABLE] appears) -- they are just carried in the JSON fields.""",
+    )
 
 
 def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
@@ -55,36 +71,50 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
     # TRIM 约束：阈值 > 0 时注入（sweep 出 OOS 验证结果后才启用，遵守 ADR-010 rule 4）
     trim_constraint = ""
     if verdict_cfg.trim_no_trim_loss_pct > 0 and verdict_cfg.trim_caution_loss_pct > 0:
-        trim_constraint = (
+        trim_constraint = bilingual(
             f"**🔥 零花钱账户 + 强破产兜底时的 TRIM 约束（强制，覆盖通用 TRIM 规则）**：\n"
             f"当 Wealth Context 显示 SOLVENCY_BUFFER_LEVEL=strong 且 ACCOUNT_PURPOSE 含\"零花钱\"或类似表述时，本约束覆盖上方通用 TRIM 规则：\n"
             f"- **浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 不允许 TRIM** — 卖出坐实亏损，而用户无流动性压力，应 HOLD 等修复\n"
             f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro SIGNAL 非 risk_off：倾向 HOLD** — 零花钱账户的资金久期长，短期波动不是卖出理由\n"
             f"- 只有浮亏 > {verdict_cfg.trim_caution_loss_pct}% 或 Macro SIGNAL=risk_off + Risk SIGNAL=high_risk 双触发时，才考虑 TRIM\n"
-            f"- 金融逻辑：零花钱账户 + 强破产兜底，小额浮亏不值得交易"
+            f"- 金融逻辑：零花钱账户 + 强破产兜底，小额浮亏不值得交易",
+            f"**🔥 TRIM constraint for pocket-money accounts with a strong solvency buffer (mandatory, overrides the general TRIM rule)**:\n"
+            f"When Wealth Context shows SOLVENCY_BUFFER_LEVEL=strong and ACCOUNT_PURPOSE mentions \"pocket money\" or similar, this constraint overrides the general TRIM rule above:\n"
+            f"- **Unrealized loss < {verdict_cfg.trim_no_trim_loss_pct}%: TRIM is not allowed** -- selling locks in the loss while the user has no liquidity pressure, so HOLD and wait for recovery\n"
+            f"- **Unrealized loss {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% and Macro SIGNAL is not risk_off: lean HOLD** -- pocket-money accounts have a long capital horizon, short-term volatility is not a reason to sell\n"
+            f"- Only consider TRIM when unrealized loss > {verdict_cfg.trim_caution_loss_pct}%, or Macro SIGNAL=risk_off together with Risk SIGNAL=high_risk\n"
+            f"- Rationale: pocket-money account + strong bankruptcy backstop -- a small unrealized loss is not worth trading over",
         )
 
     # 集中度 lens 关闭时（单资产/刻意集中策略）压掉 CIO 的超配规则。空串=开启时零改动
     # （str.replace 空串为 no-op）。这是 prompt 软层；硬兜底在 cio_parse.py Sanity 4。
     concentration_directive = ""
     if not verdict_cfg.concentration_lens_enabled:
-        concentration_directive = (
+        concentration_directive = bilingual(
             "**🚫 集中度 lens 已被用户关闭（单资产 / 刻意集中策略）**：忽略上方所有基于 "
             "CONCENTRATION_PCT 的超配规则——`<20% / 20-40% / >40%` 分档与 `>60% 限仓` 均不适用，"
             "**不得以集中度 / 超配为由输出 TRIM**（也不得换标签成 bearish 但实由超配驱动）。"
-            "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。"
+            "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。",
+            "**🚫 The concentration lens has been disabled by the user (single-asset / deliberately concentrated strategy)**: ignore all "
+            "CONCENTRATION_PCT-based overweight rules above -- the `<20% / 20-40% / >40%` tiers and the `>60% cap` no longer apply. "
+            "**Do not output TRIM on grounds of concentration / overweight** (and do not relabel it as bearish while it is actually driven by concentration). "
+            "Still evaluate volatility / drawdown / stop-loss / macro / valuation risk normally.",
         )
 
     # 现金仓位机会成本规则关闭时（默认）压掉"低集中度不许 HOLD、默认至少 ACCUMULATE"。
     # 空串=开启时零改动。纯 prompt 软层（无确定性后处理强制 ACCUMULATE，所以不需要硬兜底）。
     cash_opp_cost_directive = ""
     if not verdict_cfg.cash_opportunity_cost_rule_enabled:
-        cash_opp_cost_directive = (
+        cash_opp_cost_directive = bilingual(
             "**🚫 现金仓位机会成本规则已被用户关闭**：忽略上方整段「现金仓位机会成本规则」——"
             "`HOLD` 在**任何仓位 / 任何现金比例**都是合法 default，**不得**仅因 CONCENTRATION_PCT 低 / "
             "子弹充足就强制 `ACCUMULATE` 或禁止 `HOLD`。是否加仓纯按 Quant/Macro/Risk 信号 + 估值 / "
             "趋势证据决定。下方 Verdict 选项里「ACCUMULATE=100% 现金时的 default」与「HOLD 只在 20%+ "
-            "时合法」同样作废。"
+            "时合法」同样作废。",
+            "**🚫 The cash-opportunity-cost rule has been disabled by the user**: ignore the entire \"cash opportunity cost rule\" section above -- "
+            "`HOLD` is a legal default at **any position size / any cash ratio**. **Do not** force `ACCUMULATE` or forbid `HOLD` just because "
+            "CONCENTRATION_PCT is low or there is plenty of cash on hand. Whether to add to the position is decided purely by Quant/Macro/Risk signals "
+            "plus valuation / trend evidence. Below, the Verdict options' \"ACCUMULATE = default when 100% cash\" and \"HOLD only legal at 20%+\" are likewise void.",
         )
 
     prompt = load_skill(
@@ -108,7 +138,7 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
         f"{contract}\n\n{prompt}"
     )
     if json_mode:
-        prompt += _JSON_OUTPUT_ADDENDUM
+        prompt += _json_output_addendum()
     return prompt
 
 

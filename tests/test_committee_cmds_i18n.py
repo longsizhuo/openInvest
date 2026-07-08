@@ -4,7 +4,8 @@ import argparse
 import json
 
 
-def test_cmd_run_committee_english_next_step(monkeypatch, capsys, tmp_path):
+def test_cmd_run_committee_english_next_step(monkeypatch, capfd, tmp_path):
+    # 用 capfd 而非 capsys：_print_json 直写 sys.__stdout__（fd 级）绕过 capsys（见 test_prepare_committee.py）。
     from openinvest.core.config import reset_config, set_config_override
     from openinvest.skill_cmds import committee_cmds as cc
 
@@ -43,7 +44,7 @@ def test_cmd_run_committee_english_next_step(monkeypatch, capsys, tmp_path):
 
     args = argparse.Namespace(symbol="AAPL", force=True, max_rounds=1)
     cc.cmd_run_committee(args)
-    out = json.loads(capsys.readouterr().out)
+    out = json.loads(capfd.readouterr().out)
 
     assert out["status"] == "ok"
     assert "The user opens their broker or banking app" in out["next_step"]

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import StreamingResponse
 
+from openinvest.capabilities.committee.i18n import get_invest_lang
 from openinvest.connectors.web_api.models import (
     CommitteePrepareRequest,
     CommitteeRunRequest,
@@ -201,6 +202,7 @@ def _run_committee_task(
                 "symbols": symbols,
                 "max_debate_rounds": max_rounds,
                 "by_asset": summary,
+                "language": get_invest_lang(),
             },
         })
         _write_committee_status(task_id, s)

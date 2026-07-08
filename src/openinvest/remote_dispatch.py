@@ -338,8 +338,14 @@ def _h_run_committee(args: argparse.Namespace) -> None:
 
     gui_url = _api_base()
     today = _hub_today()
-    from openinvest.capabilities.committee.i18n import get_invest_lang
-    if get_invest_lang() == "en":
+    # 用 hub 实际跑委员会时的语言（result.language），而不是本机的 get_invest_lang()——
+    # remote hub 模式下 cio_memo/verdict 是 hub 生成的，语言由 hub 自己的 INVEST_LANG 决定，
+    # 跟本机配置可能不一致；next_step 提示必须跟着 memo 实际语言走，否则同一响应里两种语言。
+    hub_lang = (final.get("result") or {}).get("language")
+    if hub_lang not in ("zh", "en"):
+        from openinvest.capabilities.committee.i18n import get_invest_lang
+        hub_lang = get_invest_lang()
+    if hub_lang == "en":
         next_step = (
             "⚠️ The `cio_memo` field is a Markdown string. Render it directly as Markdown instead of printing the full JSON blob.\n\n"
             "A verdict has been generated. If the user agrees, guide them through these steps:\n"
