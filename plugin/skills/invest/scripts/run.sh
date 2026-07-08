@@ -14,7 +14,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# SCRIPT_DIR = plugin/skills/invest/scripts，仓库根在 4 层之上（plugin/ 重排后
+# 比旧的 skills/invest/scripts 多一层，别再蒙对——2026-07 曾因此指向 plugin/ 而非仓库根）
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SRC_ROOT="$REPO_ROOT/src"
 export INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
 SPEC="${OPENINVEST_SPEC:-openinvest}"
