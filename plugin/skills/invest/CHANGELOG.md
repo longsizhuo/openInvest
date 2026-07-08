@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.2](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.1...invest-skill-v0.18.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* **skill:** dev-mode 分支保留真实退出码，不再吞掉非零状态 ([4052078](https://github.com/longsizhuo/openInvest/commit/4052078d0b07f8be8d4a25ec43e9a1b4dbc2405b))
+* **skill:** 修正 plugin/ 重排后 REPO_ROOT 相对路径少跳一层 ([48b9b20](https://github.com/longsizhuo/openInvest/commit/48b9b2077453dd0e2be1caecf6a60927eb582c17))
+
 ## [0.18.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.0...invest-skill-v0.18.1) (2026-07-07)
 
 
