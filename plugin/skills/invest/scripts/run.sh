@@ -84,19 +84,21 @@ EOF
     if [ "$DEV_MODE" = "1" ]; then
       cd "$REPO_ROOT"
       export PYTHONPATH="$SRC_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-      if ! uv run python -m openinvest.cli "$@"; then
-          rc=$?
+      rc=0
+      uv run python -m openinvest.cli "$@" || rc=$?
+      if [ "$rc" -ne 0 ]; then
           echo "{\"status\":\"error\",\"error\":\"openinvest（本地源码模式）执行失败 (exit $rc)\",\"hint\":\"当前使用 OPENINVEST_DEV_MODE=1；先运行 uv sync，再重试。\"}"
-          exit $rc
+          exit "$rc"
       fi
       exit 0
     fi
     # 不 exec：uvx 拉包失败（首跑断网 / PyPI 故障）时给 agent 结构化错误
-    # （if 形式对 set -e 安全；CLI 子命令自身的业务错误 JSON 由 Python 层输出）
-    if ! uvx --from "$SPEC" openinvest "$@"; then
-        rc=$?
+    # （|| 形式对 set -e 安全；CLI 子命令自身的业务错误 JSON 由 Python 层输出）
+    rc=0
+    uvx --from "$SPEC" openinvest "$@" || rc=$?
+    if [ "$rc" -ne 0 ]; then
         echo "{\"status\":\"error\",\"error\":\"openinvest 执行失败 (exit $rc)\",\"hint\":\"首次运行需网络从 PyPI 拉包；检查网络后重试，或跑 uvx openinvest doctor 看完整输出\"}"
-        exit $rc
+        exit "$rc"
     fi
     ;;
 esac
