@@ -1,6 +1,7 @@
 .env
 chroma.*
 .idea
+.backups/
 
 # 隐私
 cache_data
