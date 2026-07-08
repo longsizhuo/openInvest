@@ -338,12 +338,21 @@ def _h_run_committee(args: argparse.Namespace) -> None:
 
     gui_url = _api_base()
     today = _hub_today()
-    _print_json({
-        "status": "ok",
-        "verdict": asset_result.get("verdict", {}),
-        "cio_memo": asset_result.get("cio_memo") or "",
-        "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
-        "next_step": (
+    from openinvest.capabilities.committee.i18n import get_invest_lang
+    if get_invest_lang() == "en":
+        next_step = (
+            "⚠️ The `cio_memo` field is a Markdown string. Render it directly as Markdown instead of printing the full JSON blob.\n\n"
+            "A verdict has been generated. If the user agrees, guide them through these steps:\n"
+            f"1) Record the trade in openInvest first (easiest path: open {gui_url} in a browser and use the holdings page; "
+            "or run remote-mode `run.sh buy/sell ...`, which writes to the hub automatically)\n"
+            "2) Open the real broker or banking app and place the order using the alloc_cny amount from the verdict "
+            "(openInvest does not connect to exchanges; it only produces decisions)\n"
+            "3) Return to openInvest and mark the execution outcome\n\n"
+            "**Do not write to memory/ directly.** In remote mode the local machine does not even own the memory/ directory; "
+            "all state changes must go through run.sh write commands or the hub API."
+        )
+    else:
+        next_step = (
             "⚠️ `cio_memo` 字段是 Markdown 字符串，**直接当 Markdown 渲染给用户看**，"
             "不要把整个 JSON 原样打印。\n\n"
             "已生成 verdict。如果用户同意，告诉他按下面三步走：\n"
@@ -354,7 +363,13 @@ def _h_run_committee(args: argparse.Namespace) -> None:
             "3) 回 openInvest 标记成交\n\n"
             "**不要直接写 memory/**——远端模式下本机根本没有 memory/，"
             "所有状态变更必须走 run.sh 写命令或 hub API。"
-        ),
+        )
+    _print_json({
+        "status": "ok",
+        "verdict": asset_result.get("verdict", {}),
+        "cio_memo": asset_result.get("cio_memo") or "",
+        "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
+        "next_step": next_step,
     })
 
 

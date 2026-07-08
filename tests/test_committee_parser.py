@@ -276,6 +276,42 @@ def test_risk_officer_prompt_concentration_directive_both_rounds():
     assert "集中度 lens 已关闭" in build_risk_officer_prompt(asset, round_label="rebuttal")
 
 
+def test_committee_prompts_follow_english_mode_and_keep_parser_markers():
+    """INVEST_LANG=en 时自然语言切英文，但结构化解析锚点仍要求保持英文。"""
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.macro_strategist import build_macro_strategist_prompt
+    from openinvest.capabilities.committee.quant import build_quant_prompt
+    from openinvest.capabilities.committee.risk_officer import build_risk_officer_prompt
+
+    set_config_override({"language": {"invest_lang": "en"}})
+    asset = {"symbol": "GC=F", "display_name": "Gold"}
+
+    quant_prompt = build_quant_prompt(asset)
+    risk_prompt = build_risk_officer_prompt(asset)
+    cio_prompt = build_cio_prompt(asset)
+    macro_prompt = build_macro_strategist_prompt()
+
+    assert "Produce your analysis in English." in quant_prompt
+    assert "Produce your analysis in English." in risk_prompt
+    assert "Produce your analysis in English." in macro_prompt
+    assert "Produce your analysis memo in English." in cio_prompt
+    assert "Keep all required section headers" in cio_prompt
+    assert "VERDICT, CONFIDENCE, DOMINANT_VIEW" in cio_prompt
+    assert "All free-text field values after the fixed English field names must also be in English." in quant_prompt
+    assert "All free-text field values after the fixed English field names must also be in English." in risk_prompt
+    assert "All free-text field values after the fixed English field names must also be in English." in macro_prompt
+    assert "All free-text field values after the fixed English field names must also be in English." in cio_prompt
+
+
+def test_committee_prompts_default_to_chinese_mode():
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.quant import build_quant_prompt
+
+    asset = {"symbol": "GC=F", "display_name": "黄金"}
+    assert "请使用中文输出你的分析。" in build_quant_prompt(asset)
+    assert "请使用中文输出你的分析备忘。" in build_cio_prompt(asset)
+
+
 # ---------- Sanity check 5: TRIM 必须给低于现价的买回点，否则降级 HOLD ----------
 
 def _trim_reentry_text(reentry_price="950", reason="bearish") -> str:

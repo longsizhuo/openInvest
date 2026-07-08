@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import argparse
+import json
+
+
+def test_cmd_run_committee_english_next_step(monkeypatch, capsys, tmp_path):
+    from openinvest.core.config import reset_config, set_config_override
+    from openinvest.skill_cmds import committee_cmds as cc
+
+    reset_config()
+    set_config_override({"language": {"invest_lang": "en"}})
+
+    monkeypatch.setattr(cc, "ROOT", tmp_path)
+
+    class FakePM:
+        strategy = {
+            "target_assets": [
+                {
+                    "symbol": "AAPL",
+                    "target_pct": 0.7,
+                    "max_single_invest_cny": 100.0,
+                    "display_name": "Apple Inc.",
+                }
+            ]
+        }
+
+    class FakeReport:
+        cio_memo = "VERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\nSUGGESTED_ALLOC_CNY: 0"
+
+    monkeypatch.setattr("openinvest.core.portfolio_manager.PortfolioManager", lambda: FakePM())
+    monkeypatch.setattr(
+        "openinvest.core.committee_runner.run_committee_session",
+        lambda **_: {
+            "asset_committees": {
+                "AAPL": {
+                    "verdict": {"verdict": "HOLD", "confidence": 0.5, "alloc_cny": 0, "dominant_view": "macro"},
+                    "report": FakeReport(),
+                }
+            }
+        },
+    )
+
+    args = argparse.Namespace(symbol="AAPL", force=True, max_rounds=1)
+    cc.cmd_run_committee(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert out["status"] == "ok"
+    assert "The user opens their broker or banking app" in out["next_step"]
+    assert "Thhe user" not in out["next_step"]
+
+    reset_config()

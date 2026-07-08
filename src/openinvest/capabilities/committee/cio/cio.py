@@ -12,6 +12,12 @@ helper 函数 `agents/dspy_few_shot_loader.py` 保留作未来 path c 重训后�
 """
 from typing import Any, Dict
 
+from openinvest.capabilities.committee.i18n import (
+    build_field_value_language_directive,
+    build_output_language_directive,
+    get_invest_lang,
+    localize_prompt_output_requirements,
+)
 from openinvest.capabilities.loader import load_skill
 
 
@@ -31,7 +37,7 @@ _JSON_OUTPUT_ADDENDUM = """
   "reentry_price": 数字（非 TRIM 用 null，TRIM 必须低于现价）,
   "reentry_condition": 字符串（非 TRIM 用 null）,
   "expected_path": 字符串（非 TRIM 用 null）,
-  "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
+  "memo": "<full analysis memo in the requested output language>"
 }
 上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到 [WORKER_UNAVAILABLE] 则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。"""
 
@@ -87,6 +93,18 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
         TRIM_CONSTRAINT=trim_constraint,
         CONCENTRATION_DIRECTIVE=concentration_directive,
         CASH_OPP_COST_DIRECTIVE=cash_opp_cost_directive,
+    )
+    prompt = localize_prompt_output_requirements(prompt)
+    contract = (
+        "Start your first line exactly with `VERDICT:` and fill every required field in order. "
+        "Do not write any prose before the structured fields."
+        if get_invest_lang() == "en"
+        else "第一行必须直接从 `VERDICT:` 开始，并按顺序填写所有必填字段。不要在结构化字段前写任何散文说明。"
+    )
+    prompt = (
+        f"{build_output_language_directive(artifact='analysis memo', keep_verbatim_headers=True)}\n"
+        f"{build_field_value_language_directive()}\n"
+        f"{contract}\n\n{prompt}"
     )
     if json_mode:
         prompt += _JSON_OUTPUT_ADDENDUM

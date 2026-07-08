@@ -10,6 +10,11 @@
 """
 from typing import Any, Dict
 
+from openinvest.capabilities.committee.i18n import (
+    build_field_value_language_directive,
+    build_output_language_directive,
+    localize_prompt_output_requirements,
+)
 from openinvest.capabilities.loader import load_skill
 
 
@@ -26,6 +31,11 @@ def build_risk_officer_prompt(asset: Dict[str, Any], round_label: str = "opening
         round_label=round_label,
         asset_name=asset_name,
         asset_symbol=asset["symbol"],
+    )
+    prompt = localize_prompt_output_requirements(prompt)
+    prompt = (
+        f"{build_output_language_directive(artifact='analysis')}\n"
+        f"{build_field_value_language_directive()}\n\n{prompt}"
     )
     # 集中度 lens 关闭时（单资产/刻意集中策略）彻底隐藏集中度。前置注入而非占位符：一次覆盖
     # opening + rebuttal 两个 SKILL 文件，不会漏某一轮。配合 portfolio_summary 已不喂集中度数字

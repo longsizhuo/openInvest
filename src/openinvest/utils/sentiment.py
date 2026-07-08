@@ -179,6 +179,8 @@ def _format_stance_line(
     from openinvest.core.config import load_config
     cfg = load_config().sentiment
     band = cfg.event_stance_neutral_band
+    from openinvest.capabilities.committee.i18n import get_invest_lang
+    lang = get_invest_lang()
     net = "risk" if score < -band else "opportunity" if score > band else "neutral"
     weighted = (
         (cfg.event_stance_w_low, cfg.event_stance_w_mid, cfg.event_stance_w_high)
@@ -187,7 +189,10 @@ def _format_stance_line(
     )
     label = f"EVENT_STANCE({symbol})" if symbol else "EVENT_STANCE"
     extra = f"score={score:+.1f}, " if weighted else ""
-    suffix = "该资产相关事件" if symbol else "来自近期事件层"
+    if lang == "en":
+        suffix = "asset-linked events" if symbol else "derived from recent event-layer inputs"
+    else:
+        suffix = "该资产相关事件" if symbol else "来自近期事件层"
     return f"{label}: net {net} ({extra}risk={risk} opportunity={opp}, {suffix})"
 
 
@@ -254,11 +259,18 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
     vix = _vix_percentile()
     if vix is None:
         return ""
+    from openinvest.capabilities.committee.i18n import get_invest_lang
+    lang = get_invest_lang()
     vix_last, pct = vix
     label = _vix_label(pct)
-    lines = [
-        f"FEAR_GREED_GAUGE: VIX={vix_last:.1f} (近2年分位 {pct * 100:.0f}%) → {label}",
-    ]
+    if lang == "en":
+        lines = [
+            f"FEAR_GREED_GAUGE: VIX={vix_last:.1f} (2-year percentile {pct * 100:.0f}%) -> {label}",
+        ]
+    else:
+        lines = [
+            f"FEAR_GREED_GAUGE: VIX={vix_last:.1f} (近2年分位 {pct * 100:.0f}%) → {label}",
+        ]
 
     use_cnn = _cnn_enabled() if cnn_enabled is None else cnn_enabled
     if use_cnn:
@@ -272,11 +284,18 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
 
     from openinvest.core.config import load_config
     if pct >= load_config().sentiment.vix_defense_quantile:
-        lines.append(
-            "INDEP_DEFENSE_FLAG: on  "
-            "# VIX 处近2年高位=市场恐慌，独立于 MA regime 的快速崩盘哨兵；"
-            "加仓需谨慎，优先考虑防御（regime 可能仍滞后显示 uptrend）"
-        )
+        if lang == "en":
+            lines.append(
+                "INDEP_DEFENSE_FLAG: on  "
+                "# VIX is near its 2-year highs = market fear; this is a fast crash sentinel independent of the MA regime. "
+                "Be cautious with adding risk and prefer defense first (the regime may still lag and show uptrend)"
+            )
+        else:
+            lines.append(
+                "INDEP_DEFENSE_FLAG: on  "
+                "# VIX 处近2年高位=市场恐慌，独立于 MA regime 的快速崩盘哨兵；"
+                "加仓需谨慎，优先考虑防御（regime 可能仍滞后显示 uptrend）"
+            )
     else:
         lines.append("INDEP_DEFENSE_FLAG: off")
 

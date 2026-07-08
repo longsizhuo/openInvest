@@ -27,8 +27,15 @@ EQUITY_QUOTE_TYPES = {"ETF", "EQUITY", "MUTUALFUND", "INDEX"}
 
 
 def _pe_level(pe: float) -> str:
+    from openinvest.capabilities.committee.i18n import get_invest_lang
     from openinvest.core.config import load_config
     cfg = load_config().valuation
+    if get_invest_lang() == "en":
+        if pe >= cfg.pe_expensive:
+            return "expensive"
+        if pe < cfg.pe_cheap:
+            return "neutral-to-cheap"
+        return "neutral"
     if pe >= cfg.pe_expensive:
         return "偏贵"
     if pe < cfg.pe_cheap:
@@ -55,6 +62,8 @@ def build_valuation_brief(
         log.warning(f"valuation: {symbol} .info 拉取失败 graceful '': {type(e).__name__}: {e}")
         return ""
 
+    from openinvest.capabilities.committee.i18n import get_invest_lang
+    lang = get_invest_lang()
     quote_type = str(info.get("quoteType") or "").upper()
     if quote_type and quote_type not in EQUITY_QUOTE_TYPES:
         # 商品 / 期货 / 汇率 / 加密 → 不出估值（黄金等走 Macro 货币因素）
@@ -65,17 +74,29 @@ def build_valuation_brief(
     if isinstance(pe, (int, float)) and not isinstance(pe, bool) and pe > 0:
         from openinvest.core.config import load_config
         _pe_expensive = load_config().valuation.pe_expensive
-        lines.append(
-            f"VALUATION: trailing_PE={float(pe):.1f} "
-            f"(绝对水平: {_pe_level(float(pe))}, 阈值 >{_pe_expensive:g}=偏贵)"
-        )
+        if lang == "en":
+            lines.append(
+                f"VALUATION: trailing_PE={float(pe):.1f} "
+                f"(absolute level: {_pe_level(float(pe))}, threshold >{_pe_expensive:g}=expensive)"
+            )
+        else:
+            lines.append(
+                f"VALUATION: trailing_PE={float(pe):.1f} "
+                f"(绝对水平: {_pe_level(float(pe))}, 阈值 >{_pe_expensive:g}=偏贵)"
+            )
 
     if price_quantile_2y is not None:
         try:
-            lines.append(
-                f"PRICE_QUANTILE_2Y: {float(price_quantile_2y) * 100:.0f}% "
-                f"(价格在近2年的百分位，越高越贵)"
-            )
+            if lang == "en":
+                lines.append(
+                    f"PRICE_QUANTILE_2Y: {float(price_quantile_2y) * 100:.0f}% "
+                    f"(price percentile over the past 2 years; higher means richer valuation)"
+                )
+            else:
+                lines.append(
+                    f"PRICE_QUANTILE_2Y: {float(price_quantile_2y) * 100:.0f}% "
+                    f"(价格在近2年的百分位，越高越贵)"
+                )
         except (TypeError, ValueError):
             pass
 
@@ -83,10 +104,16 @@ def build_valuation_brief(
         # 权益类但 PE/分位都拿不到 → 不硬凑空 section
         return ""
 
-    lines.append(
-        "NOTE: forward 盈利增速 v1 不可得（yfinance ETF forwardPE=null），"
-        "估值仅含 trailing PE + 价格分位"
-    )
+    if lang == "en":
+        lines.append(
+            "NOTE: forward earnings growth is unavailable in v1 (yfinance ETF forwardPE=null); "
+            "this brief only includes trailing PE and the price percentile"
+        )
+    else:
+        lines.append(
+            "NOTE: forward 盈利增速 v1 不可得（yfinance ETF forwardPE=null），"
+            "估值仅含 trailing PE + 价格分位"
+        )
     return "\n".join(lines)
 
 

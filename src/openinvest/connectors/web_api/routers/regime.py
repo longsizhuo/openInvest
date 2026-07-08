@@ -77,7 +77,7 @@ async def get_regime_rules() -> RegimeRulesResponse:
     - 5 个可被 LLM 调用的 tool
     """
     from openinvest.core.regime import get_thresholds
-    from openinvest.capabilities.committee.macro_strategist import PROMPT_MACRO_STRATEGIST
+    from openinvest.capabilities.committee.macro_strategist import build_macro_strategist_prompt
     from openinvest.capabilities.committee.quant import build_quant_prompt
     from openinvest.capabilities.committee.risk_officer import build_risk_officer_prompt
     from openinvest.capabilities.committee.cio import build_cio_prompt
@@ -93,7 +93,7 @@ async def get_regime_rules() -> RegimeRulesResponse:
             role="macro",
             label="宏观分析师 (Macro Strategist)",
             description="跨资产共享，每次 daily_report 跑一次。评估全球利率/通胀/地缘风险。",
-            prompt_full=PROMPT_MACRO_STRATEGIST,
+            prompt_full=build_macro_strategist_prompt(),
             temperature=0.2,
             enable_tools=True,
             notes=[
