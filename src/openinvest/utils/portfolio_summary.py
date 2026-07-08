@@ -30,8 +30,6 @@ def portfolio_summary_text(
     pm: "PortfolioManager",
     total_assets_cny: float,
     current_prices: Dict[str, float],
-    *,
-    backup_cny: float = 0.0,
 ) -> str:
     """详细的用户上下文，给 Risk Officer 压力测试用（含当前市价 + 浮盈 + 集中度）
 
@@ -48,9 +46,8 @@ def portfolio_summary_text(
     """
     cash_cny = pm.cash_amount("CNY")
     aud_cash = pm.cash_amount("AUD")
-    buffer_cny = float(pm.user.get("exchange_buffer_cny", 0))
     risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
-    dry_powder = max(0.0, cash_cny - buffer_cny)
+    dry_powder = max(0.0, cash_cny)
 
     # 总资产是否可用：NaN / 非有限（上游某腿不可解析污染了 total）时显式降级，
     # 绝不渲染 ¥nan 或据假值算集中度。
@@ -65,7 +62,7 @@ def portfolio_summary_text(
     lines = [
         f"用户风险偏好: {risk_level}",
         f"总资产估算: {total_str}",
-        f"  - CNY 现金: ¥{cash_cny:,.0f} (其中应急金 ¥{buffer_cny:,} 不可投)",
+        f"  - CNY 现金: ¥{cash_cny:,.0f}",
         f"  - 可投子弹 (dry_powder): ¥{dry_powder:,.0f}",
     ]
     if aud_cash > 0:
@@ -151,24 +148,5 @@ def portfolio_summary_text(
                     f"CNY 市值 ¥{value_cny:,.0f}）"
                 )
         lines.append(line)
-
-    # 真实总财富占比注释（当有兜底 backup 时附注，给 Risk Officer / CIO 参考）
-    if backup_cny > 0:
-        if total_ok:
-            real_total = total_assets_cny + backup_cny
-            account_ratio = (total_assets_cny / real_total * 100) if real_total > 0 else 0.0
-            lines.append(
-                f"  [兜底注释] 账户总资产 ¥{total_assets_cny:,.0f} 占真实总财富 "
-                f"¥{real_total:,.0f} 的 {account_ratio:.1f}%，"
-                f"BACKUP ¥{backup_cny:,.0f} 仅作风险兜底不可投资。"
-                f"账户归零不影响生存。"
-            )
-        else:
-            # 总资产不可用：仍附注 BACKUP 存在，但占比暂不可算（绝不渲染 ¥nan）
-            lines.append(
-                f"  [兜底注释] 账户总资产暂不可用（请勿据此判断），"
-                f"BACKUP ¥{backup_cny:,.0f} 仅作风险兜底不可投资。"
-                f"账户归零不影响生存。"
-            )
 
     return "\n".join(lines) + "\n"

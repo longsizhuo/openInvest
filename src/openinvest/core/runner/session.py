@@ -5,7 +5,6 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from openinvest.core.committee import (
-    load_wealth_context_view,
     run_committee,
     run_macro_view,
 )
@@ -34,7 +33,6 @@ def run_committee_for_symbol(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     shared_macro_view: Optional[str] = None,
     event_brief: Optional[str] = None,
-    wealth_context_view: Optional[str] = None,
     portfolio_summary_override: Optional[str] = None,
     prior_insights_override: Optional[str] = None,
     sentiment_brief: Optional[str] = None,
@@ -50,9 +48,6 @@ def run_committee_for_symbol(
         event_brief: 事件层 RAG 召回的盘中事件上下文（结构化文本）。None / "" 都
             等价于"不召回 / 不注入"。caller 显式传则 override 内部默认召回。
             受 env INVEST_EVENT_RAG_ENABLED 总开关控制（默认 false）。
-        wealth_context_view: shared loader 结果 override。None → 内部调
-            load_wealth_context_view()（保持向后兼容）。Session orchestrator
-            一次性算好后传进来避免重复调用。
         portfolio_summary_override: 给 cron daily_report 用——它拼了含 total_assets_cny
             + data_warnings 的完整版 portfolio_summary，需要让 Risk Officer 看见。
             None → 用内部精简版（默认）。
@@ -145,18 +140,6 @@ def run_committee_for_symbol(
             macro_data = {}
         macro_view = run_macro_view(str(macro_data), event_brief=effective_event_brief)
         emit("macro_done", macro_preview=macro_view[:240])
-
-    # 5. WealthContextOfficer view（修复 2026-05-15 漂移: 之前没读 user.md 的
-    # wealth_context, Risk Officer 永远按 portfolio cash 判风险）
-    # caller 已经算过就 override 进来避免重复调用 LLM；否则 fallback 自己调
-    # 先于 portfolio summary 加载，因为 portfolio_summary_text 需要 backup_cny
-    # 来附注真实财富占比
-    if wealth_context_view is not None:
-        wealth_view = wealth_context_view
-    else:
-        wealth_view = load_wealth_context_view()
-    if wealth_view:
-        emit("wealth_context_loaded", preview=wealth_view[:240])
 
     # 5.1. Portfolio summary
     # 2026-05-19 修复 Direct 路径集中度漂移：之前 service layer 自拼简化版
@@ -267,7 +250,6 @@ def run_committee_for_symbol(
         portfolio_summary=portfolio_summary,
         prior_insights=prior_insights,
         regime_brief=regime_brief,
-        wealth_context_view=wealth_view,
         reentry_reference=reentry_reference,
         current_price=current_price,
         sentiment_brief=effective_sentiment_brief,
@@ -332,7 +314,7 @@ def run_committee_for_symbol(
 # 邮件 render / event_brief / Gemini prompt）。
 #
 # 本函数是三路径**共享的单一可信源**：所有"跨资产 macro 共享 / event 多 symbol
-# 召回 / wealth view 注入 / prior insights 加载 / 并行 dispatch"逻辑只在这一处实现。
+# 召回 / prior insights 加载 / 并行 dispatch"逻辑只在这一处实现。
 #
 # 三个 entry 只负责自己路径独有的事：
 #   - Skill: Stage 0 同日 cache 检查、--force flag、最终 JSON 输出、NapCat hint
@@ -353,7 +335,6 @@ def run_committee_session(
     event_brief_override: Optional[str] = None,
     event_ids: Optional[List[str]] = None,
     macro_view_override: Optional[str] = None,
-    wealth_view_override: Optional[str] = None,
     portfolio_summary_override: Optional[str] = None,
     sentiment_brief_override: Optional[str] = None,
     max_workers: int = 4,
@@ -369,7 +350,6 @@ def run_committee_session(
         event_ids: Web event-trigger 路径用。session 内部翻译成 brief。与 override
             互斥（override 优先）
         macro_view_override: 测试桩用，跳过 run_macro_view
-        wealth_view_override: 测试桩 / backtest 用，跳过 load_wealth_context_view
         portfolio_summary_override: cron daily_report 拼了含 total_assets_cny 的
             完整版，传进来让 Risk Officer 看见。其他路径不传走 service 默认精简版
         max_workers: ThreadPoolExecutor 并发数，默认 4 防 LLM API 限流
@@ -379,7 +359,6 @@ def run_committee_session(
         {
             "symbols": List[str],
             "macro_view": str,
-            "wealth_view": str,
             "event_brief": str,
             "asset_committees": Dict[str, Dict],  # sym → result，或 {"error": str}
             "errors": Dict[str, str],
@@ -413,15 +392,7 @@ def run_committee_session(
                            "（symbols 参数空 + strategy.target_assets 也空）")
     emit("session_start", symbols=symbols, max_debate_rounds=max_debate_rounds)
 
-    # ---- Step 2: shared wealth_view ----
-    if wealth_view_override is not None:
-        wealth_view = wealth_view_override
-    else:
-        wealth_view = load_wealth_context_view()
-    if wealth_view:
-        emit("wealth_context_loaded", preview=wealth_view[:240])
-
-    # ---- Step 3: shared event_brief（三选一，严格优先级）----
+    # ---- Step 2: shared event_brief（三选一，严格优先级）----
     event_brief_source: str
     if event_brief_override is not None:
         event_brief = event_brief_override
@@ -504,7 +475,6 @@ def run_committee_session(
             progress_callback=progress_callback,
             shared_macro_view=macro_view,
             event_brief=event_brief,
-            wealth_context_view=wealth_view,
             portfolio_summary_override=portfolio_summary_override,
             sentiment_brief=sentiment_brief,  # 市场级共享，避免每资产各拉 VIX/CNN
             probability_table=prob_table,
@@ -564,7 +534,6 @@ def run_committee_session(
     return {
         "symbols": symbols,
         "macro_view": macro_view,
-        "wealth_view": wealth_view,
         "event_brief": event_brief,
         "sentiment_brief": sentiment_brief,
         "asset_committees": asset_committees,
@@ -573,7 +542,6 @@ def run_committee_session(
             "shared_macro": True,
             "event_brief_source": event_brief_source,
             "event_brief_attached": bool(event_brief),
-            "wealth_view_attached": bool(wealth_view),
             "sentiment_brief_attached": bool(sentiment_brief),
             "max_debate_rounds": max_debate_rounds,
             "max_workers": effective_workers,

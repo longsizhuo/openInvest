@@ -29,7 +29,7 @@ Quant 给 neutral（当时旧版 regime 锁禁 bearish；2026-06 锁已拆，现
 2. **用户上下文恶化**（与 Quant 无关，是你独有的视角）：
    - Round 1 没注意到的集中度计算修正（分母用 *总资产*，不是 NDQ + cash）
    - 用户 7 天内多次买入同资产 → 情绪化追涨，给 high_risk
-   - DRY_POWDER_CNY < 1000 **且** SOLVENCY_BUFFER_LEVEL=weak/unknown → 流动性风险升级
+   - DRY_POWDER_CNY < 1000 → 流动性风险升级
 
 ## 禁止的升级 trigger（历史 bug 修复）
 

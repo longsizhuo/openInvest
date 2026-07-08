@@ -119,7 +119,7 @@ def format_event_brief(events: List[Dict[str, Any]]) -> str:
 def resolve_event_brief_multi(symbols: List[str]) -> str:
     """跨资产 event RAG 召回 + 去重，作为 daily_report cron 路径的共享 loader。
 
-    等价地位同 load_wealth_context_view：跑一次，结果同时注入
+    跨资产共享 loader：跑一次，结果同时注入
     run_macro_view(event_brief=...) 和每个 run_committee(..., event_brief=...)。
 
     去重策略：按 "ts|one_line_claim" 拆行后 dict 去重（保留首次出现顺序），

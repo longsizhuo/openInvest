@@ -38,7 +38,6 @@ def _seed_docs(
     *,
     cash: Optional[Dict[str, float]] = None,
     holdings: Optional[list] = None,
-    exchange_buffer_cny: float = 0.0,
     risk_tolerance: str = "Balanced",
     target_assets: Optional[list] = None,
     max_single_invest_cny: float = 10000.0,
@@ -58,7 +57,6 @@ def _seed_docs(
     store.write("user", "user", {
         "display_name": "TestUser",
         "risk_tolerance": risk_tolerance,
-        "exchange_buffer_cny": exchange_buffer_cny,
     }, "# user body")
 
     # strategy.md
@@ -239,12 +237,11 @@ class TestGetUserStatus:
     """get_user_status() 全路径：折算/追踪仓/缺价/portfolio_value/dry_powder"""
 
     def _make_pm_with_holdings(
-        self, tmp_path, cash, holdings, exchange_buffer_cny=0.0,
+        self, tmp_path, cash, holdings,
         max_single_invest_cny=10000.0
     ) -> PortfolioManager:
         s = _make_store(tmp_path)
         _seed_docs(s, cash=cash, holdings=holdings,
-                   exchange_buffer_cny=exchange_buffer_cny,
                    max_single_invest_cny=max_single_invest_cny)
         return PortfolioManager(s)
 
@@ -332,53 +329,39 @@ class TestGetUserStatus:
         status = pm2.get_user_status(current_prices={"NDQ.AX": None}, exchange_rate=5.0)
         assert status.portfolio_value == pytest.approx(5000.0)
 
-    def test_dry_powder_with_exchange_buffer(self, tmp_path):
-        """disposable_for_invest = min(max(0, cash_cny - buffer), max_single)"""
+    def test_dry_powder_equals_cash_capped_by_max_single(self, tmp_path):
+        """disposable_for_invest = min(cash_cny, max_single)"""
         pm2 = self._make_pm_with_holdings(
             tmp_path,
             cash={"CNY": 30000.0},
             holdings=[],
-            exchange_buffer_cny=10000.0,
             max_single_invest_cny=15000.0
         )
         status = pm2.get_user_status(current_prices={}, exchange_rate=4.8)
-        # available = 30000 - 10000 = 20000；min(20000, 15000) = 15000
+        # available = 30000；min(30000, 15000) = 15000
         assert status.disposable_for_invest == pytest.approx(15000.0)
 
     def test_dry_powder_capped_by_max_single(self, tmp_path):
-        """cash 远大于 buffer 时，disposable 封顶在 max_single_invest_cny"""
+        """cash 远大于上限时，disposable 封顶在 max_single_invest_cny"""
         pm2 = self._make_pm_with_holdings(
             tmp_path,
             cash={"CNY": 100000.0},
             holdings=[],
-            exchange_buffer_cny=5000.0,
             max_single_invest_cny=8000.0
         )
         status = pm2.get_user_status(current_prices={}, exchange_rate=4.8)
         assert status.disposable_for_invest == pytest.approx(8000.0)
 
-    def test_dry_powder_zero_when_cash_below_buffer(self, tmp_path):
-        """cash_cny < exchange_buffer 时 disposable = 0（不出现负值）"""
-        pm2 = self._make_pm_with_holdings(
-            tmp_path,
-            cash={"CNY": 3000.0},
-            holdings=[],
-            exchange_buffer_cny=5000.0
-        )
-        status = pm2.get_user_status(current_prices={}, exchange_rate=4.8)
-        assert status.disposable_for_invest == 0.0
-
     def test_dry_powder_uncapped_when_no_positive_caps(self, tmp_path):
-        """单次上限 0/缺失 = 不设限（2026-06-12 语义）：disposable = available"""
+        """单次上限 0/缺失 = 不设限（2026-06-12 语义）：disposable = cash"""
         pm2 = self._make_pm_with_holdings(
             tmp_path,
             cash={"CNY": 100000.0},
             holdings=[],
-            exchange_buffer_cny=5000.0,
             max_single_invest_cny=0.0,   # 0 = 不设限，不再回落 10000
         )
         status = pm2.get_user_status(current_prices={}, exchange_rate=4.8)
-        assert status.disposable_for_invest == pytest.approx(95000.0)
+        assert status.disposable_for_invest == pytest.approx(100000.0)
         assert status.max_single_invest_cny == 0.0  # 哨兵：不设限
 
     def test_risk_level_and_target_asset(self, tmp_path):
@@ -508,7 +491,7 @@ class TestWithPortfolioTx:
         store.write = s.write  # 仅用 s
 
         # 写 user 和 strategy 才能构造 PM
-        s.write("user", "user", {"display_name": "T", "exchange_buffer_cny": 0.0,
+        s.write("user", "user", {"display_name": "T",
                                    "risk_tolerance": "Balanced"}, "")
         s.write("strategy", "strategy", {
             "target_allocation_stock": 0.7, "target_allocation_cash": 0.3,
@@ -589,7 +572,7 @@ class TestPortfolioManagerInitErrors:
     def test_missing_portfolio_raises(self, tmp_path):
         """只缺 portfolio.md → FileNotFoundError"""
         s = _make_store(tmp_path)
-        s.write("user", "user", {"display_name": "T", "exchange_buffer_cny": 0.0,
+        s.write("user", "user", {"display_name": "T",
                                    "risk_tolerance": "Balanced"}, "")
         s.write("strategy", "strategy", {
             "target_allocation_stock": 0.7, "target_allocation_cash": 0.3,

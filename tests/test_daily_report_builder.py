@@ -31,7 +31,7 @@ from openinvest.jobs.daily_report_builder import (
 
 # ============ Fixture 辅助 ============
 
-def _make_pm(tmp_path, cash=None, holdings=None, exchange_buffer_cny=0.0) -> PortfolioManager:
+def _make_pm(tmp_path, cash=None, holdings=None) -> PortfolioManager:
     """创建一个带完整 memory 的 PortfolioManager（v2 结构）"""
     store = MemoryStore(tmp_path / "memory")
     cash = cash if cash is not None else {"CNY": 50000.0, "AUD": 500.0}
@@ -40,7 +40,6 @@ def _make_pm(tmp_path, cash=None, holdings=None, exchange_buffer_cny=0.0) -> Por
     store.write("user", "user", {
         "display_name": "TestUser",
         "risk_tolerance": "Balanced",
-        "exchange_buffer_cny": exchange_buffer_cny,
     }, "")
     store.write("strategy", "strategy", {
         "target_allocation_stock": 0.7,
@@ -167,33 +166,17 @@ class TestPortfolioSummaryText:
         # TSLA is_tracking_only=True 但 units=0，不出现在 real_holdings
         assert "TSLA" not in text
 
-    def test_exchange_buffer_subtracted(self, tmp_path):
-        """dry_powder = cash_cny - exchange_buffer_cny"""
-        pm = _make_pm(tmp_path, cash={"CNY": 30000.0}, holdings=[],
-                       exchange_buffer_cny=10000.0)
+    def test_dry_powder_equals_cash(self, tmp_path):
+        """dry_powder = cash_cny（无 buffer 减项后）"""
+        pm = _make_pm(tmp_path, cash={"CNY": 30000.0}, holdings=[])
         text = portfolio_summary_text(pm, total_assets_cny=30000.0, current_prices={})
-        assert "20,000" in text  # dry_powder = 30000 - 10000
+        assert "30,000" in text
 
     def test_risk_level_shown(self, tmp_path):
         """风险偏好显示正确"""
         pm = _make_pm(tmp_path)
         text = portfolio_summary_text(pm, total_assets_cny=50000.0, current_prices={})
         assert "Balanced" in text
-
-    def test_backup_cny_annotation_shown(self, tmp_path):
-        """backup_cny > 0 时输出真实总财富占比注释"""
-        pm = _make_pm(tmp_path, cash={"CNY": 20000.0}, holdings=[])
-        text = portfolio_summary_text(pm, total_assets_cny=20000.0,
-                                       current_prices={}, backup_cny=400000.0)
-        assert "兜底注释" in text
-        assert "420,000" in text  # real_total = 20000 + 400000
-        assert "4.8%" in text     # 20000 / 420000 ≈ 4.76%, rounded to 4.8%
-
-    def test_backup_cny_zero_no_annotation(self, tmp_path):
-        """backup_cny=0（默认）时不出注释"""
-        pm = _make_pm(tmp_path, cash={"CNY": 20000.0}, holdings=[])
-        text = portfolio_summary_text(pm, total_assets_cny=20000.0, current_prices={})
-        assert "兜底注释" not in text
 
     def test_concentration_not_zeroed_when_total_unknown(self, tmp_path):
         """total_assets_cny=NaN（上游某腿不可解析）时，集中度不得伪造成 0.0%。
@@ -262,42 +245,6 @@ class TestPortfolioSummaryText:
         )
         assert "集中度" not in text, "lens OFF 时集中度不应出现在 portfolio_summary"
         assert "黄金" in text and "浮盈" in text  # 其余持仓信息仍在
-
-
-# ============ load_backup_cny：守 emergency_buffer_cny key 漂移回归 ============
-
-class TestLoadBackupCny:
-    """load_backup_cny 是 backup_cny 的单一可信源（cron / skill / service 三路径共用）。
-
-    历史 bug：daily_report / skill 误读不存在的 backup_amount_cny → 恒为 0、注释从不
-    渲染。renderer 单测（上面那两个）直接传 backup_cny=400000 绕过了 key 提取，守不住
-    这个漂移；这一组直接走 loader 的 metadata 提取来守。
-    """
-
-    def _pm_with_wealth(self, tmp_path, wealth_context):
-        pm = _make_pm(tmp_path)
-        pm.store.write("user", "user", {
-            "display_name": "TestUser",
-            "risk_tolerance": "Balanced",
-            "wealth_context": wealth_context,
-        }, "")
-        return pm
-
-    def test_reads_emergency_buffer_cny(self, tmp_path):
-        from openinvest.core.committee_runner import load_backup_cny
-        pm = self._pm_with_wealth(tmp_path, {"emergency_buffer_cny": 400000.0})
-        assert load_backup_cny(pm) == 400000.0
-
-    def test_missing_wealth_context_returns_zero(self, tmp_path):
-        from openinvest.core.committee_runner import load_backup_cny
-        pm = _make_pm(tmp_path)  # 无 wealth_context
-        assert load_backup_cny(pm) == 0.0
-
-    def test_legacy_wrong_key_returns_zero(self, tmp_path):
-        """历史误用的 backup_amount_cny 已废弃；只认 emergency_buffer_cny"""
-        from openinvest.core.committee_runner import load_backup_cny
-        pm = self._pm_with_wealth(tmp_path, {"backup_amount_cny": 999999.0})
-        assert load_backup_cny(pm) == 0.0
 
 
 # ============ 任务 3d：assemble_full_report ============

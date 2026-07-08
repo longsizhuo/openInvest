@@ -31,7 +31,7 @@ class UserStatus:
     """get_user_status() 返回值（用于 daily_report 等场景）"""
     cash_cny: float                     # CNY 现金（兼容字段：v2 内部从 cash["CNY"] 取）
     cash_aud: float                     # AUD 现金
-    disposable_for_invest: float        # 本期可投 CNY = max(0, cash_cny - exchange_buffer)；有正 cap 时封顶
+    disposable_for_invest: float        # 本期可投 CNY = max(0, cash_cny)；有正 cap 时封顶
     risk_level: str
     portfolio_value: float              # 总市值（CNY 折算粗算）
     target_asset: str                   # 主资产 symbol（target_assets[0]）
@@ -175,7 +175,6 @@ class PortfolioManager:
         from openinvest.utils.fx import get_fx_rate, to_base
         cash_cny = self.cash_amount("CNY")
         cash_aud = self.cash_amount("AUD")
-        exchange_buffer = float(self.user.get("exchange_buffer_cny", 0) or 0)
         prices = dict(current_prices or {})
 
         target_assets = list(self.strategy.get("target_assets", []) or [])
@@ -244,7 +243,7 @@ class PortfolioManager:
                 portfolio_value += value_cny
             # 拉不到汇率的 holding 静默跳过（缺口告警在 daily_report 那层做）
 
-        available = max(0.0, cash_cny - exchange_buffer)
+        available = max(0.0, cash_cny)
         disposable = min(available, max_single) if max_single > 0 else available
 
         return UserStatus(
@@ -589,21 +588,6 @@ class PortfolioManager:
             "remaining_units": old_units - units,
         }
 
-    def add_income(self, net_income_cny: float, payday_label: str) -> None:
-        """payday_check job 调用 - CNY 月度净收入入账"""
-        with self.with_portfolio_tx() as p:
-            cash = dict(p.get("cash") or {})
-            cash["CNY"] = float(cash.get("CNY", 0) or 0) + net_income_cny
-            p["cash"] = cash
-            new_cash = cash["CNY"]
-
-        self.store.update_fields("user", last_payday=payday_label)
-        self._reload()
-        log.info(
-            f"💰 [Payday {payday_label}] 净收入 ¥{net_income_cny:,.0f} 已入账，"
-            f"现金余额 ¥{new_cash:,.2f}",
-        )
-
     # ---------- 内部 ----------
 
     def _reload(self) -> None:
@@ -689,6 +673,6 @@ def _render_portfolio_body_v2(p) -> str:
     lines.extend([
         "## 说明",
         "",
-        f"_schema_version: {p.get('schema_version', 2)}_  此文件由 daily_report / commsec_sync / payday_check / web_api 自动更新；不要手动编辑。",
+        f"_schema_version: {p.get('schema_version', 2)}_  此文件由 daily_report / commsec_sync / web_api 自动更新；不要手动编辑。",
     ])
     return "\n".join(lines) + "\n"

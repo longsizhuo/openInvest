@@ -125,7 +125,7 @@ def main():
 
 ## 说明
 
-此文件由 daily_report / commsec_sync / payday_check / napcat_bot 四方更新。
+此文件由 daily_report / commsec_sync / napcat_bot 更新。
 - 黄金持仓需通过 NapCat 私聊命令 `/gold_set 12.5` 设置（用户主动报）
 - 其余通过自动化流程更新
 """

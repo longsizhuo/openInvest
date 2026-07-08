@@ -1,16 +1,11 @@
 """Contract tests — 防 cross-entry 漂移
 
-历史教训：2026-05-15 wealth_context_view 漂移事故 — run_committee 接受了参数，
-Risk Officer prompt 也读了，但 daily_report / scripts.skill 没人在调用链上算
-view 传进去 → user.md 的 wealth_context 三个月没进过 production 委员会。
-
-本文件守住**真实行为契约**，不是字符模式：
-1. graceful loader 必须在异常时返回空字符串
-2. entry 调用 run_committee 时必须**真的把 loader 结果**传给它
-
-第 2 条用 sentinel 字符串通过 monkeypatch 锚定 —— 如果有人偷懒写
-`wealth_context_view=""` 硬编码 / 漏调 loader，sentinel 不会出现在 captured
-kwargs 里，test 立刻红。
+历史教训：三路径（Skill/Web/Cron）各自调原语 run_committee，导致同样的"加跨
+entry 参数"动作要在 3 处分别改，漏一处即漂移（连续 4 次事故）。抽出
+run_committee_session 作为单一可信源后，本文件守住**真实行为契约**：entry 调用
+session 时必须**真的把 shared loader 结果**（macro_view / event_brief / sentiment /
+valuation）传到 run_committee。用 sentinel 字符串通过 monkeypatch 锚定 —— 漏调
+loader / 传错字段名，sentinel 不会出现在 captured kwargs 里，test 立刻红。
 """
 from __future__ import annotations
 
@@ -22,60 +17,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-# ============================================================================
-# 契约 1: load_wealth_context_view graceful 退化空字符串
-# ============================================================================
-# 不是"为通过而写"——这是 CLAUDE.md 分层契约段明确写的"shared loader 必须
-# graceful 退化"。memory 文件缺/损坏时不能让 committee 整个挂掉。
-
-def test_load_wealth_context_view_graceful_on_missing_memory(monkeypatch, tmp_path):
-    """memory 文件缺失时 load_wealth_context_view 返回 ""，不抛异常"""
-    from openinvest.core import memory_store as ms
-
-    empty_dir = tmp_path / "empty_memory"
-    empty_dir.mkdir()
-    monkeypatch.setattr(ms, "MEMORY_ROOT", empty_dir)
-
-    from openinvest.core.committee import load_wealth_context_view
-    result = load_wealth_context_view()
-    assert result == "", (
-        "load_wealth_context_view 在 memory 缺失时应 graceful 退化空字符串，"
-        f"实际返回: {result!r}"
-    )
-
-
-# ============================================================================
-# 契约 2: daily_report 真把 loader 结果传给 run_committee
-# ============================================================================
-# 这是**真行为测试**，不是 AST 扫字符模式：
-# - 用 SENTINEL 字符串通过 monkeypatch 锚定 load_wealth_context_view 输出
-# - 抓 run_committee 收到的 kwargs
-# - 验证 captured wealth_context_view == SENTINEL
-#
-# 漂移会被抓:
-# - "硬编码空" (wealth_context_view=""): captured != SENTINEL → 红
-# - "漏调 loader" (没传这个 kwarg / 用其他变量): captured != SENTINEL → 红
-# - "用错的字段名" (传成 wealth_view=...): kwarg 不存在 → 红
-
-def _seed_minimal_memory(memory_dir: Path, with_wealth_context: bool = False) -> None:
+def _seed_minimal_memory(memory_dir: Path) -> None:
     """生成 daily_report.run() 能跑起来的最小 memory 结构"""
-    wealth_block = ""
-    if with_wealth_context:
-        wealth_block = (
-            "wealth_context:\n"
-            "  emergency_buffer_cny: 4000000\n"
-            "  family_backup_available: true\n"
-            "  account_purpose: 零花钱账户\n"
-        )
     (memory_dir / "user.md").write_text(
-        f"""---
+        """---
 name: user
 type: profile
 schema_version: 1
 display_name: Test
 risk_tolerance: Balanced
-exchange_buffer_cny: 0
-{wealth_block}---
+---
 """,
     )
     (memory_dir / "strategy.md").write_text(
@@ -126,104 +77,13 @@ updated: '2024-05-15T00:00:00+00:00'
 
 
 # ============================================================================
-# 契约 3: 邮件 render 路径 — assemble_full_report 必须把 wealth_view 渲染进正文
-# ============================================================================
-# 历史教训（2026-05-15 第二次漂移事故）：load_wealth_context_view 修好了，
-# daily_report.run() 也把它传给了 run_committee（Risk Officer 用得上）—— 但
-# assemble_full_report 邮件模板里**没有 wealth section**，导致 LLM 用了视图却
-# 看不到结果进用户邮箱。本测验证 SENTINEL 字符串确实出现在最终邮件 markdown。
-
-def test_assemble_full_report_renders_wealth_section_when_view_nonempty():
-    """非空 wealth_context_view 必须出现在邮件 markdown 正文（而不是只进 transcript）"""
-    from openinvest.jobs.daily_report_builder import assemble_full_report
-
-    SENTINEL = "WEALTH_SECTION_SENTINEL_abc123"
-
-    md = assemble_full_report(
-        today="2026-05-16",
-        macro_view="mock macro view",
-        gold_snapshot_text="mock gold snapshot",
-        friction_report="mock friction",
-        target_assets=[],
-        asset_committees={},
-        skipped_assets=set(),
-        total_assets_cny=100000.0,
-        final_decision_gemini="mock gemini",
-        wealth_context_view=SENTINEL,
-    )
-
-    assert SENTINEL in md, (
-        "❌ wealth_context_view 没渲染进邮件正文！\n"
-        "   assemble_full_report 收了 wealth_context_view 参数但邮件模板里没插 section，\n"
-        "   导致 WealthContextOfficer 视图只进 transcript / Risk Officer prompt，\n"
-        "   用户邮件看不到。检查 jobs/daily_report_builder.py 的 wealth_section 插入逻辑。"
-    )
-
-
-def test_assemble_full_report_omits_wealth_section_when_view_empty():
-    """空字符串（fork 用户没填 wealth_context）→ 不应出现空 section 标题"""
-    from openinvest.jobs.daily_report_builder import assemble_full_report
-
-    md = assemble_full_report(
-        today="2026-05-16",
-        macro_view="mock macro view",
-        gold_snapshot_text="mock gold snapshot",
-        friction_report="mock friction",
-        target_assets=[],
-        asset_committees={},
-        skipped_assets=set(),
-        total_assets_cny=100000.0,
-        final_decision_gemini="mock gemini",
-        wealth_context_view="",
-    )
-
-    assert "WealthContextOfficer" not in md, (
-        "空 wealth_context_view 不应渲染 section 标题（避免空 section 干扰用户）"
-    )
-
-
-# ============================================================================
-# 契约 4: Gemini prompt 必须包含 wealth_view 和 event_brief
+# 契约 3: Gemini prompt 必须包含 event_brief
 # ============================================================================
 # 2026-05-16 漂移事故：Gemini prompt 是 daily_report.py 里的硬编码 f-string，
-# wealth_view 和 event_brief 均未注入，导致 Gemini 独立 challenge 时看不到
-# 真实流动性上下文和近期事件层，等价于这两层信息对 Gemini 不可见。
+# event_brief 未注入，导致 Gemini 独立 challenge 时看不到近期事件层。
 #
 # 修复方案：把 prompt 组装抽到 build_gemini_prompt() 纯函数（daily_report_builder.py），
-# 接受 wealth_view 和 event_brief 参数，在 prompt 里加对应 section（非空时插入）。
-#
-# 4 个 SENTINEL 测试守卫：
-# a. test_gemini_prompt_includes_wealth_view — wealth_view SENTINEL 出现在 prompt
-# b. test_gemini_prompt_includes_event_brief — event_brief SENTINEL 出现在 prompt
-# c. test_gemini_prompt_omits_empty_sections — 两者为空时不出现对应空 section 标题
-# d. test_daily_report_passes_event_brief_to_run_committee_and_macro
-#    — monkeypatch resolve_event_brief_multi 返 SENTINEL，抓 run_macro_view + run_committee kwargs
-
-def test_gemini_prompt_includes_wealth_view():
-    """build_gemini_prompt 必须把 wealth_view 渲染进 prompt 正文
-
-    任何形式的硬编码 / 漏传都会让 SENTINEL 不出现在 prompt 里，测试立即红。
-    """
-    from openinvest.jobs.daily_report_builder import build_gemini_prompt
-
-    SENTINEL = "WEALTH_VIEW_SENTINEL_gemini_abc"
-
-    prompt = build_gemini_prompt(
-        portfolio_summary="mock portfolio",
-        macro_view="mock macro",
-        cio_memos_combined="mock cio",
-        gold_snapshot_text="mock gold",
-        friction_report="mock friction",
-        wealth_view=SENTINEL,
-        event_brief="",
-    )
-
-    assert SENTINEL in prompt, (
-        "❌ build_gemini_prompt 没把 wealth_view 渲染进 prompt！\n"
-        "   Gemini 独立 challenge 时看不到用户真实流动性上下文。\n"
-        "   检查 jobs/daily_report_builder.py build_gemini_prompt() 的 wealth_section 插入逻辑。"
-    )
-
+# 接受 event_brief 参数，在 prompt 里加对应 section（非空时插入）。
 
 def test_gemini_prompt_includes_event_brief():
     """build_gemini_prompt 必须把 event_brief 渲染进 prompt 正文
@@ -240,7 +100,6 @@ def test_gemini_prompt_includes_event_brief():
         cio_memos_combined="mock cio",
         gold_snapshot_text="mock gold",
         friction_report="mock friction",
-        wealth_view="",
         event_brief=SENTINEL,
     )
 
@@ -252,11 +111,7 @@ def test_gemini_prompt_includes_event_brief():
 
 
 def test_gemini_prompt_omits_empty_sections():
-    """wealth_view="" 和 event_brief="" 时不出现对应空 section 标题
-
-    避免 Gemini 看到"# 用户真实流动性 (WealthContextOfficer)\n\n"这种无内容的空 section，
-    会让 Gemini 产生"为什么这里是空的"的困惑。
-    """
+    """event_brief="" 时不出现空 section 标题（避免 Gemini 困惑于空 section）"""
     from openinvest.jobs.daily_report_builder import build_gemini_prompt
 
     prompt = build_gemini_prompt(
@@ -265,14 +120,9 @@ def test_gemini_prompt_omits_empty_sections():
         cio_memos_combined="mock cio",
         gold_snapshot_text="mock gold",
         friction_report="mock friction",
-        wealth_view="",
         event_brief="",
     )
 
-    # 空时不应出现 section 标题
-    assert "WealthContextOfficer" not in prompt, (
-        "空 wealth_view 不应在 Gemini prompt 里出现 WealthContextOfficer section 标题"
-    )
     assert "事件层" not in prompt, (
         "空 event_brief 不应在 Gemini prompt 里出现事件层 section 标题"
     )
@@ -292,15 +142,15 @@ def test_gemini_prompt_omits_empty_sections():
 # 历史教训（2026-05-16）: 三路径（Skill/Web/Cron）各自调原语 run_committee，导致
 # 同样的"加跨 entry 参数"动作要在 3 处分别改，漏一处即漂移（连续 4 次事故）。
 # 抽出 run_committee_session 作为单一可信源后，本契约守护它：
-# - 任何 entry 调 session，最终 run_committee 必然收到 shared inputs（wealth +
-#   event_brief + macro_view）
+# - 任何 entry 调 session，最终 run_committee 必然收到 shared inputs（event_brief +
+#   macro_view）
 # - 单资产失败不阻断其他资产
 # - event_brief 三选一优先级（override > event_ids > multi_recall）严格执行
 
 def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
     monkeypatch, tmp_path,
 ):
-    """3 个 SENTINEL（wealth/event/macro）必须全部到达 run_committee kwargs."""
+    """event + macro SENTINEL 必须到达 run_committee kwargs."""
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
@@ -308,13 +158,10 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
     from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    SENTINEL_W = "WEALTH_SENTINEL_session_abc"
     SENTINEL_E = "EVENT_SENTINEL_session_def"
     SENTINEL_M = "MACRO_SENTINEL_session_ghi"
 
-    # 锚定 3 个 loader 的输出
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view",
-                        lambda: SENTINEL_W)
+    # 锚定 loader 的输出
     monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: SENTINEL_E)
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
@@ -352,9 +199,6 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
 
     assert captured, "run_committee 未被调用 — session dispatch 失败"
     kw = captured[0]
-    assert kw.get("wealth_context_view") == SENTINEL_W, (
-        f"wealth_view 漂移: 期望 {SENTINEL_W!r}, 实际 {kw.get('wealth_context_view')!r}"
-    )
     assert kw.get("macro_view") == SENTINEL_M, (
         f"macro_view 漂移: 期望 {SENTINEL_M!r}, 实际 {kw.get('macro_view')!r}"
     )
@@ -362,7 +206,6 @@ def test_run_committee_session_passes_all_shared_inputs_to_run_committee(
     # event_brief 通过 run_committee_for_symbol 流到 _resolve_event_brief（接受 override）
     # 然后 service layer 没把它直接传给 run_committee（macro 在 prompt 里），
     # 我们改测 session 返回值
-    assert result["wealth_view"] == SENTINEL_W
     assert result["event_brief"] == SENTINEL_E
     assert result["macro_view"] == SENTINEL_M
 
@@ -378,7 +221,6 @@ def test_run_committee_session_continues_on_single_asset_error(
     from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
@@ -426,7 +268,6 @@ def test_run_committee_session_event_brief_override_takes_priority(
     SENTINEL_OVERRIDE = "OVERRIDE_BRIEF_xxx"
     SENTINEL_MULTI = "MULTI_RECALL_BRIEF_yyy"
 
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: SENTINEL_MULTI)  # 不应被调
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
@@ -463,7 +304,6 @@ def test_run_committee_session_event_ids_translates_via_event_store(
     from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "M")
     monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
@@ -605,8 +445,8 @@ def test_override_concentration_noop_when_field_missing():
 # ============================================================================
 # 契约 7: 新维度（sentiment_brief / valuation_brief）— 确定性事实块防漂
 # ============================================================================
-# 对齐 TradingAgents 补的基本面 + 情绪维度。做成确定性 shared 块（像 wealth_view /
-# event_brief），必须真的从 loader 流到 run_committee，否则就是"算了但没人看"的漂移。
+# 对齐 TradingAgents 补的基本面 + 情绪维度。做成确定性 shared 块（像 event_brief），
+# 必须真的从 loader 流到 run_committee，否则就是"算了但没人看"的漂移。
 #
 # - graceful: 两个 loader 任何失败都退化 ""（不阻断 committee）
 # - SENTINEL: session→for_symbol→run_committee 链路真的把 loader 结果传到 run_committee
@@ -663,7 +503,6 @@ def test_run_committee_session_passes_sentiment_and_valuation_to_run_committee(
     monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief",
                         lambda *a, **k: SENTINEL_VAL)
     # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
                         lambda syms: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
@@ -870,7 +709,6 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
         portfolio_summary=fake_summary,
         prior_insights="",
         regime_brief="REGIME: uptrend",
-        wealth_context_view="",
         max_debate_rounds=1,
     )
 
@@ -992,7 +830,6 @@ def _setup_session_mocks(monkeypatch, tmp_path, *, atr_spike_ratio: float):
     from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
 
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
     monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
@@ -1123,7 +960,6 @@ def test_service_layer_appends_per_asset_event_stance(monkeypatch, tmp_path):
                         lambda syms: FAKE_BRIEF)
     monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
     monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
@@ -1182,7 +1018,6 @@ def test_service_layer_no_per_asset_line_when_base_empty(monkeypatch, tmp_path):
                         lambda syms: FAKE_BRIEF)
     monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief",
                         lambda *a, **k: "")
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
                         lambda *a, **kw: "MOCK_MACRO")
     monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
@@ -1243,7 +1078,6 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
     # 其余 shared loader / 数据全 mock，让链路能跑到 run_committee
     monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief", lambda *a, **k: "")
     monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief", lambda *a, **k: "")
-    monkeypatch.setattr("openinvest.core.runner.session.load_wealth_context_view", lambda: "")
     monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
     monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
     monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")

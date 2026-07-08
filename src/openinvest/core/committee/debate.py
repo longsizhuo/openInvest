@@ -40,7 +40,6 @@ class CommitteeReport:
     """4 角色 + cross-challenge round 的完整输出"""
     asset: Dict[str, Any]
     macro_view: str = ""              # 跨资产共享
-    wealth_context_view: str = ""     # 跨资产共享 (off-portfolio 真实流动性)
     quant_view: str = ""              # Round 1: Quant 独立陈述
     risk_view: str = ""               # Round 1: Risk Officer 独立陈述
     quant_adjusted: str = ""          # Round 2: Quant 看到 Risk 后调整
@@ -58,10 +57,6 @@ class CommitteeReport:
             f"=== ASSET: {self.asset.get('display_name', self.asset.get('symbol'))} ===",
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
         ]
-        if self.wealth_context_view:
-            lines.append(
-                f"\n=== WEALTH CONTEXT OFFICER (真实流动性，跨资产共享) ===\n{self.wealth_context_view}"
-            )
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
         if self.valuation_brief:
             lines.append(
@@ -143,7 +138,6 @@ def run_committee(
     portfolio_summary: str,
     prior_insights: str = "",
     regime_brief: str = "",
-    wealth_context_view: str = "",
     reentry_reference: str = "",
     current_price: Optional[float] = None,
     sentiment_brief: str = "",
@@ -190,7 +184,6 @@ def run_committee(
     report = CommitteeReport(
         asset=asset,
         macro_view=macro_view,
-        wealth_context_view=wealth_context_view,
         market_data=market_data,
         portfolio_summary=portfolio_summary,
         prior_insights=prior_insights,
@@ -224,18 +217,11 @@ def run_committee(
         f"{sentiment_section}"
         f"请按 Quant Analyst 格式输出技术信号。"
     )
-    wealth_section = (
-        f"# 用户真实流动性 (WealthContextOfficer):\n{wealth_context_view}\n\n"
-        if wealth_context_view else ""
-    )
     risk_input_r1 = (
         f"# 资产: {asset.get('display_name', sym)} ({sym})\n"
         f"# 用户当前持仓:\n{portfolio_summary}\n\n"
-        f"{wealth_section}"
         f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n"
         f"请按 Risk Officer 格式输出风险评估。"
-        f"**注意**：如果 WealthContextOfficer 报告 TRUE_LIQUIDITY=ample 或 moderate，"
-        f"不要因为 portfolio cash 低就喊 high_risk—— 看 EXPLANATION_TO_RISK。"
     )
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,

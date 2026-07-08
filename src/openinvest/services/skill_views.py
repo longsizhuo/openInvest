@@ -337,8 +337,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
             None if memory_ok else
             "向用户问以下信息后调 `run.sh init --from-stdin`（详细流程见 "
             "skills/invest/references/onboarding.md）：display_name, risk_tolerance "
-            "(Conservative/Balanced/Aggressive), monthly_income_cny / "
-            "monthly_expenses_cny / exchange_buffer_cny（都可填 0 跳过），"
+            "(Conservative/Balanced/Aggressive), "
             "holdings_description（自由描述持仓，例如 '510300 沪深300ETF "
             "3000 股 4.2 元，余额宝 5 万 CNY'），DEEPSEEK_API_KEY（可选，"
             "Coordinator 路径不需要）。target_assets 留空也行，onboarding "

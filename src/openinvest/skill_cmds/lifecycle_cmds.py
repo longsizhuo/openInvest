@@ -162,8 +162,6 @@ def cmd_init(args: argparse.Namespace) -> None:
     {
       "profile": {
         "name": "<display_name>", "risk_tolerance": "Conservative|Balanced|Aggressive",
-        "monthly_income_cny": 0, "monthly_expenses_cny": 0,
-        "exchange_buffer_cny": 0, "last_run_date": "YYYY-MM-DD",
         "holdings_description": "<自然语言持仓描述，让后端 LLM 解析>",
         "current_assets": {"cash_cny": 0, "aud_cash": 0, "ndq_shares": 0,
                            "gold_grams": 0, "gold_avg_cost_cny_per_gram": 0},
@@ -387,10 +385,6 @@ def _interactive_prompt() -> Dict[str, Any]:
         "risk_tolerance": ask(
             "风险偏好 (Conservative / Balanced / Aggressive)", "Balanced"
         ),
-        "monthly_income_cny": float(ask("月收入 (CNY，填 0 跳过)", "0")),
-        "monthly_expenses_cny": float(ask("月支出 (CNY，填 0 跳过)", "0")),
-        "exchange_buffer_cny": float(ask("换汇周转金 (CNY，填 0 表示无)", "0")),
-        "last_run_date": "1970-01-01",
         # 给 migrate_profile.py 兜底；如果走自然语言路径，3b 步骤会覆盖
         "current_assets": {"cash_cny": 0.0, "aud_cash": 0.0, "ndq_shares": 0.0},
         "investment_strategy": {

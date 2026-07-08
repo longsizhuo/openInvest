@@ -9,8 +9,6 @@ from typing import Any, Dict
 # exchange_fee / PortfolioManager 等改走函数内 call-time import（保持可被契约测试 patch）。
 from openinvest.core.committee import (
     atr_defense_from_text,  # save_committee_transcript 提 ATR 防御腿
-    load_backup_cny,
-    load_wealth_context_view,
     parse_cio_memo,
     regime_label_from_text,
 )
@@ -128,15 +126,9 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
             current_prices[sym] = _safe_close_latest(sym)
 
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-    # backup_cny（off-portfolio 兜底）/ insights / wealth view / 确定性事实块全部
-    # 以模块全局名调用 shared loaders（单一可信源 + 可被契约测试 monkeypatch）
-    _backup_cny = load_backup_cny(pm)
-    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices, backup_cny=_backup_cny)
+    # insights / 确定性事实块以模块全局名调用 shared loaders（单一可信源 + 可被契约测试 monkeypatch）
+    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices)
     insights = load_prior_insights(target, pm)
-
-    # 2026-05-18 漂移修复: skill 路径之前没接 wealth_context_view，Risk Officer
-    # 永远看不到 family_backup / account_purpose，按 PWM 老逻辑误判超配。
-    wealth_view = load_wealth_context_view()
 
     # 2026-06-11 漂移修复（coordinator 防御链对齐）: direct 路径在 service layer
     # 加载的确定性事实块，coordinator 路径此前没产出 —— CIO 看不到 VALUATION/
@@ -169,7 +161,6 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     return {
         "asset": target,
         "portfolio_summary": portfolio_summary,
-        "wealth_context_view": wealth_view,  # Claude worker 必须把这个塞进 Risk Officer R1/R2 prompt
         "macro_data": macro_data,
         "market_data": market,
         "regime_brief": regime_brief,  # Claude worker 必须把这个塞进 Quant Round 1/2 prompt
@@ -206,13 +197,10 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
             '\\n\\n# 市场数据:\\n<paste market_data>"\n'
             "  Quant 基于 regime 概率口径 + 当前指标自行判断 SIGNAL（无方向硬锁；集中度归 Risk 管）。\n"
             "  valuation_brief 为空串=非权益类（黄金等走 Macro 货币因素），该段跳过。\n"
-            "**Risk Officer 必须塞 wealth_context_view**（2026-05-18 漂移修复）:\n"
+            "**Risk Officer**: 召唤 Risk Round 1/2 worker 时，prompt 模板:\n"
             '  "<paste prompts.risk_round1>\\n\\n# 用户持仓:\\n<paste portfolio_summary>'
-            '\\n\\n# Wealth Context (off-portfolio 真实流动性):\\n<paste wealth_context_view>'
             '\\n\\n# 长期模式:\\n<paste prior_insights>"\n'
-            "  确保 Risk Officer 能拿到 SOLVENCY_BUFFER_LEVEL（family_backup_available\n"
-            "  + account_purpose 折算后的真实流动性等级），不按 PWM 老逻辑误判超配。\n"
-            "  Round 2 Risk 同样塞，让升级判断仍基于正确的 buffer level。\n"
+            "  Risk Officer 按 portfolio cash 判断流动性 + 风险预算。\n"
             "**CIO 必须塞确定性事实块 + 路径参考**（2026-06 防御链/路径化）: CIO prompt 末尾追加:\n"
             '  "\\n\\n=== VALUATION (确定性事实，必须纳入) ===\\n<paste valuation_brief>'
             '\\n\\n=== MARKET SENTIMENT 表盘 (确定性事实，必须纳入) ===\\n<paste sentiment_brief>'

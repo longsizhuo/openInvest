@@ -110,11 +110,6 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
         "\n\n---\n\n## Macro Strategist (shared)\n",
         report.macro_view,
     ])
-    # WealthContextOfficer 落盘（跨资产共享，可能为空 stub）— GUI 用来显示流动性 panel
-    if report.wealth_context_view:
-        lines.append(
-            f"\n\n---\n\n## Wealth Context Officer (real liquidity)\n{report.wealth_context_view}"
-        )
     # 确定性事实块落盘（审计 + verdict_review 事后归因 + GUI 展示）
     if report.valuation_brief:
         lines.append(

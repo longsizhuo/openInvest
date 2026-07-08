@@ -13,35 +13,32 @@ LLM 调用数：
   但收敛后会提前退出，平均 6-8 LLM
 
 拆包说明（2026-06-15，#56 同款薄壳 façade）：本文件原是扁平 core/committee.py，
-现按职责拆到本包的 6 个子模块（agent_io / cio_parse / views / loaders / debate /
+现按职责拆到本包的子模块（agent_io / cio_parse / views / debate /
 persist）。本 __init__ re-export 全部历史符号（含下划线名 + 模块常量），保持
 `from core.committee import X` 与 `core.committee.X` 属性访问对所有历史 X 仍可用，
 entry / service / 测试 / 脚本零改。注意：run_committee 实际定义在 debate.py，
 其内部解析的 _create_agent / _persist 等名字在 debate 命名空间——测试/脚本要 patch
 的是 core.committee.debate.* 而非本 façade 属性。
 
-import 顺序（依赖自底向上）：agent_io → cio_parse → persist → views → loaders → debate。
+import 顺序（依赖自底向上）：agent_io → cio_parse → persist → views → debate。
 """
 from openinvest.core.committee.agent_io import *  # noqa: F401,F403
 from openinvest.core.committee.cio_parse import *  # noqa: F401,F403
 from openinvest.core.committee.persist import *  # noqa: F401,F403
 from openinvest.core.committee.views import *  # noqa: F401,F403
-from openinvest.core.committee.loaders import *  # noqa: F401,F403
 from openinvest.core.committee.debate import *  # noqa: F401,F403
 
 from openinvest.core.committee.agent_io import __all__ as _agent_io_all
 from openinvest.core.committee.cio_parse import __all__ as _cio_parse_all
 from openinvest.core.committee.persist import __all__ as _persist_all
 from openinvest.core.committee.views import __all__ as _views_all
-from openinvest.core.committee.loaders import __all__ as _loaders_all
 from openinvest.core.committee.debate import __all__ as _debate_all
 
-# 包级 __all__ = 6 个子模块 __all__ 的并集（保持历史导出面 100% 不变）
+# 包级 __all__ = 各子模块 __all__ 的并集（保持历史导出面）
 __all__ = list(
     _agent_io_all
     + _cio_parse_all
     + _persist_all
     + _views_all
-    + _loaders_all
     + _debate_all
 )
