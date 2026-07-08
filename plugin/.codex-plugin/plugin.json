@@ -1,0 +1,34 @@
+{
+  "name": "invest",
+  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. The backend self-bootstraps (git clone + uv sync) on first call — the plugin only ships the agent skill layer.",
+  "skills": "./skills/",
+  "author": {
+    "name": "longsizhuo",
+    "url": "https://github.com/longsizhuo"
+  },
+  "homepage": "https://github.com/longsizhuo/openInvest",
+  "repository": "https://github.com/longsizhuo/openInvest",
+  "keywords": [
+    "investing",
+    "portfolio",
+    "finance",
+    "llm",
+    "committee",
+    "yfinance"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "openInvest",
+    "shortDescription": "AI investment committee & portfolio runtime",
+    "longDescription": "Four LLM roles (Macro Strategist, Quant, Risk Officer, CIO) debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict with a written memo. Multi-currency portfolio ledger, decision accounting (which advice you followed, and the PnL of what the rules blocked), 14 MCP tools with destructive-action hints. Backend installs from PyPI via uvx — no clone, no daemon. Never places real orders; not investment advice.",
+    "developerName": "longsizhuo",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/longsizhuo/openInvest",
+    "brandColor": "#4f8ef7",
+    "logo": "./assets/logo.png"
+  }
+}

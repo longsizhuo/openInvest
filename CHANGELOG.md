@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.22.1](https://github.com/longsizhuo/openInvest/compare/v0.22.0...v0.22.1) (2026-07-07)
+
+
+### Docs
+
+* **agents:** wiki 20 补 OpenClaw 接入（workspace skills 拷贝；plugins install 是 stub 勿用） ([05581e7](https://github.com/longsizhuo/openInvest/commit/05581e7264725304037e73cc8dc7fa5c780cb4ac))
+
+## [0.22.0](https://github.com/longsizhuo/openInvest/compare/v0.21.2...v0.22.0) (2026-07-06)
+
+
+### Features
+
+* **hermes:** 仓库根 plugin manifest——hermes plugins install longsizhuo/openInvest 一键装 skills ([957952c](https://github.com/longsizhuo/openInvest/commit/957952c094fe237f4071bd5cd1be6d29d4349a22))
+
+## [0.21.2](https://github.com/longsizhuo/openInvest/compare/v0.21.1...v0.21.2) (2026-07-06)
+
+
+### Docs
+
+* **skill:** SKILL.md 补 Hermes 原生元数据（platforms + metadata.hermes.tags）——增量字段，Claude/Codex 忽略 ([fa69fd7](https://github.com/longsizhuo/openInvest/commit/fa69fd79db744a6fdbf68fb42bd174098c06275a))
+
+## [0.21.1](https://github.com/longsizhuo/openInvest/compare/v0.21.0...v0.21.1) (2026-07-06)
+
+
+### Docs
+
+* **agents:** Hermes 接入指南（config.yaml MCP + agentskills 拷入）+ 行情 skill 联动投喂；uv.lock 版本号同步 ([999214b](https://github.com/longsizhuo/openInvest/commit/999214bf6fde44fa03a030efead4387317975c72))
+
+## [0.21.0](https://github.com/longsizhuo/openInvest/compare/v0.20.0...v0.21.0) (2026-07-06)
+
+
+### Features
+
+* **events:** ingest_event agent 投喂 + RSS 泛头条预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) 方案①②） ([c4c9c34](https://github.com/longsizhuo/openInvest/commit/c4c9c34229126e7c43829b53186370e766c60888))
+* **events:** ingest_event agent 投喂 + RSS 预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) ①②） ([2740707](https://github.com/longsizhuo/openInvest/commit/2740707b1058824a53b81b8281d24d7c1446b79d))
+* **events:** 中文快讯 wire（akshare 东财+新浪7×24）——A 股 symbol 自动激活（[#153](https://github.com/longsizhuo/openInvest/issues/153)） ([f7857f3](https://github.com/longsizhuo/openInvest/commit/f7857f3fb73b17c67026b5d4540175f99933c9f0))
+* **events:** 中文快讯 wire（akshare）——A 股 symbol 自动激活（[#153](https://github.com/longsizhuo/openInvest/issues/153) ③） ([40831fe](https://github.com/longsizhuo/openInvest/commit/40831fee9a0957d1293eb7e6f3c399b599ccdbfb))
+
+## [0.20.0](https://github.com/longsizhuo/openInvest/compare/v0.19.1...v0.20.0) (2026-07-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugin:** skill 源文件 git 路径变更 skills/* → plugin/skills/*（根 skills/ 符号链接保持磁盘兼容）
+
+### Features
+
+* **plugin:** Codex plugin cache 瘦身 44MB→156KB——真身入 plugin/，marketplace source 指回 ./plugin ([c3ad092](https://github.com/longsizhuo/openInvest/commit/c3ad0929960309afc90b0d822d8a0ad9d55c6ed4))
+
+## [0.19.1](https://github.com/longsizhuo/openInvest/compare/v0.19.0...v0.19.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **db:** WAL 膨胀治理——启动 checkpoint(TRUNCATE) + 读路径 rollback + 回填收尾截断 ([5e900e0](https://github.com/longsizhuo/openInvest/commit/5e900e03f9f3f5057f3e558e460ad5bd10339464)), closes [#104](https://github.com/longsizhuo/openInvest/issues/104)
+
+## [0.19.0](https://github.com/longsizhuo/openInvest/compare/v0.18.1...v0.19.0) (2026-07-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **security:** 设置 INVEST_API_TOKEN 后 loopback 请求也需要 Bearer token
+
+### Bug Fixes
+
+* **security:** INVEST_API_TOKEN 全域强制——删 loopback 豁免（[#106](https://github.com/longsizhuo/openInvest/issues/106)） ([76d4d8e](https://github.com/longsizhuo/openInvest/commit/76d4d8e376a5c6d99fd9d5dd8fdad5cea9919c75))
+
+## [0.18.1](https://github.com/longsizhuo/openInvest/compare/v0.18.0...v0.18.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **mcp:** server.json description 压到 registry 100 字符上限内 ([d323020](https://github.com/longsizhuo/openInvest/commit/d323020e04a1ba20633a9c71d7bfb710ab126469))
+
+## [0.18.0](https://github.com/longsizhuo/openInvest/compare/v0.17.1...v0.18.0) (2026-07-05)
+
+
+### Features
+
+* **mcp:** openinvest mcp 子命令 + 官方 MCP Registry 自动发布（issue [#133](https://github.com/longsizhuo/openInvest/issues/133) P0） ([256573e](https://github.com/longsizhuo/openInvest/commit/256573e1125244cba4225e868264144b54029bca))
+
+## [0.17.1](https://github.com/longsizhuo/openInvest/compare/v0.17.0...v0.17.1) (2026-07-05)
+
+
+### Docs
+
+* 全量文档对齐 2026-07-05 现实——GUI/NapCat 退役、PyPI+uvx 分发、Web API deprecated ([f828195](https://github.com/longsizhuo/openInvest/commit/f8281951fd270d844c0986e28a34995b758b1ce3))
+
 ## [0.17.0](https://github.com/longsizhuo/openInvest/compare/v0.16.0...v0.17.0) (2026-07-05)
 
 

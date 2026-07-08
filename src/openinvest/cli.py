@@ -70,6 +70,12 @@ from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 # ---------- main ----------
 
 def main() -> None:
+    # mcp 子命令最先分流：stdout 是 JSON-RPC 通道，不能进下面的重定向/argparse 输出
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from openinvest.connectors.mcp_server import main as _mcp_main
+        _mcp_main()
+        return
+
     # 把 sys.stdout 重定向到 stderr，让 utils/* 里的 print() noise 走 stderr。
     # _print_json 用 sys.__stdout__ 写真正的 JSON。
     sys.stdout = sys.stderr
@@ -198,6 +204,17 @@ def main() -> None:
     p.add_argument("--commit", action="store_true",
                    help="非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）；默认只预览")
     p.set_defaults(func=cmd_import_holdings)
+
+    p = sub.add_parser(
+        "ingest_event",
+        help="把 agent 搜到的新闻投喂进事件账本（归一化+判级+入库，幂等；需后端 LLM key）",
+    )
+    p.add_argument("--title", required=True)
+    p.add_argument("--url", required=True)
+    p.add_argument("--snippet", help="摘要（可选，给归一化 LLM 更多上下文）")
+    p.add_argument("--source", help="来源标注（如 caixin / 你的搜索渠道），入库为 agent:<source>")
+    p.add_argument("--ts", help="事件时间 ISO 8601（可选）")
+    p.set_defaults(func=cmd_ingest_event)
 
     p = sub.add_parser(
         "event_check",

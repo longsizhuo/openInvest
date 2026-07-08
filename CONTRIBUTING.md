@@ -27,7 +27,6 @@
 |------|------|------|
 | 修 bug / 改文档错别字 | 🟢 | [Issues](https://github.com/longsizhuo/openInvest/issues) 标 `bug` / `docs` |
 | 加新数据源 / 资产代理 | 🟡 | [Wiki: 07-extending](docs/wiki/07-extending.md#2-加新数据源) |
-| 加 GUI 功能 | 🟡 | invest-gui 仓库 + [Wiki: 10-design-system](docs/wiki/10-design-system.md) |
 | 加新 agent 角色 | 🔴 | [Wiki: 02-agents](docs/wiki/02-agents.md) + [07-extending](docs/wiki/07-extending.md#3-加新-agent-角色) |
 | 大架构改动 | 🔴 | 先开 ADR 讨论，见下文 |
 
@@ -56,23 +55,14 @@ cp .env.example .env
 $EDITOR .env
 
 # 跑测试确认环境 OK
-uv run pytest tests/ -v
-# 期望: 166 passed
+uv run pytest tests/ -q
+# 期望: 900+ passed
 ```
 
-如果你要改 GUI：
-
-```bash
-git clone https://github.com/longsizhuo/invest-gui.git
-cd invest-gui
-pnpm install
-
-# 起后端 + 前端 dev
-# Terminal 1: 在 invest 目录
-INVEST_WEB_DEV_CORS=1 uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
-# Terminal 2: 在 invest-gui 目录
-pnpm dev   # 浏览器开 http://localhost:5173
-```
+> ⚠️ **GUI 已退役（2026-07-05）**：后端不再 serve 前端，invest-gui 仓库封存待重做
+> （重做方向：独立前端直连 MCP）。**不要再配置/贡献前端**——所有能力经 CLI 子命令
+> （`uv run openinvest <cmd>`）和 MCP 工具（`openinvest-mcp`）暴露。Web API 标记
+> deprecated，只服务 remote hub 模式，不接受新增端点的 PR。
 
 详见 [QUICK_START.md](docs/QUICK_START.md)。
 
@@ -149,7 +139,6 @@ uv run pytest tests/test_xxx.py -v   # 单跑
 | `capabilities/*` | mock LLM client，测 prompt 渲染 + parse |
 | `connectors/web_api.py` | `tests/test_web_api.py`，FastAPI TestClient |
 | `connectors/napcat_bot.py` | `tests/test_napcat_v2.py`，CommandContext fixture |
-| 前端 | invest-gui 暂未配单测，至少 build 过 + 浏览器手测 |
 
 详见 [tests/README.md](tests/README.md)。
 
@@ -159,7 +148,7 @@ uv run pytest tests/test_xxx.py -v   # 单跑
 
 | 改动 | 同步文档 |
 |------|---------|
-| 加新 endpoint | `docs/wiki/06-api.md` 端点表 + invest-gui 跑 `pnpm gen-types` |
+| 加新能力 | 优先加 CLI 子命令 + MCP 工具（web_api 已 deprecated，不收新端点）|
 | 改 Pydantic schema | `docs/wiki/05-data-model.md` |
 | 加新 agent 角色 | `docs/wiki/02-agents.md` 角色矩阵 |
 | 加新 cron job | `jobs/README.md` |
@@ -241,17 +230,7 @@ def cash_total_in_base(
 - 全局可变状态（用闭包 / class 封装）
 - 直接改 dict（必须走 `with_portfolio_tx()`）—— 详见 [Wiki: 05-data-model](docs/wiki/05-data-model.md)
 
-### 4.2 TypeScript（invest-gui）
-
-- **strict mode 开**
-- **类型由 OpenAPI 自动生成**：`pnpm gen-types`，不手写 API 类型
-- **CSS variables 走 token**：用 `bg-[var(--surface-raised)]` 不写 `bg-zinc-900`
-- **不引 shadcn/ui / Material UI**（自定义组件库已够用）
-- **注释**：中文（同 Python）
-
-详见 [Wiki: 10-design-system](docs/wiki/10-design-system.md)。
-
-### 4.3 通用
+### 4.2 通用
 
 - 不写多段 docstring：一句话说清"为什么"，多了变 noise
 - 不加 emoji 到代码里（除非是错误标记 `⚠`）

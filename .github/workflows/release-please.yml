@@ -1,21 +1,29 @@
 name: release-please
 
 # 读 conventional commits 自动开 Release PR（3 条独立线）：
-#   - 根目录 Python 后端     → tag v0.1.x       + CHANGELOG.md
-#   - skills/invest          → tag invest-skill-v0.9.x        + skills/invest/CHANGELOG.md
-#   - skills/invest-setup    → tag invest-setup-skill-v0.1.x  + skills/invest-setup/CHANGELOG.md
+#   - 根目录 Python 后端     → tag v0.x.y       + CHANGELOG.md
+#   - skills/invest          → tag invest-skill-v0.x.y        + skills/invest/CHANGELOG.md
+#   - skills/invest-setup    → tag invest-setup-skill-v0.x.y  + skills/invest-setup/CHANGELOG.md
 #
-# 分流靠 commit 改的文件路径 —— 一次 commit 跨多组件会触发多个 Release PR。
-# merge PR 后自动打 tag + 建 GitHub Release，并把 SKILL.md 的 `version:` 字段
-# 同步到 manifest（靠 `# x-release-please-version` 注释锚定）。
+# 全自动闭环（2026-07-05）：开 Release PR → 本 workflow 直接合并 → 再跑一轮
+# release-please 切 tag/GitHub Release → 后端（"."）发版时顺手 uv publish 到 PyPI。
+# 不依赖 tag push 事件触发后续 workflow——GITHUB_TOKEN 造的事件不会触发别的
+# workflow，所以全部动作收在同一个 run 里。
+#
+# 多组件同时有 Release PR 时，合并第一个会让其余的 manifest 冲突——第二轮
+# release-please 会刷新它们，下一次 main push 自动合并。不追求一轮清空。
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 1 * * *"   # 每日兜底：清掉因 manifest 冲突滞留的 release PR
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
+  id-token: write   # MCP Registry OIDC 认证
 
 concurrency:
   group: release-please-${{ github.ref }}
@@ -25,8 +33,66 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: rp
+        uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Auto-merge release PRs
+        # 不用 prs_created 门（它只在新建时为 true，更新已有 PR 时是 false）——
+        # 直接扫 open 的 release-please 分支 PR，幂等
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,headRefName \
+            -q '.[] | select(.headRefName | startswith("release-please--")) | .number' \
+          | while read -r n; do
+            gh pr merge "$n" --merge --repo "$GITHUB_REPOSITORY" \
+              && echo "merged #$n" \
+              || echo "skip #$n（冲突，下轮 release-please 刷新后自愈）"
+          done
+
+      - id: rp2
+        name: Cut tags/releases for just-merged PRs
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # ---- 后端发版 → 自动 publish 到 PyPI ----
+      - name: Checkout (for build)
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Publish to PyPI
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          git pull origin main   # 拿到刚合并的版本 bump
+          uv build
+          uv publish
+          echo "✅ published $(grep '^version' pyproject.toml)"
+
+      - name: Publish to MCP Registry
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
+        run: |
+          VERSION=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          # 等 PyPI 索引可见（registry 会校验包存在 + README 里的 mcp-name 标记）
+          for i in $(seq 1 20); do
+            curl -sf "https://pypi.org/pypi/openinvest/$VERSION/json" >/dev/null && break
+            sleep 15
+          done
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > s.tmp && mv s.tmp server.json
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+          echo "✅ MCP Registry: io.github.longsizhuo/openinvest@$VERSION"

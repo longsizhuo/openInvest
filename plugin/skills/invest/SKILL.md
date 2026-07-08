@@ -1,7 +1,11 @@
 ---
 name: invest
-version: 0.16.0 # x-release-please-version
+version: 0.18.1 # x-release-please-version
 description: openInvest 多资产 AI 投资委员会 **日常使用**。读取持仓 / 实时行情 / 策略 / 历史决议 / 加减仓 / 跑 4 角色 LLM 委员会给投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Cursor / Cline / Codex / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**："show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"加仓 / 减仓 / 记一笔交易"。**首次安装走另一个 skill `invest-setup`**（doctor 返回 needs_setup 时切过去）。后端 longsizhuo/openInvest。
+platforms: [linux, macos]
+metadata:
+  hermes:
+    tags: [investing, portfolio, committee, stocks, gold, etf, crypto, 投资, 持仓, 委员会, 行情]
 ---
 
 # Invest Skill
@@ -158,6 +162,14 @@ events / holdings import / gold 专用端点）→ 读 `references/tools.md`（�
 /api/holdings/import）——后端 LLM 只解析文字，不收图。先不带 `--commit` 预览，
 用户核对后再 `--commit` 非破坏写入。
 
+## 新闻投喂（你的搜索 > 任何爬虫）
+
+你有比后端爬虫强得多的搜索能力（含中文源）。**浏览/搜索中看到与用户持仓相关的
+财经新闻时，主动调 `ingest_event` 喂进事件账本**（MCP 工具或 CLI `ingest_event
+--title --url [--snippet --source]`）——后端负责归一化/判级/去重/RAG 召回，
+重发同一条不会重复入账。尤其 A 股/区域市场新闻：那是爬虫盲区，你是唯一来源。
+若宿主装有行情/新闻类 skill（如 Longbridge），其新闻同样值得喂——账本只认信息不认出身。
+
 ## 决策闭环 workflow（Decision Review + Reflection）
 
 openInvest 记账，**你负责采集**——这是宿主 agent 的本职（issue #133 Decision 2）。
@@ -194,13 +206,12 @@ openInvest 记账，**你负责采集**——这是宿主 agent 的本职（issu
   那条路烧 DeepSeek token。Direct 路径单资产 `run_committee` 就够。
 - **不要编实时价**。永远走 `run.sh status` 或 `live_prices`。yfinance 可能返回
   陈旧数据，注意 `is_stale` flag。
-- **永远不直接写 `memory/`**。所有状态变更走 NapCat 或 Web API（atomic write +
+- **永远不直接写 `memory/`**。所有状态变更走 CLI 子命令 / MCP 工具（atomic write +
   fcntl 锁 + 审计 trail）。直接编辑会导致 schema drift + 并发写损坏。
 - **同一资产同一天不重复跑委员会**——`run_committee` 默认会读 cache；
   Coordinator 路径要先 `ls memory/.committee/<today>/<SYM>.md` 检查。
 - **不要编 CIO confidence**。worker 之间分歧严重时老实写 `confidence: 0.4-0.5`。
-- **不要泄露用户的 QQ / email**。NapCat 白名单是 per-user env var
-  （`INVEST_WHITELIST_QQ`），永远不在输出里写死。
+- **不要泄露用户的 email 等个人身份信息**，永远不在输出里写死。
 
 ## 出问题先看哪
 

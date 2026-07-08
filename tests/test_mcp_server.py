@@ -5,7 +5,7 @@ import asyncio
 
 EXPECTED_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
-    "decisions", "explain_decision", "record_execution",
+    "decisions", "explain_decision", "record_execution", "ingest_event",
     "buy", "sell", "deposit", "withdraw", "run_committee",
 }
 
@@ -39,7 +39,7 @@ def test_tool_annotations():
             assert ann.readOnlyHint is True, name
         elif name in MONEY_TOOLS:
             assert ann.readOnlyHint is False and ann.destructiveHint is True, name
-        else:  # record_execution / run_committee：写但幂等（append 账本 / 当日缓存）
+        else:  # record_execution / run_committee / ingest_event：写但幂等
             assert ann.readOnlyHint is False and ann.destructiveHint is False \
                 and ann.idempotentHint is True, name
 

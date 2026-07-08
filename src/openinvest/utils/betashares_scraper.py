@@ -1,3 +1,9 @@
+"""BetaShares 官网爬虫——yfinance 被墙/抓空时 NDQ.AX 的现价兜底。
+
+接线点：utils/exchange_fee.py:_betashares_fallback（yfinance 失败分支调
+scrape_full_ndq_data 拿当前 NAV 写 MarketStore, source="betashares_fallback"）。
+2026-07 真实站点验证通过（NAV/date/holdings/sectors 全解析成功）。
+"""
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -66,7 +72,17 @@ def parse_betashares_content(html):
 
 def scrape_full_ndq_data():
     url = "https://www.betashares.com.au/fund/nasdaq-100-etf/"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    # 光秃 "Mozilla/5.0" 会被站点 WAF 判 bot → 403（2026-07 验证）。
+    # 完整浏览器 header 组合实测 200。
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-AU,en;q=0.9",
+        "Referer": "https://www.betashares.com.au/",
+    }
     try:
         r = requests.get(url, headers=headers, timeout=20)
         r.raise_for_status()

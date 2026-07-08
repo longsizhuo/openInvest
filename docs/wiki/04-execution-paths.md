@@ -25,8 +25,9 @@ documents:
 > **2026-05 重命名**：旧文档叫 "Skill 路径" vs "Web/Cron 路径"。但 skill 现在
 > 同时支持两条（`prepare_committee` + spawn subagent 走 Coordinator；
 > `run_committee` 走 Direct，任意非 Claude agent 也能用），所以统一改叫
-> **Coordinator** vs **Direct**。Direct 包含原 cron 路径 + Web GUI 触发版本 +
-> skill 里的 `run_committee` 子命令。
+> **Coordinator** vs **Direct**。Direct 包含原 cron 路径 + Web API 触发版本
+> （GUI 已于 2026-07-05 退役，端点保留服务 hub/内部触发）+ skill 里的
+> `run_committee` 子命令。
 
 ---
 
@@ -94,19 +95,19 @@ Agent({...})  // cio 综合 transcript
 
 ---
 
-## 2. Direct 路径（任意 agent / cron / Web GUI）
+## 2. Direct 路径（任意 agent / cron / Web API）
 
 三个触发入口都走同一份 `core/committee/debate.py:run_committee`：
 
 | 入口 | 谁用 | 备注 |
 |------|------|------|
-| `~/.claude/skills/invest/scripts/run.sh run_committee SYM` | Cursor / Cline / Codex / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
-| `POST /api/committee/run` | Web GUI 的"触发/直播"按钮 | 异步 + SSE 进度推送 |
+| `~/.claude/skills/invest/scripts/run.sh run_committee SYM`（= `uvx openinvest run_committee`）| Cursor / Cline / Codex / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
+| `POST /api/committee/run`（deprecated 存量端点）| remote hub 转发 / 内部触发 | 异步 + SSE 进度推送 |
 | cron `0 3 * * *` 跑 `jobs/daily_report.py` | 服务器自动每日 | 跑全部 target_assets，可选发邮件 |
 
 ### 触发
 
-**手动**：`POST /api/committee/run` （Web GUI 「触发/直播」按钮）
+**手动**：`uvx openinvest run_committee SYM`（hub 场景走 `POST /api/committee/run`）
 **自动**：cron `0 3 * * *` 跑 `jobs/daily_report.py`
 
 ### 实现
@@ -141,7 +142,7 @@ cio_memo = _ask(cio_agent, cio_prompt_with_full_transcript)
 ### 优势
 
 - ✅ 后台 cron 自动跑（每天 03:00 daily_report）
-- ✅ Web GUI SSE 实时直播 stage 进度
+- ✅ SSE 实时直播 stage 进度（hub / SSE 消费方）
 - ✅ 多资产真并行（ThreadPoolExecutor 包多个 `run_committee_for_symbol`）
 - ✅ 状态持久化（`.committee/<task_id>/status.json` + `daily/<date>/<sym>.md`）
 - ✅ DeepSeek-Chat 响应快（2-3s/次 vs Claude 5-10s/次），整体收敛 ~16s
@@ -225,8 +226,8 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 你在 Cursor / Cline / Codex / 其他非 Claude agent 里？
   → Direct 路径（skill `run_committee SYM` 一键拿 verdict，需要 DEEPSEEK_API_KEY）
 
-你在 Web GUI 想点按钮触发 + 看实时进度？
-  → Direct 路径（POST /api/committee/run，自带 SSE）
+你在 remote hub 客户端想触发 + 看实时进度？
+  → Direct 路径（POST /api/committee/run，自带 SSE；deprecated 存量端点）
 
 你想每天 03:00 自动跑（无人值守）？
   → Direct 路径 cron（jobs/daily_report.py）

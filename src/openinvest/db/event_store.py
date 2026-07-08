@@ -113,6 +113,10 @@ class EventStore:
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA busy_timeout=5000")
         cur.execute("PRAGMA synchronous=NORMAL")
+        try:
+            cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # #104：启动回收 WAL
+        except Exception:
+            pass
         self.conn.commit()
 
         self._lock = threading.RLock()

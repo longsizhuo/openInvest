@@ -34,6 +34,7 @@ __all__ = [
     "cmd_live_prices",
     "cmd_discipline",
     "cmd_event_check",
+    "cmd_ingest_event",
     "cmd_decisions",
     "cmd_record_execution",
 ]
@@ -292,6 +293,19 @@ def cmd_record_execution(args: argparse.Namespace) -> None:
         _print_json({"status": "error", "error": str(e)})
         sys.exit(1)
     _print_json(rec)
+
+
+def cmd_ingest_event(args) -> None:
+    """agent 投喂新闻进事件账本（等价 MCP ingest_event，#153 方案①）"""
+    from openinvest.services.event_ingest import ingest_events
+    result = ingest_events([{
+        "title": args.title, "url": args.url,
+        "snippet": args.snippet or "", "source": args.source or "",
+        "published_at": args.ts,
+    }])
+    _print_json(result)
+    if result.get("status") == "error":
+        sys.exit(1)
 
 
 def cmd_event_check(args: argparse.Namespace) -> None:

@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.18.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.0...invest-skill-v0.18.1) (2026-07-07)
+
+
+### Docs
+
+* **agents:** Hermes 接入指南（config.yaml MCP + agentskills 拷入）+ 行情 skill 联动投喂；uv.lock 版本号同步 ([999214b](https://github.com/longsizhuo/openInvest/commit/999214bf6fde44fa03a030efead4387317975c72))
+* **skill:** SKILL.md 补 Hermes 原生元数据（platforms + metadata.hermes.tags）——增量字段，Claude/Codex 忽略 ([fa69fd7](https://github.com/longsizhuo/openInvest/commit/fa69fd79db744a6fdbf68fb42bd174098c06275a))
+
+## [0.18.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.17.0...invest-skill-v0.18.0) (2026-07-06)
+
+
+### Features
+
+* **events:** ingest_event agent 投喂 + RSS 泛头条预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) 方案①②） ([c4c9c34](https://github.com/longsizhuo/openInvest/commit/c4c9c34229126e7c43829b53186370e766c60888))
+* **events:** ingest_event agent 投喂 + RSS 预过滤（[#153](https://github.com/longsizhuo/openInvest/issues/153) ①②） ([2740707](https://github.com/longsizhuo/openInvest/commit/2740707b1058824a53b81b8281d24d7c1446b79d))
+
+## [0.17.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.16.1...invest-skill-v0.17.0) (2026-07-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugin:** skill 源文件 git 路径变更 skills/* → plugin/skills/*（根 skills/ 符号链接保持磁盘兼容）
+
+### Features
+
+* **plugin:** Codex plugin cache 瘦身 44MB→156KB——真身入 plugin/，marketplace source 指回 ./plugin ([c3ad092](https://github.com/longsizhuo/openInvest/commit/c3ad0929960309afc90b0d822d8a0ad9d55c6ed4))
+
+## [0.16.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.16.0...invest-skill-v0.16.1) (2026-07-05)
+
+
+### Docs
+
+* 全量文档对齐 2026-07-05 现实——GUI/NapCat 退役、PyPI+uvx 分发、Web API deprecated ([f828195](https://github.com/longsizhuo/openInvest/commit/f8281951fd270d844c0986e28a34995b758b1ce3))
+
 ## [0.16.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.15.0...invest-skill-v0.16.0) (2026-07-05)
 
 

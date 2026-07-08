@@ -15,8 +15,8 @@
 `prepare_committee` 只对 `strategy.target_assets` 里的资产工作。用户想分析没追踪的
 symbol：
 
-1. 先通过 Web GUI（Strategy 页）或 `POST /api/strategy/asset` 加进 `target_assets`
-   ——见 `references/adding-assets.md`
+1. 先用 CLI `run.sh buy`（有真实持仓时）或 `POST /api/strategy/asset` 加进
+   `target_assets`——见 `references/adding-assets.md`
 2. 或通过 `POST /api/holdings` 加成追踪仓（`is_tracking_only: true`）——效果一样，
    不动 strategy
 
@@ -41,8 +41,8 @@ risk_round1, quant_round2_after_risk, risk_round2_after_quant, cio}`，然后你
 - header 拼写错
 - CIO 段是空的（你忘写了）
 
-parser 严格因为存盘的文件被 Dreaming 和 Web GUI "决议归档" tab 消费。检查
-6 段都在再重发。
+parser 严格因为存盘的文件被 Dreaming 和 `decisions` / `explain_decision`
+决策回放消费。检查 6 段都在再重发。
 
 ## 同日检查说有 verdict 但你没跑过
 
@@ -56,15 +56,13 @@ frontmatter 有 `Provider: claude (skill mode)` 或 `Provider: deepseek`。
 如果是 `deepseek`，cron `daily_report` 已经跑过 + 写过 verdict——你应该读那个
 拿给用户。只在用户明确想要 Claude 视角再重跑。
 
-## doctor 全绿但用户报 "GUI 里看不到我的数据"
+## 远端模式（INVEST_API_BASE）转发报错 / 连不上 hub
 
-用户开了 GUI 但后端没接上。检查：
+`.env` 配了 `INVEST_API_BASE` 但子命令转发失败。检查 hub 机器：
 
-1. `ps aux | grep uvicorn` —— `connectors.web_api` 在 :8765 跑吗？
-2. `curl http://127.0.0.1:8765/api/health` —— 200 吗？
-
-让用户跑 `~/.claude/skills/invest/scripts/run.sh gui`（前台 uvicorn，Ctrl+C 退出），
-浏览器开 `http://127.0.0.1:8765`。
+1. `ps aux | grep uvicorn` —— hub 上 web_api 在 :8765 跑吗？
+2. `curl $INVEST_API_BASE/api/health` —— 200 吗？（hub 开了鉴权就带
+   `Authorization: Bearer $INVEST_API_TOKEN`）
 
 ## `.env` 里有 DeepSeek key 但 `daily_report` 还报 401
 

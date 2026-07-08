@@ -1,7 +1,11 @@
 ---
 name: invest-setup
-version: 0.2.0 # x-release-please-version
+version: 0.3.1 # x-release-please-version
 description: First-time openInvest installation and onboarding. **ONLY use when** user explicitly says "set up invest" / "init invest" / "帮我初始化 invest", OR when `invest` skill's `doctor` returns `status: "needs_setup"`. **NOT for daily usage** — once onboarding is done, the `invest` skill takes over (portfolio viewing, committee analysis, buy/sell tracking). Wraps `run.sh init --from-stdin` with the canonical 5-question flow.
+platforms: [linux, macos]
+metadata:
+  hermes:
+    tags: [investing, setup, onboarding, 初始化, 投资]
 ---
 
 # Invest Setup Skill

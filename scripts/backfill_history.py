@@ -134,6 +134,11 @@ def main() -> None:
             failed.append(s)
     # 非零退出 + 汇总：否则一批里几个挂了脚本仍 exit 0,自动化/操作者误判成功,
     # 那些 symbol 的 path-profile 继续用欠采样的 bull-biased 分布而无人察觉。
+    # #104：批量写完主动截断 WAL——别把几百 MB 日志留给下一个 checkpoint
+    try:
+        ms.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        pass
     if failed:
         print(f"\n{len(failed)}/{len(symbols)} symbol(s) FAILED: {', '.join(failed)}")
         sys.exit(1)

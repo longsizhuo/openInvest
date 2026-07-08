@@ -2,19 +2,21 @@
 type: reference
 title: 30 分钟上手 openInvest
 tags: [quickstart, onboarding, setup, deployment]
-intent: 新用户从 clone 到跑通委员会的最快通路
+intent: 新用户从 pip/uvx 安装到跑通委员会的最快通路
 documents:
-  endpoints:
-    - GET /api/portfolio
+  endpoints: []
   config_keys: []
   symbols: []
 ---
 
 # 30 分钟上手 openInvest
 
-> 给陌生 fork 用户的最快通路：从 `git clone` 到第一份 AI memo + GUI 看板。
+> 给新用户的最快通路：从 `uvx openinvest` 到第一份 AI memo。
 >
 > 完整版背景在 [README.md](../README.md)。这里只走 happy path。
+>
+> ⚠️ 2026-07-05 起 Web GUI 已退役（前端仓库封存待重做，重做走独立前端连 MCP）。
+> 没有 :8765 网页面板；日常交互走 CLI / MCP / agent skill。
 
 ---
 
@@ -22,11 +24,11 @@ documents:
 
 | 阶段 | 用时 | 你要做的 |
 |------|------|----------|
-| 1. 装依赖 | 5 min | `uv sync` |
-| 2. 配 `.env` 凭证 | 5 min | DeepSeek key + 邮箱（可跳过 IMAP） |
+| 1. 安装 | 2 min | `uv tool` / `uvx`，无需 clone |
+| 2. 配 `INVEST_HOME` + `.env` 凭证 | 5 min | DeepSeek key + 邮箱（可跳过 IMAP） |
 | 3. 改 `memory/` 的 portfolio + strategy | 10 min | 把"演示数据"换成自己的 |
-| 4. 跑第一次委员会 | 5 min | `uv run python -m jobs.daily_report` |
-| 5. 装 Web GUI | 5 min | `uv run python -m scripts.sync_gui_dist` + uvicorn |
+| 4. 跑第一次委员会 | 5 min | `uvx openinvest run_committee <SYM>` |
+| 5. 注册 MCP（给 agent 用） | 2 min | `claude mcp add openinvest ...` |
 
 ---
 
@@ -35,75 +37,62 @@ documents:
 需要的工具：
 
 ```bash
-# Python 3.13+
-python --version    # 应 ≥ 3.13
-
-# uv（推荐，快 100 倍 pip）
+# uv（自带 uvx，推荐）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 可选：
 
-- DeepSeek API key（必填，否则 LLM 跑不起来）—— [开通入口](https://platform.deepseek.com/)
+- DeepSeek API key（Direct 路径必填，否则 LLM 跑不起来）—— [开通入口](https://platform.deepseek.com/)
 - Gmail 应用密码（CommSec 邮件导入用，可跳过）
-- Cloudflare Access 账号（生产部署 GUI 时用，本地开发不用）
+
+> git clone 只用于**开发后端本身**，不是用户安装方式。想改代码再 clone。
 
 ---
 
-## 🐳 想用 Docker？（替代 step 1 + 5）
+## 1. 安装（2 min）
 
-不想装 uv / 手起 uvicorn，可以直接用容器（镜像自带 GUI，无需单独 `sync_gui_dist`）：
+后端从 PyPI 分发，两种等价方式：
 
 ```bash
-git clone https://github.com/longsizhuo/openInvest.git && cd openInvest
-cp .env.example .env && $EDITOR .env                               # 填 DEEPSEEK_API_KEY
-docker compose run --rm invest-web python -m scripts.skill init     # onboarding（建 memory/，走 invest-web：agent 的 sh -c entrypoint 会吞参数）
-docker compose up -d --build                                       # 起 web(:8765) + scheduler
+# 方式 A：uvx 免安装直跑（推荐，首跑自动拉包）
+uvx openinvest doctor
+
+# 方式 B：pip 常驻安装
+pip install openinvest
+openinvest doctor
 ```
 
-浏览器开 <http://localhost:8765>。预构建镜像（`docker compose pull`）/ 端口暴露 / 生产
-Caddy 等细节见 [08-deployment.md 第 0 节](wiki/08-deployment.md#0-容器一键自托管docker-compose--ghcr)。
+装完拿到三个命令：
 
-下面的 step 1–5 是**手装 uv 的等价路径**，与 Docker 二选一即可。
+| 命令 | 用途 |
+|------|------|
+| `openinvest` | CLI（status / run_committee / buy / sell / ...） |
+| `openinvest-mcp` | MCP stdio server（14 工具，给 agent 用） |
+| `openinvest-web` | API server（仅 remote hub 部署用，见 [08-deployment.md](wiki/08-deployment.md)） |
+
+**更新**：`skills/invest/scripts/run.sh update` 或 `uvx --refresh openinvest doctor`。
 
 ---
 
-## 1. clone + 装依赖（5 min）
+## 2. 配数据目录 + `.env`（5 min）
+
+代码和数据分离：包在 uv cache / site-packages，**你的数据全在 `INVEST_HOME`**
+（默认 `~/openInvest`，只放 `memory/`、`db/`、`.env`）。
 
 ```bash
-git clone https://github.com/longsizhuo/openInvest.git
-cd openInvest
-uv sync           # 装 prod + dev 依赖
+export INVEST_HOME=~/openInvest    # 写进 shell rc；用默认值可省略
+mkdir -p ~/openInvest
+uvx openinvest init                # onboarding：交互建 memory/ 三件套
+$EDITOR ~/openInvest/.env
 ```
 
-验证：
+`.env` 最少要填：
 
 ```bash
-uv run pytest tests/ -q
-# 期望: 148 passed
-```
-
-如果 `pytest` 全过 → 进 step 2。如果挂了多条，最常见是 `pyarrow` / `yfinance` 拉数据失败 → 看 [troubleshooting](#troubleshooting) 第 1 节。
-
----
-
-## 2. 配 `.env`（5 min）
-
-```bash
-cp .env.example .env
-$EDITOR .env
-```
-
-最少要填这些：
-
-```bash
-# DeepSeek（必填，否则委员会跑不动）
+# DeepSeek（Direct 路径必填，否则委员会跑不动）
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-
-# Web GUI 端口（保持默认）
-INVEST_WEB_HOST=127.0.0.1
-INVEST_WEB_PORT=8765
 ```
 
 可选（全部能跳过）：
@@ -126,7 +115,7 @@ SMTP_TO=you@gmail.com
 
 ## 3. 配自己的持仓 + 策略（10 min）
 
-`memory/` 是你的私有数据目录（git ignore）。**首次 clone 时是空的**，按下面的模板写。
+`$INVEST_HOME/memory/` 是你的私有数据目录。`init` 没走完 / 想手写，按下面的模板。
 
 ### 3.1 `memory/portfolio.md`
 
@@ -216,53 +205,40 @@ XX 岁，研发，无房贷，目标 5 年内首付。可承受 -20% 回撤但�
 ## 4. 跑第一次委员会（5 min）
 
 ```bash
-uv run python -m jobs.daily_report
+uvx openinvest run_committee NDQ.AX
 ```
 
-正常会看到：
+正常会看到 4 角色辩论 + CIO verdict，transcript 落盘：
 
-```
-[INFO] Macro snapshot: SCORE=+1 SIGNAL=neutral STRENGTH=4
-[INFO] Running committee for NDQ.AX (max_debate_rounds=1)
-[INFO] Round 1: quant + risk parallel...
-[INFO] Round 2: cross-challenge...
-[INFO] CIO synthesizing...
-[INFO] Saved to memory/daily/2026-05-06/NDQ.AX.md
-[INFO] Email sent (if SMTP configured)
+```bash
+cat ~/openInvest/memory/daily/$(date +%F)/NDQ.AX.md
+# 一份完整 markdown brief，含 4 角色 transcript + CIO verdict
 ```
 
 **预算**：单次 ~5 LLM 调用 × $0.001 ≈ ¥0.05（DeepSeek 价格）。
 
-跑完后看：
+日常查看：
 
 ```bash
-cat memory/daily/$(date +%F)/NDQ.AX.md
-# 一份完整 markdown brief，含 4 角色 transcript + CIO verdict
+uvx openinvest status        # 持仓 + 浮盈
+uvx openinvest live_prices   # 实时行情
+uvx openinvest decisions     # 历史决议
 ```
 
 跑挂了？看 [troubleshooting](#troubleshooting) 第 2 节。
 
 ---
 
-## 5. 装 Web GUI（5 min）
+## 5. 注册 MCP（给 agent 用，2 min）
 
-GUI 通过 GitHub Releases 分发预构建产物（不在主仓库 git history）：
+Claude Code / 任何 MCP 宿主一行注册：
 
 ```bash
-# 拉最新构建到 static/
-uv run python -m scripts.sync_gui_dist
-
-# 起 web server
-uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
+claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 ```
 
-浏览器开 <http://localhost:8765>，应该看到：
-
-- **主面板**：持仓 + 浮盈 + 总资产折 CNY
-- **历史**：所有 deposit/withdraw/buy/sell 流水
-- **策略**：目标配置 vs 实际偏差
-- **委员会**：点 [Run] 触发，SSE 直播 6 个 stage
-- **System**：LLM 用量、命中率、数据源健康
+之后在 Claude Code 里直接说"看看我的持仓"、"跑委员会分析 AAPL"即可，
+14 个 MCP 工具覆盖读写全链路。
 
 ---
 
@@ -270,17 +246,13 @@ uv run uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765
 
 ### 自动化（可选）
 
+日报 cron 走 `openinvest.jobs.daily_report` 模块（pip 安装形态）：
+
 ```bash
-# 系统级 cron 每天 03:00 跑委员会
+pip install openinvest
 crontab -e
-# 加一行：
-0 3 * * * cd $HOME/openInvest && $HOME/.local/bin/uv run python -m jobs.daily_report
-```
-
-或者用 invest 自带的 jobs runner：
-
-```bash
-uv run python -m scheduler.runner   # 读 jobs/*.yml 跑所有 enabled job
+# 加一行（每天 03:00 跑委员会日报）：
+0 3 * * * INVEST_HOME=$HOME/openInvest python -m openinvest.jobs.daily_report
 ```
 
 ### CommSec 自动同步成交（澳股用户）
@@ -288,40 +260,24 @@ uv run python -m scheduler.runner   # 读 jobs/*.yml 跑所有 enabled job
 `.env` 里填了 EMAIL_SENDER/PASSWORD 后：
 
 ```bash
-# 预览（不写入）
-uv run python -m scripts.import_commsec --lookback 30
-
-# 真正写入
-uv run python -m scripts.import_commsec --lookback 30 --apply
+INVEST_HOME=~/openInvest python -m openinvest.jobs.commsec_sync
 ```
 
-或者 GUI 上点 [Import CommSec] 按钮。
+> ⚠️ 默认禁用了 cron 自动模式，因为 IMAP 临时失败会静默丢成交。建议手动触发，先看清楚拉到了什么再写。
 
-> ⚠️ 默认禁用了 cron 自动模式（`jobs/commsec_sync.yml: enabled: false`），因为 IMAP 临时失败会静默丢成交。建议手动触发，先看清楚拉到了什么再写。
+### Remote hub 模式（可选，多数用户不需要）
 
-### 生产部署（用 CF Access 保护 GUI）
-
-参考 README 的 ["生产部署"](../README.md) 章节。简单说：
-
-1. systemd 起 invest-web.service（uvicorn daemon 绑 127.0.0.1:8765）
-2. Caddy 反代 invest.your-domain.com → 127.0.0.1:8765
-3. Cloudflare Access 在边缘验证你的邮箱
-
-
+`openinvest-web` 起 FastAPI（Web API 已 **deprecated**，只服务 `INVEST_API_BASE`
+转发与内部触发，不再新增端点）。容器 / systemd / Caddy 细节见
+[08-deployment.md](wiki/08-deployment.md)。
 
 ---
 
 ## Troubleshooting
 
-### 1. `uv sync` 后 pytest 挂多条
+### 1. `uvx openinvest` 首跑失败
 
-最常见原因是 `yfinance` 第一次拉数据被限速。先单跑一个简单的：
-
-```bash
-uv run pytest tests/test_schemas.py -v
-```
-
-如果这个过了 → yfinance 类的测试用 `mock` 不需要网络也应该过。如果挂在 `test_quotes.py` / `test_gold_price.py` 是网络问题，重跑几次。
+首次运行需网络从 PyPI 拉包。检查网络后重试；公司代理环境设好 `HTTPS_PROXY`。
 
 ### 2. 跑 committee 报 401 / DeepSeek 错
 
@@ -347,24 +303,19 @@ holdings.0.units → field required
 
 → 严格按上面的 v2 模板。所有持仓必须有：`symbol / kind / units / unit_label / avg_cost / cost_currency / channel / display_name`。
 
-### 4. GUI 显示 "缺少 EMAIL_SENDER" 但已经填了
+### 4. 改了 `.env` 不生效
 
-`.env` 是后改的，需要重启 uvicorn。Ctrl+C 后重跑。
+CLI 每次进程启动重读 `.env`，一般即时生效；常驻的 `openinvest-web` / MCP server 要重启进程。
 
 ### 5. CommSec preview 拿到 0 条但邮箱里明明有
 
-CommSec 邮件最近 180 天才扫。如果是更早的成交：
-
-```bash
-uv run python -m scripts.import_commsec --lookback 365 --apply
-```
-
-最大 365 天。
+CommSec 邮件扫描窗口有限（最近 180 天）。更早的成交用 `uvx openinvest buy` /
+`record_execution` 手动补账。
 
 ### 6. 想从演示数据回到干净状态
 
 ```bash
-rm -rf memory/.committee/* memory/.runs/* memory/daily/*
+rm -rf ~/openInvest/memory/.committee/* ~/openInvest/memory/.runs/* ~/openInvest/memory/daily/*
 # 不要删 portfolio.md / strategy.md / user.md
 ```
 
@@ -374,11 +325,10 @@ rm -rf memory/.committee/* memory/.runs/* memory/daily/*
 
 走完上面 5 步，下面这些都应该能正常：
 
-- [ ] `uv run pytest tests/` 全绿
-- [ ] `uv run python -m jobs.daily_report` 能跑出 `memory/daily/<date>/<SYMBOL>.md`
-- [ ] `curl http://localhost:8765/api/portfolio` 返回真实数字
-- [ ] 浏览器开 :8765 能看到主面板 + 持仓数字一致
-- [ ] GUI 点 [Run committee] 能看到 SSE 直播 6 个 stage
-- [ ] `memory/llm_usage.jsonl` 有新条目（token 计费透明化生效）
+- [ ] `uvx openinvest doctor` 返回 ok
+- [ ] `uvx openinvest status` 显示自己的持仓数字
+- [ ] `uvx openinvest run_committee <SYM>` 能跑出 `~/openInvest/memory/daily/<date>/<SYMBOL>.md`
+- [ ] `claude mcp list` 里能看到 openinvest，agent 能读持仓
+- [ ] `~/openInvest/memory/llm_usage.jsonl` 有新条目（token 计费透明化生效）
 
 任何一条没过就回 troubleshooting 找对应 case，找不到就开 issue。

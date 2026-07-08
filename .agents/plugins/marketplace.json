@@ -8,10 +8,10 @@
       "name": "invest",
       "source": {
         "source": "local",
-        "path": "."
+        "path": "./plugin"
       },
       "category": "Productivity",
-      "description": "Self-hosted AI investment committee — portfolio + live prices, any yfinance symbol, 4-role LLM committee for buy/sell verdicts. Backend self-bootstraps on first call."
+      "description": "Self-hosted AI investment committee — portfolio + live prices, any yfinance symbol, 4-role LLM committee for buy/sell verdicts, 14-tool MCP server. Backend installs from PyPI via uvx on first call."
     }
   ]
 }

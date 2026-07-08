@@ -60,7 +60,8 @@ documents:
 
 | Connector | 触发协议 | 适合 |
 |-----------|---------|------|
-| `connectors/web_api.py` | HTTP REST + SSE | Web GUI / 程序化集成 |
+| `connectors/web_api/`（**deprecated**）| HTTP REST + SSE | remote hub 模式（INVEST_API_BASE 转发）+ 内部触发；不再新增端点 |
+| `connectors/mcp_server.py`（`openinvest-mcp`）| MCP stdio | 任意 MCP 宿主（Claude Code / Cursor / ...）|
 | `skills/invest/scripts/run.sh` (CLI) | Claude Code Skill | 让 Claude 自己当协调者跑 |
 
 **关键约束**：connector 必须**只做协议转换**，业务逻辑全部 forward 给 `core/`。
@@ -247,7 +248,7 @@ holdings:
 并发压测（`tests/test_memory_store.py`）：
 ```
 50 线程并发 cash["CNY"] += 1   → 最终 delta = 50.0  (0 lost updates)
-20 轮 scheduler 扣款 + napcat 存款 race → delta 精确 = -37880  (0 lost updates)
+20 轮 scheduler 扣款 + 并发存款 race    → delta 精确 = -37880  (0 lost updates)
 ```
 
 详见 [05-data-model.md#并发安全](05-data-model.md#并发安全)。
@@ -258,7 +259,7 @@ holdings:
 
 每层都设计成可独立替换：
 
-- **加 connector**（如 Telegram bot）：照 napcat_bot.py 模式新建一个文件，**不要碰 core**
+- **加 connector**（如 Telegram bot）：新建一个协议转换文件（历史范例 napcat_bot.py 已删除，git history 可考），**不要碰 core**；多数场景直接接 MCP 更省
 - **加 agent 角色**（如 ESG 分析师）：在 `capabilities/committee/` 加 prompt 文件，在 `core/committee/debate.py:run_committee` 注册
 - **换 LLM provider**（DeepSeek → OpenAI）：改 `capabilities/sdk_agent.py` 的 client init，prompt 不动
 - **换持久化**（Markdown → SQLite）：实现 `MemoryStore` 同接口，core 不动

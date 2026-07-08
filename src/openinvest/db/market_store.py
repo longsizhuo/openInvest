@@ -45,6 +45,13 @@ class MarketStore:
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA busy_timeout=5000")
         cur.execute("PRAGMA synchronous=NORMAL")  # WAL + NORMAL 是推荐组合
+        # #104：每次进程启动回收 WAL 膨胀（TRUNCATE 失败退化为不回收，无害）。
+        # 长命读连接（exchange_fee 全局 _STORE）持有的游离读快照会让被动
+        # checkpoint 饥饿——启动时主动截断 + 读路径 rollback 双保险
+        try:
+            cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
         self.conn.commit()
 
         self._lock = threading.RLock()
@@ -134,6 +141,7 @@ class MarketStore:
             cursor = self.conn.cursor()
             cursor.execute("SELECT date FROM daily_prices WHERE symbol = ? ORDER BY date DESC LIMIT 1", (symbol,))
             row = cursor.fetchone()
+            self.conn.rollback()  # #104
             return row[0] if row else None
 
     def get_history_df(self, symbol, days=730):
@@ -151,6 +159,7 @@ class MarketStore:
                 "WHERE symbol = ? ORDER BY date ASC"
             )
             df = pd.read_sql_query(query, self.conn, params=(symbol,))
+            self.conn.rollback()  # #104：结束隐式读事务，别钉住 WAL checkpoint
         if not df.empty:
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.set_index('Date')
