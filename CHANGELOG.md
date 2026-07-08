@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.23.0](https://github.com/longsizhuo/openInvest/compare/v0.22.1...v0.23.0) (2026-07-08)
+
+
+### Features
+
+* **committee:** localize committee outputs ([723be05](https://github.com/longsizhuo/openInvest/commit/723be05f4b579b4a6a79a3e352598a639ab5297e))
+* **config:** add invest language setting ([18b094e](https://github.com/longsizhuo/openInvest/commit/18b094e7d03db5803a691ccaa9905122271aefec))
+
+
+### Bug Fixes
+
+* **committee:** 补上语言覆盖面里剩余的早退分支 + zh-CN 配置一致性 ([5659588](https://github.com/longsizhuo/openInvest/commit/56595887c89427147544ef6937a9266e9175c0cc))
+* **committee:** 补全委员会语言覆盖面，修正 rebuttal 字数约束误删 ([f1af463](https://github.com/longsizhuo/openInvest/commit/f1af463f0b00f82b660e7d167ad901d4e2d2ceb3))
+* **skill:** dev-mode 分支保留真实退出码，不再吞掉非零状态 ([4052078](https://github.com/longsizhuo/openInvest/commit/4052078d0b07f8be8d4a25ec43e9a1b4dbc2405b))
+* **skill:** 修正 plugin/ 重排后 REPO_ROOT 相对路径少跳一层 ([48b9b20](https://github.com/longsizhuo/openInvest/commit/48b9b2077453dd0e2be1caecf6a60927eb582c17))
+
+
+### Docs
+
+* add issue 132 i18n implementation note ([de68f87](https://github.com/longsizhuo/openInvest/commit/de68f87d230e652310e4f6c5baf7c916d2cca5eb))
+
 ## [0.22.1](https://github.com/longsizhuo/openInvest/compare/v0.22.0...v0.22.1) (2026-07-07)
 
 
