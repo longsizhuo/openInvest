@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.24.0](https://github.com/longsizhuo/openInvest/compare/v0.23.0...v0.24.0) (2026-07-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **committee:** 移除 web API 端点 PUT /api/user/wealth_context 和 WealthContextRequest 模型；GET /api/user 不再返回 wealth_context / exchange_buffer_cny / last_payday 字段；UserData schema 去掉这些字段 （extra="allow" 下旧 user.md 里的残留字段不报错，但不再被任何代码消费）； 删除 payday_check job（自动月度入账，改手动 /deposit）。
+
+### Bug Fixes
+
+* **committee:** 修 full_validation.py 残留 wealth_view_override 调用 ([2f3e7ef](https://github.com/longsizhuo/openInvest/commit/2f3e7eff9ab49d6b2982f2649cab9d6d30e2d319))
+
+
+### Refactor
+
+* **committee:** 删除 WealthContextOfficer 角色 + user.md 死字段 ([a425e9d](https://github.com/longsizhuo/openInvest/commit/a425e9deafc02d1fcdbacd7b2c3798ab0c68fd76))
+
 ## [0.23.0](https://github.com/longsizhuo/openInvest/compare/v0.22.1...v0.23.0) (2026-07-08)
 
 
