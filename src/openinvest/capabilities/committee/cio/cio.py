@@ -69,21 +69,20 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
     verdict_cfg = load_config().verdict
 
     # TRIM 约束：阈值 > 0 时注入（sweep 出 OOS 验证结果后才启用，遵守 ADR-010 rule 4）
+    # 用户显式开启（配 trim_*_loss_pct）= 采用"小额浮亏不 TRIM"纪律，覆盖通用 TRIM 规则。
     trim_constraint = ""
     if verdict_cfg.trim_no_trim_loss_pct > 0 and verdict_cfg.trim_caution_loss_pct > 0:
         trim_constraint = bilingual(
-            f"**🔥 零花钱账户 + 强破产兜底时的 TRIM 约束（强制，覆盖通用 TRIM 规则）**：\n"
-            f"当 Wealth Context 显示 SOLVENCY_BUFFER_LEVEL=strong 且 ACCOUNT_PURPOSE 含\"零花钱\"或类似表述时，本约束覆盖上方通用 TRIM 规则：\n"
-            f"- **浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 不允许 TRIM** — 卖出坐实亏损，而用户无流动性压力，应 HOLD 等修复\n"
-            f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro SIGNAL 非 risk_off：倾向 HOLD** — 零花钱账户的资金久期长，短期波动不是卖出理由\n"
+            f"**🔥 小额浮亏 TRIM 约束（用户已启用，强制，覆盖通用 TRIM 规则）**：\n"
+            f"- **浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 不允许 TRIM** — 卖出坐实亏损，长期资金久期下应 HOLD 等修复\n"
+            f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro SIGNAL 非 risk_off：倾向 HOLD** — 短期波动不是卖出理由\n"
             f"- 只有浮亏 > {verdict_cfg.trim_caution_loss_pct}% 或 Macro SIGNAL=risk_off + Risk SIGNAL=high_risk 双触发时，才考虑 TRIM\n"
-            f"- 金融逻辑：零花钱账户 + 强破产兜底，小额浮亏不值得交易",
-            f"**🔥 TRIM constraint for pocket-money accounts with a strong solvency buffer (mandatory, overrides the general TRIM rule)**:\n"
-            f"When Wealth Context shows SOLVENCY_BUFFER_LEVEL=strong and ACCOUNT_PURPOSE mentions \"pocket money\" or similar, this constraint overrides the general TRIM rule above:\n"
-            f"- **Unrealized loss < {verdict_cfg.trim_no_trim_loss_pct}%: TRIM is not allowed** -- selling locks in the loss while the user has no liquidity pressure, so HOLD and wait for recovery\n"
-            f"- **Unrealized loss {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% and Macro SIGNAL is not risk_off: lean HOLD** -- pocket-money accounts have a long capital horizon, short-term volatility is not a reason to sell\n"
+            f"- 金融逻辑：长期投资账户，小额浮亏不值得交易",
+            f"**🔥 Small-unrealized-loss TRIM constraint (enabled by the user, mandatory, overrides the general TRIM rule)**:\n"
+            f"- **Unrealized loss < {verdict_cfg.trim_no_trim_loss_pct}%: TRIM is not allowed** -- selling locks in the loss; with a long capital horizon, HOLD and wait for recovery\n"
+            f"- **Unrealized loss {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% and Macro SIGNAL is not risk_off: lean HOLD** -- short-term volatility is not a reason to sell\n"
             f"- Only consider TRIM when unrealized loss > {verdict_cfg.trim_caution_loss_pct}%, or Macro SIGNAL=risk_off together with Risk SIGNAL=high_risk\n"
-            f"- Rationale: pocket-money account + strong bankruptcy backstop -- a small unrealized loss is not worth trading over",
+            f"- Rationale: long-term investment account -- a small unrealized loss is not worth trading over",
         )
 
     # 集中度 lens 关闭时（单资产/刻意集中策略）压掉 CIO 的超配规则。空串=开启时零改动

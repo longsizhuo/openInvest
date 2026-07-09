@@ -416,8 +416,6 @@ def test_committee_run_and_status_done(client, monkeypatch):
     # 这是真正生效的 mock 点（committee_runner 拆包后 cr_mod 指向 core.runner.session）
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
-    # wealth_view loader 也 mock（避免读真 user.md / 触发 LLM）
-    monkeypatch.setattr(cr_mod, "load_wealth_context_view", lambda: "")
     # event_brief multi 召回也 mock 掉（避免 EventStore init）
     monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
 
@@ -458,7 +456,6 @@ def test_committee_run_error_path(client, monkeypatch):
     # session 共享 prep 也 mock（避免真 LLM）
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
-    monkeypatch.setattr(cr_mod, "load_wealth_context_view", lambda: "")
     monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
 
     r = client.post("/api/committee/run", json={"symbols": ["NDQ.AX"]})
@@ -1043,9 +1040,7 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
     monkeypatch.setattr(ef, "get_macro_data", lambda: "MOCK_MACRO")
     monkeypatch.setattr(cr, "load_sentiment_brief", lambda *a, **k: "SENT_SENTINEL")
     monkeypatch.setattr(cr, "load_valuation_brief", lambda *a, **k: "VAL_SENTINEL")
-    monkeypatch.setattr(cr, "load_wealth_context_view", lambda: "")
     monkeypatch.setattr(cr, "load_prior_insights", lambda *a, **k: "")
-    monkeypatch.setattr(cr, "load_backup_cny", lambda pm: 0.0)
     monkeypatch.setattr(rp, "get_regime_forward_summary", lambda *a, **k: None)
     # coordinator 改用 build_reentry_reference（取回结构化 profile，与 session 路径对齐）
     monkeypatch.setattr(rp, "build_reentry_reference", lambda *a, **k: ("REENTRY_SENTINEL", None))
@@ -1109,7 +1104,6 @@ def test_committee_run_summary_includes_cio_memo(client, monkeypatch):
     monkeypatch.setattr(cr_mod, "run_committee_for_symbol", lambda sym, **kw: fake_result)
     monkeypatch.setattr(cr_mod, "run_macro_view", lambda data, **kw: "fake macro")
     monkeypatch.setattr(cr_mod, "get_macro_data", lambda: {})
-    monkeypatch.setattr(cr_mod, "load_wealth_context_view", lambda: "")
     monkeypatch.setattr(cr_mod, "resolve_event_brief_multi", lambda syms: "")
 
     r = client.post("/api/committee/run", json={"symbols": ["NDQ.AX"]})
@@ -1227,23 +1221,3 @@ def test_config_endpoints_roundtrip(client):
     # 非白名单 delete → 404
     assert client.delete("/api/config/verdict.alloc_cny_ceiling").status_code == 404
     reset_config()
-
-
-# ============ open-pot 月度补充（wealth_context.monthly_contribution_cny）============
-
-
-def test_wealth_context_monthly_contribution_roundtrip(client):
-    """PUT monthly_contribution_cny → GET /api/user 的 wealth_context 反映，且不清掉已有字段"""
-    client.put("/api/user/wealth_context", json={"emergency_buffer_cny": 4_000_000})
-    r = client.put("/api/user/wealth_context", json={"monthly_contribution_cny": 10000})
-    assert r.status_code == 200
-    wc = client.get("/api/user").json()["wealth_context"]
-    assert wc["monthly_contribution_cny"] == 10000
-    assert wc["emergency_buffer_cny"] == 4_000_000  # merge，不被清掉
-
-
-def test_wealth_context_negative_monthly_rejected(client):
-    """负的月度补充 → 422（ge=0 校验）"""
-    assert client.put(
-        "/api/user/wealth_context", json={"monthly_contribution_cny": -5}
-    ).status_code == 422

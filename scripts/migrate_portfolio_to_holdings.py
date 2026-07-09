@@ -67,7 +67,7 @@ def render_portfolio_body_v2(cash: Dict[str, float], holdings: List[Dict[str, An
     lines.extend([
         "## 说明",
         "",
-        "此文件由 daily_report / commsec_sync / payday_check / web_api / napcat_bot 自动更新。",
+        "此文件由 daily_report / commsec_sync / web_api / napcat_bot 自动更新。",
         "不要手动编辑——如需调整，请走 GUI / NapCat /cmd 命令。",
     ])
     return "\n".join(lines) + "\n"

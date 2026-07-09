@@ -5,7 +5,6 @@ import logging
 import math
 from typing import Any, Dict, Optional
 
-from openinvest.core.committee import load_backup_cny  # _build_default_portfolio_summary 兜底走 backup_cny 单一可信源
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.utils.exchange_fee import get_history_data
 
@@ -50,7 +49,7 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
 def load_sentiment_brief(event_brief: str = "") -> str:
     """市场情绪表盘 shared loader（确定性：VIX 分位保底 + CNN 锦上添花）。
 
-    地位同 load_wealth_context_view：session 跑一次（VIX/CNN 是市场级、跨资产相同），
+    市场级跨资产共享 loader：session 跑一次（VIX/CNN 是市场级、跨资产相同），
     结果注入每个 run_committee(..., sentiment_brief=...)。
 
     任何失败 graceful 退化空字符串，不阻断 committee。CNN 不可达时 VIX 分位照常输出
@@ -146,9 +145,7 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
                 )
 
         total_cny, _status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-        # backup_cny（off-portfolio 兜底）走单一可信源 loader，三路径一致
-        backup_cny = load_backup_cny(pm)
-        return portfolio_summary_text(pm, total_cny, current_prices, backup_cny=backup_cny)
+        return portfolio_summary_text(pm, total_cny, current_prices)
     except Exception as e:  # noqa: BLE001
         # 兜底：拉价/折算彻底失败 → 用历史简化版，至少 Risk Officer 还有点上下文
         log.warning(
@@ -157,13 +154,10 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
         )
         cash_cny = pm.cash_amount("CNY")
         aud_cash = pm.cash_amount("AUD")
-        buffer_cny = float(pm.user.get("exchange_buffer_cny", 0) or 0)
         risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
-        dry_powder = max(0.0, cash_cny - buffer_cny)
         return (
             f"用户风险偏好: {risk_level}\n"
-            f"CNY 现金: ¥{cash_cny:,.0f}（应急金 ¥{buffer_cny:,.0f}，"
-            f"可投 ¥{dry_powder:,.0f}）\n"
+            f"CNY 现金: ¥{cash_cny:,.0f}（可投 ¥{max(0.0, cash_cny):,.0f}）\n"
             f"AUD 现金: ${aud_cash:,.0f}\n"
             f"⚠️ portfolio_summary 完整版构建失败，请勿据此做集中度判断"
         )

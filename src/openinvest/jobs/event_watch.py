@@ -1,7 +1,7 @@
 """jobs/event_watch —— 第一层：盘中事件感知 + 邮件通知 + 触发委员会
 
 每 30m cron 跑一次：
-1. 拉用户上下文（holdings ∪ target_assets ∪ wealth_context.macro_tags）
+1. 拉用户上下文（holdings ∪ target_assets）
 2. 构 query → fetch_all 多源新闻
 3. event_normalizer.normalize → 结构化事件
 4. dedup（同 url 跳过）+ event_store.upsert_event
@@ -49,7 +49,7 @@ _GOLD_STANDING_QUERIES = ["central bank gold purchases", "gold ETF flows"]
 
 
 def _load_user_context() -> Dict[str, Any]:
-    """从 PortfolioManager 抓 holdings / target_assets / wealth_context tags
+    """从 PortfolioManager 抓 holdings / target_assets
 
     返回 dict 即可，不要把 PM 实例直接传出去（避免 caller 误改持仓）
     """
@@ -58,20 +58,17 @@ def _load_user_context() -> Dict[str, Any]:
         pm = PortfolioManager()
     except Exception as e:
         log.warning(f"PortfolioManager 不可用，event_watch 用空上下文: {e}")
-        return {"holdings": [], "watching": [], "macro_tags": [], "queries": []}
+        return {"holdings": [], "watching": [], "queries": []}
 
     holdings = [h.get("symbol") for h in pm.holdings.all() if h.get("symbol")]
     watching = [a.get("symbol") for a in (pm.strategy.get("target_assets") or [])
                 if a.get("symbol")]
-    wc = (pm.user.get("wealth_context") or {})
-    macro_tags = wc.get("macro_tags") or []
 
     # 构造给 ddgs 用的 query 列表：
-    # 每个 watched/held symbol 一条 + 用户 macro_tag 一条 + 默认 macro keyword
+    # 每个 watched/held symbol 一条 + 默认 macro keyword
     queries: List[str] = []
     for sym in (set(holdings) | set(watching)):
         queries.append(f"{sym} news")
-    queries.extend([f"{tag} markets" for tag in macro_tags])
     if not any("fed" in q.lower() for q in queries):
         queries.append("Fed rate decision")  # 默认抓宏观
     # 持金/关注金 → 追加黄金常驻 queries（央行购金等低频宏观事件靠关键词才抓得到）
@@ -81,7 +78,6 @@ def _load_user_context() -> Dict[str, Any]:
     return {
         "holdings": holdings,
         "watching": watching,
-        "macro_tags": [t.lower() for t in macro_tags],
         "queries": list(dict.fromkeys(queries)),  # 去重保序
     }
 
@@ -241,7 +237,6 @@ def run(
     min_sev = cfg.event.min_severity
     min_sev_rank = _SEVERITY_RANK.get(min_sev, 2)
     watched_set = {s.lower() for s in watched}
-    macro_tag_set = set(ctx["macro_tags"])
 
     triggerable_events: List[Dict[str, Any]] = []
     for ne in normalized:
@@ -266,8 +261,7 @@ def run(
             continue
 
         affected_lower = {s.lower() for s in (ev["affected_symbols"] or [])}
-        entity_lower = {e.lower() for e in (ev["entities"] or [])}
-        if not (affected_lower & watched_set) and not (entity_lower & macro_tag_set):
+        if not (affected_lower & watched_set):
             continue
 
         # 这条事件值得触发

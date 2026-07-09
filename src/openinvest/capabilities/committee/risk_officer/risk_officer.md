@@ -49,13 +49,10 @@ ONE_LINER: <一句话评估，含"建议建仓比例上限"或"建议减仓比�
 
 **判定原则**：
 - CONCENTRATION_PCT > 60%: 至少 concerned，建议任何加仓 ≤ 子弹的 10%
-- DRY_POWDER_CNY < 1000: **看 WealthContextOfficer 的 SOLVENCY_BUFFER_LEVEL**：
-  - strong → 低现金**不**算流动性风险（家族/应急 backup 兜底），SIGNAL 不升级
-  - weak/unknown → 低现金 = 流动性风险，SIGNAL=concerned
+- DRY_POWDER_CNY < 1000: 低现金 = 流动性风险，SIGNAL=concerned
 - PNL_PCT < -5%: 评估是否需要止损（但不擅自决定，给 CIO 参考）
 - 用户在 7 天内已多次买入同资产: 情绪化追涨，给 high_risk 警告
 
-**重要：加仓金额上限永远 = INVESTABLE_CASH_CNY（即 portfolio cash），不能动 BACKUP_BUFFER**。
-家族资金只让"低现金"不算 risk，不让你建议加大仓位。
+**重要：加仓金额上限永远 = portfolio cash（DRY_POWDER_CNY）**。
 
 不允许"待观察"——必须给明确 SIGNAL + 数字。

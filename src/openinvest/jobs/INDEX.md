@@ -8,7 +8,6 @@
 |-----|------|------|-------|
 | `daily_report` | 每天 10:00 | `0 10 * * *` | `jobs.daily_report:run` |
 | `commsec_sync` | 每 2 小时 | `0 */2 * * *` | `jobs.commsec_sync:run` |
-| `payday_check` | 每月 1 号 09:00 | `0 9 1 * *` | `jobs.payday_check:run` |
 | `weekly_review` | 周日 11:00 | `0 11 * * 0` | `jobs.weekly_review:run` |
 | `dreaming` | 每天 03:00 | `0 3 * * *` | `jobs.dreaming:run` |
 

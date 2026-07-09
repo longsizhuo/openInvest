@@ -8,7 +8,6 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 |-----|------|------|
 | `daily_report.py` | 每天 10am | 跑完整投资委员会，生成 markdown brief，发邮件 |
 | `commsec_sync.py` | 每 2h | 拉 CommSec 成交回执邮件，更新 portfolio.holdings |
-| `payday_check.py` | 每月 1 日 | 自动 +CNY 入账（配置在 user.md 的薪资字段）|
 | `dreaming.py` | 每天 3am | 三阶段记忆整合（Light → REM → Deep Sleep），insights/ 沉淀长期模式 |
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |
 | `verdict_review.py` | 每天 2am（`enabled: false`，Phase 3 待开） | 委员会决策命中率刷进 verdict_review.jsonl（dreaming 上游训练源） |

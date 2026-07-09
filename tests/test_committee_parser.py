@@ -331,12 +331,6 @@ def test_rebuttal_char_limit_survives_language_localization():
     assert "严格按下列格式" in risk_rebuttal
     assert "≤120 字" in risk_rebuttal
 
-    from openinvest.capabilities.committee.i18n import localize_prompt_output_requirements
-    from openinvest.capabilities.committee.wealth_context_officer import PROMPT_WEALTH_CONTEXT_OFFICER
-    wealth_prompt = localize_prompt_output_requirements(PROMPT_WEALTH_CONTEXT_OFFICER)
-    assert "必须中文回复" not in wealth_prompt
-    assert "≤200 字总长度" in wealth_prompt
-
 
 # ---------- Sanity check 5: TRIM 必须给低于现价的买回点，否则降级 HOLD ----------
 

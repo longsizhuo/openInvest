@@ -72,19 +72,11 @@ def main(force: bool = False):
     user_data = {
         "display_name": profile.get("name", "Anonymous"),
         "risk_tolerance": profile.get("risk_tolerance", "Balanced"),
-        "monthly_income_cny": profile.get("monthly_income_cny", 0),
-        "monthly_expenses_cny": profile.get("monthly_expenses_cny", 0),
-        "exchange_buffer_cny": profile.get("exchange_buffer_cny", 0),
-        "last_payday": profile.get("last_run_date", "1970-01-01"),
     }
     user_body = f"""# 用户画像
 
 - **姓名**: {user_data['display_name']}
 - **风险偏好**: {user_data['risk_tolerance']}
-- **月收入 (CNY)**: ¥{user_data['monthly_income_cny']:,}
-- **月支出 (CNY)**: ¥{user_data['monthly_expenses_cny']:,}
-- **换汇周转金 (CNY)**: ¥{user_data['exchange_buffer_cny']:,}
-- **上次发薪日**: {user_data['last_payday']}
 
 ## 备注
 
@@ -142,7 +134,7 @@ def main(force: bool = False):
     body_lines.append("")
     body_lines.append("## 说明")
     body_lines.append("")
-    body_lines.append("此文件由 daily_report / commsec_sync / payday_check 三个 job 自动更新。")
+    body_lines.append("此文件由 daily_report / commsec_sync 等 job 自动更新。")
     body_lines.append("通过 GUI / NapCat 命令调整，不要手动编辑 frontmatter。")
     portfolio_body = "\n".join(body_lines) + "\n"
     store.write("portfolio", "state", portfolio_data, portfolio_body)

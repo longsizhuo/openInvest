@@ -31,7 +31,7 @@ class _FakePM:
         self.strategy = {"target_assets": [
             {"symbol": "TEST.AX", "display_name": "Test ETF", "type": "etf"},
         ]}
-        self.user = {"wealth_context": {}}
+        self.user = {}
 
 
 SENT = "SENTIMENT_PREP_SENTINEL\nINDEP_DEFENSE_FLAG: off"
@@ -60,9 +60,7 @@ def _mock_world(monkeypatch):
     import openinvest.core.runner.coordinator as cr
     monkeypatch.setattr(cr, "load_sentiment_brief", lambda *a, **k: SENT)
     monkeypatch.setattr(cr, "load_valuation_brief", lambda *a, **k: VAL)
-    monkeypatch.setattr(cr, "load_wealth_context_view", lambda: "")
     monkeypatch.setattr(cr, "load_prior_insights", lambda *a, **k: "")
-    monkeypatch.setattr(cr, "load_backup_cny", lambda pm: 0.0)
 
     import openinvest.core.regime_probability as rp
     monkeypatch.setattr(rp, "get_regime_forward_summary", lambda *a, **k: None)

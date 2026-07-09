@@ -163,49 +163,13 @@ class TotalValueResponse(BaseModel):
     fx_rates: Dict[str, Optional[float]]
 
 
-# ============ User profile + wealth_context ============
-
-class WealthContextRequest(BaseModel):
-    """PUT /api/user/wealth_context body — off-portfolio 财务背景
-
-    家族资金 / 应急金等 backup 信息。**铁律：这些金额永远不算"可投资资金"**——
-    只让 WealthContextOfficer 把"低 portfolio cash"消化掉，避免 Risk 误判
-    high_risk。详见 docs/wiki/12-verification.md 主张 7。
-
-    所有字段可选；全空表示用户没有 off-portfolio backup（走老逻辑）。
-    """
-    emergency_buffer_cny: Optional[float] = Field(
-        default=None, ge=0,
-        description="应急金 / 家族 backup 额度（CNY）。**不可作投资**，仅作风险兜底",
-    )
-    family_backup_available: Optional[bool] = Field(
-        default=None,
-        description="是否有家族经济支持（破产兜底）",
-    )
-    account_purpose: Optional[str] = Field(
-        default=None, max_length=64,
-        description='账户性质，如 "零花钱账户" / "长期投资账户" / "退休金"',
-    )
-    lifestyle_notes: Optional[str] = Field(
-        default=None, max_length=512,
-        description="自由文本说明，如 '家族资金 ¥4M 仅作破产兜底，不可作投资使用'",
-    )
-    monthly_contribution_cny: Optional[float] = Field(
-        default=None, ge=0,
-        description="每月从工资/外部补充进投资池的额度（CNY，开口池）。让 WealthContextOfficer "
-                    "把 portfolio cash 当流量而非封闭快照：低现金更不算流动性风险、30% 现金目标软化。"
-                    "**仍不算当下可投资金**——加仓上限永远 = 当前 portfolio cash。",
-    )
-
+# ============ User profile ============
 
 class UserProfileResponse(BaseModel):
     """GET /api/user 返回 user.md frontmatter 全部字段"""
     display_name: Optional[str] = None
     risk_tolerance: Optional[str] = None
-    exchange_buffer_cny: float = 0.0
-    last_payday: Optional[str] = None
     user_email: Optional[str] = None
-    wealth_context: Optional[Dict[str, Any]] = None
 
 
 # ============ v2 通用 holdings CRUD ============
@@ -970,7 +934,6 @@ __all__ = [
     "HoldingsListResponse",
     "TotalValueBreakdownItem",
     "TotalValueResponse",
-    "WealthContextRequest",
     "UserProfileResponse",
     "HoldingCreateRequest",
     "HoldingPatchRequest",

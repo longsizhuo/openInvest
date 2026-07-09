@@ -7,8 +7,7 @@
 |---|---|
 | `agent_io.py` | SDKAgent 工厂 `_create_agent` + 重试 `_ask` / 并行 `_parallel_ask` + LLM 重试常量 + 失败哨兵 |
 | `cio_parse.py` | CIO memo 解析 `parse_cio_memo`（6 道 sanity check）+ 各类正则 + THRESHOLDS + 集中度覆写 |
-| `views.py` | 跨资产共享评估 `run_macro_view` / `run_wealth_context_view` |
-| `loaders.py` | 所有 production entry 必经的 shared input loader（`load_wealth_context_view` / `load_backup_cny`）|
+| `views.py` | 跨资产共享评估 `run_macro_view` |
 | `debate.py` | 主流程 `run_committee` + `CommitteeReport` + 收敛判定 + 辩论历史拼装 |
 | `persist.py` | 决议落盘 `_persist` + macro 快照 `_capture_macro_context` |
 

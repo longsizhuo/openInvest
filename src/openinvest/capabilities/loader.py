@@ -19,7 +19,7 @@
     ---
     name: <role>
     description: <一句话>
-    role: macro|quant|risk|cio|wealth_context
+    role: macro|quant|risk|cio
     ---
 
     <markdown body：纯 prompt 文本>
@@ -90,8 +90,8 @@ def load_skill(
     """读取并渲染 <role>.md，返回完整 prompt 字符串。
 
     Args:
-        role: 角色目录名，如 "cio" / "macro_strategist" / "quant" / "risk_officer"
-              / "wealth_context_officer"。目录下必须有 <role>.py + <role>.md。
+        role: 角色目录名，如 "cio" / "macro_strategist" / "quant" / "risk_officer"。
+              目录下必须有 <role>.py + <role>.md。
         round_label: 轮次。"opening" 读 <role>.md，其他读 <role>_<round_label>.md
         capability: capability 目录名，默认 "committee"
         **variables: 占位符变量，e.g. asset_name="NDQ.AX", asset_symbol="NDQ.AX"

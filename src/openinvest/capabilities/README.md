@@ -12,7 +12,6 @@ capabilities/
 │   ├── macro_strategist.py  ← 宏观分析师（跨资产共享）
 │   ├── quant.py             ← 量化分析师（技术指标、信号强度）
 │   ├── risk_officer.py      ← 风控官（持仓集中度、行为模式）
-│   └── wealth_context_officer.py ← 财富背景官（流动性评估）
 ├── loader.py                ← prompt 模板加载器（load_skill + 占位符渲染）
 ├── tools.py                 ← agent 共享工具函数（市场数据查询等）
 ├── sdk_agent.py             ← Anthropic SDK agent 实现

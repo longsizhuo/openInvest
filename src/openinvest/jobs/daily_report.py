@@ -107,11 +107,9 @@ def _portfolio_summary(
     pm: PortfolioManager,
     total_assets_cny: float,
     current_prices: Dict[str, float],
-    *,
-    backup_cny: float = 0.0,
 ) -> str:
     """用户上下文文本，委托给 daily_report_builder（见 ADR-005）"""
-    return portfolio_summary_text(pm, total_assets_cny, current_prices, backup_cny=backup_cny)
+    return portfolio_summary_text(pm, total_assets_cny, current_prices)
 
 
 def _run_gemini_cli_review(prompt: str) -> str:
@@ -356,10 +354,7 @@ def run() -> Dict[str, Any]:
             continue
         total_assets_cny += value_cny
 
-    # backup_cny（off-portfolio 兜底）走单一可信源 loader（service layer re-export）
-    from openinvest.core.committee_runner import load_backup_cny
-    _backup_cny = load_backup_cny(pm)
-    portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices, backup_cny=_backup_cny)
+    portfolio_summary = _portfolio_summary(pm, total_assets_cny, current_prices)
     if data_warnings:
         portfolio_summary += "\n\n=== 数据可信度告警 ===" + "".join(data_warnings)
 
@@ -374,19 +369,18 @@ def run() -> Dict[str, Any]:
     else:
         friction_report = "N/A (本期无需换汇)"
 
-    # 三路径统一架构：所有跨资产 prep (macro/wealth/event_brief multi 召回/regime/
+    # 三路径统一架构：所有跨资产 prep (macro/event_brief multi 召回/regime/
     # market_data/prior_insights) 全部委托给 run_committee_session 一处实现，跟
     # Skill/Web 对齐。本函数只负责 cron-specific 后置: staleness 熔断、邮件渲染、
     # Gemini 第二意见、Dreaming append_daily、邮件发送。
     # 修复 2026-05-16 漂移: 此前 daily_report 自己手搓 multi-asset loop, 跟 Web 重复
-    # 实现; wealth_view / event_brief 漂移都在这条路径上出过事故
+    # 实现; event_brief 漂移在这条路径上出过事故
     target_symbols_to_run = [
         a["symbol"] for a in target_assets if a["symbol"] not in skipped_assets
     ]
 
     asset_committees: Dict[str, Dict[str, Any]] = {}
     macro_view = ""
-    wealth_view = ""
     event_brief = ""
 
     if not target_symbols_to_run:
@@ -402,7 +396,6 @@ def run() -> Dict[str, Any]:
         )
         asset_committees = session["asset_committees"]
         macro_view = session["macro_view"]
-        wealth_view = session["wealth_view"]
         event_brief = session["event_brief"]
 
         # 单资产 session 失败 → 合并到 skipped_assets, 防 cio_memos_combined /
@@ -435,14 +428,13 @@ def run() -> Dict[str, Any]:
     # 的 market_snapshot section 用（跟 cron 邮件的 macro view 是同源数据）。
     macro_data_report = get_macro_data()
     # 修复 2026-05-16 漂移：Gemini prompt 委托给 builder 纯函数，
-    # wealth_view 和 event_brief 注入 Gemini，让独立 challenge 看到完整上下文
+    # event_brief 注入 Gemini，让独立 challenge 看到完整上下文
     gemini_prompt = build_gemini_prompt(
         portfolio_summary=portfolio_summary,
         macro_view=macro_view,
         cio_memos_combined=cio_memos_combined,
         gold_snapshot_text=gold_snapshot_text,
         friction_report=friction_report,
-        wealth_view=wealth_view,
         event_brief=event_brief,
     )
     final_decision_gemini = _run_gemini_cli_review(gemini_prompt)
@@ -517,7 +509,6 @@ def run() -> Dict[str, Any]:
         skipped_assets=skipped_assets,
         total_assets_cny=total_assets_cny,
         final_decision_gemini=final_decision_gemini,
-        wealth_context_view=wealth_view,
         plain_summaries=plain_summaries,
         discipline_md=discipline_md,
     )

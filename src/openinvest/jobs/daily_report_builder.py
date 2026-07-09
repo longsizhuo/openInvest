@@ -7,7 +7,7 @@ ADR-005：从 daily_report.py 拆分出"给定数据 → 组装 markdown"的纯�
 - format_staleness_warning()：给定 label + age_days，生成告警字符串
 - assemble_full_report()：给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 - classify_asset_freshness()：stateless 辅助函数（age_days → fresh/stale/very_stale）
-- build_gemini_prompt()：给定所有投资结果 + wealth_view + event_brief，组装 Gemini 第二意见 prompt
+- build_gemini_prompt()：给定所有投资结果 + event_brief，组装 Gemini 第二意见 prompt
 
 re-export（向后兼容，2026-05-19）：
 - portfolio_summary_text()：搬到 utils/portfolio_summary.py 以便 core/ service layer
@@ -93,16 +93,14 @@ def build_gemini_prompt(
     cio_memos_combined: str,
     gold_snapshot_text: str,
     friction_report: str,
-    wealth_view: str = "",
     event_brief: str = "",
 ) -> str:
     """组装 Gemini 第二意见 prompt（纯函数，零 IO）
 
     修复 2026-05-16 漂移：原来 Gemini prompt 是 daily_report.py 里的硬编码 f-string，
-    wealth_view 和 event_brief 均未注入，导致 Gemini 做独立 challenge 时
-    看不到真实流动性上下文和近期事件，等价于没有这两层信息。
+    event_brief 未注入，导致 Gemini 做独立 challenge 时看不到近期事件。
 
-    # 事件层 和 # 用户真实流动性 两个 section 仅在非空时插入，避免出现空标题。
+    # 事件层 section 仅在非空时插入，避免出现空标题。
     tests/test_committee_contract.py 有 SENTINEL 断言保护此处。
 
     Args:
@@ -111,18 +109,12 @@ def build_gemini_prompt(
         cio_memos_combined: 所有资产 CIO 备忘拼接文本
         gold_snapshot_text: 黄金现货快照文本
         friction_report: 换汇摩擦成本报告
-        wealth_view: WealthContextOfficer 真实流动性视图（可空）
         event_brief: 跨资产 event RAG 召回的近期事件上下文（可空）
 
     Returns:
         发给 Gemini CLI 的完整 prompt 字符串
     """
-    # 仅非空时插入各可选 section，避免出现空标题干扰 Gemini
-    wealth_section = (
-        f"\n# 用户真实流动性 (WealthContextOfficer)\n{wealth_view}\n"
-        if wealth_view.strip()
-        else ""
-    )
+    # 仅非空时插入 event section，避免出现空标题干扰 Gemini
     event_section = (
         f"\n# 事件层（近期 RAG 召回）\n{event_brief}\n"
         if event_brief.strip()
@@ -134,7 +126,6 @@ def build_gemini_prompt(
         "\n"
         "# 用户上下文\n"
         f"{portfolio_summary}\n"
-        f"{wealth_section}"
         "\n"
         "# 宏观环境\n"
         f"{macro_view}\n"
@@ -277,7 +268,6 @@ def assemble_full_report(
     skipped_assets: set,
     total_assets_cny: float,
     final_decision_gemini: str,
-    wealth_context_view: str = "",
     plain_summaries: Optional[Dict[str, str]] = None,
     discipline_md: str = "",
 ) -> str:
@@ -416,16 +406,6 @@ def assemble_full_report(
 
     n = len(active_assets)  # 活跃资产数，用于后续章节编号
 
-    # WealthContextOfficer 章节：仅当 wealth_view 非空时插入，避免无内容时还出现空 section
-    # 防漂移：assemble_full_report 必须把 wealth_view 渲染进邮件正文，否则 Risk Officer
-    # 用到的"家族真实资金/流动性"信息只进 transcript 不进用户邮箱。tests/test_committee_contract.py
-    # 有 SENTINEL 断言保护此处。
-    wealth_section = (
-        f"\n## 1.5. 真实流动性视图 (WealthContextOfficer)\n{wealth_context_view}\n\n---\n"
-        if wealth_context_view.strip()
-        else ""
-    )
-
     # 纪律台账(ADR-023:委员会可证价值=不作为+拦冲动,非 alpha)。entry 层算好传入,
     # 本纯函数只渲染。空则不出 section(无数据时不留空壳)。
     discipline_section = (
@@ -439,7 +419,7 @@ def assemble_full_report(
 {macro_view}
 
 ---
-{wealth_section}
+
 ## 黄金现货快照
 ```
 {gold_snapshot_text}

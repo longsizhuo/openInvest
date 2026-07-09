@@ -63,13 +63,13 @@ openInvest 有三个调用层，每层服务不同对象：
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee`（入口 façade，实现在 `scripts/skill_cmds/committee_cmds.py:cmd_run_committee`） | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
-| **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ wealth view + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
+| **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ sentiment 共享 + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
 | **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
 | **Primitive** | `core/committee/debate.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
 
 ### Shared Input Loaders（单一可信源）
 
-加新的 cross-entry 参数（如 `event_brief`, `wealth_context_view`, `prior_insights`）时**只改 Orchestrator**：
+加新的 cross-entry 参数（如 `event_brief`, `sentiment_brief`, `prior_insights`）时**只改 Orchestrator**：
 
 1. `core/runner/session.py:run_committee_session()` 加内部步骤读 loader（或加 `<name>_override` kwarg）
 2. `core/runner/loaders.py:load_<name>()` 实现 IO 读取 + graceful 退化空字符串
@@ -81,7 +81,7 @@ openInvest 有三个调用层，每层服务不同对象：
 ### 机器强制（不靠记忆）
 
 - **`uv run lint-imports`**（CI 跑）：禁止 `jobs/` / `connectors/` / `scripts/` 直接 `from core.committee import ...`，必须走 `committee_runner`。例外只剩 `scripts.backtest_committee`（研究脚本，与 production 不共享 service layer）
-- **`uv run pytest tests/test_committee_contract.py`**：SENTINEL 契约测试守 session 内部 wealth/event/macro 真的注入 run_committee
+- **`uv run pytest tests/test_committee_contract.py`**：SENTINEL 契约测试守 session 内部 event/macro/sentiment 真的注入 run_committee
 - 想绕过 → CI 红 → 别合
 
 ### 漂移历史
