@@ -10,7 +10,7 @@ B6 (2026-05) 起 utils/exchange_fee.py 不再走 BetaShares 特殊分支。
 import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from openinvest.utils.betashares_scraper import scrape_full_ndq_data
 from openinvest.db.market_store import MarketStore

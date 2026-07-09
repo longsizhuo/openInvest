@@ -12,5 +12,5 @@ SQLite 持久化（行情缓存 + APScheduler job 状态 + Chroma 向量库）�
 ## 与其他目录的关系
 
 - 上游：`utils/gold_price.py` `utils/exchange_fee.py` 在 yfinance 挂时回落到这里读历史
-- 下游：被 `jobs/pnl_snapshot.py` 写入；`scripts/init_market_db.py` 初始化
+- 下游：被 `jobs/pnl_snapshot.py` 写入；`scripts/archive/init_market_db.py` 初始化
 - 数据完整性：DB schema 简单（symbol, ts, close），重建成本低

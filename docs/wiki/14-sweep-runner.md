@@ -25,7 +25,7 @@ documents:
 只跑 `classify_regime()` 等纯函数，不需要 LLM，秒级完成。
 
 ```bash
-uv run python -m scripts.sweep_runner --mode arithmetic \
+uv run python -m scripts.research.sweep_runner --mode arithmetic \
   --param regime.trend_spread_atr_ratio \
   --range 2.0,8.0,0.5 \
   --train-start 2018-01-01 --train-end 2023-12-31 \
@@ -40,7 +40,7 @@ uv run python -m scripts.sweep_runner --mode arithmetic \
 跑 walk-forward paper trading，需要 LLM。每个 trial 做 sanity check + outlier 标记。
 
 ```bash
-uv run python -m scripts.sweep_runner --mode pnl \
+uv run python -m scripts.research.sweep_runner --mode pnl \
   --param reward.weight_max_drawdown \
   --range -1.0,-0.1,0.1 \
   --train-start 2024-05-13 --train-end 2024-11-15 \

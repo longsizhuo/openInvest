@@ -1,4 +1,4 @@
-"""scripts/analyze_news_attribution —— 根因标注助手
+"""scripts/research/analyze_news_attribution —— 根因标注助手
 
 读 memory/.dreams/verdict_review.jsonl（jobs.verdict_review 跑出来的命中率数据），
 对每条 miss verdict（hits['7d'] == False 且没有 macro_shock）跑一遍人工 / LLM 标注，
@@ -7,9 +7,9 @@
 输出 news_blindspot 占比，给"事件 RAG 是否值得完整启用"的决策提供数据支撑。
 
 用法（默认 interactive 人工模式）:
-    python -m scripts.analyze_news_attribution
-    python -m scripts.analyze_news_attribution --auto    # LLM 自动标注（v4-flash）
-    python -m scripts.analyze_news_attribution --report  # 只读已有标注算占比
+    python -m scripts.research.analyze_news_attribution
+    python -m scripts.research.analyze_news_attribution --auto    # LLM 自动标注（v4-flash）
+    python -m scripts.research.analyze_news_attribution --report  # 只读已有标注算占比
 
 落盘 jsonl 路径: memory/.dreams/attribution.jsonl
 """

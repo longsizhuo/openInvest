@@ -25,7 +25,7 @@ VIX 腿 off→on 当天若 ATR 腿本就触发，最终防御不变。要精确�
 yfinance 事后修订（实测 6/9 DB=19.9 vs transcript 冻结 21.4）。所以**窗口方法已被
 transcript 校验，但无 transcript 日的 per-day VIX 值是近似**——该列标注来源。
 
-用法: uv run python scripts/audit_convention_diff.py [--recent N] [--csv 路径]
+用法: uv run python scripts/research/audit_convention_diff.py [--recent N] [--csv 路径]
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ import csv
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.core.config import load_config  # noqa: E402
@@ -75,7 +75,7 @@ def validate(vix) -> bool:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--recent", type=int, default=250)
-    ap.add_argument("--csv", default="scripts/audit_convention_diff_result.csv")
+    ap.add_argument("--csv", default="scripts/research/audit_convention_diff_result.csv")
     args = ap.parse_args()
     ms = MarketStore()
     defense_q = load_config().sentiment.vix_defense_quantile

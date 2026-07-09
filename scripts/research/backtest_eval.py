@@ -6,7 +6,7 @@
 **只读已落盘 verdict + OHLC，不跑委员会**，所以秒级、确定性、可反复跑。
 
 用法：
-  uv run python -m scripts.backtest_eval \
+  uv run python -m scripts.research.backtest_eval \
       --verdicts preset=/tmp/full_validation_results.jsonl \
       --verdicts naked=/tmp/fv_after.jsonl \
       [--mapping relative|absolute] [--init-exposure 0.5]
@@ -25,7 +25,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.db.market_store import MarketStore  # noqa: E402

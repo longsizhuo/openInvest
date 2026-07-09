@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402

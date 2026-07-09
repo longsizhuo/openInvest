@@ -7,7 +7,7 @@
               每 trial 做 sanity check + outlier 标记。
 
 用法:
-  uv run python -m scripts.sweep_runner --mode arithmetic \
+  uv run python -m scripts.research.sweep_runner --mode arithmetic \
     --param regime.trend_spread_atr_ratio --range 2.0,8.0,0.5 \
     --train-start 2018-01-01 --train-end 2023-12-31 \
     --assets NDQ.AX,GC=F \

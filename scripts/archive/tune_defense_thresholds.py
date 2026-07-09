@@ -9,8 +9,8 @@ regime.per_asset.crash_atr_pct_min 等）已随尺度无关化删除，跑出的
 Verdict sanity：对三期 exp_B draws 做确定性防御后处理，对比基线 CR/Sharpe/MaxDD。
 
 用法：
-  uv run python scripts/tune_defense_thresholds.py
-  uv run python scripts/tune_defense_thresholds.py --report /tmp/defense_tuning_report.md
+  uv run python scripts/archive/tune_defense_thresholds.py
+  uv run python scripts/archive/tune_defense_thresholds.py --report /tmp/defense_tuning_report.md
 
 设计：
 - VIX 腿：point-in-time 滚动 2 年（504 个交易日）分位排名，无前视偏差
@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.db.market_store import MarketStore  # noqa: E402
@@ -912,7 +912,7 @@ def _build_report(
         A("")
 
     A("---\n")
-    A("*报告由 `scripts/tune_defense_thresholds.py` 自动生成，确定性可重跑。*")
+    A("*报告由 `scripts/archive/tune_defense_thresholds.py` 自动生成，确定性可重跑。*")
 
     return "\n".join(lines)
 

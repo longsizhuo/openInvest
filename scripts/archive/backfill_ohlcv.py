@@ -14,9 +14,9 @@ schema 扩了 high/low/volume 列后，**旧行仍是 NULL**，必须回填。
 
 用法
 ====
-    uv run python -m scripts.backfill_ohlcv                # 回填 DB 里所有 symbol
-    uv run python -m scripts.backfill_ohlcv AAPL GC=F      # 只回填指定 symbol
-    uv run python -m scripts.backfill_ohlcv --period 5y    # 自定义回溯期
+    uv run python -m scripts.archive.backfill_ohlcv                # 回填 DB 里所有 symbol
+    uv run python -m scripts.archive.backfill_ohlcv AAPL GC=F      # 只回填指定 symbol
+    uv run python -m scripts.archive.backfill_ohlcv --period 5y    # 自定义回溯期
 
 回填后会抽查每个 symbol 的 high/low/volume 非空比例。
 """

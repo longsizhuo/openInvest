@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402
@@ -31,7 +31,7 @@ def main():
             "  - 如果你**不是**原作者：不要跑这个，去 GUI 策略页或手编 strategy.md "
             "添加你自己的 target_assets。\n"
             "  - 如果你**确实**想要作者默认（比如复刻同款组合做对照）：\n"
-            "    `python -m scripts.upgrade_to_multi_asset --i-really-want-author-defaults`",
+            "    `python -m scripts.archive.upgrade_to_multi_asset --i-really-want-author-defaults`",
         )
         return
     store = MemoryStore()

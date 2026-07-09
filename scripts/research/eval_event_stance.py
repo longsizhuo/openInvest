@@ -20,8 +20,8 @@
 - tagged：仅 affected_symbols 含该资产的事件（per-asset 行的口径）
 
 用法：
-    uv run python scripts/eval_event_stance.py
-    uv run python scripts/eval_event_stance.py --assets GC=F NDQ.AX --report /tmp/r.md
+    uv run python scripts/research/eval_event_stance.py
+    uv run python scripts/research/eval_event_stance.py --assets GC=F NDQ.AX --report /tmp/r.md
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.db.market_store import MarketStore  # noqa: E402

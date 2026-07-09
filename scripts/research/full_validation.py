@@ -54,17 +54,17 @@
 跑法
 ────────────────────────────────────────────────────────────────────────────
   # 看采样计划 + 续跑状态（只读 OHLC，不跑委员会，零成本）
-  uv run python -m scripts.full_validation --plan
+  uv run python -m scripts.research.full_validation --plan
 
   # 先跑 5 个点验证落盘/续跑/failed 格式（用单独的 smoke 文件，不污染正式文件）
-  uv run python -m scripts.full_validation --limit 5 \
+  uv run python -m scripts.research.full_validation --limit 5 \
       --results-file /tmp/full_validation_smoke.jsonl
 
   # 全量后台（断点续跑，可随时 Ctrl-C / 被 kill 后重跑续上）
-  uv run python -m scripts.full_validation
+  uv run python -m scripts.research.full_validation
 
   # 全量跑完后出分段统计（开卷/闭卷分两段，绝不合并）
-  uv run python -m scripts.full_validation --stats
+  uv run python -m scripts.research.full_validation --stats
 
 需要 DEEPSEEK_API_KEY（Direct 路径跑后端 4 角色辩论）。--plan / --stats 不需要。
 """
@@ -83,7 +83,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
@@ -123,7 +123,7 @@ NEUTRAL_PORTFOLIO_SUMMARY = (
 # 复刻 core.committee.VERDICT_RE（现 core/committee/cio_parse.py），用于从 CIO 原文
 # 还原 Sanity 改写前的 verdict_raw。
 # 本脚本另在 _pin_to_date_and_isolate 里 import core.committee.debate 以 patch _persist
-# （防污染），这条 scripts.full_validation -> core.committee 例外已加进 pyproject.toml 的
+# （防污染），这条 scripts.research.full_validation -> core.committee 例外已加进 pyproject.toml 的
 # import-linter（同 backtest_committee，研究脚本不共享 production service layer）。
 _VERDICT_RAW_RE = re.compile(r"VERDICT:\s*(BUY|ACCUMULATE|HOLD|TRIM|SELL)", re.I)
 

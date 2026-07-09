@@ -132,12 +132,12 @@ class SentimentConfig:
     # 独立快崩防御 ATR 腿（资产级，通用口径）：当日 ATR% / 自身近 1 年滚动中位
     # ATR% ≥ 此比值 → 触发。尺度无关（任何资产自校准，无 per-asset magic number），
     # 对历史尖峰稳健（分位制会被窗内旧尖峰脱敏，中位基线不受尾部影响）。
-    # 2.0 = 波动较自身常态翻倍。确定性 sweep 依据见 scripts/tune_defense_thresholds.py：
+    # 2.0 = 波动较自身常态翻倍。确定性 sweep 依据见 scripts/archive/tune_defense_thresholds.py：
     # OR 组合 capture NDQ 3/3、GC 13/16，ATR 腿独立 on_rate 3.6%/3.7%。
     atr_defense_spike_ratio: float = 2.0
     # EVENT_STANCE 聚合（utils/sentiment.py）：severity 权重 + 时效半衰期。
     # **默认值 = 逐位等价旧纯计数**（等权 + half_life=0 禁用衰减 + band=0）。
-    # 2026-06-11 经 scripts/eval_event_stance.py 验证判 INSUFFICIENT_DATA
+    # 2026-06-11 经 scripts/research/eval_event_stance.py 验证判 INSUFFICIENT_DATA
     # （事件史仅 ~25d、信号日 7-17）——未经该脚本重跑给出达标结论前**不许改默认值**
     # （ADR-010 rule 4 同款纪律，先例 trim_no_trim_loss_pct）。
     event_stance_w_low: float = 1.0
@@ -157,7 +157,7 @@ class PathConfig:
 
     **dataclass 默认=禁用(0/1) 是有意的安全模式，不是与 YAML 漂移**：经验证的
     生产值(80/1.1)在 defaults.yaml；dataclass 走"配置缺失→graceful 退化到不校准"
-    而非应用未验证参数。改默认值前必须先过 scripts/fit_path_calibration.py。
+    而非应用未验证参数。改默认值前必须先过 scripts/research/fit_path_calibration.py。
     """
     shrinkage_k: float = 0.0    # 条件→无条件收缩强度；0 = 禁用（生产值见 defaults.yaml）
     band_gamma: float = 1.0     # P10/P90/downside 带宽扩张系数；1 = 禁用（同上）

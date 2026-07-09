@@ -294,7 +294,7 @@ scripts/rl_train.py            ← Optuna 主入口，TPE bayesian search
 scripts/backtest_runner.py     ← workspace 隔离 wrapper（必经包装）
 scripts/run_walk_forward.py    ← walk-forward simulation runner
 scripts/holdout_validate.py    ← hold-out 验证（防 overfit）
-scripts/build_dspy_trainset.py ← 给 DSPy 准备 trainset (verdict + 7d return)
+scripts/archive/build_dspy_trainset.py ← 给 DSPy 准备 trainset (verdict + 7d return)
 
 # 核心模拟器 / metric
 core/paper_trade_simulator.py  ← PaperAccount + execute_verdict
@@ -331,7 +331,7 @@ docs/training_report.md                         ← 完整一轮训练报告
 **实现状态（2026-05-11）**：
 - ✅ DSPy 3.2.1 装好
 - ✅ `experiments/dspy_trainset_v1_*.json` 66 样本就绪
-- ✅ `scripts/rl_optimize_prompts.py` scaffold 完成
+- ✅ `scripts/archive/rl_optimize_prompts.py` scaffold 完成
 - ✅ Smoke test 通过：**baseline 0.600 → optimized 0.700（+10pp）**
 - ✅ **正式 run 完成**（10 candidate × 46 train × 20 dev，66 min）：
   **baseline 0.725 → optimized 0.825（+10pp / +13.8% 相对）**
@@ -343,13 +343,13 @@ docs/training_report.md                         ← 完整一轮训练报告
 
 ```bash
 # Smoke (~5 min ~¥0.5, 验证 pipeline)
-python -m scripts.rl_optimize_prompts \
+python -m scripts.archive.rl_optimize_prompts \
   --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \
   --output experiments/dspy_optimized_v1.json \
   --smoke-test
 
 # 正式 (~30 min ~¥3)
-python -m scripts.rl_optimize_prompts \
+python -m scripts.archive.rl_optimize_prompts \
   --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \
   --output experiments/dspy_optimized_v1.json \
   --n-candidates 10 --n-bootstrap 4
@@ -433,7 +433,7 @@ role: cio
 ### 下一步（plan 阶段 5）
 
 参考 `NousResearch/hermes-agent-self-evolution:evolution/skills/skill_module.py`，
-把 SKILL.md wrap 成 `dspy.Module`，让 `scripts/rl_optimize_prompts.py` 的 DSPy 优化
+把 SKILL.md wrap 成 `dspy.Module`，让 `scripts/archive/rl_optimize_prompts.py` 的 DSPy 优化
 **直接读写 .md 文件**（当前需要手工把 best demos 转 .py 注入）。
 
 ---

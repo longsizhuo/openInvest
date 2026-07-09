@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402

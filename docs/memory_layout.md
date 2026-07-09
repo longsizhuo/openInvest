@@ -134,10 +134,10 @@ uv run python scripts/migrate_profile.py
 uv run python scripts/migrate_portfolio_to_holdings.py
 
 # 升级单资产 → 多资产
-uv run python scripts/upgrade_to_multi_asset.py
+uv run python scripts/archive/upgrade_to_multi_asset.py
 
 # 导入实际黄金交易历史（按需，给原作者用的）
-uv run python scripts/import_gold_trades.py
+uv run python scripts/archive/import_gold_trades.py
 
 # 手动导入 CommSec 邮件成交（替代旧 cron 自动模式，2026-05+）
 uv run python scripts/import_commsec.py --lookback 30 --apply

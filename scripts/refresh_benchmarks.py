@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from openinvest.core.benchmarks import BENCHMARKS, refresh_benchmark  # noqa: E402
 
-BACKFILL_DAYS = 60  # 与 scripts/backfill_pnl_history.py 对齐
+BACKFILL_DAYS = 60  # 与 scripts/archive/backfill_pnl_history.py 对齐
 
 
 def main() -> None:

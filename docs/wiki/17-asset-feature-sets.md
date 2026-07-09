@@ -55,7 +55,7 @@ documents:
 - **可逆**：`verdict.gold_defense_dca_enabled=false` 即退回旧全拦行为（dataclass 默认
   即关）。配置见 `core/config/defaults.yaml`，代码 `core/committee/cio_parse.py:parse_cio_memo`
   + `core/runner/intervention.py:_gold_defense_dca_gate`。
-- 旧验收脚本 `scripts/validate_gold_defense.py`（测"全拦"是否 PASS）已是历史口径——
+- 旧验收脚本 `scripts/research/validate_gold_defense.py`（测"全拦"是否 PASS）已是历史口径——
   裁决不再以"翻 PASS/FAIL"为准，改以账本钱口径长期验证（账本视角下"全拦 vs 分批 vs
   不拦"是三臂对比）。背景见 wiki 12 #6、wiki 18 §5。
 

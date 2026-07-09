@@ -153,7 +153,7 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
 - **小样本诚实标注**：GC=F downtrend 90d 独立样本 ≈4 → ⚠样本不足；不假装精确
 - **1×ATR 是定义不是调参结果**：它只影响"显著回踩/冲高"的展示分界，不进任何
   确定性 verdict 改写；要 sweep 它需先建验证口径（同 EVENT_STANCE 权重的纪律，
-  见 `scripts/eval_event_stance.py` 的 INSUFFICIENT_DATA 闸门先例）
+  见 `scripts/research/eval_event_stance.py` 的 INSUFFICIENT_DATA 闸门先例）
 
 ## 6. 校准闭环（path_review）与 walk-forward 基线
 
@@ -188,7 +188,7 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
    ——GC 07-09 downtrend 覆盖 7%）→ `calibrate_profile` 两个修复：
    **小样本收缩**（λ=eff_n/(eff_n+k)，条件分布向同资产无条件分布收缩）+
    **带宽扩张**（P10/P90/downside 围绕中位 ×γ）。
-   `scripts/fit_path_calibration.py` 预注册 fit(2007-17)/OOS(2018-26)：
+   `scripts/research/fit_path_calibration.py` 预注册 fit(2007-17)/OOS(2018-26)：
    **OOS 三窗带覆盖 76/73/70% → 81/80/76% 全进 [75,85]，Brier 全窗改善 → PASS**，
    k=80 / γ=1.1 已写入 defaults（path 节）。caveat：p_below 与"事后基率"
    差距缩到 0.5-1.5% 但未反超（事后基率不可预知，仅参考）。

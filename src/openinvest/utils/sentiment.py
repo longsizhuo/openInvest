@@ -145,7 +145,7 @@ def _stance_score(
     score = Σ sign × w(severity) × 0.5^(age_h/half_life)；opportunity 正、risk 负、
     neutral 0；age 负值（错标未来）clamp 0。**默认 config（等权 + half_life=0 禁用
     衰减）下 score ≡ opportunity计数 − risk计数，net 判定与旧纯计数逐位一致**——
-    加权公式经 scripts/eval_event_stance.py 验证前保持禁用（2026-06-11 基线判
+    加权公式经 scripts/research/eval_event_stance.py 验证前保持禁用（2026-06-11 基线判
     INSUFFICIENT_DATA，ADR-010 rule 4 纪律）。
     """
     from openinvest.core.config import load_config
@@ -250,7 +250,7 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
 
     VIX 分位是保底；VIX 都拿不到 → 返回 ""（保持 graceful loader 契约）。
     CNN 默认尝试，失败静默跳过。event_brief 非空时附净情绪聚合行
-    （默认=纯计数；severity 加权/时效衰减经 scripts/eval_event_stance.py 验证前禁用）。
+    （默认=纯计数；severity 加权/时效衰减经 scripts/research/eval_event_stance.py 验证前禁用）。
 
     Returns:
         多行文本，或 "" 表示连 VIX 都没有（整块降级）。

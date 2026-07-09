@@ -16,13 +16,13 @@ DSPy 怎么帮：
 
 用法:
     # Smoke test (推荐先跑这个，确认 pipeline 没炸)
-    python -m scripts.rl_optimize_prompts \\
+    python -m scripts.archive.rl_optimize_prompts \\
         --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \\
         --output experiments/dspy_optimized_v1.json \\
         --smoke-test
 
     # 正式（耗 ~30min ~¥3）
-    python -m scripts.rl_optimize_prompts \\
+    python -m scripts.archive.rl_optimize_prompts \\
         --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \\
         --output experiments/dspy_optimized_v1.json \\
         --n-candidates 10 --n-bootstrap 4
@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 def _configure_dspy():
@@ -239,7 +239,7 @@ def run_dspy_optimization(
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--trainset", required=True, type=Path,
-                   help="trainset.json 路径（用 scripts/build_dspy_trainset.py 生成）")
+                   help="trainset.json 路径（用 scripts/archive/build_dspy_trainset.py 生成）")
     p.add_argument("--output", required=True, type=Path,
                    help="optimized program 落盘路径")
     p.add_argument("--n-candidates", type=int, default=10,

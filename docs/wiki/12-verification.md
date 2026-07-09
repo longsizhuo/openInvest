@@ -79,7 +79,7 @@ CONCENTRATION_PCT < 20%（仓位 < 20%，子弹 ≥ 80%）：
 
 ## 主张 3：v1 prompt 的方向准确率不高，但"不犯大错"
 
-**实测 v1 verdict vs 7 天后实际涨跌**（66 样本，`scripts/build_dspy_trainset.py`）：
+**实测 v1 verdict vs 7 天后实际涨跌**（66 样本，`scripts/archive/build_dspy_trainset.py`）：
 
 | 命中分档 | 比例 |
 |---|---|
@@ -143,7 +143,7 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 
 ## 主张 6：DSPy 自动调 prompt 比人手写更准
 
-**实测**（`scripts/rl_optimize_prompts.py`）：
+**实测**（`scripts/archive/rl_optimize_prompts.py`）：
 
 | Run | Train | Dev | Candidates | Bootstrap | Baseline | Optimized | Δ |
 |---|---|---|---|---|---|---|---|
@@ -221,7 +221,7 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
      决策 [adr/009](adr/009-no-ta-style-analyst-agents.md)
 
 6. **黄金 VIX 防御腿"语义错误"假设——验收结论被一次窗口口径 bug 翻转（2026-06-13 漂移审计）**
-   （`scripts/validate_gold_defense.py`）
+   （`scripts/research/validate_gold_defense.py`）
    → 假设：黄金双相（流动性挤兑先跌、危机买盘接力），高 VIX 拦黄金买入是
      股票语义错装（2020-03 案例：挤兑 -8.6% 后 90d +30.7%）
    → 探索性全样本（2002-2026, n≈5963）强烈支持：VIX≥85 分位桶各窗中位全面右偏
@@ -267,7 +267,7 @@ python -m scripts.backtest_runner --workspace /tmp/diag \
   --start 2024-05-13 --end 2024-11-15 --assets NDQ.AX,GC=F
 
 # 主张 3 (trainset 命中率)
-python -m scripts.build_dspy_trainset \
+python -m scripts.archive.build_dspy_trainset \
   --workspace /tmp/diag --output /tmp/trainset.json
 
 # 主张 4 (Optuna 30-trial)
@@ -277,7 +277,7 @@ python -m scripts.rl_train --workspace /tmp/optuna --n-trials 30 ...
 python -m scripts.holdout_validate --optuna-workspace /tmp/optuna ...
 
 # 主张 6 (DSPy)
-python -m scripts.rl_optimize_prompts \
+python -m scripts.archive.rl_optimize_prompts \
   --trainset experiments/dspy_trainset_v1_2024_05_to_11.json \
   --output /tmp/dspy_out.json --n-candidates 10
 ```

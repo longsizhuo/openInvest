@@ -38,8 +38,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 想干啥 | 跑什么（从仓库根 `..` 运行） | 读/写到这里的 |
 |---|---|---|
-| DSPy v2 重建训练集 | `uv run --with dspy python -m scripts.build_dspy_trainset_v2 --output experiments/dspy_trainset_v2.json` | `dspy_trainset_v*.json` |
-| DSPy v2 训练（MIPROv2） | `uv run --with dspy python -m scripts.rl_optimize_prompts_v2 --trainset … --output experiments/dspy_optimized_v2.json [--smoke-test\|--auto light]` | `dspy_optimized_v*.json` |
+| DSPy v2 重建训练集 | `uv run --with dspy python -m scripts.research.build_dspy_trainset_v2 --output experiments/dspy_trainset_v2.json` | `dspy_trainset_v*.json` |
+| DSPy v2 训练（MIPROv2） | `uv run --with dspy python -m scripts.research.rl_optimize_prompts_v2 --trainset … --output experiments/dspy_optimized_v2.json [--smoke-test\|--auto light]` | `dspy_optimized_v*.json` |
 | Optuna 超参搜索 | `python -m scripts.rl_train --workspace /tmp/my_optuna …` | `optuna_final_summary.json` |
 
 - **DSPy 没进 `pyproject.toml`**——必须 `uv run --with dspy`。

@@ -18,7 +18,7 @@
 
 幂等：写之前先把 jsonl 截掉旧数据 → 重新写。
 
-跑法：python -m scripts.backfill_pnl_history
+跑法：python -m scripts.archive.backfill_pnl_history
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 import yfinance as yf
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402

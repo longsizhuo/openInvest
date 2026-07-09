@@ -14,19 +14,19 @@ v1 vs v2 关键差异：
   （早期 80% train、后期 20% dev，防 look-ahead bias）
 
 ⚠️ 注意：
-- 不破坏 v1：scripts/rl_optimize_prompts.py 原样保留
+- 不破坏 v1：scripts/archive/rl_optimize_prompts.py 原样保留
 - trainset 由另一个 subagent build（experiments/dspy_trainset_v2.json）
 - verdict_oracle_accuracy 由另一个 subagent 加在 core/backtest_reward.py
 
 用法:
     # Smoke test（不要在 trainset 还没 build 完前跑）
-    python -m scripts.rl_optimize_prompts_v2 \
+    python -m scripts.research.rl_optimize_prompts_v2 \
         --trainset experiments/dspy_trainset_v2.json \
         --output experiments/dspy_optimized_v2.json \
         --smoke-test
 
     # 正式
-    python -m scripts.rl_optimize_prompts_v2 \
+    python -m scripts.research.rl_optimize_prompts_v2 \
         --trainset experiments/dspy_trainset_v2.json \
         --output experiments/dspy_optimized_v2.json \
         --auto light
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 # ---------- DSPy 配置 ----------

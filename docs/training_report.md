@@ -84,7 +84,7 @@ CONCENTRATION_PCT < 20%（仓位 < 20%，子弹 ≥ 80%）：
 
 ### v1 verdict 命中率分析（DSPy trainset）
 
-`scripts/build_dspy_trainset.py` 算每个 verdict 的 7d 实际 return + 方向分：
+`scripts/archive/build_dspy_trainset.py` 算每个 verdict 的 7d 实际 return + 方向分：
 
 - 方向对（+1）: 47.0% (31/66)
 - 中性（0）: 39.4% (26/66)
@@ -196,7 +196,7 @@ LLM 不善 timing 但擅避免"重大方向错"——长期累积仍 +15.5%。
 
 ## 6. DSPy 阶段（已实现 + 跑完）
 
-`scripts/rl_optimize_prompts.py` 已落地，minimal viable 版本（不重做 4 角色
+`scripts/archive/rl_optimize_prompts.py` 已落地，minimal viable 版本（不重做 4 角色
 cross-challenge，只 wrap CIO 单步 verdict 预测）。
 
 ### 实测数据
@@ -237,7 +237,7 @@ DSPy 改善的是**单步 verdict 预测准确率**（dev set 上的 metric scor
 - `experiments/optuna_final_summary.json` — 30 trial 完整数据
 - `experiments/dspy_trainset_v1_2024_05_to_11.json` — 66 样本训练集
 - `scripts/backtest_runner.py:_warmup_market_data()` — 10y 预热（commit `867db9b`）
-- `scripts/build_dspy_trainset.py` — trainset 生成器（commit `这次`）
+- `scripts/archive/build_dspy_trainset.py` — trainset 生成器（commit `这次`）
 - `scripts/holdout_validate.py` — hold-out 验证（commit `这次`）
 
 ### 修改

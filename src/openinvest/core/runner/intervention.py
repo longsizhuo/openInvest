@@ -45,7 +45,7 @@ def _intervention_record(
     反事实记账（2026-06-12）：每次确定性规则改写 CIO 裁决（快崩防御降级 /
     SOLVENCY 拦 TRIM / Sanity5 否 TRIM 等）都落一条结构化记录，攒"如果没拦
     会怎样"的样本——这是防御/兜底规则未来能用钱口径验收的唯一数据来源
-    （黄金 VIX 腿验收 scripts/validate_gold_defense.py 判 FAIL 后尤其如此）。
+    （黄金 VIX 腿验收 scripts/research/validate_gold_defense.py 判 FAIL 后尤其如此）。
     只动 confidence 不动 verdict/alloc 的不算干预。
     """
     v = verdict or {}

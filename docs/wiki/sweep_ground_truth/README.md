@@ -30,7 +30,7 @@ events:
 ## 使用
 
 ```bash
-uv run python -m scripts.sweep_runner \
+uv run python -m scripts.research.sweep_runner \
   --mode arithmetic \
   --param regime.trend_ma_spread_pct \
   --range 2.0,8.0,0.5 \

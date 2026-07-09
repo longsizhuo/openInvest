@@ -83,7 +83,7 @@ DeepSeek **没有**公开 embedding API（plan 早期一稿写错）。当前实
 
 ## 验证
 
-事件 RAG 是否值得全量启用，由 `scripts/analyze_news_attribution.py` 跑出来的根因占比决定：
+事件 RAG 是否值得全量启用，由 `scripts/research/analyze_news_attribution.py` 跑出来的根因占比决定：
 
 - `news_blindspot ≥ 30%` → 开 `INVEST_EVENT_RAG_ENABLED=true`
 - `10% ~ 30%` → 只开 trigger 路径，RAG 暂留

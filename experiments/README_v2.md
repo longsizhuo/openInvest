@@ -19,10 +19,10 @@
 
 | 文件 | 用途 |
 |------|------|
-| `scripts/build_dspy_trainset_v2.py` | yfinance 多 symbol × 2 年 → oracle labeling → forward-window metrics → trainset_v2.json |
+| `scripts/research/build_dspy_trainset_v2.py` | yfinance 多 symbol × 2 年 → oracle labeling → forward-window metrics → trainset_v2.json |
 | `core/backtest_reward.py:forward_window_reward()` | per-sample reward 公式 |
 | `core/backtest_reward.py:verdict_oracle_accuracy()` | DSPy metric: verdict 与 forward outcome 一致性 |
-| `scripts/rl_optimize_prompts_v2.py` | MIPROv2 训练器 |
+| `scripts/research/rl_optimize_prompts_v2.py` | MIPROv2 训练器 |
 | `capabilities/dspy_few_shot_loader.py` | 把 v2 optimized demos format 成 markdown，注入 CIO prompt |
 | `experiments/dspy_trainset_v2.json` | 5565 样本训练集 |
 | `experiments/dspy_optimized_v2.json` | MIPROv2 优化后的 program（含 demos）|
@@ -31,13 +31,13 @@
 
 ```bash
 # 1. 重建 trainset (yfinance 拉数据，~5min)
-uv run --with dspy python -m scripts.build_dspy_trainset_v2 \
+uv run --with dspy python -m scripts.research.build_dspy_trainset_v2 \
     --output experiments/dspy_trainset_v2.json
 
 # 2. smoke test (50 train / 20 dev, ~3min)
 DEEPSEEK_API_KEY=$(grep '^DEEPSEEK_API_KEY=' .env | cut -d= -f2-) \
 DEEPSEEK_BASE_URL=$(grep '^DEEPSEEK_BASE_URL=' .env | cut -d= -f2-) \
-uv run --with dspy python -m scripts.rl_optimize_prompts_v2 \
+uv run --with dspy python -m scripts.research.rl_optimize_prompts_v2 \
     --trainset experiments/dspy_trainset_v2.json \
     --output experiments/dspy_optimized_v2_smoke.json \
     --smoke-test
@@ -45,7 +45,7 @@ uv run --with dspy python -m scripts.rl_optimize_prompts_v2 \
 # 3. 正式训练 (5565 train / dev, auto=light ~20min, medium ~1h)
 DEEPSEEK_API_KEY=$(grep '^DEEPSEEK_API_KEY=' .env | cut -d= -f2-) \
 DEEPSEEK_BASE_URL=$(grep '^DEEPSEEK_BASE_URL=' .env | cut -d= -f2-) \
-uv run --with dspy python -m scripts.rl_optimize_prompts_v2 \
+uv run --with dspy python -m scripts.research.rl_optimize_prompts_v2 \
     --trainset experiments/dspy_trainset_v2.json \
     --output experiments/dspy_optimized_v2.json \
     --auto light

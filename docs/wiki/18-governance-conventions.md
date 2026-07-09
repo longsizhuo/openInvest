@@ -32,7 +32,7 @@ documents:
 （不只是新闻）。实证：6/9 transcript 冻结 `VIX=21.4`，今天 DB 已被 yfinance 修订成 `19.9`。
 - 没当时快照的历史点 → 标"**不可忠实复现，仅近似**"，结论不得依赖其精确值。
 - **重算脚本必须先用 ≥3 个有 transcript 的冻结点反向校验**，复现冻结值才可信
-  （先例 `scripts/audit_convention_diff.py` v2：4 点全复现 730 窗）。脚本是被验证对象，
+  （先例 `scripts/research/audit_convention_diff.py` v2：4 点全复现 730 窗）。脚本是被验证对象，
   transcript 是金标准，不许反过来"信脚本"。
 
 ### B. 用户显式否决权（写进章程本身，不只是"签字同意章程"）

@@ -21,7 +21,7 @@ import pandas as pd
 import yfinance as yf
 
 # 让脚本可以 from utils / core / ... import
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
