@@ -68,7 +68,7 @@ openinvest doctor
 | 命令 | 用途 |
 |------|------|
 | `openinvest` | CLI（status / run_committee / buy / sell / ...） |
-| `openinvest-mcp` | MCP stdio server（14 工具，给 agent 用） |
+| `openinvest-mcp` | MCP stdio server（15 工具，给 agent 用） |
 | `openinvest-web` | API server（仅 remote hub 部署用，见 [08-deployment.md](wiki/08-deployment.md)） |
 
 **更新**：`skills/invest/scripts/run.sh update` 或 `uvx --refresh openinvest doctor`。
@@ -238,7 +238,7 @@ claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 ```
 
 之后在 Claude Code 里直接说"看看我的持仓"、"跑委员会分析 AAPL"即可，
-14 个 MCP 工具覆盖读写全链路。
+15 个 MCP 工具覆盖读写全链路。
 
 ---
 

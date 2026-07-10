@@ -409,10 +409,10 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
 
 - **transport = stdio**：MCP client 按 session spawn 子进程，无端口无 daemon；
   写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
-- **14 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
+- **15 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
   strategy / history / live_prices / what_if / discipline / decisions /
-  explain_decision / record_execution / buy / sell / deposit / withdraw /
-  run_committee（Direct 路径，当天已跑读缓存）
+  explain_decision / record_execution / ingest_event / buy / sell / deposit /
+  withdraw / run_committee（Direct 路径，当天已跑读缓存）
 - 刻意不把 81 个 REST 端点全暴露（撑爆 agent context）；Coordinator 委员会
   workflow 也不在这里——那是 Skill 的职责（issue #133 Decision 5/6）
 

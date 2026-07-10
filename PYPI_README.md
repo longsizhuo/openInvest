@@ -29,7 +29,7 @@ uvx openinvest doctor        # health check
 
 ### As an MCP server (recommended for agents)
 
-14 tools — portfolio read/write, live prices, decision ledger, and the committee — over stdio:
+15 tools — portfolio read/write, live prices, decision ledger, and the committee — over stdio:
 
 ```bash
 claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp

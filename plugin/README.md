@@ -36,7 +36,7 @@ writes your config. After that just ask things like *"show my portfolio"*,
 ## What actually gets installed
 
 The plugin ships the **agent skill layer** (`invest` + `invest-setup`) plus an
-**MCP server** (`.mcp.json`, auto-registered on install — 14 tools: `status`,
+**MCP server** (`.mcp.json`, auto-registered on install — 15 tools: `status`,
 `live_prices`, `decisions`, `explain_decision`, `record_execution`, `buy`,
 `sell`, `run_committee`, …). The backend ships on **PyPI**
 ([`openinvest`](https://pypi.org/project/openinvest/)): on first call `run.sh`

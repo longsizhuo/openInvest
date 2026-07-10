@@ -29,7 +29,7 @@ documents:
 
 | 组件 | 作用 |
 |---|---|
-| **MCP server**（14 工具，自动注册） | agent 能调什么：status / live_prices / decisions / explain_decision / record_execution / buy / sell / run_committee … |
+| **MCP server**（15 工具，自动注册） | agent 能调什么：status / live_prices / decisions / explain_decision / record_execution / buy / sell / run_committee … |
 | **invest skill** | agent 怎么编排委员会（Coordinator 协议、决策纪律） |
 | **invest-setup skill** | 首次 5 问 onboarding |
 

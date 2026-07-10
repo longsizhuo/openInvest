@@ -144,7 +144,7 @@ INVEST_API_TOKEN=<hub 的同名 token>             # hub 开了鉴权才需要
 
 **MCP 用户**（plugin 装完自动注册，Claude Code / Codex 同）：status / strategy /
 history / live_prices / what_if / discipline / decisions / explain_decision /
-record_execution / buy / sell / deposit / withdraw / run_committee 共 14 个工具，
+record_execution / ingest_event / buy / sell / deposit / withdraw / run_committee 共 15 个工具，
 schema 自动发现，直接调，不需要查表。
 
 **CLI/REST agent** 或 MCP 没覆盖的长尾操作（trades 意向流 / config 白名单 /

@@ -64,7 +64,7 @@ openInvest 有三个调用层，每层服务不同对象：
 |---|---|---|---|
 | **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee`（入口 façade，实现在 `scripts/skill_cmds/committee_cmds.py:cmd_run_committee`） | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
 | **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ sentiment 共享 + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
-| **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语 + 持久化 transcript | ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
+| **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语（transcript 落盘实际发生在原语层 `debate.py:_persist`，非本层——issue #179 修表跟代码对齐）| ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
 | **Primitive** | `core/committee/debate.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|
 
 ### Shared Input Loaders（单一可信源）
@@ -150,7 +150,7 @@ skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，�
 src/openinvest/cli.py              CLI 入口（console script `openinvest`；旧 scripts/skill.py 是兼容 shim）
 src/openinvest/skill_cmds/         skill 各 cmd 实现子包（_helpers/analysis/committee/portfolio/lifecycle/config）
 src/openinvest/connectors/web_api/ FastAPI 端点包（**deprecated**，只服务 remote hub 模式）；不再新增端点
-src/openinvest/connectors/mcp_server.py  MCP stdio adapter（14 工具，console script `openinvest-mcp`）
+src/openinvest/connectors/mcp_server.py  MCP stdio adapter（15 工具，console script `openinvest-mcp`）
 src/openinvest/core/portfolio_manager.py 持仓 façade，with_portfolio_tx fcntl 锁
 src/openinvest/core/committee/     委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
 src/openinvest/core/decision_ledger.py   决策账本读时 join（issue #133 Decision 9）

@@ -3,7 +3,7 @@
 > 本文件是**工具文档**——SKILL.md 只管 workflow（issue #133 Decision 6：
 > Tool Usage 交给 MCP schema 自动发现，Skill 收缩为编排协议）。
 >
-> - **MCP 用户**（Claude Code plugin / codex mcp）：14 个工具带 schema 自动发现，
+> - **MCP 用户**（Claude Code plugin / codex mcp）：15 个工具带 schema 自动发现，
 >   通常不用读本文件；MCP 没覆盖的长尾端点（trades/config/events/...）才来查表
 > - **CLI/REST agent**（Gemini / Cursor / 脚本）：本文件是完整参考
 
