@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.1](https://github.com/longsizhuo/openInvest/compare/v0.24.0...v0.24.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **deploy:** 修复 src-layout 迁移后整体失效的 Docker 部署面 ([1f8d833](https://github.com/longsizhuo/openInvest/commit/1f8d833544269d3cfbd54a49d6fc43be9b304cf8))
+* **privacy:** 红线[#2](https://github.com/longsizhuo/openInvest/issues/2) 补漏——小样本桶 hit 一并抑制 + 堵减法逆算通道 ([4907692](https://github.com/longsizhuo/openInvest/commit/4907692c8980be60521e8f13ab2bfc9591f0b4e9))
+
+
+### Docs
+
+* **wiki:** 12-verification 加 ADR-022 污染桶标注 + 修反向免责声明 ([b36d243](https://github.com/longsizhuo/openInvest/commit/b36d243653b5788b093c9bc3c3c16b6d1f694f50))
+
 ## [0.24.0](https://github.com/longsizhuo/openInvest/compare/v0.23.0...v0.24.0) (2026-07-09)
 
 
