@@ -5,8 +5,7 @@ chroma.*
 
 # 隐私
 cache_data
-user_profile.json
-user_profile.json.bak
+user_profile.json*
 
 # Python
 __pycache__/
