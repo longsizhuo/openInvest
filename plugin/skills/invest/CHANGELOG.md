@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.2...invest-skill-v0.18.3) (2026-07-10)
+
+
+### Docs
+
+* **mcp:** MCP 工具数 14→15 全仓对齐 + 枚举补 ingest_event ([0d7fdcd](https://github.com/longsizhuo/openInvest/commit/0d7fdcd837f5b332e46dcbd6eba0ba2215fe69a5))
+
 ## [0.18.2](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.1...invest-skill-v0.18.2) (2026-07-08)
 
 
