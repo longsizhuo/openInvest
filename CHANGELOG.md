@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.2](https://github.com/longsizhuo/openInvest/compare/v0.24.1...v0.24.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **accuracy:** 公开命中率固定单一 horizon + 同样本市场基率 ([dc2bfcf](https://github.com/longsizhuo/openInvest/commit/dc2bfcf9148435b510d7821e4c13cfbd04cfdbfa))
+* **backtest:** PaperTradeSimulator 黄金腿补 USDCNY 汇率 ([d1975a4](https://github.com/longsizhuo/openInvest/commit/d1975a4e997c915811993d02994f6f17e4ca0e4c))
+* **pnl:** 公开 PnL 图口径脚注 + 图例去持仓 symbol ([b20abe7](https://github.com/longsizhuo/openInvest/commit/b20abe77ebd468a61d55b34c7fb23993e83c73de))
+
 ## [0.24.1](https://github.com/longsizhuo/openInvest/compare/v0.24.0...v0.24.1) (2026-07-10)
 
 
