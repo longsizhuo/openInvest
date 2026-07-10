@@ -150,3 +150,22 @@ def test_summarize_holdout_sub30_suppresses_rates():
     # contaminated 桶从不抑制（本就标注非业绩）
     assert s["contaminated"]["rates_suppressed_sub30"] is False
     assert "hit_rate" in s["contaminated"]["by_window"]["7d"]
+
+
+def test_close_on_or_after_past_side_guard():
+    """issue #179 P1-A⑤：决议日早于数据窗口首行 → None（跳过），
+    绝不静默锚到窗口第一根算出错误收益。"""
+    import pandas as pd
+    from datetime import date
+    from openinvest.jobs.verdict_review import _close_on_or_after
+
+    df = pd.DataFrame(
+        {"Close": [10.0, 11.0, 12.0]},
+        index=pd.to_datetime(["2026-06-01", "2026-06-02", "2026-06-03"]),
+    )
+    # 窗口内正常锚定
+    assert _close_on_or_after(df, date(2026, 6, 2)) == 11.0
+    # 未来侧（原有护栏）
+    assert _close_on_or_after(df, date(2026, 7, 1)) is None
+    # 过去侧（本次新增）：2025 年的决议日不得锚到 2026-06-01
+    assert _close_on_or_after(df, date(2025, 1, 1)) is None

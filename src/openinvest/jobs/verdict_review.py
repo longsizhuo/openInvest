@@ -112,6 +112,11 @@ def _close_on_or_after(df, day) -> Optional[float]:
     自动过滤未成熟窗口。旧 bug 用 `<= target 的最后一根` 在 target 未来时
     会塌缩成"今天的收盘"，把只过了 3 天的样本标成 30d 收益。
     """
+    # 过去侧护栏（issue #179 P1-A⑤）：决议日早于窗口首行时，>= 过滤返回整个
+    # frame，iloc[0] 会静默锚到"窗口第一根"而非决议日收盘，收益算错。
+    # _closes 只拉 1y——重打分老决议（backfill / 全量重跑）必然踩到。宁跳过不算错。
+    if day < df.index.date.min():
+        return None
     sub = df[df.index.date >= day]
     if sub.empty:
         return None
@@ -235,16 +240,31 @@ FLAT_CEILING_PCT = 8.0
 DEFAULT_DAILY_VOL_PCT = 2.0  # atr_pct 拉取失败时的兜底日波动
 
 
-def _atr_pct(symbol: str) -> float:
-    """资产的 14 日 ATR 占价格百分比（日波动幅度的度量）。拉不到 → 兜底。"""
-    df = _closes(symbol)
-    if df is None:
-        return DEFAULT_DAILY_VOL_PCT
+def _atr_pct_asof(symbol: str, decision_date: str) -> float:
+    """决议日 as-of 截断的 14 日 ATR%（issue #179 P1-A⑥）。拉不到 → 兜底。
+
+    旧实现拿"当前"1y 数据算 ATR 给全部历史决议定 flat band：(a) 前视——历史决议
+    用今天的波动率打分；(b) 标签漂移——run() 每次从 .md 全量重建 jsonl，同一决议
+    的 hit/directions 会随当日 ATR 变化翻转，直接污染 #141 Brier 校准的标签稳定性。
+    与 _decision_regime 同口径：DB 全历史 → 截断决议日 → tail(400) 算 ATR。
+    """
+    global _REGIME_STORE
     try:
+        import pandas as pd
         from openinvest.utils.market_metrics import compute_metrics
+        if _REGIME_STORE is None:
+            from openinvest.db.market_store import MarketStore
+            _REGIME_STORE = MarketStore()
+        df = _REGIME_STORE.get_history_df(symbol, days=100000)
+        if df is None or df.empty:
+            return DEFAULT_DAILY_VOL_PCT
+        df = df[df.index <= pd.to_datetime(decision_date)].tail(400)
+        if len(df) < 20:
+            return DEFAULT_DAILY_VOL_PCT
         atr = compute_metrics(df).get("atr_pct")
         return float(atr) if atr and atr > 0 else DEFAULT_DAILY_VOL_PCT
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("_atr_pct_asof(%s,%s) 兜底: %s", symbol, decision_date, e)
         return DEFAULT_DAILY_VOL_PCT
 
 
@@ -289,11 +309,12 @@ def _decision_regime(symbol: str, decision_date: str) -> Optional[str]:
 _ATR_CACHE: Dict[str, float] = {}
 
 
-def _atr_pct_cached(symbol: str) -> float:
-    """_atr_pct 的进程内缓存（atr 用当前 1y 数据算，同 symbol 全程不变，避免每条 review 重拉行情）。"""
-    if symbol not in _ATR_CACHE:
-        _ATR_CACHE[symbol] = _atr_pct(symbol)
-    return _ATR_CACHE[symbol]
+def _atr_pct_cached(symbol: str, decision_date: str) -> float:
+    """_atr_pct_asof 的进程内缓存（键=(symbol, 决议日)，避免每条 review 重拉行情）。"""
+    key = f"{symbol}@{decision_date}"
+    if key not in _ATR_CACHE:
+        _ATR_CACHE[key] = _atr_pct_asof(symbol, decision_date)
+    return _ATR_CACHE[key]
 
 
 def _flat_band(atr_pct: float, window_days: int) -> float:
@@ -394,7 +415,7 @@ def review_one(
     # 波动率阈值按资产定（HOLD 的"没动"判定 + 方向分类共用同一个 flat band）。
     # 改为对所有 verdict 都算 atr（带缓存）：directions 是 verdict 无关的"市场到底涨没涨"，
     # 必须和 HOLD 用同一条 flat band 才能让下游 regime 基率与 missed_up/avoided_down 口径一致。
-    atr = _atr_pct_cached(real_symbol)
+    atr = _atr_pct_cached(real_symbol, decision_date)
     for window in HIT_WINDOWS:
         ret = _window_return(real_symbol, holding, decision_date, window)
         if ret is not None:
