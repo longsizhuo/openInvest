@@ -400,3 +400,24 @@ def test_ensure_benchmarks_fresh_swallows_errors(monkeypatch):
     # 1 个失败，其余成功
     assert len(refresh_calls) == len(BENCHMARKS) - 1
 
+
+
+def test_render_svg_no_holding_symbols(monkeypatch):
+    """红线 #1 回归（issue #179 P1-C①）：公开 pnl-data 分支的 SVG 不得含
+    可反推持仓的 symbol / 资产名（NDQ.AX、GC=F、Gold 等）。图例用泛化标签。"""
+    import openinvest.jobs.pnl_snapshot as ps
+    from openinvest.jobs.pnl_snapshot import render_svg
+
+    # 与同文件 _ensure_benchmarks_fresh 系测试同款隔离：不碰真实基准缓存/网络
+    monkeypatch.setattr(ps, "get_all_series", lambda start_date: [])
+    monkeypatch.setattr(ps, "_ensure_benchmarks_fresh", lambda s, e: None)
+
+    history = [
+        {"ts": f"2026-06-{d:02d}T10:00:00+00:00", "total_pnl_pct": 1.0 + d,
+         "ndq_pnl_pct": 0.5, "gold_pnl_pct": 2.0}
+        for d in range(1, 6)
+    ]
+    svg = render_svg(history)
+    for forbidden in ("NDQ", "GC=F", "GC_F", "Gold", "gold_cny"):
+        assert forbidden not in svg, f"公开 SVG 含违禁词 {forbidden!r}（红线 #1）"
+    assert "口径：★ 实盘" in svg, "口径脚注缺失（issue #179 P1-A③）"

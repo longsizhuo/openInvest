@@ -413,8 +413,8 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
         f'fill="#6e7681" class="label">0%</text>'
     )
 
-    # SVG 总高度
-    H_TOTAL = bar_y_end + BAR_BOTTOM_PAD
+    # SVG 总高度（含底部口径脚注一行，issue #179 P1-A③）
+    H_TOTAL = bar_y_end + BAR_BOTTOM_PAD + 18
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H_TOTAL}" role="img" aria-label="PnL chart with benchmark bars">
   <style>
@@ -443,9 +443,9 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
     <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
     <text x="20" y="4" fill="#c9d1d9" font-weight="bold">Total</text>
     <line x1="80" y1="0" x2="94" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="100" y="4" fill="#c9d1d9">NDQ.AX</text>
+    <text x="100" y="4" fill="#c9d1d9">资产 A</text>
     <line x1="170" y1="0" x2="184" y2="0" stroke="#f0a500" stroke-width="1.5"/>
-    <text x="190" y="4" fill="#c9d1d9">Gold</text>
+    <text x="190" y="4" fill="#c9d1d9">资产 B</text>
   </g>
 
   <!-- ===== 分隔线 ===== -->
@@ -457,6 +457,9 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
 
   {zero_line_svg}
   {chr(10).join(bar_svg)}
+
+  <!-- 口径脚注：两侧统计口径不同，不可直接比大小（issue #179 P1-A③）-->
+  <text x="{MARGIN_L}" y="{bar_y_end + BAR_BOTTOM_PAD + 8}" fill="#6e7681" class="label">口径：★ 实盘 = 现市值/累计成本 −1（分批建仓，含加仓时点效应）；基准 = 窗口首日一次性买入。口径不同，只看方向不比大小。</text>
 </svg>
 """
 
