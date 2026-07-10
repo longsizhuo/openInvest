@@ -10,10 +10,10 @@ APScheduler 守护进程入口。把 `jobs/` 下的 `.yml` 定义注册成 cron�
 
 ```bash
 # Daemon 模式（生产）
-python -m scheduler.runner
+python -m openinvest.scheduler.runner
 
 # 单跑一个 job（debug）
-python -m scheduler.runner --once daily_report
+python -m openinvest.scheduler.runner --once daily_report
 ```
 
 ## 与其他目录的关系

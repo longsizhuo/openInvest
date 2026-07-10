@@ -1,6 +1,6 @@
 services:
-  # ── Web API + GUI（:8765）──────────────────────────────────────────────
-  # 浏览器开 http://localhost:8765 看完整 GUI；GUI 已在镜像 build 期烤进 static/。
+  # ── Web API（:8765）─────────────────────────────────────────────────────
+  # GUI 已退役（2026-07-05），镜像不再烤 dist；web 服务只 serve /api。
   invest-web:
     build: .
     image: ghcr.io/longsizhuo/openinvest:latest   # build: . 在本地构建并打这个名；docker compose pull 可直接拉预构建镜像免本地 build
@@ -59,4 +59,4 @@ services:
           echo "       docker compose run --rm invest-web python scripts/migrate_profile.py" >&2
           exit 1
         fi
-        exec python -m scheduler.runner
+        exec python -m openinvest.scheduler.runner

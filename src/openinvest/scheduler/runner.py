@@ -8,9 +8,9 @@
 - 支持 --list 列出所有任务
 
 使用：
-    python -m scheduler.runner               # 后台跑所有 enabled job
-    python -m scheduler.runner --once daily_report
-    python -m scheduler.runner --list
+    python -m openinvest.scheduler.runner               # 后台跑所有 enabled job
+    python -m openinvest.scheduler.runner --once daily_report
+    python -m openinvest.scheduler.runner --list
 """
 from __future__ import annotations
 

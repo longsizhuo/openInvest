@@ -14,9 +14,9 @@
 ## 启动调度器
 
 ```bash
-.venv/bin/python -m scheduler.runner          # 后台调度
-.venv/bin/python -m scheduler.runner --once daily_report   # 一次性跑某个 job
-.venv/bin/python -m scheduler.runner --list   # 列出所有 job
+.venv/bin/python -m openinvest.scheduler.runner          # 后台调度
+.venv/bin/python -m openinvest.scheduler.runner --once daily_report   # 一次性跑某个 job
+.venv/bin/python -m openinvest.scheduler.runner --list   # 列出所有 job
 ```
 
 ## 持久化
