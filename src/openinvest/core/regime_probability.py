@@ -24,7 +24,9 @@ log = logging.getLogger(__name__)
 DEFAULT_THRESHOLD_PCT = 5.0
 # 低于此样本量标记 low_confidence
 MIN_CONFIDENT_N = 10
-# 买回参考用的"悲观但可能"分位（forward return 的低分位 → 卖出后可能触及的低点）
+# 买回参考用的"悲观但可能"分位。⚠️ 口径 = forward return 的**期末**分位（D+window 收盘），
+# 不是途中最低价——途中触及某价位的概率恒 ≥ 期末仍低于它的概率，两者不可互换
+#（issue #179 P1-A⑦；要真"途中低点"分布需用 min_w 路径统计，暂未接入）
 REENTRY_DOWNSIDE_QUANTILE = 0.20
 
 
@@ -155,7 +157,7 @@ def get_regime_probability(
 
 
 # ============================================================================
-# 买回点估计 (reentry) — 给 TRIM 决策用："卖出后历史上会跌到哪、概率多大"
+# 买回点估计 (reentry) — 给 TRIM 决策用："卖出后 D+window **期末**历史上落在哪、概率多大"
 # ============================================================================
 
 
@@ -206,14 +208,14 @@ class ReentryEstimate:
         if not self.has_downside:
             return (
                 f"{self.window} (n={self.n}{overlap}): 该 regime 历史上 {self.window} 内"
-                f"跌破现价概率仅 {self.p_below_current * 100:.0f}%，"
+                f"期末仍低于现价的概率仅 {self.p_below_current * 100:.0f}%，"
                 f"{int(REENTRY_DOWNSIDE_QUANTILE * 100)} 分位仍 {self.downside_pct:+.1f}%"
-                f"（无明显低于现价的买回点）{conf}"
+                f"（期末口径下无明显低于现价的买回参考）{conf}"
             )
         return (
-            f"{self.window} (n={self.n}{overlap}): 跌破现价概率 {self.p_below_current * 100:.0f}%、"
+            f"{self.window} (n={self.n}{overlap}): 期末低于现价概率 {self.p_below_current * 100:.0f}%、"
             f"跌>{self.threshold_pct:.0f}% 概率 {self.p_down * 100:.0f}%；"
-            f"悲观情形({int(REENTRY_DOWNSIDE_QUANTILE * 100)}分位) {self.downside_pct:+.1f}% "
+            f"悲观情形({int(REENTRY_DOWNSIDE_QUANTILE * 100)}分位·期末) {self.downside_pct:+.1f}% "
             f"→ {self.currency}{self.downside_price:,.2f}；中位 {self.median_return_pct:+.1f}%{conf}"
         )
 
@@ -230,7 +232,7 @@ def get_reentry_estimate(
     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
     days: int = 100000,
 ) -> Optional[ReentryEstimate]:
-    """基于历史 forward return 分布给出卖出后买回点参考。
+    """基于历史 forward return 分布给出卖出后买回点参考（期末收益分位口径，非途中最低价）。
 
     Args:
         asset / regime: 分组键
@@ -306,7 +308,7 @@ def get_regime_forward_summary(
     core.regime.classify_regime，会构成循环依赖），所以数据由调用方注入。
 
     2026-05-31: 用于把"人写方向预设"（不抄底/逢高减/谨慎看多…）换成中性的
-    "该 regime 历史 30d forward return：中位X%、跌破现价概率Y%、样本n"，让 LLM
+    "该 regime 历史 30d forward return：中位X%、期末低于现价概率Y%、样本n"，让 LLM
     基于数据判断方向。源走 OHLC（0 token，与概率表同源）。
     """
     est = get_reentry_estimate(asset, regime, current_price, window=window, source="ohlc")
@@ -632,7 +634,7 @@ def build_reentry_reference(
             u = (profile or {}).get("windows", {}).get(w)
             if c and u:
                 _seg.append(
-                    f"{w} 跌破现价 {c['p_below'] * 100:.0f}% · 20分位 {c['downside_pct']:+.1f}%"
+                    f"{w} 期末低于现价 {c['p_below'] * 100:.0f}% · 20分位 {c['downside_pct']:+.1f}%"
                     f"（{_base} 口径 {u['downside_pct']:+.1f}%）"
                 )
         if _seg:
@@ -647,7 +649,7 @@ def build_reentry_reference(
         f"- 现价: {cur}{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
         + ccy_note
-        + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；历史上跌破现价概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
+        + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；以上概率均为 D+window **期末**口径（非途中最低点）——期末仍低于现价的概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
         "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"
     )
     return text, (profile if source == "ohlc" else None)

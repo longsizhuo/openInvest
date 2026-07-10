@@ -254,7 +254,7 @@ def _regime_data_hint(
         # 调用方没传概率口径（OHLC 读失败 / 非 committee caller）→ 退化无数字版，
         # 仍中性、仍指向数据，不预设方向。
         return (
-            f"{q}该 regime 的历史 30d forward return 分布（中位 / 跌破现价概率 / 样本数）"
+            f"{q}该 regime 的历史 30d forward return 分布（中位 / 期末低于现价概率 / 样本数）"
             "见 brief 概率表口径。结合分位 / RSI / 浮亏自行判断方向，不预设方向"
         )
     med = prob_hint.get("median_pct")
@@ -264,7 +264,7 @@ def _regime_data_hint(
     overlap = f"（重叠窗口独立≈{eff}）" if (eff and n and eff != n) else ""
     return (
         f"该 regime 历史 30d forward return：中位 {med:+.1f}%、"
-        f"跌破现价概率 {pb * 100:.0f}%、样本 n={n}{overlap}。"
+        f"期末低于现价概率 {pb * 100:.0f}%、样本 n={n}{overlap}。"
         f"{q}结合分位 / RSI / 浮亏自行判断方向，不预设方向"
     )
 
@@ -281,7 +281,7 @@ def regime_strategy_hint(
     2026-05-31（REGIME→方向链第一刀）：去掉人手写、无数据背书的方向预设
     （顺势可加 / 不抄底 / 高抛低吸 / 逢高减 / 谨慎看多）——它们会和系统自己的
     OHLC 概率表打架、干扰 LLM。uptrend / downtrend / range_bound / recovery 改成
-    中性引用该 (symbol, regime) 的 30d forward return 概率口径（中位 / 跌破现价
+    中性引用该 (symbol, regime) 的 30d forward return 概率口径（中位 / 期末低于现价
     概率 / 样本数），方向判断交回 LLM + 数据。
 
     crash / unknown 保留（不是方向预测）：
