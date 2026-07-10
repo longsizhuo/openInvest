@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.4](https://github.com/longsizhuo/openInvest/compare/v0.24.3...v0.24.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* **data:** 行情增量缓存加复权拼接哨兵 ([67f46a6](https://github.com/longsizhuo/openInvest/commit/67f46a635608585388a53cd3ab9f736992e66edb))
+* **research:** backtest_eval 组合对比两处偏置 ([15f1043](https://github.com/longsizhuo/openInvest/commit/15f1043b637a6e61cb19cc42083bb078c5cb3d2b))
+
+
+### Docs
+
+* **regime:** 买回点/概率提示统一标注'期末'口径 ([4946cb4](https://github.com/longsizhuo/openInvest/commit/4946cb44c60ca693688098dc6970c90d404d355c))
+
 ## [0.24.3](https://github.com/longsizhuo/openInvest/compare/v0.24.2...v0.24.3) (2026-07-10)
 
 
