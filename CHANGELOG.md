@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.3](https://github.com/longsizhuo/openInvest/compare/v0.24.2...v0.24.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* **review:** verdict_review 决议锚点过去侧护栏 + flat band 改 as-of ATR ([5f7e2f7](https://github.com/longsizhuo/openInvest/commit/5f7e2f72fe18e862c60ca9fd0c81cc01312a043c))
+
 ## [0.24.2](https://github.com/longsizhuo/openInvest/compare/v0.24.1...v0.24.2) (2026-07-10)
 
 
