@@ -213,6 +213,29 @@ def get_history_data(
             print(f"🔄 [yfinance] Refreshing {symbol} (period={fetch_period})...")
             ticker = yf.Ticker(symbol)
             df_yf = ticker.history(period=fetch_period)
+            # 复权拼接哨兵（issue #179 P1-A④）：yfinance auto_adjust 在分红/拆股后
+            # 会**全历史回溯**重新复权，而 5d 增量只更新最近几行——DB 里旧复权基准
+            # 与新增行在缝合点断裂（ATR/RSI/regime 全被假跳变污染）。重叠日期的
+            # close 本应逐字节一致；复权变化会让**所有**重叠日同时偏移，而单日
+            # 偏移多半是 BetaShares NAV 兜底混写（本轮 5d 落库就会覆盖自愈）——
+            # 所以 ≥2 个重叠日差 >1% 才判定复权基准变化，升级 2y 全量重取。
+            if fetch_period == "5d" and not df_yf.empty and not df_db.empty:
+                db_close = {
+                    ts.strftime("%Y-%m-%d"): _nan_to_none(c)
+                    for ts, c in df_db["Close"].items()
+                }
+                mismatched = []
+                for idx, row in df_yf.iterrows():
+                    day = idx.strftime("%Y-%m-%d")
+                    new_c, old_c = _nan_to_none(row.get("Close")), db_close.get(day)
+                    if new_c and old_c and abs(new_c / old_c - 1) > 0.01:
+                        mismatched.append(day)
+                if len(mismatched) >= 2:
+                    print(
+                        f"⚠️ [splice-sentinel] {symbol} 重叠日 {mismatched} close "
+                        f"整体偏移 >1%，疑似分红/拆股复权基准变化，改 2y 全量重取自愈"
+                    )
+                    df_yf = ticker.history(period="2y")
             if not df_yf.empty:
                 yf_got_data = True
                 for idx, row in df_yf.iterrows():
