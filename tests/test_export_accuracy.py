@@ -66,6 +66,14 @@ def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
                 f"{window.get('direction_hit_rate')!r} 仍暴露 ⇒ 被抑制桶的 hit 可由"
                 f"减法精确还原（红线 #2 补充抑制）"
             )
+        br = window.get("base_rate") or {}
+        if br and int(br.get("n", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
+            for k in ("up", "down", "flat"):
+                assert br.get(k) is None, (
+                    f"{where}: 窗口 {name!r} base_rate.n={br.get('n')} "
+                    f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 base_rate.{k}="
+                    f"{br.get(k)!r}（红线 #2 同纪律）"
+                )
 
 
 # ---------- helper ----------
@@ -417,3 +425,30 @@ def test_predicate_passes_on_clean_small_sample_dict():
     }
     # 不应抛异常
     _assert_no_small_sample_rate_leak(clean, where="<in-memory clean>")
+
+
+def test_base_rate_and_fixed_horizon():
+    """issue #179 P1-A②：固定 HIT_HORIZON（不混窗口）+ 同样本市场基率"""
+    from scripts.export_accuracy import _aggregate, _suppress_small_samples, HIT_HORIZON
+
+    rows = []
+    # 5 条成熟 30d 记录（3 up / 2 down），外加 1 条只有 7d 的未成熟记录（必须被跳过）
+    for i, mkt in enumerate(["up", "up", "up", "down", "down"]):
+        rows.append({
+            "expected_direction": "up",
+            "hits": {HIT_HORIZON: mkt == "up"},
+            "directions": {HIT_HORIZON: mkt},
+        })
+    rows.append({"expected_direction": "up", "hits": {"7d": True}, "directions": {"7d": "up"}})
+
+    agg = _aggregate(rows)
+    assert agg["sample_size"] == 5, "7d-only 未成熟记录不得回落计入"
+    assert agg["hit_horizon"] == HIT_HORIZON
+    assert agg["base_rate"]["n"] == 5
+    assert agg["base_rate"]["up"] == pytest.approx(0.6)
+    assert agg["base_rate"]["down"] == pytest.approx(0.4)
+
+    # n<30 → base_rate 数字同样被抑制（n 保留）
+    supp = _suppress_small_samples(agg)
+    assert supp["base_rate"]["n"] == 5
+    assert supp["base_rate"]["up"] is None

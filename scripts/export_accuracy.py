@@ -35,8 +35,19 @@ DEFAULT_OUT = ROOT / "docs" / "accuracy_summary.json"
 # 公开数据红线 #2：命中率 n < 30 不对外展示具体数字（防小样本被截图误传）。
 # 与 GUI invest-gui/src/routes/PublicStats.tsx 的 MIN_SAMPLE_FOR_DISPLAY 保持同一阈值——
 # 这里在「数据层」就把小样本 rate 置 null，避免任何人直接 curl 公开 JSON 拿到
-# GUI 本该屏蔽的小样本数字。hit/total 计数保留（GUI 仍展示 n）。
+# GUI 本该屏蔽的小样本数字。total 计数保留（GUI 仍展示 n）。
 MIN_SAMPLE_FOR_PUBLIC = 30
+
+# 命中率统计的固定观测窗口（issue #179 P1-A②）：此前 30d→7d→1d 回落取"最长有数据
+# 的窗口"，同一份 rate 混着三种 horizon 的命中，数字不可比。固定单一 horizon，
+# 未成熟（还没到 D+30）的记录直接不计入。
+HIT_HORIZON = "30d"
+HIT_HORIZON_DAYS = 30
+
+# 时间窗口按"评估期落点"取，不按决议日取：决议要过 HIT_HORIZON_DAYS 天才成熟，
+# 若 "30d" 窗口还按决议日筛（决议 ≥ today−30），它和"已成熟"（决议 ≤ today−30）
+# 的交集只剩边界一天——固定 horizon 后该桶结构性恒空。所以窗口筛选统一放宽
+# HIT_HORIZON_DAYS："30d" = 评估结果落在最近 30 天内的决议（决议日 ≥ today−60）。
 
 # expected_direction → 方向组映射（verdict 原文不出现在输出里）
 _DIRECTION_MAP: Dict[str, str] = {
@@ -61,18 +72,13 @@ def _parse_date(date_str: str) -> Optional[datetime]:
 
 
 def _row_is_hit(row: Dict[str, Any]) -> Optional[bool]:
-    """从 hits dict 中取最长窗口的 bool（30d > 7d > 1d）。
+    """取固定观测窗口 HIT_HORIZON 的命中 bool。
 
-    hits 全空或全无 bool 值时返回 None（跳过该记录）。
-    这是方向准确性的代理指标——用最长有数据的窗口。
+    该窗口无 bool（未成熟 / 无数据）时返回 None（跳过该记录）——
+    绝不回落到更短窗口混 horizon（issue #179 P1-A②）。
     """
-    hits: Dict[str, Any] = row.get("hits") or {}
-    # 按优先级取最长窗口
-    for window in ("30d", "7d", "1d"):
-        val = hits.get(window)
-        if isinstance(val, bool):
-            return val
-    return None  # 无有效命中数据
+    val = (row.get("hits") or {}).get(HIT_HORIZON)
+    return val if isinstance(val, bool) else None
 
 
 def _load_rows(jsonl_path: Path) -> List[Dict[str, Any]]:
@@ -92,7 +98,7 @@ def _load_rows(jsonl_path: Path) -> List[Dict[str, Any]]:
 
 
 def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """对一批 rows 计算方向命中率聚合（脱敏：只看 expected_direction + hits）"""
+    """对一批 rows 计算方向命中率聚合（脱敏：只看 expected_direction + hits + directions）"""
     # by_direction：bullish / bearish / hold 各自的 hit / total
     by_dir: Dict[str, Dict[str, int]] = {
         "bullish": {"hit": 0, "total": 0},
@@ -101,12 +107,30 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
     total_hit = 0
     total_count = 0
+    # 同样本市场基率（issue #179 P1-A②）：同一 HIT_HORIZON 窗口里市场实际
+    # up/down/flat 的占比，verdict 无关——没有它，命中率没有对照系
+    #（60% 命中在 70% 单边上涨的窗口里其实是负 alpha）
+    dir_counts = {"up": 0, "down": 0, "flat": 0}
+    dir_total = 0
 
     for row in rows:
-        # hits 全空 → 跳过
+        # 固定窗口无命中数据 → 跳过
         is_hit = _row_is_hit(row)
         if is_hit is None:
             continue
+
+        raw_mkt = str((row.get("directions") or {}).get(HIT_HORIZON) or "").lower()
+        if raw_mkt in dir_counts:
+            dir_counts[raw_mkt] += 1
+            dir_total += 1
+        else:
+            # 上游 verdict_review 在同一分支写 hits+directions，两者应同生同灭；
+            # 命中有效但方向缺失 ⇒ base_rate.n 与 sample_size 分母静默漂移，显式喊出来
+            print(
+                f"  警告：记录 hits[{HIT_HORIZON}] 有效但 directions[{HIT_HORIZON}] "
+                f"缺失/非法（{raw_mkt!r}）——base_rate 分母将小于 sample_size",
+                file=sys.stderr,
+            )
 
         # 方向分类（不输出 verdict 原文，只用 expected_direction 映射）
         raw_dir = str(row.get("expected_direction") or "").lower().strip()
@@ -136,7 +160,15 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             round(total_hit / total_count, 4) if total_count > 0 else None
         ),
         "sample_size": total_count,
+        "hit_horizon": HIT_HORIZON,
         "by_direction": by_dir_out,
+        "base_rate": {
+            "n": dir_total,
+            **{
+                k: (round(v / dir_total, 4) if dir_total > 0 else None)
+                for k, v in dir_counts.items()
+            },
+        },
     }
 
 
@@ -170,6 +202,14 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
     out["by_direction"] = new_by_dir
     if n_suppressed == 1:
         out["direction_hit_rate"] = None
+
+    # base_rate 是市场属性不是模型业绩，但小样本占比同样噪音大且可被截图误读——
+    # 同一 n<30 纪律
+    br = out.get("base_rate")
+    if br and int(br.get("n", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
+        out["base_rate"] = {
+            k: (None if k != "n" else v) for k, v in br.items()
+        }
     return out
 
 
@@ -200,8 +240,8 @@ def build_summary(jsonl_path: Path) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
 
     windows = {
-        "30d": _filter_by_window(rows, 30, now),
-        "90d": _filter_by_window(rows, 90, now),
+        "30d": _filter_by_window(rows, 30 + HIT_HORIZON_DAYS, now),
+        "90d": _filter_by_window(rows, 90 + HIT_HORIZON_DAYS, now),
         "all": rows,
     }
 

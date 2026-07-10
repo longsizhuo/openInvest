@@ -1,9 +1,10 @@
 {
-  "generated_at": "2026-07-10T20:52:17+00:00",
+  "generated_at": "2026-07-10T21:29:34+00:00",
   "windows": {
     "30d": {
-      "direction_hit_rate": null,
-      "sample_size": 22,
+      "direction_hit_rate": 0.6216,
+      "sample_size": 37,
+      "hit_horizon": "30d",
       "by_direction": {
         "bullish": {
           "hit": null,
@@ -12,56 +13,76 @@
         },
         "bearish": {
           "hit": null,
-          "total": 1,
+          "total": 9,
           "rate": null
         },
         "hold": {
           "hit": null,
-          "total": 17,
+          "total": 24,
           "rate": null
         }
+      },
+      "base_rate": {
+        "n": 37,
+        "up": 0.1622,
+        "down": 0.3243,
+        "flat": 0.5135
       }
     },
     "90d": {
-      "direction_hit_rate": 0.6515,
-      "sample_size": 132,
+      "direction_hit_rate": 0.566,
+      "sample_size": 53,
+      "hit_horizon": "30d",
       "by_direction": {
         "bullish": {
           "hit": null,
-          "total": 23,
+          "total": 4,
           "rate": null
         },
         "bearish": {
           "hit": null,
-          "total": 23,
+          "total": 15,
           "rate": null
         },
         "hold": {
-          "hit": 56,
-          "total": 86,
-          "rate": 0.6512
+          "hit": 18,
+          "total": 34,
+          "rate": 0.5294
         }
+      },
+      "base_rate": {
+        "n": 53,
+        "up": 0.1698,
+        "down": 0.3396,
+        "flat": 0.4906
       }
     },
     "all": {
-      "direction_hit_rate": 0.6515,
-      "sample_size": 132,
+      "direction_hit_rate": 0.566,
+      "sample_size": 53,
+      "hit_horizon": "30d",
       "by_direction": {
         "bullish": {
           "hit": null,
-          "total": 23,
+          "total": 4,
           "rate": null
         },
         "bearish": {
           "hit": null,
-          "total": 23,
+          "total": 15,
           "rate": null
         },
         "hold": {
-          "hit": 56,
-          "total": 86,
-          "rate": 0.6512
+          "hit": 18,
+          "total": 34,
+          "rate": 0.5294
         }
+      },
+      "base_rate": {
+        "n": 53,
+        "up": 0.1698,
+        "down": 0.3396,
+        "flat": 0.4906
       }
     }
   }
