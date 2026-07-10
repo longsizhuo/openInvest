@@ -25,6 +25,15 @@ documents:
 这章就是给第 2 类人的——把所有"我们认为有用"的主张，**拉到回测数据上证伪/证实**。
 含正向结果也含 negative results（同等重要）。
 
+> ⚠️ **污染桶标注（ADR-022，issue #179 P0-3）**：本章主张 1–6 的实验窗口全部落在
+> `2024-12-31`（`jobs/verdict_review.py` 的 `CONTAMINATION_CUTOFF`，即 LLM 训练知识
+> 截止）**之前**——按 [ADR-022](adr/022-backtest-memory-contamination-and-holdout-discipline.md)
+> 的分桶纪律，这属于**污染桶**：LLM 可能在"回忆"训练数据里见过的行情而非预测，
+> 绝对收益/年化/Sharpe 等数字**不可当业绩宣称**。这些实验仍然合法的用途是
+> **行为一致性对比**（同窗口下 v0 vs v1、参数 A vs B 的相对差异）。
+> 干净业绩证据只认 cutoff 之后的 holdout（`scripts/research/full_validation.py` +
+> `verdict_review` 干净桶）。
+
 ---
 
 ## 主张 1：v0 baseline 是个 100% HOLD 复读机
@@ -139,6 +148,11 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 → 主张证实：**参数泛化 OK，不是 in-sample overfit**。Hold-out 期 NDQ 震荡所以策略
 变保守（BUY 2 次 vs train 12 次），但风险控制反而更好（Max DD 缩水 75%）。
 
+> ⚠️ 这是**参数 holdout**（防参数过拟合），不是**业绩 holdout**（防记忆穿越）——
+> 窗口 2024-11-18 ~ 12-31 整段 ≤ `CONTAMINATION_CUTOFF`，落在污染桶内。
+> 此表只支持"参数换相邻窗口仍稳"的主张，**不支持任何业绩宣称**（ADR-022 §5：
+> 两个正交的 holdout 谁也不能替谁）。
+
 ---
 
 ## 主张 6：DSPy 自动调 prompt 比人手写更准
@@ -190,7 +204,8 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 
 ## Negative results（同等重要）
 
-记下来防"事后选择性叙事"：
+记下来防"事后选择性叙事"。（数字同样来自污染桶窗口——见页首 ADR-022 标注；
+negative result 在污染桶里只会**更乐观**不会更悲观，所以"跑不赢"的结论方向可信）：
 
 1. **委员会跑不赢等权 buy-and-hold**（v1 -1.65%，hold-out -1.9%）
    → 4 角色辩论在牛市单边涨时反而比"什么都不做的四资产 25% 买死"差
@@ -290,7 +305,11 @@ python -m scripts.archive.rl_optimize_prompts \
 ## 局限性 / 不能宣称的事
 
 - **样本量小**：66 verdict × 2 资产 × 6 个月。不足以说"100% 适用所有市况"
-- **LLM 训练数据 lookahead bias**：DeepSeek 训练截止 ~2024-06-30，之后回测含偏差
+- **LLM 记忆穿越（方向别写反）**：LLM 训练截止 `2024-12-31`（单一可信源
+  `jobs/verdict_review.py:CONTAMINATION_CUTOFF`，2026-06-25 实测 MiMo 自报训练到
+  2024 末）。cutoff **之前**的回测日期落在训练知识窗口内——"预测"可能是记忆回放，
+  **本章全部实验窗口都在这个污染桶里**；cutoff **之后**的数据才是干净 holdout。
+  详见 ADR-022（含"绝对价位指纹"论证：匿名化日期救不了这个偏差）
 - **paper trade simulator ≠ 真实交易**：没算滑点、税费、流动性约束
 - **未实盘验证**：所有结论来自模拟。真接入用户实盘后效果**可能不同**
 
