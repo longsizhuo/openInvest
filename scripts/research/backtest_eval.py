@@ -175,7 +175,10 @@ def main():
     rows = []  # (policy_label, asset, metrics, avg_exp)
     combined: Dict[str, List[pd.Series]] = {}
 
-    baseline_done = False
+    # baseline 与 label 无关，但要**按资产**收一次而不是"只在第一个 label 收"
+    # （issue #179 P1-A⑧）：第一个 label 对某资产 run_asset 失败时，旧写法让该资产
+    # 的 baseline 永久缺席，组合对比两侧资产集不一致。
+    baseline_done_assets: set = set()
     for label, vd in labeled:
         for asset in assets:
             res = run_asset(asset, vd.get(asset, []), mapfn, init)
@@ -183,14 +186,16 @@ def main():
                 continue
             rows.append((f"{label}", asset, metrics(res["committee"]), res["_avg_exp_committee"]))
             combined.setdefault(label, []).append(res["committee"])
-            if not baseline_done:
+            if asset not in baseline_done_assets:
                 for bl in ("buy_hold", "regime", "cash"):
                     rows.append((bl, asset, metrics(res[bl]), None))
                     combined.setdefault(bl, []).append(res[bl])
-        baseline_done = True  # baseline 与 label 无关，只收一次（用第一个 label 的价格/regime）
+                baseline_done_assets.add(asset)
 
     def combine(series_list):
-        df = pd.concat(series_list, axis=1).fillna(0.0)
+        # 不 fillna(0)：短历史资产的缺席日按 0 收益填充会稀释组合均值，
+        # skipna mean 只对当日有数据的资产等权（issue #179 P1-A⑧）
+        df = pd.concat(series_list, axis=1)
         return df.mean(axis=1)  # 等权组合日收益
 
     print(f"{'policy':<22}{'asset':<10}{'CR':>9}{'AR':>9}{'Sharpe':>9}{'MaxDD':>9}{'avgExp':>8}")
