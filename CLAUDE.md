@@ -62,7 +62,7 @@ openInvest 有三个调用层，每层服务不同对象：
 
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
-| **Entry** | `jobs/daily_report.py`, `connectors/web_api.py:_run_committee_task`, `scripts/skill.py:cmd_run_committee`（入口 façade，实现在 `scripts/skill_cmds/committee_cmds.py:cmd_run_committee`） | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
+| **Entry** | `src/openinvest/jobs/daily_report.py`, `connectors/web_api/routers/committee.py:_run_committee_task`, `openinvest.cli:cmd_run_committee`（入口 façade，实现在 `src/openinvest/skill_cmds/committee_cmds.py:cmd_run_committee`） | 触发 + 该路径独有的事（cache 检查 / SSE 推送 / 邮件 / Gemini / Dreaming） | ❌ 直接调 `core.committee` 任何函数（必经 `run_committee_session`）|
 | **Orchestrator** | `core/runner/session.py:run_committee_session` | **三路径单一可信源**: 解析 symbols + 跨资产 macro 共享 + event_brief 三选一（override/event_ids/multi 召回）+ sentiment 共享 + 并行 dispatch + 聚合返回 | ❌ 邮件 / Gemini / SSE 等 cron/web/skill 特定逻辑 |
 | **Service** | `core/runner/session.py:run_committee_for_symbol` | 单资产端到端 prep + 调原语（transcript 落盘实际发生在原语层 `debate.py:_persist`，非本层——issue #179 修表跟代码对齐）| ❌ 跨层直接 IO（必经 PortfolioManager / MemoryStore）|
 | **Primitive** | `core/committee/debate.py:run_committee` | 纯函数：prompt 编排 + 4 角色辩论 + LLM 调用 | ❌ 读 user.md / portfolio.md（输入必经参数传入）|

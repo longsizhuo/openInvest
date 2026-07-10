@@ -80,12 +80,24 @@ def test_match_trades():
     assert _match_trades(trades[:3], "2026-07-03/GC=F", "2026-07-03", "GC=F", "HOLD") == []
 
 
-def test_match_trades_utc_same_day_morning():
-    """UTC+8 用户决议日早晨的成交（UTC 还是前一天）必须落进窗口（review finding #4）。"""
+def test_match_trades_utc_same_day_morning(monkeypatch):
+    """UTC+8 用户决议日早晨的成交（UTC 还是前一天）必须落进窗口（review finding #4）。
+
+    旧写法在本地时区为 UTC 时 skip——CI runner 恒 UTC，这条回归网从没在 CI 跑过
+    （issue #179 P2）。改为强制 TZ=Asia/Shanghai + tzset()，任何环境都执行。
+    """
     import os, time
-    if time.strftime("%z") in ("+0000", ""):
-        import pytest
-        pytest.skip("本地时区为 UTC，场景不成立")
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    time.tzset()
+    try:
+        _run_utc_morning_case()
+    finally:
+        # monkeypatch 会还原 TZ env，但 libc 时区缓存要再 tzset 一次才生效
+        monkeypatch.undo()
+        time.tzset()
+
+
+def _run_utc_morning_case():
     # 本地 2026-07-03 06:00（东八区）= UTC 2026-07-02T22:00
     trades = [{"id": 1, "verdict_id": None, "symbol": "GC=F", "direction": "SELL",
                "units": 1, "ts": "2026-07-02T22:00:00+00:00", "status": "executed"}]

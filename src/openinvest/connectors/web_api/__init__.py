@@ -66,7 +66,11 @@ async def _bearer_token_auth(request, call_next):
     token = os.getenv("INVEST_API_TOKEN", "").strip()
     if token:
         path = request.url.path
-        if path.startswith("/api/") and path != "/api/health":
+        # /docs /openapi.json /redoc 暴露全部端点 schema——token 模式下同样要鉴权
+        # （issue #179 P2；不设 token 时行为不变）
+        if (path.startswith("/api/") and path != "/api/health") or path in (
+            "/docs", "/openapi.json", "/redoc"
+        ):
             auth_header = request.headers.get("authorization", "")
             provided = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
             import secrets as _secrets

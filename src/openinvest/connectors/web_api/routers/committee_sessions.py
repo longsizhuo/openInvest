@@ -98,6 +98,12 @@ def _parse_committee_header(content: str) -> tuple:
 )
 async def get_committee_session(date: str, symbol: str) -> CommitteeSessionDetail:
     """单个委员会决议完整 markdown"""
+    # 路径穿越校验（issue #179 P2）：date/symbol 直接拼文件路径，".." 或斜杠
+    # 变体可逃出 .committee/ 读任意 .md。MCP 同类风险已修，这里补齐。
+    import re as _re
+    from openinvest.utils.symbols import safe_symbol
+    if not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or safe_symbol(symbol) != symbol:
+        raise HTTPException(404, f"未找到 {date}/{symbol}")
     store = MemoryStore()
     md = store.root / ".committee" / date / f"{symbol}.md"
     if not md.exists():

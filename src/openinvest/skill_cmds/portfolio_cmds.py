@@ -10,6 +10,7 @@ CLAUDE.md 产品哲学：Agent 必须拥有全部功能（不能只读不写）�
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 

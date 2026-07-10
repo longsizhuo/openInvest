@@ -12,6 +12,11 @@
 - 网格 k ∈ {0,5,10,20,40,80}，γ ∈ {1.0,1.1,...,1.6}
 - **验收（OOS）**：≥2 个窗的覆盖率落 [0.75, 0.85] 且每窗 Brier ≤ 未校准 Brier
   → 通过才允许把 (k,γ) 写进 defaults.yaml（ADR-010 rule 4）
+
+⚠️ 已知统计局限（issue #179 P2 留痕）：fit/OOS 分窗内的 forward return 样本
+窗口重叠，独立有效样本量 << 名义 n，显著性判断按名义 n 会过于乐观；且 (k,γ)
+已在生产使用，再用同一历史调参有双重校准（double-dipping）风险。重调参前先做
+有效样本量修正（effective_n ≈ n/窗口天数）。
 """
 from __future__ import annotations
 

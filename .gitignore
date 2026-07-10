@@ -52,3 +52,4 @@ docs/.okf-index.json
 experiments/reference/
 .grimp_cache/
 dist/
+docs/outperform_events.jsonl

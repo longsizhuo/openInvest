@@ -371,8 +371,10 @@ INVEST_API_TOKEN=<openssl rand -hex 24>   # 开应用层鉴权
 INVEST_WEB_HOST=0.0.0.0                   # 绑出 loopback（局域网直连时）
 ```
 
-token 语义：非 loopback 来源访问 `/api/*`（`/api/health` 豁免）要求
-`Authorization: Bearer`；不设 token 行为完全不变。
+token 语义：**所有来源（含 loopback）**访问 `/api/*`（`/api/health` 豁免）
+及 `/docs` `/openapi.json` `/redoc` 都要求 `Authorization: Bearer`；不设 token
+行为完全不变。（原 loopback 豁免已删——反代下连接源恒为 127.0.0.1，豁免即裸奔；
+token 模式下浏览器裸开 /docs 会 401，用 `curl -H` 或反代注入 header。）
 
 ### 客户端侧（2 分钟）
 

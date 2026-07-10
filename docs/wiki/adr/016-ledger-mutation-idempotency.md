@@ -99,7 +99,7 @@ superseded_by: []
 | `record_external_trade` | 邮件轮询 / `commsec_apply` | 累加 | `state_claim(email_id)` | ✅ #62 |
 | `commsec_apply` 端点 | HTTP POST | — | 透传上面 | ✅ |
 | `patch_trade_status → _sync_trade_to_portfolio` | PATCH 重试 / 双击 / 并发 | 累加 | 原子 `claim_status_transition` CAS（#127，取代原状态机守卫）+ 回退用 `release_claim` CAS（#127）| ✅ #127 |
-| `payday_check.run → add_income` | cron + 手动 `/payday` 并发 | 累加 | 原子 `state_claim(YYYY-MM)`（本 PR）| ✅ 本 PR |
+| ~~`payday_check.run → add_income`~~ | cron + 手动 `/payday` 并发 | 累加 | 原子 `state_claim(YYYY-MM)`（本 PR）| ✅（payday_check 已随 #177 删除，行保留作历史审计）|
 | `POST /api/holdings` | HTTP POST | append | symbol 已存在 → 409 | ✅ |
 | `PUT /api/holdings/{symbol}` | HTTP PUT | SET | 覆盖 | ✅ |
 | `DELETE /api/holdings/{symbol}` | HTTP DELETE | remove | 第二次 → 404 | ✅ |

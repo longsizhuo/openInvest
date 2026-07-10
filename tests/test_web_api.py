@@ -1221,3 +1221,14 @@ def test_config_endpoints_roundtrip(client):
     # 非白名单 delete → 404
     assert client.delete("/api/config/verdict.alloc_cny_ceiling").status_code == 404
     reset_config()
+
+
+def test_committee_session_path_traversal_rejected(client):
+    """issue #179 P2：date/symbol 直接拼文件路径，穿越变体必须 404。"""
+    for bad in (
+        "/api/committee_sessions/..%2F..%2F/GC_F",
+        "/api/committee_sessions/2026-07-01/%2E%2E%2F%2E%2E%2Fuser",
+        "/api/committee_sessions/not-a-date/GC_F",
+        "/api/committee_sessions/2026-07-01/GC=F",  # 未转义 symbol（合法名恒为 safe_symbol 输出）
+    ):
+        assert client.get(bad).status_code == 404, f"{bad} 应 404"

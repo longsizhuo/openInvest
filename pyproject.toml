@@ -99,6 +99,17 @@ ignore_imports = [
     # （committee 拆包后 _persist 搬进 debate 子模块，import 目标随之变 core.committee.debate）
     "scripts.research.full_validation -> openinvest.core.committee.debate",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Entry 不绕过 committee_runner 直调 runner 层（issue #179 P2：文档契约机器化）"
+type = "forbidden"
+source_modules = ["openinvest.jobs", "openinvest.connectors", "openinvest.skill_cmds", "openinvest.cli", "scripts"]
+forbidden_modules = ["openinvest.core.runner"]
+allow_indirect_imports = "true"
+ignore_imports = [
+    # full_validation 研究件需 patch session 层防污染真实 memory（与上一契约的例外同源）
+    "scripts.research.full_validation -> openinvest.core.runner.session",
+]
 # 已删的孤儿 dep：
 # - duckduckgo-search: 被 ddgs 取代
 # - langgraph: grep 全仓零引用

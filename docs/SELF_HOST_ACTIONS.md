@@ -4,7 +4,7 @@
 填几个密钥，GitHub 每天定时帮你跑 4 角色 LLM 委员会，把报告发到你邮箱。不需要买云主机，
 不需要挂机器，不需要会运维。
 
-> 这份是**手把手详细版**。只想看 3 步速览的回 [README「零成本自托管」](../README.md#3-零成本自托管github-actions无需服务器)。
+> 这份是**手把手详细版**。只想看 3 步速览的回 [README「Serverless Self-Hosting」](../README.md#3-serverless-self-hosting-github-actions)。
 
 ---
 

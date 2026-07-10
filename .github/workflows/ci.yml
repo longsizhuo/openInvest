@@ -91,6 +91,10 @@ jobs:
           uv run python -c "from openinvest.core.committee_runner import prepare_committee_brief, save_committee_transcript"
           uv run python -c "from openinvest.remote_dispatch import maybe_dispatch_remote"
 
+      - name: uv build 打包烟测（issue #179 P2：打包断裂别等发版才发现）
+        # PR 阶段零打包验证曾让 "uv sync 缺 PYPI_README.md 就炸" 的问题活到 Docker build
+        run: uv build
+
       - name: run.sh 冒烟（Direct 路径唯一 shell 入口，issue #179 P1-B②）
         # 近一周连出两个 run.sh 回归（REPO_ROOT 相对路径 / 退出码被吞）而 CI 零覆盖。
         # dev-mode 走本仓 src/，不打 PyPI；临时 INVEST_HOME 隔离数据目录。
@@ -109,8 +113,10 @@ jobs:
         # 用仓库自带的 docs/accuracy_summary.json 作 fixture 验证
         run: |
           if [ -f docs/accuracy_summary.json ]; then
-            for keyword in symbol threshold NDQ GC=F verdict_id asset; do
-              if grep -q "\"$keyword\"" docs/accuracy_summary.json; then
+            # 字段名按带引号 JSON key 匹配；symbol 值（NDQ.AX / GC=F）按子串匹配
+            # ——旧写法 "\"NDQ\"" 匹配不到值 "NDQ.AX"，防线形同虚设（issue #179 P2）
+            for keyword in '"symbol"' '"threshold"' '"verdict_id"' '"asset"' NDQ 'GC=F'; do
+              if grep -qF "$keyword" docs/accuracy_summary.json; then
                 echo "❌ accuracy_summary.json 含敏感字段 '$keyword'"
                 exit 1
               fi
