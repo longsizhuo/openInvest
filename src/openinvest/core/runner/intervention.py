@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from openinvest.utils.symbols import safe_symbol
 
 log = logging.getLogger(__name__)
 
@@ -234,7 +234,6 @@ def _save_path_snapshot(
     防代码口径漂移污染 ground truth。失败抛异常由调用方 graceful。
     """
     import json
-    import re
     from datetime import datetime
 
     from openinvest.core.memory_store import MemoryStore
@@ -242,7 +241,7 @@ def _save_path_snapshot(
     today = datetime.now().strftime("%Y-%m-%d")
     snap_dir = MemoryStore().root / ".committee" / today
     snap_dir.mkdir(parents=True, exist_ok=True)
-    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    safe = safe_symbol(symbol)
     (snap_dir / f"{safe}_path.json").write_text(json.dumps({
         "schema": 1,
         "date": today,

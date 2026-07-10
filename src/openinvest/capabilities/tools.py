@@ -21,6 +21,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from openinvest.utils.symbols import safe_symbol
 from openinvest.paths import INVEST_ROOT
 
 ROOT = INVEST_ROOT
@@ -215,7 +216,7 @@ def _impl_get_recent_committee_verdicts(asset_symbol: str, n: int = 5) -> List[D
     committee_dir = store.root / ".committee"
     if not committee_dir.exists():
         return []
-    safe_sym = _re.sub(r"[^a-zA-Z0-9_-]", "_", asset_symbol)
+    safe_sym = safe_symbol(asset_symbol)
     out: List[Dict[str, Any]] = []
     for date_dir in sorted(committee_dir.iterdir(), reverse=True):
         f = date_dir / f"{safe_sym}.md"

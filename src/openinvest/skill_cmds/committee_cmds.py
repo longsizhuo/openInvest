@@ -12,11 +12,11 @@ core.committee_runner 是 service layer，allow_indirect_imports 合法（不直
 from __future__ import annotations
 
 import os
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
+from openinvest.utils.symbols import safe_symbol
 from openinvest.skill_cmds._helpers import _print_json
 from openinvest.paths import INVEST_ROOT
 
@@ -98,7 +98,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     # 把 symbol 里的非 alnum 字符替换成 _（如 "GC=F" → "GC_F.md"）。这里必须
     # 用同款转换，否则 transcript_path.exists() 永远返回 False，cmd_run_committee
     # 输出的 transcript_path 字段就是空字符串（Fresh Claude 端到端测试发现）
-    safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", args.symbol)
+    safe_sym = safe_symbol(args.symbol)
     transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
     if transcript_path.exists() and not args.force:
         from openinvest.capabilities.committee.i18n import bilingual

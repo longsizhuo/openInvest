@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from openinvest.utils.symbols import safe_symbol
 
 # client（Claude Code 等）靠这些 hint 决定要不要弹确认：
 # 读工具零确认放行；动钱工具必须过 destructiveHint 闸——status 和 sell 不能同级
@@ -121,7 +122,7 @@ def explain_decision(decision_id: str) -> Dict[str, Any]:
     # date 段必须是日期字面量——否则 "../.." 之类会拼进路径逃出 .committee/
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
         return {"status": "error", "error": f"decision_id 日期段非法: {date!r}"}
-    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    safe = safe_symbol(symbol)
     base = MemoryStore().root / ".committee" / date
     md = base / f"{safe}.md"
     parsed = parse_committee_file(md)
@@ -228,7 +229,7 @@ def run_committee(symbol: str, force: bool = False,
 
     if not force:
         today = datetime.now().strftime("%Y-%m-%d")
-        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+        safe = safe_symbol(symbol)
         cached = MemoryStore().root / ".committee" / today / f"{safe}.md"
         parsed = parse_committee_file(cached)
         if parsed:

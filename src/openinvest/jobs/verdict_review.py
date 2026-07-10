@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from openinvest.utils.symbols import safe_symbol
 from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 sys.path.insert(0, str(ROOT))
@@ -344,7 +344,7 @@ def _is_hit(verdict: str, return_pct: float, flat_threshold: float = 0.03) -> bo
 
 def _sanitize(symbol: str) -> str:
     """与 core/committee.py 写文件时一致的转义（= / . → _）。"""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    return safe_symbol(symbol)
 
 
 def _build_symbol_resolver() -> Dict[str, Dict[str, Any]]:

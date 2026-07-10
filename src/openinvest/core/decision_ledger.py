@@ -19,6 +19,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from openinvest.utils.symbols import safe_symbol
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ def record_execution(
 
 def _safe_stem(symbol: str) -> str:
     """symbol → 落盘文件名 stem（与 persist/coordinator 的 sanitize 同式）。"""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    return safe_symbol(symbol)
 
 
 def _vid_matches(vid: str, decision_id: str, date: str, symbol: str) -> bool:

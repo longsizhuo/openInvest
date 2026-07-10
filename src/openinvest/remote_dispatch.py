@@ -19,12 +19,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 from typing import Any, Callable, Dict, Optional
 
 import requests
+from openinvest.utils.symbols import safe_symbol
 
 # 纯本地命令：不碰 memory/，远端模式下照常本地跑
 LOCAL_WHITELIST = {"live_prices", "correlate"}
@@ -269,7 +269,7 @@ def _h_run_committee(args: argparse.Namespace) -> None:
     LLM key 只在 hub 的 .env；进度打 stderr，最终 JSON 打 stdout。
     """
     symbol = args.symbol
-    safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    safe_sym = safe_symbol(symbol)
 
     # Stage 0：同日 cache（hub 日期口径）。--force 跳过
     if not args.force:

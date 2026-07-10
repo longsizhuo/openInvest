@@ -10,7 +10,6 @@ inner import（utils.exchange_fee.get_history_data）保持函数内，测试 pa
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -22,13 +21,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def safe_symbol(symbol: str) -> str:
-    """symbol → 落盘文件名归一（committee/backtest transcript 的 <symbol>.md）。
-
-    单一可信源：_persist 写文件名用它，断点续跑判存在的脚本也 import 它，避免
-    两处手抄正则漂移（改了一处另一处仍按旧规则探测 → 找不到文件静默重跑）。
-    """
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol or "asset")
+# 单一可信源挪到中立层 utils.symbols（issue #179 P1-B④：jobs/connectors 直接
+# import core.committee 撞分层契约，9 处手抄由此而来）。此处 re-export 保持
+# `from openinvest.core.committee import safe_symbol` 等全部历史路径可用。
+from openinvest.utils.symbols import safe_symbol  # noqa: F401
 
 
 def _capture_macro_context(as_of_date: Optional[str] = None) -> Dict[str, Any]:

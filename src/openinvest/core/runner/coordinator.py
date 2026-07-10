@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 # prepare_committee_brief / save_committee_transcript 在模块作用域用到这些；
 # exchange_fee / PortfolioManager 等改走函数内 call-time import（保持可被契约测试 patch）。
+from openinvest.utils.symbols import safe_symbol
 from openinvest.core.committee import (
     atr_defense_from_text,  # save_committee_transcript 提 ATR 防御腿
     parse_cio_memo,
@@ -251,7 +252,7 @@ def save_committee_transcript(symbol: str, raw: str) -> Dict[str, Any]:
     today = datetime.now().strftime("%Y-%m-%d")
     out_dir = store.root / ".committee" / today
     out_dir.mkdir(parents=True, exist_ok=True)
-    safe_sym = re.sub(r"[^a-zA-Z0-9_-]", "_", symbol)
+    safe_sym = safe_symbol(symbol)
     path = out_dir / f"{safe_sym}.md"
 
     lines = [
