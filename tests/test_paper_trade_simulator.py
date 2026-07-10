@@ -241,3 +241,17 @@ def test_sortino_doesnt_explode():
     s = sortino_ratio(daily)
     # 应是合理范围（< 100 by clip）
     assert abs(s) < 100
+
+
+def test_gold_price_includes_usdcny_leg(mock_market):
+    """回归（issue #179 P1-A①）：GC=F 报价是 USD/oz，但模拟器把黄金计价当 CNY
+    （用户持积存金）。_get_price 必须补 USDCNY 腿，否则窗口收益漏掉人民币汇率漂移。
+    """
+    from openinvest.core.paper_trade_simulator import PaperTradeSimulator
+
+    sim = PaperTradeSimulator(initial_cash_cny=100000.0, start_date="2024-01-02")
+    # mock_market 里未登记 GC=F → fake_get_history 回落 100.0；fake fx USD→CNY = 7.1
+    price = sim._get_price("GC=F", "2024-01-02")
+    assert price == pytest.approx(100.0 * 7.1)
+    # 对照：非黄金资产不叠汇率腿（AAPL 的估值换算在别处按 USD 计价走 fx）
+    assert sim._get_price("AAPL", "2024-01-02") == pytest.approx(180.0)

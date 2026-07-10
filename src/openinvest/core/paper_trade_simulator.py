@@ -289,14 +289,31 @@ class PaperTradeSimulator:
     # ---------- helpers ----------
 
     def _get_price(self, symbol: str, date: str) -> Optional[float]:
-        """date 当日 close（用 as_of_date 防穿越）"""
+        """date 当日 close（用 as_of_date 防穿越）。
+
+        黄金代理特例：GC=F 原生报价是 USD/oz，但本模拟器把它的计价币种标为
+        CNY（用户持的是积存金 CNY/克，见 ASSET_CURRENCY）——必须补 USDCNY 腿，
+        否则买/卖/估值全程 fx=1，窗口收益漏掉人民币汇率漂移，系统性偏置黄金腿
+        （与 jobs/verdict_review._window_return 的 GC=F×USDCNY 口径对齐，
+        issue #179 P1-A①）。oz→克的常数因子在收益比值里消掉，无需换算。
+        """
         df = get_history_data(symbol, "5d", as_of_date=date)
         if df is None or df.empty:
             return None
         try:
-            return float(df["Close"].iloc[-1])
+            price = float(df["Close"].iloc[-1])
         except Exception:  # noqa: BLE001
             return None
+        if symbol.upper() == "GC=F":
+            fx = get_fx_rate("USD", "CNY", as_of_date=date)
+            if fx is None:
+                fx = self._fallback_fx("USD")
+                # 固定 7.1 兜底会重新引入本修复要消除的汇率误差——留痕供事后复盘
+                log.warning(
+                    "GC=F USDCNY 腿 %s 拉不到汇率，回落固定 %.1f（2024 均值）", date, fx
+                )
+            price *= fx
+        return price
 
     @staticmethod
     def _fallback_fx(ccy: str) -> float:
