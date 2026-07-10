@@ -91,6 +91,19 @@ jobs:
           uv run python -c "from openinvest.core.committee_runner import prepare_committee_brief, save_committee_transcript"
           uv run python -c "from openinvest.remote_dispatch import maybe_dispatch_remote"
 
+      - name: run.sh 冒烟（Direct 路径唯一 shell 入口，issue #179 P1-B②）
+        # 近一周连出两个 run.sh 回归（REPO_ROOT 相对路径 / 退出码被吞）而 CI 零覆盖。
+        # dev-mode 走本仓 src/，不打 PyPI；临时 INVEST_HOME 隔离数据目录。
+        run: |
+          export INVEST_HOME="$(mktemp -d)"
+          export OPENINVEST_DEV_MODE=1
+          out="$(bash plugin/skills/invest/scripts/run.sh doctor)"
+          echo "$out" | uv run python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status")=="needs_setup", d'
+          # 退出码不能被吞：未知子命令必须非零退出
+          if bash plugin/skills/invest/scripts/run.sh definitely_not_a_cmd >/dev/null 2>&1; then
+            echo "❌ 未知子命令应非零退出（退出码被吞回归）"; exit 1
+          fi
+
       - name: 脱敏聚合输出无敏感字段（金融视角红线）
         # PM-Growth 妥协方案：accuracy_summary.json 公开数据绝不能含 symbol / threshold / verdict 等
         # 用仓库自带的 docs/accuracy_summary.json 作 fixture 验证
