@@ -144,9 +144,13 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
     """公开输出前抹掉小样本命中率（红线 #2）。
 
     - 窗口整体 sample_size < MIN_SAMPLE_FOR_PUBLIC → direction_hit_rate 置 None
-    - 每个方向 total < MIN_SAMPLE_FOR_PUBLIC → 该方向 rate 置 None
+    - 每个方向 total < MIN_SAMPLE_FOR_PUBLIC → 该方向 rate **和 hit** 都置 None
+      （只藏 rate 的话 hit/total 一次除法就能还原被抑制数字——issue #179 P0-2）
+    - 恰好只有一个方向被抑制时，direction_hit_rate 也一并置 None：否则
+      被抑制桶的 hit = round(direction_hit_rate × sample_size) − Σ 其余桶 hit，
+      减法通道仍然精确可逆（统计披露控制里的 complementary suppression）
 
-    保留 hit / total 计数（GUI 需要展示 n=XX「样本不足」），只抹具体命中率数字。
+    保留 total 计数（GUI 需要展示 n=XX「样本不足」）。
     返回新 dict（不就地改入参，便于测试对照）。
     """
     out = dict(window)
@@ -155,12 +159,17 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
 
     by_dir = out.get("by_direction") or {}
     new_by_dir: Dict[str, Any] = {}
+    n_suppressed = 0
     for bucket, counts in by_dir.items():
         c = dict(counts)
         if int(c.get("total", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
             c["rate"] = None
+            c["hit"] = None
+            n_suppressed += 1
         new_by_dir[bucket] = c
     out["by_direction"] = new_by_dir
+    if n_suppressed == 1:
+        out["direction_hit_rate"] = None
     return out
 
 

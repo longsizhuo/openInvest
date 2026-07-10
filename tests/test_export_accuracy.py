@@ -29,13 +29,15 @@ from scripts.export_accuracy import (
 # ---------- helper: 小样本 rate 泄露断言（红线 #2 的可信源谓词）----------
 
 def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
-    """对一份 accuracy_summary dict 施加红线 #2：
+    """对一份 accuracy_summary dict 施加红线 #2（issue #179 P0-2 收紧后口径）：
 
     - 窗口 sample_size < MIN_SAMPLE_FOR_PUBLIC ⇒ direction_hit_rate 必须为 None
-    - 每个方向 bucket total < MIN_SAMPLE_FOR_PUBLIC ⇒ bucket rate 必须为 None
+    - 每个方向 bucket total < MIN_SAMPLE_FOR_PUBLIC ⇒ bucket 的 rate **和 hit** 都必须为 None
+      （hit/total 一次除法可精确还原被抑制的 rate）
+    - 恰好一个 bucket 被抑制 ⇒ 窗口 direction_hit_rate 也必须为 None
+      （否则 hit = round(rate×n) − Σ其余桶 hit 减法可逆）
 
-    计数（hit/total）可以保留——只有具体 rate 在小样本时必须被抹掉。
-    where 仅用于失败信息定位。
+    total 计数保留（GUI 展示 n=XX「样本不足」）。where 仅用于失败信息定位。
     """
     windows = summary.get("windows") or {}
     assert windows, f"{where}: summary 缺 windows，结构异常"
@@ -47,14 +49,23 @@ def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
                 f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 direction_hit_rate="
                 f"{window.get('direction_hit_rate')!r}（红线 #2）"
             )
+        n_suppressed = 0
         for bucket_name, bucket in (window.get("by_direction") or {}).items():
             total = int(bucket.get("total", 0) or 0)
             if total < MIN_SAMPLE_FOR_PUBLIC:
-                assert bucket.get("rate") is None, (
-                    f"{where}: 窗口 {name!r} 方向 {bucket_name!r} total={total} "
-                    f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 rate={bucket.get('rate')!r}"
-                    f"（红线 #2）"
-                )
+                n_suppressed += 1
+                for field in ("rate", "hit"):
+                    assert bucket.get(field) is None, (
+                        f"{where}: 窗口 {name!r} 方向 {bucket_name!r} total={total} "
+                        f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 {field}="
+                        f"{bucket.get(field)!r}（红线 #2）"
+                    )
+        if n_suppressed == 1:
+            assert window.get("direction_hit_rate") is None, (
+                f"{where}: 窗口 {name!r} 恰好 1 个方向被抑制，direction_hit_rate="
+                f"{window.get('direction_hit_rate')!r} 仍暴露 ⇒ 被抑制桶的 hit 可由"
+                f"减法精确还原（红线 #2 补充抑制）"
+            )
 
 
 # ---------- helper ----------
@@ -225,20 +236,44 @@ def test_suppress_small_samples_nulls_overall_rate():
     assert out["by_direction"]["bullish"]["total"] == 3  # 计数保留
 
 
-def test_suppress_keeps_large_overall_but_nulls_small_direction():
-    """整体 n>=30 保留 direction_hit_rate；但某方向 n<30 仍抹该方向 rate"""
+def test_suppress_single_small_direction_also_nulls_overall():
+    """恰好 1 个方向 n<30：该方向 rate+hit 抹掉，且 overall rate 也抹
+    （否则 hit = round(rate×n) − Σ其余桶 hit 减法可逆，issue #179 P0-2）"""
     window = {
         "direction_hit_rate": 0.9118,
         "sample_size": 34,
         "by_direction": {
-            "bullish": {"hit": 0, "total": 3, "rate": 0.0},   # 小样本 → 抹
+            "bullish": {"hit": 0, "total": 3, "rate": 0.0},   # 小样本 → 抹 rate+hit
             "hold": {"hit": 30, "total": 30, "rate": 1.0},    # >=30 → 保留
         },
     }
     out = _suppress_small_samples(window)
-    assert out["direction_hit_rate"] == 0.9118
+    assert out["direction_hit_rate"] is None  # 补充抑制：堵减法通道
     assert out["by_direction"]["bullish"]["rate"] is None
+    assert out["by_direction"]["bullish"]["hit"] is None
+    assert out["by_direction"]["bullish"]["total"] == 3  # total 保留（GUI 展示 n=XX）
     assert out["by_direction"]["hold"]["rate"] == 1.0
+    assert out["by_direction"]["hold"]["hit"] == 30
+
+
+def test_suppress_two_small_directions_keeps_overall():
+    """2 个方向都 n<30：各自 rate+hit 抹掉，但 overall 保留——
+    减法只能还原两桶之和，无法分离个体，overall n>=30 本身合规"""
+    window = {
+        "direction_hit_rate": 0.85,
+        "sample_size": 40,
+        "by_direction": {
+            "bullish": {"hit": 2, "total": 4, "rate": 0.5},
+            "bearish": {"hit": 5, "total": 6, "rate": 0.8333},
+            "hold": {"hit": 27, "total": 30, "rate": 0.9},
+        },
+    }
+    out = _suppress_small_samples(window)
+    assert out["direction_hit_rate"] == 0.85
+    for b in ("bullish", "bearish"):
+        assert out["by_direction"][b]["rate"] is None
+        assert out["by_direction"][b]["hit"] is None
+    assert out["by_direction"]["hold"]["hit"] == 27
 
 
 def test_build_summary_suppresses_small_sample_public_output(tmp_path):
@@ -375,7 +410,7 @@ def test_predicate_passes_on_clean_small_sample_dict():
                 "direction_hit_rate": None,  # 已抹
                 "sample_size": 5,
                 "by_direction": {
-                    "bullish": {"hit": 4, "total": 5, "rate": None},  # 计数保留、rate 已抹
+                    "bullish": {"hit": None, "total": 5, "rate": None},  # total 保留、rate+hit 已抹
                 },
             },
         },
