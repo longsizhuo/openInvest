@@ -29,44 +29,66 @@ from openinvest.db.market_store import MarketStore
 CUT = "2020-01-01"
 _cut_ts = pd.Timestamp(CUT)
 
+# 种子行情：CUT 两侧的工作日序列（bdate_range 避开周末幽灵闸），决议日 2020-02-14
+# 之前 ≥30 行（run_one_day 的最小历史阈值），最晚一行远在 CUT 之后——
+# "patch 内截断"与"patch 外恢复"两个方向都可断言。
+# 价格 100+0.5i（最高 ~137）不含 "2020" 子串，不会误伤 prompt 年份断言。
+_SEED_DAYS = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2019-11-01", "2020-02-13")]
+_SEED_DAYS.append("2026-01-02")
+_SEED_SYMS = ("GC=F", "^VIX", "^TNX", "DX-Y.NYB", "USDCNY=X")
 
-def _has_data(sym):
-    df = MarketStore().get_history_df(sym, days=100000)
-    return df is not None and not df.empty
+
+@pytest.fixture
+def seeded_tmp_store(monkeypatch, tmp_path):
+    """tmp SQLite + 种子行情（issue #179 P1-D①）。
+
+    此前这些测试 skipif 真实 db/ 无 GC=F 历史——CI 全新 clone 永远 skip，
+    ADR-022 的 look-ahead 护栏等于没在 CI 执行过。DB_PATH 指到 tmp 后种数据，
+    _patch_tools_to_date 是 MarketStore 类级 patch，对 tmp 实例同样生效。
+    """
+    import openinvest.db.market_store as ms_mod
+
+    monkeypatch.setattr(ms_mod, "DB_PATH", str(tmp_path / "market.db"))
+    store = ms_mod.MarketStore()
+    for sym in _SEED_SYMS:
+        for i, d in enumerate(_SEED_DAYS):
+            store.save_generic_price(sym, d, 100.0 + 0.5 * i)
+    monkeypatch.setattr(ef, "_STORE", store)
+
+    def _no_network(*a, **kw):
+        raise RuntimeError("yfinance disabled in test")
+
+    monkeypatch.setattr(ef.yf, "Ticker", _no_network)
+    return store
 
 
-@pytest.mark.skipif(not _has_data("GC=F"), reason="store 无 GC=F 历史（未回填）")
-def test_wrapper_get_history_data_cut():
+def test_wrapper_get_history_data_cut(seeded_tmp_store):
     with _patch_tools_to_date(CUT):
         df = ef.get_history_data("GC=F", "2y")
     assert df is not None and not df.empty
     assert df.index.max() <= _cut_ts, f"ef.get_history_data 泄漏未来: {df.index.max()}"
 
 
-@pytest.mark.skipif(not _has_data("GC=F"), reason="store 无 GC=F 历史（未回填）")
-def test_root_store_cut_covers_pathprofile_and_fx():
+def test_root_store_cut_covers_pathprofile_and_fx(seeded_tmp_store):
     """根级 MarketStore.get_history_df 截断 —— path-profile / 汇率腿都走它。"""
     with _patch_tools_to_date(CUT):
-        for sym in ("GC=F", "^VIX", "^TNX", "DX-Y.NYB", "USDCNY=X"):
+        for sym in _SEED_SYMS:
             df = MarketStore().get_history_df(sym, days=100000)
-            if df is not None and not df.empty:
-                assert df.index.max() <= _cut_ts, f"{sym} 根级读泄漏未来: {df.index.max()}"
+            assert df is not None and not df.empty, f"{sym} 种子数据缺失（fixture 坏了）"
+            assert df.index.max() <= _cut_ts, f"{sym} 根级读泄漏未来: {df.index.max()}"
 
 
-@pytest.mark.skipif(not _has_data("GC=F"), reason="store 无 GC=F 历史（未回填）")
-def test_pathprofile_under_patch_is_cut():
+def test_pathprofile_under_patch_is_cut(seeded_tmp_store):
     """直接验 get_path_profile（带 asof 与否都不能引入未来）——这是当年最脆的那条。"""
     from openinvest.core.regime_probability import get_path_profile
     with _patch_tools_to_date(CUT):
-        prof = get_path_profile("GC=F", "downtrend")  # 不传 asof，靠根级 patch 兜
+        get_path_profile("GC=F", "downtrend")  # 不传 asof，靠根级 patch 兜
     # 拿不到 profile 也算通过（无样本），关键是不能因为读到未来数据而"样本虚多"。
-    # 用 tail 行数 sanity：截断后 GC=F ≤2020-01-01 的行数应远少于全量。
     full = MarketStore().get_history_df("GC=F", days=100000)
     assert full.index.max() > _cut_ts, "patch 未释放（污染了后续）"
 
 
-@pytest.mark.skipif(not _has_data("GC=F"), reason="store 无 GC=F 历史（未回填）")
-def test_patch_released_after_context():
+def test_patch_released_after_context(seeded_tmp_store):
     with _patch_tools_to_date(CUT):
         pass
     df = MarketStore().get_history_df("GC=F", days=100000)
@@ -79,8 +101,7 @@ _LEAK_DATE = "2020-02-14"
 _LEAK_YEAR = "2020"
 
 
-@pytest.mark.skipif(not _has_data("GC=F"), reason="store 无 GC=F 历史（未回填）")
-def test_prompt_has_no_decision_date(monkeypatch, tmp_path):
+def test_prompt_has_no_decision_date(seeded_tmp_store, monkeypatch, tmp_path):
     """dump 一个 backtest 日发给 4 角色的 prompt，锁住"prompt 里没有字面 decision_date"。
 
     做法：monkeypatch core.committee 的 _create_agent，返回一个不真调 LLM 的 stub，
@@ -113,6 +134,14 @@ def test_prompt_has_no_decision_date(monkeypatch, tmp_path):
 
     # 钉 debate 命名空间（run_committee 在那里解析 _create_agent，patch façade 无效）。
     monkeypatch.setattr(debate, "_create_agent", _fake_create_agent)
+    # macro 腿在 views.py 有自己的 `from agent_io import _create_agent` 绑定，
+    # 只 patch debate 会漏——曾导致本测试每次真打一次 DeepSeek（本地烧额度，
+    # CI 假 key 静默吞）。两个命名空间都钉死，macro prompt 一并纳入断言。
+    import openinvest.core.committee.views as views
+    monkeypatch.setattr(views, "_create_agent", _fake_create_agent)
+    # 纵深防御：就算未来出现第三个绑定，也别让真 key 泄进测试进程
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     # 别污染真实 memory/.backtest/ —— persist 设成 no-op。
     import openinvest.core.committee as cc
     monkeypatch.setattr(cc, "_persist", lambda *a, **k: None)
@@ -125,7 +154,7 @@ def test_prompt_has_no_decision_date(monkeypatch, tmp_path):
 
     assert captured, "一份 prompt 都没截获 —— run_one_day 没走到 committee？"
     roles = {role for role, _, _ in captured}
-    assert {"quant", "risk", "cio"} <= roles, f"缺角色 prompt，只拿到 {roles}"
+    assert {"macro", "quant", "risk", "cio"} <= roles, f"缺角色 prompt，只拿到 {roles}"
 
     for role, sysp, user in captured:
         blob = f"{sysp}\n{user}"

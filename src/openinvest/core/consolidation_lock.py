@@ -32,13 +32,17 @@ HOLDER_STALE_MS = 60 * 60 * 1000  # 60 min — 与 leaked 源码一致
 
 
 def _is_process_running(pid: int) -> bool:
-    """跨平台检测 PID 是否存活"""
+    """跨平台检测 PID 是否存活。
+
+    EPERM = 进程存在但无权限发信号 → 算活着（issue #179 P1-D②：旧实现把
+    OSError 一律当死，root/他人进程持锁会被误判僵尸而被抢锁）。
+    """
     if pid <= 0:
         return False
     try:
         os.kill(pid, 0)
-    except OSError:
-        return False
+    except OSError as e:
+        return e.errno == errno.EPERM
     return True
 
 
@@ -82,9 +86,14 @@ def try_acquire_consolidation_lock(memory_root: Path) -> Optional[float]:
         if path.exists():
             try:
                 mtime_ms = path.stat().st_mtime * 1000
+            except OSError:
+                mtime_ms = None
+            try:
                 holder_pid = int(path.read_text().strip())
             except (ValueError, OSError):
-                mtime_ms = None
+                # body 为空是 rollback 后的正常形态——只丢 PID，不能连 mtime
+                # 一起丢（丢了 prior=0，下次 rollback 会误删文件、抹掉
+                # lastConsolidatedAt。issue #179 P1-D②）
                 holder_pid = None
 
         now_ms = time.time() * 1000
@@ -121,10 +130,10 @@ def rollback_consolidation_lock(memory_root: Path, prior_mtime: float) -> None:
         print(f"[autoDream] rollback 失败: {e}")
 
 
+# read_last_consolidated_at / record_manual_consolidation 从未实现却列在
+# __all__，`from ... import *` 直接 AttributeError（issue #179 P1-D② 顺手修）
 __all__ = [
-    "read_last_consolidated_at",
     "try_acquire_consolidation_lock",
     "rollback_consolidation_lock",
-    "record_manual_consolidation",
     "HOLDER_STALE_MS",
 ]
