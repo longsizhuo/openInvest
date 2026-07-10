@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 540" role="img" aria-label="PnL chart with benchmark bars">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 558" role="img" aria-label="PnL chart with benchmark bars">
   <style>
     .label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
     .title { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; font-weight: bold; }
   </style>
-  <rect width="800" height="540" fill="#0d1117"/>
+  <rect width="800" height="558" fill="#0d1117"/>
 
   <!-- ===== 上半：折线图（用户三线趋势）===== -->
   <text x="50" y="20" fill="#c9d1d9" class="title">📈 实盘 PnL 趋势 (最近 30 天)</text>
@@ -25,9 +25,9 @@
     <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
     <text x="20" y="4" fill="#c9d1d9" font-weight="bold">Total</text>
     <line x1="80" y1="0" x2="94" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="100" y="4" fill="#c9d1d9">NDQ.AX</text>
+    <text x="100" y="4" fill="#c9d1d9">资产 A</text>
     <line x1="170" y1="0" x2="184" y2="0" stroke="#f0a500" stroke-width="1.5"/>
-    <text x="190" y="4" fill="#c9d1d9">Gold</text>
+    <text x="190" y="4" fill="#c9d1d9">资产 B</text>
   </g>
 
   <!-- ===== 分隔线 ===== -->
@@ -68,4 +68,7 @@
 <text x="192" y="503.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">招商白酒 161725</text>
 <rect x="200.0" y="491" width="291.2" height="16" fill="#2ea043" opacity="0.7" rx="2"/>
 <text x="206.0" y="503.0" text-anchor="start" fill="#f0f6fc" class="label" font-weight="normal">-7.96%</text>
+
+  <!-- 口径脚注：两侧统计口径不同，不可直接比大小（issue #179 P1-A③）-->
+  <text x="50" y="548" fill="#6e7681" class="label">口径：★ 实盘 = 现市值/累计成本 −1（分批建仓，含加仓时点效应）；基准 = 窗口首日一次性买入。口径不同，只看方向不比大小。</text>
 </svg>
