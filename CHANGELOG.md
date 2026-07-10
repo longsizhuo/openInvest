@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.24.5](https://github.com/longsizhuo/openInvest/compare/v0.24.4...v0.24.5) (2026-07-10)
+
+
+### Bug Fixes
+
+* **p2:** issue [#179](https://github.com/longsizhuo/openInvest/issues/179) P2 批量清理——安全小修 + 文档对齐 + CI 防线补齐 ([6dc76cd](https://github.com/longsizhuo/openInvest/commit/6dc76cd15a34e4c28b53d26953b3b8a2fe8050d6))
+
+
+### Refactor
+
+* **core:** safe_symbol 收敛到中立层 utils.symbols 单一可信源 ([4ffee50](https://github.com/longsizhuo/openInvest/commit/4ffee50d1a65d9c7fb1b027e0507d3b90a167291))
+
+
+### Docs
+
+* **mcp:** MCP 工具数 14→15 全仓对齐 + 枚举补 ingest_event ([0d7fdcd](https://github.com/longsizhuo/openInvest/commit/0d7fdcd837f5b332e46dcbd6eba0ba2215fe69a5))
+
 ## [0.24.4](https://github.com/longsizhuo/openInvest/compare/v0.24.3...v0.24.4) (2026-07-10)
 
 
