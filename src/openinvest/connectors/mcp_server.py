@@ -1,16 +1,24 @@
-"""MCP stdio adapter（issue #133 Phase 3）—— 薄包装层，零业务逻辑。
+"""MCP adapter（issue #133 Phase 3）—— 薄包装层，零业务逻辑。
 
-Claude Code（或任意 MCP client）按 session spawn 本进程，stdin/stdout 说
-JSON-RPC，无端口无 daemon。写安全与 CLI / web API 并存同一模型
-（with_portfolio_tx fcntl 锁）。
+两种 transport：
+- **stdio（默认）**：Claude Code（或任意 MCP client）按 session spawn 本进程，
+  stdin/stdout 说 JSON-RPC，无端口无 daemon。
+- **streamable-HTTP（`--http`）**：remote MCP——hub 上常驻，spoke 机器的 agent
+  直连 `http://hub:8766/mcp`，替代旧的"CLI → REST 转发"（INVEST_API_BASE）路径。
+  鉴权复用 INVEST_API_TOKEN（与 web_api 同一 bearer 语义），/health 豁免探活。
 
-工具刻意克制在 ~15 个高频能力（现 15 个）（81 个 REST 端点全暴露会撑爆 agent context），
+写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
+
+工具刻意克制在高频能力（现 18 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
 
 注册（本地开发）：
     claude mcp add openinvest -- uv --directory <repo> run python -m connectors.mcp_server
+注册（remote spoke → hub）：
+    claude mcp add --transport http openinvest https://<hub>/mcp \\
+        --header "Authorization: Bearer $INVEST_API_TOKEN"
 """
 from __future__ import annotations
 
@@ -292,8 +300,144 @@ def run_committee(symbol: str, force: bool = False,
     }
 
 
+# ---------- streamable-HTTP transport（remote MCP，issue #179 后续：REST 退役路线 A）----------
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def _health(_request):  # noqa: ANN001
+    """探活（鉴权豁免，对齐 web_api /api/health）。custom route 只在
+    streamable_http_app() 物化——stdio 模式不起 HTTP 栈，注册零影响。"""
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"status": "ok"})
+
+
+class _BearerAuthMiddleware:
+    """与 web_api._bearer_token_auth 同语义（同一 INVEST_API_TOKEN，两处注释互指对齐）：
+
+    - 不设 token → 直通（仅限 loopback 开发形态；_serve_http 拒绝"非 loopback 且无 token"）
+    - 设了 token → 除 /health 外所有 HTTP 请求必须 `Authorization: Bearer <token>`
+    - 每请求读 env（systemd reload / 测试 monkeypatch 即时生效）
+    - secrets.compare_digest 防时序侧信道；token 永不进日志、永不进响应体
+
+    原生 ASGI 三段式（不用 BaseHTTPMiddleware：它对流式响应有历史坑，且这里
+    只需改写 4xx 短路径）。lifespan / websocket scope 原样穿透。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        import os
+        import secrets as _secrets
+
+        if scope["type"] != "http" or scope.get("path") == "/health":
+            await self.app(scope, receive, send)
+            return
+        token = os.getenv("INVEST_API_TOKEN", "").strip()
+        if token:
+            # 取第一个 authorization 头（对齐 Starlette Headers.get / web_api 语义；
+            # dict() 会取最后一个，重复头时两面行为漂移）
+            auth = next(
+                (v for k, v in (scope.get("headers") or []) if k == b"authorization"),
+                b"",
+            ).decode("latin-1")
+            provided = auth[7:].strip() if auth.startswith("Bearer ") else ""
+            if not (provided and _secrets.compare_digest(provided, token)):
+                import json as _json
+
+                body = _json.dumps({
+                    "detail": (
+                        "unauthorized：本 hub 开启了 INVEST_API_TOKEN 鉴权，"
+                        "请求需带 `Authorization: Bearer <token>`"
+                    )
+                }, ensure_ascii=False).encode("utf-8")
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"application/json")],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
+def _configure_http_settings(host: str, port: int) -> None:
+    """HTTP transport 的全部 settings 突变（_serve_http 与测试共用一套组装）。
+
+    Host 校验（SDK DNS-rebinding 防护）三档，按**信任边界**排：
+    1) INVEST_MCP_ALLOWED_HOSTS 显式白名单 → 开校验（最紧；条目支持 host:* 通配端口）
+    2) 设了 INVEST_API_TOKEN → 关校验：DNS-rebinding 的威胁模型是"浏览器页面打
+       无鉴权本机服务"，而浏览器发起的重绑请求带不上 Authorization 头（先吃
+       _BearerAuthMiddleware 的 401）。文档推荐形态 = 绑 loopback + Caddy 反代，
+       下游 Host 是公网域名——此档若开校验会把全部合法流量 421（review 真机踩过）
+    3) 无 token（_serve_http 守卫保证此时必为 loopback 绑定）→ 保留 SDK 构造时的
+       loopback 自动白名单——无鉴权本机服务正是 rebinding 防护该管的形态
+    """
+    import os
+
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    mcp.settings.host = host
+    mcp.settings.port = port
+    mcp.settings.stateless_http = True
+    mcp.settings.json_response = True
+
+    token = os.getenv("INVEST_API_TOKEN", "").strip()
+    allowed = os.getenv("INVEST_MCP_ALLOWED_HOSTS", "").strip()
+    if allowed:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[h.strip() for h in allowed.split(",") if h.strip()],
+        )
+    elif token:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        )
+
+
+def _serve_http() -> None:
+    """streamable-HTTP 常驻服务（`openinvest-mcp --http`）。
+
+    - 绑定：INVEST_MCP_HOST（默认 127.0.0.1，生产由 Caddy/CF 反代）/ INVEST_MCP_PORT（默认 8766）
+    - 非 loopback 绑定且未设 INVEST_API_TOKEN → 拒绝启动（信任边界不裸奔）
+    - stateless + json_response：18 个工具全无状态；纯 JSON 响应不给 CF 边缘留 SSE 长流
+    - /health 探活豁免鉴权（对齐 web_api 的 /api/health 语义）
+    """
+    import os
+    import sys
+
+    import uvicorn
+
+    host = os.getenv("INVEST_MCP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = int(os.getenv("INVEST_MCP_PORT", "8766"))
+    token = os.getenv("INVEST_API_TOKEN", "").strip()
+    if not token and host not in ("127.0.0.1", "localhost", "::1"):
+        sys.exit(
+            f"拒绝启动：绑定 {host}（非 loopback）但 INVEST_API_TOKEN 未设置。"
+            "远端暴露必须有 bearer 鉴权——在 .env 设 INVEST_API_TOKEN，"
+            "或改绑 127.0.0.1 走反向代理。"
+        )
+
+    _configure_http_settings(host, port)
+
+    app = mcp.streamable_http_app()
+    app.add_middleware(_BearerAuthMiddleware)
+    uvicorn.run(app, host=host, port=port)
+
+
 def main() -> None:
-    mcp.run()  # stdio transport（默认）
+    import argparse
+
+    p = argparse.ArgumentParser(prog="openinvest-mcp")
+    p.add_argument(
+        "--http", action="store_true",
+        help="streamable-HTTP transport（remote MCP，INVEST_MCP_HOST/PORT，默认 stdio）",
+    )
+    if p.parse_args().http:
+        _serve_http()
+    else:
+        mcp.run()  # stdio transport（默认，行为不变）
 
 
 if __name__ == "__main__":
