@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.0](https://github.com/longsizhuo/openInvest/compare/v0.24.5...v0.25.0) (2026-07-11)
+
+
+### Features
+
+* **strategy:** strategy 写操作补齐 CLI + MCP——agent 读写对等 ([eb1bdf6](https://github.com/longsizhuo/openInvest/commit/eb1bdf635d487f5bc964fb8085794d66dc18a646))
+
+
+### Docs
+
+* **hermes:** 注册器提示的 MCP 工具数漏改 15→18 ([6ba36f8](https://github.com/longsizhuo/openInvest/commit/6ba36f82a1f5932c0330c383942c1f0970ad39e8))
+* **skill:** strategy 写工具注册进 agent 指引 ([5c0d9e4](https://github.com/longsizhuo/openInvest/commit/5c0d9e4c8850667cde3962763647570a6e7224a6))
+
 ## [0.24.5](https://github.com/longsizhuo/openInvest/compare/v0.24.4...v0.24.5) (2026-07-10)
 
 
