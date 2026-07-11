@@ -111,6 +111,12 @@ Quant 失去概率口径与防御哨兵背景；CIO 的 EXPECTED_PATH 凭空编�
 
 ## 远端模式（hub-and-spoke，多设备共享一份数据）
 
+> **推荐新路径（2026-07）**：hub 跑 `openinvest-mcp --http`（remote MCP）时，
+> spoke 直接注册 HTTP MCP，18 工具全量可用、不经 CLI 转发：
+> `claude mcp add --transport http openinvest https://<hub>/mcp --header "Authorization: Bearer $INVEST_API_TOKEN"`
+> 下面的 CLI→REST 转发仍支持（维护模式），Coordinator 协议（prepare/save）与
+> doctor/event_check 仍走它。部署见后端 wiki 08 §9。
+
 `.env` 里设了 `INVEST_API_BASE` = 本机是**客户端**：所有子命令自动转发到远端
 hub（另一台跑着 invest web_api 的机器），**本机没有也不该有 `memory/`**。
 数据（持仓/策略/决议/prompt）全在 hub，改一处全设备生效。

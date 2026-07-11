@@ -55,7 +55,7 @@
 
 **产品哲学**：agent（你）拥有 openInvest 全部功能。**优先走 CLI 子命令 / MCP 工具**；
 只有 CLI/MCP 没覆盖的长尾操作才 curl 下面端点（默认 :8765）。Web API 已标记
-deprecated（GUI 退役，存量端点服务 remote hub 模式，不再新增端点）。
+deprecated（GUI 退役，存量端点服务 remote hub 模式，不再新增端点）。remote 场景优先用 hub 的 remote MCP（`openinvest-mcp --http`，18 工具直连），REST 转发只兜 MCP 没有的长尾。
 
 用户说"记一笔交易"/"我打算买 X"/"标记成交"/"加新资产"时调这些：
 
