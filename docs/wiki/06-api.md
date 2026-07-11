@@ -409,7 +409,7 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
 
 - **transport 两种**：
   - **stdio（默认）**：MCP client 按 session spawn 子进程，无端口无 daemon
-  - **streamable-HTTP（`openinvest-mcp --http`，2026-07）**：remote MCP，hub 常驻
+  - **streamable-HTTP（`openinvest-mcp --http`，2026-07，BETA）**：remote MCP，hub 常驻
     127.0.0.1:8766（`INVEST_MCP_HOST/PORT`），spoke agent 直连 `/mcp`；鉴权复用
     `INVEST_API_TOKEN`（bearer，`/health` 豁免），stateless + json_response。
     能力差集注记：Coordinator 协议（prepare/save_committee）与 doctor/event_check

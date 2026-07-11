@@ -123,7 +123,7 @@ Add the lightweight skill from the official registry. The host agent will automa
 ### 2. Standalone — MCP server or CLI (no clone needed)
 The backend ships on [PyPI](https://pypi.org/project/openinvest/); `~/openInvest` holds only your data:
 ```bash
-# MCP (18 tools, any MCP client; add --http for a remote streamable-HTTP server)
+# MCP (18 tools, any MCP client; add --http for a remote streamable-HTTP server — BETA)
 claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 
 # or plain CLI

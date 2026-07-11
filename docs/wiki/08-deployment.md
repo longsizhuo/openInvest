@@ -352,7 +352,10 @@ CF Access 日志：CF Zero Trust → Logs → Access。
 hub，读写都走 HTTP——**锁仍是 hub 单机 fcntl，零分布式复杂度**。中央调参
 自动成立：strategy / 角色 prompt 都在 hub，改一处全设备生效。
 
-### 推荐新路径：remote MCP（2026-07，REST 退役路线 A）
+### 推荐新路径：remote MCP（**BETA**，2026-07，REST 退役路线 A）
+
+> ⚠️ **BETA**：作者本人未在真实多设备环境测试过（仅自动化测试 + hub 本机 curl
+> 端到端）。已知问题与求助清单见 issue（HELP WANTED）。
 
 hub 常驻 `openinvest-mcp --http`（streamable-HTTP，绑 127.0.0.1:8766，
 `systemd/invest-mcp.service`），spoke 机器的 **agent 直连 MCP**，不再经

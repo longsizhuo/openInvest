@@ -68,7 +68,7 @@ openinvest doctor
 | 命令 | 用途 |
 |------|------|
 | `openinvest` | CLI（status / run_committee / buy / sell / ...） |
-| `openinvest-mcp` | MCP server（18 工具，给 agent 用；默认 stdio，`--http` 起 remote streamable-HTTP） |
+| `openinvest-mcp` | MCP server（18 工具，给 agent 用；默认 stdio，`--http` 起 remote streamable-HTTP，BETA） |
 | `openinvest-web` | API server（仅 remote hub 部署用，见 [08-deployment.md](wiki/08-deployment.md)） |
 
 **更新**：`skills/invest/scripts/run.sh update` 或 `uvx --refresh openinvest doctor`。

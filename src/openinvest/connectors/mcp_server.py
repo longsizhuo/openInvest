@@ -3,7 +3,7 @@
 两种 transport：
 - **stdio（默认）**：Claude Code（或任意 MCP client）按 session spawn 本进程，
   stdin/stdout 说 JSON-RPC，无端口无 daemon。
-- **streamable-HTTP（`--http`）**：remote MCP——hub 上常驻，spoke 机器的 agent
+- **streamable-HTTP（`--http`，BETA）**：remote MCP——hub 上常驻，spoke 机器的 agent
   直连 `http://hub:8766/mcp`，替代旧的"CLI → REST 转发"（INVEST_API_BASE）路径。
   鉴权复用 INVEST_API_TOKEN（与 web_api 同一 bearer 语义），/health 豁免探活。
 
