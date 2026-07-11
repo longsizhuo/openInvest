@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.3...invest-skill-v0.18.4) (2026-07-11)
+
+
+### Docs
+
+* **skill:** strategy 写工具注册进 agent 指引 ([5c0d9e4](https://github.com/longsizhuo/openInvest/commit/5c0d9e4c8850667cde3962763647570a6e7224a6))
+
 ## [0.18.3](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.2...invest-skill-v0.18.3) (2026-07-10)
 
 
