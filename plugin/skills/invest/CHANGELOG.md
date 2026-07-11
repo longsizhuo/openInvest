@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.5...invest-skill-v0.18.6) (2026-07-11)
+
+
+### Docs
+
+* **skill:** remote MCP 指引同步 BETA 标注 ([67d584c](https://github.com/longsizhuo/openInvest/commit/67d584c8a49b06f9132b54f50e38aba311df4cea))
+
 ## [0.18.5](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.4...invest-skill-v0.18.5) (2026-07-11)
 
 
