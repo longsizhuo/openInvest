@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "openInvest",
     "shortDescription": "AI investment committee & portfolio runtime",
-    "longDescription": "Four LLM roles (Macro Strategist, Quant, Risk Officer, CIO) debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict with a written memo. Multi-currency portfolio ledger, decision accounting (which advice you followed, and the PnL of what the rules blocked), 15 MCP tools with destructive-action hints. Backend installs from PyPI via uvx — no clone, no daemon. Never places real orders; not investment advice.",
+    "longDescription": "Four LLM roles (Macro Strategist, Quant, Risk Officer, CIO) debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict with a written memo. Multi-currency portfolio ledger, decision accounting (which advice you followed, and the PnL of what the rules blocked), 18 MCP tools with destructive-action hints. Backend installs from PyPI via uvx — no clone, no daemon. Never places real orders; not investment advice.",
     "developerName": "longsizhuo",
     "category": "Productivity",
     "capabilities": [

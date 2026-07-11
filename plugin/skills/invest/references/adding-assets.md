@@ -11,9 +11,15 @@
 
 MCP 用户直接调 `buy` 工具，参数同名。加权平均成本自动算，symbol 自动进追踪。
 
-**"我只想看不想持有"** 场景：
-走方式 2 的 `POST /api/holdings` 带 `is_tracking_only: true`（追踪仓不计入
-总资产 / PnL，但委员会照样能分析），或干脆不持久化直接分析（方式 3）。
+**"我只想看不想持有"** 场景（issue #179 起有原生入口）：
+```bash
+~/.claude/skills/invest/scripts/run.sh track_asset --symbol AAPL --max-single-invest-cny 8000
+```
+MCP 用户直接调 `track_asset` 工具（幂等 upsert：重复 track 不报错，只更新传入
+字段）。它把 symbol 加进 strategy 的跟踪列表——委员会/DCA 的覆盖面由它决定；
+`untrack_asset` 移除，`set_allocations` 改股票/现金目标配比。
+仍要"零仓位挂在持仓表里"的展示需求才走 `POST /api/holdings` 带
+`is_tracking_only: true`，或干脆不持久化直接分析（方式 3）。
 
 ## 方式 2：REST API（长尾：追踪仓 / remote hub）
 

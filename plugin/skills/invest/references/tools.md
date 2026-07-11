@@ -3,7 +3,7 @@
 > 本文件是**工具文档**——SKILL.md 只管 workflow（issue #133 Decision 6：
 > Tool Usage 交给 MCP schema 自动发现，Skill 收缩为编排协议）。
 >
-> - **MCP 用户**（Claude Code plugin / codex mcp）：15 个工具带 schema 自动发现，
+> - **MCP 用户**（Claude Code plugin / codex mcp）：18 个工具带 schema 自动发现，
 >   通常不用读本文件；MCP 没覆盖的长尾端点（trades/config/events/...）才来查表
 > - **CLI/REST agent**（Gemini / Cursor / 脚本）：本文件是完整参考
 
@@ -71,7 +71,7 @@ deprecated（GUI 退役，存量端点服务 remote hub 模式，不再新增端
 | `PUT /api/holdings/{symbol}` | 改持仓字段 | `{units?, avg_cost?, channel?}` |
 | `POST /api/deposit` / `/api/withdraw` | 调 cash 现金 | `{currency: "CNY"\|"AUD"\|..., amount}` |
 | `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
-| `POST /api/strategy/asset` | 加 target_assets 条目 | `{symbol, channel?, max_single_invest_cny}` |
+| `POST /api/strategy/asset` | 加 target_assets 条目。**已有原生对等入口**：MCP `track_asset` / CLI `track_asset`（另有 `untrack_asset`、`set_allocations`），优先用原生，别再 curl | `{symbol, channel?, max_single_invest_cny}` |
 | `GET /api/events/recent?hours=24&min_severity=low&limit=50` | 列最近 N 小时事件层感知的新闻（ADR-006）。debug / "系统现在感知到什么" | — |
 | `GET /api/discipline` | 委员会纪律台账：不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实损益（对齐 ADR-023，agent 展示"它拦了什么"）| — |
 | `GET /api/decisions?days=90` | 统一决策视图：决议↔干预↔执行↔结果 join + 采纳率（issue #133 Decision 9）| — |
