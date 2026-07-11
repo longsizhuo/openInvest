@@ -40,3 +40,11 @@ INVEST_HOME=~/openInvest uvx openinvest doctor
 - Update later: `uvx --refresh openinvest doctor`
 
 No daemon, no ports: the MCP client spawns the process per session over stdio.
+
+**Remote (hub-and-spoke)**: if the user has a central hub running `openinvest-mcp --http`
+(streamable-HTTP on the hub, see `docs/wiki/08-deployment.md` §9), register over HTTP instead:
+
+```bash
+claude mcp add --transport http openinvest https://<hub-domain>/mcp \
+    --header "Authorization: Bearer $INVEST_API_TOKEN"
+```

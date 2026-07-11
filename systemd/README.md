@@ -7,6 +7,12 @@
 - `invest-web.service` — FastAPI Web API 后端（`uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765`）
   - 依赖 `network-online.target`；`Restart=on-failure RestartSec=15`
   - `ProtectSystem=strict` + `ReadWritePaths=%h/openInvest`（允许写 memory/db）
+- `invest-mcp.service` — remote MCP（`openinvest-mcp --http`，streamable-HTTP 绑 127.0.0.1:8766）
+  - spoke 机器的 agent 直连 `https://<hub>/mcp`（Caddy 反代 /mcp → 8766），替代旧的
+    CLI→REST 转发路径
+  - 鉴权复用同一 `.env` 的 `INVEST_API_TOKEN`（bearer；`/health` 豁免探活）
+  - 部署步骤同 invest-web（下面命令里把 `invest-web` 换成 `invest-mcp`）；若用
+    invest-deploy.sh 自动部署，记得在其 restart 行加 `invest-mcp.service`
 
 ## 部署
 

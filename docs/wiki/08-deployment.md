@@ -352,6 +352,38 @@ CF Access 日志：CF Zero Trust → Logs → Access。
 hub，读写都走 HTTP——**锁仍是 hub 单机 fcntl，零分布式复杂度**。中央调参
 自动成立：strategy / 角色 prompt 都在 hub，改一处全设备生效。
 
+### 推荐新路径：remote MCP（2026-07，REST 退役路线 A）
+
+hub 常驻 `openinvest-mcp --http`（streamable-HTTP，绑 127.0.0.1:8766，
+`systemd/invest-mcp.service`），spoke 机器的 **agent 直连 MCP**，不再经
+CLI→REST 转发。18 个工具（读/写/委员会 Direct）全量可用，鉴权复用同一
+`INVEST_API_TOKEN`（bearer，`/health` 豁免）：
+
+```bash
+# spoke 侧注册（Claude Code；其他 MCP client 同理配 url + header）
+claude mcp add --transport http openinvest https://invest.your-domain.com/mcp \
+    --header "Authorization: Bearer $INVEST_API_TOKEN"
+# CF Access Service Token 场景再加：
+#   --header "CF-Access-Client-Id: xxx.access" --header "CF-Access-Client-Secret: yyy"
+```
+
+hub 的 Caddy 加一条路由（后端 Host 校验：token 模式默认关闭——反代下游 Host
+是公网域名，token 才是信任边界；要收紧可设
+`INVEST_MCP_ALLOWED_HOSTS=invest.your-domain.com` 白名单）：
+
+```caddy
+handle /mcp {
+    reverse_proxy 127.0.0.1:8766
+}
+```
+
+**与 REST 转发的关系**：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，
+仍支持但不再演进——它还覆盖 remote MCP 没有的 Coordinator 协议
+（prepare/save_committee）与 doctor/event_check；日常读写/Direct 委员会请优先
+remote MCP。已知限制：`run_committee` 直连是同步调用，未命中当天缓存时可能撞
+CF ~100s 边缘超时（缓存命中秒回；重活建议仍由 hub 侧 cron/REST 轮询路径跑）。
+自动部署（invest-deploy.sh）的 restart 行记得加 `invest-mcp.service`。
+
 ```
 笔记本 (client)                         hub（本机/VPS）
   run.sh status ──HTTP──┐                invest-web.service :8765

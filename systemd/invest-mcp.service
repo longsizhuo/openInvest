@@ -1,0 +1,35 @@
+[Unit]
+Description=Invest MCP (streamable-HTTP) — remote MCP，spoke agent 直连 hub 的 18 工具面
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 部署到自己机器时改 User/Group 为你的用户名（默认 ubuntu）
+User=ubuntu
+Group=ubuntu
+# %h 在 systemd 里展开成本服务 User 的 home dir
+# fork 用户：把 INVEST_HOME 改成你 clone openInvest 的位置（默认 ~/openInvest）
+Environment=INVEST_HOME=%h/openInvest
+WorkingDirectory=%h/openInvest
+EnvironmentFile=%h/openInvest/.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TZ=Asia/Shanghai
+Environment=UV_CACHE_DIR=%h/openInvest/.uv-cache
+# 仅绑 127.0.0.1，公网由 Caddy 反代 /mcp → 8766；鉴权复用 .env 的 INVEST_API_TOKEN
+Environment=INVEST_MCP_HOST=127.0.0.1
+Environment=INVEST_MCP_PORT=8766
+ExecStart=%h/.local/bin/uv run --no-sync openinvest-mcp --http
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/openInvest
+
+[Install]
+WantedBy=multi-user.target

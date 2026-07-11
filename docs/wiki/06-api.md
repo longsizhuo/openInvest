@@ -407,7 +407,13 @@ REST 之外的第三个 adapter（CLI / REST / MCP 同吃 service 层，零业�
 claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
 ```
 
-- **transport = stdio**：MCP client 按 session spawn 子进程，无端口无 daemon；
+- **transport 两种**：
+  - **stdio（默认）**：MCP client 按 session spawn 子进程，无端口无 daemon
+  - **streamable-HTTP（`openinvest-mcp --http`，2026-07）**：remote MCP，hub 常驻
+    127.0.0.1:8766（`INVEST_MCP_HOST/PORT`），spoke agent 直连 `/mcp`；鉴权复用
+    `INVEST_API_TOKEN`（bearer，`/health` 豁免），stateless + json_response。
+    能力差集注记：Coordinator 协议（prepare/save_committee）与 doctor/event_check
+    仍只在 REST/CLI（Decision 5/6 刻意不进 MCP），详见 wiki 08 §9
   写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
 - **18 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
   strategy / history / live_prices / what_if / discipline / decisions /
