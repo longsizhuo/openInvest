@@ -215,6 +215,51 @@ def withdraw(currency: str, amount: float) -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
+# ---------- strategy 写操作（issue #179：读写对等；实现共用 services.strategy_write）----------
+
+_STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+
+
+@mcp.tool(annotations=_STRAT_W)
+def set_allocations(target_allocation_stock: float, target_allocation_cash: float) -> Dict[str, Any]:
+    """改股票/现金目标配比（两者和必须 ≈1，schema 强校验失败自动回滚）。"""
+    from openinvest.services import strategy_write as svc
+    try:
+        return svc.set_allocations(target_allocation_stock, target_allocation_cash)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool(annotations=_STRAT_W)
+def track_asset(symbol: str, max_single_invest_cny: Optional[float] = None,
+                display_name: Optional[str] = None, channel: Optional[str] = None,
+                price_offset_pct: Optional[float] = None,
+                sell_fee_pct: Optional[float] = None) -> Dict[str, Any]:
+    """跟踪标的（upsert 幂等）：不存在则新建（此时 max_single_invest_cny 必填），
+    已存在只更新传入的字段。委员会/DCA 覆盖哪些 symbol 由跟踪列表决定。"""
+    from openinvest.services import strategy_write as svc
+    try:
+        return svc.upsert_target_asset(symbol, {
+            "max_single_invest_cny": max_single_invest_cny,
+            "display_name": display_name,
+            "channel": channel,
+            "price_offset_pct": price_offset_pct,
+            "sell_fee_pct": sell_fee_pct,
+        })
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True))
+def untrack_asset(symbol: str) -> Dict[str, Any]:
+    """移除跟踪标的（委员会不再分析它；schema 保证至少剩 1 个跟踪标的）。"""
+    from openinvest.services import strategy_write as svc
+    try:
+        return svc.remove_target_asset(symbol)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
 # ---------- 委员会（Direct 路径） ----------
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))

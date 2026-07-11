@@ -1,7 +1,7 @@
 """Hermes plugin 注册器（仓库根，与 plugin.yaml 相邻——Hermes 约定）。
 
 只做一件事：把 plugin/skills/ 下的 agentskills.io 标准 skill 注册进 Hermes。
-MCP server（15 工具）是 Hermes 的 config.yaml 扩展面，plugin API 无法代注册
+MCP server（18 工具）是 Hermes 的 config.yaml 扩展面，plugin API 无法代注册
 （官方文档明确 MCP 属"非 Python 扩展面"），安装后提示用户加三行配置。
 
 本文件对其他生态零影响：Claude/Codex plugin 的 source 是 ./plugin 子目录，

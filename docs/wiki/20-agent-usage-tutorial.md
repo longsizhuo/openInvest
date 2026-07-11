@@ -29,7 +29,7 @@ documents:
 
 | 组件 | 作用 |
 |---|---|
-| **MCP server**（15 工具，自动注册） | agent 能调什么：status / live_prices / decisions / explain_decision / record_execution / buy / sell / run_committee … |
+| **MCP server**（18 工具，自动注册） | agent 能调什么：status / live_prices / decisions / explain_decision / record_execution / buy / sell / run_committee … |
 | **invest skill** | agent 怎么编排委员会（Coordinator 协议、决策纪律） |
 | **invest-setup skill** | 首次 5 问 onboarding |
 
@@ -100,7 +100,7 @@ mcp_servers:
       INVEST_HOME: ~/openInvest
 ```
 
-Hermes 自动发现 15 个工具并与内置工具并列注册。skills 一条命令装：
+Hermes 自动发现 18 个工具并与内置工具并列注册。skills 一条命令装：
 
 ```bash
 hermes plugins install longsizhuo/openInvest --enable

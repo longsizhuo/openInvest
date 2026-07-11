@@ -18,7 +18,7 @@
         {
           "type": "positional",
           "value": "mcp",
-          "description": "Run the stdio MCP server (15 tools)"
+          "description": "Run the stdio MCP server (18 tools)"
         }
       ],
       "environmentVariables": [

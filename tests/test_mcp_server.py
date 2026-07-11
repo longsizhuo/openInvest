@@ -7,6 +7,8 @@ EXPECTED_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "record_execution", "ingest_event",
     "buy", "sell", "deposit", "withdraw", "run_committee",
+    # strategy 写操作（issue #179：读写对等）
+    "set_allocations", "track_asset", "untrack_asset",
 }
 
 
@@ -24,7 +26,8 @@ READONLY_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision",
 }
-MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw"}
+# destructive 桶：动钱 4 件 + untrack_asset（删跟踪标的丢配置字段，client 该弹确认）
+MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "untrack_asset"}
 
 
 def test_tool_annotations():

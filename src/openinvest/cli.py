@@ -63,6 +63,7 @@ from openinvest.skill_cmds._helpers import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.analysis_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.committee_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.portfolio_cmds import *  # noqa: E402,F401,F403
+from openinvest.skill_cmds.strategy_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.lifecycle_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 
@@ -194,6 +195,29 @@ def main() -> None:
     p.add_argument("--symbol", required=True)
     p.add_argument("--force", action="store_true", help="units > 0 也强删")
     p.set_defaults(func=cmd_delete_holding)
+
+    # ---- strategy 写操作（issue #179：读写对等，与 MCP 工具同名同语义）----
+    p = sub.add_parser("set_allocations", help="改股票/现金目标配比（两者和必须 ≈1）")
+    p.add_argument("--stock", type=float, required=True, help="股票目标比例 0~1")
+    p.add_argument("--cash", type=float, required=True, help="现金目标比例 0~1")
+    p.set_defaults(func=cmd_set_allocations)
+
+    p = sub.add_parser(
+        "track_asset",
+        help="跟踪标的（upsert 幂等：不存在新建 / 已存在只更新传入字段）。新建须带 --max-single-invest-cny",
+    )
+    p.add_argument("--symbol", required=True, help="yfinance symbol（如 AAPL / GC=F / 510300.SS）")
+    p.add_argument("--display-name", default=None, help="人类可读名")
+    p.add_argument("--channel", default=None, help="交易渠道（如 CommSec / 浙商积存金）")
+    p.add_argument("--max-single-invest-cny", type=float, default=None,
+                   help="单笔投入上限 CNY（0~1,000,000；新建必填）")
+    p.add_argument("--price-offset-pct", type=float, default=None, help="报价偏移 -0.1~0.1")
+    p.add_argument("--sell-fee-pct", type=float, default=None, help="卖出费率 0~0.05")
+    p.set_defaults(func=cmd_track_asset)
+
+    p = sub.add_parser("untrack_asset", help="移除跟踪标的（schema 保证至少剩 1 个）")
+    p.add_argument("--symbol", required=True)
+    p.set_defaults(func=cmd_untrack_asset)
 
     p = sub.add_parser(
         "import",

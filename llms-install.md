@@ -5,7 +5,7 @@ Everything ships on PyPI; no cloning, no venv setup. Only prerequisite: [`uv`](h
 
 ## Install as MCP server (recommended)
 
-Register the stdio server (15 tools) with the user's data directory:
+Register the stdio server (18 tools) with the user's data directory:
 
 ```bash
 claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest mcp

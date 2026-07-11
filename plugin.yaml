@@ -1,7 +1,7 @@
 # Hermes Agent plugin manifest（hermes plugins install longsizhuo/openInvest）
 # 注册器在旁边的 __init__.py：把 plugin/skills/ 下的 agentskills 注册进 Hermes。
-# MCP（15 工具）是 Hermes 的独立扩展面，无法由 plugin 注册——见 install 后提示。
+# MCP（18 工具）是 Hermes 的独立扩展面，无法由 plugin 注册——见 install 后提示。
 name: openinvest
 version: "1.0"
-description: Self-hosted AI investment committee — registers the invest + invest-setup skills. For the 15 MCP tools add mcp_servers.openinvest (command uvx, args [openinvest, mcp]) to ~/.hermes/config.yaml.
+description: Self-hosted AI investment committee — registers the invest + invest-setup skills. For the 18 MCP tools add mcp_servers.openinvest (command uvx, args [openinvest, mcp]) to ~/.hermes/config.yaml.
 author: longsizhuo
