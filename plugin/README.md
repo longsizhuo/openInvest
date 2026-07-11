@@ -48,7 +48,7 @@ data in `~/openInvest` (portfolio, ledgers, `.env`). Update anytime with
 > (a few seconds); if the first MCP connect times out, just retry once — after
 > that uvx serves from cache and MCP starts in ~1s.
 
-> **Remote hub?** If your data lives on a central hub running `openinvest-mcp --http`,
+> **Remote hub? (BETA)** If your data lives on a central hub running `openinvest-mcp --http`,
 > skip the local server and connect over HTTP instead:
 > `claude mcp add --transport http openinvest https://<hub>/mcp --header "Authorization: Bearer $INVEST_API_TOKEN"`
 
