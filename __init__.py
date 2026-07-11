@@ -21,7 +21,7 @@ def register(ctx):
             ctx.register_skill(child.name, skill_md)
             log.info(f"[openinvest] 注册 skill: {child.name}")
     log.info(
-        "[openinvest] MCP 工具（15 个）需在 ~/.hermes/config.yaml 加: "
+        "[openinvest] MCP 工具（18 个）需在 ~/.hermes/config.yaml 加: "
         "mcp_servers.openinvest → command: uvx, args: [openinvest, mcp], "
         "env: {INVEST_HOME: ~/openInvest}"
     )
