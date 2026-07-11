@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.4...invest-skill-v0.18.5) (2026-07-11)
+
+
+### Docs
+
+* **skill:** remote MCP spoke 直连指引 ([a8c36a3](https://github.com/longsizhuo/openInvest/commit/a8c36a36d9f4c2581b3f32ec0c4955badf4f4eb0))
+
 ## [0.18.4](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.3...invest-skill-v0.18.4) (2026-07-11)
 
 
