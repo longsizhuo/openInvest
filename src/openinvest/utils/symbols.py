@@ -1,20 +1,6 @@
-"""symbol 字符串归一原语（中立层——任何层都可 import，不撞分层契约）。
+"""symbol 落盘转义 —— 实现已迁移至 openinvest.calc.symbols（计算层，ADR-026）
 
-issue #179 P1-B④：safe_symbol 正则此前在 core/committee/persist.py 一处定义 +
-9 处手抄 inline（mcp_server ×2 / decision_ledger / coordinator / intervention /
-verdict_review / remote_dispatch / committee_cmds / capabilities.tools）。同类
-漂移咬过一次（文件名口径两处不一致 → 断点续跑探测不到文件静默重跑），
-收敛到这里做单一可信源；persist.py re-export 保持全部历史 import 路径可用。
+薄壳 façade：保持全部历史 import 路径可用，entry / 测试零改。
+monkeypatch 请钉 openinvest.calc.symbols.* 实现命名空间，patch 本模块属性打不到实现。
 """
-from __future__ import annotations
-
-import re
-
-
-def safe_symbol(symbol: str) -> str:
-    """symbol → 文件名/路径安全名（GC=F → GC_F，510300.SS → 510300_SS）。
-
-    用途：committee/backtest transcript 落盘名、断点续跑存在性探测、
-    decision ledger join 键。改这个正则 = 改全仓文件名口径，三思。
-    """
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", symbol or "asset")
+from openinvest.calc.symbols import *  # noqa: F401,F403
