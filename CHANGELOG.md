@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2](https://github.com/longsizhuo/openInvest/compare/v0.26.1...v0.26.2) (2026-07-12)
+
+
+### Docs
+
+* 宿主 agent 侧日报 cron 教程（Hermes 示例 + 推荐 prompt）；PYPI/jobs README 同步 agent 口径 ([244093a](https://github.com/longsizhuo/openInvest/commit/244093a314c0059e1e8d44a4060e02a74d0ad736))
+
 ## [0.26.1](https://github.com/longsizhuo/openInvest/compare/v0.26.0...v0.26.1) (2026-07-12)
 
 
