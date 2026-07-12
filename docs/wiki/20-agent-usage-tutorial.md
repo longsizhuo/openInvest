@@ -149,39 +149,38 @@ cp -r ~/openInvest/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace �
 
 服务器内置的 `daily_report` cron 已于 2026-07-12 默认停用（`jobs/daily_report.yml`
 `enabled: false`）——按 [#133](https://github.com/longsizhuo/openInvest/issues/133)
-的分工，定时触发和通知渠道归宿主 agent，openInvest 只提供工具面。以 Hermes 为例
-（其他带 cron 的 agent 同理）：
+的分工，定时触发和通知渠道归宿主 agent，openInvest 只提供能力面：
 
 ```bash
-hermes cron create "0 2 * * 1-5" --name daily-invest-report \
-  --skill openinvest:invest --deliver telegram \
-  "$(cat <<'PROMPT'
-用 openinvest 的 MCP 工具生成今日投资日报。全程只读 + 只报告，禁止调用任何写工具
-（buy / sell / deposit / withdraw / record_execution / set_allocations / track_asset）。
-
-步骤：
-1. strategy 读 target_assets；
-2. 逐个 symbol 调 run_committee（不要传 force——当天已跑过会命中缓存）；
-3. status 读持仓与总资产；
-4. 输出中文日报，短到手机一屏读完：
-   - 每资产一行：verdict + confidence + 一句核心理由
-   - 总资产（CNY）
-   - 委员会建议与当前持仓相悖时，单列"需要你拍板"一节
-5. 工具失败就写明哪个工具、什么错误，不要编造数据，同一工具最多重试 1 次。
-
-日报是建议不是指令；是否执行由用户决定后另行记账（record_execution 的闭环在对话里做）。
-PROMPT
-)"
+uvx openinvest daily_report   # 完整日报管道，stdout = 邮件正文同源 markdown，不发邮件
 ```
 
-要点（prompt 为什么这么写）：
+**报告格式由后端统一保证**（同一条 `assemble_full_report` 管道：多资产委员会 +
+Gemini 第二意见 + 翻译官人话解读 + 纪律台账）——所有用户、所有 agent 的 cron
+拿到的日报一模一样，不需要在 prompt 里教 agent 怎么写报告。
 
-- **幂等**：MCP `run_committee` 自带当天缓存（默认 `force=False`），cron 重跑 /
-  手动补发不会重复烧 DeepSeek token，也不会当天出两份 verdict
-- **只读纪律**：写工具逐个点名禁用——cron 无人值守，一切写操作留给对话内确认
-- **失败兜底**：宁可收一封"今天失败了 + 原因"，不要收一封编造的日报
-- **时区**：Hermes cron 按服务器本地时区解析，UTC 机器上北京 10:00 = `0 2 * * 1-5`；
-  `--deliver` 换成你配好的渠道（telegram / discord / signal / platform:chat_id）
+以 Hermes 为例（`--no-agent` = 脚本 stdout 原样投递，Hermes 侧零 LLM token）：
+
+```bash
+mkdir -p ~/.hermes/scripts
+cat > ~/.hermes/scripts/daily_invest.sh <<'EOF'
+#!/usr/bin/env bash
+INVEST_HOME=~/openInvest exec uvx openinvest daily_report
+EOF
+hermes cron create "0 2 * * 1-5" --name daily-invest-report \
+  --no-agent --script daily_invest.sh --deliver <渠道>
+```
+
+注意：
+
+- cron 按服务器本地时区解析（UTC 机器上北京 10:00 = `0 2 * * 1-5`）；`--deliver`
+  换成你配好的渠道（telegram / discord / signal / platform:chat_id）
+- 后端跑委员会走 Direct 路径，`INVEST_HOME/.env` 里要有 `DEEPSEEK_API_KEY`（同原 cron）
+- 重跑会重新跑整个委员会（消耗 token）——语义与原 cron / GH Actions `workflow_dispatch` 一致
+- 熔断（数据全废）或未配置 target_assets 时 stdout 是结构化 JSON——收到 JSON = 该排查了
+- 想要 LLM 二次加工（翻译 / 只推增量），改 `--skill openinvest:invest` + 一句话
+  prompt（"跑 `daily_report` 子命令，把输出按 X 加工后投递"），报告主体仍由后端生成
+- OpenClaw 等其他带 cron 的 agent 同理——能定时跑 shell 就能用
 
 ## 6. ~~Web GUI~~（已退役 2026-07-05）
 
