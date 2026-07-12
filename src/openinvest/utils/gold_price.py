@@ -15,22 +15,16 @@ Auto offset 推断：
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Optional
 
 import yfinance as yf
 
-GOLD_OZ_PER_GRAM = 31.1035
-
-
-@dataclass
-class GoldPriceSnapshot:
-    gold_usd_per_oz: float
-    usdcny_rate: float
-    spot_cny_per_gram: float
-    bank_cny_per_gram: float       # 渠道估算价 = spot * (1 + offset)
-    offset_pct: float               # 当前使用的点差
-    is_stale: bool = False          # 来自 DB 兜底（audit algo M7）
+# 纯计算核已迁 calc 层（ADR-026）——导回保持历史导出面；本文件只剩 IO shell。
+from openinvest.calc.gold import (  # noqa: F401
+    GOLD_OZ_PER_GRAM,
+    GoldPriceSnapshot,
+    format_gold_report,
+)
 
 
 def _get_db_fallback_snapshot(offset_pct: float) -> Optional[GoldPriceSnapshot]:
@@ -113,17 +107,6 @@ def infer_offset_pct(reported_bank_price_cny_per_gram: float) -> Optional[float]
     if snap is None or snap.spot_cny_per_gram <= 0:
         return None
     return reported_bank_price_cny_per_gram / snap.spot_cny_per_gram - 1.0
-
-
-def format_gold_report(snap: GoldPriceSnapshot) -> str:
-    """给 daily_report 邮件 / NapCat 用的展示文本"""
-    return (
-        f"--- GOLD PRICE SNAPSHOT ---\n"
-        f"伦敦金现货 (GC=F): ${snap.gold_usd_per_oz:.2f}/oz\n"
-        f"USD/CNY: {snap.usdcny_rate:.4f}\n"
-        f"现货克价: ¥{snap.spot_cny_per_gram:.2f}/g\n"
-        f"渠道估价 (offset {snap.offset_pct:.2%}): ¥{snap.bank_cny_per_gram:.2f}/g"
-    )
 
 
 if __name__ == "__main__":
