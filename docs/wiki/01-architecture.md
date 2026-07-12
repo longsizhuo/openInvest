@@ -96,6 +96,16 @@ documents:
 
 ## 3. Core 层（业务核心）
 
+> **2026-07-13（ADR-026）**：纯计算收编进 `openinvest/calc/` 计算层（T0：
+> regime / market_metrics / strategy_metrics / regime_probability 纯核 /
+> transaction_costs / timeframe_analysis / sentiment 打分 / gold / series /
+> symbols / backtest_reward），域绑定纯模块原地登记（cio_parse /
+> daily_report_builder / pnl_render / review_calc / dreaming_calc /
+> debate_calc / intervention_rules / event_format / decision_calc / schemas）。
+> 旧路径全留 façade，本页写的 `core/regime.py` 等历史路径仍可 import；
+> 纯度由 import-linter 契约 + CI AST 守卫机器强制，全文见
+> [adr/026](adr/026-pure-calculation-layer.md)。
+
 ### 3.1 编排器：`core/committee/` 包（`debate.py:run_committee` 为入口）
 
 ```python
@@ -129,7 +139,7 @@ Pydantic v2 强 schema，写入前必过：
 - `holdings[].symbol` 必须非空
 - 任何不满足 → ValidationError，写不进 memory
 
-### 3.4 REGIME 分类与概率口径：`core/regime.py` + `core/regime_probability.py`
+### 3.4 REGIME 分类与概率口径：`calc/regime.py` + `core/regime_probability.py`（纯核在 `calc/regime_probability.py`）
 
 6 类 regime（uptrend/downtrend/range_bound/crash/recovery/unknown），**确定性算法
 不走 LLM**。2026-05-31 起 regime 不再翻译成方向锁（消融证明方向锁层=1 个杠杆+2 个

@@ -152,6 +152,7 @@ src/openinvest/skill_cmds/         skill 各 cmd 实现子包（_helpers/analysi
 src/openinvest/connectors/web_api/ FastAPI 端点包（**deprecated**，只服务 remote hub 模式）；不再新增端点
 src/openinvest/connectors/mcp_server.py  MCP adapter（18 工具；stdio 默认 / `--http` remote streamable-HTTP，console script `openinvest-mcp`）
 src/openinvest/core/portfolio_manager.py 持仓 façade，with_portfolio_tx fcntl 锁
+src/openinvest/calc/               计算层 T0（纯计算，域中立；禁 IO，机器强制见 ADR-026；旧路径留 façade）
 src/openinvest/core/committee/     委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）
 src/openinvest/core/decision_ledger.py   决策账本读时 join（issue #133 Decision 9）
 src/openinvest/db/trades_db.py     内部账本 SQLite WAL（不连真实支付；数据文件在仓库根 db/）

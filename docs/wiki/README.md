@@ -94,6 +94,7 @@ documents:
 | [008](adr/008-caution-insight-deferred.md) | caution 改 lift-based 评分（试金石验证非 reward hacking）；现有数据下休眠；"过度保守"假设缺证据 | ✅ 已采纳 |
 | [009](adr/009-no-ta-style-analyst-agents.md) | 否决 TradingAgents 式分析师 subagent（test_ta 实验，预注册 Gate 0/3） | ✅ 已采纳 |
 | [025](adr/025-price-sentinel.md) | 价格异动哨兵：10min vs 日ATR% 垂直线检测，先报警邮件后触发委员会 | ✅ 已采纳 |
+| [026](adr/026-pure-calculation-layer.md) | 决策核心三层纯度契约：calc 计算层 + 输入完备 + 全量留痕 | ✅ 已采纳 |
 
 ---
 
