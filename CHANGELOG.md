@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.27.0](https://github.com/longsizhuo/openInvest/compare/v0.26.2...v0.27.0) (2026-07-12)
+
+
+### Features
+
+* **cli:** daily_report 子命令——邮件同款日报走 stdout，宿主 agent cron 原样投递 ([cd75be6](https://github.com/longsizhuo/openInvest/commit/cd75be6220fad5905430d9a82018d87f545bf66f))
+
+
+### Docs
+
+* **skill:** daily_report 子命令指引——日报格式后端统一，cron 投递归宿主 agent ([7f78c68](https://github.com/longsizhuo/openInvest/commit/7f78c684bec7d88a9cf4f7ba1fdf0db2968ee072))
+* 日报 cron 教程改 --no-agent 脚本方案（prompt 归零）+ AGENTS.md 固化 Hermes 测试路径 ([ae1e4b3](https://github.com/longsizhuo/openInvest/commit/ae1e4b32f537c5b43a2706b87653da212b8966d4))
+
 ## [0.26.2](https://github.com/longsizhuo/openInvest/compare/v0.26.1...v0.26.2) (2026-07-12)
 
 
