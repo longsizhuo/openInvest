@@ -145,6 +145,44 @@ cp -r ~/openInvest/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace �
 注意别用 `openclaw plugins install`——截至 2026-07（openclaw-python 0.8.x）它是
 未实现的 stub，返回假 success 但什么都不装。
 
+### 每日日报 cron（宿主 agent 侧）
+
+服务器内置的 `daily_report` cron 已于 2026-07-12 默认停用（`jobs/daily_report.yml`
+`enabled: false`）——按 [#133](https://github.com/longsizhuo/openInvest/issues/133)
+的分工，定时触发和通知渠道归宿主 agent，openInvest 只提供工具面。以 Hermes 为例
+（其他带 cron 的 agent 同理）：
+
+```bash
+hermes cron create "0 2 * * 1-5" --name daily-invest-report \
+  --skill openinvest:invest --deliver telegram \
+  "$(cat <<'PROMPT'
+用 openinvest 的 MCP 工具生成今日投资日报。全程只读 + 只报告，禁止调用任何写工具
+（buy / sell / deposit / withdraw / record_execution / set_allocations / track_asset）。
+
+步骤：
+1. strategy 读 target_assets；
+2. 逐个 symbol 调 run_committee（不要传 force——当天已跑过会命中缓存）；
+3. status 读持仓与总资产；
+4. 输出中文日报，短到手机一屏读完：
+   - 每资产一行：verdict + confidence + 一句核心理由
+   - 总资产（CNY）
+   - 委员会建议与当前持仓相悖时，单列"需要你拍板"一节
+5. 工具失败就写明哪个工具、什么错误，不要编造数据，同一工具最多重试 1 次。
+
+日报是建议不是指令；是否执行由用户决定后另行记账（record_execution 的闭环在对话里做）。
+PROMPT
+)"
+```
+
+要点（prompt 为什么这么写）：
+
+- **幂等**：MCP `run_committee` 自带当天缓存（默认 `force=False`），cron 重跑 /
+  手动补发不会重复烧 DeepSeek token，也不会当天出两份 verdict
+- **只读纪律**：写工具逐个点名禁用——cron 无人值守，一切写操作留给对话内确认
+- **失败兜底**：宁可收一封"今天失败了 + 原因"，不要收一封编造的日报
+- **时区**：Hermes cron 按服务器本地时区解析，UTC 机器上北京 10:00 = `0 2 * * 1-5`；
+  `--deliver` 换成你配好的渠道（telegram / discord / signal / platform:chat_id）
+
 ## 6. ~~Web GUI~~（已退役 2026-07-05）
 
 GUI 壳层已退役：`run.sh gui` 已删除，后端不再 serve 网页面板。看持仓 / 录入 /

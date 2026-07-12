@@ -6,7 +6,7 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 
 | Job | 频率 | 职责 |
 |-----|------|------|
-| `daily_report.py` | 每天 10am | 跑完整投资委员会，生成 markdown brief，发邮件 |
+| `daily_report.py` | ~~每天 10am~~ **默认停用**（2026-07-12）| 跑完整投资委员会，生成 markdown brief，发邮件——日报改由宿主 agent 侧 cron 经 MCP 触发，教程见 `docs/wiki/20-agent-usage-tutorial.md` §5 |
 | `commsec_sync.py` | 每 2h | 拉 CommSec 成交回执邮件，更新 portfolio.holdings |
 | `dreaming.py` | 每天 3am | 三阶段记忆整合（Light → REM → Deep Sleep），insights/ 沉淀长期模式 |
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |

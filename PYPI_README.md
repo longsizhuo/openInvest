@@ -6,7 +6,7 @@
 
 openInvest runs a 4-role LLM investment committee (Macro Strategist, Quant Analyst, Risk Officer, CIO) that debates any asset and returns a BUY / ACCUMULATE / HOLD / TRIM / SELL verdict with a written memo — plus portfolio tracking, a decision ledger, and full decision-accounting (which advice you followed, what happened after).
 
-It is **not a chatbot**. Conversation, memory, and personalization stay in your agent (Claude Code, Codex, Cursor, or any script); openInvest provides the investing capabilities behind it.
+It is **not a chatbot**. Conversation, memory, and personalization stay in your agent (Claude Code, Codex, Hermes, OpenClaw, Cursor, or any script); openInvest provides the investing capabilities behind it.
 
 ## Install & run
 
@@ -37,13 +37,20 @@ claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 
 Read tools carry `readOnlyHint`; money-moving tools (`buy`, `sell`, `deposit`, `withdraw`) carry `destructiveHint`, so MCP clients gate them behind confirmation.
 
-### As a Claude Code / Codex plugin
+### As an agent plugin (Claude Code / Codex / Hermes)
 
 Skills (committee orchestration protocol) + MCP server, bundled:
 
 ```
+# Claude Code
 /plugin marketplace add longsizhuo/openInvest
 /plugin install invest@openinvest
+
+# Codex
+codex plugin marketplace add longsizhuo/openInvest
+
+# Hermes Agent
+hermes plugins install longsizhuo/openInvest --enable
 ```
 
 ## What it does
