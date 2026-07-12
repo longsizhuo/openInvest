@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from openinvest.core.portfolio_manager import PortfolioManager
 # re-export 给 jobs/daily_report.py + scripts/skill.py:cmd_prepare_committee 用
 # （保留旧 import path 的向后兼容）
 from openinvest.utils.portfolio_summary import portfolio_summary_text  # noqa: F401
