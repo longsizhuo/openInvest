@@ -18,7 +18,7 @@ documents:
 > openInvest 是给 AI agent 用的投资 runtime（[issue #133](https://github.com/longsizhuo/openInvest/issues/133)）：
 > 你的 agent 负责对话和记忆，openInvest 负责投资决策。下面按最常见路径展开。
 
-## 1. 安装（Claude Code，推荐）
+## 1. 安装（以 Claude Code 为例；其他 agent 见第 5 节）
 
 ```
 /plugin marketplace add longsizhuo/openInvest
@@ -80,7 +80,10 @@ agent → record_execution("2026-07-02/510300.SS", rejected, reason="现金留�
 
 不声明也有兜底：7 天内同标的同向成交会被自动匹配为"已执行"。
 
-## 5. 非 Claude 的 agent
+## 5. 其他 agent（Codex / Hermes / OpenClaw / 任意 MCP client）
+
+> 接入原则见 [#133](https://github.com/longsizhuo/openInvest/issues/133)：openInvest
+> 是 agent 的投资 runtime，MCP 是第一接口；对话/记忆/通知渠道由宿主 agent 自己负责。
 
 - **Codex**：`codex plugin marketplace add longsizhuo/openInvest`（同一套 skill）
 - **Gemini / Cursor / 任意脚本**：CLI Direct 路径——`run.sh run_committee SYM` 一键
@@ -116,7 +119,23 @@ skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本�
 
 ### OpenClaw
 
-OpenClaw 自动加载 workspace `skills/` 目录（无 MCP client，skills 经 uvx 驱动后端）：
+MCP 声明式接入（`~/.openclaw/openclaw.json`，JSON5）：
+
+```json5
+{
+  mcp: {
+    servers: {
+      openinvest: {
+        command: "uvx",
+        args: ["openinvest", "mcp"],
+        env: { INVEST_HOME: "~/openInvest" },
+      },
+    },
+  },
+}
+```
+
+旧版本没有 MCP client 时，fallback 走 workspace `skills/` 拷贝（skills 经 uvx 驱动后端）：
 
 ```bash
 git clone https://github.com/longsizhuo/openInvest ~/openInvest

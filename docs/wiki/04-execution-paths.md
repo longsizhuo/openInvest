@@ -36,7 +36,7 @@ documents:
 | 路径 | 谁能用 | 触发 | 协调者 | Worker 实现 | 模型 | 真 subagent? | 成本 |
 |------|--------|------|--------|-------------|------|-------------|------|
 | **Coordinator** | 仅 Claude Code（要 `Agent({...})` 工具）| skill `prepare_committee SYM` | 用户的 Claude | `Agent({subagent_type})` 真 spawn 4 subagent（subprocess 隔离）| Claude 4 | ✅ | 由用户订阅承担（项目 ¥0）|
-| **Direct** | 任意 agent（Cursor / Cline / Codex / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee/` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
+| **Direct** | 任意 agent（Codex / Hermes / OpenClaw / Cursor / Cline / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee/` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
 
 **功能等价**：同一套 prompt，同一套 cross-challenge 协议，同一套 regime 分类 + 中性概率口径。
 **模型不同**：verdict 可能不同——这是**对比验证机制**而不是 bug。
@@ -101,7 +101,7 @@ Agent({...})  // cio 综合 transcript
 
 | 入口 | 谁用 | 备注 |
 |------|------|------|
-| `~/.claude/skills/invest/scripts/run.sh run_committee SYM`（= `uvx openinvest run_committee`）| Cursor / Cline / Codex / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
+| `~/.claude/skills/invest/scripts/run.sh run_committee SYM`（= `uvx openinvest run_committee`）| Codex / Hermes / OpenClaw / Cursor / Cline / 普通脚本 / DeepSeek 本地 / 任意 agent | 一条命令拿 verdict JSON + CIO memo |
 | `POST /api/committee/run`（deprecated 存量端点）| remote hub 转发 / 内部触发 | 异步 + SSE 进度推送 |
 | cron `0 3 * * *` 跑 `jobs/daily_report.py` | 服务器自动每日 | 跑全部 target_assets，可选发邮件 |
 
@@ -223,7 +223,7 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 你在 Claude Code 里 + 想问"该不该买"？
   → Coordinator 路径（让你的 Claude spawn 4 subagent，不烧 DeepSeek token）
 
-你在 Cursor / Cline / Codex / 其他非 Claude agent 里？
+你在 Codex / Hermes / OpenClaw / Cursor / Cline / 其他 agent 里？
   → Direct 路径（skill `run_committee SYM` 一键拿 verdict，需要 DEEPSEEK_API_KEY）
 
 你在 remote hub 客户端想触发 + 看实时进度？

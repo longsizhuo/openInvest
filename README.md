@@ -7,7 +7,7 @@
 **A self-hosted investment decision engine built for modern AI agents. Multi-agent information isolation and cross-challenge protocol, providing an auditable decision trail (Audit Trail).**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Agents](https://img.shields.io/badge/Agents-Claude%20Code%20%7C%20Codex%20%7C%20Hermes%20%7C%20OpenClaw-informational)](docs/wiki/20-agent-usage-tutorial.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
@@ -29,7 +29,7 @@ Most AI investment assistants try to become better chatbots. OpenInvest takes a 
 
 It focuses on building a transparent, verifiable, and auditable decision engine that can be integrated into any modern AI agent. Instead of competing with personal AI agents, OpenInvest is designed to amplify them. 
 
-Every improvement in Claude Code, OpenClaw, Codex, or future agents automatically makes OpenInvest more capable.
+Every improvement in Claude Code, Codex, Hermes, OpenClaw, or future agents automatically makes OpenInvest more capable.
 
 ---
 
@@ -81,7 +81,7 @@ OpenInvest understands the market. Your agent understands you.
                      │
          ┌───────────┴───────────┐
          ▼                       ▼
-   Claude Code             OpenInvest
+    Your Agent             OpenInvest
 (User Understanding)   (Market Understanding)
          │                       │
          └───────────┬───────────┘
@@ -92,7 +92,7 @@ OpenInvest understands the market. Your agent understands you.
 > **Your agent knows you. OpenInvest knows investing.**
 
 ### Avoiding User Ownership
-OpenInvest intentionally avoids "owning" the user. Most AI products try to own everything—memory, persona, chat history, and workspaces. OpenInvest takes a back seat. It exposes clean APIs, CLI commands, and Claude Code skills, letting your primary agent manage the conversation and context while OpenInvest powers the underlying investment intelligence.
+OpenInvest intentionally avoids "owning" the user. Most AI products try to own everything—memory, persona, chat history, and workspaces. OpenInvest takes a back seat. It exposes clean APIs, CLI commands, and agent skills (Claude Code / Codex / Hermes / OpenClaw), letting your primary agent manage the conversation and context while OpenInvest powers the underlying investment intelligence.
 
 ---
 
@@ -106,19 +106,27 @@ OpenInvest intentionally avoids "owning" the user. Most AI products try to own e
 *   **Long-Horizon Backtesting**: Built-in test harness with lookahead bias protections.
 *   **Dreaming-Based Memory Consolidation**: Nightly memory distillation to prevent context drift.
 *   **Self-Hosted / Zero-Cost**: Powered directly by your local agent's reasoning resources.
-*   **Claude Code Skill**: Lightweight plugin with interactive bootstrap wizard.
+*   **Agent Skill**: Lightweight plugin for Claude Code / Codex / Hermes / OpenClaw, with interactive bootstrap wizard.
 *   **Automated Deployment**: GitHub Actions workflow to run the committee and email reports daily.
 
 ---
 
 ## Quick Start
 
-### 1. Integrate with Claude Code (Recommended)
-Add the lightweight skill from the official registry. The host agent will automatically pull the core code and align dependencies on first run:
+### 1. Integrate with your agent (Recommended)
+Add the lightweight skill from your agent's plugin registry. The host agent will automatically pull the core code and align dependencies on first run:
 ```bash
+# Claude Code
 /plugin marketplace add longsizhuo/openInvest
 /plugin install invest@openinvest
+
+# Codex
+codex plugin marketplace add longsizhuo/openInvest
+
+# Hermes Agent
+hermes plugins install longsizhuo/openInvest --enable
 ```
+OpenClaw and any other MCP client: register the MCP server from step 2 below (full walkthrough in the [agent tutorial](docs/wiki/20-agent-usage-tutorial.md)).
 
 ### 2. Standalone — MCP server or CLI (no clone needed)
 The backend ships on [PyPI](https://pypi.org/project/openinvest/); `~/openInvest` holds only your data:

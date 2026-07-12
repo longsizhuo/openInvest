@@ -61,8 +61,8 @@ documents:
 | Connector | 触发协议 | 适合 |
 |-----------|---------|------|
 | `connectors/web_api/`（**deprecated**）| HTTP REST + SSE | remote hub 模式（INVEST_API_BASE 转发）+ 内部触发；不再新增端点 |
-| `connectors/mcp_server.py`（`openinvest-mcp`）| MCP stdio | 任意 MCP 宿主（Claude Code / Cursor / ...）|
-| `skills/invest/scripts/run.sh` (CLI) | Claude Code Skill | 让 Claude 自己当协调者跑 |
+| `connectors/mcp_server.py`（`openinvest-mcp`）| MCP stdio | 任意 MCP 宿主（Claude Code / Codex / Hermes / OpenClaw / Cursor / ...）|
+| `skills/invest/scripts/run.sh` (CLI) | Agent Skill（Claude Code / Codex / Hermes / ...）| 让宿主 agent 自己当协调者跑 |
 
 **关键约束**：connector 必须**只做协议转换**，业务逻辑全部 forward 给 `core/`。
 违反这条 → connector 之间会出现行为飘移（已有教训：早期 QQ bot connector 自己改 portfolio dict 导致 Web 写入失败——该 connector 已于 2026-07 退役）。

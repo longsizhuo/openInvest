@@ -9,7 +9,7 @@ openInvest 有三个调用层，每层服务不同对象：
 | 层 | 服务对象 | 目的 |
 |----|---------|------|
 | ~~GUI~~（已退役 2026-07-05，等重做） | ~~小白用户~~ | 前端不再由后端 serve；重做时走独立前端直连 MCP |
-| **CLI / Skill**（`scripts/skill.py` + `skills/invest/scripts/run.sh`）| **AI agent**（Claude / Gemini / Cursor / Cline / Codex / 任意脚本）| Agent 跑全链路：查询 + 记账 + 改持仓 + 触发委员会 |
+| **CLI / Skill**（`scripts/skill.py` + `skills/invest/scripts/run.sh`）| **AI agent**（Claude / Codex / Hermes / OpenClaw / Gemini / Cursor / Cline / 任意脚本）| Agent 跑全链路：查询 + 记账 + 改持仓 + 触发委员会 |
 | **Web API**（deprecated）| remote hub 模式 | 存量端点服务 INVEST_API_BASE 转发与内部触发；不再新增端点，待 MCP 覆盖 remote 后退役 |
 
 ### 关键原则

@@ -7,7 +7,7 @@
 **基于 Coordinator-Worker 架构的自托管 AI 投资决策委员会系统。多大语言模型角色信息隔离质询，提供可审计的投资决策追踪流水（Audit Trail）。**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Claude Code](https://img.shields.io/badge/Skill-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Agents](https://img.shields.io/badge/Agents-Claude%20Code%20%7C%20Codex%20%7C%20Hermes%20%7C%20OpenClaw-informational)](docs/wiki/20-agent-usage-tutorial.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
 
@@ -29,7 +29,7 @@ OpenInvest 是一个面向现代 AI Agent 的自托管投资决策引擎。
 
 它提供透明、可验证、可审计的决策能力，并通过标准接口融入现代 AI Agent，而不是重新构建聊天、记忆和个性化能力。OpenInvest 并非与个人 AI Agent 竞争，而是为了放大它们的能力。
 
-Claude Code、OpenClaw、Codex 或未来智能体的每一次进步，都将自动使 OpenInvest 变得更加强大。
+Claude Code、Codex、Hermes、OpenClaw 或未来智能体的每一次进步，都将自动使 OpenInvest 变得更加强大。
 
 ---
 
@@ -81,7 +81,7 @@ OpenInvest 负责理解市场，Agent 负责理解用户。
                      │
          ┌───────────┴───────────┐
          ▼                       ▼
-   Claude Code             OpenInvest
+    Your Agent             OpenInvest
 (User Understanding)   (Market Understanding)
          │                       │
          └───────────┬───────────┘
@@ -92,7 +92,7 @@ OpenInvest 负责理解市场，Agent 负责理解用户。
 > **Agent 理解你。OpenInvest 理解投资。**
 
 ### 避免占有用户
-OpenInvest 刻意避免“占有”用户。大多数 AI 产品都试图占有一切——记忆、角色、聊天记录和工作区。OpenInvest 则选择退居幕后。它提供简洁的 API、CLI 命令和 Claude Code 技能，让您的主智能体管理对话和上下文，而 OpenInvest 仅为底层的投资智能提供支持。
+OpenInvest 刻意避免“占有”用户。大多数 AI 产品都试图占有一切——记忆、角色、聊天记录和工作区。OpenInvest 则选择退居幕后。它提供简洁的 API、CLI 命令和 agent 技能（Claude Code / Codex / Hermes / OpenClaw），让您的主智能体管理对话和上下文，而 OpenInvest 仅为底层的投资智能提供支持。
 
 ---
 
@@ -106,19 +106,27 @@ OpenInvest 刻意避免“占有”用户。大多数 AI 产品都试图占有�
 *   **长周期回测系统**：内置测试沙箱，具备严格的先知偏差（Lookahead Bias）防护。
 *   **三阶段 Dreaming 记忆固化**：每日凌晨自动蒸馏复盘，将行为洞察固化回长期记忆。
 *   **零成本自托管**：推理计算完全依托宿主 Agent，无需消耗个人的第三方 API 额度。
-*   **Claude Code Skill**：轻量化 Skill 插件，内置交互式引导配置向导。
+*   **Agent Skill**：轻量化 Skill 插件（Claude Code / Codex / Hermes / OpenClaw），内置交互式引导配置向导。
 *   **自动化 GitHub Actions**：每日定时运行委员会并自动向指定邮箱发送决策日报。
 
 ---
 
 ## 快速开始
 
-### 1. 接入 Claude Code 运行时（推荐）
-通过官方 Marketplace 动态加载轻量化 Skill，宿主 Agent 在首次运行时会自动拉取核心代码并完成 `uv sync` 环境依赖对齐：
+### 1. 接入你的 Agent（推荐）
+通过所用 Agent 的插件 Marketplace 动态加载轻量化 Skill，宿主 Agent 在首次运行时会自动拉取核心代码并完成 `uv sync` 环境依赖对齐：
 ```bash
+# Claude Code
 /plugin marketplace add longsizhuo/openInvest
 /plugin install invest@openinvest
+
+# Codex
+codex plugin marketplace add longsizhuo/openInvest
+
+# Hermes Agent
+hermes plugins install longsizhuo/openInvest --enable
 ```
+OpenClaw 及任意 MCP client：按下方第 2 步注册 MCP server（完整教程见 [agent 使用教程](docs/wiki/20-agent-usage-tutorial.md)）。
 
 ### 2. 独立 Skill 原生导入
 ```bash
