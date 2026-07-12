@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.26.0](https://github.com/longsizhuo/openInvest/compare/v0.25.0...v0.26.0) (2026-07-12)
+
+
+### Features
+
+* **mcp:** streamable-HTTP transport（--http）——remote MCP，REST 退役路线 A ([f0ef9e7](https://github.com/longsizhuo/openInvest/commit/f0ef9e7f679e6a5d451e59d90f79c70a8cd3d407))
+
+
+### Docs
+
+* **deploy:** remote MCP 部署链路（invest-mcp.service + Caddy /mcp + spoke 注册） ([a1f7541](https://github.com/longsizhuo/openInvest/commit/a1f7541071969318d626fd1dd51b5f2111723d76))
+* **mcp:** remote MCP 标注 BETA——作者未在真实多设备环境实测 ([e6cc184](https://github.com/longsizhuo/openInvest/commit/e6cc1844d2bb0a2b36a8a7ca125d871afbb912d9))
+* **skill:** remote MCP spoke 直连指引 ([a8c36a3](https://github.com/longsizhuo/openInvest/commit/a8c36a36d9f4c2581b3f32ec0c4955badf4f4eb0))
+* **skill:** remote MCP 指引同步 BETA 标注 ([67d584c](https://github.com/longsizhuo/openInvest/commit/67d584c8a49b06f9132b54f50e38aba311df4cea))
+
 ## [0.25.0](https://github.com/longsizhuo/openInvest/compare/v0.24.5...v0.25.0) (2026-07-11)
 
 
