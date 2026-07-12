@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/longsizhuo/openInvest/compare/v0.28.0...v0.28.1) (2026-07-12)
+
+
+### Docs
+
+* **wiki:** schema_source 锚点跟随 calc 搬迁——OKF frontmatter lint 修红 ([2b55367](https://github.com/longsizhuo/openInvest/commit/2b55367761f3fda39599c71102fa7fbf43d46c6a))
+
 ## [0.28.0](https://github.com/longsizhuo/openInvest/compare/v0.27.0...v0.28.0) (2026-07-12)
 
 
