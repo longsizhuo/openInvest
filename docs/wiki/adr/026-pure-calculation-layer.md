@@ -4,8 +4,9 @@ title: "ADR-026：决策核心三层纯度契约——calc 计算层 + 输入完
 tags: [calc, purity, functional-core, provenance, import-linter, architecture]
 intent: 把散落的纯计算收编成机器强制的计算层；定义 LLM 系统下"可复现"的正确目标
 schema_source:
-  - src/openinvest/calc/__init__.py
-  - pyproject.toml
+  - src/openinvest/core/committee/debate.py:run_committee
+  - src/openinvest/services/event_ingest.py:ingest_events
+  - src/openinvest/calc/regime.py:classify_regime
 documents:
   endpoints: []
   config_keys: []
