@@ -105,6 +105,17 @@ Quant 失去概率口径与防御哨兵背景；CIO 的 EXPECTED_PATH 凭空编�
 - `--force`：今天已经跑过也重跑（默认读 cache 省 token）
 - `--max-rounds N`：cross-challenge 轮数上限（默认 1）
 
+### 每日日报（宿主 agent 侧 cron）
+
+```bash
+~/.claude/skills/invest/scripts/run.sh daily_report   # = uvx openinvest daily_report
+```
+
+跑完整日报管道（多资产委员会 + Gemini 第二意见 + 翻译官 + 纪律台账），stdout
+输出与邮件正文同源的 markdown，**不发邮件**——投递归宿主 agent（Hermes cron
+`--no-agent --script` 原样转发即可，报告格式由后端统一保证）。熔断 / 未配置
+target_assets 时 stdout 是结构化 JSON 错误。重跑会重新跑整个委员会（烧 token）。
+
 **前置条件**：`.env` 有 `DEEPSEEK_API_KEY`。如果调用 agent 在用户机器上跑
 但没有 key，提示用户先 `run.sh init` 把 key 配好。
 （**远端模式例外**：key 在 hub 上，本机不需要——见下节。）
@@ -208,8 +219,8 @@ openInvest 记账，**你负责采集**——这是宿主 agent 的本职（issu
     * `family_backup_available=true` → 低 portfolio cash **不是** liquidity risk
     * `account_purpose="零花钱账户"` → 容忍较大回撤；`"退休金"` → 倾向减仓
   - 加仓金额上限**永远**= portfolio cash（**不能动 backup**），这条不变
-- **不要主动跑 `daily_report` cron**——除非用户明说 "跑深度分析" / "run full report"。
-  那条路烧 DeepSeek token。Direct 路径单资产 `run_committee` 就够。
+- **不要在对话里主动跑 `daily_report`**——除非用户明说 "跑深度分析" / "run full report"
+  或是在配置每日 cron。那条路烧 DeepSeek token。对话里单资产 `run_committee` 就够。
 - **不要编实时价**。永远走 `run.sh status` 或 `live_prices`。yfinance 可能返回
   陈旧数据，注意 `is_stale` flag。
 - **永远不直接写 `memory/`**。所有状态变更走 CLI 子命令 / MCP 工具（atomic write +
