@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.28.0](https://github.com/longsizhuo/openInvest/compare/v0.27.0...v0.28.0) (2026-07-12)
+
+
+### Features
+
+* **events:** 事件账本 ingested_by 溯源字段——坏 verdict 可反查坏输入是谁喂的 ([71b31cb](https://github.com/longsizhuo/openInvest/commit/71b31cb126e8e010445b55e57f05c71c556b803d))
+
+
+### Refactor
+
+* **calc:** core/benchmarks 纯核 → calc/series（BenchmarkSeries/to_pct_series/_generate_constant_apr） ([c21bf66](https://github.com/longsizhuo/openInvest/commit/c21bf66c6c5effa583e5ee70018f3e024c0ba2e5))
+* **calc:** core/regime_probability 纯核 → calc/regime_probability ([d1602d9](https://github.com/longsizhuo/openInvest/commit/d1602d9064a7bf2581a852527fd05d394adf0ae5))
+* **calc:** sentiment/gold 纯核 → calc/sentiment + calc/gold ([383218e](https://github.com/longsizhuo/openInvest/commit/383218e1e8c0af16349aafcc91796d04e9b382e1))
+* **calc:** utils/exchange_fee 拆 calc/transaction_costs + calc/timeframe_analysis ([20eed24](https://github.com/longsizhuo/openInvest/commit/20eed24f58467206cc0c31338837f0b07a686b04))
+* **calc:** 新建 openinvest.calc 计算层——regime/market_metrics/strategy_metrics/backtest_reward/symbols 五整模块搬迁 ([3e11882](https://github.com/longsizhuo/openInvest/commit/3e118824482310ae96f4f6eed768fec5d885261f))
+* **core:** debate_calc + intervention_rules + event_format + decision_calc 拆分；daily_report_builder 删死 import ([e465783](https://github.com/longsizhuo/openInvest/commit/e4657834ec62198a14b2ca2b49222fa247251b35))
+* **jobs:** pnl_snapshot 渲染纯核 → jobs/pnl_render ([f8e5561](https://github.com/longsizhuo/openInvest/commit/f8e5561381772d3cbf69af0d963705b1f29b2118))
+* **jobs:** verdict/path review 统计纯核 → jobs/review_calc；dreaming 聚合纯核 → jobs/dreaming_calc ([f1da2fd](https://github.com/longsizhuo/openInvest/commit/f1da2fdfae8345b0c8dfadb46e35a91da6662b64))
+
+
+### Docs
+
+* **adr:** ADR-026 决策核心三层纯度契约 + wiki/CLAUDE.md 同步 ([028d64e](https://github.com/longsizhuo/openInvest/commit/028d64e655f566af5262f6391223752ededc0fb0))
+
 ## [0.27.0](https://github.com/longsizhuo/openInvest/compare/v0.26.2...v0.27.0) (2026-07-12)
 
 
