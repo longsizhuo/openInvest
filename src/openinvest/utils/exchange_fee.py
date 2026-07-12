@@ -8,6 +8,24 @@ import pandas as pd
 import yfinance as yf
 from openinvest.db.market_store import MarketStore
 
+# 纯计算核已迁 calc 层（ADR-026）——导回保持历史导出面；本文件只剩 IO shell。
+# monkeypatch 计算逻辑请钉 openinvest.calc.{transaction_costs,timeframe_analysis}。
+from openinvest.calc.timeframe_analysis import (  # noqa: F401
+    _analyze_slice,
+    _apply_cutoff,
+    _calc_change,
+    _calc_max_drawdown,
+    _calc_volatility,
+    analyze_multi_timeframe,
+)
+from openinvest.calc.transaction_costs import (  # noqa: F401
+    CostSnapshot,
+    ForexFriction,
+    StockFriction,
+    TransactionCostCalculator,
+    format_cost_report,
+)
+
 _STORE = MarketStore()
 
 # BetaShares 官网可兜底现价的 symbol（yfinance 被墙/抓空时的最后一道）。
@@ -55,102 +73,6 @@ def _nan_to_none(v):
     except (TypeError, ValueError):
         return None
     return None if np.isnan(fv) else fv
-
-
-# ==========================================
-# 0. 数据结构定义
-# ==========================================
-@dataclass
-class ForexFriction:
-    input_cny: float
-    net_aud: float
-    spot_rate: float
-    effective_rate: float
-    friction_pct: float
-    total_fee_cny: float
-    break_even_pct: float
-    is_viable: bool
-
-
-@dataclass
-class StockFriction:
-    input_aud: float
-    fee_aud: float
-    friction_pct: float
-
-
-@dataclass
-class CostSnapshot:
-    invest_cny: float
-    spot_rate: float
-    forex: ForexFriction
-    trade_aud: float
-    stock: StockFriction
-    combined_fee_cny: Optional[float]
-    combined_friction_pct: Optional[float]
-
-
-class TransactionCostCalculator:
-    def __init__(self):
-        self.cn_cable_fee = 150.0
-        self.cn_commission_rate = 0.001
-        self.cn_commission_min = 50.0
-        self.cn_commission_max = 260.0
-        self.au_inward_fee = 15.0
-        self.commsec_tier_1 = 5.0
-        self.commsec_tier_2 = 10.0
-        self.commsec_tier_3 = 19.95
-        self.commsec_rate_high = 0.0012
-
-    def calculate_forex_friction(self, invest_cny: float, spot_rate: float) -> ForexFriction:
-        if invest_cny <= 0 or spot_rate <= 0:
-            return ForexFriction(0, 0, 0, 0, 0, 0, 0, False)
-
-        commission = max(self.cn_commission_min, min(invest_cny * self.cn_commission_rate, self.cn_commission_max))
-        cn_total_fee = self.cn_cable_fee + commission
-        remaining_cny = invest_cny - cn_total_fee
-
-        if remaining_cny <= 0:
-            return ForexFriction(invest_cny, 0, spot_rate, float('inf'), 100.0, cn_total_fee, float('inf'), False)
-
-        gross_aud = remaining_cny / spot_rate
-        net_aud = gross_aud - self.au_inward_fee
-
-        if net_aud <= 0:
-            total_fee_cny_equiv = cn_total_fee + (gross_aud * spot_rate)
-            return ForexFriction(invest_cny, 0, spot_rate, float('inf'), 100.0, total_fee_cny_equiv, float('inf'), False)
-
-        effective_rate = invest_cny / net_aud
-        value_loss_cny = invest_cny - (net_aud * spot_rate)
-        friction_pct = (value_loss_cny / invest_cny) * 100
-        break_even_pct = (1 / (1 - friction_pct / 100) - 1) * 100 if friction_pct < 100 else float('inf')
-
-        return ForexFriction(
-            input_cny=invest_cny,
-            net_aud=net_aud,
-            spot_rate=spot_rate,
-            effective_rate=effective_rate,
-            friction_pct=friction_pct,
-            total_fee_cny=value_loss_cny,
-            break_even_pct=break_even_pct,
-            is_viable=True
-        )
-
-    def calculate_stock_friction(self, amount_aud: float) -> StockFriction:
-        if amount_aud <= 0:
-            return StockFriction(0, 0, 0)
-        
-        if amount_aud <= 1000:
-            fee = self.commsec_tier_1
-        elif amount_aud <= 10000:
-            fee = self.commsec_tier_2
-        elif amount_aud <= 25000:
-            fee = self.commsec_tier_3
-        else:
-            fee = amount_aud * self.commsec_rate_high
-
-        friction_pct = (fee / amount_aud) * 100
-        return StockFriction(input_aud=amount_aud, fee_aud=fee, friction_pct=friction_pct)
 
 
 # ==========================================
@@ -269,124 +191,6 @@ def get_history_data(
     return pd.DataFrame()
 
 
-def _apply_cutoff(df: pd.DataFrame, as_of_date: Optional[str]) -> pd.DataFrame:
-    """把 df 截到 cutoff 当日（含）。
-
-    语义：T 日决策时**可以看 T 日的 close**（用户场景：晚间 cron 跑委员会 / 用户睡前
-    查 verdict，市场已收盘）。所以保留 `index <= cutoff` 数据，去掉 cutoff 之后所有
-    交易日（保证 LLM 看不到未来）。
-
-    跟 backtest_committee.py:_patch_tools_to_date 原有的 `df.index < next_day`
-    语义一致。
-    """
-    if as_of_date is None or df.empty:
-        return df
-    cutoff = pd.to_datetime(as_of_date)
-    # df.index 可能是 tz-aware（yfinance 默认带时区），cutoff 是 naive → 对齐
-    try:
-        if df.index.tz is not None:
-            cutoff = cutoff.tz_localize(df.index.tz)
-    except (AttributeError, TypeError):
-        pass
-    return df[df.index <= cutoff]
-
-
-# ==========================================
-# 2. 数学工具
-# ==========================================
-def _calc_change(start: float, end: float) -> float:
-    if start == 0: return 0.0
-    return (end - start) / start
-
-
-def _calc_max_drawdown(series: pd.Series) -> float:
-    if series.empty: return 0.0
-    roll_max = series.cummax()
-    drawdown = (series - roll_max) / roll_max
-    return drawdown.min()
-
-
-def _calc_volatility(series: pd.Series) -> float:
-    if len(series) < 2: return 0.0
-    return series.pct_change().std() * np.sqrt(252)
-
-
-def _analyze_slice(df_slice: pd.DataFrame, label: str, current_price: float) -> str:
-    if df_slice.empty:
-        return f"- **{label}**: No Data"
-    start_price = df_slice['Close'].iloc[0]
-    change = _calc_change(start_price, current_price)
-    mdd = _calc_max_drawdown(df_slice['Close'])
-    vol_str = ""
-    if len(df_slice) > 20:
-        vol = _calc_volatility(df_slice['Close'])
-        vol_str = f", Vol: {vol:.2%}"
-    return f"- **{label}**: Ret: {change:.2%}, MaxDD: {mdd:.2%}{vol_str}"
-
-
-def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
-    """格式化层 — 数值计算交给 utils.market_metrics.compute_metrics（SSOT 唯一来源）。
-
-    本函数只负责：拿 metrics dict + 切窗口算阶段收益 + 拼成给 LLM 看的字符串。
-    任何 MA / RSI / 分位 / ATR 改动 → 改 utils/market_metrics.py，不要在这里加。
-    """
-    from .market_metrics import compute_metrics
-
-    if hist.empty:
-        return f"数据缺失: {title}"
-
-    metrics = compute_metrics(hist)
-    current_price = metrics["current_price"]
-    if current_price is None:
-        return f"数据缺失: {title}"
-
-    ma_120 = metrics["ma120"]
-    ma_250 = metrics["ma250"]
-    rsi_14 = metrics["rsi14"]
-    pos = metrics["price_quantile_2y"]
-    rvol = metrics.get("rvol")
-
-    slices = {
-        "1-Week": hist.tail(5),
-        "1-Month": hist.tail(21),
-        "6-Months": hist.tail(126),
-        "1-Year": hist.tail(252),
-        "2-Years": hist
-    }
-
-    rsi_str = f"{rsi_14:.2f}" if rsi_14 is not None else "N/A"
-    # CONTAMINATION CHANNEL (ADR-022): 绝对价位/宏观点位逐字进 prompt → 记忆过历史的 LLM 可反推年代;归一化能压低但杀纪律规则(VIX>20=fear 吃绝对值),不可消除。
-    report_lines = [
-        f"--- {title} ANALYSIS ---",
-        # RSI(14) 为 Wilder 平滑（与 TradingView/券商口径一致）
-        f"Current Price: {current_price:.4f} | RSI(14, Wilder): {rsi_str}",
-    ]
-
-    if pos is not None:
-        # 真百分位排名：历史 X% 的交易日收盘价 ≤ 当前价（不是区间归一位置）
-        report_lines.append(
-            f"Price Percentile (2y): {pos:.0%} (历史 {pos:.0%} 交易日收盘价 ≤ 当前价)"
-        )
-    if rvol is not None:
-        # 相对成交量：> 1 放量，< 1 缩量（依赖 DB 补存 Volume）
-        report_lines.append(f"RVOL(20): {rvol:.2f}x (当日量 / 前 20 日均量)")
-
-    report_lines.append("**Timeframe Performance:**")
-    for label, df_slice in slices.items():
-        report_lines.append(_analyze_slice(df_slice, label, current_price))
-
-    report_lines.append("**Key Levels:**")
-    if ma_120 is not None:
-        report_lines.append(f"- MA120 (Trend): {ma_120:.4f}")
-    if ma_250 is not None:
-        report_lines.append(f"- MA250 (Base): {ma_250:.4f}")
-        if ma_250 != 0:
-            bias = (current_price / ma_250 - 1)
-            report_lines.append(f"- MA250 Deviation: {bias:.2%}")
-
-    return "\n".join(report_lines)
-
-
 # ==========================================
 # 3. 对外接口
 # ==========================================
@@ -503,42 +307,6 @@ def get_cost_snapshot(
         combined_fee_cny=combined_fee_cny,
         combined_friction_pct=combined_friction_pct
     )
-
-
-def format_cost_report(snapshot: CostSnapshot) -> str:
-    fx = snapshot.forex
-    stock = snapshot.stock
-
-    lines = [
-        "--- FRICTION COST REPORT (Pre-calculated) ---",
-        f"Input CNY: ¥{snapshot.invest_cny:.2f}",
-        f"Spot Rate (AUD/CNY): {snapshot.spot_rate:.4f}",
-        "",
-        "[Scenario 1: Forex Transfer (CNY -> AUD)]",
-        f"- Net AUD Received: ${fx.net_aud:.2f}",
-        f"- Effective Rate (after fees): {fx.effective_rate:.4f}",
-        f"- Total Friction Loss: {fx.friction_pct:.2f}% (¥{fx.total_fee_cny:.2f})",
-        f"- Break-even Requirement: AUD must appreciate {fx.break_even_pct:.2f}%",
-    ]
-    if not fx.is_viable:
-        lines.append("- Status: Not viable (fees exceed principal or inbound fees)")
-
-    lines.extend([
-        "",
-        "[Scenario 2: Stock Trading (AUD -> NDQ)]",
-        f"- Trade AUD: ${snapshot.trade_aud:.2f}",
-        f"- Brokerage Fee: ${stock.fee_aud:.2f}",
-        f"- Friction Loss: {stock.friction_pct:.2f}%",
-    ])
-
-    if snapshot.combined_fee_cny is not None:
-        lines.extend([
-            "",
-            "[Scenario 3: Combined (FX + Brokerage)]",
-            f"- Total Friction Loss: {snapshot.combined_friction_pct:.2f}% (¥{snapshot.combined_fee_cny:.2f})"
-        ])
-
-    return "\n".join(lines)
 
 
 def get_cost_report(
