@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.7](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.6...invest-skill-v0.18.7) (2026-07-12)
+
+
+### Docs
+
+* **skill:** daily_report 子命令指引——日报格式后端统一，cron 投递归宿主 agent ([7f78c68](https://github.com/longsizhuo/openInvest/commit/7f78c684bec7d88a9cf4f7ba1fdf0db2968ee072))
+* **skill:** Direct 路径 agent 示例补 Hermes / OpenClaw，与市场用户构成对齐 ([077c266](https://github.com/longsizhuo/openInvest/commit/077c26624d6e1f2472ac57bc1597d19baf3338b6))
+
 ## [0.18.6](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.5...invest-skill-v0.18.6) (2026-07-11)
 
 
