@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.1](https://github.com/longsizhuo/openInvest/compare/v0.26.0...v0.26.1) (2026-07-12)
+
+
+### Docs
+
+* **skill:** Direct 路径 agent 示例补 Hermes / OpenClaw，与市场用户构成对齐 ([077c266](https://github.com/longsizhuo/openInvest/commit/077c26624d6e1f2472ac57bc1597d19baf3338b6))
+* 文案去 Claude 中心化——README/wiki 四 agent 并列 + OpenClaw 改 MCP 声明式接入 ([6c7cbef](https://github.com/longsizhuo/openInvest/commit/6c7cbefe91c4f764ef7702ac707ce0499c16cf0c))
+
 ## [0.26.0](https://github.com/longsizhuo/openInvest/compare/v0.25.0...v0.26.0) (2026-07-12)
 
 
