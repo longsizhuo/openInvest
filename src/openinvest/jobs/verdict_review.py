@@ -26,6 +26,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from openinvest.utils.symbols import safe_symbol
+# 统计纯核已迁 jobs/review_calc（ADR-026）——导回保持历史导出面
+from openinvest.jobs.review_calc import (  # noqa: F401
+    CONTAMINATION_CUTOFF,
+    EXPECTED_DIRECTION,
+    FLAT_CEILING_PCT,
+    HIT_WINDOWS,
+    K_FLAT,
+    VerdictReview,
+    _bucket_lines,
+    _flat_band,
+    _is_hit,
+    _summarize_bucket,
+)
+from openinvest.jobs.review_calc import summarize_verdict_reviews as summarize  # noqa: F401
 from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 sys.path.insert(0, str(ROOT))
@@ -34,13 +48,7 @@ log = logging.getLogger(__name__)
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402
 
-# 命中率窗口：天级 / 周级 / 月级，给短期+中期反馈
-HIT_WINDOWS = [1, 7, 30]
 
-# 记忆穿越 cutoff：决议日 ≤ 此日 = 落在 LLM 训练知识窗口内，"预测"实为记忆回放（非业绩）。
-# 单一可信源（机器强制，不靠记忆）——backtest_committee 落盘 `**Contaminated**` 标记 + 本文件
-# 分桶都 import 这个常量，绝不让两处各自硬编码 "2024-12-31" 漂移（见 CLAUDE.md 机器强制原则）。
-CONTAMINATION_CUTOFF = "2024-12-31"
 
 # 宏观突变阈值（剔除黑天鹅时用）
 MACRO_SHOCK_THRESHOLDS = {
@@ -49,32 +57,8 @@ MACRO_SHOCK_THRESHOLDS = {
     "usdcny_pct_change": 0.03,      # 人民币 ±3%
 }
 
-# verdict → 期望方向
-EXPECTED_DIRECTION = {
-    "BUY": "up",
-    "ACCUMULATE": "up",
-    "SELL": "down",
-    "TRIM": "down",
-    "HOLD": "flat",  # 期望波动小
-}
 
 
-@dataclass
-class VerdictReview:
-    """单次 verdict 的事后评估"""
-    date: str
-    asset: str
-    verdict: str
-    confidence: float
-    expected_direction: str
-    macro_at_decision: Dict[str, float]
-    actual_returns: Dict[str, float] = field(default_factory=dict)  # {"1d": 0.012, "7d": -0.034, ...}
-    hits: Dict[str, bool] = field(default_factory=dict)  # 同上 key
-    macro_shock: Dict[str, Any] = field(default_factory=dict)  # 事后 macro 突变标记
-    regime_at_decision: Optional[str] = None  # 决议日 regime（crash 样本供下游免责，留痕不删）
-    directions: Dict[str, str] = field(default_factory=dict)  # 每窗口原始市场方向 up/down/flat（verdict 无关；给 Dreaming 算 regime 基率 + caution lift）
-    source: str = "live"  # "live" 或 "backtest"
-    contaminated: bool = False  # 决议日 ≤ CONTAMINATION_CUTOFF：落在 LLM 训练窗口，记忆穿越非业绩
 
 
 # ---------- 解析 ----------
@@ -227,16 +211,6 @@ def _detect_macro_shock(
 
 # ---------- hit 判定 ----------
 
-# HOLD "没动" 的判定阈值 = K_FLAT × 资产日波动(atr_pct) × sqrt(窗口天数)，再封顶。
-# 设计（2026-05-26，与用户讨论后定）：
-# - 不写死 3%——黄金一周波动 ~1%、纳指 ~1.8%、加密 ~3-5%，统一阈值对黄金太松、
-#   对加密太紧。改成"小于该资产平时这段时间正常会动的幅度"才算 HOLD 命中。
-# - 适应的是**测量值**（atr_pct 实时从行情算），固定的是**规则**（K_FLAT 常数）——
-#   绝不让系统自学习这把"给自己打分的尺子"，否则会 reward hacking（把及格线挪低）。
-# - sqrt(天数) 是随机游走的标准波动随时间缩放（日波动 → 窗口波动）。
-# - 封顶 FLAT_CEILING_PCT 防 atr 异常时尺子失控。
-K_FLAT = 1.0
-FLAT_CEILING_PCT = 8.0
 DEFAULT_DAILY_VOL_PCT = 2.0  # atr_pct 拉取失败时的兜底日波动
 
 
@@ -317,27 +291,8 @@ def _atr_pct_cached(symbol: str, decision_date: str) -> float:
     return _ATR_CACHE[key]
 
 
-def _flat_band(atr_pct: float, window_days: int) -> float:
-    """HOLD "没动" 的阈值，返回小数（如 0.026 = 2.6%）。"""
-    import math
-    band_pct = min(K_FLAT * atr_pct * math.sqrt(window_days), FLAT_CEILING_PCT)
-    return band_pct / 100.0
 
 
-def _is_hit(verdict: str, return_pct: float, flat_threshold: float = 0.03) -> bool:
-    """verdict 方向是否被事后行情验证。
-
-    flat_threshold: HOLD "没动" 的阈值（小数）。默认 0.03 仅作回退；正常由
-    review_one 按资产波动率传入 _flat_band 的结果。
-    """
-    direction = EXPECTED_DIRECTION.get(verdict, "flat")
-    if direction == "up":
-        return return_pct > 0
-    elif direction == "down":
-        return return_pct < 0
-    elif direction == "flat":
-        return abs(return_pct) < flat_threshold  # |涨跌| < 该资产窗口波动 = HOLD 命中
-    return False
 
 
 # ---------- symbol 反转义 ----------
@@ -472,119 +427,10 @@ def review_all(*, include_backtest: bool = True, include_live: bool = True) -> L
 
 # ---------- 报告生成 ----------
 
-def _summarize_bucket(reviews: List[VerdictReview], *, suppress_rates: bool) -> Dict[str, Any]:
-    """对单桶（holdout 或 contaminated）算命中率聚合，按 verdict 类型 + 窗口分类。
-
-    suppress_rates=True（holdout 且 n<30）：按公开数据红线 #2 **不展示具体命中率数字**，
-    只留样本量 n（防小样本被截图误传）。contaminated 桶永不抑制（它本就标注"非业绩"）。
-    """
-    bucket: Dict[str, Any] = {"n": len(reviews), "by_window": {}, "by_verdict": {},
-                              "macro_shock_count": 0, "live_count": 0, "backtest_count": 0,
-                              "rates_suppressed_sub30": suppress_rates}
-    for window in HIT_WINDOWS:
-        key = f"{window}d"
-        hits = [r.hits[key] for r in reviews if key in r.hits]
-        if not hits:
-            continue
-        entry: Dict[str, Any] = {"n": len(hits)}
-        if not suppress_rates:
-            entry["hit_rate"] = round(sum(hits) / len(hits), 3)
-            # 剔除 macro shock 后再算
-            non_shock = [r.hits[key] for r in reviews
-                         if key in r.hits and not r.macro_shock.get("detected")]
-            if non_shock:
-                entry["hit_rate_excl_macro_shock"] = round(sum(non_shock) / len(non_shock), 3)
-                entry["n_excl_shock"] = len(non_shock)
-        bucket["by_window"][key] = entry
-
-    for verdict in ["BUY", "ACCUMULATE", "HOLD", "TRIM", "SELL"]:
-        subset = [r for r in reviews if r.verdict == verdict]
-        if not subset:
-            continue
-        entry = {"n": len(subset),
-                 "avg_confidence": round(sum(r.confidence for r in subset) / len(subset), 3)}
-        if not suppress_rates:
-            for window in HIT_WINDOWS:
-                key = f"{window}d"
-                hits = [r.hits[key] for r in subset if key in r.hits]
-                if hits:
-                    entry[f"hit_rate_{key}"] = round(sum(hits) / len(hits), 3)
-        bucket["by_verdict"][verdict] = entry
-
-    bucket["macro_shock_count"] = sum(1 for r in reviews if r.macro_shock.get("detected"))
-    # 决议日 regime 分布 + crash 计数（crash 样本下游免责剔除，但此处留痕统计）
-    bucket["regime_crash_count"] = sum(1 for r in reviews if r.regime_at_decision == "crash")
-    bucket["regime_recovery_count"] = sum(1 for r in reviews if r.regime_at_decision == "recovery")
-    regime_dist: Dict[str, int] = {}
-    for r in reviews:
-        reg = r.regime_at_decision or "unknown"
-        regime_dist[reg] = regime_dist.get(reg, 0) + 1
-    bucket["regime_distribution"] = regime_dist
-    bucket["live_count"] = sum(1 for r in reviews if r.source == "live")
-    bucket["backtest_count"] = sum(1 for r in reviews if r.source == "backtest")
-    return bucket
 
 
-def summarize(reviews: List[VerdictReview]) -> Dict[str, Any]:
-    """按 contaminated（决议日 ≤ CONTAMINATION_CUTOFF）**强制分桶**聚合。
-
-    机器强制（不靠记忆）：holdout（cutoff 之后，干净业绩）与 contaminated（落在 LLM 训练
-    窗口，记忆穿越非业绩）**绝不合并成一个命中率**——本函数不产出任何跨桶 union 数字，
-    两桶各自独立 `_summarize_bucket`。partition assert 守"每条 review 非此即彼，无遗漏无重叠"。
-    holdout 桶 n<30 按红线 #2 不出命中率切片；contaminated 桶数字带 note 标注"含记忆穿越,非业绩"。
-    """
-    holdout = [r for r in reviews if not r.contaminated]
-    contaminated = [r for r in reviews if r.contaminated]
-    assert len(holdout) + len(contaminated) == len(reviews), \
-        "contaminated 分桶必须无遗漏无重叠（每条 review 非 holdout 即 contaminated）"
-
-    return {
-        "total": len(reviews),
-        "cutoff": CONTAMINATION_CUTOFF,
-        "holdout": _summarize_bucket(holdout, suppress_rates=len(holdout) < 30),
-        "contaminated": {
-            **_summarize_bucket(contaminated, suppress_rates=False),
-            "note": "含记忆穿越,非业绩",
-        },
-    }
 
 
-def _bucket_lines(title: str, bucket: Dict[str, Any], *, note: Optional[str] = None) -> List[str]:
-    """单桶（holdout / contaminated）的报告片段。命中率被 sub30 抑制时只报样本量。"""
-    lines = [f"\n## {title} (n={bucket['n']}, "
-             f"{bucket['live_count']} live + {bucket['backtest_count']} backtest)\n"]
-    if note:
-        lines.append(f"> ⚠️ {note}\n")
-    if bucket["n"] == 0:
-        lines.append("_无样本_\n")
-        return lines
-    if bucket.get("rates_suppressed_sub30"):
-        lines.append(f"📊 样本量 {bucket['n']} < 30 —— 按公开数据红线 #2 **不展示具体命中率**"
-                     "（防小样本被截图误传）。继续积累到 30+ 再做正式评估。\n")
-        return lines
-
-    lines += ["### 按时间窗口命中率\n",
-              "| 窗口 | N | 总命中率 | 剔除宏观突变后 |",
-              "|---|---|---|---|"]
-    for w_key, w in bucket["by_window"].items():
-        excl = w.get("hit_rate_excl_macro_shock")
-        excl_n = w.get("n_excl_shock", "—")
-        if isinstance(excl, float):
-            lines.append(f"| {w_key} | {w['n']} | {w['hit_rate']*100:.1f}% | {excl*100:.1f}% (n={excl_n}) |")
-        else:
-            lines.append(f"| {w_key} | {w['n']} | {w['hit_rate']*100:.1f}% | — |")
-
-    lines += ["\n### 按 verdict 类型命中率\n",
-              "| Verdict | N | 平均 confidence | 1d hit | 7d hit | 30d hit |",
-              "|---|---|---|---|---|---|"]
-    for v_key, v in bucket["by_verdict"].items():
-        lines.append(
-            f"| {v_key} | {v['n']} | {v['avg_confidence']:.2f} | "
-            f"{v.get('hit_rate_1d', 0)*100:.0f}% | "
-            f"{v.get('hit_rate_7d', 0)*100:.0f}% | "
-            f"{v.get('hit_rate_30d', 0)*100:.0f}% |"
-        )
-    return lines
 
 
 def write_report(reviews: List[VerdictReview], summary: Dict[str, Any]) -> Path:

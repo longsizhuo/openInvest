@@ -30,6 +30,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from openinvest.paths import INVEST_ROOT
+# 统计纯核已迁 jobs/review_calc（ADR-026）——导回保持历史导出面
+from openinvest.jobs.review_calc import (  # noqa: F401
+    PathReview,
+    SHAPE_CLASSES,
+    SHAPE_WINDOW,
+    WINDOWS,
+    realized_shape,
+)
+from openinvest.jobs.review_calc import summarize_path_reviews as summarize  # noqa: F401
 ROOT = INVEST_ROOT
 sys.path.insert(0, str(ROOT))
 
@@ -41,9 +50,6 @@ from openinvest.core.regime_probability import forward_return  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-WINDOWS = ("30d", "60d", "90d")
-SHAPE_WINDOW = "90d"
-SHAPE_CLASSES = ("dip_then_up", "up_no_dip", "pop_then_down", "down_no_pop")
 
 
 # ---------------------------------------------------------------------------
@@ -102,37 +108,8 @@ def realized_path(symbol: str, date: str) -> Optional[Dict[str, Any]]:
     return out if "fwd_30d" in out else None
 
 
-def realized_shape(real: Dict[str, Any], atr_pct: Optional[float]) -> Optional[str]:
-    """与预测同口径的实际形状分类（单位 = 决策日 ATR%）。"""
-    if "fwd_90d" not in real or "min_90d" not in real or not atr_pct:
-        return None
-    up = real["fwd_90d"] > 0
-    dipped = real["min_90d"] <= -atr_pct
-    popped = real["max_90d"] >= atr_pct
-    if up:
-        return "dip_then_up" if dipped else "up_no_dip"
-    return "pop_then_down" if popped else "down_no_pop"
 
 
-# ---------------------------------------------------------------------------
-# 评分
-# ---------------------------------------------------------------------------
-@dataclass
-class PathReview:
-    date: str
-    asset: str
-    regime: str
-    source: str                       # live / recompute
-    current_price: Optional[float]
-    windows: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    # 每窗: {fwd_real, in_band(P10-P90), below_current(实际), p_below(预测),
-    #        err_vs_median(实际−预测中位, pp)}
-    shape_pred: Dict[str, float] = field(default_factory=dict)
-    shape_real: Optional[str] = None
-    shape_prob_score: Optional[float] = None   # 预测分布给实际类的概率
-    shape_top1_hit: Optional[bool] = None
-    trough_pred_days: Optional[int] = None
-    trough_real_days: Optional[int] = None
 
 
 def score_one(snap: Dict[str, Any], source: str) -> Optional[PathReview]:
@@ -250,59 +227,6 @@ def recompute_snapshots(
     return out
 
 
-# ---------------------------------------------------------------------------
-# 汇总
-# ---------------------------------------------------------------------------
-def summarize(reviews: List[PathReview]) -> Dict[str, Any]:
-    summ: Dict[str, Any] = {"n": len(reviews), "windows": {}, "shape": {}}
-    for w in WINDOWS:
-        rows = [r.windows[w] for r in reviews if w in r.windows]
-        if not rows:
-            continue
-        n = len(rows)
-        cov = sum(1 for x in rows if x["in_band"]) / n
-        # p_below 校准：Brier vs 基率 Brier（越低越好）
-        briers = [(x["p_below"] - (1.0 if x["below_current"] else 0.0)) ** 2 for x in rows]
-        base = sum(1 for x in rows if x["below_current"]) / n
-        base_briers = [(base - (1.0 if x["below_current"] else 0.0)) ** 2 for x in rows]
-        errs = [x["err_vs_median"] for x in rows]
-        summ["windows"][w] = {
-            "n": n,
-            "band_coverage": round(cov, 3),          # 目标 ~0.80
-            "p_below_brier": round(float(np.mean(briers)), 4),
-            "base_rate_brier": round(float(np.mean(base_briers)), 4),
-            "median_abs_err_pp": round(float(np.median([abs(e) for e in errs])), 2),
-            "median_err_pp": round(float(np.median(errs)), 2),  # 系统性偏差（+=预测偏保守）
-        }
-    sh = [r for r in reviews if r.shape_real]
-    if sh:
-        n = len(sh)
-        summ["shape"] = {
-            "n": n,
-            "prob_score_mean": round(float(np.mean([r.shape_prob_score for r in sh])), 4),
-            "uniform_baseline": 0.25,
-            "top1_hit": round(sum(1 for r in sh if r.shape_top1_hit) / n, 3),
-            "trough_mae_days": round(float(np.mean([
-                abs(r.trough_real_days - r.trough_pred_days)
-                for r in sh
-                if r.trough_real_days is not None and r.trough_pred_days is not None
-            ])), 1) if any(
-                r.trough_real_days is not None and r.trough_pred_days is not None
-                for r in sh
-            ) else None,
-        }
-    # 按 regime 分桶（解读"哪个 regime 的路径分布最可信"）
-    summ["by_regime"] = {}
-    for rg in sorted({r.regime for r in reviews}):
-        rows = [r.windows.get("90d") for r in reviews
-                if r.regime == rg and "90d" in r.windows]
-        if rows:
-            summ["by_regime"][rg] = {
-                "n": len(rows),
-                "band_coverage_90d": round(
-                    sum(1 for x in rows if x["in_band"]) / len(rows), 3),
-            }
-    return summ
 
 
 def write_outputs(reviews: List[PathReview], summ: Dict[str, Any]) -> Tuple[Path, Path]:
