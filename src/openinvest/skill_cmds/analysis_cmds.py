@@ -302,7 +302,7 @@ def cmd_ingest_event(args) -> None:
         "title": args.title, "url": args.url,
         "snippet": args.snippet or "", "source": args.source or "",
         "published_at": args.ts,
-    }])
+    }], ingested_by=getattr(args, "ingested_by", "host-agent") or "host-agent")
     _print_json(result)
     if result.get("status") == "error":
         sys.exit(1)

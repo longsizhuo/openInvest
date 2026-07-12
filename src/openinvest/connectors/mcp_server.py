@@ -169,14 +169,17 @@ def record_execution(decision_id: str, executed: bool,
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def ingest_event(title: str, url: str, snippet: str = "",
-                 source: str = "", published_at: Optional[str] = None) -> Dict[str, Any]:
+                 source: str = "", published_at: Optional[str] = None,
+                 ingested_by: str = "host-agent") -> Dict[str, Any]:
     """把你（宿主 agent）搜到的财经新闻投喂进事件账本：后端 LLM 归一化 →
     severity/symbol 判级 → 入库 → 供委员会 RAG 召回。**你有比自托管爬虫强得多的
     搜索能力（含中文源）——看到与用户持仓相关的新闻就喂进来**，尤其 A 股/区域
-    市场（爬虫盲区）。幂等：同 url / 同 claim 重发不重复入账。需后端 LLM key。"""
+    市场（爬虫盲区）。幂等：同 url / 同 claim 重发不重复入账。需后端 LLM key。
+    ingested_by 报你自己的身份（如 "hermes"）——溯源用，与 source（新闻来源）语义不同。"""
     from openinvest.services.event_ingest import ingest_events
     return ingest_events([{"title": title, "url": url, "snippet": snippet,
-                           "source": source, "published_at": published_at}])
+                           "source": source, "published_at": published_at}],
+                         ingested_by=ingested_by)
 
 
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------

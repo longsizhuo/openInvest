@@ -245,6 +245,8 @@ def main() -> None:
     p.add_argument("--snippet", help="摘要（可选，给归一化 LLM 更多上下文）")
     p.add_argument("--source", help="来源标注（如 caixin / 你的搜索渠道），入库为 agent:<source>")
     p.add_argument("--ts", help="事件时间 ISO 8601（可选）")
+    p.add_argument("--ingested-by", dest="ingested_by", default="host-agent",
+                   help="喂料 agent 身份（溯源，落 events.ingested_by；区别于 --source=新闻来源）")
     p.set_defaults(func=cmd_ingest_event)
 
     p = sub.add_parser(

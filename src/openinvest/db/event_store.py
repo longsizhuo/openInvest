@@ -21,6 +21,8 @@ schema：
     affected_symbols_json TEXT NOT NULL                       JSON list yfinance symbols
     created_at        TEXT NOT NULL                           入库 ISO timestamp
     committee_task_id TEXT                                    trigger 触发的 committee task
+    ingested_by       TEXT                                    喂料 agent 身份（溯源，ADR-026；
+                                                              区别于 sources.src_name=新闻来源）
 
   sources(id, event_id FK, src_name, url, title, snippet, fetched_at)
   events_vec USING vec0(embedding float[N])                   N 维由 caller 传入决定
@@ -142,7 +144,8 @@ class EventStore:
                     entities_json         TEXT,
                     affected_symbols_json TEXT NOT NULL,
                     created_at            TEXT NOT NULL,
-                    committee_task_id     TEXT
+                    committee_task_id     TEXT,
+                    ingested_by           TEXT
                 )
             """)
             cur.execute("""
@@ -157,6 +160,12 @@ class EventStore:
                     UNIQUE(event_id, url)
                 )
             """)
+            # 在线迁移：既有库（CREATE IF NOT EXISTS 不会改老表）补 ingested_by 列
+            # ——照 market_store._migrate_ohlcv_columns 的 PRAGMA 模式，幂等
+            existing_cols = {r[1] for r in cur.execute("PRAGMA table_info(events)").fetchall()}
+            if "ingested_by" not in existing_cols:
+                cur.execute("ALTER TABLE events ADD COLUMN ingested_by TEXT")
+
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sources_event ON sources(event_id)")
@@ -183,7 +192,7 @@ class EventStore:
         event 必须含字段：
           one_line_claim, stance, severity (low/mid/high or 1/2/3), ts,
           affected_symbols (List[str])
-        可选：event_type, source_reliability, entities (List[str])
+        可选：event_type, source_reliability, entities (List[str]), ingested_by（喂料 agent 身份）
 
         event_id 由 one_line_claim 自动算出；同 event_id 已存在则**只更新
         severity / stance / 元数据**，不重写 ts（保留最早出现时刻）。
@@ -221,14 +230,15 @@ class EventStore:
                     INSERT INTO events
                         (event_id, one_line_claim, event_type, stance, severity,
                          source_reliability, ts, entities_json,
-                         affected_symbols_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         affected_symbols_json, created_at, ingested_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     eid, claim, event.get("event_type"), stance, sev_int,
                     event.get("source_reliability"), ts,
                     json.dumps(entities, ensure_ascii=False),
                     json.dumps(affected, ensure_ascii=False),
                     created_at,
+                    event.get("ingested_by"),
                 ))
                 new_id = cur.lastrowid
                 if self._vec_loaded and embedding is not None:
@@ -504,6 +514,7 @@ def _row_to_event(row: sqlite3.Row) -> Dict[str, Any]:
         "entities": json.loads(row["entities_json"] or "[]"),
         "affected_symbols": json.loads(row["affected_symbols_json"] or "[]"),
         "committee_task_id": row["committee_task_id"],
+        "ingested_by": row["ingested_by"] if "ingested_by" in row.keys() else None,
         "supersedes": None,
         "distance": None,
     }

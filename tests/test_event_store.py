@@ -202,3 +202,41 @@ def test_recall_extra_tags_match(store):
     out = store.recall("NDQ.AX", extra_tags=["us_rates"], min_severity="mid")
     assert len(out) == 1
     assert "Powell" in out[0]["one_line_claim"]
+
+
+def test_ingested_by_persists_and_reads_back(store):
+    """ingested_by 溯源列：写入后 recall/_row_to_event 能读回（ADR-026 溯源）"""
+    was_new, eid = store.upsert_event({
+        "one_line_claim": "Fed cuts rates by 25bp",
+        "stance": "opportunity", "severity": "high",
+        "ts": _utc_iso(), "affected_symbols": ["GC=F"],
+        "ingested_by": "hermes",
+    })
+    assert was_new
+    events = store.recall("GC=F", min_severity="low")
+    hit = next(e for e in events if e["event_id"] == eid)
+    assert hit["ingested_by"] == "hermes"
+
+
+def test_ingested_by_migration_on_legacy_db():
+    """老库（无 ingested_by 列）被 _init_db 在线 ALTER 迁移，幂等且不炸活库"""
+    import sqlite3, tempfile, os
+    from openinvest.db.event_store import EventStore
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "events.db")
+        conn = sqlite3.connect(path)
+        conn.execute("""
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT UNIQUE NOT NULL, one_line_claim TEXT NOT NULL,
+                event_type TEXT, stance TEXT NOT NULL, severity INTEGER NOT NULL,
+                source_reliability TEXT, ts TEXT NOT NULL, entities_json TEXT,
+                affected_symbols_json TEXT NOT NULL, created_at TEXT NOT NULL,
+                committee_task_id TEXT
+            )""")
+        conn.commit(); conn.close()
+        s = EventStore(db_path=path, embedding_dim=4)   # _init_db 触发迁移
+        cols = {r[1] for r in s.conn.execute("PRAGMA table_info(events)").fetchall()}
+        assert "ingested_by" in cols
+        s2 = EventStore(db_path=path, embedding_dim=4)  # 再开一次 = 幂等
+        s2.conn.close(); s.conn.close()

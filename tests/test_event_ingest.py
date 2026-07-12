@@ -145,3 +145,19 @@ def test_prefilter_covers_akshare_prefix():
     ]
     kept = _rss_prefilter(items, ["510300.SS"])
     assert [i.title for i in kept] == ["沪深300开盘涨0.5%"]
+
+
+def test_ingest_passes_ingested_by_to_store(monkeypatch):
+    """ingested_by 批级注入：normalizer 输出全来自 LLM，溯源必须在入库前挂上"""
+    import openinvest.services.event_ingest as mod
+    store = _FakeStore()
+    monkeypatch.setattr("openinvest.db.event_store.EventStore", lambda *a, **kw: store)
+    monkeypatch.setattr("openinvest.services.event_normalizer.normalize",
+                        lambda items, **kw: [_NE(items[0], "PBOC cuts RRR 100bp")])
+    out = mod.ingest_events(
+        [{"title": "央行降准", "url": "https://caixin.com/y", "source": "caixin"}],
+        ingested_by="hermes",
+    )
+    assert out["status"] == "ok" and out["ingested"] == 1
+    (eid, ev), = store.rows.items()
+    assert ev["ingested_by"] == "hermes"

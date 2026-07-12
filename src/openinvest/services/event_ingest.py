@@ -17,11 +17,14 @@ from typing import Any, Dict, List, Optional
 log = logging.getLogger(__name__)
 
 
-def ingest_events(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent") -> Dict[str, Any]:
     """把 agent 提供的原始新闻批量走归一化管道入库。
 
     Args:
         items: [{title(必填), url(必填), snippet?, source?, published_at?}, ...]
+        ingested_by: 喂料 agent 身份（如 "hermes" / "claude-code"），落 events.ingested_by
+            （溯源：坏 verdict 反查坏输入是谁喂的）。source 是**新闻来源**（落
+            sources.src_name=agent:<source>），两者语义不同。
 
     Returns:
         {status, ingested, duplicates, events: [{event_id, one_line_claim,
@@ -69,6 +72,7 @@ def ingest_events(items: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     out = []
     for ne in normalized:
+        ne.event["ingested_by"] = ingested_by  # normalizer 输出全来自 LLM——溯源在入库前注入
         was_new, eid = store.upsert_event(ne.event, embedding=ne.embedding)
         if ne.raw_item:
             store.add_source(
