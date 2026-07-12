@@ -164,6 +164,13 @@ def main() -> None:
     )
     p.set_defaults(func=cmd_run_committee)
 
+    sub.add_parser(
+        "daily_report",
+        help="完整日报管道（多资产委员会+Gemini 第二意见+翻译官+纪律台账），stdout "
+             "输出邮件同款 markdown，不发邮件——宿主 agent 侧 cron 原样投递用。"
+             "需要 DEEPSEEK_API_KEY。",
+    ).set_defaults(func=cmd_daily_report)
+
     # ============ 写操作子命令（Agent 用） ============
     p = sub.add_parser("deposit", help="存入现金（任意币种）")
     p.add_argument("--currency", "-c", required=True, help="币种 (CNY/AUD/USD/HKD/...)")

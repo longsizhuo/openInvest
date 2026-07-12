@@ -137,3 +137,20 @@ def test_no_abort_when_one_asset_fresh(mock_pm, monkeypatch):
     except Exception:
         # 其他异常说明确实进入到下游了，没被熔断短路 = ✓（我们只关心 abort gate 行为）
         pass
+
+
+def test_abort_path_has_no_full_report_even_when_requested(mock_pm, monkeypatch):
+    """cmd_daily_report 契约：熔断早返回没有 full_report 键 → CLI 回退输出 JSON"""
+    monkeypatch.setattr(
+        daily_report_mod, "_get_last_close",
+        lambda symbol, label: (None, None),
+    )
+    monkeypatch.setattr(
+        daily_report_mod, "get_gold_snapshot",
+        lambda offset_pct=0.0: None,
+    )
+
+    result = daily_report_mod.run(send_email=False, include_report=True)
+
+    assert result["status"] == "aborted"
+    assert "full_report" not in result

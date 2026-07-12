@@ -135,7 +135,10 @@ def _run_gemini_cli_review(prompt: str) -> str:
 
 # ----------------------------------------------------------------------
 
-def run() -> Dict[str, Any]:
+def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]:
+    """send_email=False: 跳过邮件（宿主 agent 侧 cron 自己投递）；
+    include_report=True: 返回值带 full_report（邮件正文原文）——默认不带，
+    避免 scheduler 把整篇 markdown 写进 job_runs 日志。"""
     pm = PortfolioManager()
     store = pm.store
     today = datetime.now().strftime("%Y-%m-%d")
@@ -536,25 +539,26 @@ def run() -> Dict[str, Any]:
     # committee 结果已经持久化到 .committee/<date>/ 和 daily/<date>.md，邮件
     # 失败不应该让整个 job 状态变成 failed —— 但必须能在 return value 和审计日志
     # 里看到 email 失败这件事，让外部监控（看 dream_event）能告警。
-    email_status: Dict[str, Any] = {"sent": False, "receiver": "", "error": None}
-    try:
-        receiver = send_gmail_notification(full_report)
-        email_status = {
-            "sent": bool(receiver),
-            "receiver": receiver,
-            "error": None,
-            "skipped": not receiver,  # 凭据缺失等于故意 skip
-        }
-    except EmailDeliveryError as e:
-        email_status = {"sent": False, "receiver": "", "error": str(e), "skipped": False}
-        log.error("Email delivery failed (committee 已落盘，job 仍标 success): %s", e)
-        store.dream_event({
-            "phase": "email_delivery_failed",
-            "date": today,
-            "error": str(e),
-        })
+    email_status: Dict[str, Any] = {"sent": False, "receiver": "", "error": None, "skipped": True}
+    if send_email:
+        try:
+            receiver = send_gmail_notification(full_report)
+            email_status = {
+                "sent": bool(receiver),
+                "receiver": receiver,
+                "error": None,
+                "skipped": not receiver,  # 凭据缺失等于故意 skip
+            }
+        except EmailDeliveryError as e:
+            email_status = {"sent": False, "receiver": "", "error": str(e), "skipped": False}
+            log.error("Email delivery failed (committee 已落盘，job 仍标 success): %s", e)
+            store.dream_event({
+                "phase": "email_delivery_failed",
+                "date": today,
+                "error": str(e),
+            })
 
-    return {
+    result: Dict[str, Any] = {
         "status": "success" if not skipped_assets else "degraded",
         "date": today,
         "assets": [a["symbol"] for a in target_assets],
@@ -570,6 +574,9 @@ def run() -> Dict[str, Any]:
             for sym, r in asset_committees.items()
         },
     }
+    if include_report:
+        result["full_report"] = full_report
+    return result
 
 
 def _report_exit_code(result: Dict[str, Any]) -> int:

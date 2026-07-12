@@ -24,10 +24,30 @@ from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 
 __all__ = [
+    "cmd_daily_report",
     "cmd_prepare_committee",
     "cmd_run_committee",
     "cmd_save_committee",
 ]
+
+
+def cmd_daily_report(_: argparse.Namespace) -> None:
+    """完整日报管道（多资产委员会 + Gemini 第二意见 + 翻译官 + 纪律台账），
+    stdout 输出与邮件正文同源的 markdown（assemble_full_report）——宿主 agent
+    侧 cron 原样投递用（Hermes `--no-agent --script` / OpenClaw cron）。不发邮件。
+    熔断 / no_target_assets 早返回时无报告可发 → 输出结构化 JSON，让 cron
+    投递的是失败原因而不是空白。"""
+    from openinvest.jobs.daily_report import run
+
+    result = run(send_email=False, include_report=True)
+    report = result.get("full_report")
+    if report:
+        # cli.main 把 sys.stdout 重定向到了 stderr（防 utils noise），真输出走 __stdout__
+        real_stdout = getattr(sys, "__stdout__", sys.stdout)
+        real_stdout.write(report if report.endswith("\n") else report + "\n")
+        real_stdout.flush()
+    else:
+        _print_json(result)
 
 
 # ---------- prepare_debate ----------
