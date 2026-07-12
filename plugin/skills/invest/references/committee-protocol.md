@@ -8,8 +8,8 @@
 本文档是 **Coordinator 路径**——你（Claude Code）用 `Agent({...})` 工具
 spawn 4 个 subagent 自己扮演各角色。
 
-**如果你不是 Claude Code**（Cursor / Cline / Codex / DeepSeek 本地 / 普通
-脚本 / 其他 agent），**不要按这里跑**——你没有 `Agent({...})` 工具。改用
+**如果你不是 Claude Code**（Codex / Hermes / OpenClaw / Cursor / Cline / DeepSeek
+本地 / 普通脚本 / 其他 agent），**不要按这里跑**——你没有 `Agent({...})` 工具。改用
 **Direct 路径**：
 
 ```bash

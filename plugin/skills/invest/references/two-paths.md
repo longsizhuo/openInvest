@@ -13,7 +13,7 @@
 
 | 维度 | Coordinator 路径 | Direct 路径 |
 |------|------------------|-------------|
-| 谁能用 | **仅 Claude Code**（要 `Agent({...})` 工具）| 任何 agent（Cursor / Cline / Codex / DeepSeek 本地 / 普通 Python 脚本）+ cron 自动跑 |
+| 谁能用 | **仅 Claude Code**（要 `Agent({...})` 工具）| 任何 agent（Codex / Hermes / OpenClaw / Cursor / Cline / DeepSeek 本地 / 普通 Python 脚本）+ cron 自动跑 |
 | 触发方式 | skill 里 `prepare_committee` → spawn 4 subagent → `save_committee` | skill 里 `run_committee SYM` 一条命令 / `POST /api/committee/run` / cron `daily_report` |
 | Coordinator | 那个对话里的 Claude（你）| `core/committee/` Python 包 |
 | Worker 实现 | `Agent({subagent_type})` 真 subprocess | 4 个 `SDKAgent` 实例 + ThreadPool |
@@ -46,7 +46,7 @@ validation。如果两边都说 TRIM，比单边说 TRIM 证据更强。
 |----------|------|
 | "我想自动跑——有变化叫我" | Direct + cron `daily_report` + 邮件 |
 | "我在 Claude Code 里就想问" | Coordinator（不烧 DeepSeek）|
-| "我用 Cursor / Cline / Codex / 不用 Claude" | Direct（`run.sh run_committee SYM`）|
+| "我用 Codex / Hermes / OpenClaw / Cursor / Cline / 不用 Claude" | Direct（`run.sh run_committee SYM`）|
 | "我要 live dashboard" | Web GUI 已退役（2026-07）——走 Direct，进度看 CLI JSON 输出 |
 | "Cron 说 TRIM 你说 HOLD，谁对？" | 两个都是信号。分歧 → 真模糊。降低 confidence |
 | "我想零成本" | Coordinator（用户 Claude 订阅，不烧 API token）|

@@ -97,7 +97,7 @@ echo '{
 ### DeepSeek key
 
 什么时候需要：用户想让服务器后台每天 03:00 自动跑、
-或者用 Cursor / Cline / Codex 等非 Claude agent 跑。
+或者用 Codex / Hermes / OpenClaw / Cursor / Cline 等其他 agent 跑。
 
 去哪开：[platform.deepseek.com](https://platform.deepseek.com) 注册 → API
 keys 页面创建。复制以 `sk-` 开头的字符串。
