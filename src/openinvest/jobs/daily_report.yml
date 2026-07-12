@@ -1,6 +1,6 @@
 name: daily_report
-description: 每日 10:00 跑多 agent 投资分析，发邮件
+description: 每日 10:00 跑多 agent 投资分析，发邮件（2026-07-12 停用：日报改由宿主 agent 侧 cron 经 MCP 触发，见 #133 接入原则）
 schedule: "0 10 * * *"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.daily_report:run
-enabled: true
+enabled: false
