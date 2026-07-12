@@ -110,6 +110,39 @@ ignore_imports = [
     # full_validation 研究件需 patch session 层防污染真实 memory（与上一契约的例外同源）
     "scripts.research.full_validation -> openinvest.core.runner.session",
 ]
+
+[[tool.importlinter.contracts]]
+name = "计算层纯度：calc + 域绑定纯模块禁 import 内部 IO 模块（ADR-026；外部包 yfinance/requests + 时钟禁令走 CI AST 守卫）"
+type = "forbidden"
+source_modules = [
+    "openinvest.calc",
+    "openinvest.jobs.daily_report_builder",
+    "openinvest.jobs.pnl_render",
+    "openinvest.jobs.review_calc",
+    "openinvest.jobs.dreaming_calc",
+    "openinvest.core.committee.cio_parse",
+    "openinvest.core.committee.debate_calc",
+    "openinvest.core.runner.intervention_rules",
+    "openinvest.core.runner.event_format",
+    "openinvest.core.decision_calc",
+    "openinvest.core.schemas",
+]
+forbidden_modules = [
+    "openinvest.db",
+    "openinvest.services",
+    "openinvest.connectors",
+    "openinvest.utils.fx",
+    "openinvest.utils.quotes",
+    "openinvest.utils.exchange_fee",
+    "openinvest.utils.gold_price",
+    "openinvest.core.portfolio_manager",
+    "openinvest.core.memory_store",
+    "openinvest.core.benchmarks",
+    "openinvest.capabilities",
+]
+# 只封直连；daily_report_builder → utils.portfolio_summary → utils.fx 这类
+# 函数级间接边放行（间接洗白靠 grep 守卫 + review 兜，见 ADR-026）
+allow_indirect_imports = "true"
 # 已删的孤儿 dep：
 # - duckduckgo-search: 被 ddgs 取代
 # - langgraph: grep 全仓零引用

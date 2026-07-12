@@ -49,6 +49,52 @@ jobs:
         # [tool.importlinter]。允许 list 也在那里维护。
         run: uv run lint-imports --no-cache
 
+      - name: 计算层纯度 AST 守卫（ADR-026：纯模块禁外部 IO 库 + 时钟）
+        # import-linter 只能封内部模块（外部包不进 grimp 图）——yfinance/requests/
+        # urllib/sqlite3 import 与 .now() 时钟调用由本步兜底。走 AST 而非 grep：
+        # docstring/注释里提到这些词不误伤，且连 pd.Timestamp.now() 也抓。
+        # 名单与 pyproject [tool.importlinter] 纯度契约保持一致。
+        run: |
+          uv run python - <<'PYEOF'
+          import ast, glob, sys
+
+          BANNED_IMPORTS = {"yfinance", "requests", "urllib", "sqlite3"}
+          FILES = sorted(
+              glob.glob("src/openinvest/calc/*.py") + [
+                  "src/openinvest/jobs/daily_report_builder.py",
+                  "src/openinvest/jobs/pnl_render.py",
+                  "src/openinvest/jobs/review_calc.py",
+                  "src/openinvest/jobs/dreaming_calc.py",
+                  "src/openinvest/core/committee/cio_parse.py",
+                  "src/openinvest/core/committee/debate_calc.py",
+                  "src/openinvest/core/runner/intervention_rules.py",
+                  "src/openinvest/core/runner/event_format.py",
+                  "src/openinvest/core/decision_calc.py",
+                  "src/openinvest/core/schemas.py",
+              ]
+          )
+          bad = []
+          for f in FILES:
+              tree = ast.parse(open(f).read())
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      for a in node.names:
+                          if a.name.split(".")[0] in BANNED_IMPORTS:
+                              bad.append(f"{f}:{node.lineno} import {a.name}")
+                  elif isinstance(node, ast.ImportFrom):
+                      if (node.module or "").split(".")[0] in BANNED_IMPORTS:
+                          bad.append(f"{f}:{node.lineno} from {node.module} import ...")
+                  elif isinstance(node, ast.Call):
+                      fn = node.func
+                      if isinstance(fn, ast.Attribute) and fn.attr == "now":
+                          bad.append(f"{f}:{node.lineno} .now() 时钟调用（时间是输入不是环境）")
+          if bad:
+              print("❌ 计算层纯度违规（ADR-026）：")
+              print("\n".join(bad))
+              sys.exit(1)
+          print(f"✅ 计算层纯度 AST 守卫通过（{len(FILES)} 个纯模块）")
+          PYEOF
+
       - name: Smoke import check
         # 确保关键模块没有 import 错误
         # v2 重构（2026-05）：_render_portfolio_body → _render_portfolio_body_v2 (cash dict + holdings list)
@@ -90,6 +136,25 @@ jobs:
           uv run python -c "from openinvest.services.skill_views import build_status_view, build_strategy_view, build_history_view, build_what_if_view, build_doctor_view"
           uv run python -c "from openinvest.core.committee_runner import prepare_committee_brief, save_committee_transcript"
           uv run python -c "from openinvest.remote_dispatch import maybe_dispatch_remote"
+          # calc 计算层 + 域绑定纯模块（ADR-026；旧路径 façade 行在上面继续存在，专职验兼容）
+          uv run python -c "from openinvest.calc.regime import classify_regime, format_regime_brief, get_thresholds, THRESHOLDS"
+          uv run python -c "from openinvest.calc.market_metrics import compute_metrics, TRADING_DAYS_2Y, _calc_price_quantile"
+          uv run python -c "from openinvest.calc.strategy_metrics import evaluate_strategy, total_return_pct, max_drawdown_pct, sortino_ratio, vs_benchmark"
+          uv run python -c "from openinvest.calc.backtest_reward import compute_strategy_reward"
+          uv run python -c "from openinvest.calc.symbols import safe_symbol"
+          uv run python -c "from openinvest.calc.series import BenchmarkSeries, to_pct_series, _generate_constant_apr"
+          uv run python -c "from openinvest.calc.transaction_costs import TransactionCostCalculator, CostSnapshot, format_cost_report"
+          uv run python -c "from openinvest.calc.timeframe_analysis import analyze_multi_timeframe, _apply_cutoff"
+          uv run python -c "from openinvest.calc.regime_probability import compute_regime_return_frame, calibrate_profile, quote_currency_iso, _make_regime_probability, RegimeProbability, ReentryEstimate"
+          uv run python -c "from openinvest.calc.sentiment import _vix_label, _parse_event_brief_entries, _stance_score"
+          uv run python -c "from openinvest.calc.gold import format_gold_report, GoldPriceSnapshot"
+          uv run python -c "from openinvest.jobs.pnl_render import render_svg, _pct_label_pos, _outperform_events, _is_trading_window"
+          uv run python -c "from openinvest.jobs.review_calc import summarize_verdict_reviews, summarize_path_reviews, _flat_band, _is_hit, realized_shape, VerdictReview, PathReview"
+          uv run python -c "from openinvest.jobs.dreaming_calc import _classify_regime, _score, _label, _slugify, _candidate_slug"
+          uv run python -c "from openinvest.core.committee.debate_calc import _extract_signal_strength, _check_convergence, _format_debate_history"
+          uv run python -c "from openinvest.core.runner.intervention_rules import rule_family, _extract_regime_label"
+          uv run python -c "from openinvest.core.runner.event_format import format_event_brief"
+          uv run python -c "from openinvest.core.decision_calc import summarize_decisions, _vid_matches, _match_trades"
 
       - name: uv build 打包烟测（issue #179 P2：打包断裂别等发版才发现）
         # PR 阶段零打包验证曾让 "uv sync 缺 PYPI_README.md 就炸" 的问题活到 Docker build
