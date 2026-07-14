@@ -269,6 +269,8 @@ def assemble_full_report(
     final_decision_gemini: str,
     plain_summaries: Optional[Dict[str, str]] = None,
     discipline_md: str = "",
+    *,
+    render_target: str = "email",
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -287,6 +289,11 @@ def assemble_full_report(
         final_decision_gemini: Gemini 第二意见文本
         plain_summaries: {symbol: 翻译官人话解读}（LLM 版，entry 层生成；
             缺失/失败时该资产回落确定性 plain_verdict_summary 一句话）
+        render_target: "email"（默认，分析师长文走 `<div class="analyst"
+            markdown="1">` 卡片——notifier 用 md_in_html 扩展转成带样式的 HTML）
+            | "chat"（宿主 agent cron 投递 Discord/Weixin/QQ 等聊天平台用；
+            这些平台不解析原生 HTML，"email" 变体的 `<div>` 会以字面文本泄露——
+            见 2026-07-14 Hermes cron 渲染事故）：同样内容不裹 HTML，纯 markdown。
 
     Returns:
         完整 markdown 报告字符串
@@ -382,21 +389,37 @@ def assemble_full_report(
                 "**路径概率**（该 regime 历史 forward 分布，CIO 决策依据）:\n\n"
                 + "\n".join(path_lines) + "\n\n"
             )
-        # 分析师长文走 .analyst 卡片（md_in_html）而非 ``` 代码块。
+        # 分析师长文走 .analyst 卡片（md_in_html）而非 ``` 代码块——**仅 email**。
         # 历史（2026-06-12）：曾用 <details> 折叠，但 python-markdown 默认不解析
         # 原生 HTML 块内部 markdown → **粗体**/换行全坏，于是改塞 ``` 代码块；副作用是
         # LLM 原文（含 ** 标记）以灰色等宽块原样泄露、极难阅读。
-        # 现方案（2026-06-20）：notifier 开 md_in_html 扩展 + `markdown="1"` 容器，
+        # 2026-06-20：notifier 开 md_in_html 扩展 + `markdown="1"` 容器，
         # 卡片内 markdown 正常解析（粗体/换行/列表都对），版式可读且不泄露原文。
-        lines.extend([
-            "### CIO 备忘\n\n",
-            f'<div class="analyst" markdown="1">\n\n{c["report"].cio_memo}\n\n</div>\n\n',
-            "### 分析师意见（专家区）\n\n",
-            "**Quant（技术面）**\n\n",
-            f'<div class="analyst" markdown="1">\n\n{c["report"].quant_view}\n\n</div>\n\n',
-            "**Risk Officer（风控）**\n\n",
-            f'<div class="analyst" markdown="1">\n\n{c["report"].risk_view}\n\n</div>\n',
-        ])
+        # 2026-07-14：这套 HTML 卡片只对"markdown → HTML 邮件"管线有意义——
+        # Hermes/OpenClaw cron 把同一份 full_report 原样转发给 Discord/Weixin/QQ，
+        # 这些平台不解析原生 HTML，`<div class="analyst" markdown="1">` 以字面
+        # 文本泄露给用户（见 daily-invest-report 2026-07-14 实况）。chat 变体
+        # 去掉 HTML 包裹，内容不变——纯 markdown 到哪个平台都至少能读。
+        if render_target == "chat":
+            lines.extend([
+                "### CIO 备忘\n\n",
+                f'{c["report"].cio_memo}\n\n',
+                "### 分析师意见（专家区）\n\n",
+                "**Quant（技术面）**\n\n",
+                f'{c["report"].quant_view}\n\n',
+                "**Risk Officer（风控）**\n\n",
+                f'{c["report"].risk_view}\n',
+            ])
+        else:
+            lines.extend([
+                "### CIO 备忘\n\n",
+                f'<div class="analyst" markdown="1">\n\n{c["report"].cio_memo}\n\n</div>\n\n',
+                "### 分析师意见（专家区）\n\n",
+                "**Quant（技术面）**\n\n",
+                f'<div class="analyst" markdown="1">\n\n{c["report"].quant_view}\n\n</div>\n\n',
+                "**Risk Officer（风控）**\n\n",
+                f'<div class="analyst" markdown="1">\n\n{c["report"].risk_view}\n\n</div>\n',
+            ])
         return "".join(lines)
 
     asset_section = "\n\n---\n\n".join([

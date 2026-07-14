@@ -399,6 +399,39 @@ class TestAssembleFullReport:
         assert "NDQ.AX Risk" in report
         assert "分析师意见" in report
 
+    def test_chat_render_target_has_no_html(self):
+        """render_target="chat"：Discord/Weixin/QQ 等聊天平台不解析原生 HTML，
+        <div class="analyst" markdown="1"> 会以字面文本泄露给用户（2026-07-14
+        Hermes cron 渲染事故）。chat 变体同样内容，不裹 HTML。"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            render_target="chat",
+        )
+        assert "<div" not in report
+        assert "</div>" not in report
+        assert 'markdown="1"' not in report
+        # 内容本身不丢——只是不裹 HTML
+        assert "NDQ.AX Quant" in report
+        assert "NDQ.AX Risk" in report
+        assert "分析师意见" in report
+
+    def test_email_render_target_is_default(self):
+        """不传 render_target 时行为不变（向后兼容——现存 email 调用方零改动）。"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert 'class="analyst"' in report
+
     def test_glossary_rendered(self):
         """术语表固定渲染在报告尾部（小白查表，专家跳过）"""
         report = assemble_full_report(
