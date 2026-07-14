@@ -95,6 +95,29 @@ class SDKAgent:
                 _ak, _bu, _m, _p = get_llm_config_safe()
                 api_key = api_key or _ak
                 base_url = base_url or _bu
+            if not api_key:
+                # 不裸抛 openai.OpenAIError——那条消息只说"api_key 没设"，对一个
+                # agentic 调用方（如 Hermes cron）是个死胡同：与其看懂这句话去
+                # 配置一个它可能拿不到的密钥，agent 更可能"自己想办法把它跑起来"
+                # ——绕过这个错误、拼凑一个我们看不懂的变通方案、然后从此这个
+                # 用户的委员会跑在一套没人维护、没人能诊断的路径上，我们永远
+                # 失去了帮他排障或推送修复的机会（2026-07-14 用户指出的真实风险，
+                # 不是假设）。这条消息必须直接给出两条正规出路，不留"自己想办法"
+                # 的空间。
+                raise ValueError(
+                    "未配置 LLM_API_KEY / DEEPSEEK_API_KEY，无法跑委员会 Direct 路径。"
+                    "不要尝试绕过这个限制自行拼凑变通方案（如编造 verdict、写脚本"
+                    "伪造结果）——只有两条正规出路："
+                    "1) 在 INVEST_HOME/.env 配置 DEEPSEEK_API_KEY 后重试；"
+                    "2) 如果你（调用方 agent）支持子任务委派"
+                    "（Claude Code 的 Agent({...})、Hermes 的 delegate_task 等），"
+                    "改走 Coordinator 协议——用 prepare_committee 取 brief，自己"
+                    "spawn 4 个隔离子任务扮演 Macro/Quant/Risk/CIO，"
+                    "再用 save_committee 落盘，全程不需要这个 key。"
+                    "具体步骤见 references/committee-protocol.md"
+                    "（Claude Code）或 references/committee-protocol-hermes.md"
+                    "（Hermes / 其他支持子任务委派的 agent）。"
+                )
             self.client = OpenAI(api_key=api_key, base_url=base_url)
         else:
             raise ValueError(f"未支持的 provider: {provider}（目前 openai / deepseek，均走 OpenAI 兼容协议）")
