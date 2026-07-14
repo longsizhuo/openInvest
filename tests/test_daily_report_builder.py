@@ -23,6 +23,7 @@ from openinvest.core.memory_store import MemoryStore
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.jobs.daily_report_builder import (
     assemble_full_report,
+    build_tldr_block,
     classify_asset_freshness,
     format_staleness_warning,
     portfolio_summary_text,
@@ -399,6 +400,73 @@ class TestAssembleFullReport:
         assert "NDQ.AX Risk" in report
         assert "分析师意见" in report
 
+    def test_chat_render_target_has_no_html(self):
+        """render_target="chat"：Discord/Weixin/QQ 等聊天平台不解析原生 HTML，
+        <div class="analyst" markdown="1"> 会以字面文本泄露给用户（2026-07-14
+        Hermes cron 渲染事故）。chat 变体同样内容，不裹 HTML。"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            render_target="chat",
+        )
+        assert "<div" not in report
+        assert "</div>" not in report
+        assert 'markdown="1"' not in report
+        # 内容本身不丢——只是不裹 HTML
+        assert "NDQ.AX Quant" in report
+        assert "NDQ.AX Risk" in report
+        assert "分析师意见" in report
+
+    def test_email_render_target_is_default(self):
+        """不传 render_target 时行为不变（向后兼容——现存 email 调用方零改动）。"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+        )
+        assert 'class="analyst"' in report
+
+    def test_chat_render_target_has_tldr_at_top(self):
+        """chat 变体标题正下方就是逐资产速览（emoji 徽章 + 裁决 + 置信度 +
+        建议金额）——Discord 2000 字符/条会把长报告切成多条消息，第一条必须
+        自带结论，不能让用户翻到最后一条才看到 verdict（2026-07-14 渲染优化）。"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="宏观正文", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX", "display_name": "纳指ETF"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            render_target="chat",
+        )
+        title_pos = report.index("投资委员会日报")
+        tldr_pos = report.index("今日速览")
+        macro_pos = report.index("宏观正文")
+        assert title_pos < tldr_pos < macro_pos  # 速览夹在标题和正文之间
+        assert "🟩" in report  # ACCUMULATE 徽章（_make_committees fixture 用的裁决）
+        assert "纳指ETF" in report and "NDQ.AX" in report
+        assert "置信度 75%" in report
+
+    def test_email_render_target_has_no_tldr(self):
+        """email 变体不加速览块——邮件本来就一次性看全文，不需要重复摘要。"""
+        report = assemble_full_report(
+            today="2026-05-10", macro_view="", gold_snapshot_text="",
+            friction_report="",
+            target_assets=[{"symbol": "NDQ.AX"}],
+            asset_committees=self._make_committees(["NDQ.AX"]),
+            skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="",
+            render_target="email",
+        )
+        assert "今日速览" not in report
+
     def test_glossary_rendered(self):
         """术语表固定渲染在报告尾部（小白查表，专家跳过）"""
         report = assemble_full_report(
@@ -518,6 +586,46 @@ class TestAssembleFullReport:
         # 已移除的 solvency 自动兜底口径不应再出现
         assert "兜底充足" not in report
         assert "系统路径预期" not in report
+
+
+class TestBuildTldrBlock:
+    """build_tldr_block()：纯格式化，逐资产一行摘要"""
+
+    def _committees(self, verdict="HOLD", confidence=0.65, alloc_cny=0):
+        return {
+            "GC=F": {"verdict": {
+                "verdict": verdict, "confidence": confidence,
+                "dominant_view": "risk", "alloc_cny": alloc_cny,
+            }},
+        }
+
+    def test_empty_assets_returns_empty_string(self):
+        assert build_tldr_block([], {}) == ""
+
+    def test_each_verdict_gets_distinct_emoji(self):
+        for verdict, emoji in [
+            ("BUY", "🟢"), ("ACCUMULATE", "🟩"), ("HOLD", "🟡"),
+            ("TRIM", "🟠"), ("SELL", "🔴"),
+        ]:
+            block = build_tldr_block(
+                [{"symbol": "GC=F"}], self._committees(verdict=verdict),
+            )
+            assert emoji in block, f"{verdict} 应该带 {emoji}"
+
+    def test_unknown_verdict_falls_back_to_neutral_emoji(self):
+        block = build_tldr_block(
+            [{"symbol": "GC=F"}], self._committees(verdict="WEIRD"),
+        )
+        assert "⚪" in block
+
+    def test_line_includes_confidence_and_alloc(self):
+        block = build_tldr_block(
+            [{"symbol": "GC=F", "display_name": "伦敦金"}],
+            self._committees(verdict="TRIM", confidence=0.8, alloc_cny=3000),
+        )
+        assert "伦敦金" in block and "GC=F" in block
+        assert "置信度 80%" in block
+        assert "¥3,000" in block
 
 
 # ============ 翻译官（人话解读 LLM 版） ============

@@ -155,6 +155,46 @@ _VERDICT_PLAIN = {
 }
 
 
+# chat 变体专用：裁决 emoji 徽章。BUY/ACCUMULATE 都是"买"但分两档深浅绿，
+# 5 级配色比纯文字在 Discord 上更快扫完（2026-07-14，daily-invest-report
+# 渲染优化——聊天平台没有大号标题，靠 emoji 做视觉锚点）。
+_VERDICT_EMOJI = {
+    "BUY": "🟢",
+    "ACCUMULATE": "🟩",
+    "HOLD": "🟡",
+    "TRIM": "🟠",
+    "SELL": "🔴",
+}
+
+
+def build_tldr_block(
+    active_assets: List[Dict[str, Any]],
+    asset_committees: Dict[str, Dict[str, Any]],
+) -> str:
+    """chat 变体专用：逐资产一行摘要（emoji 裁决徽章 + 置信度 + 建议金额），
+    整块置顶在报告最前面。
+
+    动机：Hermes/OpenClaw cron 把完整报告转发到 Discord，Discord 单条消息
+    2000 字符上限会把多资产报告切成 ~5 条消息（分页标记 "(1/5)" 等），结论
+    埋在中间某条里。这个摘要块保证第一条消息就有全部裁决，不用翻到最后。
+
+    纯格式化，复用调用方已算好的 verdict dict，零新计算 / 零 LLM。
+    """
+    if not active_assets:
+        return ""
+    lines = ["**📊 今日速览**\n"]
+    for a in active_assets:
+        sym = a["symbol"]
+        v = asset_committees[sym]["verdict"]
+        emoji = _VERDICT_EMOJI.get(v["verdict"], "⚪")
+        lines.append(
+            f"{emoji} **{a.get('display_name', sym)}** ({sym}): "
+            f"{v['verdict']} · 置信度 {v['confidence']:.0%} · "
+            f"建议 ¥{v['alloc_cny']:,.0f}"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def plain_verdict_summary(verdict: Dict[str, Any],
                           path_profile: Optional[Dict[str, Any]]) -> str:
     """给小白看的一句话结论——从 verdict + 路径分布确定性生成，零 LLM 调用。
@@ -269,6 +309,8 @@ def assemble_full_report(
     final_decision_gemini: str,
     plain_summaries: Optional[Dict[str, str]] = None,
     discipline_md: str = "",
+    *,
+    render_target: str = "email",
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -287,6 +329,11 @@ def assemble_full_report(
         final_decision_gemini: Gemini 第二意见文本
         plain_summaries: {symbol: 翻译官人话解读}（LLM 版，entry 层生成；
             缺失/失败时该资产回落确定性 plain_verdict_summary 一句话）
+        render_target: "email"（默认，分析师长文走 `<div class="analyst"
+            markdown="1">` 卡片——notifier 用 md_in_html 扩展转成带样式的 HTML）
+            | "chat"（宿主 agent cron 投递 Discord/Weixin/QQ 等聊天平台用；
+            这些平台不解析原生 HTML，"email" 变体的 `<div>` 会以字面文本泄露——
+            见 2026-07-14 Hermes cron 渲染事故）：同样内容不裹 HTML，纯 markdown。
 
     Returns:
         完整 markdown 报告字符串
@@ -382,21 +429,37 @@ def assemble_full_report(
                 "**路径概率**（该 regime 历史 forward 分布，CIO 决策依据）:\n\n"
                 + "\n".join(path_lines) + "\n\n"
             )
-        # 分析师长文走 .analyst 卡片（md_in_html）而非 ``` 代码块。
+        # 分析师长文走 .analyst 卡片（md_in_html）而非 ``` 代码块——**仅 email**。
         # 历史（2026-06-12）：曾用 <details> 折叠，但 python-markdown 默认不解析
         # 原生 HTML 块内部 markdown → **粗体**/换行全坏，于是改塞 ``` 代码块；副作用是
         # LLM 原文（含 ** 标记）以灰色等宽块原样泄露、极难阅读。
-        # 现方案（2026-06-20）：notifier 开 md_in_html 扩展 + `markdown="1"` 容器，
+        # 2026-06-20：notifier 开 md_in_html 扩展 + `markdown="1"` 容器，
         # 卡片内 markdown 正常解析（粗体/换行/列表都对），版式可读且不泄露原文。
-        lines.extend([
-            "### CIO 备忘\n\n",
-            f'<div class="analyst" markdown="1">\n\n{c["report"].cio_memo}\n\n</div>\n\n',
-            "### 分析师意见（专家区）\n\n",
-            "**Quant（技术面）**\n\n",
-            f'<div class="analyst" markdown="1">\n\n{c["report"].quant_view}\n\n</div>\n\n',
-            "**Risk Officer（风控）**\n\n",
-            f'<div class="analyst" markdown="1">\n\n{c["report"].risk_view}\n\n</div>\n',
-        ])
+        # 2026-07-14：这套 HTML 卡片只对"markdown → HTML 邮件"管线有意义——
+        # Hermes/OpenClaw cron 把同一份 full_report 原样转发给 Discord/Weixin/QQ，
+        # 这些平台不解析原生 HTML，`<div class="analyst" markdown="1">` 以字面
+        # 文本泄露给用户（见 daily-invest-report 2026-07-14 实况）。chat 变体
+        # 去掉 HTML 包裹，内容不变——纯 markdown 到哪个平台都至少能读。
+        if render_target == "chat":
+            lines.extend([
+                "### CIO 备忘\n\n",
+                f'{c["report"].cio_memo}\n\n',
+                "### 分析师意见（专家区）\n\n",
+                "**Quant（技术面）**\n\n",
+                f'{c["report"].quant_view}\n\n',
+                "**Risk Officer（风控）**\n\n",
+                f'{c["report"].risk_view}\n',
+            ])
+        else:
+            lines.extend([
+                "### CIO 备忘\n\n",
+                f'<div class="analyst" markdown="1">\n\n{c["report"].cio_memo}\n\n</div>\n\n',
+                "### 分析师意见（专家区）\n\n",
+                "**Quant（技术面）**\n\n",
+                f'<div class="analyst" markdown="1">\n\n{c["report"].quant_view}\n\n</div>\n\n',
+                "**Risk Officer（风控）**\n\n",
+                f'<div class="analyst" markdown="1">\n\n{c["report"].risk_view}\n\n</div>\n',
+            ])
         return "".join(lines)
 
     asset_section = "\n\n---\n\n".join([
@@ -411,9 +474,16 @@ def assemble_full_report(
         f"\n{discipline_md}\n\n---\n" if discipline_md.strip() else ""
     )
 
+    # chat 变体置顶速览（见 build_tldr_block 动机）；email 不加——邮件本来就
+    # 一次性看全文，标题+目录结构已经够用，不需要重复摘要。
+    tldr_section = (
+        f"\n{build_tldr_block(active_assets, asset_committees)}\n---\n"
+        if render_target == "chat" else ""
+    )
+
     return f"""
 # 投资委员会日报 ({today})
-
+{tldr_section}
 ## 1. 宏观环境 (跨资产共享)
 {macro_view}
 
