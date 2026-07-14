@@ -5,7 +5,14 @@
   DDGS 那种被上游封锁/限流的单点风险，中文财经媒体覆盖也明显更好
 - 全程内网调用（本机容器），零外部 API 成本、零外部限流
 
-未配置 SEARXNG_URL 时整个源静默关闭——fork 用户没有 searxng 也零影响。
+定位说明（写给 fork 用户 / reviewer）：
+- searxng 是独立开源项目（https://github.com/searxng/searxng，docker 一条
+  命令即可自托管），本模块与任何特定 agent / 私有部署无关
+- **searxng 本身就是搜索引擎抽象层**：要换/增删 Google、Bing、百度、DDG
+  等上游引擎，改 searxng 自己的 settings.yml 即可，invest 侧零改动。这也是
+  为什么不在 invest 里为 Tavily/Brave/Serper 各写一个带 API key 的适配器
+- 不想自托管的用户不受影响：SEARXNG_URL 留空 = 整源静默关闭（零请求零
+  日志），默认的 ddgs 零配置可用
 """
 from __future__ import annotations
 
