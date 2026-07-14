@@ -94,13 +94,20 @@ echo '{
 告诉用户："你直接说 '看看我的持仓' / '该不该加仓 X'，Claude 会帮你跑分析，
 不烧任何 token 也不用注册账号。"
 
-### DeepSeek key
+### LLM key（Direct 路径用，很多人叫它"DeepSeek key"但不是只能填 DeepSeek）
 
-什么时候需要：用户想让服务器后台每天 03:00 自动跑、
-或者用 Codex / Hermes / OpenClaw / Cursor / Cline 等其他 agent 跑。
+什么时候需要：**cron / 定时任务无人值守跑**（不管背后是哪个 agent）。
+交互场景（用户在场问"该不该买 X"）不需要——Claude Code / Hermes 等有子任务
+委派能力的 agent 走 Coordinator 协议，零 key。判定标准是"有没有人在场"，
+不是"用的什么 agent"，详见 SKILL.md"选路径"。
 
-去哪开：[platform.deepseek.com](https://platform.deepseek.com) 注册 → API
-keys 页面创建。复制以 `sk-` 开头的字符串。
+任意 OpenAI 兼容端点都行（`.env` 填 `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`，
+`DEEPSEEK_*` 三件套仍兼容保留）：
+- **想零成本**：千问 / 智谱 / MiMo 等目前有免费额度的供应商都能接
+  （额度条款会变，去对应平台确认当前政策）
+- **不想比价**：[platform.deepseek.com](https://platform.deepseek.com) 注册 →
+  API keys 页面创建，复制 `sk-` 开头的字符串。日报量级（几个资产/天）成本
+  约 ¥0.01-0.03 一次，一个月不到 ¥2
 
 ### Gmail App Password（用于发每日决议邮件）
 

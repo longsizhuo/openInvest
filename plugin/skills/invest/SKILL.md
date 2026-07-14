@@ -21,16 +21,51 @@ Reply in the language the user is currently speaking unless they explicitly ask 
 
 ## 选路径
 
-| 你是谁 | 走哪条路 | 跑什么 | 凭据 |
-|--------|----------|--------|------|
-| Claude Code（有 `Agent({...})` 工具）| **Coordinator** | `prepare_committee` → spawn 4 subagent → `save_committee` | 不需要 DeepSeek key |
-| 任何其他 agent（Codex / Hermes / OpenClaw / Cursor / Cline / DeepSeek 本地 / 普通 Python）| **Direct** | `run_committee <SYMBOL>` 一键 | 需要 `DEEPSEEK_API_KEY` |
+**第一个问题不是"你是哪个品牌"，是"这次调用有没有人在场"**：
 
-两条路径**底座一样**——同一份 prompt，同一份数据准备（regime 分类 + 概率口径 +
+```
+现在是用户在聊天里问"该不该买 X"，你能实时反应（工具选错了、被安全拦截了，
+用户都能当场看到、当场纠正）？
+  → 看你有没有隔离子任务委派能力（Agent({...}) / delegate_task）
+    有 → Coordinator（下表）
+    没有 → Direct
+
+现在是 cron / 定时任务在跑，没有人盯着？
+  → 无脑走 Direct，不管你是什么 agent、有没有委派能力
+```
+
+**为什么无人值守一律 Direct，即使有委派能力**：Coordinator 协议依赖你自己临场
+决定"调哪个工具、prompt 怎么拼"，正常情况没问题，但 2026-07-14 实测过一次
+Hermes cron 无人值守跑 Coordinator——它没有老实按协议调用委派工具，而是自己
+选了别的路子，还撞上"cron 无人值守不能批准危险命令"的安全拦截，卡住不动。
+Direct 是纯确定性 Python 代码，不会临场发挥。省下配 key 这点麻烦，换来的是
+无人值守场景下概率性卡死/走偏——不划算。
+
+| 场景 | 你是谁 | 走哪条路 | 跑什么 | 凭据 |
+|------|--------|----------|--------|------|
+| 交互（用户在场）| Claude Code（有 `Agent({...})` 工具）| **Coordinator** | `prepare_committee` → spawn 4 subagent → `save_committee` | 不需要 key |
+| 交互（用户在场）| Hermes（有 `delegate_task` 工具）| **Coordinator**（[Hermes 变体](references/committee-protocol-hermes.md)）| 同上，spawn 语法换成 `delegate_task(tasks=[...])` | 不需要 key |
+| 交互，无委派能力 | Codex / OpenClaw / Cursor / Cline / 普通脚本 | **Direct** | `run_committee <SYMBOL>` 一键 | 需要 `LLM_API_KEY` |
+| **cron / 无人值守**，任何 agent | 不管是谁、有没有委派能力 | **Direct** | `run_committee` / `daily_report` | 需要 `LLM_API_KEY` |
+
+三条路径**底座一样**——同一份 prompt，同一份数据准备（regime 分类 + 概率口径 +
 确定性事实块），同一份落盘格式
-（`memory/.committee/<date>/<asset>.md`）。区别只在"4 个 LLM 角色谁来扮演"：
-Coordinator 由 Claude（用户订阅）扮演，Direct 由 DeepSeek-Chat（按 token 计）扮演。
-verdict 可能不同（不同模型，cross-validation 用）。
+（`memory/.committee/<date>/<asset>.md`，Coordinator 两个变体记得 `save_committee`
+带 `--provider <你的品牌>`，别让 transcript 被误标成 claude）。区别只在
+"4 个 LLM 角色谁来扮演"：Coordinator 由你自己（用户已订阅的模型）扮演，
+Direct 由配置好的 LLM（按 token 计）扮演。verdict 可能不同（不同模型，
+cross-validation 用）。
+
+**`LLM_API_KEY` 不是只能填 DeepSeek，且成本接近零**：`utils/llm.py` 走任意
+OpenAI 兼容端点（`LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` 三个 env，`DEEPSEEK_*`
+仍兼容保留）。想零成本 → 千问 / 智谱 / MiMo 等目前有免费额度的供应商都能接
+（额度条款会变，用前自己确认）；不想折腾 → 直接用 DeepSeek，日报量级
+（几个资产/天）大约 ¥0.01-0.03 一次，一个月不到 ¥2。别为了省这点钱把无人
+值守场景的可靠性押在 Coordinator 上。
+
+**没有子任务委派能力、又没配 key 的场景**：不要硬闯 Coordinator，也不要编造
+verdict、写代码硬跑绕过去——直接调 `run_committee`（会得到清楚的报错），如实
+告诉用户"需要配置 LLM_API_KEY"。
 
 ## 决策树（不论哪条路径，前面都一样）
 

@@ -8,15 +8,25 @@
 本文档是 **Coordinator 路径**——你（Claude Code）用 `Agent({...})` 工具
 spawn 4 个 subagent 自己扮演各角色。
 
-**如果你不是 Claude Code**（Codex / Hermes / OpenClaw / Cursor / Cline / DeepSeek
-本地 / 普通脚本 / 其他 agent），**不要按这里跑**——你没有 `Agent({...})` 工具。改用
-**Direct 路径**：
+**只用于交互场景（用户在场）**。如果你是被 cron / 定时任务无人值守触发的
+（没有用户在实时看着你），**不要用这份协议**——它依赖你临场决定"调哪个
+工具、prompt 怎么拼"，无人纠错时可能卡住或走偏。无人值守一律改用 Direct
+路径（见下方 `run_committee` / `daily_report`），不管你有没有 subagent 能力。
+
+**如果你不是 Claude Code**，先看你有没有隔离子任务委派能力（Hermes 的
+`delegate_task` 等）：
+
+- **有**（Hermes / 其他支持子任务委派的 agent）→ 改读
+  [committee-protocol-hermes.md](committee-protocol-hermes.md)，同样的
+  6-stage 协议、零 API 成本，只是 spawn 语法不同
+- **没有**（Codex / Cursor / Cline / DeepSeek 本地 / 普通脚本等只能单轮
+  对话的 agent）→ 改用 **Direct 路径**：
 
 ```bash
 ~/.claude/skills/invest/scripts/run.sh run_committee <SYMBOL>
 ```
 
-一条命令拿到 verdict + CIO memo + transcript。需要 `DEEPSEEK_API_KEY`。
+一条命令拿到 verdict + CIO memo + transcript，但需要 `DEEPSEEK_API_KEY`。
 详见 SKILL.md 的"选路径"章节和 `references/two-paths.md`。
 
 ---
