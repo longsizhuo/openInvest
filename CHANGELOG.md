@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.29.0](https://github.com/longsizhuo/openInvest/compare/v0.28.1...v0.29.0) (2026-07-14)
+
+
+### Features
+
+* **daily-report:** chat cron 渲染优化——去 HTML div 包裹 + 置顶速览 ([ffbc6f1](https://github.com/longsizhuo/openInvest/commit/ffbc6f1b8447110ccc4a86079a69be938a5b206f))
+* **services:** 事件/verdict 报警实时推送 Discord DM ([a2851e4](https://github.com/longsizhuo/openInvest/commit/a2851e4bc1db036529a32a50991afeed89f20c66))
+* **services:** 事件/verdict 报警实时推送 Discord DM（经 ChatBot 转发） ([d0b558b](https://github.com/longsizhuo/openInvest/commit/d0b558b05b100f938c0a0e4df3d75fe32bf02ccb))
+
+
+### Bug Fixes
+
+* **committee:** save_committee 落盘 Provider 标注可配置，不再硬编码 claude ([2138d2f](https://github.com/longsizhuo/openInvest/commit/2138d2f41f1428502b01c37484c6223b2d7928bd))
+* **committee:** SDKAgent 缺 LLM key 时抛清晰可操作错误，不再裸抛 OpenAIError ([c387f51](https://github.com/longsizhuo/openInvest/commit/c387f5117ecc4f2111a75166be5aa14d70a74a53))
+* **daily-report:** 第二意见 CLI 从 gemini 迁移到 agy（原环境已切换命令） ([012e2c9](https://github.com/longsizhuo/openInvest/commit/012e2c912f16b81d92113bbd66b464049d23b76f))
+
+
+### Docs
+
+* **skill:** Hermes Coordinator 协议 + 路由表改按交互/无人值守分轴 ([27d06ee](https://github.com/longsizhuo/openInvest/commit/27d06ee63b23e645210339a905b0fde6475f6dbb))
+* wiki 同步——Coordinator 路由改按交互/无人值守分轴，cron 教程改 provider-agnostic key ([a7748c7](https://github.com/longsizhuo/openInvest/commit/a7748c7e84a001a5857786b08d6fd84d87cbbb8c))
+
 ## [0.28.1](https://github.com/longsizhuo/openInvest/compare/v0.28.0...v0.28.1) (2026-07-12)
 
 
