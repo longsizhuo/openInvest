@@ -117,6 +117,18 @@ skill 是显式加载制，不进自动索引）。注意 `hermes skills install
 skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本——券商级信息源
 接入决策管道，零额外集成。
 
+**聊天里临时问"该不该买 X"，不想配 key？走 Coordinator**：Hermes 有
+`delegate_task`（隔离子任务委派），跟 Claude Code 的 `Agent({...})` 一样能
+扮演委员会 4 个角色——不需要任何第三方 API key，用你自己订阅的模型。协议见
+[references/committee-protocol-hermes.md](../../plugin/skills/invest/references/committee-protocol-hermes.md)。
+
+**⚠️ 但这只适用于你在场的交互场景**——Coordinator 协议依赖 Hermes 临场决定
+"调哪个工具、prompt 怎么拼"，2026-07-14 实测过一次让它无人值守跑这套协议：
+没有老实调用 `delegate_task`，自己选了别的路子，还撞上安全拦截卡住不动。
+**每日 cron 这类无人值守场景，不管什么 agent，一律走 Direct**（下一节），
+配置一个 `LLM_API_KEY` 即可——不一定要付费，千问/智谱/MiMo 等目前都有免费
+额度可用，即使付费 DeepSeek 日报量级也就 ¥0.01-0.03 一次。
+
 ### OpenClaw
 
 MCP 声明式接入（`~/.openclaw/openclaw.json`，JSON5）：
@@ -175,7 +187,9 @@ hermes cron create "0 2 * * 1-5" --name daily-invest-report \
 
 - cron 按服务器本地时区解析（UTC 机器上北京 10:00 = `0 2 * * 1-5`）；`--deliver`
   换成你配好的渠道（telegram / discord / signal / platform:chat_id）
-- 后端跑委员会走 Direct 路径，`INVEST_HOME/.env` 里要有 `DEEPSEEK_API_KEY`（同原 cron）
+- 后端跑委员会走 Direct 路径，`INVEST_HOME/.env` 里要有 `LLM_API_KEY`（任意
+  OpenAI 兼容端点，`DEEPSEEK_API_KEY` 仍兼容；免费额度供应商也行，见上方
+  "不想配 key？"一节）
 - 重跑会重新跑整个委员会（消耗 token）——语义与原 cron / GH Actions `workflow_dispatch` 一致
 - 熔断（数据全废）或未配置 target_assets 时 stdout 是结构化 JSON——收到 JSON = 该排查了
 - 想要 LLM 二次加工（翻译 / 只推增量），改 `--skill openinvest:invest` + 一句话

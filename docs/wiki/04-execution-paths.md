@@ -35,15 +35,15 @@ documents:
 
 | 路径 | 谁能用 | 触发 | 协调者 | Worker 实现 | 模型 | 真 subagent? | 成本 |
 |------|--------|------|--------|-------------|------|-------------|------|
-| **Coordinator** | 仅 Claude Code（要 `Agent({...})` 工具）| skill `prepare_committee SYM` | 用户的 Claude | `Agent({subagent_type})` 真 spawn 4 subagent（subprocess 隔离）| Claude 4 | ✅ | 由用户订阅承担（项目 ¥0）|
-| **Direct** | 任意 agent（Codex / Hermes / OpenClaw / Cursor / Cline / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee/` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
+| **Coordinator** | 有隔离子任务委派能力的 agent（Claude Code `Agent({...})` / Hermes `delegate_task`）| skill `prepare_committee SYM` | 你的 agent 自己 | `Agent({...})`（subprocess 隔离）或 `delegate_task(tasks=[...])`（批量隔离子任务）真 spawn 4 subagent | 用户已订阅的模型 | ✅ | 由用户订阅承担（项目 ¥0）|
+| **Direct** | 只能单轮对话的 agent（Codex / OpenClaw / Cursor / Cline / 普通脚本）+ cron | skill `run_committee SYM` / `POST /api/committee/run` / cron `daily_report` | `core/committee/` | 4 个 `SDKAgent` + `ThreadPoolExecutor` 同进程多线程 | DeepSeek-Chat | ❌（信息分隔但非 subprocess）| ¥0.01-0.03 一次 |
 
 **功能等价**：同一套 prompt，同一套 cross-challenge 协议，同一套 regime 分类 + 中性概率口径。
 **模型不同**：verdict 可能不同——这是**对比验证机制**而不是 bug。
 
 ---
 
-## 1. Coordinator 路径（仅 Claude Code）
+## 1. Coordinator 路径（Claude Code / Hermes 等有子任务委派能力的 agent）
 
 ### 触发
 
@@ -223,7 +223,11 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 你在 Claude Code 里 + 想问"该不该买"？
   → Coordinator 路径（让你的 Claude spawn 4 subagent，不烧 DeepSeek token）
 
-你在 Codex / Hermes / OpenClaw / Cursor / Cline / 其他 agent 里？
+你在 Hermes 里（有 `delegate_task`）？
+  → Coordinator 路径 Hermes 变体（references/committee-protocol-hermes.md，
+    同样不烧 DeepSeek token）
+
+你在 Codex / OpenClaw / Cursor / Cline / 其他只能单轮对话的 agent 里？
   → Direct 路径（skill `run_committee SYM` 一键拿 verdict，需要 DEEPSEEK_API_KEY）
 
 你在 remote hub 客户端想触发 + 看实时进度？
