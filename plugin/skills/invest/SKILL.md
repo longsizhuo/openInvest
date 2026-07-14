@@ -1,6 +1,6 @@
 ---
 name: invest
-version: 0.18.7 # x-release-please-version
+version: 0.18.8 # x-release-please-version
 description: openInvest 多资产 AI 投资委员会 **日常使用**。读取持仓 / 实时行情 / 策略 / 历史决议 / 加减仓 / 跑 4 角色 LLM 委员会给投资 verdict。支持任意 yfinance symbol（A 股 / 港股 / 美股 / ETF / 加密 / 商品）和任意币种。**两条路径**：(1) Coordinator — Claude Code spawn 4 个 subagent，省 DeepSeek token；(2) Direct — 任何 agent（Codex / Hermes / OpenClaw / Cursor / Cline / 普通脚本）跑 `run.sh run_committee <SYM>` 一键拿 verdict。**触发场景**："show portfolio / 看看我的持仓"、"我现在涨了多少 / how is my P&L"、"该不该买/卖 X / should I buy X"、"分析一下 X / analyze X"、"跑委员会 / run committee on X"、"track AAPL / 跟踪苹果"、"加仓 / 减仓 / 记一笔交易"。**首次安装走另一个 skill `invest-setup`**（doctor 返回 needs_setup 时切过去）。后端 longsizhuo/openInvest。
 platforms: [linux, macos]
 metadata:

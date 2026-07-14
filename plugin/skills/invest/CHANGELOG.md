@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.8](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.7...invest-skill-v0.18.8) (2026-07-14)
+
+
+### Docs
+
+* **skill:** Hermes Coordinator 协议 + 路由表改按交互/无人值守分轴 ([27d06ee](https://github.com/longsizhuo/openInvest/commit/27d06ee63b23e645210339a905b0fde6475f6dbb))
+
 ## [0.18.7](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.6...invest-skill-v0.18.7) (2026-07-13)
 
 
