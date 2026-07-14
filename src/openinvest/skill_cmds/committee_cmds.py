@@ -208,4 +208,5 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
         _print_json({"error": "empty stdin"})
         return
     from openinvest.core.committee_runner import save_committee_transcript
-    _print_json(save_committee_transcript(args.symbol, raw))
+    provider = getattr(args, "provider", None) or "claude"
+    _print_json(save_committee_transcript(args.symbol, raw, provider=provider))

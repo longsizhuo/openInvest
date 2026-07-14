@@ -217,11 +217,21 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     }
 
 
-def save_committee_transcript(symbol: str, raw: str) -> Dict[str, Any]:
+def save_committee_transcript(
+    symbol: str, raw: str, *, provider: str = "claude",
+) -> Dict[str, Any]:
     """把 coordinator 模式产出的 6 段 transcript 落到 memory/.committee/<date>/<asset>.md
 
     解析 CIO 段 → parse_cio_memo（含确定性防御降级后处理）→ 落盘 + dream_event。
     返回 {"saved": <path>, "verdict": {...}}。
+
+    Args:
+        provider: 实际扮演 4 角色的 agent 品牌（"claude" / "hermes" / ...），
+            写进 transcript 的 **Provider** 行。默认 "claude"——历史唯一调用方
+            是 Claude Code，不传时输出逐字节不变。2026-07-14 前这里是硬编码
+            "claude (skill mode)"，不管谁调用；Hermes Coordinator 协议接入后
+            如果不分开标注，Dreaming 按 provider 分桶的模式挖掘、事后排障
+            都会把 Hermes 跑的 transcript 误判成 Claude 产出。
     """
     from datetime import datetime
 
@@ -259,7 +269,7 @@ def save_committee_transcript(symbol: str, raw: str) -> Dict[str, Any]:
         f"# Committee: {symbol}",
         f"\n**Date**: {today}",
         f"**Symbol**: {symbol}",
-        "**Provider**: claude (skill mode)",
+        f"**Provider**: {provider} (skill mode)",
         f"**Verdict**: {verdict['verdict']} (confidence {verdict['confidence']:.2f})",
         f"**Dominant view**: {verdict['dominant_view']}",
         f"**Suggested allocation CNY**: {verdict['alloc_cny']}",

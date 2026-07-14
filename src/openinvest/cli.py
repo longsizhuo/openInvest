@@ -146,6 +146,11 @@ def main() -> None:
 
     p = sub.add_parser("save_committee")
     p.add_argument("symbol")
+    p.add_argument(
+        "--provider", default=None,
+        help="实际扮演 4 角色的 agent 品牌（claude/hermes/...），写进 transcript "
+             "**Provider** 行。不传默认 claude（历史兼容）。",
+    )
     p.set_defaults(func=cmd_save_committee)
 
     p = sub.add_parser(
