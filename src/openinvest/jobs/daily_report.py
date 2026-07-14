@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import shutil
 import subprocess
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
@@ -112,23 +113,55 @@ def _portfolio_summary(
     return portfolio_summary_text(pm, total_assets_cny, current_prices)
 
 
+# 独立 challenge 用的第二意见 CLI，按优先级探测（agy 优先——各家 CLI 更替快，
+# 谁的 agentic CLI 装了能用就用谁；gemini 保留兼容仍用它的环境）。
+# INVEST_SECOND_OPINION_CLI 可强制指定二选一之外的命令名。
+_SECOND_OPINION_CLI_CANDIDATES = ("agy", "gemini")
+
+# 单个 CLI 参数受 Linux 内核 MAX_ARG_STRLEN=128KB 硬限（与 ARG_MAX/总长度无关，
+# 超出直接 E2BIG）——agy 的 -p/--print 要求 prompt 是位置参数（不读 stdin），
+# 持仓资产多时 cio_memos_combined 可能顶到这个限。留安全余量防御性截断。
+_MAX_PROMPT_ARG_BYTES = 100_000
+
+
 def _run_gemini_cli_review(prompt: str) -> str:
-    log.info("[Gemini CLI] 正在生成第二意见...")
-    # PATH 上找 gemini，避免硬编码 nvm 路径（每升级 node 版本就失效）
-    import shutil
-    gemini_cmd = shutil.which("gemini")
-    if not gemini_cmd:
-        return "Skipped: gemini CLI 不在 PATH"
-    try:
-        result = subprocess.run(
-            [gemini_cmd], input=prompt,
-            capture_output=True, text=True, timeout=180,
+    override = os.getenv("INVEST_SECOND_OPINION_CLI")
+    candidates = (override,) if override else _SECOND_OPINION_CLI_CANDIDATES
+    cli_name = next((c for c in candidates if c and shutil.which(c)), None)
+    if not cli_name:
+        return (
+            f"Skipped: 未找到可用的第二意见 CLI（尝试过 {'/'.join(candidates)}），"
+            "检查 PATH 或设 INVEST_SECOND_OPINION_CLI"
         )
+    cli_cmd = shutil.which(cli_name)
+    log.info("[%s CLI] 正在生成第二意见...", cli_name)
+
+    prompt_bytes = prompt.encode("utf-8")
+    if len(prompt_bytes) > _MAX_PROMPT_ARG_BYTES:
+        prompt = (
+            prompt_bytes[:_MAX_PROMPT_ARG_BYTES].decode("utf-8", errors="ignore")
+            + "\n\n[...超长截断，原文过大触发 CLI 参数长度限制...]"
+        )
+
+    try:
+        if cli_name == "gemini":
+            # gemini CLI：走 stdin（旧接口约定，无参数长度限制）
+            result = subprocess.run(
+                [cli_cmd], input=prompt,
+                capture_output=True, text=True, timeout=240,
+            )
+        else:
+            # agy CLI：-p/--print 要求 prompt 作为位置参数，不支持 stdin
+            # （`agy -p ""` 配合 stdin 管道实测报 "empty prompt" 错误）。
+            result = subprocess.run(
+                [cli_cmd, "-p", prompt],
+                capture_output=True, text=True, timeout=240,
+            )
         if result.returncode != 0:
             return f"Error: {result.stderr.strip()}"
         return result.stdout.strip()
     except FileNotFoundError:
-        return "Skipped: gemini CLI 不可用"
+        return f"Skipped: {cli_name} CLI 不可用"
     except Exception as e:
         return f"Skipped: {e}"
 
@@ -514,6 +547,9 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         final_decision_gemini=final_decision_gemini,
         plain_summaries=plain_summaries,
         discipline_md=discipline_md,
+        # send_email=False 只会是宿主 agent cron（cmd_daily_report）调用——
+        # 报告投递去 Discord/Weixin/QQ 等聊天平台，走无 HTML 的 chat 变体。
+        render_target="email" if send_email else "chat",
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）
