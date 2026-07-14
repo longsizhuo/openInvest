@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.8...invest-skill-v0.19.0) (2026-07-14)
+
+
+### Features
+
+* **skill:** 新闻投喂补「情报哨兵」定时主动喂料指引 ([6123b9e](https://github.com/longsizhuo/openInvest/commit/6123b9e15101df3b44a86f01eaf8c6b41b070474))
+
+
+### Docs
+
+* 情报哨兵产品化——SKILL.md 指引 + wiki 21 章 ([97989d8](https://github.com/longsizhuo/openInvest/commit/97989d813cd205f2558766e35a1d596f11790b83))
+
 ## [0.18.8](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.7...invest-skill-v0.18.8) (2026-07-14)
 
 
