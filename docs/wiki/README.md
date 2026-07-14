@@ -45,7 +45,8 @@ documents:
 9. [17-asset-feature-sets.md](17-asset-feature-sets.md) —— 资产类别特征集显式契约（黄金 ≠ 股票语义）
 10. [18-governance-conventions.md](18-governance-conventions.md) —— 治理章程：口径/判据/脏数据红线/否决权（用户签字）
 11. [19-telemetry-and-analytics.md](19-telemetry-and-analytics.md) —— 埋点与数据收集：匿名安装统计 / Opt-out / 隐私承诺
-12. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
+12. [21-intel-sentinel.md](21-intel-sentinel.md) —— 情报哨兵：任意 agent 平台定时喂料 ingest_event 的标准配方
+13. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
 ### 🎨 我是设计师 / 前端，想改 GUI
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA
@@ -77,6 +78,7 @@ documents:
 | 18 | [治理章程](18-governance-conventions.md) | 三原则(冻结快照/否决权/判据裁决) + 口径单源 + 合并前置 + 审计log |
 | 19 | [埋点与数据收集](19-telemetry-and-analytics.md) | 一次性匿名安装统计 + 三个 opt-out 环境变量 + 隐私承诺 |
 | 20 | [使用教程](20-agent-usage-tutorial.md) | 安装（plugin/MCP）→ onboarding → 日常自然语言用法 → 决策闭环 record_execution/decisions |
+| 21 | [情报哨兵](21-intel-sentinel.md) | 三层情报架构 + 标准哨兵 prompt 模板 + 各平台接法 + 防注入纪律 |
 
 ## 架构决策记录 (ADR)
 
