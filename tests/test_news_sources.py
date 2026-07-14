@@ -16,7 +16,10 @@ def _stub_items(prefix: str, n: int):
     ]
 
 
-def test_fetch_all_runs_each_source_and_dedups_urls():
+def test_fetch_all_runs_each_source_and_dedups_urls(monkeypatch):
+    # 测试隔离：本机 .env 可能配了 SEARXNG_URL（load_dotenv 会带进进程），
+    # 不清掉会注册 searxng 任务真发 HTTP，条数断言全崩
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
     with patch("openinvest.services.news_sources.ddgs_news.fetch_ddgs_news") as m_ddgs, \
          patch("openinvest.services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
          patch("openinvest.services.news_sources.rss_feed.fetch_rss") as m_rss:
@@ -36,7 +39,8 @@ def test_fetch_all_runs_each_source_and_dedups_urls():
     assert m_ddgs.called and m_yf.called and m_rss.called
 
 
-def test_fetch_all_continues_on_per_source_failure():
+def test_fetch_all_continues_on_per_source_failure(monkeypatch):
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
     with patch("openinvest.services.news_sources.ddgs_news.fetch_ddgs_news",
                side_effect=RuntimeError("boom")), \
          patch("openinvest.services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
@@ -53,6 +57,20 @@ def test_fetch_all_continues_on_per_source_failure():
 
 def test_fetch_all_empty_inputs():
     assert fetch_all() == []
+
+
+def test_fetch_all_registers_searxng_when_configured(monkeypatch):
+    """配了 SEARXNG_URL 时，queries 会同时喂给 ddgs 和 searxng 两个源。"""
+    monkeypatch.setenv("SEARXNG_URL", "http://127.0.0.1:8890")
+    with patch("openinvest.services.news_sources.ddgs_news.fetch_ddgs_news") as m_ddgs, \
+         patch(
+             "openinvest.services.news_sources.searxng_news.fetch_searxng_news"
+         ) as m_sx:
+        m_ddgs.return_value = _stub_items("ddgs", 1)
+        m_sx.return_value = _stub_items("searxng", 2)
+        out = fetch_all(queries=["gold"])
+    assert m_sx.called
+    assert len(out) == 3
 
 
 def test_rss_feed_parses_minimal_feed():

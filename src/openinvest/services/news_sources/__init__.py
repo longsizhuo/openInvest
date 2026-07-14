@@ -1,9 +1,12 @@
 """services/news_sources —— 多源新闻抓取，事件层 fetch 阶段统一入口
 
-三个独立源（任一失败不连坐）：
+五个独立源（任一失败不连坐）：
 - ddgs_news.py     DuckDuckGo news（宽泛查询，覆盖 macro / sector）
+- searxng_news.py  自托管 searxng 元搜索（聚合多引擎 news 类目，中文覆盖好、
+                   无外部限流；SEARXNG_URL 未配置时静默关闭）
 - rss_feed.py      Reuters / BBC / FT / 财新 等 RSS（高质量主流财经）
 - yfinance_news.py yf.Ticker(sym).news（按 symbol 直接关联）
+- akshare_news.py  东财/新浪 7×24 中文快讯（watched 含 A 股时自动开）
 
 统一返回 RawNewsItem dataclass，给 event_normalizer 进 LLM 归一化。
 """
@@ -67,6 +70,18 @@ def fetch_all(
                 "kwargs": {"query": q, "max_results": max_per_source},
                 "label": f"ddgs:{q[:30]}",
             })
+        # searxng 与 ddgs 吃同一组 queries；未配 SEARXNG_URL 时整体跳过
+        from openinvest.services.news_sources.searxng_news import (
+            fetch_searxng_news,
+            searxng_base_url,
+        )
+        if searxng_base_url():
+            for q in queries:
+                tasks.append({
+                    "fn": fetch_searxng_news,
+                    "kwargs": {"query": q, "max_results": max_per_source},
+                    "label": f"searxng:{q[:30]}",
+                })
     if cn_wire:
         from openinvest.services.news_sources.akshare_news import fetch_cn_wire
         tasks.append({
