@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.notifier import (
     render_markdown_email,
     send_email_html,
@@ -53,7 +54,40 @@ def send_event_alert(
         holdings_snapshot=holdings_snapshot or {},
     )
     html = render_markdown_email(md, footer_label="Invest Event Watch")
+    # Discord DM 先推（实时通道，best-effort 永不抛）；邮件随后作为保底归档，
+    # 顺序保证邮件投递失败（EmailDeliveryError）不影响 Discord 已送达
+    send_discord_alert(
+        _build_discord_text(
+            events, committee_task_id=committee_task_id, api_base_url=api_base_url
+        )
+    )
     return send_email_html(subject=subject, html_body=html, plain_body=md)
+
+
+def _build_discord_text(
+    events: List[Dict[str, Any]],
+    *,
+    committee_task_id: Optional[str],
+    api_base_url: str,
+) -> str:
+    """事件报警的 Discord 精简版：一行一事件，带委员会链接。
+
+    完整详情（sources / 持仓快照）仍在邮件里；DM 版只求"手机上 10 秒读完，
+    想深挖就直接回复让 agent 就地分析"。
+    """
+    lines = [f"**{_build_subject(events)}**"]
+    for e in events[:6]:
+        icon = _STANCE_ICON.get(e.get("stance", "neutral"), "📰")
+        syms = ", ".join(e.get("affected_symbols") or []) or "macro"
+        lines.append(f"{icon} {e.get('one_line_claim', '')} `[{syms}]`")
+    if len(events) > 6:
+        lines.append(f"…… 另有 {len(events) - 6} 条，见邮件")
+    if committee_task_id:
+        lines.append(
+            f"⚙️ 已自动触发委员会重跑：{api_base_url.rstrip('/')}/api/committee/{committee_task_id}"
+        )
+    lines.append("-# 详情在邮件里；直接回复这条消息可让 AI 助手就地分析")
+    return "\n".join(lines)
 
 
 def _build_subject(events: List[Dict[str, Any]]) -> str:
@@ -190,4 +224,6 @@ def send_committee_verdict_email(
         for s in symbols[:3]
     )
     html = render_markdown_email(md, footer_label="Invest Event Watch · Committee")
+    # verdict 同样先推 DM（md 本身已足够精简，Discord 原生渲染 markdown）
+    send_discord_alert(f"**{subject}**\n{md}")
     return send_email_html(subject=subject, html_body=html, plain_body=md)

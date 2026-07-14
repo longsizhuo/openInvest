@@ -229,6 +229,13 @@ SMTP_USER=you@gmail.com
 SMTP_PASS=app-password
 SMTP_TO=you@gmail.com
 
+# Discord DM 实时报警（可选）：event_watch 事件 / 委员会 verdict 先推 Discord
+# 再发邮件。invest 不直接持有 Discord token——POST 给同宿主机 Discord bot 的
+# alert server（X-Internal-Key 内网鉴权），由它代发 DM。两个都不填 = 完全禁用，
+# 行为与从前一致（邮件仍是保底归档通道）。
+CHATBOT_ALERT_URL=http://127.0.0.1:6200/alert/invest
+CHATBOT_INTERNAL_KEY=shared-secret-with-your-bot
+
 # 委员会行为开关（也可运行时经 API/CLI 改，ADR-017；env 仅部署期默认）
 # 集中度 lens：false=单资产/刻意集中/全可投资金池不因持仓集中度被建议减仓（ADR-019）
 INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
