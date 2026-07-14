@@ -116,6 +116,7 @@ jobs:
           uv run python -c "from openinvest.core.decision_ledger import parse_committee_file, record_execution, list_decisions, summarize_decisions"
           uv run python -c "from openinvest.connectors.mcp_server import mcp, main"
           uv run python -c "from openinvest.services.holdings_import import parse_holdings, commit_parsed, _normalize_holding"
+          uv run python -c "from openinvest.services.discord_notify import send_discord_alert"
           uv run python -c "from scripts.backfill_history import backfill, main, _num, COMMODITY_DEEP_HISTORY"
           uv run python -c "from openinvest.core.regime_probability import forward_return"
           uv run python -c "from openinvest.core.committee_runner import rule_family, _intervention_record, _gold_defense_dca_gate"
