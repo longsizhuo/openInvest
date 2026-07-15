@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.2](https://github.com/longsizhuo/openInvest/compare/v0.30.1...v0.30.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* **sentiment:** opportunity stance 别再暗示方向性利好 ([4040f71](https://github.com/longsizhuo/openInvest/commit/4040f719615ccf1915f937884ef9fcb8da4d4ebe))
+
 ## [0.30.1](https://github.com/longsizhuo/openInvest/compare/v0.30.0...v0.30.1) (2026-07-15)
 
 
