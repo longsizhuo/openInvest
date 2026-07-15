@@ -47,6 +47,19 @@ _GOLD_PROXY_SYMBOLS = {"GC=F", "GLD", "IAU", "PMGOLD.AX", "518880.SS"}
 # 普通 per-symbol query 抓不到，需要显式关键词
 _GOLD_STANDING_QUERIES = ["central bank gold purchases", "gold ETF flows"]
 
+# 宏观常驻 queries（issue #211）：per-symbol query（"AAPL news"）搜到的是行情评论，
+# 搜不到数据发布本身——CPI 公布当天固定管道 0 条入库就是这个缺口炸的。这几个是
+# 美国经济日历里最常移动市场的定期发布，跟持仓无关、每轮都搜。
+# ponytail: 不按经济日历日程加权触发时机（那需要额外接一个日历数据源判断"今天
+# 是不是发布日"），固定每轮都搜——多花几次搜索配额换召回，比精确日历调度便宜。
+# 真需要再加日历加权。
+_MACRO_STANDING_QUERIES = [
+    "CPI inflation report",
+    "Fed FOMC rate decision",
+    "US non-farm payrolls jobs report",
+    "PPI producer price index",
+]
+
 
 def _load_user_context() -> Dict[str, Any]:
     """从 PortfolioManager 抓 holdings / target_assets
@@ -69,8 +82,7 @@ def _load_user_context() -> Dict[str, Any]:
     queries: List[str] = []
     for sym in (set(holdings) | set(watching)):
         queries.append(f"{sym} news")
-    if not any("fed" in q.lower() for q in queries):
-        queries.append("Fed rate decision")  # 默认抓宏观
+    queries.extend(_MACRO_STANDING_QUERIES)  # 与持仓无关，每轮都搜（issue #211）
     # 持金/关注金 → 追加黄金常驻 queries（央行购金等低频宏观事件靠关键词才抓得到）
     if (set(holdings) | set(watching)) & _GOLD_PROXY_SYMBOLS:
         queries.extend(_GOLD_STANDING_QUERIES)

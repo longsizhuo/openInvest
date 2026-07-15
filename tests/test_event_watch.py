@@ -237,3 +237,25 @@ def test_gold_standing_queries_absent_without_gold(monkeypatch):
     ctx = event_watch._load_user_context()
     for q in event_watch._GOLD_STANDING_QUERIES:
         assert q not in ctx["queries"], q
+
+
+# ---------- 宏观常驻 queries（issue #211）：per-symbol query 搜不到数据发布本身 ----------
+
+def test_macro_standing_queries_always_present(monkeypatch):
+    """CPI/FOMC/非农/PPI 关键词每轮都搜，与持仓无关——不再只靠单条 'Fed rate
+    decision' 兜底（CPI 公布当天固定管道 7 小时 0 条入库的根因）。"""
+    import openinvest.core.portfolio_manager as pm_mod
+    monkeypatch.setattr(pm_mod, "PortfolioManager",
+                        lambda: _FakePM(holdings=["AAPL"], watching=["NVDA"]))
+    ctx = event_watch._load_user_context()
+    for q in event_watch._MACRO_STANDING_QUERIES:
+        assert q in ctx["queries"], q
+
+
+def test_macro_standing_queries_present_even_with_no_holdings(monkeypatch):
+    """空持仓/空关注也要搜宏观——这几个跟"你持有什么"无关。"""
+    import openinvest.core.portfolio_manager as pm_mod
+    monkeypatch.setattr(pm_mod, "PortfolioManager", lambda: _FakePM())
+    ctx = event_watch._load_user_context()
+    for q in event_watch._MACRO_STANDING_QUERIES:
+        assert q in ctx["queries"], q
