@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.30.0](https://github.com/longsizhuo/openInvest/compare/v0.29.0...v0.30.0) (2026-07-15)
+
+
+### Features
+
+* **news:** searxng 元搜索接入 event_watch 新闻源 ([1089fe9](https://github.com/longsizhuo/openInvest/commit/1089fe90883cbc32a4594fe7a1405619b01e480f))
+* **news:** searxng 元搜索接入 event_watch 新闻源（第 5 源） ([fab57ec](https://github.com/longsizhuo/openInvest/commit/fab57ecee011e18d1173b3d09d5987a99e8af702))
+* **skill:** 新闻投喂补「情报哨兵」定时主动喂料指引 ([6123b9e](https://github.com/longsizhuo/openInvest/commit/6123b9e15101df3b44a86f01eaf8c6b41b070474))
+
+
+### Docs
+
+* **news:** searxng 模块补定位说明——与特定 agent 无关、本身即引擎抽象层 ([cb4eb04](https://github.com/longsizhuo/openInvest/commit/cb4eb047179056df63e4b870b009dd0f8def5ed5))
+* **wiki:** 21 章情报哨兵——三层情报架构与 agent 定时喂料标准配方 ([ae5b527](https://github.com/longsizhuo/openInvest/commit/ae5b5274ddfe493e6f97e63cf2dfeb2fd9a943fe))
+* 情报哨兵产品化——SKILL.md 指引 + wiki 21 章 ([97989d8](https://github.com/longsizhuo/openInvest/commit/97989d813cd205f2558766e35a1d596f11790b83))
+
 ## [0.29.0](https://github.com/longsizhuo/openInvest/compare/v0.28.1...v0.29.0) (2026-07-14)
 
 
