@@ -5,13 +5,17 @@ from datetime import datetime, timezone, timedelta
 
 import subprocess
 
+from openinvest.jobs import pnl_snapshot
 from openinvest.jobs.pnl_snapshot import (
+    Snapshot,
     _auto_push_svg,
     _is_trading_window,
+    _outperform_events,
     _outperform_feed_attribution,
     _pct_label_pos,
     _redact_token_in,
 )
+from openinvest.calc.series import BenchmarkSeries
 
 
 def _bj(year, month, day, hour, minute=0):
@@ -195,6 +199,37 @@ def test_auto_push_called_process_error_redacts_token(monkeypatch):
     assert _SECRET_TOKEN not in str(result)
     assert "x-access-token:***@" in result["reason"]
     assert result["reason"].startswith("git failure:")
+
+
+# ---------- outperform 事件真的产出非空结果（#197 回归：get_all_series 缺 start_date 被吞）----------
+
+def test_outperform_events_nonempty_on_happy_path(monkeypatch):
+    """正常路径下 _outperform_events 必须真的产出事件，而不是被吞异常静默退化成空列表。"""
+    history = [
+        {"ts": "2026-06-01T00:00:00Z", "total_pnl_pct": 1.0},
+        {"ts": "2026-07-01T00:00:00Z", "total_pnl_pct": 5.0},
+    ]
+    series = BenchmarkSeries(
+        key="纳指", color="#000", group="index", dash="",
+        points={"2026-06-01": 0.0, "2026-07-01": 2.0},
+    )
+
+    captured_args = []
+
+    def _fake_get_all_series(*args, **kwargs):
+        captured_args.append(args)
+        return [series]
+
+    monkeypatch.setattr(pnl_snapshot, "_read_history", lambda window_days=None: history)
+    monkeypatch.setattr(pnl_snapshot, "get_all_series", _fake_get_all_series)
+
+    snap = Snapshot(ts="2026-07-01T00:00:00Z", total_pnl_pct=5.0,
+                     ndq_pnl_pct=None, gold_pnl_pct=None)
+    events = _outperform_events(snap)
+
+    assert captured_args == [("2026-06-01",)]  # start_date 必须传，不能裸调
+    assert events != []
+    assert events[0]["benchmark"] == "纳指"  # BenchmarkSeries 只有 .key，没有 .label
 
 
 # ---------- README outperform feed 署名按 git remote 推断（fork 不挂作者账户） ----------

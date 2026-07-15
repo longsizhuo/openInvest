@@ -248,19 +248,15 @@ def _is_trading_window(now: Optional[datetime] = None) -> bool:
 
 
 def _outperform_events(snap: Snapshot) -> List[Dict[str, Any]]:
-    """IO 包装：读 history + 拉基准序列，再委托 pnl_render 纯核。
-
-    注意 get_all_series() 这个调用与上游签名不符（缺 start_date），TypeError
-    会被 except 吞掉 → 事件恒为空。这是搬迁前就存在的存量行为，纯搬迁不改——
-    修复跟踪见 GitHub issue（outperform feed 静默失效）。
-    """
+    """IO 包装：读 history + 拉基准序列，再委托 pnl_render 纯核。"""
     if snap.total_pnl_pct is None:
         return []
     history = _read_history(window_days=WINDOW_DAYS)
     if not history:
         return []
+    start_date = history[0]["ts"][:10]
     try:
-        all_series = get_all_series()
+        all_series = get_all_series(start_date)
     except Exception as e:
         log.warning(f"benchmark series 拉失败，跳过 outperform 事件: {e}")
         return []

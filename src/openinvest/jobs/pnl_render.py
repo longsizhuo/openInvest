@@ -336,14 +336,14 @@ def _outperform_events(
         win = diff > 0
         events.append({
             "ts": snap.ts,
-            "benchmark": series.label,
+            "benchmark": series.key,
             "user_pct": round(user_pct, 4),
             "bench_pct": round(bench_pct, 4),
             "diff_pct": round(diff, 4),
             "is_outperform": win,
             "label": (
                 f"作者账户过去 {len(history)} 个数据点 "
-                f"{'跑赢' if win else '跑输'}{series.label} {diff:+.2f}%"
+                f"{'跑赢' if win else '跑输'}{series.key} {diff:+.2f}%"
             ),
         })
     # 按 |diff| 排序（绝对幅度大的优先展示），不再"只挑赢的"
