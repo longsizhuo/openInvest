@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.3](https://github.com/longsizhuo/openInvest/compare/v0.30.2...v0.30.3) (2026-07-15)
+
+
+### Docs
+
+* **research:** 固化 issue [#210](https://github.com/longsizhuo/openInvest/issues/210) 事件研究脚本进 experiments/ ([50aac1d](https://github.com/longsizhuo/openInvest/commit/50aac1de3d240bf439af078fdd2a61be91f5c585))
+
 ## [0.30.2](https://github.com/longsizhuo/openInvest/compare/v0.30.1...v0.30.2) (2026-07-15)
 
 
