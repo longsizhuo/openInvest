@@ -1,6 +1,6 @@
 [project]
 name = "openinvest"
-version = "0.30.3"
+version = "0.30.4"
 description = "Investment runtime built for AI agents — 4-role LLM investment committee, portfolio ledger, decision accounting, MCP server"
 readme = "PYPI_README.md"
 license = "MIT"

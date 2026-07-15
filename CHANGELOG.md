@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.4](https://github.com/longsizhuo/openInvest/compare/v0.30.3...v0.30.4) (2026-07-15)
+
+
+### Bug Fixes
+
+* **event-watch:** 宏观关键词轮换，别只靠单条 Fed 兜底查询 ([41e2565](https://github.com/longsizhuo/openInvest/commit/41e25655a91dc1cd2c9388f4122eb45650fafd57))
+
 ## [0.30.3](https://github.com/longsizhuo/openInvest/compare/v0.30.2...v0.30.3) (2026-07-15)
 
 
