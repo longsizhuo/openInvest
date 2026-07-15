@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/longsizhuo/openInvest/compare/v0.30.0...v0.30.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **pnl:** outperform feed 静默失效——get_all_series 补 start_date + series.key ([f20e3e6](https://github.com/longsizhuo/openInvest/commit/f20e3e61a41848a6be757e9c94078dabedbd8072)), closes [#197](https://github.com/longsizhuo/openInvest/issues/197)
+
 ## [0.30.0](https://github.com/longsizhuo/openInvest/compare/v0.29.0...v0.30.0) (2026-07-15)
 
 
