@@ -271,3 +271,24 @@ def test_event_stance_line_for_symbol_no_match_returns_none():
     assert event_stance_line_for_symbol(BRIEF_3, "MISSING.SYM") is None
     assert event_stance_line_for_symbol("", "FAKE.AX") is None
     assert event_stance_line_for_symbol(BRIEF_3, "") is None
+
+
+def test_event_stance_opportunity_carries_reversal_caveat():
+    """issue #210 回归：net opportunity 必须带历史基线提示（opportunity 事件后
+    5 日均值 -1.07%，是反向指标不是买入信号），否则 committee 容易把这行措辞
+    误读成方向性利好。net risk / net neutral 不受影响，原样不变。"""
+    from openinvest.utils.sentiment import _event_stance_line, event_stance_line_for_symbol
+
+    opp_only = "[2026-05-11T08:00:00Z] [opportunity/mid] [GC=F]\ngood news\n"
+    line = _event_stance_line(opp_only)
+    assert line.startswith("EVENT_STANCE: net opportunity (risk=0 opportunity=1")
+    assert "反向指标" in line and "-1.07%" in line
+
+    # net risk 不附加提示（研究只对 opportunity 组显著）
+    risk_line = _event_stance_line(
+        "[2026-05-11T08:00:00Z] [risk/mid] [GC=F]\nbad news\n"
+    )
+    assert "反向指标" not in risk_line
+
+    per_asset = event_stance_line_for_symbol(opp_only, "GC=F")
+    assert "反向指标" in per_asset

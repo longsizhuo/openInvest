@@ -100,7 +100,13 @@ def fetch_cnn_fear_greed(timeout: float = CNN_TIMEOUT_S) -> Optional[Tuple[int, 
 def _format_stance_line(
     score: float, risk: int, opp: int, *, symbol: Optional[str] = None,
 ) -> Optional[str]:
-    """净情绪行格式化。默认 config 下输出与旧纯计数版完全一致（不显示 score）。"""
+    """净情绪行格式化。默认 config 下输出与旧纯计数版完全一致（不显示 score）。
+
+    net opportunity 的场合附一句校准提示（issue #210 预注册事件研究：opportunity
+    类事件后 5 日均值 -1.07%、cluster-robust t=-2.82 显著，经验上是短线反向指标，
+    不是买入信号）——不加提示的话 committee/CIO 读到"net opportunity"这个措辞
+    容易直接当成方向性利好，这正是研究要纠正的误读。
+    """
     if risk == 0 and opp == 0:
         return None
     from openinvest.core.config import load_config
@@ -119,7 +125,17 @@ def _format_stance_line(
         "该资产相关事件" if symbol else "来自近期事件层",
         "asset-linked events" if symbol else "derived from recent event-layer inputs",
     )
-    return f"{label}: net {net} ({extra}risk={risk} opportunity={opp}, {suffix})"
+    caveat = ""
+    if net == "opportunity":
+        caveat = bilingual(
+            "；历史基线：opportunity 类事件后 5 日均值 -1.07%（命中率 40%，"
+            "cluster-robust 显著），经验上是短线反向指标而非买入信号，不应单独作为加仓依据",
+            "; historical baseline: 'opportunity'-tagged events show a mean -1.07% "
+            "5-day forward return (40% win rate, cluster-robust significant) — "
+            "empirically a short-term reversal signal, not a buy trigger; don't treat "
+            "it as a standalone accumulate cue",
+        )
+    return f"{label}: net {net} ({extra}risk={risk} opportunity={opp}, {suffix}){caveat}"
 
 
 def _event_stance_line(event_brief: str) -> Optional[str]:

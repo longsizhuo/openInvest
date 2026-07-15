@@ -19,7 +19,10 @@ from openinvest.services.notifier import (
 log = logging.getLogger(__name__)
 
 
-_STANCE_ICON = {"risk": "🚨", "opportunity": "🎯", "neutral": "📰"}
+# opportunity 曾用 🎯（暗示"命中/买入"）——issue #210 预注册事件研究：opportunity
+# 类事件后 5 日均值 -1.07%、cluster-robust 显著，经验上是短线反向指标而非买入信号。
+# 换成 🔍（"留意/值得细看"），不再给用户方向性暗示。
+_STANCE_ICON = {"risk": "🚨", "opportunity": "🔍", "neutral": "📰"}
 
 
 def send_event_alert(
@@ -97,7 +100,7 @@ def _build_subject(events: List[Dict[str, Any]]) -> str:
         icon = "🚨"
         label = "Risk"
     elif stances == {"opportunity"}:
-        icon = "🎯"
+        icon = "🔍"
         label = "Opportunity"
     else:
         icon = "📰"
