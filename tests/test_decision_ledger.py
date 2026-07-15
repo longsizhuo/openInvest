@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from openinvest.core.decision_ledger import (
     MATCH_WINDOW_DAYS,
     _match_trades,
+    list_decisions,
     parse_committee_file,
     record_execution,
 )
@@ -127,3 +129,86 @@ def test_record_execution_concurrent_no_double_append(tmp_path):
     with ThreadPoolExecutor(max_workers=8) as ex:
         list(ex.map(w, range(16)))
     assert len(p.read_text().splitlines()) == 1
+
+
+# ---------- list_decisions() 端到端（回归：本体之前零覆盖，只测过 parse/match/record 三个子函数）----------
+
+class _FakeTradesDB:
+    """免碰真实 db/trades.db —— list_decisions() 内部 `TradesDB()` 局部 import，
+    patch 源模块属性即可让每次调用都拿到这个假类。trades 内容由测试用例注入。"""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    def list_trades(self, limit=10000):
+        return list(self._TRADES)
+
+
+def test_list_decisions_end_to_end_seeded_ledger(monkeypatch, tmp_path):
+    """种委员会 md + interventions + verdict_review + executions + 假 trades，
+    验证 list_decisions() 真的把四份账本 join 成一条完整记录，而不是静默退化成
+    空列表——list_decisions() 之前没有任何测试直接调用过它本体（同 #197 那类风险：
+    上游任一环节（MemoryStore 路径解析 / 目录遍历 / join 条件）写错都不会被现有
+    测试发现，因为大家只测了 parse_committee_file / _match_trades / record_execution
+    这几个子函数）。
+    """
+    import openinvest.core.memory_store as ms
+    import openinvest.db.trades_db as trades_db_mod
+
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    monkeypatch.setattr(trades_db_mod, "TradesDB", _FakeTradesDB)
+
+    date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    sym = "GC=F"
+    decision_id = f"{date}/{sym}"
+    monkeypatch.setattr(_FakeTradesDB, "_TRADES", [
+        {"id": 1, "verdict_id": decision_id, "symbol": sym, "direction": "SELL",
+         "units": 2, "ts": "2026-01-01T00:00:00", "status": "executed", "price": 500.0}
+    ], raising=False)
+
+    committee_dir = tmp_path / ".committee" / date
+    committee_dir.mkdir(parents=True)
+    (committee_dir / "GC_F.md").write_text(
+        f"# Committee: 伦敦金\n\n"
+        f"**Date**: {date}\n"
+        f"**Symbol**: {sym}\n"
+        f"**Verdict**: TRIM (confidence 0.72)\n"
+        f"**Suggested allocation CNY**: -8,000\n\n"
+        f"## Macro Context Snapshot (for post-hoc attribution)\n\n"
+        f'```json\n{{"vix": 15.81}}\n```\n',
+        encoding="utf-8",
+    )
+
+    dreams = tmp_path / ".dreams"
+    dreams.mkdir(parents=True)
+    (dreams / "interventions.jsonl").write_text(
+        json.dumps({"date": date, "asset": sym, "rule": "sanity4_concentration",
+                    "rule_family": "concentration", "original_verdict": "TRIM",
+                    "original_alloc": -8000}) + "\n",
+        encoding="utf-8",
+    )
+    (dreams / "verdict_review.jsonl").write_text(
+        json.dumps({"date": date, "asset": sym, "source": "live",
+                    "actual_returns": {"30d": 1.2}, "hits": {"30d": True},
+                    "macro_shock": {"detected": False}}) + "\n",
+        encoding="utf-8",
+    )
+
+    record_execution(decision_id, True, reason="想通了", trade_ids=[1])
+
+    decisions = list_decisions(days=90)
+
+    assert decisions != [], "list_decisions() 不应静默退化成空列表"
+    got = next((d for d in decisions if d["decision_id"] == decision_id), None)
+    assert got is not None, f"{decision_id} 未出现在 list_decisions() 结果里"
+    assert got["symbol"] == sym
+    assert got["verdict"] == "TRIM"
+    assert got["confidence"] == 0.72
+    assert got["alloc_cny"] == -8000.0
+    assert got["intervention"] is not None
+    assert got["intervention"]["rule"] == "sanity4_concentration"
+    assert got["executed"] is True
+    assert got["execution"]["reason"] == "想通了"
+    assert [t["id"] for t in got["matched_trades"]] == [1]
+    assert got["outcome"] is not None
+    assert got["outcome"]["actual_returns"] == {"30d": 1.2}

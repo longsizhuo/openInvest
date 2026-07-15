@@ -1,6 +1,9 @@
 """path_review 后验校准单测 — 实际路径口径、评分、汇总、成熟度过滤。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -113,3 +116,43 @@ def test_collect_live_snapshots(tmp_path, monkeypatch):
     (d / "bad_path.json").write_text("{broken")
     snaps = pr.collect_live_snapshots()
     assert len(snaps) == 1 and snaps[0]["symbol"] == "X"
+
+
+# ---------- run() 端到端（回归：本体之前零覆盖，只测过 collect/score/summarize 子函数）----------
+
+def test_run_live_path_end_to_end(monkeypatch, tmp_path):
+    """种 .committee/<date>/<sym>_path.json → run() 真的 collect → score → summarize
+    → write_outputs 落盘非空。run() 是 cron 实际调用的入口，之前没有任何测试驱动过
+    它本体——MEMORY_ROOT 解析错、字段名对不上、summarize 输入形状变了，都不会被
+    现有测试（只测子函数）发现。"""
+    import openinvest.core.memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    monkeypatch.setattr(pr, "ROOT", tmp_path)  # docs/path_calibration.md 别写进真仓库
+    (tmp_path / "docs").mkdir()  # write_outputs 只 mkdir jsonl 的父目录，md 的要自己建
+
+    _stub_closes(monkeypatch, [100.0 + i for i in range(200)])  # 2024-01-01 起线性上行
+
+    profile = {
+        "windows": {
+            "30d": {"median_pct": 10.0, "p_below": 0.3, "p10_pct": -5.0, "p90_pct": 40.0},
+            "60d": {"median_pct": 30.0, "p_below": 0.25, "p10_pct": 10.0, "p90_pct": 60.0},
+            "90d": {"median_pct": 50.0, "p_below": 0.2, "p10_pct": 40.0, "p90_pct": 90.0},
+        },
+    }
+    d = tmp_path / ".committee" / "2024-02-01"
+    d.mkdir(parents=True)
+    (d / "AAPL_path.json").write_text(
+        json.dumps({"date": "2024-02-01", "symbol": "AAPL", "regime": "uptrend",
+                    "current_price": 131.0, "atr_pct": 1.0, "profile": profile}),
+        encoding="utf-8",
+    )
+
+    out = pr.run()
+
+    assert out["reviews"] == 1, "应评到种入的这条 live 快照"
+    assert out["summary"]["n"] == 1
+    assert set(out["summary"]["windows"]) == {"30d", "60d", "90d"}
+    jl = Path(out["jsonl"])
+    assert jl.exists() and jl.read_text().strip() != ""
+    md = Path(out["report"])
+    assert md.exists() and "路径预测校准报告" in md.read_text()
