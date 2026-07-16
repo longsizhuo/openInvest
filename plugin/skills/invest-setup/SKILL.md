@@ -1,7 +1,7 @@
 ---
 name: invest-setup
 version: 0.3.1 # x-release-please-version
-description: First-time openInvest installation and onboarding. **ONLY use when** user explicitly says "set up invest" / "init invest" / "帮我初始化 invest", OR when `invest` skill's `doctor` returns `status: "needs_setup"`. **NOT for daily usage** — once onboarding is done, the `invest` skill takes over (portfolio viewing, committee analysis, buy/sell tracking). Wraps `run.sh init --from-stdin` with the canonical 5-question flow.
+description: First-time openInvest installation and onboarding. **ONLY use when** user explicitly says "set up invest" / "init invest" / "帮我初始化 invest", OR when `invest` skill's `doctor` returns `status="needs_setup"`. **NOT for daily usage** — once onboarding is done, the `invest` skill takes over (portfolio viewing, committee analysis, buy/sell tracking). Wraps `run.sh init --from-stdin` with the canonical 5-question flow.
 platforms: [linux, macos]
 metadata:
   hermes:
@@ -10,116 +10,123 @@ metadata:
 
 # Invest Setup Skill
 
-**单一职责**：把一个空的 openInvest 部署变成可用状态。**只在用户首次配置时
-触发**，跑完一次就退场（`invest` skill 接管所有日常交互）。
+**Single responsibility**: turn an empty openInvest deployment into a working one.
+**Triggers only on the user's first-time setup** — run once, then step aside (the
+`invest` skill takes over all day-to-day interaction).
 
 ## When to Use
 
-- 用户明说 "set up invest" / "initialize invest" / "帮我初始化 invest"
-- 跑 `invest` skill 的 `doctor` 返回 `status: "needs_setup"`（memory / user_profile 缺失）
-- 用户想完全重配（明确说 "reset" / "重新配置"，需要 `--force`）
-- v1 → v2 schema 迁移（用户的 portfolio.md 是老格式）
+- User explicitly says "set up invest" / "initialize invest" / "帮我初始化 invest"
+- The `invest` skill's `doctor` returns `status: "needs_setup"` (memory / user_profile missing)
+- User wants a full reconfiguration (explicitly says "reset" / "重新配置"; requires `--force`)
+- v1 → v2 schema migration (the user's portfolio.md is in the old format)
 
 ## When NOT to Use
 
-- 用户已经 onboard 完成（`doctor` 返回 `status: "ready"`）→ **切到 `invest` skill**
-- 用户想看持仓 / P&L / 跑委员会 → 走 `invest` skill
-- 用户想加新追踪资产但已 onboard → `invest` skill 的 `POST /api/holdings` 端点
-- 用户想 commit / push 代码 → 这是 git 操作，跟 setup 无关
+- User is already onboarded (`doctor` returns `status: "ready"`) → **switch to the `invest` skill**
+- User wants to view holdings / P&L / run the committee → use the `invest` skill
+- User wants to track a new asset but is already onboarded → the `invest` skill's `POST /api/holdings` endpoint
+- User wants to commit / push code → that's a git operation, unrelated to setup
 
-如果你（agent）误进了这个 skill，**立刻退出**，告诉用户应该用 `invest` skill。
+If you (the agent) entered this skill by mistake, **exit immediately** and tell the
+user to use the `invest` skill instead.
 
-## 两条 onboarding 路径
+## Two onboarding paths
 
-| 路径 | 场景 | 流程 |
+| Path | Scenario | Flow |
 |------|------|------|
-| **A. 全新部署**（默认）| 用户第一次用 openInvest，数据建在本机 | 下面"流程（4 步）" |
-| **B. 连接已有 hub** | 用户在另一台机器（服务器）已跑着 openInvest，想在本机共用同一份数据（多设备） | 下面"路径 B"，2 分钟 |
+| **A. Fresh deployment** (default) | User's first time with openInvest; data lives on this machine | "Flow (4 steps)" below |
+| **B. Connect to an existing hub** | User already runs openInvest on another machine (a server) and wants this machine to share the same data (multi-device) | "Path B" below, 2 minutes |
 
-触发路径 B 的说法："连接我的 hub" / "我服务器上已经装好了" / "多台电脑共用持仓" /
-"connect to my existing deployment"。
+Phrasings that trigger Path B: "connect to my hub / 连接我的 hub" / "it's already
+installed on my server / 我服务器上已经装好了" / "share one portfolio across
+machines / 多台电脑共用持仓" / "connect to my existing deployment".
 
-## 路径 B：连接已有 hub（不跑 init）
+## Path B: connect to an existing hub (no init)
 
-1. 问两个问题：
-   - hub 地址？（例 `https://invest.example.com` 或 `http://10.0.0.6:8765`）
-   - hub 开了鉴权吗？token（`INVEST_API_TOKEN`）还是 Cloudflare Access
-     service token（`CF_ACCESS_CLIENT_ID/SECRET`）？没开就跳过
-2. 把答案写进 `$INVEST_HOME/.env`（只需要这两三行；**不需要** DeepSeek key /
-   Gmail / 5 问流程——那些都在 hub 上）：
+1. Ask two questions:
+   - Hub address? (e.g. `https://invest.example.com` or `http://10.0.0.6:8765`)
+   - Does the hub have auth enabled? A token (`INVEST_API_TOKEN`) or a Cloudflare
+     Access service token (`CF_ACCESS_CLIENT_ID/SECRET`)? Skip if not enabled.
+2. Write the answers into `$INVEST_HOME/.env` (only these two or three lines are
+   needed; **no** DeepSeek key / Gmail / 5-question flow — those all live on the hub):
    ```env
    INVEST_API_BASE=https://invest.example.com
-   INVEST_API_TOKEN=...        # 可选
+   INVEST_API_TOKEN=...        # optional
    ```
-3. 验证：跑 `run.sh doctor` → 应返回 `status: "ready"` + `remote` 段
-   （api_base / 鉴权方式）。连不上时 error JSON 的 hint 会指出是地址、token
-   还是 hub 服务没起。
-4. 完成，移交 `invest` skill。
+3. Verify: run `run.sh doctor` → it should return `status: "ready"` plus a `remote`
+   section (api_base / auth method). If it can't connect, the error JSON's hint
+   tells you whether the problem is the address, the token, or the hub service
+   not running.
+4. Done — hand over to the `invest` skill.
 
-**注意**：路径 B **不要跑 `init`**（远端模式下 init 被禁用并报错）；本机不会
-产生 `memory/`，所有数据留在 hub。
+**Note**: Path B **must not run `init`** (init is disabled in remote mode and will
+error); no `memory/` is created on this machine — all data stays on the hub.
 
-## 流程（4 步）
+## Flow (4 steps)
 
-### 1. 先跑 `doctor` 确认真的需要 setup
+### 1. Run `doctor` first to confirm setup is really needed
 
 ```bash
 ~/.claude/skills/invest-setup/scripts/run.sh doctor
 ```
 
-返回 `status: "ready"` → **立即退出**，告诉用户 "已经 onboard 过了，用 `invest`
-skill 即可"。
+Returns `status: "ready"` → **exit immediately** and tell the user "you're already
+onboarded — just use the `invest` skill".
 
-返回 `status: "needs_setup"` → 进 step 2。
+Returns `status: "needs_setup"` → go to step 2.
 
-### 2. 问用户 5 个问题（Coordinator 路径用 `AskUserQuestion`，Direct 路径用对话工具）
+### 2. Ask the user 5 questions (use `AskUserQuestion` on the Coordinator path, your conversational tool on the Direct path)
 
-| # | 问 | 备注 |
+| # | Ask | Notes |
 |---|------|------|
-| Q1 | 怎么称呼你？ | display name，不愿给就 `Anonymous` |
-| Q2 | 风险偏好？ | `Conservative` / `Balanced` / `Aggressive` |
-| Q3 | 月收入 / 月支出 / 换汇周转金 (CNY)？ | 三个数；都可填 0 跳过 |
-| Q4 | **当前持有什么？**（自由描述）| 自然语言，见下面 |
-| Q5 | DeepSeek API key & Gmail App Password？ | **可选**。Coordinator 路径不需要 |
+| Q1 | What should we call you? | display name; `Anonymous` if they'd rather not say |
+| Q2 | Risk tolerance? | `Conservative` / `Balanced` / `Aggressive` |
+| Q3 | Monthly income / monthly expenses / FX working buffer (CNY)? | three numbers; all can be 0 to skip |
+| Q4 | **What do you currently hold?** (free-form description) | natural language, see below |
+| Q5 | DeepSeek API key & Gmail App Password? | **Optional**. Not needed on the Coordinator path |
 
-#### Q4 自然语言（关键改动 2026-05）
+#### Q4 natural language (key change 2026-05)
 
-**不要按字段问**。让用户一句话描述持仓：
+**Do not ask field by field**. Let the user describe their holdings in one sentence:
 
-> "510300 沪深 300 ETF 3000 股 4.2 元，招行朝朝宝 8 万，工行积存金 50 克 750 均价"
-> "AAPL 100 股 150 美元成本，BTC 0.3 个，CNY 现金 5 万"
-> "什么都没有，就 1 万块 CNY"
+> "510300 CSI 300 ETF, 3000 shares at 4.2 CNY; 80k in CMB Zhaozhaobao; 50 grams of ICBC gold accumulation at 750 average cost"
+> "AAPL 100 shares at 150 USD cost, 0.3 BTC, 50k CNY cash"
+> "Nothing at all, just 10k CNY"
 
-后端 `cmd_init` 看到 `holdings_description` 字段会调 DeepSeek 解析成 v2 schema。
-**没 DeepSeek key 时回退到 v1 字段**（只写 cash_cny / aud_cash 进 portfolio），
-**告诉用户这一点**。
+When the backend `cmd_init` sees a `holdings_description` field it calls DeepSeek to
+parse it into the v2 schema. **Without a DeepSeek key it falls back to v1 fields**
+(only cash_cny / aud_cash get written into the portfolio) —
+**tell the user about this**.
 
-边界规则告诉用户（不强制）：
-- A 股直接说代码（`510300`），不需要 `.SS` 后缀
-- 港股 / 美股说 ticker（`0700.HK` 或 "腾讯"）
-- 加密直接说币种（`BTC` / `ETH`）
-- 余额宝 / 朝朝宝 / 货币基金 → 解析器归到 cash，不进 holdings
+Boundary rules to tell the user (not enforced):
+- For A-shares, just say the code (`510300`) — no `.SS` suffix needed
+- For HK / US stocks, say the ticker (`0700.HK` or "Tencent")
+- For crypto, just say the coin (`BTC` / `ETH`)
+- Yu'ebao / Zhaozhaobao / money-market funds → the parser routes them into cash, not holdings
 
-### 3. wealth_context（可选 但推荐问）
+### 3. wealth_context (optional but recommended)
 
-如果用户透露 "这账户是零花钱" / "我有备用金" / "家族 backup" → 多问一句：
+If the user reveals "this account is pocket money" / "I have an emergency reserve" /
+"family backup" → ask one more question:
 
-> 你 portfolio 外有应急金 / 家族 backup 吗？大概多少？（家族资金**不能**用于
-> 投资，只用于消除"低现金=高风险"的误判）
+> Do you have an emergency fund / family backup outside this portfolio? Roughly how
+> much? (Family funds **cannot** be used for investing — they only serve to prevent
+> the "low cash = high risk" misjudgment.)
 
-记到 wealth_context：
+Record it into wealth_context:
 ```yaml
 wealth_context:
-  emergency_buffer_cny: 200000  # 或用户给的数
+  emergency_buffer_cny: 200000  # or whatever number the user gives
   family_backup_available: true
-  account_purpose: "零花钱账户"  # 用户原话
+  account_purpose: "pocket-money account"  # the user's own words
   lifestyle_notes: "..."
 ```
 
-详见 [docs/wiki/12-verification.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/12-verification.md)
-主张 7（WealthContextOfficer）。
+See [docs/wiki/12-verification.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/12-verification.md)
+claim 7 (WealthContextOfficer) for details.
 
-### 4. 拼 payload + 跑 init
+### 4. Assemble the payload + run init
 
 ```bash
 echo '{
@@ -128,59 +135,63 @@ echo '{
   "monthly_income_cny": 30000,
   "monthly_expense_cny": 15000,
   "exchange_buffer_cny": 10000,
-  "holdings_description": "<Q4 用户原话>",
-  "wealth_context": { ... },   # 可选
-  "deepseek_api_key": "...",   # 可选
-  "gmail_app_password": "..."  # 可选
+  "holdings_description": "<the user's exact words from Q4>",
+  "wealth_context": { ... },   # optional
+  "deepseek_api_key": "...",   # optional
+  "gmail_app_password": "..."  # optional
 }' | ~/.claude/skills/invest-setup/scripts/run.sh init --from-stdin
 ```
 
-返回 JSON：
+Returns JSON:
 ```json
 {
   "status": "ok",
-  "holdings_parse_note": "...",  // 自然语言解析结果，**给用户看一眼**
+  "holdings_parse_note": "...",  // natural-language parse result, **show it to the user**
   "memory_root": "/path/...",
-  "next_step": "用 invest skill 跑 status 看持仓"
+  "next_step": "run status via the invest skill to view holdings"
 }
 ```
 
-### 5. 确认 + 移交
+### 5. Confirm + hand over
 
-跑完后：
-1. 把 `holdings_parse_note` 渲染给用户看（让他确认解析对了）
-2. 跑 `doctor` 再确认 status: "ready"
-3. **告诉用户**："✓ Onboarding 完成。下次你说'看持仓' / '分析 X' 时会自动用
-   invest skill。如果需要重新配置说 'reset invest'"。
+After it finishes:
+1. Render `holdings_parse_note` to the user (so they can confirm the parse is correct)
+2. Run `doctor` again to confirm status: "ready"
+3. **Tell the user**: "✓ Onboarding complete. Next time you say 'show portfolio' /
+   'analyze X', the invest skill kicks in automatically. To reconfigure, say
+   'reset invest'."
 
-## 错误处理
+## Error handling
 
-- **DeepSeek 解析超时**：报错给用户，让用户用 v1 字段重填（aud / cny / ndq_units / gold_grams）
-- **schema validation fail**：通常是字段类型不对，看 `init` 返回的 error 字段
-- **user_profile.json 已存在**：拒绝覆盖，让用户加 `--force` 显式确认
+- **DeepSeek parse timeout**: report the error to the user and have them re-enter using v1 fields (aud / cny / ndq_units / gold_grams)
+- **schema validation fail**: usually a wrong field type — check the error field in the `init` response
+- **user_profile.json already exists**: refuse to overwrite; have the user add `--force` to confirm explicitly
 
-## 常见问题
+## FAQ
 
-### Q: 我用千问 / 智谱替代 DeepSeek，跑不通
-A: 改 `.env` 时 **model name 也要改**：
+### Q: I swapped DeepSeek for Qwen / Zhipu and it doesn't work
+A: When editing `.env`, **the model name must change too**:
 
 ```env
 LLM_API_KEY=...
 LLM_BASE_URL=...
-LLM_MODEL=qwen-max         # ← 别忘了
+LLM_MODEL=qwen-max         # ← don't forget this
 ```
 
-只改 API key + base_url 但 model 还是 `deepseek-chat` → 上游返回 400
-"model not found"。每家 provider 的 model 名都不一样，去对应官网查。
+Changing only the API key + base_url while the model stays `deepseek-chat` → the
+upstream returns 400 "model not found". Every provider names its models differently —
+check the provider's own site.
 
-### Q: 跑完委员会决策回放空白
-A: 看 `memory/.committee/<today>/<asset>.md` 文件是否生成。没生成说明
-调用过程出错了——跑 `run.sh doctor` 看哪一项 hint 红了。
+### Q: The committee decision replay is blank after a run
+A: Check whether the `memory/.committee/<today>/<asset>.md` file was generated. If
+not, something failed during the call — run `run.sh doctor` and see which item's
+hint is red.
 
-### Q: 代码好像比示例网站旧
-A: 跑 `run.sh update`（从 PyPI 拉最新版）。openInvest 还在快速迭代。
+### Q: The code seems older than the demo site
+A: Run `run.sh update` (pulls the latest release from PyPI). openInvest is still
+iterating quickly.
 
 ## References
 
-详细 5 步流程在原版 `references/onboarding.md`（179 行）。本 SKILL.md 是精简
-agent-触发指引。
+The detailed 5-step flow lives in the original `references/onboarding.md` (179 lines).
+This SKILL.md is the condensed agent-trigger guide.
