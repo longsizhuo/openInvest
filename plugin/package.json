@@ -1,6 +1,6 @@
 {
   "name": "openinvest",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Self-hosted multi-asset AI investment committee — 4 LLM roles debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict. Never places real orders.",
   "author": "longsizhuo",
   "license": "MIT",
