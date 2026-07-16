@@ -1,90 +1,96 @@
-# 工具清单（CLI 子命令 + Web API 端点）
+# Tool Catalog (CLI subcommands + Web API endpoints)
 
-> 本文件是**工具文档**——SKILL.md 只管 workflow（issue #133 Decision 6：
-> Tool Usage 交给 MCP schema 自动发现，Skill 收缩为编排协议）。
+> This file is the **tool documentation** — SKILL.md only covers workflow (issue #133 Decision 6:
+> Tool Usage is delegated to MCP schema auto-discovery; the Skill shrinks to the orchestration protocol).
 >
-> - **MCP 用户**（Claude Code plugin / codex mcp）：18 个工具带 schema 自动发现，
->   通常不用读本文件；MCP 没覆盖的长尾端点（trades/config/events/...）才来查表
-> - **CLI/REST agent**（Gemini / Cursor / 脚本）：本文件是完整参考
+> - **MCP users** (Claude Code plugin / codex mcp): the 18 tools come with auto-discovered schemas,
+>   so you usually don't need this file; only consult this table for the long-tail endpoints MCP
+>   doesn't cover (trades/config/events/...)
+> - **CLI/REST agents** (Gemini / Cursor / scripts): this file is the complete reference
 
-## 子命令一览
+## Subcommand overview
 
-| 命令 | 路径 | 用在 | 返回 |
+| Command | Path | Use for | Returns |
 |------|------|------|------|
-| `doctor` | 通用 | 必跑第一步 | JSON，`status: "ready"` 或 `"needs_setup"` |
-| `init [--from-stdin] [--force]` | 通用 | **不在本 skill 用**，首次安装走 `invest-setup` skill | — |
-| `status` | 通用 | 看持仓 | 现金 + holdings + 实时价 + P&L |
-| `strategy` | 通用 | 看策略 | target_assets + Dreaming insights |
-| `history [-n N]` | 通用 | 看流水 | 最近 N 笔交易 + 委员会决议 |
-| `live_prices` | 通用 | 背景行情 | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
-| `discipline` | 通用 | "委员会拦了什么/纪律如何" | 不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实省/费钱(只读零 LLM，对齐 ADR-023)。等价 `GET /api/discipline` |
-| `decisions [--days N]` | 通用 | "我听了几次建议/哪些没执行" | 决议↔干预↔执行↔结果 join + 采纳率(只读零 LLM)。等价 `GET /api/decisions`（issue #133 Decision 9）|
-| `ingest_event` | 写 | agent 投喂新闻进事件账本（归一化+判级，幂等；需后端 LLM key）| `--title --url [--snippet --source --ts]` |
-| `record_execution DECISION_ID [--rejected] [--reason "..."]` | 通用 写 | 用户说"我没买/我买了"时回写 | 幂等追加 executions.jsonl。**用户拒绝建议时主动问一句原因再记**（Reason Loop 采集端在你这里）。等价 `POST /api/decisions/execution` |
-| `what_if [--symbol X --pct N \| --gold-pct N \| --ndq-pct N]` | 通用 | "X 跌 Y% 我亏多少" | 算术情景，无 LLM |
-| `correlate --symbols A,B[,C...] [--period 6mo] [--with-llm]` | "btw" 附带 | 用户**顺嘴问**"A 跟 B 像不像"（不写入 memory/.committee，纯查询返回）| pairwise 相关矩阵 + sector + macro 关联 |
-| `prepare_committee SYM` | Coordinator | 拿 brief 给 4 subagent | brief JSON + 6 段 prompts |
-| `save_committee SYM` | Coordinator | 落盘 transcript | stdin 4 段输出 → markdown |
-| `run_committee SYM [--force]` | Direct | 一键完整委员会 | verdict JSON + CIO memo |
-| `deposit -c CCY -a N` | 通用 写 | 存入现金（任意币种） | JSON 新余额 |
-| `withdraw -c CCY -a N` | 通用 写 | 取出现金，余额不足报错 | JSON 新余额 |
-| `buy --symbol S --units N --price P [-c CCY] [--kind etf/equity/...]` | 通用 写 | 加仓 / 建仓（加权平均成本） | JSON action + 估算成本 |
-| `sell --symbol S --units N --price P` | 通用 写 | 减仓（按 holding cost_currency 还现金） | JSON 剩余 units |
-| `delete_holding --symbol S [--force]` | 通用 写 | 删除持仓行（units 必须 0 或 --force） | JSON 已删 |
-| `import [--file F \| --text T] [--commit]` | 通用 读/写 | 自由文本/CSV 持仓描述 → LLM 解析成结构化持仓（券商持仓粘贴、批量录入）。默认只预览；`--commit` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种，重复导入幂等）。等价 POST /api/holdings/import | JSON `{parsed, committed, summary?}` |
-| `config [--set KEY VALUE] [--clear KEY]` | 通用 读/写 | 读/改可经 API 配置的白名单参数（concentration_lens / **cash_opportunity_cost_rule**（机会成本规则，默认 OFF，ADR-024）/ risk_profile / gold_defense_dca / dreaming.llm_verify / **dca.auto_dca_enabled / dca.auto_dca_amount_cny**——自动定投开关与金额，ADR-018 / **event.watch_schedule**——event_watch 扫描窗口 crontab（按 Asia/Shanghai 解释，默认北京 8:00-次日 2:30；scheduler ≤10 分钟自动拾取，改完无需重启）/ **event.sentinel_enabled / event.sentinel_atr_mult / event.sentinel_cooldown_min / event.sentinel_schedule**——价格异动哨兵（垂直线检测，先报警邮件后触发委员会，ADR-025）：总开关 / 触发倍数(×日ATR，默认 0.8) / 同symbol同方向冷却分钟数(默认 120) / 扫描窗口 crontab(默认 5 分钟一次)，另有 event.*/staleness.* 若干，全量见 GET /api/config）。无参=读全部。等价 GET/PUT /api/config（ADR-017）| JSON 全部生效值 |
+| `doctor` | Universal | Mandatory first step | JSON, `status: "ready"` or `"needs_setup"` |
+| `init [--from-stdin] [--force]` | Universal | **Not used in this skill** — first-time installation goes through the `invest-setup` skill | — |
+| `status` | Universal | View portfolio | cash + holdings + live prices + P&L |
+| `strategy` | Universal | View strategy | target_assets + Dreaming insights |
+| `history [-n N]` | Universal | View the transaction log | last N trades + committee verdicts |
+| `live_prices` | Universal | Background market data | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
+| `discipline` | Universal | "what did the committee block / how is my discipline" (委员会拦了什么/纪律如何) | inaction rate (HOLD share) + count of blocked impulsive actions + counterfactual money saved/lost (read-only, zero LLM, aligned with ADR-023). Equivalent to `GET /api/discipline` |
+| `decisions [--days N]` | Universal | "how many recommendations did I follow / which ones weren't executed" (我听了几次建议/哪些没执行) | verdict↔intervention↔execution↔outcome join + adoption rate (read-only, zero LLM). Equivalent to `GET /api/decisions` (issue #133 Decision 9) |
+| `ingest_event` | Write | agent feeds news into the event ledger (normalization + severity grading, idempotent; requires backend LLM key) | `--title --url [--snippet --source --ts]` |
+| `record_execution DECISION_ID [--rejected] [--reason "..."]` | Universal, write | Write back when the user says "I didn't buy / I bought it" (我没买/我买了) | Idempotent append to executions.jsonl. **When the user rejects a recommendation, proactively ask why before recording** (you are the collection end of the Reason Loop). Equivalent to `POST /api/decisions/execution` |
+| `what_if [--symbol X --pct N \| --gold-pct N \| --ndq-pct N]` | Universal | "how much do I lose if X drops Y%" (X 跌 Y% 我亏多少) | Arithmetic scenario, no LLM |
+| `correlate --symbols A,B[,C...] [--period 6mo] [--with-llm]` | "btw" side-query | The user **asks in passing** "do A and B move alike?" (A 跟 B 像不像) (no writes to memory/.committee; pure query, returns results) | pairwise correlation matrix + sector + macro linkage |
+| `prepare_committee SYM` | Coordinator | Get the brief for the 4 subagents | brief JSON + 6 prompt sections |
+| `save_committee SYM` | Coordinator | Persist the transcript to disk | 4-section output via stdin → markdown |
+| `run_committee SYM [--force]` | Direct | One-shot full committee | verdict JSON + CIO memo |
+| `deposit -c CCY -a N` | Universal, write | Deposit cash (any currency) | JSON new balance |
+| `withdraw -c CCY -a N` | Universal, write | Withdraw cash; errors on insufficient balance | JSON new balance |
+| `buy --symbol S --units N --price P [-c CCY] [--kind etf/equity/...]` | Universal, write | Add to / open a position (weighted average cost) | JSON action + estimated cost |
+| `sell --symbol S --units N --price P` | Universal, write | Reduce a position (returns cash per the holding's cost_currency) | JSON remaining units |
+| `delete_holding --symbol S [--force]` | Universal, write | Delete a holding row (units must be 0, or use --force) | JSON deleted |
+| `import [--file F \| --text T] [--commit]` | Universal, read/write | Free-text/CSV holdings description → LLM-parsed structured holdings (broker-position paste, bulk entry). Preview-only by default; `--commit` performs a non-destructive write (only adds new symbols; cash only fills currencies currently at 0; re-importing is idempotent). Equivalent to POST /api/holdings/import | JSON `{parsed, committed, summary?}` |
+| `config [--set KEY VALUE] [--clear KEY]` | Universal, read/write | Read/modify the whitelist of API-configurable parameters (concentration_lens / **cash_opportunity_cost_rule** (opportunity-cost rule, default OFF, ADR-024) / risk_profile / gold_defense_dca / dreaming.llm_verify / **dca.auto_dca_enabled / dca.auto_dca_amount_cny** — auto-DCA switch and amount, ADR-018 / **event.watch_schedule** — event_watch scan-window crontab (interpreted in Asia/Shanghai; default Beijing 8:00 to 2:30 next day; the scheduler picks changes up automatically within ≤10 minutes, no restart needed) / **event.sentinel_enabled / event.sentinel_atr_mult / event.sentinel_cooldown_min / event.sentinel_schedule** — price-anomaly sentinel (vertical-move detection; sends an alert email first, then triggers the committee, ADR-025): master switch / trigger multiple (× daily ATR, default 0.8) / cooldown minutes for the same symbol + same direction (default 120) / scan-window crontab (default every 5 minutes). There are also several event.*/staleness.* keys — see GET /api/config for the full list). No args = read everything. Equivalent to GET/PUT /api/config (ADR-017) | JSON of all effective values |
 
-**子命令名是封闭集合 —— 上表之外的命令都不存在**。看到自己想调
-`get_committee_context` / `analyze_asset` / `pull_brief` 这种名字时，停下，
-回上表对照 —— 你大概率是在脑补不存在的命令名，应该选 `prepare_committee` 或
-`run_committee`。
+**The subcommand names are a closed set — any command not in the table above does not exist.**
+When you catch yourself wanting to call `get_committee_context` / `analyze_asset` / `pull_brief`
+or names like that, stop and check against the table — you are most likely hallucinating a
+nonexistent command name and should pick `prepare_committee` or `run_committee` instead.
 
-输出都是 JSON。**始终从 JSON 引用数字**，不从 `memory/*.md` markdown 读
-（markdown body 是 frontmatter 的渲染产物，可能略滞后）。
+All output is JSON. **Always quote numbers from the JSON**, never from the `memory/*.md`
+markdown (the markdown body is rendered from the frontmatter and may lag slightly behind).
 
-### 从券商 App **截图**导入持仓（你来 OCR，后端零依赖）
+### Importing holdings from broker-app **screenshots** (you do the OCR; zero backend dependency)
 
-用户发券商持仓**截图**时：**你自己读图**（你有视觉能力），把每行转成
-`symbol/数量/成本/币种/渠道` 的文字，再走 `import --text "..."`（或 POST
-/api/holdings/import）。后端 `import` 的 LLM 只解析**文字**——不要把图片塞给它
-（DeepSeek/多数 chat 模型不收图，会报错）。即：截图 → 你转文字 → import，
-比让后端 OCR 更准、且不挑后端模型。先 `--text`（不带 `--commit`）让用户核对预览，
-确认后再 `--commit` 非破坏写入。
+When the user sends a **screenshot** of broker holdings: **read the image yourself** (you have
+vision), convert each row into text as `symbol/units/cost/currency/channel`, then run
+`import --text "..."` (or POST /api/holdings/import). The backend `import`'s LLM parses **text
+only** — do not feed it the image (DeepSeek and most chat models don't accept images and will
+error). In short: screenshot → you transcribe to text → import. This is more accurate than
+backend OCR and doesn't depend on the backend model. Run `--text` first (without `--commit`)
+so the user can verify the preview, then `--commit` for the non-destructive write.
 
-## Web API 写操作端点（agent 也能调）
+## Web API write endpoints (agents can call these too)
 
-**产品哲学**：agent（你）拥有 openInvest 全部功能。**优先走 CLI 子命令 / MCP 工具**；
-只有 CLI/MCP 没覆盖的长尾操作才 curl 下面端点（默认 :8765）。Web API 已标记
-deprecated（GUI 退役，存量端点服务 remote hub 模式，不再新增端点）。remote 场景优先用 hub 的 remote MCP（`openinvest-mcp --http`，18 工具直连），REST 转发只兜 MCP 没有的长尾。
+**Product philosophy**: the agent (you) has access to ALL of openInvest's functionality.
+**Prefer CLI subcommands / MCP tools**; only curl the endpoints below (default :8765) for
+long-tail operations not covered by CLI/MCP. The Web API is marked deprecated (the GUI is
+retired; the remaining endpoints serve remote hub mode, and no new endpoints will be added).
+For remote scenarios, prefer the hub's remote MCP (`openinvest-mcp --http`, 18 tools direct);
+REST forwarding only backfills the long tail MCP doesn't cover.
 
-用户说"记一笔交易"/"我打算买 X"/"标记成交"/"加新资产"时调这些：
+Call these when the user says "record a trade" (记一笔交易) / "I plan to buy X" (我打算买 X) /
+"mark as executed" (标记成交) / "add a new asset" (加新资产):
 
-| 端点 | 用在 | body 简例 |
+| Endpoint | Use for | Example body |
 |------|------|-----------|
-| `GET /api/user` | **分析战况前必读**，拿 wealth_context（家族 backup / 账户性质 / 应急金）—— 决定怎么解释集中度 + 低现金 | — |
-| `PUT /api/user/wealth_context` | 用户改家族 backup / 账户性质 / **月度补充额（开口池）**等（用户口述后 agent 代填）| `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?, monthly_contribution_cny?}` |
-| `POST /api/trades/record` | **记一笔意向交易**（不连真实支付，只内部账本）| `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
-| `GET /api/trades?limit=N` | 看最近 N 笔意向 / 已成交 | — |
-| `PATCH /api/trades/{id}/status` | **标记成交**（status: "executed"）→ 自动同步 portfolio.md（更新 holdings + 扣 cash）| `{status: "executed"}` |
-| `POST /api/holdings` | 新增 yfinance 跟踪资产（不下单，只录入持仓数据）| `{symbol, kind, units, avg_cost, cost_currency, channel?}` |
-| `POST /api/holdings/import` | 自由文本/CSV 持仓描述 → LLM 解析（券商持仓粘贴、批量录入）。`commit:false` 只预览不落盘；`commit:true` 非破坏写入（只加新 symbol、cash 只填当前为 0 的币种）。需后端 LLM key | `{content, commit?}` |
-| `PUT /api/holdings/{symbol}` | 改持仓字段 | `{units?, avg_cost?, channel?}` |
-| `POST /api/deposit` / `/api/withdraw` | 调 cash 现金 | `{currency: "CNY"\|"AUD"\|..., amount}` |
-| `POST /api/gold/buy` / `/sell` | 黄金买卖（含 sell_fee 自动算）| `{grams, price_per_gram}` |
-| `POST /api/strategy/asset` | 加 target_assets 条目。**已有原生对等入口**：MCP `track_asset` / CLI `track_asset`（另有 `untrack_asset`、`set_allocations`），优先用原生，别再 curl | `{symbol, channel?, max_single_invest_cny}` |
-| `GET /api/events/recent?hours=24&min_severity=low&limit=50` | 列最近 N 小时事件层感知的新闻（ADR-006）。debug / "系统现在感知到什么" | — |
-| `GET /api/discipline` | 委员会纪律台账：不作为率(HOLD 占比) + 拦截冲动操作次数 + 反事实损益（对齐 ADR-023，agent 展示"它拦了什么"）| — |
-| `GET /api/decisions?days=90` | 统一决策视图：决议↔干预↔执行↔结果 join + 采纳率（issue #133 Decision 9）| — |
-| `POST /api/decisions/execution` | 回写用户对某决议的执行/拒绝+原因（幂等，ADR-016）| `{decision_id: "2026-07-03/GC=F", executed: false, reason?: "..."}` |
-| `POST /api/events/check` | 手动跑一次 event_watch（拉新闻 + 归一化 + 入库 + 命中触发委员会）。同步 30-90s | — |
-| `GET /api/config` | 看可经 API 配置的白名单参数当前生效值（+ 是否被 override + 元信息）| — |
-| `PUT /api/config` | 改一条白名单 override（落盘持久、跨进程共读，优先级高于 env；ADR-017）| `{key, value}`，如 `{"key":"verdict.concentration_lens_enabled","value":false}` |
-| `DELETE /api/config/{key}` | 删一条 override 回退默认 | — |
+| `GET /api/user` | **Read before any portfolio analysis** — get wealth_context (family backup / account purpose / emergency fund), which determines how to interpret concentration + low cash | — |
+| `PUT /api/user/wealth_context` | The user updates family backup / account purpose / **monthly contribution (open-ended pool)** etc. (the user dictates, the agent fills it in) | `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?, monthly_contribution_cny?}` |
+| `POST /api/trades/record` | **Record an intended trade** (no real payment connection; internal ledger only) | `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
+| `GET /api/trades?limit=N` | View the last N intended / executed trades | — |
+| `PATCH /api/trades/{id}/status` | **Mark as executed** (status: "executed") → auto-syncs portfolio.md (updates holdings + deducts cash) | `{status: "executed"}` |
+| `POST /api/holdings` | Add a yfinance-tracked asset (places no order; only records holding data) | `{symbol, kind, units, avg_cost, cost_currency, channel?}` |
+| `POST /api/holdings/import` | Free-text/CSV holdings description → LLM parse (broker-position paste, bulk entry). `commit:false` previews only, no write; `commit:true` non-destructive write (only adds new symbols; cash only fills currencies currently at 0). Requires backend LLM key | `{content, commit?}` |
+| `PUT /api/holdings/{symbol}` | Modify holding fields | `{units?, avg_cost?, channel?}` |
+| `POST /api/deposit` / `/api/withdraw` | Adjust cash | `{currency: "CNY"\|"AUD"\|..., amount}` |
+| `POST /api/gold/buy` / `/sell` | Gold buy/sell (sell_fee computed automatically) | `{grams, price_per_gram}` |
+| `POST /api/strategy/asset` | Add a target_assets entry. **Native equivalents already exist**: MCP `track_asset` / CLI `track_asset` (plus `untrack_asset`, `set_allocations`) — prefer the native ones; stop curling this | `{symbol, channel?, max_single_invest_cny}` |
+| `GET /api/events/recent?hours=24&min_severity=low&limit=50` | List news perceived by the event layer in the last N hours (ADR-006). For debugging / "what is the system currently aware of" (系统现在感知到什么) | — |
+| `GET /api/discipline` | Committee discipline ledger: inaction rate (HOLD share) + count of blocked impulsive actions + counterfactual P&L (aligned with ADR-023; lets the agent show "what it blocked") | — |
+| `GET /api/decisions?days=90` | Unified decision view: verdict↔intervention↔execution↔outcome join + adoption rate (issue #133 Decision 9) | — |
+| `POST /api/decisions/execution` | Write back the user's execution/rejection of a verdict + the reason (idempotent, ADR-016) | `{decision_id: "2026-07-03/GC=F", executed: false, reason?: "..."}` |
+| `POST /api/events/check` | Manually run event_watch once (fetch news + normalize + store + trigger the committee on hits). Synchronous, 30-90s | — |
+| `GET /api/config` | View the current effective values of the API-configurable whitelist parameters (+ whether overridden + metadata) | — |
+| `PUT /api/config` | Set one whitelist override (persisted to disk, shared across processes, takes precedence over env; ADR-017) | `{key, value}`, e.g. `{"key":"verdict.concentration_lens_enabled","value":false}` |
+| `DELETE /api/config/{key}` | Delete an override, reverting to the default | — |
 
-**典型流程**：用户说"我打算..."/"刚买了 X"/"我的持仓多了 Y" → 用
-`POST /api/trades/record`（带 intended_date 区分计划 vs 已成交）→ 真实成交后用
-`PATCH .../status executed`，后端会**自动更新 portfolio.md**（加权均价 + cash 扣减），
-不需要你再调别的接口。
+**Typical flow**: the user says "I plan to..." (我打算...) / "just bought X" (刚买了 X) / "my
+position in Y grew" (我的持仓多了 Y) → use `POST /api/trades/record` (with intended_date to
+distinguish planned vs executed) → once actually executed, use `PATCH .../status executed`;
+the backend **automatically updates portfolio.md** (weighted average cost + cash deduction) —
+you don't need to call anything else.
 
-**完整 OpenAPI**：`http://127.0.0.1:8765/openapi.json` 查所有端点 + Pydantic schema。
-
+**Full OpenAPI**: `http://127.0.0.1:8765/openapi.json` lists every endpoint + Pydantic schema.

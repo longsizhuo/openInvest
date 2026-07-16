@@ -1,82 +1,85 @@
-# 故障排查（doctor 全绿但还出错时读）
+# Troubleshooting (read when doctor is all green but things still fail)
 
-## `status` 成功但实时价是 0 或缺失
+## `status` succeeds but live prices are 0 or missing
 
-**原因**：yfinance 被限速，或资产所在市场闭市 + DB cache fallback 没建。
+**Cause**: yfinance is rate-limited, or the asset's market is closed and the DB cache fallback
+hasn't been built.
 
-看返回的 quote——每个都有 `is_stale` flag。`true` 表示价格来自本地 DB cache
-（`db/market_data.db`），不是实时。
+Look at the returned quotes — each carries an `is_stale` flag. `true` means the price came from
+the local DB cache (`db/market_data.db`), not live data.
 
-**修法**：告诉用户"实时数据源不可达，用的是缓存数据（X 天前）。建议过几分钟再试，
-或检查 `db/market_data.db` 是否被定期更新"。
+**Fix**: tell the user "the live data source is unreachable; showing cached data (X days old).
+Try again in a few minutes, or check whether `db/market_data.db` is being updated regularly."
 
-## `prepare_committee X` 返回 `{"error": "asset X not in strategy.target_assets"}`
+## `prepare_committee X` returns `{"error": "asset X not in strategy.target_assets"}`
 
-`prepare_committee` 只对 `strategy.target_assets` 里的资产工作。用户想分析没追踪的
-symbol：
+`prepare_committee` only works on assets in `strategy.target_assets`. If the user wants to
+analyze an untracked symbol:
 
-1. 先用 CLI `run.sh buy`（有真实持仓时）或 `POST /api/strategy/asset` 加进
-   `target_assets`——见 `references/adding-assets.md`
-2. 或通过 `POST /api/holdings` 加成追踪仓（`is_tracking_only: true`）——效果一样，
-   不动 strategy
+1. First add it to `target_assets` via CLI `run.sh buy` (when there's a real position) or
+   `POST /api/strategy/asset` — see `references/adding-assets.md`
+2. Or add it as a tracking-only holding via `POST /api/holdings` (`is_tracking_only: true`) —
+   same effect, without touching strategy
 
-委员会不管是否持有都能分析，但需要 `target_assets` 配置（cap / fee / channel 信息）。
+The committee can analyze an asset whether or not it's held, but it needs the `target_assets`
+config (cap / fee / channel info).
 
-## Worker（`Agent` 调用）报错 "no such tool"
+## Worker (`Agent` call) errors with "no such tool"
 
-你不在 Claude Code 里（或者当前 context 没有 `Agent` 工具）。Skill 模式需要
-orchestrator 能 spawn worker。
+You are not inside Claude Code (or the current context has no `Agent` tool). Skill mode requires
+an orchestrator that can spawn workers.
 
-**降级方案**：单对话 6 角色输出。读 brief 里 `prompts.{macro_strategist, quant_round1,
-risk_round1, quant_round2_after_risk, risk_round2_after_quant, cio}`，然后你内联写
-6 段（你自己扮演所有角色）。同样的 `=== MACRO ===` / `=== QUANT_R1 ===` / ...
-分隔符。`save_committee` 两种格式都接受。
+**Degraded fallback**: single-conversation 6-role output. Read `prompts.{macro_strategist, quant_round1,
+risk_round1, quant_round2_after_risk, risk_round2_after_quant, cio}` from the brief, then write
+all 6 sections inline (you play every role yourself). Use the same `=== MACRO ===` /
+`=== QUANT_R1 ===` / ... separators. `save_committee` accepts both formats.
 
-降级后失去真正的 context 隔离（信息会在你的单 context 里渗透）但至少能出 verdict。
+The fallback loses true context isolation (information bleeds across roles inside your single
+context) but at least produces a verdict.
 
-## `save_committee` 拒绝输入
+## `save_committee` rejects the input
 
-最常见原因：
-- 缺 6 个 section header 之一（`=== MACRO ===` 等）
-- header 拼写错
-- CIO 段是空的（你忘写了）
+Most common causes:
+- One of the 6 section headers is missing (`=== MACRO ===` etc.)
+- A header is misspelled
+- The CIO section is empty (you forgot to write it)
 
-parser 严格因为存盘的文件被 Dreaming 和 `decisions` / `explain_decision`
-决策回放消费。检查 6 段都在再重发。
+The parser is strict because the saved file is consumed by Dreaming and by the `decisions` /
+`explain_decision` decision replay. Check that all 6 sections are present, then resend.
 
-## 同日检查说有 verdict 但你没跑过
+## Same-day check says a verdict exists but you never ran one
 
-看是谁写的：
+Check who wrote it:
 
 ```bash
 head -5 "$INVEST_HOME/memory/.committee/$(date +%F)/<SYMBOL>.md"
 ```
 
-frontmatter 有 `Provider: claude (skill mode)` 或 `Provider: deepseek`。
-如果是 `deepseek`，cron `daily_report` 已经跑过 + 写过 verdict——你应该读那个
-拿给用户。只在用户明确想要 Claude 视角再重跑。
+The frontmatter contains `Provider: claude (skill mode)` or `Provider: deepseek`. If it's
+`deepseek`, the cron `daily_report` has already run and written a verdict — you should read that
+one and present it to the user. Only rerun if the user explicitly wants the Claude perspective.
 
-## 远端模式（INVEST_API_BASE）转发报错 / 连不上 hub
+## Remote mode (INVEST_API_BASE) forwarding errors / can't reach the hub
 
-`.env` 配了 `INVEST_API_BASE` 但子命令转发失败。检查 hub 机器：
+`.env` has `INVEST_API_BASE` set but subcommand forwarding fails. Check the hub machine:
 
-1. `ps aux | grep uvicorn` —— hub 上 web_api 在 :8765 跑吗？
-2. `curl $INVEST_API_BASE/api/health` —— 200 吗？（hub 开了鉴权就带
-   `Authorization: Bearer $INVEST_API_TOKEN`）
+1. `ps aux | grep uvicorn` — is web_api running on :8765 on the hub?
+2. `curl $INVEST_API_BASE/api/health` — does it return 200? (If the hub has auth enabled,
+   include `Authorization: Bearer $INVEST_API_TOKEN`)
 
-## `.env` 里有 DeepSeek key 但 `daily_report` 还报 401
+## `.env` has a DeepSeek key but `daily_report` still returns 401
 
-Key 多半拼错或被吊销。直接测：
+The key is most likely mistyped or revoked. Test it directly:
 
 ```bash
 curl -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
   https://api.deepseek.com/v1/models
 ```
 
-200 = key 有效，401 = key 失效。让用户去 https://platform.deepseek.com/api_keys
-重发一个。
+200 = key valid, 401 = key invalid. Have the user reissue one at
+https://platform.deepseek.com/api_keys.
 
-## 更深的故障
+## Deeper failures
 
 [docs/wiki/09-troubleshooting.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/09-troubleshooting.md)
-（项目仓库里）有 10 类症状 → 修法的完整目录。
+(in the project repository) has a complete catalog of 10 symptom classes → fixes.

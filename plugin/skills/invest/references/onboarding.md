@@ -1,53 +1,56 @@
-# Onboarding（doctor 返回 `needs_setup` 时读）
+# Onboarding (read when doctor returns `needs_setup`)
 
-用户还没第一次配。**永远不要**让用户"自己去编辑 user_profile.json"——那是
-skill 失败模式。两条路径都喂 stdin：
+The user hasn't done first-time setup yet. **Never** tell the user to "go edit
+user_profile.json yourself" — that is a skill failure mode. Both paths feed stdin:
 
-- **Coordinator 路径（Claude Code）**：你（Claude）用 `AskUserQuestion`
-  问下面 5 个问题，拼 JSON piped 给 `run.sh init --from-stdin`。
-- **Direct 路径（任意 agent）**：照样可以走 `init --from-stdin`，把答案
-  拼成 JSON 喂进去；问问题靠你自己的对话工具。
+- **Coordinator path (Claude Code)**: you (Claude) use `AskUserQuestion` to ask
+  the 5 questions below, assemble the JSON, and pipe it to `run.sh init --from-stdin`.
+- **Direct path (any agent)**: the same `init --from-stdin` works — assemble the
+  answers into JSON and feed it in; asking the questions relies on your own
+  conversation tooling.
 
-## 5 个问题（默认问，不要问"你追踪哪些 yfinance symbol"）
+## The 5 questions (ask these by default; do NOT ask "which yfinance symbols do you track")
 
-普通话提问（如果用户用其他语言，跟随用户）：
+Ask in Mandarin (if the user uses another language, follow the user):
 
-| # | 问 | 备注 |
+| # | Question | Notes |
 |---|------|------|
-| Q1 | 怎么称呼你？ | display name；用户不愿给就 `Anonymous` |
-| Q2 | 风险偏好？ | `Conservative` / `Balanced` / `Aggressive` 三选一 |
-| Q3 | 月收入 / 月支出 / 换汇周转金 (CNY)？ | 三个数。**都可填 0 跳过**（不影响委员会跑，只影响 Risk Officer 算 dry_powder）|
-| Q4 | **当前持有什么？**（自由描述）| 见下面 "Q4 自然语言"——不要按字段问 |
-| Q5 | DeepSeek API key & Gmail App Password？ | **可选**。Coordinator 路径（Claude Code 里说话）不需要任何 key 就能跑；只有想让服务器后台每天自动跑/发邮件才需要。详见下面 "Q5 详细" |
+| Q1 | What should I call you? | display name; use `Anonymous` if the user declines |
+| Q2 | Risk appetite? | pick one of `Conservative` / `Balanced` / `Aggressive` |
+| Q3 | Monthly income / monthly expenses / FX working buffer (CNY)? | Three numbers. **All can be 0 to skip** (doesn't affect committee runs; only affects the Risk Officer's dry_powder calculation) |
+| Q4 | **What do you currently hold?** (free-form description) | See "Q4 natural language" below — do NOT ask field by field |
+| Q5 | DeepSeek API key & Gmail App Password? | **Optional**. The Coordinator path (chatting inside Claude Code) runs without any keys; they're only needed if you want the server to run automatically every day in the background / send emails. See "Q5 details" below |
 
-### Q4 自然语言（核心改动 2026-05）
+### Q4 natural language (core change, 2026-05)
 
-**不要再硬编码 "NDQ.AX 股数 / 黄金克数 / aud_cash / cash_cny"**。让用户自由
-描述。后端 `cmd_init` 看到 `holdings_description` 字段会自动调 DeepSeek 解析
-成 v2 schema。
+**Stop hard-coding "NDQ.AX share count / gold grams / aud_cash / cash_cny"**. Let the user
+describe freely. When the backend `cmd_init` sees a `holdings_description` field, it
+automatically calls DeepSeek to parse it into the v2 schema.
 
-**问法**：
-> 用一句话告诉我你现在持有什么（资产 + 现金都说）。例：
-> "510300 沪深 300 ETF 3000 股 4.2 元，招行朝朝宝 8 万，工行积存金 50 克 750 均价"
-> "AAPL 100 股 150 美元成本，BTC 0.3 个，CNY 现金 5 万"
-> "什么都没有，就 1 万块 CNY"
+**How to ask**:
+> Tell me in one sentence what you currently hold (both assets and cash). Examples:
+> "510300 沪深 300 ETF 3000 股 4.2 元，招行朝朝宝 8 万，工行积存金 50 克 750 均价" (3000 units of the 510300 CSI 300 ETF at 4.2 yuan, 80k in CMB Zhaozhaobao, 50 grams of ICBC gold accumulation at 750 avg cost)
+> "AAPL 100 股 150 美元成本，BTC 0.3 个，CNY 现金 5 万" (100 AAPL shares at $150 cost, 0.3 BTC, 50k CNY cash)
+> "什么都没有，就 1 万块 CNY" (nothing at all, just 10k CNY)
 
-**几条边界规则告诉用户**（不强制，但帮 LLM 解析得准）：
-- A 股直接说代码（`510300`），不需要后缀
-- 港股 / 美股说 ticker（`0700.HK` 或干脆"腾讯"）
-- 加密直接说币种（`BTC` / `ETH`）
-- 余额宝 / 朝朝宝 / 银行理财 / 货币基金 → 解析器会归到 cash，不进 holdings
-- 没说均价 / 渠道也行，缺啥后端补默认
+**A few boundary rules to tell the user** (not mandatory, but they help the LLM parse accurately):
+- For A-shares, just say the code (`510300`) — no suffix needed
+- For HK / US stocks, say the ticker (`0700.HK`, or simply "腾讯 / Tencent")
+- For crypto, just say the coin (`BTC` / `ETH`)
+- Yu'ebao (余额宝) / Zhaozhaobao (朝朝宝) / bank wealth-management products / money-market funds → the parser folds these into cash; they don't enter holdings
+- Omitting the avg cost / channel is fine; the backend fills defaults for whatever's missing
 
-**回退路径**：
-- 如果用户**没有提供 DeepSeek key**（Q5 留空）：解析跑不了，cmd_init 会回退
-  到 v1 字段，只把 `cash_cny`、`aud_cash` 写进 portfolio。这种用户之后必须
-  用 CLI `run.sh buy <SYM> ...`（或同名 MCP 工具）加追踪资产。**告诉用户这点**。
-- 如果用户**真的什么都没有**：可以填 `"什么都没有，CNY 现金 0"`，pipeline 跑通就行。
+**Fallback paths**:
+- If the user **did not provide a DeepSeek key** (Q5 left blank): parsing can't run, and cmd_init
+  falls back to the v1 fields, writing only `cash_cny` and `aud_cash` into the portfolio. Such
+  users must later use CLI `run.sh buy <SYM> ...` (or the MCP tool of the same name) to add
+  tracked assets. **Tell the user this.**
+- If the user **truly holds nothing**: they can enter `"什么都没有，CNY 现金 0"` (nothing at all,
+  CNY cash 0) — as long as the pipeline goes through, that's fine.
 
-## 拼 payload
+## Assembling the payload
 
-收完答案：
+Once you have the answers:
 
 ```bash
 echo '{
@@ -57,8 +60,8 @@ echo '{
     "monthly_income_cny": <Q3a>,
     "monthly_expenses_cny": <Q3b>,
     "exchange_buffer_cny": <Q3c>,
-    "last_run_date": "<今天 YYYY-MM-DD>",
-    "holdings_description": "<Q4 用户原话，原样塞这里>",
+    "last_run_date": "<today YYYY-MM-DD>",
+    "holdings_description": "<Q4 user's answer, pasted here verbatim>",
     "current_assets": {"cash_cny": 0, "aud_cash": 0, "ndq_shares": 0},
     "investment_strategy": {
       "target_allocation_stock": 0.7,
@@ -67,70 +70,71 @@ echo '{
     }
   },
   "env": {
-    "DEEPSEEK_API_KEY": "<Q5a 或空字符串>",
+    "DEEPSEEK_API_KEY": "<Q5a or empty string>",
     "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
-    "EMAIL_SENDER": "<Q5b 或空字符串>",
-    "EMAIL_PASSWORD": "<Q5c 或空字符串>"
+    "EMAIL_SENDER": "<Q5b or empty string>",
+    "EMAIL_PASSWORD": "<Q5c or empty string>"
   }
 }' | ~/.claude/skills/invest/scripts/run.sh init --from-stdin
 ```
 
-`current_assets` 里那三个 v1 字段全填 0 也 OK——`holdings_description` 走通
-之后会**覆盖**写 portfolio.md（v2 schema 含完整 holdings list）。
+Filling all three v1 fields in `current_assets` with 0 is fine — once `holdings_description`
+goes through, it **overwrites** portfolio.md (v2 schema with the full holdings list).
 
-`init` 返回 JSON 里看 `holdings_parse_note`：
-- `"parsed via DeepSeek; portfolio.md overwritten with v2 schema"` → 成功
-- `"LLM parse failed (...); fell back to v1 fields"` → DeepSeek 出错，跑了 v1
-  兜底；告诉用户 + 让他之后用 CLI `buy` 重补
-- `"DEEPSEEK_API_KEY 缺失"` → Q5 没填 key，回退 v1。要么让用户填，要么让他
-  之后用 CLI `buy` 加资产
+In the JSON that `init` returns, check `holdings_parse_note`:
+- `"parsed via DeepSeek; portfolio.md overwritten with v2 schema"` → success
+- `"LLM parse failed (...); fell back to v1 fields"` → DeepSeek errored; the v1 fallback ran.
+  Tell the user + have them re-add the holdings later with CLI `buy`
+- `"DEEPSEEK_API_KEY 缺失"` (key missing) → no key given in Q5, fell back to v1. Either have the
+  user provide one, or have them add assets later with CLI `buy`
 
-`status: "ok"` 后**马上**再跑一次 `run.sh doctor` 确认 `status: "ready"`，
-然后回去执行用户最初的请求。
+After `status: "ok"`, **immediately** run `run.sh doctor` again to confirm `status: "ready"`,
+then go back and carry out the user's original request.
 
-## Q5 详细：DeepSeek key & Gmail App Password 怎么搞
+## Q5 details: how to get the DeepSeek key & Gmail App Password
 
-**两个都是可选**。如果用户在 Claude Code 里聊天就够，**两个都跳过没问题**——
-告诉用户："你直接说 '看看我的持仓' / '该不该加仓 X'，Claude 会帮你跑分析，
-不烧任何 token 也不用注册账号。"
+**Both are optional.** If chatting inside Claude Code is enough for the user, **skipping both is
+perfectly fine** — tell the user: "Just say 'show my portfolio' or 'should I add to X', and
+Claude will run the analysis for you — no tokens burned, no account registration needed."
 
-### LLM key（Direct 路径用，很多人叫它"DeepSeek key"但不是只能填 DeepSeek）
+### LLM key (used by the Direct path; many people call it the "DeepSeek key" but it isn't limited to DeepSeek)
 
-什么时候需要：**cron / 定时任务无人值守跑**（不管背后是哪个 agent）。
-交互场景（用户在场问"该不该买 X"）不需要——Claude Code / Hermes 等有子任务
-委派能力的 agent 走 Coordinator 协议，零 key。判定标准是"有没有人在场"，
-不是"用的什么 agent"，详见 SKILL.md"选路径"。
+When it's needed: **unattended cron / scheduled runs** (regardless of which agent is behind
+them). Interactive scenarios (a user present, asking "should I buy X") don't need it — agents
+with subtask-delegation ability such as Claude Code / Hermes use the Coordinator protocol, zero
+keys. The criterion is "is a human present", not "which agent is being used" — see "Choosing a
+path" in SKILL.md.
 
-任意 OpenAI 兼容端点都行（`.env` 填 `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`，
-`DEEPSEEK_*` 三件套仍兼容保留）：
-- **想零成本**：千问 / 智谱 / MiMo 等目前有免费额度的供应商都能接
-  （额度条款会变，去对应平台确认当前政策）
-- **不想比价**：[platform.deepseek.com](https://platform.deepseek.com) 注册 →
-  API keys 页面创建，复制 `sk-` 开头的字符串。日报量级（几个资产/天）成本
-  约 ¥0.01-0.03 一次，一个月不到 ¥2
+Any OpenAI-compatible endpoint works (set `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` in `.env`;
+the `DEEPSEEK_*` trio remains supported for compatibility):
+- **Want zero cost**: any provider currently offering free quotas — Qwen / Zhipu / MiMo etc. —
+  can be plugged in (quota terms change; confirm the current policy on each platform)
+- **Don't want to comparison-shop**: register at [platform.deepseek.com](https://platform.deepseek.com) →
+  create a key on the API keys page and copy the string starting with `sk-`. At daily-report
+  volume (a few assets/day) it costs about ¥0.01-0.03 per run, under ¥2 a month
 
-### Gmail App Password（用于发每日决议邮件）
+### Gmail App Password (for sending the daily verdict email)
 
-什么时候需要：用户想让 cron 跑完每日 daily_report 后给自己发邮件总结。
-**不发邮件就跳过**。
+When it's needed: the user wants an email summary sent to them after the cron daily_report
+finishes. **Skip it if no email is wanted.**
 
-去哪开（**告诉用户这个完整链接**）：
-1. Gmail 账号必须先开 2FA（[myaccount.google.com/security](https://myaccount.google.com/security)）
-2. 然后去 [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) 生成 16 位密码
-3. **不是登录密码** —— 是 16 位带空格的随机串，例如 `abcd efgh ijkl mnop`
+Where to get it (**give the user this full link**):
+1. The Gmail account must have 2FA enabled first ([myaccount.google.com/security](https://myaccount.google.com/security))
+2. Then go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) to generate the 16-character password
+3. **It is NOT the login password** — it's a 16-character random string with spaces, e.g. `abcd efgh ijkl mnop`
 
-### 用户跳过 Q5 后的引导（**关键**）
+### Guidance after the user skips Q5 (**critical**)
 
-`init` 完了，告诉用户：
-> 现在你可以直接对我说"看看我的持仓"或"该不该加仓 X"，我会帮你跑 4 角色 AI
-> 委员会分析。
+Once `init` is done, tell the user:
+> You can now simply say "show my portfolio" or "should I add to X", and I'll run the 4-role AI
+> committee analysis for you.
 
-**不要**说 "Coordinator 模式 / Direct 模式" 这种术语 —— 小白听不懂。
+**Do NOT** use jargon like "Coordinator mode / Direct mode" — beginners won't understand it.
 
-## 直接结构化喂 v2（高级用户 / 脚本场景）
+## Feeding structured v2 directly (advanced users / scripted scenarios)
 
-如果调用方已经能算 v2 schema（比如另一个 agent 解析了 broker statement），
-跳过 `holdings_description`，直接传 `holdings_v2`：
+If the caller can already produce the v2 schema (e.g. another agent parsed a broker statement),
+skip `holdings_description` and pass `holdings_v2` directly:
 
 ```json
 {
@@ -148,39 +152,43 @@ echo '{
 }
 ```
 
-`holdings_v2` 优先级高于 `holdings_description`（不调 LLM，省 token）。
+`holdings_v2` takes precedence over `holdings_description` (no LLM call — saves tokens).
 
-## 重新 onboarding
+## Re-onboarding
 
-`run.sh init --force` 会覆盖现有 `user_profile.json`。用户想从头开始时用这个。
-（不动 `.env`——那个是合并写入的）。
+`run.sh init --force` overwrites the existing `user_profile.json`. Use it when the user wants to
+start over. (It does not touch `.env` — that file is merge-written.)
 
-## 降级后必说话术
+## Mandatory phrasing after a degraded parse
 
-`cmd_init` 返回的 `holdings_parse_note` 值决定 agent 必须说的话。**不允许跳过，不允许只在
-`next_step` 里藏着、等用户追问才说**。
+The `holdings_parse_note` value returned by `cmd_init` determines what the agent MUST say. **You
+may not skip it, and you may not bury it in `next_step` and wait for the user to ask.**
 
-| `holdings_parse_note` 值（含以下关键词） | agent 必须对用户说的话（中文原文，不得改动要点） |
+| `holdings_parse_note` value (contains these keywords) | What the agent must say to the user (verbatim script — do not alter the key points) |
 |---|---|
-| `"DEEPSEEK_API_KEY 缺失"` | "你的持仓我暂时按基础模式记录了——只录了现金，没识别你说的具体股票。想让我自动识别 (510300 → 沪深300ETF 那种)，需要一个免费 DeepSeek API key，30 秒去 platform.deepseek.com 注册。要不要现在搞定？" |
-| `"LLM parse failed"` | "解析你说的持仓时出了点问题（DeepSeek 临时故障或网络超时），现在只录了现金部分。你可以等一会儿重跑 `run.sh init --force`，或者让我用 `run.sh buy` 帮你手动加股票。" |
-| `"parsed via DeepSeek"` 且 `user_review_required: true` | 读出 `parsed_holdings_for_user_review` 里每条持仓让用户确认，例："我理解你持有：A 3000 股 4.2 元、B 50 克黄金 750 均价。对吗？" |
-| `"no holdings_description provided"` | 无需额外说（用户本来就没描述持仓） |
+| `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), you need a free DeepSeek API key — 30 seconds to register at platform.deepseek.com. Want to set that up now?" |
+| `"LLM parse failed"` | "Something went wrong while parsing your holdings (a temporary DeepSeek outage or a network timeout), so only the cash portion was recorded. You can wait a bit and rerun `run.sh init --force`, or let me add the stocks manually with `run.sh buy`." |
+| `"parsed via DeepSeek"` with `user_review_required: true` | Read out each holding in `parsed_holdings_for_user_review` for the user to confirm, e.g.: "My understanding is you hold: 3000 units of A at 4.2 yuan, and 50 grams of gold B at 750 avg cost. Is that right?" |
+| `"no holdings_description provided"` | Nothing extra needed (the user didn't describe any holdings in the first place) |
 
-### 降级后禁止做的事
+### What NOT to do after a degraded parse
 
-- 不要在 `next_step` 里简单带过，然后继续推进其他步骤——用户看不到 `next_step` 字段
-- 不要假设用户知道什么是 v1 / v2 fallback；改用"基础模式"这种说法
-- 不要在用户确认持仓前就跑 `run.sh status` 告诉用户"持仓正确"（status 命令会
-  输出空持仓，会让用户以为出错）
+- Do not mention it briefly in `next_step` and then push ahead with other steps — the user never
+  sees the `next_step` field
+- Do not assume the user knows what a v1 / v2 fallback is; say "basic mode" instead
+- Do not run `run.sh status` and tell the user "your holdings look correct" before they've
+  confirmed their holdings (the status command would print an empty portfolio and make the user
+  think something broke)
 
-## 常见坑
+## Common pitfalls
 
-- **Gmail App Password 不是 16 位** → 用户给的多半是登录密码。指他们去
-  https://myaccount.google.com/apppasswords。
-- **DeepSeek key 不以 `sk-` 开头** → 多半是页面标题误粘了。让用户重新复制 key。
-- **LLM 解析的 symbol 不对**（如把"宁德时代"映射成 `300750.SZ` 但用户其实买的
-  港股 `3750.HK`）→ 让用户跑 `run.sh status` 检查，不对就用 CLI `sell` / `buy` 修正。
-- **Coordinator 路径用户没给 DeepSeek key** → 完全 OK，Coordinator 不调
-  DeepSeek。但要告诉用户："你跳过 key 之后没法用 Direct 路径（Cron / 非
-  Claude agent），如果只在 Claude Code 里用就够了。"
+- **Gmail App Password isn't 16 characters** → the user most likely gave their login password.
+  Point them to https://myaccount.google.com/apppasswords.
+- **DeepSeek key doesn't start with `sk-`** → they probably pasted the page title by mistake.
+  Ask the user to re-copy the key.
+- **The LLM parsed the wrong symbol** (e.g. mapping "宁德时代" (CATL) to `300750.SZ` when the
+  user actually bought the HK-listed `3750.HK`) → have the user run `run.sh status` to check,
+  and fix it with CLI `sell` / `buy` if wrong.
+- **A Coordinator-path user gave no DeepSeek key** → completely fine; the Coordinator never
+  calls DeepSeek. But tell the user: "Since you skipped the key, you can't use the Direct path
+  (cron / non-Claude agents); if you only use this inside Claude Code, you're all set."

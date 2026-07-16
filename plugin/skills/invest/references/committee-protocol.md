@@ -1,200 +1,210 @@
-# 委员会协议（用户问"该不该买/卖 X"时读这个）
+# Committee Protocol (read this when the user asks "should I buy/sell X / 该不该买/卖X")
 
-用户说了 **"该不该买/卖 X"** / **"分析一下 X"** / **"跑委员会 X"**——严格按
-6 个 stage 跑。
+The user said **"should I buy/sell X / 该不该买/卖X"** / **"analyze X / 分析一下X"** /
+**"run committee on X / 跑委员会X"** — follow the 6 stages strictly.
 
-## ⚠️ 先确认你能走这条路
+## ⚠️ First confirm you can take this path
 
-本文档是 **Coordinator 路径**——你（Claude Code）用 `Agent({...})` 工具
-spawn 4 个 subagent 自己扮演各角色。
+This document is the **Coordinator path** — you (Claude Code) use the `Agent({...})` tool
+to spawn 4 subagents and play the roles yourself.
 
-**只用于交互场景（用户在场）**。如果你是被 cron / 定时任务无人值守触发的
-（没有用户在实时看着你），**不要用这份协议**——它依赖你临场决定"调哪个
-工具、prompt 怎么拼"，无人纠错时可能卡住或走偏。无人值守一律改用 Direct
-路径（见下方 `run_committee` / `daily_report`），不管你有没有 subagent 能力。
+**Interactive scenarios only (user present).** If you were triggered unattended by cron /
+a scheduled job (no user watching you in real time), **do not use this protocol** — it
+relies on you deciding on the fly which tool to call and how to assemble the prompts,
+and with no one to correct you it can stall or go off track. For unattended runs, always
+use the Direct path instead (see `run_committee` / `daily_report` below), regardless of
+whether you have subagent capability.
 
-**如果你不是 Claude Code**，先看你有没有隔离子任务委派能力（Hermes 的
-`delegate_task` 等）：
+**If you are not Claude Code**, first check whether you have isolated-subtask delegation
+capability (Hermes's `delegate_task`, etc.):
 
-- **有**（Hermes / 其他支持子任务委派的 agent）→ 改读
-  [committee-protocol-hermes.md](committee-protocol-hermes.md)，同样的
-  6-stage 协议、零 API 成本，只是 spawn 语法不同
-- **没有**（Codex / Cursor / Cline / DeepSeek 本地 / 普通脚本等只能单轮
-  对话的 agent）→ 改用 **Direct 路径**：
+- **Yes** (Hermes / other agents that support subtask delegation) → read
+  [committee-protocol-hermes.md](committee-protocol-hermes.md) instead — same
+  6-stage protocol, zero API cost, only the spawn syntax differs
+- **No** (Codex / Cursor / Cline / local DeepSeek / plain scripts and other agents
+  limited to single-turn conversation) → use the **Direct path** instead:
 
 ```bash
 ~/.claude/skills/invest/scripts/run.sh run_committee <SYMBOL>
 ```
 
-一条命令拿到 verdict + CIO memo + transcript，但需要 `DEEPSEEK_API_KEY`。
-详见 SKILL.md 的"选路径"章节和 `references/two-paths.md`。
+One command gets you the verdict + CIO memo + transcript, but requires `DEEPSEEK_API_KEY`.
+See the "choosing a path" section in SKILL.md and `references/two-paths.md` for details.
 
 ---
 
-> **Coordinator 路径背景**：Macro 不共享，每次进 Round 1 一起 spawn → R1 共
-> 3 个 worker。Direct/Cron 路径里 Macro 跨资产共享，R1 只有 Quant + Risk 2 个
-> worker，详见 [docs/wiki/02-agents.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/02-agents.md#两条路径-llm-调用数对照)。
-> 不要混着引用两份。
+> **Coordinator path background**: Macro is not shared — it is spawned together with the
+> others each time Round 1 starts → R1 has 3 workers total. In the Direct/Cron path Macro
+> is shared across assets, so R1 has only 2 workers (Quant + Risk); see
+> [docs/wiki/02-agents.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/02-agents.md#两条路径-llm-调用数对照).
+> Do not mix up citations between the two.
 
-## Stage 0：同日检查（避免重复跑）
+## Stage 0: Same-day check (avoid duplicate runs)
 
 ```bash
 ls "$INVEST_HOME/memory/.committee/$(date +%F)/<SYMBOL>.md" 2>/dev/null
 ```
 
-如果文件存在，**直接读它，不要重新跑**。告诉用户：
-> "今天已经跑过 <SYMBOL> 了，verdict 是 X (confidence Y)。要重跑吗？"
+If the file exists, **read it directly — do not re-run**. Tell the user:
+> "<SYMBOL> has already been run today; the verdict was X (confidence Y). Want to re-run?"
 
-一次完整委员会要消耗用户 ~15-60s 的 Claude budget——同一答案别烧两遍。
+A full committee run consumes ~15-60s of the user's Claude budget — don't burn it
+twice for the same answer.
 
-## Stage 1：拿 brief
+## Stage 1: Get the brief
 
 ```bash
 ~/.claude/skills/invest/scripts/run.sh prepare_committee <SYMBOL>
 ```
 
-返回 JSON 含所有需要的字段：
+Returns JSON containing all the fields you need:
 
-| 字段 | 用在 |
+| Field | Used in |
 |------|------|
-| `asset` | 4 个 worker 都引用 |
+| `asset` | Referenced by all 4 workers |
 | `portfolio_summary` | Risk Officer prompt |
 | `macro_data` | Macro Strategist prompt |
 | `market_data` | Quant prompt |
-| `regime_brief` | **关键** —— Quant Round 1 + Round 2 prompt 都要塞（见警告）|
-| `prior_insights` | Risk Officer prompt（如果 Dreaming 没跑过会是空）|
-| `prompts.{...}` | `capabilities/committee/<role>/<role>.py` 里的 prompt 模板（原样用）|
-| `instructions` | 单资产 orchestration tip（**读它**！）|
+| `regime_brief` | **Critical** — must go into both the Quant Round 1 + Round 2 prompts (see warning) |
+| `prior_insights` | Risk Officer prompt (empty if Dreaming has never run) |
+| `prompts.{...}` | Prompt templates from `capabilities/committee/<role>/<role>.py` (use verbatim) |
+| `instructions` | Single-asset orchestration tip (**read it**!) |
 
-**⚠ regime_brief 警告**：这是 Python 算出来的市场 regime（uptrend / downtrend /
-range_bound / crash / recovery）+ 该 regime 的中性概率口径（30d forward return
-中位 / 跌破现价概率 / 样本数——方向判断交回 Quant 基于数据自决，无方向硬锁）。
-**忘了塞给 Quant，就会回退到老 bug 路径**——Quant 在 range_bound 底部乱喊
-bearish。Round 1 + Round 2 Quant prompt **都要原样塞**进去。
+**⚠ regime_brief warning**: this is the market regime computed by Python (uptrend / downtrend /
+range_bound / crash / recovery) + that regime's neutral probability stats (median 30d forward
+return / probability of falling below the current price / sample count — the directional call
+is handed back to Quant to decide from the data; there is no hard directional lock).
+**Forget to inject it into Quant and you fall back onto the old bug path** — Quant wrongly
+screaming bearish at a range_bound bottom. It **must be injected verbatim** into both the
+Round 1 + Round 2 Quant prompts.
 
-## Stage 2：Round 1 —— 3 个 worker 并行
+## Stage 2: Round 1 — 3 workers in parallel
 
-**3 个 `Agent({...})` 调用必须在一条消息里发**——这样它们真正并行跑。
-每个 worker 自己一个 context window，信息物理隔离：
+**All 3 `Agent({...})` calls MUST be sent in a single message** — that is how they truly
+run in parallel. Each worker gets its own context window; information is physically isolated:
 
 ```javascript
 Agent({
   description: "Macro analysis",
   subagent_type: "general-purpose",
-  prompt: "<原样粘 prompts.macro_strategist>\n\n# 当前宏观数据:\n<原样粘 macro_data>"
+  prompt: "<paste prompts.macro_strategist verbatim>\n\n# Current macro data:\n<paste macro_data verbatim>"
 })
 
 Agent({
   description: "Quant analysis (Round 1)",
   subagent_type: "general-purpose",
-  prompt: "<原样粘 prompts.quant_round1>\n\n# 市场 Regime (确定性算出，必须遵循):\n<原样粘 regime_brief>\n\n# 市场数据:\n<原样粘 market_data>"
+  prompt: "<paste prompts.quant_round1 verbatim>\n\n# Market Regime (deterministically computed, must be followed):\n<paste regime_brief verbatim>\n\n# Market data:\n<paste market_data verbatim>"
 })
 
 Agent({
   description: "Risk Officer (Round 1)",
   subagent_type: "general-purpose",
-  prompt: "<原样粘 prompts.risk_round1>\n\n# 用户持仓:\n<原样粘 portfolio_summary>\n\n# 长期模式:\n<原样粘 prior_insights>"
+  prompt: "<paste prompts.risk_round1 verbatim>\n\n# User portfolio:\n<paste portfolio_summary verbatim>\n\n# Long-term patterns:\n<paste prior_insights verbatim>"
 })
 ```
 
-每个 worker 通过 `<task-notification>` 返回。**等 3 个全回来再进 Stage 3**。
+Each worker returns via `<task-notification>`. **Wait for all 3 to come back before
+entering Stage 3.**
 
-## Stage 3：Round 2 —— Cross-challenge（2 个 worker 并行）
+## Stage 3: Round 2 — Cross-challenge (2 workers in parallel)
 
-Quant 和 Risk 现在能看到对方的 R1 输出，调整自己。Macro 不需要 Round 2
-（它跨资产共享）。两个 Agent 调用一条消息发：
+Quant and Risk can now see each other's R1 output and adjust their own views. Macro does
+not need Round 2 (it is shared across assets). Send both Agent calls in a single message:
 
 ```javascript
 Agent({
   description: "Quant Round 2 (sees Risk's report)",
   subagent_type: "general-purpose",
-  prompt: "<原样粘 prompts.quant_round2_after_risk>\n\n# 市场 Regime (Round 1 给你的事实，Round 2 仍然有效):\n<原样粘 regime_brief>\n\n# Round 1 你自己的输出:\n<quant R1 result>\n\n# Risk Officer 的报告:\n<risk R1 result>"
+  prompt: "<paste prompts.quant_round2_after_risk verbatim>\n\n# Market Regime (the facts you were given in Round 1, still valid in Round 2):\n<paste regime_brief verbatim>\n\n# Your own Round 1 output:\n<quant R1 result>\n\n# Risk Officer's report:\n<risk R1 result>"
 })
 
 Agent({
   description: "Risk Round 2 (sees Quant's signals)",
   subagent_type: "general-purpose",
-  prompt: "<原样粘 prompts.risk_round2_after_quant>\n\n# Round 1 你自己的输出:\n<risk R1 result>\n\n# Quant 的技术信号:\n<quant R1 result>"
+  prompt: "<paste prompts.risk_round2_after_quant verbatim>\n\n# Your own Round 1 output:\n<risk R1 result>\n\n# Quant's technical signals:\n<quant R1 result>"
 })
 ```
 
-## Stage 4（可选）：未收敛时跑 Round 3+
+## Stage 4 (optional): Run Round 3+ if not converged
 
-Web/Cron 路径自带收敛检测，最多跑到 `max_debate_rounds=4`。Skill 模式实践中
-很少需要超过 2 轮——只在以下两个**同时满足**才跑 Round 3：
+The Web/Cron path has built-in convergence detection and runs up to `max_debate_rounds=4`.
+In practice, skill mode rarely needs more than 2 rounds — run Round 3 only when **both**
+of the following hold:
 
-- Quant 和 Risk 的 SIGNAL 在 R1→R2 之间翻面了（被对方说服），并且
-- 翻面后的新 SIGNAL+STRENGTH 还互相严重分歧
+- Quant's and Risk's SIGNALs flipped between R1→R2 (persuaded by the other side), AND
+- the new post-flip SIGNAL+STRENGTH still seriously diverge from each other
 
-否则跳到 Stage 5。
+Otherwise skip to Stage 5.
 
-**收敛规则**（什么时候停辩论）：
-- Quant SIGNAL 和上一轮一样，且 |STRENGTH delta| ≤ 1.0
-- Risk SIGNAL 和上一轮一样，且 |STRENGTH delta| ≤ 1.0
-- 两个都满足 → 收敛，进 CIO
+**Convergence rules** (when to stop the debate):
+- Quant SIGNAL is the same as the previous round, and |STRENGTH delta| ≤ 1.0
+- Risk SIGNAL is the same as the previous round, and |STRENGTH delta| ≤ 1.0
+- Both satisfied → converged, proceed to CIO
 
-## Stage 5：CIO 综合 —— **你来写**，不 delegate
+## Stage 5: CIO synthesis — **you write it**, do not delegate
 
-CIO 角色是**你**（orchestrator）。按 Claude Code Coordinator Mode 的原则：
+The CIO role is **you** (the orchestrator). Per the Claude Code Coordinator Mode principle:
 
 > "You are a coordinator. Synthesize results and communicate with the user.
 > Never write 'based on your findings' — that delegates understanding."
 
-读完所有 worker 输出（Macro + Quant R1/R2 + Risk R1/R2）+ `portfolio_summary`，
-按 `prompts.cio` 格式写完整 CIO memo。
+After reading all worker outputs (Macro + Quant R1/R2 + Risk R1/R2) + `portfolio_summary`,
+write the full CIO memo in the `prompts.cio` format.
 
-### CIO 输出必填字段
+### Required fields in the CIO output
 
-- `VERDICT`：`BUY` / `ACCUMULATE` / `HOLD` / `TRIM` / `SELL` 五选一
-- `CONFIDENCE`：0.0–1.0
-- `DOMINANT_VIEW`：哪一方说服了你（`macro` / `quant` / `risk`）
-- `SUGGESTED_ALLOC_CNY`：整数（正 = 买更多，负 = 减仓）
-- `EXECUTION_PLAN`：怎么实际执行（lump-sum / DCA / grid）
-- `RISK_PLAN`：止损触发条件 + 最坏 PnL 估算
-- `PERSONAL_NOTE`：bullet 给用户的话
+- `VERDICT`: one of `BUY` / `ACCUMULATE` / `HOLD` / `TRIM` / `SELL`
+- `CONFIDENCE`: 0.0–1.0
+- `DOMINANT_VIEW`: which side persuaded you (`macro` / `quant` / `risk`)
+- `SUGGESTED_ALLOC_CNY`: integer (positive = buy more, negative = reduce position)
+- `EXECUTION_PLAN`: how to actually execute (lump-sum / DCA / grid)
+- `RISK_PLAN`: stop-loss trigger conditions + worst-case PnL estimate
+- `PERSONAL_NOTE`: bullet-point message to the user
 
-### CIO sanity 自检（输出前过一遍）
+### CIO sanity self-check (run through it before outputting)
 
-| 规则 | 为什么 |
+| Rule | Why |
 |------|--------|
-| `confidence ≥ 0.95` → 降到 0.85 | 防过度自信。LLM 在模糊信号上爱 over-commit |
-| `alloc_cny > 100_000` → clamp 到 100_000 | 单笔交易上限。逼用户在更大动作上慎重 |
-| REGIME = `crash` → 强制 `HOLD` 或 `TRIM` | REGIME 优先于信号。crash = 不确定性太高，不能加风险 |
-| Worker 严重分歧 → `confidence: 0.4-0.5` | 别假装共识。诚实低 confidence > 假装高 confidence |
+| `confidence ≥ 0.95` → lower to 0.85 | Guards against overconfidence. LLMs love to over-commit on ambiguous signals |
+| `alloc_cny > 100_000` → clamp to 100_000 | Per-trade cap. Forces the user to be deliberate about larger moves |
+| REGIME = `crash` → force `HOLD` or `TRIM` | REGIME takes priority over signals. crash = uncertainty too high to add risk |
+| Workers seriously divided → `confidence: 0.4-0.5` | Don't fake consensus. Honest low confidence > pretended high confidence |
 
-## Stage 6：落盘 transcript
+## Stage 6: Persist the transcript
 
 ```bash
 cat <<EOF | ~/.claude/skills/invest/scripts/run.sh save_committee <SYMBOL>
 === MACRO ===
-<macro worker 输出>
+<macro worker output>
 
 === QUANT_R1 ===
-<quant R1 输出>
+<quant R1 output>
 
 === RISK_R1 ===
-<risk R1 输出>
+<risk R1 output>
 
 === QUANT_R2 ===
-<quant R2 输出>
+<quant R2 output>
 
 === RISK_R2 ===
-<risk R2 输出>
+<risk R2 output>
 
 === CIO ===
-<你写的 CIO memo>
+<the CIO memo you wrote>
 EOF
 ```
 
-落到 `memory/.committee/<date>/<asset>.md`，schema 和 DeepSeek cron 路径完全一样，
-只是带了 `Provider: claude (skill mode)` 标记，让 Dreaming 之后能区分两条路径
-的 transcript。
+Lands in `memory/.committee/<date>/<asset>.md`, with exactly the same schema as the
+DeepSeek cron path, just tagged `Provider: claude (skill mode)` so Dreaming can later
+distinguish the transcripts of the two paths.
 
-## 出 verdict 之后
+## After the verdict
 
-如果用户同意：
-1. **不要自己写 `memory/`**（见 SKILL.md Constraints）。
-2. 用户确认成交后，用 CLI `buy` / `sell`（现金用 `deposit` / `withdraw`，
-   或同名 MCP 工具）记账——走账本留 audit trail。
-3. 用户对建议表态（买了 / 没买 / 拒绝）后，用 `record_execution <decision_id>`
-   回写决策账本（拒绝时先问一句原因）。
+If the user agrees:
+1. **Do not write to `memory/` yourself** (see SKILL.md Constraints).
+2. After the user confirms the trade executed, record it with the CLI `buy` / `sell`
+   (for cash use `deposit` / `withdraw`, or the same-named MCP tools) — going through
+   the ledger leaves an audit trail.
+3. After the user responds to the recommendation (bought / didn't buy / declined),
+   write back to the decision ledger with `record_execution <decision_id>` (if they
+   decline, first ask why).

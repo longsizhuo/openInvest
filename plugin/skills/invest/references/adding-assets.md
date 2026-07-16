@@ -1,27 +1,30 @@
-# 添加新资产（用户想跟踪 AAPL / TSLA / 005827 等时读）
+# Adding a new asset (read when the user wants to track AAPL / TSLA / 005827 etc.)
 
-默认 onboarding 只配两个资产（NDQ.AX + GC=F）。v2 schema 支持任意 yfinance symbol。
-三种添加方式，按推荐度排：
+The default onboarding configures only two assets (NDQ.AX + GC=F). The v2 schema supports any
+yfinance symbol. Three ways to add one, ordered by preference:
 
-## 方式 1：CLI `buy`（首选，用户真的持有时）
+## Method 1: CLI `buy` (preferred, when the user actually holds it)
 
 ```bash
 ~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind stock
 ```
 
-MCP 用户直接调 `buy` 工具，参数同名。加权平均成本自动算，symbol 自动进追踪。
+MCP users call the `buy` tool directly with the same parameter names. Weighted average cost is
+computed automatically, and the symbol is automatically added to tracking.
 
-**"我只想看不想持有"** 场景（issue #179 起有原生入口）：
+**"I just want to watch it, not hold it"** scenario (native entry point since issue #179):
 ```bash
 ~/.claude/skills/invest/scripts/run.sh track_asset --symbol AAPL --max-single-invest-cny 8000
 ```
-MCP 用户直接调 `track_asset` 工具（幂等 upsert：重复 track 不报错，只更新传入
-字段）。它把 symbol 加进 strategy 的跟踪列表——委员会/DCA 的覆盖面由它决定；
-`untrack_asset` 移除，`set_allocations` 改股票/现金目标配比。
-仍要"零仓位挂在持仓表里"的展示需求才走 `POST /api/holdings` 带
-`is_tracking_only: true`，或干脆不持久化直接分析（方式 3）。
+MCP users call the `track_asset` tool directly (idempotent upsert: re-tracking doesn't error,
+it only updates the fields you pass). It adds the symbol to the strategy's tracking list — which
+determines the coverage of the committee/DCA; `untrack_asset` removes it, and `set_allocations`
+changes the stock/cash target allocation.
+Only if you still need "a zero-unit row shown in the holdings table" for display purposes should
+you use `POST /api/holdings` with `is_tracking_only: true` — or skip persistence entirely and
+just analyze (Method 3).
 
-## 方式 2：REST API（长尾：追踪仓 / remote hub）
+## Method 2: REST API (long tail: tracking-only positions / remote hub)
 
 ```http
 POST /api/holdings
@@ -39,61 +42,65 @@ Content-Type: application/json
 }
 ```
 
-`kind` 枚举：`stock` / `etf` / `metal` / `crypto` / `bond` / `fund` / `other`。
+`kind` enum: `stock` / `etf` / `metal` / `crypto` / `bond` / `fund` / `other`.
 
-Web API 已 deprecated（只服务 remote hub 模式）——能用 CLI `buy` 覆盖的场景
-优先 CLI，只有 `is_tracking_only` 这类 CLI 没暴露的字段才 curl。
+The Web API is deprecated (it only serves remote hub mode) — prefer CLI `buy` wherever it covers
+the scenario; only curl for fields the CLI doesn't expose, such as `is_tracking_only`.
 
-## 方式 3：用户只想分析不想持久化
+## Method 3: the user only wants analysis, no persistence
 
-如果用户说 **"该不该买 TSLA"** 但还不想加 TSLA 进 portfolio，可以直接分析：
+If the user says **"should I buy TSLA" (该不该买 TSLA)** but doesn't want TSLA added to the
+portfolio yet, analyze it directly:
 
 ```bash
 ~/.claude/skills/invest/scripts/run.sh prepare_committee TSLA
 ```
 
-委员会能分析任意 yfinance symbol，不管是否在 holdings 里。输出会落到
-`memory/.committee/<date>/TSLA.md` 留 history，但 TSLA 不进 portfolio。
+The committee can analyze any yfinance symbol, whether or not it's in holdings. The output lands
+in `memory/.committee/<date>/TSLA.md` for history, but TSLA does not enter the portfolio.
 
-适用：
-- 用户在 brainstorm，没决心 track
-- symbol 是一次性的（如响应新闻）
-- 用户明说"就给我看法，不用加进去"
+Use this when:
+- The user is brainstorming and not committed to tracking
+- The symbol is one-off (e.g. reacting to news)
+- The user explicitly says "just give me your take, don't add it"
 
-## yfinance symbol 格式
+## yfinance symbol formats
 
-底层数据源是 yfinance。常见格式：
+The underlying data source is yfinance. Common formats:
 
-| 市场 | 格式 | 示例 |
+| Market | Format | Examples |
 |------|------|------|
-| 美股 | 裸 ticker | `AAPL`、`TSLA` |
-| 美股 ETF | 裸 ticker | `SPY`、`QQQ` |
-| 澳交所（ASX）| `XXX.AX` | `NDQ.AX`、`BHP.AX` |
-| 港交所（HKEX）| `XXXX.HK` | `0700.HK`、`9988.HK` |
-| 上交所 | `XXXXXX.SS` | `600519.SS`、`005827.SS`（公募基金）|
-| 深交所 | `XXXXXX.SZ` | `000001.SZ` |
-| 伦交所（LSE）| `XXX.L` | `BP.L`、`HSBA.L` |
-| 东交所（TSE）| `XXXX.T` | `7203.T` |
-| 加密 | `XXX-USD` | `BTC-USD`、`ETH-USD` |
-| 汇率 | `XXXYYY=X` | `USDCNY=X`、`AUDCNY=X` |
-| 商品期货 | `XX=F` | `GC=F`（黄金）、`CL=F`（原油）|
+| US stocks | bare ticker | `AAPL`, `TSLA` |
+| US ETFs | bare ticker | `SPY`, `QQQ` |
+| ASX (Australia) | `XXX.AX` | `NDQ.AX`, `BHP.AX` |
+| HKEX (Hong Kong) | `XXXX.HK` | `0700.HK`, `9988.HK` |
+| Shanghai (SSE) | `XXXXXX.SS` | `600519.SS`, `005827.SS` (mutual fund) |
+| Shenzhen (SZSE) | `XXXXXX.SZ` | `000001.SZ` |
+| LSE (London) | `XXX.L` | `BP.L`, `HSBA.L` |
+| TSE (Tokyo) | `XXXX.T` | `7203.T` |
+| Crypto | `XXX-USD` | `BTC-USD`, `ETH-USD` |
+| FX rates | `XXXYYY=X` | `USDCNY=X`, `AUDCNY=X` |
+| Commodity futures | `XX=F` | `GC=F` (gold), `CL=F` (crude oil) |
 
-用户说 "AAPL" 直接用就行。说 "茅台" 要先转 `600519.SS` 再传给 API。
+If the user says "AAPL", use it as-is. If they say "茅台" (Moutai), convert it to `600519.SS`
+first before passing it to the API.
 
-## yfinance **不**支持的
+## What yfinance does NOT support
 
-老实告诉用户：
+Be honest with the user:
 
-- ❌ 银行理财（如招行朝朝盈）
-- ❌ 余额宝 / 国债逆回购
-- ❌ 私募基金 / 信托
-- ❌ 未上市 REITs
-- ❌ 小交易所的加密（只支持主流的 `BTC-USD` 类）
+- ❌ Bank wealth-management products (e.g. CMB 朝朝盈)
+- ❌ Yu'ebao (余额宝) / treasury reverse repos
+- ❌ Private funds / trusts
+- ❌ Unlisted REITs
+- ❌ Crypto on minor exchanges (only mainstream pairs like `BTC-USD` are supported)
 
-这些得加新数据源——见 [docs/wiki/07-extending.md#2-加新数据源](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/07-extending.md#2-加新数据源)。
-你帮不了用户实时加（要改代码），但可以指他们去那篇文档。
+These would require adding a new data source — see
+[docs/wiki/07-extending.md#2-加新数据源](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/07-extending.md#2-加新数据源).
+You can't add one for the user on the spot (it requires code changes), but you can point them to
+that doc.
 
-## 确认添加成功
+## Confirming the addition
 
-加完后，让用户（或你帮他）跑 `~/.claude/skills/invest/scripts/run.sh status`
-看 `all_holdings` 里有没有新 symbol。
+Afterwards, have the user run (or run it for them) `~/.claude/skills/invest/scripts/run.sh status`
+and check whether the new symbol appears in `all_holdings`.

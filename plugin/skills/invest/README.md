@@ -1,95 +1,99 @@
-# invest skill — 日常使用
+# invest skill — daily usage
 
-openInvest 的**日常使用 agent skill**。看持仓 / 跑委员会 / 加减仓 / btw 关联分析。
+The **daily-usage agent skill** for openInvest. View portfolio / run the committee / add or trim
+positions / "btw" correlation analysis.
 
-> **首次安装**走另一个 skill: [`../invest-setup/`](../invest-setup/) —— agent 看到
-> `doctor` 返回 `needs_setup` 时会自动加载它走 5 问 onboarding，完了才轮到本 skill。
+> **First-time installation** goes through the other skill: [`../invest-setup/`](../invest-setup/) —
+> when `doctor` returns `needs_setup`, the agent automatically loads it and runs the 5-question
+> onboarding; only after that does this skill take over.
 
-## 目录布局
+## Directory layout
 
 ```
 skills/invest/
-├── SKILL.md          ← agent 触发指引（决策树 / 子命令 / Web API 端点）
+├── SKILL.md          ← agent trigger guide (decision tree / subcommands / Web API endpoints)
 ├── scripts/
-│   └── run.sh        ← 子命令分发器（内部走 `uvx openinvest` 从 PyPI 拉后端；更新 = `run.sh update`）
+│   └── run.sh        ← subcommand dispatcher (internally pulls the backend from PyPI via `uvx openinvest`; update = `run.sh update`)
 ├── references/
-│   ├── committee-protocol.md     ← Coordinator 路径详细 stage
-│   ├── two-paths.md              ← Coordinator vs Direct 区别
-│   ├── adding-assets.md          ← 加新追踪 symbol
-│   ├── troubleshooting.md        ← doctor 全绿但还出错时看
-│   └── onboarding.md             ← 详细 5 问流程（invest-setup skill 也引用这个）
-└── README.md         ← 你在看
+│   ├── committee-protocol.md     ← detailed Coordinator-path stages
+│   ├── two-paths.md              ← Coordinator vs Direct differences
+│   ├── adding-assets.md          ← adding a new tracked symbol
+│   ├── troubleshooting.md        ← read when doctor is all green but things still fail
+│   └── onboarding.md             ← detailed 5-question flow (also referenced by the invest-setup skill)
+└── README.md         ← you are here
 ```
 
-## 安装
+## Installation
 
-被父目录 `../install.sh` 一次装两个 skill：
+The parent directory's `../install.sh` installs both skills in one go:
 
 ```bash
-cd $INVEST_HOME              # 默认 ~/openInvest
-bash skills/install.sh        # 同时装 invest + invest-setup
+cd $INVEST_HOME              # default ~/openInvest
+bash skills/install.sh        # installs both invest + invest-setup
 ```
 
-`install.sh` 装到 `~/.claude/skills/invest/` 和 `~/.claude/skills/invest-setup/`，
-内容都是指向源目录的 symlink —— `SKILL.md` / `scripts/` 更新后立即生效，
-不需要重装。后端本体从 PyPI 分发，更新跑 `run.sh update`。
+`install.sh` installs into `~/.claude/skills/invest/` and `~/.claude/skills/invest-setup/`,
+whose contents are symlinks pointing back at the source directory — updates to `SKILL.md` /
+`scripts/` take effect immediately, no reinstall needed. The backend itself is distributed via
+PyPI; update it with `run.sh update`.
 
-## 修改协议时的工作流
+## Workflow when changing the protocol
 
 ```bash
 cd $INVEST_HOME
-# 1. 改 SKILL.md / scripts/run.sh / references/*.md
+# 1. Edit SKILL.md / scripts/run.sh / references/*.md
 vim skills/invest/SKILL.md
-# 2. 测试（symlink 已生效，不需要重装）
+# 2. Test (the symlink is already live; no reinstall needed)
 ~/.claude/skills/invest/scripts/run.sh status
 # 3. commit + push
 git add skills/invest/ && git commit -m "..." && git push
-# 4. 其他设备 git pull 后立即同步生效（symlink 不变）
-#    生产服务器有 invest-deploy.timer 每小时自动 git pull
+# 4. Other devices pick it up immediately after git pull (symlinks unchanged)
+#    The production server has invest-deploy.timer auto-git-pulling hourly
 ```
 
-## 跟 invest-setup skill 的关系
+## Relationship with the invest-setup skill
 
-| | invest（本 skill） | invest-setup |
+| | invest (this skill) | invest-setup |
 |---|---|---|
-| 何时触发 | 日常—— "看持仓"、"分析 X"、"加仓" | 首次—— "帮我初始化 invest"、`doctor` 返回 `needs_setup` |
-| 频率 | 高频持续使用 | 一次（onboard 完就退场） |
-| 内部 scripts | 独立 `scripts/run.sh` | symlink → `../invest/scripts/run.sh`（reuse） |
-| 内部 references | 独立 5 个 md | `onboarding-detailed.md` symlink → `../invest/references/onboarding.md` |
+| When it triggers | Daily — "show portfolio" (看持仓), "analyze X" (分析 X), "add to a position" (加仓) | First time — "set up invest / 帮我初始化 invest", or `doctor` returns `needs_setup` |
+| Frequency | High-frequency, continuous use | Once (retires after onboarding) |
+| Internal scripts | its own `scripts/run.sh` | symlink → `../invest/scripts/run.sh` (reuse) |
+| Internal references | its own 5 md files | `onboarding-detailed.md` symlink → `../invest/references/onboarding.md` |
 
-设计参考 OpenClaw 的 [`convex-setup-auth`](https://github.com/openclaw/clawhub/tree/main/.agents/skills/convex-setup-auth)
-模式：**单一 skill 对应单一工作场景**。
+The design follows OpenClaw's [`convex-setup-auth`](https://github.com/openclaw/clawhub/tree/main/.agents/skills/convex-setup-auth)
+pattern: **one skill per single working scenario**.
 
-## 自定义安装路径
+## Custom installation path
 
 ```bash
 CLAUDE_SKILLS_DIR=/some/other/path bash skills/install.sh
 ```
 
-通常没必要——Claude Code 默认从 `~/.claude/skills/<name>/` 读 skill。
+Usually unnecessary — Claude Code reads skills from `~/.claude/skills/<name>/` by default.
 
-## 卸载
+## Uninstall
 
 ```bash
 rm -rf ~/.claude/skills/invest ~/.claude/skills/invest-setup
 ```
 
-仓库本身不会被影响。
+The repository itself is unaffected.
 
-## 跨 agent 兼容性
+## Cross-agent compatibility
 
-SKILL.md 是 [agentskills.io](https://agentskills.io) 开放标准，理论上兼容
-Claude Code / Cursor / OpenCode / OpenHands / Cline / Goose / Gemini CLI / Codex
-等 35+ agent 客户端。但**install.sh 写死了 `~/.claude/skills/`**（Claude Code 路径），
-其他客户端可能用 `~/.cursor/skills/` 等不同位置——fork 用户自己改 `CLAUDE_SKILLS_DIR`
-环境变量。
+SKILL.md follows the [agentskills.io](https://agentskills.io) open standard and is theoretically
+compatible with 35+ agent clients: Claude Code / Cursor / OpenCode / OpenHands / Cline / Goose /
+Gemini CLI / Codex, etc. However, **install.sh hard-codes `~/.claude/skills/`** (the Claude Code
+path); other clients may use different locations such as `~/.cursor/skills/` — fork users should
+set the `CLAUDE_SKILLS_DIR` environment variable themselves.
 
-OpenClaw 用户可以走 `clawhub install`（如果将来发布到 ClawHub registry）。
-当前最低公分母 = 拿到 skills/ 目录后 `bash skills/install.sh`（后端不用 clone，
-`run.sh` 内部走 `uvx openinvest` 从 PyPI 拉）。
+OpenClaw users can use `clawhub install` (if this is ever published to the ClawHub registry).
+The current lowest common denominator = grab the skills/ directory and run
+`bash skills/install.sh` (no need to clone the backend; `run.sh` internally pulls it from PyPI
+via `uvx openinvest`).
 
-## 也读这些
+## Also read
 
-- 完整 SKILL.md 协议见 [`SKILL.md`](SKILL.md)
-- 项目架构 wiki：[github.com/longsizhuo/openInvest/tree/main/docs/wiki](https://github.com/longsizhuo/openInvest/tree/main/docs/wiki)
-- 双路径决策：[`references/two-paths.md`](references/two-paths.md)
+- The full SKILL.md protocol: [`SKILL.md`](SKILL.md)
+- Project architecture wiki: [github.com/longsizhuo/openInvest/tree/main/docs/wiki](https://github.com/longsizhuo/openInvest/tree/main/docs/wiki)
+- Two-path decision: [`references/two-paths.md`](references/two-paths.md)
