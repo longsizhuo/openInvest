@@ -125,8 +125,11 @@ codex plugin marketplace add longsizhuo/openInvest
 
 # Hermes Agent
 hermes plugins install longsizhuo/openInvest --enable
+
+# OpenClaw
+openclaw plugins install clawhub:openinvest
 ```
-OpenClaw 及任意 MCP client：按下方第 2 步注册 MCP server（完整教程见 [agent 使用教程](docs/wiki/20-agent-usage-tutorial.md)）。
+其余任意 MCP client：按下方第 2 步注册 MCP server（完整教程见 [agent 使用教程](docs/wiki/20-agent-usage-tutorial.md)）。
 
 ### 2. 独立 Skill 原生导入
 ```bash

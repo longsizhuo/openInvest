@@ -131,7 +131,15 @@ skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本�
 
 ### OpenClaw
 
-MCP 声明式接入（`~/.openclaw/openclaw.json`，JSON5）：
+一键装（已发布 ClawHub bundle-plugin，2026-07-16 在 openclaw 2026.6.11 实测
+skills + MCP 双注册、`plugins doctor` 零问题）：
+
+```bash
+openclaw plugins install clawhub:openinvest
+```
+
+MCP 后端也可以声明式手动接（bundle 未生效或想显式控制 uvx 参数时，
+`~/.openclaw/openclaw.json`，JSON5）：
 
 ```json5
 {
@@ -147,15 +155,15 @@ MCP 声明式接入（`~/.openclaw/openclaw.json`，JSON5）：
 }
 ```
 
-旧版本没有 MCP client 时，fallback 走 workspace `skills/` 拷贝（skills 经 uvx 驱动后端）：
+**别混淆两个 OpenClaw**：上面说的是 npm 的 OpenClaw（docs.openclaw.ai，ClawHub
+生态）。另一个 openclaw-python（openxjarvis，Python 重实现）截至 0.8.x 它的
+`plugins install` 是未实现 stub（返回假 success 什么都不装）——openclaw-python
+用户走 workspace `skills/` 拷贝：
 
 ```bash
 git clone https://github.com/longsizhuo/openInvest ~/openInvest
 cp -r ~/openInvest/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace 路径以你的配置为准
 ```
-
-注意别用 `openclaw plugins install`——截至 2026-07（openclaw-python 0.8.x）它是
-未实现的 stub，返回假 success 但什么都不装。
 
 ### 每日日报 cron（宿主 agent 侧）
 

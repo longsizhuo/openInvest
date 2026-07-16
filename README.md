@@ -125,8 +125,11 @@ codex plugin marketplace add longsizhuo/openInvest
 
 # Hermes Agent
 hermes plugins install longsizhuo/openInvest --enable
+
+# OpenClaw
+openclaw plugins install clawhub:openinvest
 ```
-OpenClaw and any other MCP client: register the MCP server from step 2 below (full walkthrough in the [agent tutorial](docs/wiki/20-agent-usage-tutorial.md)).
+Any other MCP client: register the MCP server from step 2 below (full walkthrough in the [agent tutorial](docs/wiki/20-agent-usage-tutorial.md)).
 
 ### 2. Standalone — MCP server or CLI (no clone needed)
 The backend ships on [PyPI](https://pypi.org/project/openinvest/); `~/openInvest` holds only your data:
