@@ -1,0 +1,17 @@
+{
+  "id": "openinvest",
+  "name": "openInvest",
+  "description": "Self-hosted multi-asset AI investment committee — 4 LLM roles debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict. Never places real orders.",
+  "version": "0.19.0",
+  "icon": "https://raw.githubusercontent.com/longsizhuo/openInvest/main/plugin/assets/logo.png",
+  "skills": [
+    "skills/invest",
+    "skills/invest-setup",
+    "skills/invest-backup"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
