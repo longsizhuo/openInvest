@@ -117,12 +117,13 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Publish to ClawHub (bundle-plugin)
+      - name: Publish to ClawHub (bundle-plugin + skill)
         # 版本单一可信源 = SKILL.md frontmatter（release-please 刚 bump 完）。
         # 先把版本盖章进两个 manifest JSON 并 commit（scripts/publish_clawhub.sh
         # 的守卫要求溯源 commit 真实包含所发内容），再走脚本发布。
-        # 只发 bundle-plugin；ClawHub 上的 standalone skill（英文 description 变体）
-        # 仍手动发——CI 若从 repo 原样发会把英文描述覆盖回中文。
+        # 脚本发两个条目：bundle-plugin + standalone skill（后者发布前自动把
+        # SKILL.md 的中文 description 换成脚本内固化的英文版——ClawHub 目录面向
+        # 英文用户，repo 内保持中文）。远端已是当前版本时幂等跳过，重跑安全。
         if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), 'plugin/skills/invest') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), 'plugin/skills/invest') }}
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
