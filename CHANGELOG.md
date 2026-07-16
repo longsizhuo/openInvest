@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.0](https://github.com/longsizhuo/openInvest/compare/v0.30.5...v0.31.0) (2026-07-16)
+
+
+### Features
+
+* **invest-setup:** SKILL.md 与 README 英文化 + 修存量 YAML 解析错误 ([6e1badd](https://github.com/longsizhuo/openInvest/commit/6e1badd014a40c170b5448a72d566ae0af43edce))
+* **skill:** SKILL.md 与全部 references 英文化——正文英文 + 双语触发短语 ([83b6e59](https://github.com/longsizhuo/openInvest/commit/83b6e59a4cca8ecdb65214c4381b04faa336f87f))
+
 ## [0.30.5](https://github.com/longsizhuo/openInvest/compare/v0.30.4...v0.30.5) (2026-07-16)
 
 
