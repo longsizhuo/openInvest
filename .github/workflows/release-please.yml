@@ -96,3 +96,51 @@ jobs:
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
           echo "✅ MCP Registry: io.github.longsizhuo/openinvest@$VERSION"
+
+      - name: Dispatch GHCR image build
+        # publish-image.yml 的 `on: push: tags` 永远不会被本 workflow 切的 tag 触发
+        # （GITHUB_TOKEN 造的事件不触发其他 workflow）——v0.30.0~0.30.3 四个 tag 零触发、
+        # 镜像停在 6-16 就是这么来的。workflow_dispatch 是该规则的官方例外，直接派发。
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          gh workflow run publish-image.yml --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
+          echo "✅ dispatched GHCR build for v$VERSION"
+
+      # ---- invest-skill 发版 → 自动 publish ClawHub bundle-plugin ----
+      - name: Checkout (for ClawHub)
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), 'plugin/skills/invest') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), 'plugin/skills/invest') }}
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Publish to ClawHub (bundle-plugin)
+        # 版本单一可信源 = SKILL.md frontmatter（release-please 刚 bump 完）。
+        # 先把版本盖章进两个 manifest JSON 并 commit（scripts/publish_clawhub.sh
+        # 的守卫要求溯源 commit 真实包含所发内容），再走脚本发布。
+        # 只发 bundle-plugin；ClawHub 上的 standalone skill（英文 description 变体）
+        # 仍手动发——CI 若从 repo 原样发会把英文描述覆盖回中文。
+        if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), 'plugin/skills/invest') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), 'plugin/skills/invest') }}
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git pull origin main
+          VERSION=$(grep -m1 '^version:' plugin/skills/invest/SKILL.md | sed 's/version:[[:space:]]*//; s/[[:space:]]*#.*//')
+          for f in plugin/openclaw.plugin.json plugin/package.json; do
+            jq --arg v "$VERSION" '.version = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
+          if [ -n "$(git status --porcelain -- plugin/openclaw.plugin.json plugin/package.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add plugin/openclaw.plugin.json plugin/package.json
+            git commit -m "chore(plugin): sync ClawHub manifest version to $VERSION"
+            git push origin main
+          fi
+          npm i -g clawhub
+          clawhub login --token "$CLAWHUB_TOKEN" --label "gh-actions release"
+          bash scripts/publish_clawhub.sh
+          echo "✅ ClawHub: openinvest@$VERSION"
