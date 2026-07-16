@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.3.1...invest-setup-skill-v0.4.0) (2026-07-16)
+
+
+### Features
+
+* **invest-setup:** SKILL.md 与 README 英文化 + 修存量 YAML 解析错误 ([6e1badd](https://github.com/longsizhuo/openInvest/commit/6e1badd014a40c170b5448a72d566ae0af43edce))
+
 ## [0.3.1](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.3.0...invest-setup-skill-v0.3.1) (2026-07-06)
 
 
