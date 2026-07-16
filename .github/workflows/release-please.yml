@@ -24,6 +24,7 @@ permissions:
   contents: write
   pull-requests: write
   id-token: write   # MCP Registry OIDC 认证
+  actions: write    # GHCR 镜像构建走 workflow_dispatch 派发（gh workflow run 需要）
 
 concurrency:
   group: release-please-${{ github.ref }}

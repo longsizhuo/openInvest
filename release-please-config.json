@@ -54,7 +54,11 @@
       "release-type": "python",
       "package-name": "invest",
       "include-component-in-tag": false,
-      "extra-files": []
+      "extra-files": [],
+      "exclude-paths": [
+        "plugin",
+        "skills"
+      ]
     },
     "skills/okf-frontmatter": {
       "release-type": "simple",
