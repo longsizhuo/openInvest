@@ -4,7 +4,7 @@
 
 # openInvest
 
-**基于 Coordinator-Worker 架构的自托管 AI 投资决策委员会系统。多大语言模型角色信息隔离质询，提供可审计的投资决策追踪流水（Audit Trail）。**
+**面向现代 AI Agent 的自托管投资决策引擎。多 Agent 信息隔离与交叉质询协议，提供可审计的决策追踪流水（Audit Trail）。**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Agents](https://img.shields.io/badge/Agents-Claude%20Code%20%7C%20Codex%20%7C%20Hermes%20%7C%20OpenClaw-informational)](docs/wiki/20-agent-usage-tutorial.md)
@@ -23,14 +23,6 @@ OpenInvest 是一个面向现代 AI Agent 的自托管投资决策引擎。
 
 它提供可验证的投资委员会、基于证据的推理、长周期回测、可审计的决策记录，并通过标准接口服务于 Claude Code、Codex、Hermes、OpenClaw 等 Agent。它并非旨在取代这些 Agent，而是为了赋能它们。
 
-## 为什么是 OpenInvest？
-
-多数 AI 投资产品都希望成为更聪明的聊天机器人。OpenInvest 选择专注于投资决策本身。
-
-它提供透明、可验证、可审计的决策能力，并通过标准接口融入现代 AI Agent，而不是重新构建聊天、记忆和个性化能力。OpenInvest 并非与个人 AI Agent 竞争，而是为了放大它们的能力。
-
-Claude Code、Codex、Hermes、OpenClaw 或未来智能体的每一次进步，都将自动使 OpenInvest 变得更加强大。
-
 ---
 
 ## 生产环境性能指标 (Live Performance & PnL)
@@ -48,33 +40,34 @@ Claude Code、Codex、Hermes、OpenClaw 或未来智能体的每一次进步，�
 <!-- OUTPERFORM_FEED_END -->
 
 *   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/README.md](docs/wiki/README.md)。
-*   **系统统计自我披露**：本系统是**消除人类投资认知偏差、强化推理透明度**的审计工具，而非收益放大黑盒。最新自动审计（`docs/verdict_accuracy.md`）：方向性 Verdict（剔除 HOLD）真实命中率 **42.2%**（n=56，**低于随机**）；`HOLD`（不作为）占 **56%**；含 HOLD 的 7d 命中率 70.7% 系"HOLD 算 hit"灌水。即系统价值在透明/纪律（多数时候不作为、低换手），**不在方向预测**。完整流水详见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。
+
+---
+
+## 研究与证伪
+
+**系统统计自我披露**：本系统是**消除人类投资认知偏差、强化推理透明度**的审计工具，而非收益放大黑盒。最新自动审计（`docs/verdict_accuracy.md`）：方向性 Verdict（剔除 HOLD）真实命中率 **42.2%**（n=56，**低于随机**）；`HOLD`（不作为）占 **56%**。即系统价值在透明/纪律（多数时候不作为、低换手），**不在方向预测**。完整流水详见 [docs/verdict_accuracy.md](docs/verdict_accuracy.md)。
+
+本项目对自己的 edge 做系统性证伪，负结果照常发布。委员会读取的确定性特征、及其周边的择时信号族，均经过预注册统计闸检验——无一作为可交易 alpha 存活。
+
+| 测试 | 结果 | 判定 |
+|---|---|---|
+| Q1 横截面选股 | 6 特征 mean-IC 0.025–0.067，Holm 校正后 **p=0.397** | 无显著选股信号 |
+| M1 多变量 GBM（OOS） | mean OOS IC **+0.003**，p=0.925 | 特征组合亦无信号 |
+| Q2 黄金 MA200 趋势 | **p_holm=0.016** 显著——但 `trend_dca` 证明是 **beta 而非可交易 alpha**：择时终值 **3.07 vs 买持 15.10**，Sharpe **+0.36 vs +0.68**，maxDD 反而更深（**−57% vs −44%**） | 统计显著，经济上不可交易 |
+| 每资产多信号族 | 3 资产 × 4 信号族 × 参数网格 = 每资产 24 变体，扣成本 + DSR deflate 后**无一过 DSR > 0.95** | 任何信号族均无可交易信号 |
+| 正向对照 | 作弊完美择时信号 **DSR = 1.00** | 证明 harness 能识别真信号 |
+
+方法论：Newey-West HAC t、Deflated Sharpe（Bailey & López de Prado 2014，逐式复算）、Holm 校正、0 前视、LLM cutoff 探针。
+
+详见 [experiments/signal-eval/README.md](experiments/signal-eval/README.md) · [docs/verdict_accuracy.md](docs/verdict_accuracy.md) · [ADR-022](docs/wiki/adr/022-backtest-memory-contamination-and-holdout-discipline.md) · [ADR-023](docs/wiki/adr/023-honest-positioning-not-alpha.md)
 
 ---
 
 ## 产品理念
 
-OpenInvest 不是聊天机器人，也不是另一个 AI Agent。
+多数 AI 投资产品都想成为更聪明的聊天机器人。OpenInvest 选择构建一个透明、可验证、可审计的决策引擎，接入 Claude Code、Codex、Hermes、OpenClaw 等个人 Agent——这些 Agent 的每一次进步，都自动使 OpenInvest 更强大。
 
-我们相信，未来属于越来越智能的个人 Agent，例如 Claude Code、Codex、Hermes、OpenClaw，以及更多 Agent Operating System。这些 Agent 持续陪伴用户，理解用户的目标、偏好和长期上下文。
-
-OpenInvest 不重复构建这些能力。它专注于投资决策本身。
-
-OpenInvest 提供：
-*   可验证的投资委员会（Investment Committee）
-*   基于证据的推理过程（Evidence Based Reasoning）
-*   长周期回测与校准（Backtesting & Calibration）
-*   可审计的决策记录（Decision Records）
-*   面向 Agent 的决策接口（Decision Protocols）
-
-现代 AI Agent 通常负责：
-*   长期记忆
-*   自然语言交互
-*   用户偏好理解
-*   决策复盘
-*   个性化陪伴
-
-OpenInvest 负责理解市场，Agent 负责理解用户。
+分工是刻意设计的：你的 Agent 负责长期记忆、自然语言交互和用户理解；OpenInvest 负责可验证的投资委员会、基于证据的推理、长周期回测与可审计的决策记录。
 
 ```
                    User
@@ -131,33 +124,38 @@ openclaw plugins install clawhub:openinvest
 ```
 其余任意 MCP client：按下方第 2 步注册 MCP server（完整教程见 [agent 使用教程](docs/wiki/20-agent-usage-tutorial.md)）。
 
-### 2. 独立 Skill 原生导入
+### 2. 独立使用 —— MCP server 或 CLI（无需 clone）
+后端已发布至 [PyPI](https://pypi.org/project/openinvest/)，`~/openInvest` 只存放你的数据：
 ```bash
-git clone https://github.com/longsizhuo/openInvest.git ~/openInvest
-bash ~/openInvest/skills/install.sh
+# MCP（18 个工具，任意 MCP client；加 --http 可启动 remote streamable-HTTP server —— BETA）
+claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
+
+# 或直接用 CLI
+INVEST_HOME=~/openInvest uvx openinvest status
 ```
-在支持 Skill 的 AI 终端中发送 `帮我初始化 invest`（或 `set up invest`）。系统将触发交互式 Bootstrap 原语，指导完成以下初始化：
+在支持 Skill 的 AI 终端中发送 `帮我初始化 invest`（或 `set up invest`）。系统将触发交互式 Bootstrap 向导，指导完成以下初始化：
 1. 检测 `memory/` 状态存储路径及 `.env` 环境变量契约。
 2. 5 维度画像引导（合规法律名 / 风险容量 / 偿债结构 / 初始持仓资产 / 可选第三方密钥）。
 3. 运行静态数据迁移，即刻生成首份实时资产暴露 memo。
 
 > 💡 **零成本运行声明**：在内置 Skill 交互模式下，委员会的底层推理完全依托宿主 Agent（如 Claude Code）的推理管道，**无需消耗您个人的第三方 API Key 额度**。仅在配置 Cron 独立日报任务或运行外部服务调用时，才需声明底层 API 供应。
 
-更多部署矩阵（Docker 容器化、本地独立 Web GUI 调试端口）参阅 [docs/QUICK_START.md](docs/QUICK_START.md)。
+自托管细节参阅 [docs/QUICK_START.md](docs/QUICK_START.md)。（内置 Web GUI 已于 2026-07-05 退役——全部能力经 CLI/MCP 暴露；独立前端后续可能回归。）
 
-### 3. 零成本自托管（GitHub Actions，无需服务器）
-不想挂机器跑 cron？fork 一份，每天由 GitHub Actions 自动跑委员会并把报告发到你邮箱。
+### 3. Serverless 自托管（GitHub Actions）
+每天由 GitHub Actions 自动跑委员会并把报告发到你邮箱。
 > ⚠️ **fork 必须设为 private**：运行状态（持仓、决议）会被 commit 回你的 fork，含真实持仓数据。public fork 会泄露隐私。
 
 1. **Fork 本仓库**（Settings → 改为 Private）。
-2. 本地 `帮我初始化 invest` 生成 `memory/`，然后 `git add -f memory/ && git commit && git push` 推到你的私有 fork（Actions 靠它读你的持仓）。
+2. 本地 `帮我初始化 invest` 生成初始 `memory/`，然后 commit 并推到你的私有 fork：
+   ```bash
+   git add -f memory/ && git commit -m "chore: init memory state" && git push
+   ```
 3. fork 的 **Settings → Secrets and variables → Actions** 填：
    *   `LLM_API_KEY` 或 `DEEPSEEK_API_KEY`：跑委员会的 LLM Key。
    *   `EMAIL_SENDER` / `EMAIL_PASSWORD`：Gmail 发信地址 + [应用专用密码](https://support.google.com/accounts/answer/185833)。
    *   `DIGEST_EMAIL_TO`：收件邮箱。
 4. **Actions 标签页 → 启用 workflow**。默认每天 10:00（北京）跑；也可在 `daily-report` 里手动 **Run workflow** 立即触发。
-
-每次运行后更新的 `memory/` 自动 commit 回 fork —— 你的决策历史天然进 git，可回溯。
 
 ---
 
@@ -202,6 +200,8 @@ bash ~/openInvest/skills/install.sh
 4.  **Round 2 Rebuttal (交叉辩论机制)**：Quant 与 Risk 在第二轮被强制注入对方的 Round 1 报告，进行边界碰撞，直到两个 Agent 的信号和强度达成收敛，或触发收敛安全阀。
 5.  **CIO (首席投资官)**：汇总经过多轮过滤的质询追踪，输出结构化 `Verdict`（BUY / ACCUMULATE / HOLD / TRIM / SELL）与置信度。系统保持强克制，**不具备任何自动下单原语**，最终执行交由人类审计。
 
+这套设计背后的关键取舍以 ADR 形式记录于 [docs/wiki/adr/](docs/wiki/adr/)（当前 24 条），其中包含推翻自身早期设计的决议——[ADR-007](docs/wiki/adr/007-few-shot-retirement.md) 将 few-shot CIO 路线退役，[ADR-009](docs/wiki/adr/009-no-ta-style-analyst-agents.md) 依预注册实验否决了 TA 风格分析师扩展。
+
 ---
 
 ## 核心设计理念
@@ -212,53 +212,9 @@ bash ~/openInvest/skills/install.sh
 
 ---
 
-## 底层 LLM Provider 配置契约
+## 配置
 
-系统默认采用高性价比的 DeepSeek 系列端点。如需替换为任何标准的 OpenAI 兼容架构，必须严格遵循 `.env` 的配置契约（务必确保 `LLM_MODEL` 的官方真实 ID 映射，不可仅改 URL）：
-
-```env
-# === 选项 A: DeepSeek (架构默认) ===
-LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-chat
-
-# === 选项 B: 通义千问 (Aliyun DashScope 兼容模式) ===
-LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL=qwen-max
-
-# === 选项 C: 智谱 AI (GLM API 兼容端点) ===
-LLM_API_KEY=xxxxxxxxxxxxxxxx.xxxxxxxxx
-LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v1
-LLM_MODEL=glm-4-flash
-```
-
----
-
-## 运行时委员会行为调整原语
-
-openInvest 提供了极高内聚的运行时参数配置开关。依据 [ADR-017](docs/wiki/adr/017-config-via-api.md)，以下 Tunable 变量在 Web GUI / API / CLI / env 四个通道具备完全等价的覆盖优先级，并持久化于 `memory/.state/config_overrides.json` 中：
-
-| 统一配置键 (Config Key) | 数据类型 & 默认值 | 工程行为后果描述 |
-| --- | --- | --- |
-| `verdict.concentration_lens_enabled` | `bool` (`true`) | **持仓集中度过滤器**。当单一标的暴露过高时强行触发安全减仓阈值。若关闭，则单资产或全额风险池将**不因过度集中而被 CIO 建议减仓**（但波动率、估值风险、最大回撤风控依旧生效）。详见 [ADR-019](docs/wiki/adr/019-remove-solvency-concentration-override.md) |
-| `verdict.risk_profile` | `str` (`"steady"`) | 风险偏好特征描述符。`steady`（稳健）/ `aggressive`（在 Downtime 阶段允许激活高顺势加仓弹性）。 |
-| `verdict.gold_defense_dca_enabled` | `bool` (`true`) | 黄金防御机制。在 VIX / ATR 骤增阶段，强行将单次大额加仓原语拆分为多期 DCA（分批放行）。 |
-| `dca.auto_dca_enabled` | `bool` (`false`) | 全自动定期定投决策开关。 |
-| `dca.auto_dca_amount_cny` | `float` (`0.0`) | 触发自动定投时的单期基准人民币资本配置额度。详见 [ADR-018](docs/wiki/adr/018-dca-dip-reserve.md) |
-
-### 参数运行时重写（以关闭集中度 Lens 为例）
-
-```bash
-# 途径 1: 使用 CLI 原语重写
-uv run python scripts/skill.py config --set verdict.concentration_lens_enabled false
-
-# 途径 2: 通过运行时 REST API 注入
-curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}'
-
-# 途径 3: 宿主 GUI 交互控制
-# 前往 invest-gui「Settings → Committee Configuration」面板直接热切换
-```
+系统默认采用 DeepSeek 端点，支持任何标准 OpenAI 兼容 API。LLM provider 配置与全部运行时可调参数（[ADR-017](docs/wiki/adr/017-config-via-api.md)）参阅 [docs/wiki/22-configuration.md](docs/wiki/22-configuration.md)。
 
 ---
 
@@ -266,20 +222,6 @@ curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_l
 
 1. **无商业顾问要约**：本系统仅为大语言模型驱动的决策辅助工具。输出的 Markdown 备忘录属于基于确定性输入的模拟推理，不构成任何特定的资产配置与投资建议。
 2. **回测时间锁与过拟合防范**：`scripts/backtest_runner.py` 内置硬编码安全阀。**默认全面拒绝 `decision_date > 2024-06-30` 的任何回测请求**（若强行越界，需显式声明 `--allow-lookahead`）。由于目前主流基础模型的训练语料库截止于 2024 年中，对其后时段的回测将不可避免地混入**模型训练的先知偏差（Lookahead Bias）**。任何调参、超参数 Sweep（Optuna 实验）及 Prompt 评估必须严格在 2024-06-30 之前的历史区间内运行。
-
----
-
-## 核心系统代码库纵览
-
-```
-c apabilities/      # 多角色决策 Prompt 与行为契约定义
-core/        # 核心协调器（Coordinator）编排层、持久化文件文件锁与状态总线
-jobs/        # 定时自动化任务体系（ APScheduler，含 event_watch 感知层）
-connectors/  # 外部协议桥接（FastAPI Web API / 终端交互 Skill 适配）
-services/    # 基础公共服务群（新闻多源同步 / 结构化事件清洗 / 消息分发）
-db/          # 高性能 SQLite WAL 预写日志数据库群（交易流水/Insight记忆/市场特征）
-docs/wiki/   # 完整的架构设计记录（ADR）与分布式设计原理解析
-```
 
 ---
 

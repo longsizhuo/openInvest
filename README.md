@@ -23,14 +23,6 @@ OpenInvest is a self-hosted investment decision engine built for modern AI agent
 
 It provides a verifiable investment committee, evidence-based reasoning, long-horizon backtesting, and auditable decision records. Instead of replacing Claude Code, Codex, Hermes, or OpenClaw, OpenInvest is designed to power them.
 
-## Why OpenInvest?
-
-Most AI investment assistants try to become better chatbots. OpenInvest takes a different approach.
-
-It focuses on building a transparent, verifiable, and auditable decision engine that can be integrated into any modern AI agent. Instead of competing with personal AI agents, OpenInvest is designed to amplify them. 
-
-Every improvement in Claude Code, Codex, Hermes, OpenClaw, or future agents automatically makes OpenInvest more capable.
-
 ---
 
 ## Live Performance & PnL
@@ -48,33 +40,34 @@ Every improvement in Claude Code, Codex, Hermes, OpenClaw, or future agents auto
 <!-- OUTPERFORM_FEED_END -->
 
 *   **Benchmark Portfolio**: The system introduces 8 standard control benchmarks across 4 quadrants (AI advisors / Mutual funds / Wealth management / Broad market index). For details on the comparison methodology and data cleaning logic, see [docs/wiki/README.md](docs/wiki/README.md).
-*   **System Self-Disclosure**: This system is an **auditing tool to eliminate human investment cognitive biases and enforce reasoning transparency**, not a return-amplifying black box. Latest automated audit (`docs/verdict_accuracy.md`): Directional verdicts (excluding HOLD) have a true hit rate of **42.2%** (n=56, **below random**); `HOLD` accounts for **56%** of all decisions. The system's value lies in transparency and discipline (mostly staying inactive, low turnover), **not directional prediction**. Detailed log stream can be found in [docs/verdict_accuracy.md](docs/verdict_accuracy.md).
+
+---
+
+## Research & Falsification
+
+**System Self-Disclosure**: This system is an **auditing tool to eliminate human investment cognitive biases and enforce reasoning transparency**, not a return-amplifying black box. Latest automated audit (`docs/verdict_accuracy.md`): Directional verdicts (excluding HOLD) have a true hit rate of **42.2%** (n=56, **below random**); `HOLD` accounts for **56%** of all decisions. The system's value lies in transparency and discipline (mostly staying inactive, low turnover), **not directional prediction**. Detailed log stream can be found in [docs/verdict_accuracy.md](docs/verdict_accuracy.md).
+
+This project systematically attempts to falsify its own edge and publishes negative results as-is. The deterministic features the committee reads, and the timing signals around them, were tested against pre-registered statistical gates — none survived as tradable alpha.
+
+| Test | Result | Verdict |
+|---|---|---|
+| Q1 cross-sectional stock picking | 6 features, mean-IC 0.025–0.067, Holm-corrected **p=0.397** | No significant stock-picking signal |
+| M1 multivariate GBM (out-of-sample) | mean OOS IC **+0.003**, p=0.925 | Feature combination doesn't help either — no signal |
+| Q2 gold MA200 trend | **p_holm=0.016**, significant — but `trend_dca` shows it is **beta, not tradable alpha**: timing terminal value **3.07 vs 15.10** buy-and-hold, Sharpe **+0.36 vs +0.68**, max drawdown deeper (**−57% vs −44%**) | Statistically significant, economically untradable |
+| Per-asset multi-signal families | 3 assets × 4 signal families × parameter grid = 24 variants per asset; after costs + DSR deflation, **none passes DSR > 0.95** | No tradable signal in any family |
+| Positive control | A cheating perfect-foresight timing signal scores **DSR = 1.00** | The harness can detect a real signal |
+
+Methodology: Newey-West HAC t-statistics, Deflated Sharpe Ratio (Bailey & López de Prado 2014, re-derived equation by equation), Holm correction, zero lookahead, and LLM training-cutoff probes.
+
+Details: [experiments/signal-eval/README.md](experiments/signal-eval/README.md) · [docs/verdict_accuracy.md](docs/verdict_accuracy.md) · [ADR-022](docs/wiki/adr/022-backtest-memory-contamination-and-holdout-discipline.md) · [ADR-023](docs/wiki/adr/023-honest-positioning-not-alpha.md)
 
 ---
 
 ## Product Philosophy
 
-OpenInvest is not another chatbot or AI agent.
+Most AI investment assistants try to become better chatbots. OpenInvest instead builds a transparent, verifiable, and auditable decision engine that plugs into personal agents such as Claude Code, Codex, Hermes, and OpenClaw — every improvement in those agents automatically makes OpenInvest more capable.
 
-We believe the future belongs to increasingly capable personal agents such as Claude Code, Codex, Hermes, OpenClaw, and future Agent Operating Systems. These agents stay with their users over time and understand their goals, preferences, and long term context.
-
-OpenInvest focuses on investment decisions.
-
-OpenInvest provides:
-*   Verifiable investment committees
-*   Evidence-based reasoning
-*   Long-horizon backtesting and calibration
-*   Auditable decision records
-*   Decision protocols for AI agents
-
-Modern AI agents typically provide:
-*   Long term memory
-*   Natural conversation
-*   User understanding
-*   Decision reflection
-*   Personalized guidance
-
-OpenInvest understands the market. Your agent understands you.
+The division of labor is deliberate: your agent handles long-term memory, natural conversation, and user understanding; OpenInvest handles the verifiable investment committee, evidence-based reasoning, long-horizon backtesting, and auditable decision records.
 
 ```
                    User
@@ -207,6 +200,8 @@ openInvest does not run a mock debate in a single LLM session. The system enforc
 4.  **Round 2 Rebuttal**: Quant and Risk analysts are fed each other's Round 1 reports in Round 2, challenging boundaries until signals converge or safety valves trigger.
 5.  **CIO (Chief Investment Officer)**: Synthesizes the audited reports and outputs a structured `Verdict` (BUY / ACCUMULATE / HOLD / TRIM / SELL) with a confidence level. **No auto-order execution occurs**; final action remains strictly up to the human auditor.
 
+Key trade-offs behind this design are recorded as ADRs in [docs/wiki/adr/](docs/wiki/adr/) (24 to date), including rulings that overturned our own earlier designs — [ADR-007](docs/wiki/adr/007-few-shot-retirement.md) retired the few-shot CIO route, and [ADR-009](docs/wiki/adr/009-no-ta-style-analyst-agents.md) rejected TA-style analyst agents after a pre-registered experiment.
+
 ---
 
 ## Core Design
@@ -217,47 +212,9 @@ openInvest does not run a mock debate in a single LLM session. The system enforc
 
 ---
 
-## Configuration & Environment Settings
+## Configuration
 
-### LLM Provider Configuration
-The system defaults to DeepSeek endpoints but supports any standard OpenAI-compatible API. Map the variables in `.env` accordingly (ensure `LLM_MODEL` maps to the provider's exact model ID):
-
-```env
-# === Option A: DeepSeek (Default) ===
-LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-chat
-
-# === Option B: Aliyun Qwen (OpenAI Compatible) ===
-LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL=qwen-max
-
-# === Option C: Zhipu AI (GLM OpenAI Compatible) ===
-LLM_API_KEY=xxxxxxxxxxxxxxxx.xxxxxxxxx
-LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v1
-LLM_MODEL=glm-4-flash
-```
-
-### Tunable Runtime Overrides
-Pursuant to [ADR-017](docs/wiki/adr/017-config-via-api.md), runtime overrides persist in `memory/.state/config_overrides.json` and share the same precedence priority across CLI, REST API, and `.env`:
-
-| Config Key | Data Type (Default) | Architectural Effect |
-|---|---|---|
-| `verdict.concentration_lens_enabled` | `bool` (`true`) | **Portfolio Concentration Filter**. When enabled, alerts/TRIM are triggered on over-concentrated assets. If disabled, concentration will not trigger TRIM warnings (volatility and valuation wind-downs still apply). See [ADR-019](docs/wiki/adr/019-remove-solvency-concentration-override.md) |
-| `verdict.risk_profile` | `str` (`"steady"`) | Risk appetite configuration: `steady` / `aggressive` (allows larger scale buys during downturns). |
-| `verdict.gold_defense_dca_enabled` | `bool` (`true`) | Gold defense filter. Splits large allocations into multi-period DCAs during high volatility spikes. |
-| `dca.auto_dca_enabled` | `bool` (`false`) | Global toggle for automated dollar-cost averaging decisions. |
-| `dca.auto_dca_amount_cny` | `float` (`0.0`) | Base CNY allocation amount for each auto-DCA period. See [ADR-018](docs/wiki/adr/018-dca-dip-reserve.md) |
-
-#### Overriding Parameters at Runtime (e.g. Disabling Concentration Lens)
-```bash
-# Method 1: Using the CLI
-uvx openinvest config --set verdict.concentration_lens_enabled false
-
-# Method 2: REST API (deprecated surface — remote hub mode only)
-curl -X PUT http://localhost:8765/api/config -d '{"key":"verdict.concentration_lens_enabled","value":false}' 
-```
+The system defaults to DeepSeek endpoints and supports any standard OpenAI-compatible API. LLM provider setup and all tunable runtime overrides ([ADR-017](docs/wiki/adr/017-config-via-api.md)) are documented in [docs/wiki/22-configuration.md](docs/wiki/22-configuration.md).
 
 ---
 
