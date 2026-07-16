@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.5](https://github.com/longsizhuo/openInvest/compare/v0.30.4...v0.30.5) (2026-07-16)
+
+
+### Docs
+
+* **agents:** OpenClaw 安装改一键 clawhub 命令 + 澄清两个 OpenClaw ([449c0df](https://github.com/longsizhuo/openInvest/commit/449c0dff26c516cb41907c3d2f30ab1039b77b17))
+
 ## [0.30.4](https://github.com/longsizhuo/openInvest/compare/v0.30.3...v0.30.4) (2026-07-15)
 
 
