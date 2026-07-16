@@ -51,9 +51,22 @@ jobs:
             --json number,headRefName \
             -q '.[] | select(.headRefName | startswith("release-please--")) | .number' \
           | while read -r n; do
-            gh pr merge "$n" --merge --repo "$GITHUB_REPOSITORY" \
-              && echo "merged #$n" \
-              || echo "skip #$n（冲突，下轮 release-please 刷新后自愈）"
+            if gh pr merge "$n" --merge --repo "$GITHUB_REPOSITORY"; then
+              echo "merged #$n"
+            else
+              # "下轮自愈"对 manifest 行冲突不成立（2026-07-16 #218 实证：
+              # release-please 见 PR 内容没变就不刷新分支，冲突永远挂着）。
+              # CONFLICTING 直接关闭删分支——release PR 内容是确定性生成的，
+              # 下轮 release-please 从当前 main 干净重建，无损失。
+              state=$(gh pr view "$n" --repo "$GITHUB_REPOSITORY" --json mergeable -q .mergeable)
+              if [ "$state" = "CONFLICTING" ]; then
+                gh pr close "$n" --repo "$GITHUB_REPOSITORY" --delete-branch \
+                  --comment "manifest 冲突（多组件同轮发版的已知竞态），自动关闭重建"
+                echo "closed conflicted #$n（下轮重建）"
+              else
+                echo "skip #$n（非冲突性合并失败：$state，人工看一眼）"
+              fi
+            fi
           done
 
       - id: rp2
