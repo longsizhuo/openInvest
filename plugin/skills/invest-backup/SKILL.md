@@ -1,7 +1,7 @@
 ---
 name: invest-backup
 version: 0.1.0
-description: 备份 / 恢复 openInvest 的本地状态——memory/（持仓、策略、用户画像、委员会记录、dream 日志）+ db/（交易台账、job 运行历史、行情缓存）+ .env（SMTP/API 凭据）+ user_profile.json。这些数据全部 .gitignore，git 里没有任何历史版本，一旦被误覆盖（例如手滑直接跑了某个一次性迁移/初始化脚本）就是真实数据丢失，没有 git revert 可用。**主动触发场景**："备份一下 openInvest 的数据"、"backup invest data"、"我的持仓/策略好像被清空了"、"invest 数据丢了"、"恢复一下 invest 的备份"、"restore invest backup"、任何要在这台机器上重装/迁移 openInvest 部署之前、或者刚要跑一个陌生的迁移/初始化脚本之前（先备份再动手）。
+description: Back up / restore openInvest's local state — memory/ (holdings, strategy, user profile, committee records, dream logs) + db/ (trade ledger, job run history, market-data cache) + .env (SMTP/API credentials) + user_profile.json. All of this data is .gitignore'd with no historical versions in git, so a single accidental overwrite (e.g. slipping and running some one-off migration/init script) means real data loss — no git revert available. **Proactive trigger scenarios** — "backup invest data / 备份一下 openInvest 的数据", "my holdings/strategy look wiped / 我的持仓/策略好像被清空了", "invest data is lost / invest 数据丢了", "restore invest backup / 恢复一下 invest 的备份", before any reinstall/migration of the openInvest deployment on this machine, or right before running an unfamiliar migration/init script (back up first, then act).
 platforms: [linux, macos]
 metadata:
   hermes:
@@ -10,33 +10,33 @@ metadata:
 
 # Invest Backup Skill
 
-## 为什么需要这个 skill
+## Why this skill exists
 
-openInvest 的真实数据（`memory/` 下的持仓/策略/用户画像/委员会记录，`db/` 下的交易台账/job 历史）**全部 `.gitignore`**——这是故意的（隐私：含真实资产/工资/交易），但代价是 git 完全帮不上忙。2026-07-08 就出过一次事故：一个叫 `migrate_profile.py` 的一次性迁移脚本（没有任何 safety guard）被直接跑了一次，把 `user.md` / `strategy.md` / `portfolio.md` 覆盖成写死的 demo 默认值，`daily_report` 因为 `target_assets` 变空而每天早退、邮件从此全断，用户完全没有感知直到发现收不到邮件才追出来。
+openInvest's real data (holdings/strategy/user profile/committee records under `memory/`, trade ledger/job history under `db/`) is **entirely `.gitignore`d** — deliberately (privacy: it contains real assets/salary/trades), but the price is that git can't help at all. There was an incident on 2026-07-08: a one-off migration script named `migrate_profile.py` (with no safety guard whatsoever) was run directly once, overwriting `user.md` / `strategy.md` / `portfolio.md` with hard-coded demo defaults; `daily_report` then exited early every day because `target_assets` had become empty, emails stopped entirely from that point on, and the user had no idea until they noticed the missing emails and traced it back.
 
-**遇到下面任一场景，主动用这个 skill**：
-- 要跑任何陌生的迁移 / 初始化 / 批量写 `memory/` 或 `db/` 的脚本之前 → 先 `backup`
-- 用户说持仓、策略、委员会记录看起来不对/被清空了 → 先 `backup`（哪怕现在的状态已经是坏的，也要把"坏状态"存一份，不然连诊断素材都没了），再排查
-- 要迁移到新机器 / 重装部署 → `backup` 打包，新机器上 `restore`
+**In any of the following scenarios, proactively use this skill**:
+- Before running any unfamiliar migration / init / bulk script that writes to `memory/` or `db/` → `backup` first
+- The user says holdings, strategy, or committee records look wrong / wiped → `backup` first (even if the current state is already broken, save the "broken state" — otherwise you lose even the diagnostic material), then investigate
+- Migrating to a new machine / reinstalling the deployment → `backup` to package, `restore` on the new machine
 
-## 用法
+## Usage
 
 ```bash
-plugin/skills/invest-backup/scripts/run.sh backup [output_dir]   # 默认存到 $INVEST_ROOT/.backups/
+plugin/skills/invest-backup/scripts/run.sh backup [output_dir]   # defaults to $INVEST_ROOT/.backups/
 plugin/skills/invest-backup/scripts/run.sh restore <zip_path> [--force]
 plugin/skills/invest-backup/scripts/run.sh list
 ```
 
-- **backup**：把 `memory/`、`db/*.sqlite`、`db/*.db`、`.env`、`user_profile.json*` 打成一个带 UTC 时间戳的 zip。数据目录走 `openinvest.paths.INVEST_ROOT` 解析（和后端其余代码同一套优先级：`INVEST_HOME` env → 仓库标记探测 → cwd），不在 shell 里重复猜路径。
-- **restore**：从 zip 解回数据目录。**默认拒绝覆盖已含真实持仓/现金的 `portfolio.md`**（判定口径和 `lifecycle_cmds.py:_write_v2_portfolio` 的 2026-05-10 事故防御同一套：cash 任一币种 > 0 或 holdings 非空就算真实数据）——确认要覆盖必须显式加 `--force`。不管有没有 `--force`，恢复前都会先把当前状态自动备份一份，操作本身可逆。
-- **list**：列出已有备份，按新到旧排序，附大小。
+- **backup**: packs `memory/`, `db/*.sqlite`, `db/*.db`, `.env`, `user_profile.json*` into a single UTC-timestamped zip. The data directory is resolved via `openinvest.paths.INVEST_ROOT` (same precedence order as the rest of the backend: `INVEST_HOME` env → repo-marker detection → cwd) instead of re-guessing paths in shell.
+- **restore**: unpacks a zip back into the data directory. **By default it refuses to overwrite a `portfolio.md` that already contains real holdings/cash** (same criterion as the 2026-05-10 incident defense in `lifecycle_cmds.py:_write_v2_portfolio`: cash > 0 in any currency, or non-empty holdings, counts as real data) — to confirm the overwrite you must explicitly pass `--force`. With or without `--force`, the current state is automatically backed up before restoring, so the operation itself is reversible.
+- **list**: lists existing backups, newest first, with sizes.
 
-## 不包含什么
+## What is not included
 
-- `memory/.backtest*` 系列目录（历史回测缓存，几十 MB，可以用 `scripts/backtest_committee.py` 之类的脚本重新生成，不是不可再生数据）——本 skill 目前**没有排除**它们，因为体积尚可接受且 `backup` 语义上是"整个数据目录"；如果 `memory/` 体积涨到不方便打包，再单独排除。
-- `db/*.sqlite-journal`、`*.db-shm`、`*.db-wal`：SQLite 运行时临时文件，恢复后会自动重建，带上反而可能是半提交状态。
-- `*.lock`：fcntl 文件锁，进程重启后自动清空，不需要保留。
+- The `memory/.backtest*` family of directories (historical backtest caches, tens of MB, regenerable with scripts like `scripts/backtest_committee.py` — not irreplaceable data) — this skill currently does **not exclude** them, because the size is still acceptable and `backup` semantically means "the entire data directory"; if `memory/` ever grows too large to package comfortably, exclude them separately then.
+- `db/*.sqlite-journal`, `*.db-shm`, `*.db-wal`: SQLite runtime temp files — they are rebuilt automatically after a restore, and carrying them along could actually capture a half-committed state.
+- `*.lock`: fcntl file locks, cleared automatically on process restart, no need to keep.
 
-## 和 migrate_profile.py 类事故的关系
+## Relationship to migrate_profile.py-class incidents
 
-这个 skill 只解决"丢了能不能找回来"，**不解决"为什么会被覆盖"**。如果你在这个仓库里看到类似 `migrate_profile.py` 这种直接 `store.write(...)` 且没有 safety guard 的脚本，参考 `src/openinvest/skill_cmds/lifecycle_cmds.py` 里 `_write_v2_portfolio` 的模式（覆盖前检查是否已有真实数据，拒绝则要求显式 `force=True`，覆盖前自动备份）给它补一个同款守卫——这才是治本，本 skill 只是最后一道安全网。
+This skill only solves "can it be recovered once lost" — it does **not** solve "why did it get overwritten". If you see a script in this repo like `migrate_profile.py` that calls `store.write(...)` directly with no safety guard, follow the pattern of `_write_v2_portfolio` in `src/openinvest/skill_cmds/lifecycle_cmds.py` (check for existing real data before overwriting; on refusal require explicit `force=True`; auto-backup before overwriting) and retrofit the same guard — that is the real fix; this skill is only the last safety net.

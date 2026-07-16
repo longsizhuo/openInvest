@@ -68,28 +68,13 @@ else
     "$@"
 fi
 
-# ---- 2. standalone skill（英文 description 变体）----
-# ClawHub 目录面向英文用户；repo 内 SKILL.md description 是中文（Claude/Hermes
-# 等宿主 agent 的双语触发场景需要）。这里换 description 一行，其余原样。
-# 注意：英文文案里不能出现 ASCII 冒号+空格（YAML 会解析成新 key），用破折号。
-DESC_EN='openInvest multi-asset AI investment committee — **daily use**. Read portfolio / live prices / strategy / decision history / adjust positions / run a 4-role LLM committee for an investment verdict. Supports any yfinance symbol (A-share / HK / US / ETF / crypto / commodities) and any currency. **Two paths** — (1) Coordinator, Claude Code spawns 4 subagents, saves DeepSeek tokens; (2) Direct, any agent (Codex / Hermes / OpenClaw / Cursor / Cline / plain script) runs `run.sh run_committee <SYM>` for a one-shot verdict. **Trigger scenarios** — "show portfolio", "how is my P&L", "should I buy/sell X", "analyze X", "run committee on X", "track AAPL", "add/trim a position, log a trade". **First-time install uses a separate skill `invest-setup`** (switch to it when `doctor` returns `needs_setup`). Backend — longsizhuo/openInvest.'
-
+# ---- 2. standalone skill ----
+# SKILL.md 源文件已是英文（2026-07-16 起，正文英文 + 双语触发短语），
+# 直接从 repo 原样发布，无需任何 description 替换。
 if [ "$(_remote_latest skill)" = "$VERSION" ] && [[ " $* " != *" --dry-run "* ]]; then
   echo "⏭  skill openinvest@$VERSION 已在远端，跳过"
 else
-  TMP=$(mktemp -d)
-  trap 'rm -rf "$TMP"' EXIT
-  cp -rL plugin/skills/invest "$TMP/invest-en"
-  DESC_EN="$DESC_EN" python3 - "$TMP/invest-en/SKILL.md" <<'PYEOF'
-import os, re, sys
-path = sys.argv[1]
-text = open(path, encoding="utf-8").read()
-new, n = re.subn(r"^description:.*$", "description: " + os.environ["DESC_EN"],
-                 text, count=1, flags=re.MULTILINE)
-assert n == 1, "SKILL.md 里没找到 description 行"
-open(path, "w", encoding="utf-8").write(new)
-PYEOF
-  clawhub skill publish "$TMP/invest-en" \
+  clawhub skill publish plugin/skills/invest \
     --slug openinvest \
     --name "openInvest" \
     --version "$VERSION" \
