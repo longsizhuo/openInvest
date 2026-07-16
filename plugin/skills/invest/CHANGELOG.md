@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.19.0...invest-skill-v0.20.0) (2026-07-16)
+
+
+### Features
+
+* **skill:** SKILL.md 与全部 references 英文化——正文英文 + 双语触发短语 ([83b6e59](https://github.com/longsizhuo/openInvest/commit/83b6e59a4cca8ecdb65214c4381b04faa336f87f))
+
 ## [0.19.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.18.8...invest-skill-v0.19.0) (2026-07-14)
 
 
