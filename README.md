@@ -10,6 +10,7 @@
 [![Agents](https://img.shields.io/badge/Agents-Claude%20Code%20%7C%20Codex%20%7C%20Hermes%20%7C%20OpenClaw-informational)](docs/wiki/20-agent-usage-tutorial.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/longsizhuo/openInvest?style=social)](https://github.com/longsizhuo/openInvest)
+[![Glama MCP server](https://glama.ai/mcp/servers/longsizhuo/openInvest/badges/score.svg)](https://glama.ai/mcp/servers/longsizhuo/openInvest)
 
 [📚 Full Architecture Wiki](docs/wiki/README.md) · [🇨🇳 中文版](README_zh.md)
 
