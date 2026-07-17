@@ -33,12 +33,14 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
         insights_dir = store.root / "insights"
         if not insights_dir.exists():
             return ""
-        sym = asset.get("symbol", "").lower().replace("=", "_")
+        # 用与 Dreaming 写文件时同一个 _slugify（. / - / = 都转 _），否则 510300.SS
+        # 这类带点/横杠的 symbol 永远匹配不上自己的 insight 文件（旧写法只 replace("=")
+        # → "510300.ss" 找不到 "510300_ss_*.md"，作者本人持仓静默拿不到长期洞察，CR 命中）。
+        from openinvest.jobs.dreaming_calc import _slugify
+        sym = _slugify(asset.get("symbol", ""))
         matches = []
         for f in sorted(insights_dir.glob("*.md")):
-            if sym in f.stem.lower() or any(
-                tok in f.stem.lower() for tok in ["gold", "ndq"] if tok in sym
-            ):
+            if sym and sym in f.stem.lower():
                 matches.append(f"## {f.stem}\n{f.read_text(encoding='utf-8')[:600]}")
         return "\n\n".join(matches)
     except Exception as e:  # noqa: BLE001

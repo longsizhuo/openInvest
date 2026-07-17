@@ -269,11 +269,15 @@ def parse_cio_memo(
         rp = out.get("reentry_price")
         if rp is None or rp >= current_price:
             out["_original_verdict"] = "TRIM"
+            out["_original_alloc_sanity5"] = out.get("alloc_cny")
             out["_sanity5_reason"] = (
                 "reentry_missing" if rp is None else "reentry_not_below_current"
             )
             out["_current_price"] = current_price
-            out["verdict"] = "HOLD"
+            # 走统一 force-HOLD：verdict→HOLD + alloc→0 + confidence 压顶。手设
+            # verdict="HOLD" 会漏归零 alloc_cny，让 TRIM 的负 alloc 存活下去
+            # （_force_hold docstring 记载的 Sanity 3 同款历史 bug）。
+            _force_hold(out, confidence_ceiling=out["confidence"])
             log.warning(
                 "parse_cio_memo: TRIM 但买回点%s → 强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）",
                 "缺失" if rp is None else f"¥{rp} ≥ 现价 ¥{current_price}",

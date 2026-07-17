@@ -288,7 +288,7 @@ def save_committee_transcript(
         "asset": symbol,
         "verdict": verdict["verdict"],
         "confidence": verdict["confidence"],
-        "provider": "claude",
+        "provider": provider,
     })
     return {"saved": str(path), "verdict": verdict}
 
