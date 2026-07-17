@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.3](https://github.com/longsizhuo/openInvest/compare/v0.31.2...v0.31.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **mcp:** 18 个工具 description 全量英文化重写——用途/时机/Args/Returns 齐备 ([dcf2699](https://github.com/longsizhuo/openInvest/commit/dcf2699799ff39393a5528b0eaeafaf9edcf0fe0))
+
 ## [0.31.2](https://github.com/longsizhuo/openInvest/compare/v0.31.1...v0.31.2) (2026-07-17)
 
 
