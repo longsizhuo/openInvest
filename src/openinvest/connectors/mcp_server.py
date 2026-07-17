@@ -23,7 +23,9 @@ Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
+
+from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -93,7 +95,9 @@ def strategy() -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=_RO)
-def history(n: int = 10) -> Dict[str, Any]:
+def history(
+    n: Annotated[int, Field(description="Maximum number of recent trades to return.")] = 10,
+) -> Dict[str, Any]:
     """Get the most recent trade records and committee verdict history.
 
     Use when the user asks "what did I buy recently" or "what did the
@@ -142,8 +146,11 @@ def live_prices() -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=_RO)
-def what_if(symbol: str, pct: Optional[float] = None,
-            price: Optional[float] = None) -> Dict[str, Any]:
+def what_if(
+    symbol: Annotated[str, Field(description="yfinance ticker held or tracked by the user, e.g. 'NDQ.AX', 'GC=F', '510300.SS'.")],
+    pct: Annotated[Optional[float], Field(description="Hypothetical percent change, e.g. -10 for a 10% drop. Provide exactly one of pct or price.")] = None,
+    price: Annotated[Optional[float], Field(description="Hypothetical absolute target price (alternative to pct).")] = None,
+) -> Dict[str, Any]:
     """Simulate portfolio P&L for a hypothetical price move: "what happens to
     my portfolio if <symbol> moves ±pct% / reaches <price>". Pure arithmetic
     over current holdings — no LLM call, instant, free.
@@ -185,7 +192,9 @@ def discipline() -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=_RO)
-def decisions(days: int = 90) -> Dict[str, Any]:
+def decisions(
+    days: Annotated[int, Field(description="Look-back window in days.")] = 90,
+) -> Dict[str, Any]:
     """Get the unified decision ledger: every committee verdict joined with
     rule interventions, the user's actual executions or refusals (with
     reasons), and post-hoc outcome data — plus an adoption-rate summary.
@@ -207,7 +216,9 @@ def decisions(days: int = 90) -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=_RO)
-def explain_decision(decision_id: str) -> Dict[str, Any]:
+def explain_decision(
+    decision_id: Annotated[str, Field(description="\"<date>/<symbol>\", e.g. \"2026-07-03/GC=F\" — exactly as returned by the decisions tool.")],
+) -> Dict[str, Any]:
     """Get the full reasoning behind one committee verdict: the complete
     4-role debate transcript with the CIO memo, plus the path-probability
     snapshot the CIO saw at decision time.
@@ -258,9 +269,12 @@ def explain_decision(decision_id: str) -> Dict[str, Any]:
 # ---------- 决策账本写 ----------
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
-def record_execution(decision_id: str, executed: bool,
-                     reason: Optional[str] = None,
-                     trade_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+def record_execution(
+    decision_id: Annotated[str, Field(description="\"<date>/<symbol>\" from the decisions tool output.")],
+    executed: Annotated[bool, Field(description="True if the user acted on the verdict, False if they declined.")],
+    reason: Annotated[Optional[str], Field(description="The user's stated reason (especially when declined).")] = None,
+    trade_ids: Annotated[Optional[List[int]], Field(description="Optional trade record IDs to link explicitly.")] = None,
+) -> Dict[str, Any]:
     """Record whether the user executed or declined a committee verdict, with
     their reason. Appends to the execution ledger; idempotent — replaying the
     same record is a no-op, so retries are safe.
@@ -286,9 +300,14 @@ def record_execution(decision_id: str, executed: bool,
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
-def ingest_event(title: str, url: str, snippet: str = "",
-                 source: str = "", published_at: Optional[str] = None,
-                 ingested_by: str = "host-agent") -> Dict[str, Any]:
+def ingest_event(
+    title: Annotated[str, Field(description="Headline of the news item.")],
+    url: Annotated[str, Field(description="Canonical source URL (also the dedup key).")],
+    snippet: Annotated[str, Field(description="Short excerpt or summary of the article body.")] = "",
+    source: Annotated[str, Field(description="Publisher name (e.g. 'Reuters') — the news outlet.")] = "",
+    published_at: Annotated[Optional[str], Field(description="ISO 8601 publication time, if known.")] = None,
+    ingested_by: Annotated[str, Field(description="Your own agent identity (e.g. 'hermes') for provenance; distinct from source.")] = "host-agent",
+) -> Dict[str, Any]:
     """Feed a finance news item you (the host agent) found into the event
     ledger. The backend LLM normalizes it, grades severity, maps affected
     symbols, and stores it for committee RAG recall.
@@ -320,8 +339,14 @@ def ingest_event(title: str, url: str, snippet: str = "",
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------
 
 @mcp.tool(annotations=_MONEY)
-def buy(symbol: str, units: float, price: float, currency: str = "CNY",
-        kind: str = "equity", unit_label: str = "股") -> Dict[str, Any]:
+def buy(
+    symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
+    units: Annotated[float, Field(description="Quantity bought; must be > 0.", gt=0)],
+    price: Annotated[float, Field(description="Execution price per unit, in `currency`.", gt=0)],
+    currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
+    kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
+    unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
+) -> Dict[str, Any]:
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
     This bookkeeps a trade the user already placed with their broker —
@@ -349,7 +374,11 @@ def buy(symbol: str, units: float, price: float, currency: str = "CNY",
 
 
 @mcp.tool(annotations=_MONEY)
-def sell(symbol: str, units: float, price: float) -> Dict[str, Any]:
+def sell(
+    symbol: Annotated[str, Field(description="yfinance ticker of an existing holding.")],
+    units: Annotated[float, Field(description="Quantity sold; must be > 0.", gt=0)],
+    price: Annotated[float, Field(description="Execution price per unit, in the holding's cost currency.", gt=0)],
+) -> Dict[str, Any]:
     """Record a sell in the local ledger: reduces the position's units
     (average cost unchanged) and credits cash in the holding's cost
     currency. Bookkeeps a trade already executed at the user's broker —
@@ -375,7 +404,10 @@ def sell(symbol: str, units: float, price: float) -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=_MONEY)
-def deposit(currency: str, amount: float) -> Dict[str, Any]:
+def deposit(
+    currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
+    amount: Annotated[float, Field(description="Amount to add; must be > 0.", gt=0)],
+) -> Dict[str, Any]:
     """Record a cash deposit into the ledger, in any currency. Bookkeeping
     only — no real payment system is connected.
 
@@ -393,7 +425,10 @@ def deposit(currency: str, amount: float) -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=_MONEY)
-def withdraw(currency: str, amount: float) -> Dict[str, Any]:
+def withdraw(
+    currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
+    amount: Annotated[float, Field(description="Amount to remove; must be > 0.", gt=0)],
+) -> Dict[str, Any]:
     """Record a cash withdrawal from the ledger, in any currency. Fails if
     the balance is insufficient. Bookkeeping only — no real payment system
     is connected.
@@ -419,7 +454,10 @@ _STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotent
 
 
 @mcp.tool(annotations=_STRAT_W)
-def set_allocations(target_allocation_stock: float, target_allocation_cash: float) -> Dict[str, Any]:
+def set_allocations(
+    target_allocation_stock: Annotated[float, Field(description="Stock weight in [0, 1], e.g. 0.7. Must sum to ~1.0 with cash.", ge=0, le=1)],
+    target_allocation_cash: Annotated[float, Field(description="Cash weight in [0, 1], e.g. 0.3. Must sum to ~1.0 with stock.", ge=0, le=1)],
+) -> Dict[str, Any]:
     """Update the strategy's target stock/cash allocation ratio. The two
     values must sum to ≈1.0; schema validation rejects and rolls back any
     write that would corrupt the strategy file.
@@ -441,10 +479,14 @@ def set_allocations(target_allocation_stock: float, target_allocation_cash: floa
 
 
 @mcp.tool(annotations=_STRAT_W)
-def track_asset(symbol: str, max_single_invest_cny: Optional[float] = None,
-                display_name: Optional[str] = None, channel: Optional[str] = None,
-                price_offset_pct: Optional[float] = None,
-                sell_fee_pct: Optional[float] = None) -> Dict[str, Any]:
+def track_asset(
+    symbol: Annotated[str, Field(description="yfinance ticker to track, e.g. 'AAPL', '0700.HK', 'BTC-USD'.")],
+    max_single_invest_cny: Annotated[Optional[float], Field(description="Per-decision investment cap in CNY. Required when creating a new entry; optional on update.")] = None,
+    display_name: Annotated[Optional[str], Field(description="Human-friendly name shown in reports.")] = None,
+    channel: Annotated[Optional[str], Field(description="Where the user actually buys it (broker/app name).")] = None,
+    price_offset_pct: Annotated[Optional[float], Field(description="Systematic offset between quote and actual fill price, in percent (e.g. bank gold spread).")] = None,
+    sell_fee_pct: Annotated[Optional[float], Field(description="Sell-side fee in percent, used by fee-aware math.")] = None,
+) -> Dict[str, Any]:
     """Add a symbol to the tracked-asset list, or update an existing entry
     (idempotent upsert: only the fields you pass are changed). The tracked
     list decides which symbols the committee and DCA jobs cover.
@@ -479,7 +521,9 @@ def track_asset(symbol: str, max_single_invest_cny: Optional[float] = None,
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True))
-def untrack_asset(symbol: str) -> Dict[str, Any]:
+def untrack_asset(
+    symbol: Annotated[str, Field(description="yfinance ticker currently in the tracked list.")],
+) -> Dict[str, Any]:
     """Remove a symbol from the tracked-asset list — the committee and DCA
     jobs stop covering it. Holdings and trade history are untouched; schema
     validation guarantees at least one tracked asset remains.
@@ -500,8 +544,11 @@ def untrack_asset(symbol: str) -> Dict[str, Any]:
 # ---------- 委员会（Direct 路径） ----------
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
-def run_committee(symbol: str, force: bool = False,
-                  max_rounds: int = 1) -> Dict[str, Any]:
+def run_committee(
+    symbol: Annotated[str, Field(description="Any yfinance ticker (US / HK / A-share / ETF / crypto / commodities), e.g. 'AAPL', 'GC=F', '510300.SS'.")],
+    force: Annotated[bool, Field(description="Re-run even if a verdict already exists for today.")] = False,
+    max_rounds: Annotated[int, Field(description="Cross-challenge debate rounds.", ge=1)] = 1,
+) -> Dict[str, Any]:
     """Run the 4-role LLM investment committee on a symbol (Direct path):
     Macro Strategist, Quant Analyst, and Risk Officer debate from isolated
     evidence, then a CIO synthesizes one calibrated BUY/HOLD/SELL-style
