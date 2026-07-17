@@ -79,6 +79,7 @@ documents:
 | 19 | [埋点与数据收集](19-telemetry-and-analytics.md) | 一次性匿名安装统计 + 三个 opt-out 环境变量 + 隐私承诺 |
 | 20 | [使用教程](20-agent-usage-tutorial.md) | 安装（plugin/MCP）→ onboarding → 日常自然语言用法 → 决策闭环 record_execution/decisions |
 | 21 | [情报哨兵](21-intel-sentinel.md) | 三层情报架构 + 标准哨兵 prompt 模板 + 各平台接法 + 防注入纪律 |
+| 22 | [配置参考](22-configuration.md) | LLM provider `.env` 契约 + ADR-017 runtime overrides 全表（从 README 迁入）|
 
 ## 架构决策记录 (ADR)
 
