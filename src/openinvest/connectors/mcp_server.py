@@ -37,9 +37,12 @@ _MONEY = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHin
 mcp = FastMCP(
     "openinvest",
     instructions=(
-        "openInvest —— 面向 agent 的投资决策 runtime。持仓/行情/决议账本读写 + "
-        "4 角色 LLM 投资委员会（Direct 路径）。金额币种默认 CNY。"
-        "用户拒绝委员会建议时，问一句原因再 record_execution——原因闭环的采集端在宿主 agent。"
+        "openInvest — an investment decision runtime built for AI agents. "
+        "Read/write portfolio, live prices, and the decision ledger; run a 4-role LLM "
+        "investment committee (Direct path). Default currency for amounts is CNY. "
+        "When the user declines a committee recommendation, ask why in one sentence, "
+        "then call record_execution — reason capture is the host agent's job. "
+        "Never place real orders: this runtime is decision support only; the human executes."
     ),
 )
 
@@ -53,28 +56,75 @@ def _pm():
 
 @mcp.tool(annotations=_RO)
 def status() -> Dict[str, Any]:
-    """当前持仓全景：现金（各币种）+ holdings + 实时价 + P&L。"""
+    """Get a full snapshot of the user's portfolio: cash balances per currency,
+    every holding with units / average cost / live price, and unrealized P&L
+    per position and in total.
+
+    Use when the user asks "show my portfolio", "how is my P&L", or before
+    proposing any trade. Read-only; fetches live quotes, so values change
+    between calls.
+
+    Returns:
+        Object with `cash` (currency → amount), `holdings` (list of positions
+        with symbol, units, avg_cost, live price, market value, pnl_pct), and
+        portfolio-level totals.
+    """
     from openinvest.services.skill_views import build_status_view
     return build_status_view()
 
 
 @mcp.tool(annotations=_RO)
 def strategy() -> Dict[str, Any]:
-    """投资策略：target_assets + Dreaming 长期洞察。"""
+    """Get the user's investment strategy: target stock/cash allocation, the
+    list of tracked assets (per-asset investment cap, purchase channel, fee
+    settings), and long-term insights distilled by the nightly Dreaming
+    memory-consolidation job.
+
+    Use when deciding whether a proposed trade fits the user's plan, or when
+    the user asks "what is my strategy / what am I tracking". Read-only.
+
+    Returns:
+        Object with `target_allocation` (stock/cash ratios), `target_assets`
+        (tracked symbols with constraints), and `insights` (distilled
+        lessons from past decisions).
+    """
     from openinvest.services.skill_views import build_strategy_view
     return build_strategy_view()
 
 
 @mcp.tool(annotations=_RO)
 def history(n: int = 10) -> Dict[str, Any]:
-    """最近 n 笔交易流水 + 委员会决议记录。"""
+    """Get the most recent trade records and committee verdict history.
+
+    Use when the user asks "what did I buy recently" or "what did the
+    committee decide lately". Read-only.
+
+    Args:
+        n: Maximum number of recent trades to return (default 10).
+
+    Returns:
+        Object with `trades` (each with symbol, direction, units, price,
+        timestamp, status) and recent committee verdict records.
+    """
     from openinvest.services.skill_views import build_history_view
     return build_history_view(n)
 
 
 @mcp.tool(annotations=_RO)
 def live_prices() -> Dict[str, Any]:
-    """背景行情一次拉齐：金价（USD/oz + CNY/克）/ USDCNY / AUDCNY / NDQ.AX / VIX / TNX。"""
+    """Fetch a one-shot market backdrop: spot gold (USD/oz and CNY/gram),
+    USDCNY and AUDCNY FX rates, the NDQ.AX ETF price, the VIX volatility
+    index, and the 10-year US Treasury yield (TNX).
+
+    Use for quick market context before analysis or when the user asks
+    "how is the market / what's the gold price". Read-only; single batch,
+    no arguments.
+
+    Returns:
+        Object keyed by instrument (GC_F_usd_per_oz, gold_cny_per_gram_spot,
+        USDCNY, AUDCNY, NDQ_AX, VIX, TNX) plus `as_of` ISO timestamp. A field
+        is null when its upstream quote is unavailable.
+    """
     from datetime import datetime
     from openinvest.services.skill_views import _safe_close
     from openinvest.utils.gold_price import get_gold_snapshot
@@ -94,14 +144,41 @@ def live_prices() -> Dict[str, Any]:
 @mcp.tool(annotations=_RO)
 def what_if(symbol: str, pct: Optional[float] = None,
             price: Optional[float] = None) -> Dict[str, Any]:
-    """P&L 情景模拟："symbol 涨跌 pct% / 到 price 我的组合怎样"。纯算术零 LLM。"""
+    """Simulate portfolio P&L for a hypothetical price move: "what happens to
+    my portfolio if <symbol> moves ±pct% / reaches <price>". Pure arithmetic
+    over current holdings — no LLM call, instant, free.
+
+    Use when the user asks scenario questions like "if the Nasdaq drops 10%,
+    how much do I lose". Provide exactly one of `pct` or `price`.
+
+    Args:
+        symbol: yfinance ticker held or tracked by the user (e.g. "NDQ.AX",
+            "GC=F", "510300.SS").
+        pct: Hypothetical percent change, e.g. -10 for a 10% drop.
+        price: Hypothetical absolute target price (alternative to pct).
+
+    Returns:
+        Object with the position's simulated value change and the resulting
+        portfolio-level P&L delta.
+    """
     from openinvest.services.skill_views import build_what_if_view
     return build_what_if_view(symbol=symbol, pct=pct, price=price)
 
 
 @mcp.tool(annotations=_RO)
 def discipline() -> Dict[str, Any]:
-    """委员会纪律台账：不作为率（HOLD 占比）+ 拦截冲动操作次数 + 反事实省/费钱（ADR-023）。"""
+    """Get the committee's discipline ledger: how often it chose inaction
+    (HOLD ratio), how many impulsive user trades its rules intercepted, and
+    the counterfactual money saved/lost by those interventions (ADR-023:
+    the system's proven value is discipline and transparency, not alpha).
+
+    Use when the user asks "what has the committee blocked" or "is this tool
+    actually helping". Read-only.
+
+    Returns:
+        Object with `summary` (structured stats) and `markdown` (the same
+        ledger pre-rendered for direct display to the user).
+    """
     from openinvest.services.discipline import discipline_summary, render_discipline_md
     s = discipline_summary()
     return {"summary": s, "markdown": render_discipline_md(s)}
@@ -109,8 +186,21 @@ def discipline() -> Dict[str, Any]:
 
 @mcp.tool(annotations=_RO)
 def decisions(days: int = 90) -> Dict[str, Any]:
-    """统一决策视图：每条委员会决议 join 规则干预/用户执行/事后结果 + 采纳率汇总。
-    回答"我听了几次建议""哪些建议我没执行""被规则改写过什么"。"""
+    """Get the unified decision ledger: every committee verdict joined with
+    rule interventions, the user's actual executions or refusals (with
+    reasons), and post-hoc outcome data — plus an adoption-rate summary.
+
+    Answers "how often did I follow the advice", "which recommendations did
+    I skip", and "what did the safety rules rewrite". Read-only.
+
+    Args:
+        days: Look-back window in days (default 90).
+
+    Returns:
+        Object with `count`, `summary` (adoption rate and aggregates), and
+        `decisions` (list; each entry has decision_id, verdict, confidence,
+        intervention, executed flag, matched trades, and outcome).
+    """
     from openinvest.core.decision_ledger import list_decisions, summarize_decisions
     ds = list_decisions(days=days)
     return {"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds}
@@ -118,25 +208,38 @@ def decisions(days: int = 90) -> Dict[str, Any]:
 
 @mcp.tool(annotations=_RO)
 def explain_decision(decision_id: str) -> Dict[str, Any]:
-    """某条决议的完整依据：委员会 transcript（4 角色辩论 + CIO memo）+ 路径预测快照。
-    decision_id 形如 "2026-07-03/GC=F"（decisions 输出里的 decision_id）。"""
+    """Get the full reasoning behind one committee verdict: the complete
+    4-role debate transcript with the CIO memo, plus the path-probability
+    snapshot the CIO saw at decision time.
+
+    Use when the user asks "why was today's verdict HOLD" or wants to audit
+    a past decision. Read-only.
+
+    Args:
+        decision_id: "<date>/<symbol>", e.g. "2026-07-03/GC=F" — exactly as
+            returned in the `decisions` tool output.
+
+    Returns:
+        Object with verdict, confidence, alloc_cny, `transcript_markdown`
+        (render this to the user), and `path_snapshot` (may be null).
+    """
     import json
     from openinvest.core.decision_ledger import parse_committee_file
     from openinvest.core.memory_store import MemoryStore
     if "/" not in decision_id:
         return {"status": "error",
-                "error": f'decision_id 应为 "<date>/<symbol>"，收到 {decision_id!r}'}
+                "error": f'decision_id must be "<date>/<symbol>", got {decision_id!r}'}
     date, symbol = decision_id.split("/", 1)
     # date 段必须是日期字面量——否则 "../.." 之类会拼进路径逃出 .committee/
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-        return {"status": "error", "error": f"decision_id 日期段非法: {date!r}"}
+        return {"status": "error", "error": f"invalid date segment in decision_id: {date!r}"}
     safe = safe_symbol(symbol)
     base = MemoryStore().root / ".committee" / date
     md = base / f"{safe}.md"
     parsed = parse_committee_file(md)
     if not parsed:
         return {"status": "error",
-                "error": f"未找到决议 {decision_id}（{md} 不存在或无 verdict）"}
+                "error": f"decision {decision_id} not found ({md} missing or has no verdict)"}
     path_json = base / f"{safe}_path.json"
     path_snapshot = None
     if path_json.exists():
@@ -158,8 +261,23 @@ def explain_decision(decision_id: str) -> Dict[str, Any]:
 def record_execution(decision_id: str, executed: bool,
                      reason: Optional[str] = None,
                      trade_ids: Optional[List[int]] = None) -> Dict[str, Any]:
-    """记录用户对某决议的执行/拒绝 + 原因（幂等追加账本）。
-    用户说"我没买/我买了/我不同意"时调用；拒绝时先问一句原因。"""
+    """Record whether the user executed or declined a committee verdict, with
+    their reason. Appends to the execution ledger; idempotent — replaying the
+    same record is a no-op, so retries are safe.
+
+    Call when the user says "I bought it / I didn't buy / I disagree". When
+    they decline, ask one short question for the reason first — this closes
+    the adoption-rate loop that `decisions` reports on.
+
+    Args:
+        decision_id: "<date>/<symbol>" from the `decisions` output.
+        executed: True if the user acted on the verdict, False if declined.
+        reason: The user's stated reason (especially when declined).
+        trade_ids: Optional trade record IDs to link explicitly.
+
+    Returns:
+        The stored execution record, or {"status": "error", "error": ...}.
+    """
     from openinvest.core.decision_ledger import record_execution as _rec
     try:
         return _rec(decision_id, executed, reason=reason, trade_ids=trade_ids)
@@ -171,11 +289,28 @@ def record_execution(decision_id: str, executed: bool,
 def ingest_event(title: str, url: str, snippet: str = "",
                  source: str = "", published_at: Optional[str] = None,
                  ingested_by: str = "host-agent") -> Dict[str, Any]:
-    """把你（宿主 agent）搜到的财经新闻投喂进事件账本：后端 LLM 归一化 →
-    severity/symbol 判级 → 入库 → 供委员会 RAG 召回。**你有比自托管爬虫强得多的
-    搜索能力（含中文源）——看到与用户持仓相关的新闻就喂进来**，尤其 A 股/区域
-    市场（爬虫盲区）。幂等：同 url / 同 claim 重发不重复入账。需后端 LLM key。
-    ingested_by 报你自己的身份（如 "hermes"）——溯源用，与 source（新闻来源）语义不同。"""
+    """Feed a finance news item you (the host agent) found into the event
+    ledger. The backend LLM normalizes it, grades severity, maps affected
+    symbols, and stores it for committee RAG recall.
+
+    You have far better search reach than the self-hosted crawler (including
+    Chinese-language sources) — proactively feed news relevant to the user's
+    holdings, especially A-share/regional coverage the crawler misses.
+    Idempotent: re-sending the same url or claim does not double-insert.
+    Requires a backend LLM key.
+
+    Args:
+        title: Headline of the news item.
+        url: Canonical source URL (also the dedup key).
+        snippet: Short excerpt or summary of the article body.
+        source: Publisher name (e.g. "Reuters") — the news outlet.
+        published_at: ISO 8601 publication time, if known.
+        ingested_by: Your own agent identity (e.g. "hermes") for provenance;
+            distinct in meaning from `source`.
+
+    Returns:
+        Ingestion result with the normalized event id(s) and dedup status.
+    """
     from openinvest.services.event_ingest import ingest_events
     return ingest_events([{"title": title, "url": url, "snippet": snippet,
                            "source": source, "published_at": published_at}],
@@ -187,7 +322,25 @@ def ingest_event(title: str, url: str, snippet: str = "",
 @mcp.tool(annotations=_MONEY)
 def buy(symbol: str, units: float, price: float, currency: str = "CNY",
         kind: str = "equity", unit_label: str = "股") -> Dict[str, Any]:
-    """加仓/建仓：已有 symbol 加权平均成本，新 symbol 直接建仓。price 与 currency 同币种。"""
+    """Record a buy in the local ledger: adds to an existing position with
+    weighted-average cost, or opens a new position for an unseen symbol.
+    This bookkeeps a trade the user already placed with their broker —
+    openInvest never places real orders.
+
+    Confirm symbol, units, and price with the user before calling; this
+    moves ledger cash.
+
+    Args:
+        symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
+        units: Quantity bought; must be > 0.
+        price: Execution price per unit, in `currency`.
+        currency: Currency of `price` (default "CNY").
+        kind: Asset kind tag, e.g. "equity", "etf", "commodity".
+        unit_label: Human display label for units (default "股", i.e. shares).
+
+    Returns:
+        Updated position summary, or {"status": "error", "error": ...}.
+    """
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
                          kind=kind, unit_label=unit_label, source="mcp")
@@ -197,9 +350,24 @@ def buy(symbol: str, units: float, price: float, currency: str = "CNY",
 
 @mcp.tool(annotations=_MONEY)
 def sell(symbol: str, units: float, price: float) -> Dict[str, Any]:
-    """减仓：units 减少、cost_avg 不变，按 holding 的 cost_currency 还现金。"""
+    """Record a sell in the local ledger: reduces the position's units
+    (average cost unchanged) and credits cash in the holding's cost
+    currency. Bookkeeps a trade already executed at the user's broker —
+    openInvest never places real orders.
+
+    Confirm symbol, units, and price with the user before calling; this
+    moves ledger cash.
+
+    Args:
+        symbol: yfinance ticker of an existing holding.
+        units: Quantity sold; must be > 0.
+        price: Execution price per unit, in the holding's cost currency.
+
+    Returns:
+        Updated position summary, or {"status": "error", "error": ...}.
+    """
     if units <= 0 or price <= 0:
-        return {"status": "error", "error": "units / price 必须 > 0"}
+        return {"status": "error", "error": "units and price must both be > 0"}
     try:
         return _pm().sell(symbol=symbol, units=units, price=price, source="mcp")
     except ValueError as e:
@@ -208,7 +376,16 @@ def sell(symbol: str, units: float, price: float) -> Dict[str, Any]:
 
 @mcp.tool(annotations=_MONEY)
 def deposit(currency: str, amount: float) -> Dict[str, Any]:
-    """存入现金（任意币种）。"""
+    """Record a cash deposit into the ledger, in any currency. Bookkeeping
+    only — no real payment system is connected.
+
+    Args:
+        currency: ISO-style currency code, e.g. "CNY", "USD", "AUD".
+        amount: Amount to add; must be > 0.
+
+    Returns:
+        Updated cash balances, or {"status": "error", "error": ...}.
+    """
     try:
         return _pm().deposit_cash(currency, amount, source="mcp")
     except ValueError as e:
@@ -217,9 +394,19 @@ def deposit(currency: str, amount: float) -> Dict[str, Any]:
 
 @mcp.tool(annotations=_MONEY)
 def withdraw(currency: str, amount: float) -> Dict[str, Any]:
-    """取出现金（任意币种），余额不足报错。"""
+    """Record a cash withdrawal from the ledger, in any currency. Fails if
+    the balance is insufficient. Bookkeeping only — no real payment system
+    is connected.
+
+    Args:
+        currency: ISO-style currency code, e.g. "CNY", "USD", "AUD".
+        amount: Amount to remove; must be > 0.
+
+    Returns:
+        Updated cash balances, or {"status": "error", "error": ...}.
+    """
     if amount <= 0:
-        return {"status": "error", "error": "amount 必须 > 0"}
+        return {"status": "error", "error": "amount must be > 0"}
     try:
         return _pm().withdraw_cash(currency, amount, source="mcp")
     except ValueError as e:
@@ -233,7 +420,19 @@ _STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotent
 
 @mcp.tool(annotations=_STRAT_W)
 def set_allocations(target_allocation_stock: float, target_allocation_cash: float) -> Dict[str, Any]:
-    """改股票/现金目标配比（两者和必须 ≈1，schema 强校验失败自动回滚）。"""
+    """Update the strategy's target stock/cash allocation ratio. The two
+    values must sum to ≈1.0; schema validation rejects and rolls back any
+    write that would corrupt the strategy file.
+
+    Use when the user says e.g. "set my target to 70% stock / 30% cash".
+
+    Args:
+        target_allocation_stock: Stock weight in [0, 1], e.g. 0.7.
+        target_allocation_cash: Cash weight in [0, 1], e.g. 0.3.
+
+    Returns:
+        The updated allocation, or {"status": "error", "error": ...}.
+    """
     from openinvest.services import strategy_write as svc
     try:
         return svc.set_allocations(target_allocation_stock, target_allocation_cash)
@@ -246,8 +445,26 @@ def track_asset(symbol: str, max_single_invest_cny: Optional[float] = None,
                 display_name: Optional[str] = None, channel: Optional[str] = None,
                 price_offset_pct: Optional[float] = None,
                 sell_fee_pct: Optional[float] = None) -> Dict[str, Any]:
-    """跟踪标的（upsert 幂等）：不存在则新建（此时 max_single_invest_cny 必填），
-    已存在只更新传入的字段。委员会/DCA 覆盖哪些 symbol 由跟踪列表决定。"""
+    """Add a symbol to the tracked-asset list, or update an existing entry
+    (idempotent upsert: only the fields you pass are changed). The tracked
+    list decides which symbols the committee and DCA jobs cover.
+
+    Use when the user says "track AAPL" or wants to change a tracked
+    asset's cap/channel/fees.
+
+    Args:
+        symbol: yfinance ticker to track (e.g. "AAPL", "0700.HK", "BTC-USD").
+        max_single_invest_cny: Per-decision investment cap in CNY. Required
+            when creating a new entry; optional on update.
+        display_name: Human-friendly name shown in reports.
+        channel: Where the user actually buys it (broker/app name).
+        price_offset_pct: Systematic offset between the quote and the user's
+            actual fill price, in percent (e.g. bank gold spread).
+        sell_fee_pct: Sell-side fee in percent, used by fee-aware math.
+
+    Returns:
+        The stored asset entry, or {"status": "error", "error": ...}.
+    """
     from openinvest.services import strategy_write as svc
     try:
         return svc.upsert_target_asset(symbol, {
@@ -263,7 +480,16 @@ def track_asset(symbol: str, max_single_invest_cny: Optional[float] = None,
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True))
 def untrack_asset(symbol: str) -> Dict[str, Any]:
-    """移除跟踪标的（委员会不再分析它；schema 保证至少剩 1 个跟踪标的）。"""
+    """Remove a symbol from the tracked-asset list — the committee and DCA
+    jobs stop covering it. Holdings and trade history are untouched; schema
+    validation guarantees at least one tracked asset remains.
+
+    Args:
+        symbol: yfinance ticker currently in the tracked list.
+
+    Returns:
+        The updated tracked list, or {"status": "error", "error": ...}.
+    """
     from openinvest.services import strategy_write as svc
     try:
         return svc.remove_target_asset(symbol)
@@ -276,8 +502,26 @@ def untrack_asset(symbol: str) -> Dict[str, Any]:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def run_committee(symbol: str, force: bool = False,
                   max_rounds: int = 1) -> Dict[str, Any]:
-    """跑 4 角色 LLM 投资委员会（Direct 路径，需 DEEPSEEK_API_KEY，30-90s）。
-    返回 verdict + confidence + CIO memo。当天已跑过默认读缓存，force=True 重跑。"""
+    """Run the 4-role LLM investment committee on a symbol (Direct path):
+    Macro Strategist, Quant Analyst, and Risk Officer debate from isolated
+    evidence, then a CIO synthesizes one calibrated BUY/HOLD/SELL-style
+    verdict with a written memo.
+
+    Requires a backend LLM key (e.g. DEEPSEEK_API_KEY) and takes 30-90s on
+    a cache miss. If the symbol was already analyzed today, the cached
+    verdict is returned instantly unless `force` is set. Decision support
+    only — the human always executes.
+
+    Args:
+        symbol: Any yfinance ticker (US / HK / A-share / ETF / crypto /
+            commodities), e.g. "AAPL", "GC=F", "510300.SS".
+        force: Re-run even if a verdict already exists for today.
+        max_rounds: Cross-challenge debate rounds (default 1).
+
+    Returns:
+        Object with `decision_id`, `cached` flag, and `verdict` (verdict,
+        confidence, suggested allocation, CIO memo).
+    """
     import json
     from openinvest.core.decision_ledger import parse_committee_file
     from openinvest.core.memory_store import MemoryStore
