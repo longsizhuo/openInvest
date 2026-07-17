@@ -94,7 +94,10 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
         "1-Month": hist.tail(21),
         "6-Months": hist.tail(126),
         "1-Year": hist.tail(252),
-        "2-Years": hist
+        # 504 交易日 ≈ 2 年。用整个 hist（get_history_df(days=730) ≈ 730 交易日
+        # ≈ 2.9 日历年）会把 2Y Ret/MaxDD 窗口高估 ~45%；2026-06-13 修 price_quantile
+        # 时加了 tail(504) 但漏了这个兄弟切片（CR 命中）。
+        "2-Years": hist.tail(504),
     }
 
     rsi_str = f"{rsi_14:.2f}" if rsi_14 is not None else "N/A"

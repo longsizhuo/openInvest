@@ -180,7 +180,10 @@ def total_portfolio_value_cny(
         price = current_prices.get(sym) if current_prices else None
         # NaN 价（如当日 close=NULL 被读成 float('nan')）等同缺价 → 走 cost 兜底。
         # 只判 `is None` 会让 NaN 穿透守卫污染 total（round(NaN)=NaN），是本类 bug 根因。
-        if price is None or not math.isfinite(price):
+        # price <= 0 同样是缺价信号：多处 _safe_close（skill_views/_helpers/coordinator）
+        # 拉取失败返回 0.0 哨兵，当有效价会把整个持仓估值成 0、total 静默缩水且 status
+        # 仍报 "ok"（CR 三个 agent 同时命中的 0.0 污染类）——一并按缺价走 cost 兜底。
+        if price is None or not math.isfinite(price) or price <= 0:
             # 缺价：用 cost 兜底（与 portfolio_manager.get_user_status 同口径）
             avg = float(h.get("avg_cost", 0) or 0)
             if avg <= 0:

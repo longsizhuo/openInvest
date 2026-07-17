@@ -207,6 +207,14 @@ def build_what_if_view(
         new_prices[sym] = cur_prices[sym]
 
     # 应用 --symbol/--pct/--price 通用参数
+    # --pct/--price 必须配 --symbol：没 symbol 时静默忽略会让 `what_if --pct -5`
+    # 返回 delta=0 的"ok"，是个自信的错误答案（CR 命中）——显式报错要求指定标的。
+    if symbol is None and (pct is not None or price is not None):
+        return {
+            "status": "error",
+            "error": "--pct / --price 需要配合 --symbol 指定标的",
+            "hint": "如 `what_if --symbol NDQ.AX --pct -5`；组合级情景（全仓齐跌）暂不支持",
+        }
     if symbol:
         if symbol not in cur_prices:
             return {

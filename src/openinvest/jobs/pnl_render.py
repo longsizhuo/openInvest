@@ -269,7 +269,7 @@ def render_svg(
         stroke="#21262d" stroke-width="1"/>
 
   <!-- ===== 下半：横向柱状图（vs N 基准 + 用户实盘）===== -->
-  <text x="{MARGIN_L}" y="{LINE_H + 38}" fill="#c9d1d9" class="title">🏆 vs {len(benchmark_series)} 基准 · 截至今日累计涨幅 (60 天，sample size 较小不构成 alpha 证据)</text>
+  <text x="{MARGIN_L}" y="{LINE_H + 38}" fill="#c9d1d9" class="title">🏆 vs {len(benchmark_series)} 基准 · 截至今日累计涨幅 ({WINDOW_DAYS} 天，sample size 较小不构成 alpha 证据)</text>
 
   {zero_line_svg}
   {chr(10).join(bar_svg)}
