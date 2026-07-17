@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.31.6](https://github.com/longsizhuo/openInvest/compare/v0.31.5...v0.31.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **committee:** Sanity5 force-HOLD 漏归零 alloc + provider 硬编码 + insight slug 漂移 ([8629ede](https://github.com/longsizhuo/openInvest/commit/8629ede762be0c45d7f1788239e31fda94a17dc0))
+* **infra:** sentinel_schedule env 强转 + insights UTC 存储 + Docker 泄漏账本 ([c2a74ff](https://github.com/longsizhuo/openInvest/commit/c2a74ff3a62953f7d9685d294aa4b06ed0a056d3))
+* **ledger:** 堵住 PATCH 交易状态的双记账窗口（ADR-016 红线，CR 双 agent 命中） ([33a1595](https://github.com/longsizhuo/openInvest/commit/33a1595e2937ed77e25327e4eb4aa317257121c9))
+* **valuation:** 0.0 价污染 total + what_if 缺 symbol 静默 + 2Y 窗高估 + pnl 标签 ([444423f](https://github.com/longsizhuo/openInvest/commit/444423fa32aa4c6544678dec8fd000806cf1d5ef))
+
 ## [0.31.5](https://github.com/longsizhuo/openInvest/compare/v0.31.4...v0.31.5) (2026-07-17)
 
 
