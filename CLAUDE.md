@@ -98,15 +98,19 @@ openInvest 有三个调用层，每层服务不同对象：
 
 ## 发版（release-please）
 
-**3 条独立版本线，靠 commit 改的路径自动分流**：
+**4 条独立版本线，靠 commit 改的路径自动分流**：
 
 | Component | Tag 格式 | 控制文件 | 触发路径 |
 |---|---|---|---|
-| 后端 | `v0.1.x` | `pyproject.toml` `version` | 改 `core/` / `capabilities/` / `jobs/` / `connectors/` / `services/` / `scripts/` 等根目录代码 |
-| invest skill | `invest-skill-v0.9.x` | `skills/invest/SKILL.md` `version:` | 改 `skills/invest/**` |
-| invest-setup skill | `invest-setup-skill-v0.1.x` | `skills/invest-setup/SKILL.md` `version:` | 改 `skills/invest-setup/**` |
+| 后端 | `v0.1.x` | `pyproject.toml` `version` | 改 `core/` / `capabilities/` / `jobs/` / `connectors/` / `services/` / `scripts/` 等根目录代码（`plugin/` / `skills/` 已 exclude-paths 排除） |
+| invest skill | `invest-skill-v0.9.x` | `plugin/skills/invest/SKILL.md` `version:` | 改 `plugin/skills/invest/**` |
+| invest-setup skill | `invest-setup-skill-v0.1.x` | `plugin/skills/invest-setup/SKILL.md` `version:` | 改 `plugin/skills/invest-setup/**` |
+| invest-backup skill | `invest-backup-skill-v0.1.x` | `plugin/skills/invest-backup/SKILL.md` `version:` | 改 `plugin/skills/invest-backup/**` |
 
-**改代码时不需要做任何事**——`release-please.yml` 监听 `main` push，自动开 Release PR、生成 `CHANGELOG.md`、merge 后打 tag。
+注意：`skills/invest*` 是指向 `plugin/skills/*` 的符号链接（顶层便捷入口）；release-please
+按**真实路径** `plugin/skills/...` 分流，改文件时两条路径等价，但配置引用要写真实路径。
+
+**改代码时不需要做任何事**——`release-please.yml` 监听 `main` push，自动开 Release PR、生成 `CHANGELOG.md`、merge 后打 tag。invest-skill 发版会同 run 自动 publish 到 ClawHub（skill + bundle-plugin 双条目，`scripts/publish_clawhub.sh`）。
 
 ### 唯一要守的纪律：commit message 严格 conventional commits
 

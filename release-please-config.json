@@ -92,6 +92,17 @@
           "path": "SKILL.md"
         }
       ]
+    },
+    "plugin/skills/invest-backup": {
+      "release-type": "simple",
+      "component": "invest-backup-skill",
+      "package-name": "invest-backup-skill",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "SKILL.md"
+        }
+      ]
     }
   },
   "bump-minor-pre-major": true,
