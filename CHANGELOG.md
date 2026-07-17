@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.2](https://github.com/longsizhuo/openInvest/compare/v0.31.1...v0.31.2) (2026-07-17)
+
+
+### Docs
+
+* **glama:** README（en/zh）加 Glama 评分徽章 + 补 glama.json maintainer 声明 ([1b4fa83](https://github.com/longsizhuo/openInvest/commit/1b4fa83e7292740b7b8a916bb1ea7ed15a5a3a9a))
+
 ## [0.31.1](https://github.com/longsizhuo/openInvest/compare/v0.31.0...v0.31.1) (2026-07-17)
 
 
