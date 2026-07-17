@@ -279,7 +279,8 @@ async def patch_trade_status(
     # CAS：仅 rowcount==1 的请求赢得 planned→executed 跃迁并独占同步；其余幂等返回。
     # 同样覆盖顺序重放（双击 / 客户端超时重试 / agent 重发）。
     won = await asyncio.to_thread(
-        _get_trades_db().claim_status_transition, trade_id, "executed"
+        _get_trades_db().claim_status_transition, trade_id, "executed",
+        from_status="planned",
     )
     if not won:
         # 已是 executed（并发赢家已抢到 / 重放）→ 首次已同步，本次幂等跳过

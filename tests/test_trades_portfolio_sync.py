@@ -434,6 +434,23 @@ class TestConcurrentClaim:
         assert db.claim_status_transition(trade_id, "executed") is True
         assert db.claim_status_transition(trade_id, "executed") is False
 
+    def test_executed_cancelled_executed_cannot_rebook(self, tmp_path):
+        """ADR-016 双记账回归（CR 命中）：planned→executed（记账）→ cancelled →
+        executed 再 claim，带 from_status="planned" 时第二次必须 False，绝不二次入账。
+        旧 `WHERE status != executed` 会让 cancelled→executed 抢到（cancelled!=executed）。"""
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(
+            symbol="NDQ.AX", direction="BUY", units=10.0, price=130.0,
+            cost_currency="AUD",
+        )
+        # 首次 planned→executed：赢，记账
+        assert db.claim_status_transition(trade_id, "executed", from_status="planned") is True
+        # 用户改 cancelled（走非 executed 分支的无条件 patch_status）——账本不冲销
+        assert db.patch_status(trade_id, "cancelled") is True
+        # 再 PATCH executed：当前是 cancelled ≠ planned → 不赢，不会二次记账
+        assert db.claim_status_transition(trade_id, "executed", from_status="planned") is False
+        assert db.get_trade(trade_id)["status"] == "cancelled"
+
     def test_release_claim_rolls_back_when_uncontested(self, tmp_path):
         """release_claim: 没人插手 → 正常回退到 from_status 指定的原状态"""
         db = TradesDB(db_path=str(tmp_path / "trades.db"))

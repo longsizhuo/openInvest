@@ -169,14 +169,23 @@ class TradesDB:
             self.conn.commit()
             return cur.rowcount > 0  # rowcount==0 → 该 id 不存在
 
-    def claim_status_transition(self, trade_id: int, to_status: str) -> bool:
-        """原子状态跃迁 compare-and-set：仅当当前状态 != to_status 时改写。
+    def claim_status_transition(
+        self, trade_id: int, to_status: str, *, from_status: Optional[str] = None
+    ) -> bool:
+        """原子状态跃迁 compare-and-set。
+
+        Args:
+            from_status: 指定则要求当前状态**恰为** from_status 才赢得跃迁
+                （`WHERE status = from_status`）；None 保持旧语义（当前状态
+                != to_status 即赢）。**动账本的 planned→executed 必须传
+                from_status="planned"**——否则 executed 可从 cancelled 抢到
+                （cancelled != executed），构成重复入账：planned→executed（记账）
+                → cancelled（ADR-016 不做反向冲销）→ executed（再次记账），units
+                翻倍、现金双扣（CR 数据层 + API 层双 agent 命中）。
 
         Returns:
-            True  → 本次调用赢得了真实跃迁（rowcount==1），调用方独占后续副作用
-                    （如 portfolio 同步）。
-            False → 状态已是 to_status（并发/重放的另一方已抢到）或 id 不存在，
-                    调用方应幂等返回，不得重复入账。
+            True  → 本次调用赢得了真实跃迁（rowcount==1），调用方独占后续副作用。
+            False → 未赢（状态不满足 / id 不存在），调用方幂等返回，不得重复入账。
 
         防 #109 并发重复入账：旧的 get_trade()→sync→patch_status() 三步在 check 与
         set 之间无锁，两个并发 PATCH executed 都读到 planned 各同步一次。本方法把
@@ -188,10 +197,16 @@ class TradesDB:
             )
         with self._lock:
             cur = self.conn.cursor()
-            cur.execute(
-                "UPDATE trades SET status = ? WHERE id = ? AND status != ?",
-                (to_status, trade_id, to_status),
-            )
+            if from_status is not None:
+                cur.execute(
+                    "UPDATE trades SET status = ? WHERE id = ? AND status = ?",
+                    (to_status, trade_id, from_status),
+                )
+            else:
+                cur.execute(
+                    "UPDATE trades SET status = ? WHERE id = ? AND status != ?",
+                    (to_status, trade_id, to_status),
+                )
             self.conn.commit()
             return cur.rowcount == 1
 
