@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.1](https://github.com/longsizhuo/openInvest/compare/v0.31.0...v0.31.1) (2026-07-17)
+
+
+### Docs
+
+* **readme:** add Research & Falsification section, slim config, merge philosophy ([dd03af8](https://github.com/longsizhuo/openInvest/commit/dd03af8ff238f942f8254ad0e5483302e8bde54c))
+* **readme:** add Research & Falsification section, slim config, merge philosophy ([c41aec6](https://github.com/longsizhuo/openInvest/commit/c41aec6938d6fe454ed566ca6021b486f5ee537f))
+
 ## [0.31.0](https://github.com/longsizhuo/openInvest/compare/v0.30.5...v0.31.0) (2026-07-16)
 
 
