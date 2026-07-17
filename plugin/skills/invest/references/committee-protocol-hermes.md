@@ -105,7 +105,8 @@ within the same call, so no extra waiting logic is needed.
 ## Stage 3: Round 2 — Cross-challenge (one `delegate_task` call, 2 roles)
 
 Quant and Risk can now see each other's R1 output and adjust their own views. Macro
-does not need Round 2 (it is shared across assets):
+does not need Round 2 — the cross-challenge is only between Quant and Risk; Macro is
+market-level context and skips Round 2 on both paths:
 
 ```
 delegate_task(tasks=[

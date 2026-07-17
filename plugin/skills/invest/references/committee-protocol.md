@@ -109,7 +109,8 @@ entering Stage 3.**
 ## Stage 3: Round 2 — Cross-challenge (2 workers in parallel)
 
 Quant and Risk can now see each other's R1 output and adjust their own views. Macro does
-not need Round 2 (it is shared across assets). Send both Agent calls in a single message:
+not need Round 2 — the cross-challenge is only between Quant and Risk; Macro is
+market-level context and skips Round 2 on both paths. Send both Agent calls in a single message:
 
 ```javascript
 Agent({
