@@ -1,5 +1,11 @@
-# 只排明确安全、运行时绝不需要的东西，避免误删 db/ 这种"既是包又是数据目录"的源码。
-# 注意：db/ 含 trades_db.py 等源码（运行时 import），故**不**整体排除。
+# 只排明确安全、运行时绝不需要的东西。
+# 历史注释说"db/ 含 trades_db.py 源码故不排除"——#133 后源码已挪到
+# src/openinvest/db/，仓库根 db/ 现在纯用户数据（trades.db/events.db/insights.db/
+# jobs.sqlite...，实测无 .py）。COPY . . 会把真实交易账本 + user_profile 烤进镜像层，
+# self-host 用户在自己数据目录 docker build 再 push 就是隐私泄漏（CR 命中）。
+db/
+user_profile.json
+user_profile.json.bak
 .git
 .github
 .venv

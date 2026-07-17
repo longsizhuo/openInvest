@@ -91,7 +91,12 @@ class InsightsDB:
         created_at 默认用当前 ISO 时间。幂等：重复 slug 会覆盖旧记录。
         """
         if not created_at:
-            created_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            # UTC 存储：list_fresh 的 cutoff 用 UTC ISO，若这里写本地偏移（+08:00）
+            # 则 SQLite 按字符串比 created_at >= cutoff 会因偏移不同而错序——非 UTC
+            # 自托管者的新洞察会被 /api/insights/fresh 漏掉数小时（CR 命中）。与
+            # event_store / trades_db 的 UTC 口径对齐。
+            from datetime import timezone
+            created_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("""

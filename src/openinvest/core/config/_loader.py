@@ -186,10 +186,14 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     dca = DCAConfig(**{k: v for k, v in dca_data.items() if k in {f.name for f in fields(DCAConfig)}})
 
     event_data = dict(data.get("event", {}))
-    # watch_schedule 是含逗号的 cron 串（如 "*/30 0-2,8-23 * * *"）——env 层通用强转
-    # 会把逗号值拆成 list，这里拼回字符串（split(",") 的精确逆操作，无损还原）
-    if isinstance(event_data.get("watch_schedule"), list):
-        event_data["watch_schedule"] = ",".join(event_data["watch_schedule"])
+    # watch_schedule / sentinel_schedule 都是含逗号的 cron 串（如 "*/30 0-2,8-23 * * *"）
+    # ——env 层通用强转会把逗号值拆成 list，这里拼回字符串（split(",") 的精确逆操作）。
+    # 之前只还原 watch_schedule，漏了 sentinel_schedule：设 env override（哪怕照抄默认
+    # 值本身就含逗号）会得到拆碎的 list，_resolve_schedule 对 list .strip() 抛异常静默
+    # 回落 yml 默认，env override 永不生效（CR 命中）。
+    for _sched_key in ("watch_schedule", "sentinel_schedule"):
+        if isinstance(event_data.get(_sched_key), list):
+            event_data[_sched_key] = ",".join(event_data[_sched_key])
     event = EventConfig(**{k: v for k, v in event_data.items() if k in {f.name for f in fields(EventConfig)}})
     staleness = StalenessConfig(**{k: v for k, v in data.get("staleness", {}).items() if k in {f.name for f in fields(StalenessConfig)}})
 
