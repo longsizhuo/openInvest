@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.20.0...invest-skill-v0.20.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **skill:** 修 Stage 3 括号理由——Macro 不进 Round 2 与"共享"无关 ([7a956eb](https://github.com/longsizhuo/openInvest/commit/7a956ebef6a58658d4e045703190558c4d117bec)), closes [#221](https://github.com/longsizhuo/openInvest/issues/221)
+
 ## [0.20.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.19.0...invest-skill-v0.20.0) (2026-07-16)
 
 
