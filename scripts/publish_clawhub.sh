@@ -62,6 +62,7 @@ else
     --name openinvest \
     --display-name "openInvest" \
     --version "$VERSION" \
+    --categories finance \
     --source-repo longsizhuo/openInvest \
     --source-commit "$COMMIT" \
     --source-path plugin \
@@ -78,6 +79,7 @@ else
     --slug openinvest \
     --name "openInvest" \
     --version "$VERSION" \
+    --categories finance \
     --source-repo longsizhuo/openInvest \
     --source-commit "$COMMIT" \
     --source-path plugin/skills/invest \
