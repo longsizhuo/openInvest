@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.4](https://github.com/longsizhuo/openInvest/compare/v0.31.3...v0.31.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **mcp:** 全部工具参数补 schema 级 description + 数值边界约束 ([a5acbf6](https://github.com/longsizhuo/openInvest/commit/a5acbf6843db188323e52771eb1377a48ff5e97e))
+
 ## [0.31.3](https://github.com/longsizhuo/openInvest/compare/v0.31.2...v0.31.3) (2026-07-17)
 
 
