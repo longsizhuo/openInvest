@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.5](https://github.com/longsizhuo/openInvest/compare/v0.31.4...v0.31.5) (2026-07-17)
+
+
+### Bug Fixes
+
+* **plugin:** logo 换回真实猫头鹰品牌图 + 发布脚本补 ClawHub 分类 ([0beba28](https://github.com/longsizhuo/openInvest/commit/0beba28fc1cba7d625547cc5789543012ee9da16))
+
 ## [0.31.4](https://github.com/longsizhuo/openInvest/compare/v0.31.3...v0.31.4) (2026-07-17)
 
 
