@@ -258,12 +258,19 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
     # （audit financial C1: 之前 offset_pct=0.0 + spot_cny_per_gram 让浮盈系统性
     # 偏低 1-1.5%）
     gold_offset = 0.0
+    has_gold = False
     for a in target_assets:
         if a.get("symbol") == "GC=F":
+            has_gold = True
             gold_offset = float(a.get("price_offset_pct", 0.0) or 0.0)
             break
-    snap = get_gold_snapshot(offset_pct=gold_offset)
-    if snap is None:
+    # 只有真的跟踪 GC=F 才拉金价 + 盖 freshness——否则无金 fork 用户会得到幻影
+    # asset_freshness["GC=F"]="fresh"：真实资产全 missing 时 all(deadly) 被它
+    # 搅成 False，陈旧数据硬熔断失效，发出零 committee 的报告（CR 命中）。
+    snap = get_gold_snapshot(offset_pct=gold_offset) if has_gold else None
+    if not has_gold:
+        gold_now = 0.0
+    elif snap is None:
         asset_freshness["GC=F"] = "missing"
         store.dream_event({"phase": "price_fetch_failed", "symbol": "GC=F", "date": today})
         # yfinance + DB 兜底全失败时跳过黄金 committee
@@ -478,43 +485,47 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
     # 3.5) 翻译官：人话解读（一次 LLM 调用；任何失败 graceful 回落
     # builder 内的确定性一句话，邮件照发）
     plain_summaries: Dict[str, str] = {}
-    try:
-        t_inputs = []
-        for a in target_assets:
-            sym = a["symbol"]
-            if sym in skipped_assets or sym not in asset_committees:
-                continue
-            r = asset_committees[sym]
-            v = r["verdict"]
-            defense_note = ""
-            if v.get("_original_verdict") and v["_original_verdict"] != v["verdict"]:
-                _dca = v.get("_defense_dca")
-                if _dca == "tranche":
-                    reason = (f"高 VIX/ATR 防御期，黄金买入改强制分批 DCA，本次只放行"
-                              f"约 1/3（第 {v.get('_defense_dca_tranche_idx', 1)} 批）")
-                elif _dca and str(_dca).startswith("blocked"):
-                    reason = "高 VIX/ATR 防御期，黄金买入分批，本批未满间隔/配额暂缓（等下一批）"
-                else:
-                    reason = (v.get("_defense_downgrade") and "VIX/ATR 快崩哨兵拦截买入") or \
-                             (v.get("_original_trim_reason") == "concentration"
-                              and v.get("_concentration_lens") == "disabled"
-                              and "集中度 lens 已按 config 关闭，不因超配减仓") or \
-                             (v.get("_sanity5_reason") and "TRIM 没给合格买回点被否") or "防御规则"
-                defense_note = (f"CIO 原始结论 {v['_original_verdict']}"
-                                f"（建议金额 ¥{v.get('_original_alloc', v['alloc_cny'])}），"
-                                f"{reason}，最终改为 {v['verdict']}")
-            path_lines = [ln for ln in (r.get("path_reference") or "").splitlines()
-                          if ln.startswith("- ")]
-            t_inputs.append({
-                "symbol": sym,
-                "display_name": a.get("display_name", sym),
-                "verdict_line": (f"{v['verdict']}，置信度 {v['confidence']:.2f}，"
-                                 f"建议金额 ¥{v['alloc_cny']}"),
-                "defense_note": defense_note,
-                "path_lines": path_lines,
-                "cio_memo": r["report"].cio_memo,
-            })
-        if t_inputs:
+    # t_inputs 构造是纯数据组装（不碰网络/LLM）——放在 try 外：verdict schema
+    # 漂移抛的 KeyError/AttributeError 应该炸出来被看见，而不是被当"翻译官失败
+    # graceful 回落"吞掉导致白话摘要从每封日报永久消失（#197 类，CR 命中）。
+    t_inputs = []
+    for a in target_assets:
+        sym = a["symbol"]
+        if sym in skipped_assets or sym not in asset_committees:
+            continue
+        r = asset_committees[sym]
+        v = r["verdict"]
+        defense_note = ""
+        if v.get("_original_verdict") and v["_original_verdict"] != v["verdict"]:
+            _dca = v.get("_defense_dca")
+            if _dca == "tranche":
+                reason = (f"高 VIX/ATR 防御期，黄金买入改强制分批 DCA，本次只放行"
+                          f"约 1/3（第 {v.get('_defense_dca_tranche_idx', 1)} 批）")
+            elif _dca and str(_dca).startswith("blocked"):
+                reason = "高 VIX/ATR 防御期，黄金买入分批，本批未满间隔/配额暂缓（等下一批）"
+            else:
+                reason = (v.get("_defense_downgrade") and "VIX/ATR 快崩哨兵拦截买入") or \
+                         (v.get("_original_trim_reason") == "concentration"
+                          and v.get("_concentration_lens") == "disabled"
+                          and "集中度 lens 已按 config 关闭，不因超配减仓") or \
+                         (v.get("_sanity5_reason") and "TRIM 没给合格买回点被否") or "防御规则"
+            defense_note = (f"CIO 原始结论 {v['_original_verdict']}"
+                            f"（建议金额 ¥{v.get('_original_alloc', v['alloc_cny'])}），"
+                            f"{reason}，最终改为 {v['verdict']}")
+        path_lines = [ln for ln in (r.get("path_reference") or "").splitlines()
+                      if ln.startswith("- ")]
+        t_inputs.append({
+            "symbol": sym,
+            "display_name": a.get("display_name", sym),
+            "verdict_line": (f"{v['verdict']}，置信度 {v['confidence']:.2f}，"
+                             f"建议金额 ¥{v['alloc_cny']}"),
+            "defense_note": defense_note,
+            "path_lines": path_lines,
+            "cio_memo": r["report"].cio_memo,
+        })
+    if t_inputs:
+        # 只有 LLM 调用 + 输出解析在 graceful 守卫内（外部依赖才配 graceful）
+        try:
             from openinvest.capabilities.sdk_agent import SDKAgent
             translator = SDKAgent(
                 system_prompt=TRANSLATOR_SYSTEM_PROMPT,
@@ -523,8 +534,8 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
             raw = translator.run(build_translator_prompt(t_inputs))
             plain_summaries = parse_translator_output(raw)
             log.info("翻译官人话解读: %d/%d 资产", len(plain_summaries), len(t_inputs))
-    except Exception as e:  # noqa: BLE001  翻译官失败不阻断邮件
-        log.warning("翻译官失败 graceful 回落确定性一句话: %s", e)
+        except Exception as e:  # noqa: BLE001  翻译官失败不阻断邮件
+            log.warning("翻译官失败 graceful 回落确定性一句话: %s", e)
 
     # 4) 拼报告（委托给 builder 的纯函数）
     # 纪律台账(只读聚合,零 LLM;失败不阻断报告)

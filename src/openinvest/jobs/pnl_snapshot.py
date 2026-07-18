@@ -215,8 +215,13 @@ def _ensure_benchmarks_fresh(start_date: str, end_date: str) -> None:
     """
     for key in BENCHMARKS:
         cached = load_benchmark(key)
-        if cached and cached.get("end", "") >= start_date:
-            continue  # cache covers the window
+        # 新鲜判定必须对齐窗口**终点**：旧条件 `end >= start_date` 在缓存刚进
+        # 窗口起点后就永远为真，缓存最多冻结 WINDOW_DAYS=30 天而用户线每 2h 更新
+        # （2026-07-18 实锤：9 个缓存全停 2026-06-26 达 22 天，公开图拿今日 PnL
+        # 对比 6-26 基准）。#92 修的是"缓存早于窗口起点 → bar 消失"，这里补
+        # "缓存落后窗口终点 → bar 冻结"。留 1 天余量容忍非交易日。
+        if cached and cached.get("end", "") >= end_date:
+            continue  # cache reaches the window end — genuinely fresh
         try:
             refresh_benchmark(key, start_date, end_date)
         except Exception as exc:

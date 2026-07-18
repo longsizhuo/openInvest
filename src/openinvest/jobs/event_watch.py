@@ -292,10 +292,15 @@ def run(
             "triggered": 0,
         }
 
-    # 受影响 symbols 合并去重，只对真持仓 / 关注列表跑委员会
+    # 受影响 symbols 合并去重，只对真持仓 / 关注列表跑委员会。
+    # 大小写不敏感匹配 + 映射回 canonical 写法——triggerable 判定（上方）就是
+    # .lower() 交集，这里若用大小写敏感 `s in list`，LLM 归一化吐出 "ndq.ax"
+    # 时邮件会发但委员会静默不触发（CR 命中；events.db 实查暂无变体，防御性守卫）。
+    _canonical = {s.lower(): s for s in (ctx["holdings"] + ctx["watching"])}
     affected_syms = sorted({
-        s for ev in triggerable_events for s in (ev["affected_symbols"] or [])
-        if s in (ctx["holdings"] + ctx["watching"])
+        _canonical[s.lower()]
+        for ev in triggerable_events for s in (ev["affected_symbols"] or [])
+        if s.lower() in _canonical
     })
 
     task_id = None

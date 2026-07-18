@@ -14,10 +14,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+SPEC="${OPENINVEST_SPEC:-openinvest}"
+
+# python 执行器：git clone 形态优先 REPO_ROOT 的 venv（uv run）；plugin 安装形态
+# （ClawHub bundle / Claude marketplace 拷贝）REPO_ROOT 是无 pyproject 的 plugin
+# cache，uv run 必炸——兜底 uvx 从 PyPI 拉后端跑，与 sibling run.sh 同款（CR 命中：
+# 没兜底时数据丢失安全网对全部 PyPI/uvx 自托管用户失效）。
+_py() {
+    if [ -f "$REPO_ROOT/pyproject.toml" ]; then
+        (cd "$REPO_ROOT" && uv run --no-sync python -c "$1")
+    else
+        uvx --from "$SPEC" python -c "$1"
+    fi
+}
 
 resolve_root() {
-    (cd "$REPO_ROOT" && uv run --no-sync python -c \
-        "from openinvest.paths import INVEST_ROOT; print(INVEST_ROOT)")
+    _py "from openinvest.paths import INVEST_ROOT; print(INVEST_ROOT)"
 }
 
 ROOT="$(resolve_root)"
@@ -44,7 +56,7 @@ EOF
 has_real_portfolio_data() {
     # 复用同一份判定口径：cash 任一币种 > 0，或 holdings 非空 → 算真实数据。
     # 用 python 而不是 grep，避免 yaml/markdown 格式变化时 grep 误判。
-    (cd "$REPO_ROOT" && uv run --no-sync python -c "
+    _py "
 from openinvest.core.memory_store import MemoryStore
 store = MemoryStore()
 doc = store.read('portfolio')
@@ -54,7 +66,7 @@ cash = doc.get('cash') or {}
 holdings = doc.get('holdings') or []
 has_real = any(float(v or 0) > 0 for v in cash.values()) or len(holdings) > 0
 raise SystemExit(0 if has_real else 1)
-" 2>/dev/null)
+" 2>/dev/null
 }
 
 cmd_backup() {

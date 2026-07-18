@@ -165,10 +165,11 @@ def win_rate_per_trade(transactions: List[Any]) -> float:
     # （真严格要按 FIFO 算 realized PnL，这里近似）
     wins = 0
     for s in sells:
-        # 找之前最近的同 asset BUY
-        for b in reversed(transactions):
-            if b is s:
-                continue
+        # 只在该 SELL **之前**的交易里找最近同 asset BUY——对整个列表 reversed
+        # 会拿到卖出之后的 BUY（前视）：BUY@100→SELL@110（真赢）→BUY@120 会把
+        # 这笔 SELL 判亏，trim 后再入场的常见模式污染 win_rate（CR 命中）。
+        s_idx = transactions.index(s)
+        for b in reversed(transactions[:s_idx]):
             if b.asset == s.asset and b.action == "BUY":
                 if s.price > b.price:
                     wins += 1

@@ -13,6 +13,17 @@ def main() -> None:
     host = os.getenv("INVEST_WEB_HOST", "127.0.0.1")
     port = int(os.getenv("INVEST_WEB_PORT", "8765"))
 
+    # 信任边界不裸奔（与 mcp_server._serve_http 同款守卫，CR 命中此处缺失）：
+    # 文档教用户设 INVEST_WEB_HOST=0.0.0.0，漏配 token 就是把含 symbol/金额/
+    # verdict 的全量读写 API 暴露公网——公开数据红线必须代码强制，不能只靠文档。
+    token = os.getenv("INVEST_API_TOKEN", "").strip()
+    if not token and host not in ("127.0.0.1", "localhost", "::1"):
+        sys.exit(
+            f"拒绝启动：绑定 {host}（非 loopback）但 INVEST_API_TOKEN 未设置。"
+            "远端暴露必须有 bearer 鉴权——在 .env 设 INVEST_API_TOKEN，"
+            "或改绑 127.0.0.1 走反向代理。"
+        )
+
     # 端口已被占 = 服务大概率已在跑——给 URL 优雅退出，别甩 uvicorn traceback
     import socket
     with socket.socket() as _s:

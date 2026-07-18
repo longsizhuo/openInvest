@@ -50,7 +50,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=tag
             type=sha,prefix=sha-
-            type=raw,value=latest
+            # :latest 只跟随真正的版本 tag——workflow_dispatch（首发/重建）不重指，
+            # 否则 dispatch main 会把 :latest 指到无 semver 快照、dispatch 旧 tag 会回退（CR 命中）
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
