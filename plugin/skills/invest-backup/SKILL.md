@@ -1,6 +1,6 @@
 ---
 name: invest-backup
-version: 0.2.0 # x-release-please-version
+version: 0.2.1 # x-release-please-version
 description: Back up / restore openInvest's local state — memory/ (holdings, strategy, user profile, committee records, dream logs) + db/ (trade ledger, job run history, market-data cache) + .env (SMTP/API credentials) + user_profile.json. All of this data is .gitignore'd with no historical versions in git, so a single accidental overwrite (e.g. slipping and running some one-off migration/init script) means real data loss — no git revert available. **Proactive trigger scenarios** — "backup invest data / 备份一下 openInvest 的数据", "my holdings/strategy look wiped / 我的持仓/策略好像被清空了", "invest data is lost / invest 数据丢了", "restore invest backup / 恢复一下 invest 的备份", before any reinstall/migration of the openInvest deployment on this machine, or right before running an unfamiliar migration/init script (back up first, then act).
 platforms: [linux, macos]
 metadata:
