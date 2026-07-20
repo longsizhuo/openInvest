@@ -63,7 +63,7 @@ machines / 多台电脑共用持仓" / "connect to my existing deployment".
 **Note**: Path B **must not run `init`** (init is disabled in remote mode and will
 error); no `memory/` is created on this machine — all data stays on the hub.
 
-## Flow (4 steps)
+## Flow (6 steps)
 
 ### 1. Run `doctor` first to confirm setup is really needed
 
@@ -160,6 +160,44 @@ After it finishes:
 3. **Tell the user**: "✓ Onboarding complete. Next time you say 'show portfolio' /
    'analyze X', the invest skill kicks in automatically. To reconfigure, say
    'reset invest'."
+
+### 6. Offer the news sentinel (optional, recommended)
+
+The backend ships a complete news sentinel — `event_check` pulls multi-source
+finance news, LLM-normalizes and severity-grades it into the event ledger, and
+high-severity events hitting the user's assets auto-trigger the committee (+ email
+if configured). It only lacks a *schedule* on a fresh install. This step wires one.
+
+Ask the user: "Want the news sentinel? Every 30 minutes it scans finance news
+relevant to your holdings and feeds the committee's event ledger （新闻哨兵：每
+30 分钟扫一次持仓相关财经新闻，喂进事件账本，重大事件自动触发委员会）."
+
+**Prerequisite**: a backend LLM key (`DEEPSEEK_API_KEY` / `LLM_API_KEY` in
+`$INVEST_HOME/.env`) — event normalization is LLM-mandatory, no fallback. If the
+user skipped Q5, offer to add the key now; declined → tell them the sentinel
+can't run and skip this step.
+
+Then wire the schedule by scenario:
+
+- **Path B (remote hub)**: skip — the hub's own scheduler already runs the
+  sentinel server-side; nothing to schedule on this machine.
+- **Your platform has a scheduling facility** (Claude Code `CronCreate` / Hermes
+  scheduled reminders / OpenClaw cron jobs): register a job every 30 minutes that
+  runs the invest skill's `scripts/run.sh event_check --live` and relays the
+  returned JSON to the user as a one-line digest ("📡 哨兵入库 N 条：…"; quiet
+  when 0). Keep the cron prompt to exactly this one deterministic CLI call — do
+  **not** improvise committee protocols unattended (see the invest skill's
+  "Choosing a path": cron always goes Direct).
+- **No scheduling facility**: print this for the user's own crontab (adjust the
+  path if skills were installed elsewhere):
+  ```
+  */30 * * * * $HOME/.claude/skills/invest/scripts/run.sh event_check --live >> $HOME/openInvest/logs/event_check.log 2>&1
+  ```
+
+Cadence/scan-window are tunable later via `config --set event.watch_schedule …`
+(invest skill's tools.md). Agents with their own search tools can additionally
+feed richer events on a schedule — see the invest skill's
+`references/sentinel.md`.
 
 ## Error handling
 
