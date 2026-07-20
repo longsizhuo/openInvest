@@ -236,6 +236,13 @@ SMTP_TO=you@gmail.com
 CHATBOT_ALERT_URL=http://127.0.0.1:6200/alert/invest
 CHATBOT_INTERNAL_KEY=shared-secret-with-your-bot
 
+# 事件触发的委员会 verdict 邮件/DM 里"详情"链接的前缀。不设默认退化成
+# http://localhost:8765——在邮件/DM 里点开等于打自己电脑，读信设备打不开。
+# 设成你自己 invest-web 的公网可达地址（第 1-2 节配好 Caddy + CF Access 后
+# 就有）。就算不设，每个资产也会带一条 explain_decision(decision_id) 的
+# agent 调用提示当零配置兜底，但能点开的链接体验更好。
+INVEST_API_BASE_URL=https://invest.your-domain.com
+
 # 委员会行为开关（也可运行时经 API/CLI 改，ADR-017；env 仅部署期默认）
 # 集中度 lens：false=单资产/刻意集中/全可投资金池不因持仓集中度被建议减仓（ADR-019）
 INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
@@ -387,12 +394,68 @@ handle /mcp {
 }
 ```
 
-**与 REST 转发的关系**：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，
+### 与 REST 转发的关系：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，
 仍支持但不再演进——它还覆盖 remote MCP 没有的 Coordinator 协议
 （prepare/save_committee）与 doctor/event_check；日常读写/Direct 委员会请优先
 remote MCP。已知限制：`run_committee` 直连是同步调用，未命中当天缓存时可能撞
 CF ~100s 边缘超时（缓存命中秒回；重活建议仍由 hub 侧 cron/REST 轮询路径跑）。
 自动部署（invest-deploy.sh）的 restart 行记得加 `invest-mcp.service`。
+
+---
+
+## 10. 顾问模式（INVEST_ADVISORY_MODE）
+
+> **适用场景**：你想在群聊里部署一个\"投资顾问版艾露猫\"，让其他人可以问
+> \"XXX 能不能买\"、\"怎么看黄金\"，但**不暴露你的真实持仓**，也不能买卖操作。
+
+设置 `INVEST_ADVISORY_MODE=1` 环境变量即可开启：
+
+```bash
+# 启动 MCP 时注入
+INVEST_ADVISORY_MODE=1 uvx openinvest mcp
+```
+
+### 顾问模式行为变化
+
+| 工具 | 正常模式 | 顾问模式 |
+|------|:--------:|:--------:|
+| `run_committee` | ✅ 任意标的 | ✅ 任意标的 |
+| `explain_decision` | ✅ | ✅ |
+| `live_prices` | ✅ | ✅ |
+| `what_if` | ✅ | ✅ |
+| `ingest_event` | ✅ | ✅ |
+| `record_execution` | ✅ | ✅ |
+| `status` | ✅ 看持仓 | ❌ 不可用 |
+| `history` | ✅ 看交易 | ❌ 不可用 |
+| `buy` / `sell` | ✅ 记账 | ❌ 不可用 |
+| `deposit` / `withdraw` | ✅ 记账 | ❌ 不可用 |
+| `set_allocations` | ✅ | ❌ 不可用 |
+| `track_asset` / `untrack_asset` | ✅ | ❌ 不可用 |
+
+委员会分析仍然完整运行（Macro / Quant / Risk / CIO 四角色），但 **portfolio_summary
+显示为模拟空持仓**，不包含任何真实用户数据。
+
+### 部署建议
+
+如果要在群聊里跑顾问版，建议**启动一个单独的 MCP 实例**（不同端口），
+然后在群聊用的 Hermes / Claude Code 配置里连接这个实例：
+
+```bash
+# 终端 1：启动顾问版 MCP（无持仓、只分析）
+INVEST_ADVISORY_MODE=1 uvx openinvest mcp --http --port 8767
+
+# Hermes config.yaml 里添加（可选，与主实例并行）
+mcp_servers:
+  openinvest-advisor:
+    command: uvx
+    args:
+      - openinvest
+      - mcp
+    env:
+      INVEST_ADVISORY_MODE: "1"
+```
+
+对应的 agent prompt 模板见 [20-agent-usage-tutorial.md](20-agent-usage-tutorial.md)。
 
 ```
 笔记本 (client)                         hub（本机/VPS）

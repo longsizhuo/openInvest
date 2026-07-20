@@ -70,15 +70,20 @@ def run_committee_for_symbol(
 
     emit("preparing", symbol=symbol)
 
-    # 1. 拉 strategy 找 target
+    # 1. 拉 strategy 找 target（顾问模式跳过持仓校验）
+    import os as _os
+    _advisory = _os.environ.get("INVEST_ADVISORY_MODE", "").strip()
     pm = PortfolioManager()
-    target = next(
-        (a for a in pm.strategy.get("target_assets", []) if a.get("symbol") == symbol),
-        None,
-    )
-    if target is None:
-        emit("error", reason=f"asset {symbol} not in strategy.target_assets")
-        return {"error": f"asset {symbol} not in strategy.target_assets"}
+    if _advisory:
+        target = {"symbol": symbol, "display_name": symbol, "channel": ""}
+    else:
+        target = next(
+            (a for a in pm.strategy.get("target_assets", []) if a.get("symbol") == symbol),
+            None,
+        )
+        if target is None:
+            emit("error", reason=f"asset {symbol} not in strategy.target_assets")
+            return {"error": f"asset {symbol} not in strategy.target_assets"}
 
     # 2. 行情 + 指标 + regime
     try:
@@ -151,6 +156,8 @@ def run_committee_for_symbol(
     # data_warnings）。
     if portfolio_summary_override is not None:
         portfolio_summary = portfolio_summary_override
+    elif _advisory:
+        portfolio_summary = "💰 顾问模式：无真实持仓数据。分析结果不包含用户持仓上下文。"
     else:
         portfolio_summary = _build_default_portfolio_summary(pm)
 
@@ -381,8 +388,15 @@ def run_committee_session(
             log.warning(f"session progress emit fail: {e}")
 
     # ---- Step 1: 解析 symbols（None / 空 → strategy.target_assets）----
+    import os as _os
+    _advisory = _os.environ.get("INVEST_ADVISORY_MODE", "").strip()
     pm = PortfolioManager()
     if not symbols:
+        if _advisory:
+            raise RuntimeError(
+                "run_committee_session: advisory mode（INVEST_ADVISORY_MODE=1）"
+                " 必须显式传 symbols，无法从 strategy.target_assets 读取"
+            )
         symbols = [
             str(a.get("symbol")) for a in pm.strategy.get("target_assets", [])
             if a.get("symbol")

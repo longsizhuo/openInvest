@@ -54,10 +54,22 @@ def _pm():
     return PortfolioManager()
 
 
+def _check_advisory():
+    """Disable portfolio-sensitive tools in INVEST_ADVISORY_MODE (guest/advisory mode)."""
+    import os
+    if os.environ.get("INVEST_ADVISORY_MODE", "").strip():
+        raise RuntimeError(
+            "INVEST_ADVISORY_MODE=1: this tool is disabled in advisory mode. "
+            "Only run_committee, explain_decision, live_prices, what_if, "
+            "ingest_event, and record_execution are available."
+        )
+
+
 # ---------- 只读 ----------
 
 @mcp.tool(annotations=_RO)
 def status() -> Dict[str, Any]:
+    _check_advisory()
     """Get a full snapshot of the user's portfolio: cash balances per currency,
     every holding with units / average cost / live price, and unrealized P&L
     per position and in total.
@@ -98,6 +110,7 @@ def strategy() -> Dict[str, Any]:
 def history(
     n: Annotated[int, Field(description="Maximum number of recent trades to return.")] = 10,
 ) -> Dict[str, Any]:
+    _check_advisory()
     """Get the most recent trade records and committee verdict history.
 
     Use when the user asks "what did I buy recently" or "what did the
@@ -347,6 +360,7 @@ def buy(
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
 ) -> Dict[str, Any]:
+    _check_advisory()
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
     This bookkeeps a trade the user already placed with their broker —
@@ -379,6 +393,7 @@ def sell(
     units: Annotated[float, Field(description="Quantity sold; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Execution price per unit, in the holding's cost currency.", gt=0)],
 ) -> Dict[str, Any]:
+    _check_advisory()
     """Record a sell in the local ledger: reduces the position's units
     (average cost unchanged) and credits cash in the holding's cost
     currency. Bookkeeps a trade already executed at the user's broker —
@@ -405,9 +420,8 @@ def sell(
 
 @mcp.tool(annotations=_MONEY)
 def deposit(
-    currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
-    amount: Annotated[float, Field(description="Amount to add; must be > 0.", gt=0)],
-) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
+    _check_advisory()
     """Record a cash deposit into the ledger, in any currency. Bookkeeping
     only — no real payment system is connected.
 
@@ -426,9 +440,8 @@ def deposit(
 
 @mcp.tool(annotations=_MONEY)
 def withdraw(
-    currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
-    amount: Annotated[float, Field(description="Amount to remove; must be > 0.", gt=0)],
-) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
+    _check_advisory()
     """Record a cash withdrawal from the ledger, in any currency. Fails if
     the balance is insufficient. Bookkeeping only — no real payment system
     is connected.
@@ -455,9 +468,8 @@ _STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotent
 
 @mcp.tool(annotations=_STRAT_W)
 def set_allocations(
-    target_allocation_stock: Annotated[float, Field(description="Stock weight in [0, 1], e.g. 0.7. Must sum to ~1.0 with cash.", ge=0, le=1)],
-    target_allocation_cash: Annotated[float, Field(description="Cash weight in [0, 1], e.g. 0.3. Must sum to ~1.0 with stock.", ge=0, le=1)],
-) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
+    _check_advisory()
     """Update the strategy's target stock/cash allocation ratio. The two
     values must sum to ≈1.0; schema validation rejects and rolls back any
     write that would corrupt the strategy file.
@@ -487,6 +499,7 @@ def track_asset(
     price_offset_pct: Annotated[Optional[float], Field(description="Systematic offset between quote and actual fill price, in percent (e.g. bank gold spread).")] = None,
     sell_fee_pct: Annotated[Optional[float], Field(description="Sell-side fee in percent, used by fee-aware math.")] = None,
 ) -> Dict[str, Any]:
+    _check_advisory()
     """Add a symbol to the tracked-asset list, or update an existing entry
     (idempotent upsert: only the fields you pass are changed). The tracked
     list decides which symbols the committee and DCA jobs cover.
@@ -524,6 +537,7 @@ def track_asset(
 def untrack_asset(
     symbol: Annotated[str, Field(description="yfinance ticker currently in the tracked list.")],
 ) -> Dict[str, Any]:
+    _check_advisory()
     """Remove a symbol from the tracked-asset list — the committee and DCA
     jobs stop covering it. Holdings and trade history are untouched; schema
     validation guarantees at least one tracked asset remains.
