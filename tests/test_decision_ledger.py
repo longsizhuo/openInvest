@@ -212,3 +212,27 @@ def test_list_decisions_end_to_end_seeded_ledger(monkeypatch, tmp_path):
     assert [t["id"] for t in got["matched_trades"]] == [1]
     assert got["outcome"] is not None
     assert got["outcome"]["actual_returns"] == {"30d": 1.2}
+
+
+def test_explain_decision(monkeypatch, tmp_path):
+    """explain_decision 单条回放：正常路径 + 路径逃逸/缺失的错误契约。
+    MCP / CLI 共用本体（同 record_execution 模式），测本体即测两端。"""
+    import openinvest.core.memory_store as ms
+    from openinvest.core.decision_ledger import explain_decision
+
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    committee_dir = tmp_path / ".committee" / "2026-07-03"
+    committee_dir.mkdir(parents=True)
+    (committee_dir / "GC_F.md").write_text(MD, encoding="utf-8")
+    (committee_dir / "GC_F_path.json").write_text('{"p_up": 0.4}', encoding="utf-8")
+
+    got = explain_decision("2026-07-03/GC=F")
+    assert got["verdict"] == "HOLD"
+    assert got["confidence"] == 0.65
+    assert got["alloc_cny"] == -5000.0
+    assert got["path_snapshot"] == {"p_up": 0.4}
+    assert "伦敦金" in got["transcript_markdown"]
+
+    assert "error" in explain_decision("no-slash")
+    assert "error" in explain_decision("../../etc/GC=F")   # date 段防逃逸
+    assert "error" in explain_decision("2026-07-03/UNKNOWN")

@@ -234,36 +234,8 @@ def explain_decision(
         Object with verdict, confidence, alloc_cny, `transcript_markdown`
         (render this to the user), and `path_snapshot` (may be null).
     """
-    import json
-    from openinvest.core.decision_ledger import parse_committee_file
-    from openinvest.core.memory_store import MemoryStore
-    if "/" not in decision_id:
-        return {"status": "error",
-                "error": f'decision_id must be "<date>/<symbol>", got {decision_id!r}'}
-    date, symbol = decision_id.split("/", 1)
-    # date 段必须是日期字面量——否则 "../.." 之类会拼进路径逃出 .committee/
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-        return {"status": "error", "error": f"invalid date segment in decision_id: {date!r}"}
-    safe = safe_symbol(symbol)
-    base = MemoryStore().root / ".committee" / date
-    md = base / f"{safe}.md"
-    parsed = parse_committee_file(md)
-    if not parsed:
-        return {"status": "error",
-                "error": f"decision {decision_id} not found ({md} missing or has no verdict)"}
-    path_json = base / f"{safe}_path.json"
-    path_snapshot = None
-    if path_json.exists():
-        try:
-            path_snapshot = json.loads(path_json.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
-    return {
-        "decision_id": decision_id,
-        **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny")},
-        "transcript_markdown": md.read_text(encoding="utf-8"),
-        "path_snapshot": path_snapshot,
-    }
+    from openinvest.core.decision_ledger import explain_decision as _explain
+    return _explain(decision_id)
 
 
 # ---------- 决策账本写 ----------

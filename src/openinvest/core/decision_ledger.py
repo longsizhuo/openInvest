@@ -70,6 +70,42 @@ def parse_committee_file(path: Path) -> Optional[Dict[str, Any]]:
     }
 
 
+def explain_decision(decision_id: str) -> Dict[str, Any]:
+    """单条决议完整回放：辩论全文 + CIO memo + 决策时点 path snapshot。
+
+    MCP `explain_decision` / CLI `explain_decision` 共用（同 record_execution 模式）。
+    """
+    from openinvest.core.memory_store import MemoryStore
+
+    if "/" not in decision_id:
+        return {"status": "error",
+                "error": f'decision_id must be "<date>/<symbol>", got {decision_id!r}'}
+    date, symbol = decision_id.split("/", 1)
+    # date 段必须是日期字面量——否则 "../.." 之类会拼进路径逃出 .committee/
+    if not _DATE_DIR.fullmatch(date):
+        return {"status": "error", "error": f"invalid date segment in decision_id: {date!r}"}
+    safe = safe_symbol(symbol)
+    base = MemoryStore().root / ".committee" / date
+    md = base / f"{safe}.md"
+    parsed = parse_committee_file(md)
+    if not parsed:
+        return {"status": "error",
+                "error": f"decision {decision_id} not found ({md} missing or has no verdict)"}
+    path_json = base / f"{safe}_path.json"
+    path_snapshot = None
+    if path_json.exists():
+        try:
+            path_snapshot = json.loads(path_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            pass
+    return {
+        "decision_id": decision_id,
+        **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny")},
+        "transcript_markdown": md.read_text(encoding="utf-8"),
+        "path_snapshot": path_snapshot,
+    }
+
+
 def _executions_path() -> Path:
     from openinvest.core.memory_store import MemoryStore
     return MemoryStore().root / ".dreams" / "executions.jsonl"

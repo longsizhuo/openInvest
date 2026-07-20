@@ -32,8 +32,64 @@ __all__ = [
     "_parse_holdings_with_llm",
     "_write_v2_portfolio",
     "cmd_init",
+    "cmd_install_skills",
     "_interactive_prompt",
 ]
+
+
+# ---------- install_skills ----------
+
+def cmd_install_skills(args: argparse.Namespace) -> None:
+    """把随包分发的 plugin/skills/* 拷进宿主平台 skills 目录（替换式幂等）。
+
+    数据源双形态：wheel 安装 → openinvest/_bundled_skills（pyproject force-include）；
+    git clone / editable → 仓库根 plugin/skills。包内资源按 paths.py 口径用 __file__
+    解析（INVEST_ROOT 只管数据目录）。
+    """
+    import shutil
+
+    pkg_root = Path(__file__).resolve().parents[1]          # src/openinvest
+    src = pkg_root / "_bundled_skills"
+    if not src.is_dir():
+        src = pkg_root.parents[1] / "plugin" / "skills"      # git clone 形态
+    if not src.is_dir():
+        _print_json({"status": "error",
+                     "error": "bundled skills not found（wheel 缺 _bundled_skills 且非仓库布局）",
+                     "hint": "重装后端：uvx --refresh --from openinvest openinvest install-skills"})
+        sys.exit(1)
+
+    dest_root = Path(args.dest).expanduser()
+    dest_root.mkdir(parents=True, exist_ok=True)
+    installed = []
+    for skill_dir in sorted(src.iterdir()):
+        if not (skill_dir / "SKILL.md").is_file():
+            continue                                         # 跳过非 skill 目录
+        target = dest_root / skill_dir.name
+        # 替换式安装：先清掉旧目录/旧 symlink（dev 的 install.sh 装的是 symlink，
+        # 直接 copytree 会写穿 symlink 改到仓库文件）
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
+        shutil.copytree(skill_dir, target)
+        version = None
+        for line in (skill_dir / "SKILL.md").read_text(encoding="utf-8").splitlines():
+            if line.startswith("version:"):
+                version = line.split(":", 1)[1].split("#")[0].strip()
+                break
+        installed.append({"name": skill_dir.name, "version": version})
+
+    if not installed:
+        _print_json({"status": "error",
+                     "error": f"{src} 下没有任何含 SKILL.md 的目录——打包损坏",
+                     "hint": "重装后端：uvx --refresh --from openinvest openinvest install-skills"})
+        sys.exit(1)
+    _print_json({
+        "status": "ok",
+        "dest": str(dest_root),
+        "installed": installed,
+        "next_step": '对你的 agent 说「帮我初始化 invest」/ "set up invest"（首次）；日常直接问持仓、跑委员会',
+    })
 
 
 # ---------- doctor ----------
