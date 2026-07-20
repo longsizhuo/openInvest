@@ -248,6 +248,10 @@ A-share / regional-market news especially: that is the crawler's blind spot and 
 the only source. If the host has a quotes/news skill installed (e.g. Longbridge), its
 news is worth feeding too — the ledger cares about the information, not where it came from.
 
+The above is opportunistic — feed what you happen to see. To feed on a **schedule**
+(the intel-sentinel pattern: your platform's cron wakes you to search + feed), see
+[references/sentinel.md](references/sentinel.md).
+
 ## Decision-loop workflow (Decision Review + Reflection)
 
 openInvest does the bookkeeping; **you do the collection** — that is the host agent's
