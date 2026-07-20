@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.32.0](https://github.com/longsizhuo/openInvest/compare/v0.31.7...v0.32.0) (2026-07-20)
+
+
+### Features
+
+* add INVEST_ADVISORY_MODE for guest/advisory committee access ([9aa75af](https://github.com/longsizhuo/openInvest/commit/9aa75af91295879528adf13346fb20c246887431))
+* INVEST_ADVISORY_MODE — 顾问模式群聊部署 ([05b8fec](https://github.com/longsizhuo/openInvest/commit/05b8fec010e40a5becd68d9268d62a53c1eb5c22))
+
+
+### Bug Fixes
+
+* **mcp:** close advisory-mode isolation gaps, tighten allowed tools ([82ac796](https://github.com/longsizhuo/openInvest/commit/82ac796af074382f30a3a321312f6db8cbc1a224))
+* **mcp:** restore params and docstrings broken by advisory-mode guard ([22193c7](https://github.com/longsizhuo/openInvest/commit/22193c7eb6a3d6c8daab3db95897f4167d8de547))
+
 ## [0.31.7](https://github.com/longsizhuo/openInvest/compare/v0.31.6...v0.31.7) (2026-07-18)
 
 
