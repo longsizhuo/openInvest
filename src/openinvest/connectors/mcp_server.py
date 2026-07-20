@@ -29,6 +29,7 @@ from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from openinvest.utils.advisory import is_advisory_mode
 from openinvest.utils.symbols import safe_symbol
 
 # client（Claude Code 等）靠这些 hint 决定要不要弹确认：
@@ -54,14 +55,27 @@ def _pm():
     return PortfolioManager()
 
 
+# 顾问模式白名单：委员会分析仍可用的工具，其余一律经 _check_advisory() 拒绝。
+# 单一可信源——test_mcp_server.py::test_advisory_mode_gate_is_closed_set 用它反向
+# 校验源码：不在这个集合里的工具必须显式调 _check_advisory()，新增工具漏加闸会
+# 直接测试红（而不是悄悄放行给群聊陌生人）。
+#
+# what_if / record_execution 原本在顾问模式放行，收紧为拒绝：
+# - what_if 是"对当前真实持仓做假设推演"，本质就是读持仓，泄露仓位和浮盈；
+# - record_execution 写真实决策账本，顾问模式下群友既拿不到真实 decision_id
+#   （decisions/history 已拒绝），放行也没有合法用途，只有被用来污染账本的风险。
+ADVISORY_ALLOWED_TOOLS = frozenset({
+    "run_committee", "explain_decision", "live_prices", "ingest_event",
+})
+
+
 def _check_advisory():
     """Disable portfolio-sensitive tools in INVEST_ADVISORY_MODE (guest/advisory mode)."""
-    import os
-    if os.environ.get("INVEST_ADVISORY_MODE", "").strip():
+    if is_advisory_mode():
         raise RuntimeError(
             "INVEST_ADVISORY_MODE=1: this tool is disabled in advisory mode. "
-            "Only run_committee, explain_decision, live_prices, what_if, "
-            "ingest_event, and record_execution are available."
+            "Only run_committee, explain_decision, live_prices, and ingest_event "
+            "are available."
         )
 
 
@@ -102,6 +116,7 @@ def strategy() -> Dict[str, Any]:
         (tracked symbols with constraints), and `insights` (distilled
         lessons from past decisions).
     """
+    _check_advisory()
     from openinvest.services.skill_views import build_strategy_view
     return build_strategy_view()
 
@@ -181,6 +196,7 @@ def what_if(
         Object with the position's simulated value change and the resulting
         portfolio-level P&L delta.
     """
+    _check_advisory()
     from openinvest.services.skill_views import build_what_if_view
     return build_what_if_view(symbol=symbol, pct=pct, price=price)
 
@@ -199,6 +215,7 @@ def discipline() -> Dict[str, Any]:
         Object with `summary` (structured stats) and `markdown` (the same
         ledger pre-rendered for direct display to the user).
     """
+    _check_advisory()
     from openinvest.services.discipline import discipline_summary, render_discipline_md
     s = discipline_summary()
     return {"summary": s, "markdown": render_discipline_md(s)}
@@ -223,6 +240,7 @@ def decisions(
         `decisions` (list; each entry has decision_id, verdict, confidence,
         intervention, executed flag, matched trades, and outcome).
     """
+    _check_advisory()
     from openinvest.core.decision_ledger import list_decisions, summarize_decisions
     ds = list_decisions(days=days)
     return {"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds}
@@ -305,6 +323,7 @@ def record_execution(
     Returns:
         The stored execution record, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     from openinvest.core.decision_ledger import record_execution as _rec
     try:
         return _rec(decision_id, executed, reason=reason, trade_ids=trade_ids)

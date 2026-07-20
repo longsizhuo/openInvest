@@ -417,42 +417,68 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 
 ### 顾问模式行为变化
 
+顾问模式白名单只放行委员会分析必需的 4 个工具，其余一律拒绝（`mcp_server.py`
+的 `ADVISORY_ALLOWED_TOOLS`；改动需求见
+[test_mcp_server.py::test_advisory_mode_gate_is_closed_set](../../tests/test_mcp_server.py)
+的机器强制契约，白名单外新增工具漏加闸会直接 CI 红）：
+
 | 工具 | 正常模式 | 顾问模式 |
 |------|:--------:|:--------:|
 | `run_committee` | ✅ 任意标的 | ✅ 任意标的 |
 | `explain_decision` | ✅ | ✅ |
 | `live_prices` | ✅ | ✅ |
-| `what_if` | ✅ | ✅ |
 | `ingest_event` | ✅ | ✅ |
-| `record_execution` | ✅ | ✅ |
-| `status` | ✅ 看持仓 | ❌ 不可用 |
-| `history` | ✅ 看交易 | ❌ 不可用 |
+| `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
+| `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
+| `status` / `strategy` / `history` / `discipline` / `decisions` | ✅ | ❌ 不可用 |
 | `buy` / `sell` | ✅ 记账 | ❌ 不可用 |
 | `deposit` / `withdraw` | ✅ 记账 | ❌ 不可用 |
 | `set_allocations` | ✅ | ❌ 不可用 |
 | `track_asset` / `untrack_asset` | ✅ | ❌ 不可用 |
 
-委员会分析仍然完整运行（Macro / Quant / Risk / CIO 四角色），但 **portfolio_summary
-显示为模拟空持仓**，不包含任何真实用户数据。
+委员会分析仍然完整运行（Macro / Quant / Risk / CIO 四角色），但：
+
+- `portfolio_summary` 显示为顾问模式占位文案，不含任何真实持仓数据；
+- Dreaming 长期洞察（`prior_insights`）不注入 prompt；
+- 委员会跑完**不落盘**到你的真实 memory / 决策账本（`persist_to_memory=False`），
+  群聊查询不会污染你自己的 `history` / `decisions` / path_review 命中率统计。
+
+**已知残留风险**：`explain_decision` 允许查看历史委员会 verdict——如果
+`decision_id` 对应的分析是在**开启顾问模式之前**（也就是正常模式、真实持仓上下文
+下）跑出来的，那份历史 transcript 本身就含真实 `portfolio_summary`。顾问模式没有
+（也无法）事后过滤已落盘的历史文件。真正的隔离需要下面这条部署建议里的独立
+`INVEST_HOME`。
 
 ### 部署建议
 
-如果要在群聊里跑顾问版，建议**启动一个单独的 MCP 实例**（不同端口），
-然后在群聊用的 Hermes / Claude Code 配置里连接这个实例：
+**强烈建议顾问实例用独立 `INVEST_HOME`**（独立 `memory/` 目录，跑
+[invest-setup skill](../../skills/invest-setup/) 或手动建一份空持仓即可），
+而不是复用你自己账户的 `INVEST_HOME`——这样即使 `explain_decision` 被问到某个
+`decision_id`，读到的也是顾问实例自己积累的历史，不会是你的真实持仓分析。
 
-```bash
-# 终端 1：启动顾问版 MCP（无持仓、只分析）
-INVEST_ADVISORY_MODE=1 uvx openinvest mcp --http --port 8767
+日常聊天场景（Hermes 等按 config 自己 spawn 子进程的 client）直接声明 stdio
+server，不需要手动起终端：
 
-# Hermes config.yaml 里添加（可选，与主实例并行）
+```yaml
+# ~/.hermes/config.yaml —— 与主实例并行注册一个顾问命名空间
 mcp_servers:
   openinvest-advisor:
     command: uvx
-    args:
-      - openinvest
-      - mcp
+    args: ["openinvest", "mcp"]
     env:
+      INVEST_HOME: ~/openinvest-advisor   # 独立顾问实例的 memory 目录
       INVEST_ADVISORY_MODE: "1"
+```
+
+如果是给群聊 bot 后端复用（多个用户共享同一个常驻顾问实例，或跨机器连），按第
+9 节的 remote MCP 方式起 HTTP 常驻服务再注册：
+
+```bash
+INVEST_HOME=~/openinvest-advisor INVEST_ADVISORY_MODE=1 \
+    uvx openinvest mcp --http --port 8767
+
+# client 侧按 remote MCP 一节的方式注册（以 Claude Code 为例）：
+claude mcp add --transport http openinvest-advisor http://127.0.0.1:8767/mcp
 ```
 
 对应的 agent prompt 模板见 [20-agent-usage-tutorial.md](20-agent-usage-tutorial.md)。

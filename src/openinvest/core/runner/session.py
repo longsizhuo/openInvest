@@ -15,6 +15,7 @@ from openinvest.core.regime_probability import (
     build_probability_table_from_ohlc,
     get_regime_probability,
 )
+from openinvest.utils.advisory import is_advisory_mode
 from openinvest.utils.exchange_fee import (
     analyze_multi_timeframe, get_history_data, get_macro_data,
 )
@@ -71,8 +72,7 @@ def run_committee_for_symbol(
     emit("preparing", symbol=symbol)
 
     # 1. 拉 strategy 找 target（顾问模式跳过持仓校验）
-    import os as _os
-    _advisory = _os.environ.get("INVEST_ADVISORY_MODE", "").strip()
+    _advisory = is_advisory_mode()
     pm = PortfolioManager()
     if _advisory:
         target = {"symbol": symbol, "display_name": symbol, "channel": ""}
@@ -163,8 +163,12 @@ def run_committee_for_symbol(
 
     # 5.6. Prior insights / Dreaming long-term 行为模式（修复 2026-05-16 漂移:
     # service layer 之前从不读 insights, Web/GUI 路径的 LLM 永远看不到长期模式）
+    # 顾问模式必须 stub 空——Dreaming insights 是基于真实持仓/交易行为提炼的长期
+    # 模式，读出来就等于把真实持仓信息间接喂进群聊查询的委员会 prompt。
     if prior_insights_override is not None:
         prior_insights = prior_insights_override
+    elif _advisory:
+        prior_insights = ""
     else:
         prior_insights = load_prior_insights(target, pm)
     if prior_insights:
@@ -180,9 +184,13 @@ def run_committee_for_symbol(
         from openinvest.core.regime_probability import build_reentry_reference, convert_ccy_for
         # 币种自适应（ADR-021）：持仓以非报价币种计价（如 GC=F 报 USD、浙商积存金记 CNY）
         # → path-profile 用汇率卷积合成持仓币种下行口径，避免 USD 口径低估 CNY 持有者风险。
+        # 顾问模式没有真实持仓可言，跳过查询——不读 pm.holdings，退回本币口径。
         try:
-            _holding = pm.holdings.find(symbol)
-            _convert_ccy = convert_ccy_for(symbol, (_holding or {}).get("cost_currency"))
+            if _advisory:
+                _convert_ccy = None
+            else:
+                _holding = pm.holdings.find(symbol)
+                _convert_ccy = convert_ccy_for(symbol, (_holding or {}).get("cost_currency"))
         except Exception:  # noqa: BLE001  持仓币种取不到 → 退回本币口径，不影响 reentry 主体
             _convert_ccy = None
         reentry_reference, path_profile = build_reentry_reference(
@@ -250,6 +258,8 @@ def run_committee_for_symbol(
             defense_dca = None
 
     # 6. 跑多轮辩论 + CIO
+    # 顾问模式不落 transcript 到真实 memory——群聊问的资产多半不在用户 target_assets
+    # 里，落盘会把陌生标的混进用户自己的委员会历史，污染他后续查 history/decisions。
     result = run_committee(
         target,
         market_data=market_data,
@@ -265,6 +275,7 @@ def run_committee_for_symbol(
         defense_dca=defense_dca,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
+        persist_to_memory=not _advisory,
     )
 
     # 路径分布参考随 result 返回——entry（邮件/GUI/CLI）渲染给用户，
@@ -274,8 +285,9 @@ def run_committee_for_symbol(
     result["path_profile"] = path_profile
 
     # 6.5. 路径预测快照落盘（path_review 闭环：90 天后回看实际路径 vs 预测分布）。
-    # graceful：失败不阻断。
-    if path_profile is not None:
+    # graceful：失败不阻断。顾问模式跳过——同 6 的理由，群聊流量不该污染用户自己
+    # 的 path_review 命中率统计。
+    if path_profile is not None and not _advisory:
         try:
             _save_path_snapshot(
                 symbol, regime_label, current_price,
@@ -287,16 +299,18 @@ def run_committee_for_symbol(
 
     # 6.6. 反事实记账：确定性规则改写了 CIO 裁决 → 落 interventions.jsonl
     # （"如果没拦会怎样"由 jobs/intervention_review.py 事后回填）。graceful。
-    try:
-        _rec = _intervention_record(
-            symbol, regime_label, current_price,
-            result.get("verdict"), atr_defense_on,
-        )
-        if _rec is not None:
-            _log_intervention(_rec)
-            emit("intervention_logged", asset=symbol, rule=_rec["rule"])
-    except Exception as e:  # noqa: BLE001
-        log.warning(f"干预记账失败 graceful 跳过: {e}")
+    # 顾问模式跳过：合成的空 target 模板没有真实拦截意义，落账只会污染 discipline 统计。
+    if not _advisory:
+        try:
+            _rec = _intervention_record(
+                symbol, regime_label, current_price,
+                result.get("verdict"), atr_defense_on,
+            )
+            if _rec is not None:
+                _log_intervention(_rec)
+                emit("intervention_logged", asset=symbol, rule=_rec["rule"])
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"干预记账失败 graceful 跳过: {e}")
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
     if probability_table is not None:
@@ -388,8 +402,7 @@ def run_committee_session(
             log.warning(f"session progress emit fail: {e}")
 
     # ---- Step 1: 解析 symbols（None / 空 → strategy.target_assets）----
-    import os as _os
-    _advisory = _os.environ.get("INVEST_ADVISORY_MODE", "").strip()
+    _advisory = is_advisory_mode()
     pm = PortfolioManager()
     if not symbols:
         if _advisory:
