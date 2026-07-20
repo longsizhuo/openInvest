@@ -1115,3 +1115,97 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
     assert sym_result.get("path_profile") == {"windows": {}}, (
         "path_profile 漂移 → 人话摘要拿不到结构化分布"
     )
+
+
+# ============================================================================
+# 契约 7: 顾问模式（INVEST_ADVISORY_MODE）—— 不能把真实持仓/长期洞察漏进 prompt
+# ============================================================================
+# PR #239 review 发现的阻塞问题：session.py 的 advisory 分支只 stub 了
+# portfolio_summary 的显示文案，prior_insights（Dreaming 长期行为模式，基于真实
+# 持仓/交易提炼）和 persist_to_memory 都漏了——顾问模式群聊查询会把真实用户的
+# 长期洞察间接喂进委员会 prompt，跑完还会把 transcript 落进用户真实 memory，
+# 污染他自己的决策历史。这里用 SENTINEL 锚定：loader 被 mock 成返回真实数据，
+# 断言顾问模式下 run_committee 实际收到的 kwargs 里没有这份 SENTINEL。
+
+def test_run_committee_session_advisory_mode_requires_explicit_symbols(monkeypatch, tmp_path):
+    """顾问模式下 symbols=None 必须直接拒绝——不能偷偷从 strategy.target_assets 读，
+    那正是需要隐藏的真实持仓/追踪列表。"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+    monkeypatch.setenv("INVEST_ADVISORY_MODE", "1")
+
+    from openinvest.core.committee_runner import run_committee_session
+    with pytest.raises(RuntimeError, match="advisory mode"):
+        run_committee_session(symbols=None, max_debate_rounds=1)
+
+
+def test_run_committee_session_advisory_mode_stubs_prior_insights_and_skips_persist(
+    monkeypatch, tmp_path,
+):
+    """顾问模式下 run_committee 实际收到的 prior_insights 必须是空串（不能泄露
+    Dreaming 长期洞察），portfolio_summary 必须是顾问模式占位文案（不能是真实
+    持仓文本），且 persist_to_memory 必须是 False（不能把群聊分析写进用户真实
+    memory / 决策账本，污染他自己的 history/decisions/命中率统计）。"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+    monkeypatch.setenv("INVEST_ADVISORY_MODE", "1")
+
+    SENTINEL_INSIGHTS = "PRIOR_INSIGHTS_SENTINEL_should_never_leak_to_advisory_prompt"
+    # loader 刻意 mock 成"确实有真实洞察可读"——advisory 分支必须在调它之前短路，
+    # 而不是依赖 loader 自己感知顾问模式（loader 不该知道调用方是谁）。
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights",
+                        lambda *a, **kw: SENTINEL_INSIGHTS)
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data",
+                        lambda *a, **kw: fake_df)
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
+
+    from openinvest.core.committee_runner import run_committee_session
+    run_committee_session(symbols=["GC=F"], max_debate_rounds=1)
+
+    assert captured, "run_committee 未被调用 — session dispatch 失败"
+    kw = captured[0]
+    assert kw.get("prior_insights") == "", (
+        f"顾问模式泄露 prior_insights: 实际收到 {kw.get('prior_insights')!r}\n"
+        "  → session.py run_committee_for_symbol 的 advisory 分支没 stub prior_insights"
+    )
+    assert "顾问模式" in kw.get("portfolio_summary", ""), (
+        f"顾问模式 portfolio_summary 不是占位文案，可能泄露真实持仓: "
+        f"{kw.get('portfolio_summary')!r}"
+    )
+    assert kw.get("persist_to_memory") is False, (
+        "顾问模式必须 persist_to_memory=False —— 否则群聊分析的 transcript 会落进"
+        "用户真实 memory，污染他自己的 history/decisions/path_review 统计"
+    )
