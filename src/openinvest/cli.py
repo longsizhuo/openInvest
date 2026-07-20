@@ -120,7 +120,8 @@ def main() -> None:
              " skills 目录（替换式幂等）。无 plugin 机制的平台一条命令装齐")
     p.add_argument("--dest", default="~/.claude/skills",
                    help="目标 skills 目录，默认 ~/.claude/skills；OpenClaw 传 workspace 的"
-                        " skills/，Codex 传 ~/openInvest/skills")
+                        " skills/。git clone 老用户不需要本命令（仓库 skills/ 已就位，"
+                        "拷进 clone 会弄脏 working tree）")
     p.set_defaults(func=cmd_install_skills)
 
     p = sub.add_parser("history")

@@ -32,6 +32,16 @@ def test_install_skills_copies_and_idempotent(tmp_path, capfd):
     assert {s["name"] for s in out2["installed"]} == names
 
 
+def test_install_skills_replaces_plain_file(tmp_path, capfd):
+    """目标位置被普通文件占位时也走替换语义，输出 JSON 而非裸 traceback（CR 建议1）。"""
+    dest = tmp_path / "skills"
+    dest.mkdir()
+    (dest / "invest").write_text("stale placeholder", encoding="utf-8")
+    out = _run(dest, capfd)
+    assert out["status"] == "ok"
+    assert (dest / "invest" / "SKILL.md").is_file()
+
+
 def test_install_skills_replaces_symlink(tmp_path, capfd):
     """dev 用 install.sh 装过 symlink 的目录必须被换成实拷贝，而不是写穿链接。"""
     dest = tmp_path / "skills"

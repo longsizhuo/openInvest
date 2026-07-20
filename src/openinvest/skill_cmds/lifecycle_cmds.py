@@ -71,6 +71,8 @@ def cmd_install_skills(args: argparse.Namespace) -> None:
             target.unlink()
         elif target.is_dir():
             shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()                                  # 普通文件占位也替换，不抛 traceback
         shutil.copytree(skill_dir, target)
         version = None
         for line in (skill_dir / "SKILL.md").read_text(encoding="utf-8").splitlines():
