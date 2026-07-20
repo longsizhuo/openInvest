@@ -69,7 +69,6 @@ def _check_advisory():
 
 @mcp.tool(annotations=_RO)
 def status() -> Dict[str, Any]:
-    _check_advisory()
     """Get a full snapshot of the user's portfolio: cash balances per currency,
     every holding with units / average cost / live price, and unrealized P&L
     per position and in total.
@@ -83,6 +82,7 @@ def status() -> Dict[str, Any]:
         with symbol, units, avg_cost, live price, market value, pnl_pct), and
         portfolio-level totals.
     """
+    _check_advisory()
     from openinvest.services.skill_views import build_status_view
     return build_status_view()
 
@@ -110,7 +110,6 @@ def strategy() -> Dict[str, Any]:
 def history(
     n: Annotated[int, Field(description="Maximum number of recent trades to return.")] = 10,
 ) -> Dict[str, Any]:
-    _check_advisory()
     """Get the most recent trade records and committee verdict history.
 
     Use when the user asks "what did I buy recently" or "what did the
@@ -123,6 +122,7 @@ def history(
         Object with `trades` (each with symbol, direction, units, price,
         timestamp, status) and recent committee verdict records.
     """
+    _check_advisory()
     from openinvest.services.skill_views import build_history_view
     return build_history_view(n)
 
@@ -360,7 +360,6 @@ def buy(
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
 ) -> Dict[str, Any]:
-    _check_advisory()
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
     This bookkeeps a trade the user already placed with their broker —
@@ -380,6 +379,7 @@ def buy(
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
                          kind=kind, unit_label=unit_label, source="mcp")
@@ -393,7 +393,6 @@ def sell(
     units: Annotated[float, Field(description="Quantity sold; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Execution price per unit, in the holding's cost currency.", gt=0)],
 ) -> Dict[str, Any]:
-    _check_advisory()
     """Record a sell in the local ledger: reduces the position's units
     (average cost unchanged) and credits cash in the holding's cost
     currency. Bookkeeps a trade already executed at the user's broker —
@@ -410,6 +409,7 @@ def sell(
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     if units <= 0 or price <= 0:
         return {"status": "error", "error": "units and price must both be > 0"}
     try:
@@ -420,8 +420,9 @@ def sell(
 
 @mcp.tool(annotations=_MONEY)
 def deposit(
-    ) -> Dict[str, Any]:
-    _check_advisory()
+    currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
+    amount: Annotated[float, Field(description="Amount to add; must be > 0.", gt=0)],
+) -> Dict[str, Any]:
     """Record a cash deposit into the ledger, in any currency. Bookkeeping
     only — no real payment system is connected.
 
@@ -432,6 +433,7 @@ def deposit(
     Returns:
         Updated cash balances, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     try:
         return _pm().deposit_cash(currency, amount, source="mcp")
     except ValueError as e:
@@ -440,8 +442,9 @@ def deposit(
 
 @mcp.tool(annotations=_MONEY)
 def withdraw(
-    ) -> Dict[str, Any]:
-    _check_advisory()
+    currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
+    amount: Annotated[float, Field(description="Amount to remove; must be > 0.", gt=0)],
+) -> Dict[str, Any]:
     """Record a cash withdrawal from the ledger, in any currency. Fails if
     the balance is insufficient. Bookkeeping only — no real payment system
     is connected.
@@ -453,6 +456,7 @@ def withdraw(
     Returns:
         Updated cash balances, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     if amount <= 0:
         return {"status": "error", "error": "amount must be > 0"}
     try:
@@ -468,8 +472,9 @@ _STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotent
 
 @mcp.tool(annotations=_STRAT_W)
 def set_allocations(
-    ) -> Dict[str, Any]:
-    _check_advisory()
+    target_allocation_stock: Annotated[float, Field(description="Stock weight in [0, 1], e.g. 0.7. Must sum to ~1.0 with cash.", ge=0, le=1)],
+    target_allocation_cash: Annotated[float, Field(description="Cash weight in [0, 1], e.g. 0.3. Must sum to ~1.0 with stock.", ge=0, le=1)],
+) -> Dict[str, Any]:
     """Update the strategy's target stock/cash allocation ratio. The two
     values must sum to ≈1.0; schema validation rejects and rolls back any
     write that would corrupt the strategy file.
@@ -483,6 +488,7 @@ def set_allocations(
     Returns:
         The updated allocation, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     from openinvest.services import strategy_write as svc
     try:
         return svc.set_allocations(target_allocation_stock, target_allocation_cash)
@@ -499,7 +505,6 @@ def track_asset(
     price_offset_pct: Annotated[Optional[float], Field(description="Systematic offset between quote and actual fill price, in percent (e.g. bank gold spread).")] = None,
     sell_fee_pct: Annotated[Optional[float], Field(description="Sell-side fee in percent, used by fee-aware math.")] = None,
 ) -> Dict[str, Any]:
-    _check_advisory()
     """Add a symbol to the tracked-asset list, or update an existing entry
     (idempotent upsert: only the fields you pass are changed). The tracked
     list decides which symbols the committee and DCA jobs cover.
@@ -520,6 +525,7 @@ def track_asset(
     Returns:
         The stored asset entry, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     from openinvest.services import strategy_write as svc
     try:
         return svc.upsert_target_asset(symbol, {
@@ -537,7 +543,6 @@ def track_asset(
 def untrack_asset(
     symbol: Annotated[str, Field(description="yfinance ticker currently in the tracked list.")],
 ) -> Dict[str, Any]:
-    _check_advisory()
     """Remove a symbol from the tracked-asset list — the committee and DCA
     jobs stop covering it. Holdings and trade history are untouched; schema
     validation guarantees at least one tracked asset remains.
@@ -548,6 +553,7 @@ def untrack_asset(
     Returns:
         The updated tracked list, or {"status": "error", "error": ...}.
     """
+    _check_advisory()
     from openinvest.services import strategy_write as svc
     try:
         return svc.remove_target_asset(symbol)
