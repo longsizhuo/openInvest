@@ -189,9 +189,11 @@ Then wire the schedule by scenario:
   **not** improvise committee protocols unattended (see the invest skill's
   "Choosing a path": cron always goes Direct).
 - **No scheduling facility**: print this for the user's own crontab (adjust the
-  path if skills were installed elsewhere):
+  path if skills were installed elsewhere). The inline `mkdir -p` is load-bearing:
+  fresh installs have no `logs/` dir, and sh does redirections *before* running
+  the command — without it the job fails silently forever:
   ```
-  */30 * * * * $HOME/.claude/skills/invest/scripts/run.sh event_check --live >> $HOME/openInvest/logs/event_check.log 2>&1
+  */30 * * * * mkdir -p $HOME/openInvest/logs && $HOME/.claude/skills/invest/scripts/run.sh event_check --live >> $HOME/openInvest/logs/event_check.log 2>&1
   ```
 
 Cadence/scan-window are tunable later via `config --set event.watch_schedule …`
