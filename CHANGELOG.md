@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/longsizhuo/openInvest/compare/v0.32.0...v0.32.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **cli:** strip mcp subcommand token from argv before dispatching to mcp_server ([0513d27](https://github.com/longsizhuo/openInvest/commit/0513d27928f03c8247fc358fa50b4b63a7493d9e))
+
 ## [0.32.0](https://github.com/longsizhuo/openInvest/compare/v0.31.7...v0.32.0) (2026-07-20)
 
 
