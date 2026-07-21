@@ -129,3 +129,18 @@ def test_advisory_mode_truthiness(monkeypatch, raw, expected):
     monkeypatch.setenv("INVEST_ADVISORY_MODE", raw)
     from openinvest.utils.advisory import is_advisory_mode
     assert is_advisory_mode() is expected
+
+
+def test_cli_mcp_subcommand_strips_argv(monkeypatch):
+    """`openinvest mcp` 分流必须摘掉 "mcp" token——mcp_server.main() 自己 argparse
+    （--http），留着会 `unrecognized arguments: mcp`（0.32.0 打挂过 uvx 部署）。"""
+    import sys
+
+    from openinvest import cli
+    from openinvest.connectors import mcp_server
+
+    seen: dict = {}
+    monkeypatch.setattr(mcp_server, "main", lambda: seen.setdefault("argv", list(sys.argv)))
+    monkeypatch.setattr(sys, "argv", ["openinvest", "mcp"])
+    cli.main()
+    assert seen["argv"] == ["openinvest"]

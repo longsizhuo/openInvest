@@ -73,6 +73,9 @@ from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 def main() -> None:
     # mcp 子命令最先分流：stdout 是 JSON-RPC 通道，不能进下面的重定向/argparse 输出
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        # 摘掉子命令 token——mcp_server.main() 自己 argparse（--http），留着会
+        # "unrecognized arguments: mcp"（0.32.0 实际打挂过 uvx 部署）
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
         from openinvest.connectors.mcp_server import main as _mcp_main
         _mcp_main()
         return
