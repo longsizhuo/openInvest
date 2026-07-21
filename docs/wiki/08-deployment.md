@@ -417,7 +417,8 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 
 ### 顾问模式行为变化
 
-顾问模式白名单只放行委员会分析必需的 4 个工具，其余一律拒绝（`mcp_server.py`
+顾问模式白名单只放行委员会分析必需的工具 + 新闻源管理（只动本实例自己的
+`INVEST_HOME/rss_feeds.yml`），其余一律拒绝（`mcp_server.py`
 的 `ADVISORY_ALLOWED_TOOLS`；改动需求见
 [test_mcp_server.py::test_advisory_mode_gate_is_closed_set](../../tests/test_mcp_server.py)
 的机器强制契约，白名单外新增工具漏加闸会直接 CI 红）：
@@ -428,6 +429,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `explain_decision` | ✅ | ✅ |
 | `live_prices` | ✅ | ✅ |
 | `ingest_event` | ✅ | ✅ |
+| `news_sources` / `add_news_source` / `remove_news_source` | ✅ | ✅ 管理本实例自己的额外源清单（probe 校验 + 上限 30，群聊自助喂源用） |
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
 | `status` / `strategy` / `history` / `discipline` / `decisions` | ✅ | ❌ 不可用 |

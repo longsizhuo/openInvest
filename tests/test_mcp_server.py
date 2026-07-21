@@ -12,6 +12,8 @@ EXPECTED_TOOLS = {
     "buy", "sell", "deposit", "withdraw", "run_committee",
     # strategy 写操作（issue #179：读写对等）
     "set_allocations", "track_asset", "untrack_asset",
+    # 新闻源管理（用户级额外源，顾问模式放行——只动本实例 rss_feeds.yml）
+    "news_sources", "add_news_source", "remove_news_source",
 }
 
 
@@ -27,10 +29,10 @@ def test_tool_set_is_closed():
 
 READONLY_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
-    "decisions", "explain_decision",
+    "decisions", "explain_decision", "news_sources",
 }
-# destructive 桶：动钱 4 件 + untrack_asset（删跟踪标的丢配置字段，client 该弹确认）
-MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "untrack_asset"}
+# destructive 桶：动钱 4 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
+MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "untrack_asset", "remove_news_source"}
 
 
 def test_tool_annotations():

@@ -66,6 +66,10 @@ def _pm():
 #   （decisions/history 已拒绝），放行也没有合法用途，只有被用来污染账本的风险。
 ADVISORY_ALLOWED_TOOLS = frozenset({
     "run_committee", "explain_decision", "live_prices", "ingest_event",
+    # 新闻源管理放行：只读写本实例自己 INVEST_HOME 的 rss_feeds.yml，不碰持仓/
+    # 账本；顾问部署本就要求独立 INVEST_HOME（见 docs/wiki/08），群聊加的源只
+    # 影响顾问实例自己的抓取。滥用护栏在 service 层（probe 校验 + MAX_EXTRA_FEEDS）。
+    "news_sources", "add_news_source", "remove_news_source",
 })
 
 
@@ -74,8 +78,7 @@ def _check_advisory():
     if is_advisory_mode():
         raise RuntimeError(
             "INVEST_ADVISORY_MODE=1: this tool is disabled in advisory mode. "
-            "Only run_committee, explain_decision, live_prices, and ingest_event "
-            "are available."
+            f"Only these tools are available: {', '.join(sorted(ADVISORY_ALLOWED_TOOLS))}."
         )
 
 
@@ -366,6 +369,55 @@ def ingest_event(
     return ingest_events([{"title": title, "url": url, "snippet": snippet,
                            "source": source, "published_at": published_at}],
                          ingested_by=ingested_by)
+
+
+# ---------- 新闻源管理（用户级额外源，INVEST_HOME/rss_feeds.yml） ----------
+
+@mcp.tool(annotations=_RO)
+def news_sources() -> Dict[str, Any]:
+    """List the news feed sources the crawler pulls from: the built-in default
+    feeds plus user-added extra feeds. Extra feeds can be added/removed with
+    add_news_source / remove_news_source; defaults are fixed.
+
+    Use when someone asks "what news sources do you follow" or before
+    adding/removing a source.
+    """
+    from openinvest.services.news_sources.rss_feed import (
+        MAX_EXTRA_FEEDS, load_default_feeds, load_extra_feeds)
+    return {"default": load_default_feeds(), "extra": load_extra_feeds(),
+            "max_extra": MAX_EXTRA_FEEDS}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+def add_news_source(
+    name: Annotated[str, Field(description="Short slug for the feed, [a-z0-9_] (e.g. 'wsj_markets').")],
+    url: Annotated[str, Field(description="RSS/Atom feed URL (a real feed, not a webpage).")],
+) -> Dict[str, Any]:
+    """Add an RSS/Atom feed to the crawler's source list. The URL is
+    live-probed before saving — a URL that doesn't parse as a feed is
+    rejected. Idempotent: re-adding an existing URL returns the existing
+    entry. Capped so the list can't grow unbounded.
+
+    Use when someone says "follow <site>'s news" / "加个新闻源".
+    """
+    from openinvest.services.news_sources.rss_feed import add_extra_feed
+    try:
+        return {"status": "ok", **add_extra_feed(name, url)}
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool(annotations=_MONEY)
+def remove_news_source(
+    key: Annotated[str, Field(description="Feed name or URL to remove (extra feeds only; defaults can't be removed).")],
+) -> Dict[str, Any]:
+    """Remove a user-added news feed by name or URL. Built-in default feeds
+    cannot be removed."""
+    from openinvest.services.news_sources.rss_feed import remove_extra_feed
+    removed = remove_extra_feed(key)
+    if removed:
+        return {"status": "ok", "removed": key}
+    return {"status": "error", "error": f"额外源里没有 {key!r}（默认源不可删，news_sources 可查清单）"}
 
 
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------

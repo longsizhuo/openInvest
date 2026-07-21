@@ -258,6 +258,14 @@ def main() -> None:
     p.set_defaults(func=cmd_ingest_event)
 
     p = sub.add_parser(
+        "news_sources",
+        help="新闻源清单：默认列出（默认+额外）；--add NAME URL 加源（live probe 校验）；--remove NAME_OR_URL 删额外源",
+    )
+    p.add_argument("--add", nargs=2, metavar=("NAME", "URL"))
+    p.add_argument("--remove", metavar="NAME_OR_URL")
+    p.set_defaults(func=cmd_news_sources)
+
+    p = sub.add_parser(
         "event_check",
         help="事件层（第一层）—— 拉多源新闻 / 归一化 / 入库 / 触发委员会 + 邮件。"
              "默认 dry-run（只入库，不发邮件不触委员会）。"

@@ -33,7 +33,7 @@ from openinvest.services.embeddings import DEFAULT_DIM
 from openinvest.services.event_normalizer import NormalizedEvent, normalize
 from openinvest.services.event_notifier import send_event_alert
 from openinvest.services.news_sources import fetch_all
-from openinvest.services.news_sources.rss_feed import load_default_feeds
+from openinvest.services.news_sources.rss_feed import load_feeds
 
 log = logging.getLogger(__name__)
 
@@ -212,7 +212,9 @@ def run(
     watched = list(set(ctx["holdings"]) | set(ctx["watching"]))
     log.info(f"[event_watch] watched={watched}, queries={len(ctx['queries'])}")
 
-    rss_feeds = custom_rss_feeds if custom_rss_feeds is not None else load_default_feeds()
+    # load_feeds = 包内默认 + 用户级额外源（INVEST_HOME/rss_feeds.yml，
+    # MCP add_news_source 管理）——加过的源自动进抓取，无需改配置
+    rss_feeds = custom_rss_feeds if custom_rss_feeds is not None else load_feeds()
 
     from openinvest.core.config import load_config
     cfg = load_config()

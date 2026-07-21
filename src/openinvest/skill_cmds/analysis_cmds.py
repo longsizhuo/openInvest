@@ -35,6 +35,7 @@ __all__ = [
     "cmd_discipline",
     "cmd_event_check",
     "cmd_ingest_event",
+    "cmd_news_sources",
     "cmd_decisions",
     "cmd_record_execution",
 ]
@@ -306,6 +307,29 @@ def cmd_ingest_event(args) -> None:
     _print_json(result)
     if result.get("status") == "error":
         sys.exit(1)
+
+
+def cmd_news_sources(args) -> None:
+    """新闻源清单管理（等价 MCP news_sources/add_news_source/remove_news_source）"""
+    from openinvest.services.news_sources.rss_feed import (
+        MAX_EXTRA_FEEDS, add_extra_feed, load_default_feeds, load_extra_feeds,
+        remove_extra_feed)
+    if getattr(args, "add", None):
+        try:
+            _print_json({"status": "ok", **add_extra_feed(args.add[0], args.add[1])})
+        except ValueError as e:
+            _print_json({"status": "error", "error": str(e)})
+            sys.exit(1)
+        return
+    if getattr(args, "remove", None):
+        if remove_extra_feed(args.remove):
+            _print_json({"status": "ok", "removed": args.remove})
+        else:
+            _print_json({"status": "error", "error": f"额外源里没有 {args.remove!r}"})
+            sys.exit(1)
+        return
+    _print_json({"default": load_default_feeds(), "extra": load_extra_feeds(),
+                 "max_extra": MAX_EXTRA_FEEDS})
 
 
 def cmd_event_check(args: argparse.Namespace) -> None:
