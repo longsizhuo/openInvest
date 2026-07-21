@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/longsizhuo/openInvest/compare/v0.32.1...v0.33.0) (2026-07-21)
+
+
+### Features
+
+* **mcp:** user-managed news sources (news_sources / add_news_source / remove_news_source) ([a4b4509](https://github.com/longsizhuo/openInvest/commit/a4b4509ed9057926825912677101c76eafca307c))
+
 ## [0.32.1](https://github.com/longsizhuo/openInvest/compare/v0.32.0...v0.32.1) (2026-07-21)
 
 
