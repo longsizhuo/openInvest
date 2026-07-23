@@ -26,7 +26,10 @@ HIT_WINDOWS = [1, 7, 30]
 # 记忆穿越 cutoff：决议日 ≤ 此日 = 落在 LLM 训练知识窗口内，"预测"实为记忆回放（非业绩）。
 # 单一可信源（机器强制，不靠记忆）——backtest_committee 落盘 `**Contaminated**` 标记 + 本文件
 # 分桶都 import 这个常量，绝不让两处各自硬编码 "2024-12-31" 漂移（见 CLAUDE.md 机器强制原则）。
-CONTAMINATION_CUTOFF = "2024-12-31"
+# 2026-07-22 上调:运行时模型实为 deepseek-v4-flash(billing+get_llm_config 双确认),
+# 实测自报训练截止 2025-05(2026 事件探针"不知道")→ 取自报月末,保守向后。
+# 旧值 2024-12-31 锚定 MiMo 自报(2026-06-25 实测)。换模型必须重验(ADR-022 更新节)。
+CONTAMINATION_CUTOFF = "2025-05-31"
 
 
 # verdict → 期望方向
