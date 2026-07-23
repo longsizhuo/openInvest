@@ -1,0 +1,63 @@
+# paper_fleet 标的池 —— 50 个横截面多样化 symbol（美股/ETF/债/商品/加密/港股/A股ETF/澳）
+# 口径：全部 yfinance 可取。入池标准 = 流动性 + 资产类别覆盖，与任何真实持仓无关
+# （其中个别 symbol 与 v2 trainset 的 10 标的重叠是刻意的——保持研究连续性）。
+symbols:
+  # 美股 megacap
+  - AAPL
+  - MSFT
+  - NVDA
+  - GOOGL
+  - AMZN
+  - META
+  - TSLA
+  - AVGO
+  # 美股指数 / 行业 ETF
+  - ^GSPC
+  - ^IXIC
+  - QQQ
+  - IWM
+  - DIA
+  - XLE
+  - XLF
+  - XLK
+  - SMH
+  - XLV
+  - XLP
+  - XLU
+  # 债 / 利率
+  - TLT
+  - IEF
+  - HYG
+  # 商品
+  - GC=F
+  - SI=F
+  - CL=F
+  - HG=F
+  - GLD
+  - GDX
+  # 加密
+  - BTC-USD
+  - ETH-USD
+  - SOL-USD
+  # 国际 ETF
+  - EEM
+  - EFA
+  - FXI
+  - EWJ
+  - INDA
+  - EWG
+  - EWU
+  # 港股
+  - 0700.HK
+  - 9988.HK
+  - 3690.HK
+  - 1810.HK
+  # A 股 ETF（yfinance .SS）
+  - 510300.SS
+  - 510500.SS
+  - 512480.SS
+  - 518880.SS
+  - 588000.SS
+  # 澳
+  - NDQ.AX
+  - VAS.AX
