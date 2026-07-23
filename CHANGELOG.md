@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/longsizhuo/openInvest/compare/v0.33.0...v0.33.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **review:** 污染 cutoff 上调 2025-05-31——实测运行时模型已是 deepseek-v4-flash ([5dbc4e0](https://github.com/longsizhuo/openInvest/commit/5dbc4e03c10c08f6e95d421e5d0ab125bc846548))
+
 ## [0.33.0](https://github.com/longsizhuo/openInvest/compare/v0.32.1...v0.33.0) (2026-07-21)
 
 
