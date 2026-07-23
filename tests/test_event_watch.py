@@ -57,7 +57,7 @@ def test_run_no_trigger_when_neutral_or_low(tmp_event_db, monkeypatch):
         RawNewsItem(src_name="r", title="t1", url="https://r.co/1", snippet="s"),
         RawNewsItem(src_name="r", title="t2", url="https://r.co/2", snippet="s"),
     ])
-    monkeypatch.setattr(event_watch, "load_default_feeds", lambda: [])
+    monkeypatch.setattr(event_watch, "load_feeds", lambda: [])
     monkeypatch.setattr(event_watch, "normalize", lambda items: [
         _ne(0, "low risk claim", "risk", "low", ["NDQ.AX"]),
         _ne(1, "neutral", "neutral", "high", ["NDQ.AX"]),
@@ -84,7 +84,7 @@ def test_run_triggers_when_affected_high_risk(tmp_event_db, monkeypatch):
     monkeypatch.setattr(event_watch, "fetch_all", lambda **kw: [
         RawNewsItem(src_name="r", title="t1", url="https://r.co/1", snippet="s"),
     ])
-    monkeypatch.setattr(event_watch, "load_default_feeds", lambda: [])
+    monkeypatch.setattr(event_watch, "load_feeds", lambda: [])
     monkeypatch.setattr(event_watch, "normalize", lambda items: [
         _ne(0, "Nvidia miss", "risk", "high", ["NDQ.AX"]),
     ])
@@ -111,7 +111,7 @@ def test_run_dry_run_skips_email_and_committee(tmp_event_db, monkeypatch):
     monkeypatch.setattr(event_watch, "fetch_all", lambda **kw: [
         RawNewsItem(src_name="r", title="t", url="https://r.co/1", snippet="s"),
     ])
-    monkeypatch.setattr(event_watch, "load_default_feeds", lambda: [])
+    monkeypatch.setattr(event_watch, "load_feeds", lambda: [])
     monkeypatch.setattr(event_watch, "normalize", lambda items: [
         _ne(0, "Nvidia miss", "risk", "high", ["NDQ.AX"]),
     ])
@@ -131,7 +131,7 @@ def test_run_skips_duplicated_urls(tmp_event_db, monkeypatch):
     """第二次 run 同样的 url 不会再进 normalizer / store"""
     ctx = {"holdings": ["NDQ.AX"], "watching": [], "macro_tags": [], "queries": ["x"]}
     monkeypatch.setattr(event_watch, "_load_user_context", lambda: ctx)
-    monkeypatch.setattr(event_watch, "load_default_feeds", lambda: [])
+    monkeypatch.setattr(event_watch, "load_feeds", lambda: [])
     monkeypatch.setattr(event_watch, "_holdings_snapshot", lambda syms: {})
 
     items = [RawNewsItem(src_name="r", title="t", url="https://r.co/0", snippet="s")]
