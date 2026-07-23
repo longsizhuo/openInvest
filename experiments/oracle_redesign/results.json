@@ -1,0 +1,669 @@
+{
+  "n_decision_points": 6736,
+  "n_samples": 33680,
+  "symbols": [
+    "NDQ.AX",
+    "GC=F",
+    "^GSPC",
+    "QQQ",
+    "AAPL",
+    "TSLA",
+    "BTC-USD",
+    "TLT",
+    "IWM",
+    "EEM"
+  ],
+  "start": "2016-01-01",
+  "configs": [
+    {
+      "oracle": "path_c",
+      "params": {},
+      "dist": {
+        "BUY": 48.12,
+        "ACCUMULATE": 0.0,
+        "HOLD": 20.04,
+        "TRIM": 0.0,
+        "SELL": 31.84
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_d",
+      "params": {
+        "lambda": 0.3,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 40.3,
+        "ACCUMULATE": 0.0,
+        "HOLD": 21.13,
+        "TRIM": 0.0,
+        "SELL": 38.57
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_d",
+      "params": {
+        "lambda": 0.3,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 39.29,
+        "ACCUMULATE": 0.0,
+        "HOLD": 23.24,
+        "TRIM": 0.0,
+        "SELL": 37.47
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_d",
+      "params": {
+        "lambda": 0.6,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 34.48,
+        "ACCUMULATE": 0.0,
+        "HOLD": 20.91,
+        "TRIM": 0.0,
+        "SELL": 44.61
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_d",
+      "params": {
+        "lambda": 0.6,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 33.6,
+        "ACCUMULATE": 0.0,
+        "HOLD": 22.77,
+        "TRIM": 0.0,
+        "SELL": 43.63
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_d",
+      "params": {
+        "lambda": 1.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 28.63,
+        "ACCUMULATE": 0.0,
+        "HOLD": 20.87,
+        "TRIM": 0.0,
+        "SELL": 50.5
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_d",
+      "params": {
+        "lambda": 1.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 27.66,
+        "ACCUMULATE": 0.0,
+        "HOLD": 22.68,
+        "TRIM": 0.0,
+        "SELL": 49.66
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 2.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 43.01,
+        "ACCUMULATE": 1.8,
+        "HOLD": 20.78,
+        "TRIM": 0.55,
+        "SELL": 33.85
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 2.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 41.69,
+        "ACCUMULATE": 1.85,
+        "HOLD": 23.2,
+        "TRIM": 0.5,
+        "SELL": 32.75
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 5.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 36.78,
+        "ACCUMULATE": 3.72,
+        "HOLD": 20.53,
+        "TRIM": 1.11,
+        "SELL": 37.85
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 5.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 35.65,
+        "ACCUMULATE": 3.74,
+        "HOLD": 22.8,
+        "TRIM": 1.18,
+        "SELL": 36.63
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 10.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 28.05,
+        "ACCUMULATE": 6.52,
+        "HOLD": 20.0,
+        "TRIM": 1.89,
+        "SELL": 43.54
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 10.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 26.97,
+        "ACCUMULATE": 6.45,
+        "HOLD": 22.25,
+        "TRIM": 2.0,
+        "SELL": 42.34
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 20.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 16.95,
+        "ACCUMULATE": 8.44,
+        "HOLD": 19.67,
+        "TRIM": 2.6,
+        "SELL": 52.34
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r",
+      "params": {
+        "gamma": 20.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 16.02,
+        "ACCUMULATE": 8.43,
+        "HOLD": 21.68,
+        "TRIM": 2.63,
+        "SELL": 51.24
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 2.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 43.01,
+        "ACCUMULATE": 1.8,
+        "HOLD": 21.17,
+        "TRIM": 1.6,
+        "SELL": 32.42
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 2.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 41.69,
+        "ACCUMULATE": 1.85,
+        "HOLD": 23.56,
+        "TRIM": 1.73,
+        "SELL": 31.17
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 5.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 36.78,
+        "ACCUMULATE": 3.72,
+        "HOLD": 21.26,
+        "TRIM": 4.12,
+        "SELL": 34.11
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 5.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 35.65,
+        "ACCUMULATE": 3.74,
+        "HOLD": 23.6,
+        "TRIM": 4.03,
+        "SELL": 32.99
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 10.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 28.05,
+        "ACCUMULATE": 6.52,
+        "HOLD": 21.24,
+        "TRIM": 7.16,
+        "SELL": 37.03
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 10.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 26.97,
+        "ACCUMULATE": 6.45,
+        "HOLD": 23.59,
+        "TRIM": 7.15,
+        "SELL": 35.85
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 20.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 16.95,
+        "ACCUMULATE": 8.44,
+        "HOLD": 21.33,
+        "TRIM": 11.12,
+        "SELL": 42.16
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_r2(ladder_v2)",
+      "params": {
+        "gamma": 20.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 16.02,
+        "ACCUMULATE": 8.43,
+        "HOLD": 23.38,
+        "TRIM": 11.18,
+        "SELL": 40.99
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 2.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 42.11,
+        "ACCUMULATE": 3.51,
+        "HOLD": 19.83,
+        "TRIM": 3.2,
+        "SELL": 31.34
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 2.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 40.94,
+        "ACCUMULATE": 3.52,
+        "HOLD": 22.12,
+        "TRIM": 3.54,
+        "SELL": 29.88
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 5.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 34.94,
+        "ACCUMULATE": 7.64,
+        "HOLD": 18.09,
+        "TRIM": 7.98,
+        "SELL": 31.34
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 5.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 33.95,
+        "ACCUMULATE": 7.52,
+        "HOLD": 20.32,
+        "TRIM": 8.33,
+        "SELL": 29.88
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 10.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 25.59,
+        "ACCUMULATE": 12.68,
+        "HOLD": 15.7,
+        "TRIM": 14.69,
+        "SELL": 31.34
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 10.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 24.28,
+        "ACCUMULATE": 12.92,
+        "HOLD": 17.81,
+        "TRIM": 15.11,
+        "SELL": 29.88
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 20.0,
+        "cost": 0.001
+      },
+      "dist": {
+        "BUY": 13.93,
+        "ACCUMULATE": 17.83,
+        "HOLD": 12.54,
+        "TRIM": 24.36,
+        "SELL": 31.34
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_v3(computed-alloc)",
+      "params": {
+        "gamma": 20.0,
+        "cost": 0.003
+      },
+      "dist": {
+        "BUY": 13.15,
+        "ACCUMULATE": 17.53,
+        "HOLD": 14.57,
+        "TRIM": 24.87,
+        "SELL": 29.88
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_k(ladder_v1)",
+      "params": {
+        "gamma": 2.0
+      },
+      "dist": {
+        "BUY": 43.69,
+        "ACCUMULATE": 1.75,
+        "HOLD": 19.65,
+        "TRIM": 0.49,
+        "SELL": 34.43
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_k(ladder_v2)",
+      "params": {
+        "gamma": 2.0
+      },
+      "dist": {
+        "BUY": 43.69,
+        "ACCUMULATE": 1.75,
+        "HOLD": 19.97,
+        "TRIM": 1.63,
+        "SELL": 32.97
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_k(ladder_v1)",
+      "params": {
+        "gamma": 5.0
+      },
+      "dist": {
+        "BUY": 37.34,
+        "ACCUMULATE": 3.82,
+        "HOLD": 19.21,
+        "TRIM": 1.25,
+        "SELL": 38.38
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_k(ladder_v2)",
+      "params": {
+        "gamma": 5.0
+      },
+      "dist": {
+        "BUY": 37.34,
+        "ACCUMULATE": 3.82,
+        "HOLD": 20.01,
+        "TRIM": 4.15,
+        "SELL": 34.68
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_k(ladder_v1)",
+      "params": {
+        "gamma": 10.0
+      },
+      "dist": {
+        "BUY": 28.69,
+        "ACCUMULATE": 6.43,
+        "HOLD": 18.81,
+        "TRIM": 2.02,
+        "SELL": 44.05
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_k(ladder_v2)",
+      "params": {
+        "gamma": 10.0
+      },
+      "dist": {
+        "BUY": 28.69,
+        "ACCUMULATE": 6.43,
+        "HOLD": 20.13,
+        "TRIM": 7.09,
+        "SELL": 37.67
+      },
+      "all_alive": true
+    },
+    {
+      "oracle": "path_k(ladder_v1)",
+      "params": {
+        "gamma": 20.0
+      },
+      "dist": {
+        "BUY": 17.44,
+        "ACCUMULATE": 8.52,
+        "HOLD": 18.62,
+        "TRIM": 2.61,
+        "SELL": 52.81
+      },
+      "all_alive": false
+    },
+    {
+      "oracle": "path_k(ladder_v2)",
+      "params": {
+        "gamma": 20.0
+      },
+      "dist": {
+        "BUY": 17.44,
+        "ACCUMULATE": 8.52,
+        "HOLD": 20.26,
+        "TRIM": 11.0,
+        "SELL": 42.77
+      },
+      "all_alive": true
+    }
+  ],
+  "recommended": {
+    "oracle": "path_v3(computed-alloc)",
+    "params": {
+      "gamma": 10.0,
+      "cost": 0.003
+    },
+    "dist": {
+      "BUY": 24.28,
+      "ACCUMULATE": 12.92,
+      "HOLD": 17.81,
+      "TRIM": 15.11,
+      "SELL": 29.88
+    },
+    "all_alive": true,
+    "entropy": 1.5619,
+    "vol_slices": {
+      "low_vol": {
+        "BUY": 34.8,
+        "ACCUMULATE": 7.46,
+        "HOLD": 22.36,
+        "TRIM": 7.42,
+        "SELL": 27.96
+      },
+      "mid_vol": {
+        "BUY": 27.01,
+        "ACCUMULATE": 12.45,
+        "HOLD": 18.68,
+        "TRIM": 12.53,
+        "SELL": 29.33
+      },
+      "high_vol": {
+        "BUY": 11.01,
+        "ACCUMULATE": 18.86,
+        "HOLD": 12.39,
+        "TRIM": 25.38,
+        "SELL": 32.36
+      }
+    },
+    "state_slices": {
+      "0.0": {
+        "BUY": 30.34,
+        "ACCUMULATE": 27.88,
+        "HOLD": 41.78,
+        "TRIM": 0.0,
+        "SELL": 0.0
+      },
+      "0.25": {
+        "BUY": 30.34,
+        "ACCUMULATE": 19.2,
+        "HOLD": 4.42,
+        "TRIM": 8.68,
+        "SELL": 37.35
+      },
+      "0.5": {
+        "BUY": 30.34,
+        "ACCUMULATE": 12.1,
+        "HOLD": 4.07,
+        "TRIM": 16.14,
+        "SELL": 37.35
+      },
+      "0.75": {
+        "BUY": 30.34,
+        "ACCUMULATE": 5.45,
+        "HOLD": 4.47,
+        "TRIM": 22.39,
+        "SELL": 37.35
+      },
+      "1.0": {
+        "BUY": 0.0,
+        "ACCUMULATE": 0.0,
+        "HOLD": 34.32,
+        "TRIM": 28.33,
+        "SELL": 37.35
+      }
+    }
+  }
+}

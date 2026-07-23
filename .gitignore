@@ -53,3 +53,6 @@ experiments/reference/
 .grimp_cache/
 dist/
 docs/outperform_events.jsonl
+
+# oracle_redesign 的 yfinance 日线缓存（可重建）
+experiments/oracle_redesign/cache/
