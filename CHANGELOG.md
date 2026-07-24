@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/longsizhuo/openInvest/compare/v0.33.1...v0.34.0) (2026-07-24)
+
+
+### Features
+
+* **backtest:** --prospective 前瞻纸面模式——方案二每日舰队入口 ([4a690e8](https://github.com/longsizhuo/openInvest/commit/4a690e86334f46ecf9e91ac65f026f386da9221d))
+
 ## [0.33.1](https://github.com/longsizhuo/openInvest/compare/v0.33.0...v0.33.1) (2026-07-23)
 
 
