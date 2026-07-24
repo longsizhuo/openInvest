@@ -1,0 +1,27 @@
+{
+  "signature": "v51(path_v4 决策纪律注入)",
+  "avg_score": 0.265,
+  "per_verdict": {
+    "BUY": {
+      "n": 60,
+      "acc": 0.05
+    },
+    "HOLD": {
+      "n": 60,
+      "acc": 0.6167
+    },
+    "ACCUMULATE": {
+      "n": 60,
+      "acc": 0.15
+    },
+    "TRIM": {
+      "n": 60,
+      "acc": 0.3083
+    },
+    "SELL": {
+      "n": 60,
+      "acc": 0.2
+    }
+  },
+  "baseline_ref": "dspy_optimized_v5.summary.json(0.4117)"
+}

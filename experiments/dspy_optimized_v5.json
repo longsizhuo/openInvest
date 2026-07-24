@@ -1,0 +1,44 @@
+{
+  "predict.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "根据宏观环境 + 市场技术面 + 用户持仓状态，给出投资建议。\n\nverdict 必须从以下 5 选 1：\n  - BUY: 一次建满仓（强 bullish + 低估 + 低仓位）\n  - ACCUMULATE: 分批建仓 / 加仓（趋势好 + 有空间）\n  - HOLD: 维持现状（仓位与机会匹配，等待更好信号）\n  - TRIM: 部分减仓（超配 + 风险升温）\n  - SELL: 全部清仓（极端 risk_off + 重仓）\n\nalloc_pct_of_dry_powder: -1.0 ~ +1.0\n  - 正数 = 加仓占子弹百分比（如 0.1 = 10% 子弹）\n  - 负数 = 减仓占持仓百分比（如 -0.15 = 减 15% 持仓）\n  - 0 = HOLD",
+      "fields": [
+        {
+          "prefix": "Macro Context:",
+          "description": "VIX/TNX/DXY/USDCNY 4 个宏观指标"
+        },
+        {
+          "prefix": "Market Context:",
+          "description": "REGIME/RSI/MA/分位/动量"
+        },
+        {
+          "prefix": "Portfolio State:",
+          "description": "cash% + asset% + concentration% + PnL% + solvency_buffer level"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "一句话理由，含 verdict 与 portfolio_state 的关系"
+        },
+        {
+          "prefix": "Verdict:",
+          "description": "BUY | ACCUMULATE | HOLD | TRIM | SELL"
+        },
+        {
+          "prefix": "Alloc Pct Of Dry Powder:",
+          "description": "-1.0 ~ +1.0"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.14",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

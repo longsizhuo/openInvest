@@ -1,0 +1,30 @@
+{
+  "signature": "v52(σ30 显式输入,中性措辞)",
+  "avg_score": 0.33,
+  "per_verdict": {
+    "ACCUMULATE": {
+      "n": 60,
+      "acc": 0.1667
+    },
+    "BUY": {
+      "n": 60,
+      "acc": 0.075
+    },
+    "HOLD": {
+      "n": 60,
+      "acc": 0.2
+    },
+    "SELL": {
+      "n": 60,
+      "acc": 0.2833
+    },
+    "TRIM": {
+      "n": 60,
+      "acc": 0.925
+    }
+  },
+  "refs": {
+    "bare_v5_baseline": 0.4117,
+    "v51_discipline": 0.265
+  }
+}
