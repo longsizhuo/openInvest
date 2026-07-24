@@ -37,6 +37,7 @@ __all__ = [
     "cmd_ingest_event",
     "cmd_news_sources",
     "cmd_decisions",
+    "cmd_explain_decision",
     "cmd_record_execution",
 ]
 
@@ -274,6 +275,16 @@ def cmd_decisions(args: argparse.Namespace) -> None:
     from openinvest.core.decision_ledger import list_decisions, summarize_decisions
     ds = list_decisions(days=args.days)
     _print_json({"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds})
+
+
+def cmd_explain_decision(args: argparse.Namespace) -> None:
+    """单条决议完整回放：辩论全文 + CIO memo + path snapshot。
+    等价 MCP explain_decision。"""
+    from openinvest.core.decision_ledger import explain_decision
+    out = explain_decision(args.decision_id)
+    _print_json(out)
+    if out.get("status") == "error":
+        sys.exit(1)
 
 
 def cmd_record_execution(args: argparse.Namespace) -> None:

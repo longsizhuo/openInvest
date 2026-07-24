@@ -59,9 +59,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/openinvest"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# install_skills 子命令的数据源：三个 skill 随 wheel 分发（`uvx openinvest install-skills`
+# 一条命令替代"手动拷 plugin/skills/*"——无 plugin 机制的平台的安装入口）
+"plugin/skills" = "openinvest/_bundled_skills"
+
 [tool.hatch.build.targets.sdist]
 # 只打包源码 + 元数据——默认会把整仓（docs/static/experiments，20MB）都塞进 sdist
-only-include = ["src/openinvest", "PYPI_README.md", "LICENSE", "pyproject.toml"]
+# plugin/skills 必须在列：从 sdist 构建 wheel 时 force-include 的源路径要存在
+only-include = ["src/openinvest", "plugin/skills", "PYPI_README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
 dev = [

@@ -97,6 +97,11 @@ def main() -> None:
     p.add_argument("--days", type=int, default=90, help="回看天数，默认 90")
     p.set_defaults(func=cmd_decisions)
 
+    p = sub.add_parser("explain_decision",
+        help="单条决议完整回放：辩论全文+CIO memo+path snapshot（等价 MCP explain_decision）")
+    p.add_argument("decision_id", help='形如 "2026-07-03/GC=F"（decisions 输出里的 decision_id）')
+    p.set_defaults(func=cmd_explain_decision)
+
     p = sub.add_parser("record_execution",
         help="记录你对某条决议的执行/拒绝 + 原因（等价 POST /api/decisions/execution）")
     p.add_argument("decision_id", help='形如 "2026-07-03/GC=F"（decisions 输出里的 decision_id）')
@@ -112,6 +117,15 @@ def main() -> None:
     p.add_argument("--force", action="store_true",
                    help="user_profile.json 已存在时也覆盖")
     p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("install_skills", aliases=["install-skills"],
+        help="把随包分发的 skills（invest / invest-setup / invest-backup）拷进宿主平台"
+             " skills 目录（替换式幂等）。无 plugin 机制的平台一条命令装齐")
+    p.add_argument("--dest", default="~/.claude/skills",
+                   help="目标 skills 目录，默认 ~/.claude/skills；OpenClaw 传 workspace 的"
+                        " skills/。git clone 老用户不需要本命令（仓库 skills/ 已就位，"
+                        "拷进 clone 会弄脏 working tree）")
+    p.set_defaults(func=cmd_install_skills)
 
     p = sub.add_parser("history")
     p.add_argument("-n", type=int, default=10)
