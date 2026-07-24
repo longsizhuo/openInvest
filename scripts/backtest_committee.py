@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -268,7 +269,9 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 return symbol, {"error": str(e)[:200]}
 
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=min(len(pending), 4) or 1) as ex:
+        # BACKTEST_WORKERS 可调（默认 4 保守值）。工具全走本地 MarketStore 缓存不碰
+        # yfinance，上限只受 DeepSeek 并发（2500）与本机线程约束——大规模回填可放开
+        with ThreadPoolExecutor(max_workers=min(len(pending), int(os.environ.get("BACKTEST_WORKERS", "4"))) or 1) as ex:
             for symbol, vd in ex.map(_run_symbol, pending):
                 if vd is not None:
                     results["verdicts"][symbol] = vd
@@ -295,10 +298,30 @@ def main():
         help="干净验证模式：只跑模型训练截止【之后】且留够远期窗口能测实际收益的日期"
              "（MiMo 没见过 → 无记忆穿越 → 这才是唯一可信的预测/业绩验证）。",
     )
+    parser.add_argument(
+        "--prospective", action="store_true",
+        help="前瞻纸面模式（每日舰队，ADR-022 更新节）：只跑【今天】。决策时未来尚不"
+             "存在 ⇒ 对任何未来模型都无记忆穿越——唯一不受模型升级影响的干净样本源。"
+             "verdict_review 会在 30/90d 后用真实后市回填评分。与 --start/--end/--days"
+             "/--holdout 互斥。",
+    )
     args = parser.parse_args()
 
     # 解析时间范围
     today = datetime.now().date()
+    if args.prospective:
+        if args.holdout or args.allow_lookahead or args.days or args.start or args.end:
+            raise SystemExit("❌ --prospective 与 --holdout/--allow-lookahead/--days/--start/--end 互斥")
+        if today.weekday() >= 5:
+            print("⏭ 周末休市，前瞻舰队今日无事")
+            return
+        d = today.strftime("%Y-%m-%d")
+        print(f"🛰 PROSPECTIVE 前瞻纸面：{d}（未来尚不存在，任何模型无记忆可穿越）")
+        asset_symbols = [s.strip() for s in args.assets.split(",") if s.strip()]
+        print(f"🔬 {len(asset_symbols)} 资产 × 1 日 = {len(asset_symbols)} 次 committee")
+        run_one_day(d, asset_symbols)
+        print(f"\n✅ 前瞻纸面完成，已写入 memory/.backtest/{d}/")
+        return
     if args.days:
         end = today - timedelta(days=1)
         start = end - timedelta(days=args.days - 1)
