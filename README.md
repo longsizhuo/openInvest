@@ -4,6 +4,8 @@
 
 # openInvest
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.longsizhuo%2Fopeninvest.svg)](https://mcptoplist.com/server/io.github.longsizhuo%2Fopeninvest)
+
 **A self-hosted investment decision engine built for modern AI agents. Multi-agent information isolation and cross-challenge protocol, providing an auditable decision trail (Audit Trail).**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
