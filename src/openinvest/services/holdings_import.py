@@ -26,6 +26,8 @@ _HOLDINGS_PARSE_SYSTEM_PROMPT = """你是金融数据解析助手。把用户的
       "units": <number>,
       "unit_label": "<股|份|克|个|盎司>",
       "avg_cost": <number>,
+      "market_value": <number, optional>,
+      "pnl": <number, optional>,
       "cost_currency": "<currency_code>",
       "channel": "<券商/银行渠道，没说就 '未指定'>",
       "display_name": "<易读名>"
@@ -41,6 +43,9 @@ Symbol 映射规则：
 - 澳股: ticker + .AX (NDQ.AX)
 - 加密: 大写 + -USD (BTC-USD, ETH-USD)
 - 黄金/纸黄金/积存金: GC=F (浙商/工行/招行积存金都映射到 GC=F，渠道写银行名)
+- 中国场外公募基金: FUND:<六位基金代码>（例如 162201 → FUND:162201），kind=fund；
+  绝对不要追加 .SS/.SZ。用户只给“持有金额/持仓收益”而没给份额和成本时，
+  原样输出 market_value 和 pnl，units/avg_cost 先填 0，后端会按最新单位净值换算。
 - 货币基金/余额宝/朝朝宝/银行理财: 不放 holdings，并入 cash
 
 币种规则：
@@ -97,7 +102,7 @@ def _parse_holdings_with_llm(
     # 兜底归一化：保证两个顶层 key 都在
     parsed.setdefault("cash", {})
     parsed.setdefault("holdings", [])
-    return parsed
+    return enrich_fund_holdings(parsed)
 
 
 def parse_holdings(content: str) -> Dict[str, Any]:
@@ -116,21 +121,85 @@ _KIND_MAP = {"stock": "equity"}  # parser 出 "stock"，HoldingV2 schema 要 "eq
 _VALID_KINDS = {"equity", "etf", "metal", "crypto", "bond", "fund", "other"}
 
 
+def _first_number(h: Dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = h.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def enrich_fund_holdings(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """规范化场外基金 symbol，并由“持有金额 + P&L + 最新净值”反推份额/均价。
+
+    只改变 ``kind=fund`` 的条目。净值源失败时保留 0 份，调用方预览可以明确看到
+    未能转换，绝不编造份额。
+    """
+    from openinvest.utils.eastmoney_fund import (
+        canonical_fund_symbol,
+        fetch_fund_nav,
+    )
+
+    out = dict(parsed)
+    enriched: List[Dict[str, Any]] = []
+    for raw in parsed.get("holdings") or []:
+        h = dict(raw)
+        kind = _KIND_MAP.get(str(h.get("kind") or "").lower(), str(h.get("kind") or "").lower())
+        if kind != "fund":
+            enriched.append(h)
+            continue
+
+        h["symbol"] = canonical_fund_symbol(str(h.get("symbol") or ""))
+        h["proxy_kind"] = "eastmoney_fund"
+        h["cost_currency"] = "CNY"
+        h["unit_label"] = str(h.get("unit_label") or "份")
+
+        units = _first_number(h, "units")
+        avg_cost = _first_number(h, "avg_cost")
+        market_value = _first_number(
+            h, "market_value", "current_value", "holding_amount", "market_value_cny",
+        )
+        pnl = _first_number(h, "pnl", "pnl_cny", "holding_pnl")
+        if units <= 0 and market_value > 0:
+            snap = fetch_fund_nav(h["symbol"])
+            if snap is not None and snap.nav > 0:
+                units = market_value / snap.nav
+                cost_basis = market_value - pnl
+                avg_cost = cost_basis / units if cost_basis > 0 else 0.0
+                h["units"] = round(units, 6)
+                h["avg_cost"] = round(avg_cost, 6)
+                h["nav_at_import"] = snap.nav
+                h["nav_date_at_import"] = snap.nav_date
+                h["market_value_at_import"] = round(market_value, 2)
+                h["pnl_at_import"] = round(pnl, 2)
+        enriched.append(h)
+    out["holdings"] = enriched
+    return out
+
+
 def _normalize_holding(h: Dict[str, Any]) -> Dict[str, Any]:
     """parser 输出 → portfolio 存储 shape（对齐 HoldingCreateRequest 字段 + kind 映射）。"""
     sym = str(h.get("symbol") or "").strip()
     kind = _KIND_MAP.get(str(h.get("kind") or "").lower(), str(h.get("kind") or "").lower())
     if kind not in _VALID_KINDS:
         kind = "other"
+    if kind == "fund":
+        from openinvest.utils.eastmoney_fund import canonical_fund_symbol
+        sym = canonical_fund_symbol(sym)
     return {
         "symbol": sym,
         "kind": kind,
         "units": float(h.get("units") or 0),
-        "unit_label": str(h.get("unit_label") or "股"),
+        "unit_label": str(h.get("unit_label") or ("份" if kind == "fund" else "股")),
         "avg_cost": float(h.get("avg_cost") or 0),
         "cost_currency": str(h.get("cost_currency") or "CNY").upper(),
         "channel": str(h.get("channel") or "未指定"),
         "display_name": str(h.get("display_name") or sym),
+        "proxy_kind": str(h.get("proxy_kind") or ("eastmoney_fund" if kind == "fund" else "direct")),
     }
 
 

@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,6 +36,7 @@ def build_status_view() -> Dict[str, Any]:
     from openinvest.utils.gold_price import get_gold_snapshot
     from openinvest.core.portfolio_manager import PortfolioManager
     from openinvest.utils.fx import total_portfolio_value_cny
+    from openinvest.utils.quotes import get_quote
     pm = PortfolioManager()
 
     cash_cny = pm.cash_amount("CNY")
@@ -54,6 +56,7 @@ def build_status_view() -> Dict[str, Any]:
     # gold*price，fork 用户的 AAPL/0700.HK/BTC-USD 全漏算。改走 utils.fx.total_portfolio_value_cny
     # 通用化遍历所有 holdings + 多币种 cash 折算到 CNY。
     current_prices: Dict[str, float] = {}
+    quote_meta: Dict[str, Dict[str, Any]] = {}
     for h in pm.holdings:
         sym = str(h.get("symbol") or "")
         if not sym or h.get("is_tracking_only"):
@@ -63,8 +66,46 @@ def build_status_view() -> Dict[str, Any]:
         elif sym == "GC=F":
             current_prices[sym] = gold_now
         else:
-            current_prices[sym] = _safe_close(sym)
+            quote = get_quote(h)
+            if quote is not None and math.isfinite(quote.price) and quote.price > 0:
+                current_prices[sym] = quote.price
+                quote_meta[sym] = {
+                    "last_updated": quote.last_updated,
+                    "is_stale": quote.is_stale,
+                    "source": (quote.extra or {}).get("source", "yfinance"),
+                    "extra": quote.extra or {},
+                }
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
+
+    holding_views: List[Dict[str, Any]] = []
+    for h in pm.holdings:
+        view = {k: h[k] for k in (
+            "symbol", "kind", "units", "unit_label", "avg_cost",
+            "cost_currency", "channel", "display_name", "is_tracking_only",
+            "proxy_kind",
+        ) if k in h}
+        sym = str(h.get("symbol") or "")
+        units = float(h.get("units", 0) or 0)
+        avg_cost = float(h.get("avg_cost", 0) or 0)
+        price = current_prices.get(sym)
+        if price is not None and math.isfinite(price) and price > 0:
+            market_value = price * units
+            pnl = (price - avg_cost) * units if avg_cost > 0 else None
+            view.update({
+                "current_price": round(price, 6),
+                "market_value": round(market_value, 2),
+                "pnl": round(pnl, 2) if pnl is not None else None,
+                "pnl_pct": round((price / avg_cost - 1) * 100, 2) if avg_cost > 0 else None,
+                **quote_meta.get(sym, {}),
+            })
+        else:
+            view.update({
+                "current_price": None,
+                "market_value": None,
+                "pnl": None,
+                "pnl_pct": None,
+            })
+        holding_views.append(view)
 
     return {
         "user": {
@@ -92,13 +133,7 @@ def build_status_view() -> Dict[str, Any]:
             "pnl_pct": round(((gold_now / gold_avg) - 1) * 100, 2) if gold_avg > 0 else 0,
         },
         # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
-        "all_holdings": [
-            {k: h[k] for k in (
-                "symbol", "kind", "units", "unit_label", "avg_cost",
-                "cost_currency", "channel", "display_name", "is_tracking_only",
-            ) if k in h}
-            for h in pm.holdings
-        ],
+        "all_holdings": holding_views,
         "total_assets_cny": total_cny,
         "fx": {"audcny": round(audcny, 4)},
         "live_prices": {

@@ -4,7 +4,13 @@ from contextlib import contextmanager
 
 import pytest
 
-from openinvest.services.holdings_import import _normalize_holding, commit_parsed, parse_holdings
+from openinvest.services.holdings_import import (
+    _normalize_holding,
+    commit_parsed,
+    enrich_fund_holdings,
+    parse_holdings,
+)
+from openinvest.utils.eastmoney_fund import FundNavSnapshot
 
 
 class FakePM:
@@ -33,6 +39,52 @@ def test_normalize_kind_and_defaults():
     assert h["unit_label"] == "股" and h["cost_currency"] == "CNY" and h["channel"] == "未指定"
     assert h["display_name"] == "AAPL"
     assert _normalize_holding({"symbol": "X", "kind": "weird"})["kind"] == "other"
+
+
+def test_portfolio_schema_migrates_legacy_stock_kind():
+    from openinvest.core.schemas import validate_portfolio
+
+    out = validate_portfolio({
+        "schema_version": 2,
+        "cash": {},
+        "holdings": [{
+            "symbol": "601138.SS",
+            "kind": "stock",
+            "units": 100,
+            "avg_cost": 69.18,
+            "cost_currency": "CNY",
+        }],
+    })
+
+    assert out["holdings"][0]["kind"] == "equity"
+
+
+def test_fund_enrichment_derives_units_and_avg_cost(monkeypatch):
+    monkeypatch.setattr(
+        "openinvest.utils.eastmoney_fund.fetch_fund_nav",
+        lambda symbol: FundNavSnapshot(
+            code="162201", name="宏利成长混合", nav=6.6305,
+            nav_date="2026-08-10", is_stale=False,
+        ),
+    )
+    parsed = enrich_fund_holdings({
+        "cash": {},
+        "holdings": [{
+            "symbol": "162201.SZ", "kind": "fund", "units": 0, "avg_cost": 0,
+            "market_value": 9263.74, "pnl": -1329.68,
+            "display_name": "宏利成长混合",
+        }],
+    })
+    h = parsed["holdings"][0]
+    assert h["symbol"] == "FUND:162201"
+    assert h["proxy_kind"] == "eastmoney_fund"
+    assert h["units"] == pytest.approx(9263.74 / 6.6305, rel=1e-6)
+    assert h["avg_cost"] == pytest.approx((9263.74 + 1329.68) / h["units"], rel=1e-6)
+
+    normalized = _normalize_holding(h)
+    assert normalized["symbol"] == "FUND:162201"
+    assert normalized["proxy_kind"] == "eastmoney_fund"
+    assert normalized["kind"] == "fund"
 
 
 def test_commit_non_destructive():

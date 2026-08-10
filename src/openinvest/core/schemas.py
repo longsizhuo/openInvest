@@ -77,7 +77,7 @@ HoldingKind = Literal["equity", "etf", "metal", "crypto", "bond", "fund", "other
 # - direct: 直接用 symbol 拉 yfinance（绝大多数 yfinance 支持的资产）
 # - gold_cny_per_gram: GC=F + USDCNY=X 反推克价（浙商积存金这类 CNY 计价但 yfinance 没有的）
 # - fx_pair: 货币对（如果有需要）
-ProxyKind = Literal["direct", "gold_cny_per_gram", "fx_pair"]
+ProxyKind = Literal["direct", "gold_cny_per_gram", "fx_pair", "eastmoney_fund"]
 
 
 class Holding(BaseModel):
@@ -122,6 +122,14 @@ class Holding(BaseModel):
     @classmethod
     def _strip_symbol(cls, v: Any) -> str:
         return str(v).strip() if v is not None else v
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _normalize_legacy_kind(cls, v: Any) -> Any:
+        """Accept legacy/importer ``stock`` values and persist them as ``equity``."""
+        if isinstance(v, str) and v.strip().lower() == "stock":
+            return "equity"
+        return v
 
     @field_validator("cost_currency", mode="before")
     @classmethod
