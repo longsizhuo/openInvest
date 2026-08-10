@@ -109,6 +109,7 @@ jobs:
           uv run python -c "from openinvest.jobs.dca_daily import run, _holding_for_quote"
           uv run python -c "from openinvest.core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from openinvest.utils.fx import get_fx_rate, cash_total_in_base"
+          uv run python -c "from openinvest.utils.eastmoney_fund import fetch_fund_nav, canonical_fund_symbol"
           uv run python -c "from openinvest.utils.advisory import is_advisory_mode"
           uv run python -c "from openinvest.utils.market_metrics import TRADING_DAYS_2Y, _calc_price_quantile"
           uv run python -c "from openinvest.connectors.web_api import app"

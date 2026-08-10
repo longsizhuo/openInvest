@@ -185,7 +185,7 @@ class HoldingCreateRequest(BaseModel):
     channel: Optional[str] = Field(None, max_length=64)
     display_name: Optional[str] = Field(None, max_length=128)
     yfinance_proxy: Optional[str] = Field(None, max_length=32)
-    proxy_kind: Literal["direct", "gold_cny_per_gram", "fx_pair"] = "direct"
+    proxy_kind: Literal["direct", "gold_cny_per_gram", "fx_pair", "eastmoney_fund"] = "direct"
     is_tracking_only: bool = False
 
 
@@ -199,7 +199,7 @@ class HoldingPatchRequest(BaseModel):
     channel: Optional[str] = None
     display_name: Optional[str] = None
     yfinance_proxy: Optional[str] = None
-    proxy_kind: Optional[Literal["direct", "gold_cny_per_gram", "fx_pair"]] = None
+    proxy_kind: Optional[Literal["direct", "gold_cny_per_gram", "fx_pair", "eastmoney_fund"]] = None
     is_tracking_only: Optional[bool] = None
 
 

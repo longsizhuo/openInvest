@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from openinvest.utils import quotes
+from openinvest.utils.eastmoney_fund import FundNavSnapshot
 
 
 @dataclass
@@ -139,3 +140,23 @@ def test_get_quote_default_proxy_kind_is_direct(monkeypatch):
     q = quotes.get_quote({"symbol": "AAPL", "cost_currency": "USD", "unit_label": "股"})
     assert q is not None
     assert q.symbol == "AAPL"
+
+
+def test_get_quote_eastmoney_fund(monkeypatch):
+    monkeypatch.setattr(
+        quotes,
+        "fetch_fund_nav",
+        lambda symbol: FundNavSnapshot(
+            code="162201", name="宏利成长混合", nav=6.6305,
+            nav_date="2026-08-10", is_stale=False,
+        ),
+    )
+    q = quotes.get_quote({
+        "symbol": "FUND:162201", "kind": "fund", "cost_currency": "CNY",
+        "unit_label": "份", "proxy_kind": "eastmoney_fund",
+    })
+    assert q is not None
+    assert q.price == 6.6305
+    assert q.currency == "CNY"
+    assert q.last_updated == "2026-08-10"
+    assert q.extra["source"] == "eastmoney"

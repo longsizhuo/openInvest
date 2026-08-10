@@ -4,7 +4,8 @@
 
 ## 内容
 
-- `quotes.py` — **v2 通用行情接入**：`get_quote(holding)` 根据 `proxy_kind` 选择数据源（direct yfinance / gold 反推 / fx_pair），返回统一 `QuoteSnapshot`
+- `quotes.py` — **v2 通用行情接入**：`get_quote(holding)` 根据 `proxy_kind` 选择数据源（direct yfinance / gold 反推 / fx_pair / Eastmoney 场外基金净值），返回统一 `QuoteSnapshot`
+- `eastmoney_fund.py` — 中国场外公募基金 `FUND:<六位代码>` 最新已确认单位净值适配器
 - `gold_price.py` — 黄金克价快照（GC=F + USDCNY=X 反推 CNY/克）+ DB 兜底
 - `exchange_fee.py` — yfinance 包装 `get_history_data(symbol, period)`，含 requests-cache
 - `betashares_scraper.py` — BetaShares 官网 NDQ.AX 净值爬虫（yfinance 挂时备用）
