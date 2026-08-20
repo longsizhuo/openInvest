@@ -109,7 +109,15 @@ def fetch_all(
         return []
 
     all_items: List[RawNewsItem] = []
-    with ThreadPoolExecutor(max_workers=min(8, len(tasks))) as pool:
+    # ponytail: 故意不用 `with ThreadPoolExecutor(...)` —— 它退出时 shutdown(wait=True)
+    # 会 join 卡死的 worker，下面 as_completed 的 timeout 就白设了。2026-07-30 18:00
+    # 事故：akshare cn_wire（无 timeout 可传）卡死 → fetch_all 永不返回 → event_watch
+    # 这个实例永不结束 → APScheduler max_instances=1 把之后每次触发全 skip，
+    # 新闻哨兵静默死了 21 天（只在日志里每 30 分钟 WARNING 一次，没人看）。
+    # 代价：卡死那条线程泄漏（非 daemon，进程退出靠 systemd SIGKILL 收尾）。
+    # 上限：真根治要给每个源塞可用的 timeout，akshare 不暴露 → 先按泄漏处理。
+    pool = ThreadPoolExecutor(max_workers=min(8, len(tasks)))
+    try:
         futures = {pool.submit(t["fn"], **t["kwargs"]): t["label"] for t in tasks}
         # PR #5 Copilot CR 修复: as_completed(timeout=) 整体 wall-clock 用完后抛
         # concurrent.futures.TimeoutError，原版没 catch → 一个 slow source 拖
@@ -130,9 +138,9 @@ def fetch_all(
                 f"[news_sources] fetch_all 超时 ({timeout_sec}s)，"
                 f"未完成 sources={unfinished}；保留已收到 {len(all_items)} 条继续",
             )
-            for f in futures:
-                if not f.done():
-                    f.cancel()
+    finally:
+        # wait=False：不等卡死的 worker；cancel_futures=True：还没起跑的直接取消
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # 同 url 去重（保留先到的）
     seen_urls = set()

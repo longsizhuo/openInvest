@@ -88,3 +88,40 @@ def test_rss_feed_parses_minimal_feed():
     assert out[0].title == "<b>A</b>"  # title 不剥 HTML（让 LLM 看到原貌）
     assert "<p>" not in out[0].snippet   # snippet 剥了
     assert out[0].published_at and out[0].published_at.startswith("2026-05-13")
+
+
+def test_fetch_all_returns_when_a_source_hangs(monkeypatch):
+    """卡死的源不能拖住 fetch_all（2026-07-30 事故回归）。
+
+    旧实现用 `with ThreadPoolExecutor(...)`，退出时 shutdown(wait=True) 会 join
+    卡死的 worker —— as_completed 的 timeout 形同虚设，event_watch 那个实例永不
+    结束，APScheduler max_instances=1 于是把之后每一次触发都 skip 掉。
+    """
+    import threading
+    import time
+
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
+    release = threading.Event()
+
+    def _hang(*_a, **_kw):
+        release.wait(60)  # 测试结束前一直卡着
+        return []
+
+    try:
+        with patch("openinvest.services.news_sources.ddgs_news.fetch_ddgs_news") as m_ddgs, \
+             patch("openinvest.services.news_sources.yfinance_news.fetch_yfinance_news") as m_yf, \
+             patch("openinvest.services.news_sources.rss_feed.fetch_rss", _hang):
+            m_ddgs.return_value = _stub_items("ddgs", 2)
+            m_yf.return_value = []
+            t0 = time.monotonic()
+            out = fetch_all(
+                queries=["foo"],
+                symbols=["NDQ.AX"],
+                rss_feeds=[{"name": "r", "url": "https://feed"}],
+                timeout_sec=1.0,
+            )
+            elapsed = time.monotonic() - t0
+        assert elapsed < 10, f"fetch_all 被卡死的源拖了 {elapsed:.1f}s"
+        assert len(out) == 2, "已经到手的源结果应照常返回"
+    finally:
+        release.set()
