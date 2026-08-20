@@ -1,0 +1,60 @@
+载入行情…
+  784 个 symbol 有价格序列
+扫描 A_backtest_uncontaminated …
+{
+  "label": "A_backtest_uncontaminated",
+  "hold_total": 47880,
+  "with_line": 476,
+  "sanity_ok": 361,
+  "breached": 134,
+  "dropped_no_price": 2,
+  "dropped_sanity": 113,
+  "breach_rate": 0.37119113573407203,
+  "per_symbol": {
+    "NDQ.AX": 8,
+    "510300.SS": 7,
+    "BRK-B": 3,
+    "QCOM": 3,
+    "513050.SS": 3,
+    "0027.HK": 3,
+    "0175.HK": 3,
+    "PANW": 2,
+    "512170.SS": 2,
+    "DHR": 2
+  },
+  "n_5d": 132,
+  "median_raw_5d": 1.12,
+  "median_excess_5d": 0.84,
+  "pct_negative_5d": 36.4,
+  "n_20d": 132,
+  "median_raw_20d": 1.26,
+  "median_excess_20d": 0.09,
+  "pct_negative_20d": 45.5,
+  "verdict": "不采纳"
+}
+扫描 B_live_committee …
+{
+  "label": "B_live_committee",
+  "hold_total": 142,
+  "with_line": 64,
+  "sanity_ok": 24,
+  "breached": 4,
+  "dropped_no_price": 0,
+  "dropped_sanity": 40,
+  "breach_rate": 0.16666666666666666,
+  "per_symbol": {
+    "1024.HK": 3,
+    "GC=F": 1
+  },
+  "n_5d": 2,
+  "median_raw_5d": -6.11,
+  "median_excess_5d": -6.0,
+  "pct_negative_5d": 100.0,
+  "n_20d": 1,
+  "median_raw_20d": -3.86,
+  "median_excess_20d": -4.93,
+  "pct_negative_20d": 100.0,
+  "verdict": "样本不足"
+}
+
+写入 /home/ubuntu/projects-review/invest/experiments/stop-line-efficacy/result.json
