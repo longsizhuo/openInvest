@@ -245,7 +245,10 @@ def _sanitize_event(raw: Dict[str, Any], *, offset: int) -> Optional[NormalizedE
     entities_raw = raw.get("entities") or []
     entities = [str(e).lower().strip() for e in entities_raw if str(e).strip()][:10]
     affected_raw = raw.get("affected_symbols") or []
-    affected = [str(s).strip() for s in affected_raw if str(s).strip()][:10]
+    # 入库前归一 ticker 写法（01024.HK → 1024.HK）：召回和 event_watch 触发闸都是
+    # 精确字符串匹配，两种写法并存 = 补零那批永远匹配不上持仓，静默丢信号。
+    from openinvest.services.symbol_map import normalize_symbol
+    affected = [normalize_symbol(s) for s in affected_raw if str(s).strip()][:10]
     affected = _apply_entity_symbol_fallback(entities, affected)
 
     event = {
