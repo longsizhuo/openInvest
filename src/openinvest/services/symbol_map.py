@@ -34,6 +34,24 @@ ENTITY_CANONICAL_PATTERNS: List[Tuple[re.Pattern, str]] = [
 ]
 
 
+# 港股 ticker 归一化：HKEX 用补零到 5 位的写法（01024.HK），yfinance 用 4 位
+# （1024.HK）。LLM 归一化器两种都吐——实测 events.db 里 34 条 1024.HK 和 11 条
+# 01024.HK 并存，而召回/触发两处都是精确字符串交集匹配 → 补零那批对委员会完全
+# 不可见（2026-08-19 快手财报最重的那条 sev3 就是这么丢的）。
+# 规则：去前导零后不足 4 位补到 4 位；本身 >4 位（如 80737.HK 人民币柜台）原样保留。
+_HK_TICKER_RE = re.compile(r"^0*(\d{1,5})\.HK$", re.I)
+
+
+def normalize_symbol(symbol: str) -> str:
+    """把 ticker 归一成 yfinance canonical 写法。非港股原样返回（仅 strip + upper）。"""
+    s = str(symbol or "").strip().upper()
+    m = _HK_TICKER_RE.match(s)
+    if not m:
+        return s
+    digits = m.group(1)
+    return f"{digits.zfill(4) if len(digits) < 4 else digits}.HK"
+
+
 def canonical_symbols_for_entities(entities: Iterable[str]) -> List[str]:
     """entities 命中第一层映射 → canonical symbol 列表（保序去重）。纯代码规则，零 LLM。"""
     joined = " ".join(str(e).lower() for e in entities if str(e).strip())
@@ -93,5 +111,6 @@ __all__ = [
     "ENTITY_CANONICAL_PATTERNS",
     "TRACKING_WHITELIST",
     "canonical_symbols_for_entities",
+    "normalize_symbol",
     "proxy_symbols_for",
 ]
