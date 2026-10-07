@@ -5,13 +5,14 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from openinvest.capabilities.committee.i18n import get_invest_lang
 from openinvest.connectors.web_api.models import (
@@ -291,6 +292,107 @@ async def committee_status(task_id: str) -> CommitteeStatusResponse:
     status.setdefault("task_id", task_id)
     status.setdefault("started_at", _now_iso())
     return CommitteeStatusResponse(**status)
+
+
+@router.get("/api/committee/{task_id}/view", response_class=HTMLResponse, tags=["committee"])
+async def committee_status_view(task_id: str) -> HTMLResponse:
+    """跟 committee_status 读同一份 task 状态，渲染成可读 HTML 而非原始 JSON。
+
+    GUI 已退役（2026-07-05），但事件预警邮件/Discord 里的"详情"链接不该指向一坨
+    压平在一行、`\\n` 不换行的原始 JSON，也不该是把邮件那套样式原样照搬——网页
+    不受邮件客户端限制，能做真正的图表（2026-07-15 用户两轮反馈）。verdict
+    卡片 + 路径形状/forward-return 图表复用 core.regime_probability 的确定性
+    历史统计（零 LLM、零额外网络调用，跟委员会当时看到的是同一套算法），只是
+    在渲染时重新算一遍（status.json 里没存这份数据，避免为了展示重复持久化）。
+    正文仍复用 notifier.render_markdown_email 的 markdown→HTML 管线（email 用
+    的同一份），transcript.md 本身就是格式良好的 markdown，直接喂进去。
+    """
+    import html as html_escape
+    from openinvest.calc.symbols import safe_symbol
+    from openinvest.core.committee.cio_parse import regime_label_from_text
+    from openinvest.core.regime_probability import get_path_profile
+    from openinvest.calc.regime_probability import calibrate_profile
+    from openinvest.services.committee_charts import (
+        CHART_CSS,
+        render_forward_return_chart,
+        render_path_shape_chart,
+        render_verdict_tile,
+    )
+    from openinvest.services.notifier import render_markdown_email
+
+    # task_id 是 URL 路径参数，symbols 最终来自 POST /api/committee/run 的用户输入
+    # （经 status.json 落盘、跨请求回读）——两者都是攻击者可控字符串。下面渲染管线
+    # 会把纯文本段落喂进 markdown → 允许原生 HTML 直通（md_in_html 扩展就是为了这个），
+    # 不转义就是反射/存储型 XSS（2026-07-15 自动安全扫描抓到）。
+    # transcript 也不可信：LLM 会转述外部新闻（事件层），且 POST /api/committee/save
+    # 可直接写入任意内容。整体 html.escape 会破坏 markdown（代码块里的 > 等），所以只
+    # 拆"像标签的 <"（后跟字母 / ! ? 斜杠）+ 危险 scheme 链接；顺带修好 "MA20<MA120"
+    # 被 markdown 当标签吞掉的显示 bug。CSP 头是第二道闸（无 script-src → 内联脚本与
+    # javascript: 链接都不执行）。
+    def _esc(v: Any) -> str:
+        return html_escape.escape(str(v))
+
+    def _defang(md: str) -> str:
+        md = re.sub(r"<(?=[A-Za-z/!?])", "&lt;", md)
+        return re.sub(r"\]\(\s*(?:javascript|vbscript|data):", "](#blocked:", md, flags=re.I)
+
+    status = _read_committee_status(task_id)
+    if status is None:
+        return HTMLResponse(
+            f"<h1>task_id {_esc(task_id)} 不存在</h1>", status_code=404,
+        )
+
+    result = status.get("result") or {}
+    symbols = result.get("symbols") or []
+    by_asset = result.get("by_asset") or {}
+    started_at = status.get("started_at", "")
+    date = started_at[:10] if started_at else ""
+
+    sections = [
+        f"<style>{CHART_CSS}</style>\n\n"
+        f"# 委员会任务 `{_esc(task_id)}`\n\n"
+        f"状态: **{_esc(status.get('status', '?'))}** · 开始于 {_esc(started_at)}\n"
+    ]
+    found_any = False
+    for sym in symbols:
+        asset_blocks = []
+        verdict = (by_asset.get(sym) or {}).get("verdict")
+        if verdict:
+            asset_blocks.append(render_verdict_tile(verdict))
+
+        safe_sym = safe_symbol(sym)
+        md_path = COMMITTEE_DIR / date / f"{safe_sym}.md"
+        transcript = _defang(md_path.read_text(encoding="utf-8")) if md_path.exists() else ""
+
+        # 图表数据现算：regime 从 transcript 里的确定性 `REGIME: x` 行抽（那行是
+        # core.regime.format_regime_brief 生成的，不是 LLM 输出，抽取可靠）。
+        # 抽不到 regime（如任务失败/transcript 缺失）就跳过图表，不影响文字详情。
+        regime = regime_label_from_text(transcript) if transcript else None
+        if regime:
+            try:
+                profile = get_path_profile(sym, regime)
+                if profile:
+                    profile = calibrate_profile(profile)
+                    asset_blocks.append(render_path_shape_chart(profile.get("shape")))
+                    asset_blocks.append(render_forward_return_chart(profile.get("windows")))
+            except Exception:  # noqa: BLE001  图表是锦上添花，算失败不能拖垮整页
+                pass
+
+        if transcript:
+            asset_blocks.append(transcript)
+            found_any = True
+        else:
+            asset_blocks.append(f"## {_esc(sym)}\n\n_transcript 文件未找到（{_esc(safe_sym)}.md）_")
+        sections.append("\n\n".join(b for b in asset_blocks if b))
+    if not found_any and status.get("status") != "done":
+        sections.append(f"\n_任务状态 {_esc(status.get('status'))}，可能还在跑，transcript 尚未落盘。_")
+
+    html_body = render_markdown_email(
+        "\n\n---\n\n".join(sections), footer_label="Invest Committee",
+    )
+    return HTMLResponse(html_body, headers={
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+    })
 
 
 @router.get("/api/committee/{task_id}/audit", tags=["committee"])

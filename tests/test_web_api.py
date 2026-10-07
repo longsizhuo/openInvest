@@ -481,6 +481,176 @@ def test_committee_status_404(client):
     assert r.status_code == 404
 
 
+# ============ /api/committee/{task_id}/view（2026-07-15：渲染 HTML 而非原始 JSON） ============
+
+def test_committee_view_renders_transcript_as_html(client, tmp_store, monkeypatch):
+    """事件预警邮件/Discord 的"详情"链接指这个端点——用户反馈原始 JSON 一坨
+    压平在一行没法看，改成复用 email 的 markdown→HTML 渲染管线。"""
+    import openinvest.connectors.state_bus as sb
+    committee_dir = tmp_store.root / ".committee"
+    monkeypatch.setattr(sb, "_COMMITTEE_DIR", committee_dir)
+
+    sb.write_committee_status("view-task-1", {
+        "task_id": "view-task-1", "status": "done",
+        "started_at": "2026-07-15T08:00:00+08:00",
+        "result": {"symbols": ["GC=F"]},
+    })
+    (committee_dir / "2026-07-15").mkdir(parents=True)
+    (committee_dir / "2026-07-15" / "GC_F.md").write_text(
+        "# Committee: 伦敦金\n\n**Verdict**: HOLD (confidence 0.65)\n\n"
+        "## CIO Memo\n\n综合三方意见：维持现有仓位。",
+        encoding="utf-8",
+    )
+
+    r = client.get("/api/committee/view-task-1/view")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    assert "<html" in body.lower()
+    assert "HOLD" in body
+    assert "维持现有仓位" in body
+    assert "view-task-1" in body
+
+
+def test_committee_view_renders_verdict_tile_and_charts(client, tmp_store, monkeypatch):
+    """有 verdict + 可提取 REGIME 时，页面要带裁决卡片 + 两张图表，不只是纯文字
+    transcript（2026-07-15 用户反馈：网页不该照搬邮件排版，应该真的做图表）。
+    get_path_profile 走 mock——图表数据是真实历史 OHLC 统计，不依赖 CI 环境
+    是否有完整行情数据库。"""
+    import openinvest.connectors.state_bus as sb
+    import openinvest.connectors.web_api.routers.committee as committee_router
+    committee_dir = tmp_store.root / ".committee"
+    monkeypatch.setattr(sb, "_COMMITTEE_DIR", committee_dir)
+
+    fake_profile = {
+        "windows": {
+            "30d": {"n": 100, "effective_n": 10, "median_pct": 0.5,
+                     "p10_pct": -5.0, "p90_pct": 6.0, "downside_pct": -3.0,
+                     "low_confidence": False},
+        },
+        "shape": {
+            "window": "90d", "n": 100, "effective_n": 10,
+            "pct_dip_then_up": 0.4, "pct_up_no_dip": 0.2,
+            "pct_pop_then_down": 0.3, "pct_down_no_pop": 0.1,
+        },
+    }
+    monkeypatch.setattr(
+        "openinvest.core.regime_probability.get_path_profile",
+        lambda asset, regime, **kw: fake_profile,
+    )
+    monkeypatch.setattr(
+        "openinvest.calc.regime_probability.calibrate_profile",
+        lambda profile, **kw: profile,
+    )
+
+    sb.write_committee_status("view-task-chart", {
+        "task_id": "view-task-chart", "status": "done",
+        "started_at": "2026-07-15T08:00:00+08:00",
+        "result": {
+            "symbols": ["GC=F"],
+            "by_asset": {"GC=F": {"verdict": {
+                "verdict": "HOLD", "confidence": 0.65,
+                "dominant_view": "risk", "alloc_cny": 0,
+            }}},
+        },
+    })
+    (committee_dir / "2026-07-15").mkdir(parents=True)
+    (committee_dir / "2026-07-15" / "GC_F.md").write_text(
+        "# Committee: 伦敦金\n\nREGIME: downtrend\n\n## CIO Memo\n\n维持现有仓位。",
+        encoding="utf-8",
+    )
+
+    r = client.get("/api/committee/view-task-chart/view")
+    assert r.status_code == 200
+    body = r.text
+    assert 'class="verdict-tile"' in body
+    assert 'class="verdict-badge">HOLD' in body
+    assert "置信度" in body and "65%" in body
+    assert "90 天路径形状分布" in body
+    assert "<svg" in body
+    assert "先跌后涨" in body and "40%" in body  # pct_dip_then_up
+    assert "历史 forward return 分布" in body
+
+
+def test_committee_view_missing_task_is_404(client):
+    r = client.get("/api/committee/nonexistent_task_xyz/view")
+    assert r.status_code == 404
+
+
+def test_committee_view_escapes_task_id_xss(client):
+    """2026-07-15 自动安全扫描：task_id 是 URL 路径参数（攻击者可控），404 分支
+    此前直接原样拼进 HTML，是反射型 XSS。payload 故意不含 '/'——FastAPI 的
+    {task_id} 单段匹配本身会挡掉带 '/' 的 payload（如 <script>...</script>），
+    但那是路由层副作用，不是本处理函数的转义在起作用，用不含 '/' 的
+    payload 才是真的在测这段代码。"""
+    payload = "<img src=x onerror=alert(1)>"
+    r = client.get(f"/api/committee/{payload}/view")
+    assert r.status_code == 404
+    assert "<img src=x onerror=alert(1)>" not in r.text
+    assert "&lt;img" in r.text
+
+
+def test_committee_view_escapes_malicious_symbol(client, tmp_store, monkeypatch):
+    """symbols 最终来自 POST /api/committee/run 的用户输入，经 status.json 落盘后
+    回读——同样不能不转义地拼进渲染出的 HTML（存储型 XSS 面）。"""
+    import openinvest.connectors.state_bus as sb
+    committee_dir = tmp_store.root / ".committee"
+    monkeypatch.setattr(sb, "_COMMITTEE_DIR", committee_dir)
+    payload = "<img src=x onerror=alert(1)>"
+    sb.write_committee_status("view-task-xss", {
+        "task_id": "view-task-xss", "status": "done",
+        "started_at": "2026-07-15T08:00:00+08:00",
+        "result": {"symbols": [payload]},
+    })
+
+    r = client.get("/api/committee/view-task-xss/view")
+    assert r.status_code == 200
+    assert "<img src=x onerror=alert(1)>" not in r.text
+    assert "&lt;img" in r.text
+
+
+def test_committee_view_defangs_transcript_html(client, tmp_store, monkeypatch):
+    """transcript 不可信：LLM 转述外部新闻 + POST /api/committee/save 可写任意内容。
+    像标签的 < 与 javascript: 链接必须被拆掉；"MA20<MA120" 这类正文要原样显示；带 CSP。"""
+    import openinvest.connectors.state_bus as sb
+    committee_dir = tmp_store.root / ".committee"
+    monkeypatch.setattr(sb, "_COMMITTEE_DIR", committee_dir)
+    sb.write_committee_status("view-task-tx", {
+        "task_id": "view-task-tx", "status": "done",
+        "started_at": "2026-07-15T08:00:00+08:00",
+        "result": {"symbols": ["GC=F"]},
+    })
+    (committee_dir / "2026-07-15").mkdir(parents=True)
+    (committee_dir / "2026-07-15" / "GC_F.md").write_text(
+        "## CIO\n\n<img src=x onerror=alert(1)> <script>alert(2)</script>\n\n"
+        "[点我](javascript:alert(3))\n\n技术面 MA20<MA120 空头排列，VIX < 15。",
+        encoding="utf-8",
+    )
+    r = client.get("/api/committee/view-task-tx/view")
+    assert r.status_code == 200
+    body = r.text
+    assert "<img src=x" not in body and "<script>alert" not in body
+    assert "javascript:" not in body
+    assert "MA20&lt;MA120" in body          # 正文不再被当标签吞掉
+    assert "default-src 'none'" in r.headers["content-security-policy"]
+
+
+def test_committee_view_still_running_shows_placeholder(client, tmp_store, monkeypatch):
+    """委员会还没跑完时 transcript 文件不存在——不能崩，要给出清楚的"还在跑"提示。"""
+    import openinvest.connectors.state_bus as sb
+    committee_dir = tmp_store.root / ".committee"
+    monkeypatch.setattr(sb, "_COMMITTEE_DIR", committee_dir)
+    sb.write_committee_status("view-task-2", {
+        "task_id": "view-task-2", "status": "running",
+        "started_at": "2026-07-15T09:00:00+08:00",
+        "result": {"symbols": ["GC=F"]},
+    })
+
+    r = client.get("/api/committee/view-task-2/view")
+    assert r.status_code == 200
+    assert "还在跑" in r.text or "未找到" in r.text
+
+
 # ============ v2 holdings CRUD ============
 
 def test_holdings_list_v2(client, tmp_store, monkeypatch):
