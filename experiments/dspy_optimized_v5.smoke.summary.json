@@ -1,0 +1,41 @@
+{
+  "n_train": 50,
+  "n_dev": 20,
+  "optimizer": "MIPROv2",
+  "auto_level": "light",
+  "num_threads": 8,
+  "baseline_avg_score": 0.325,
+  "optimized_avg_score": 0.225,
+  "improvement_pp": -10.0,
+  "per_verdict_breakdown": {
+    "BUY": {
+      "n_dev": 7,
+      "baseline_acc": 0.14285714285714285,
+      "optimized_acc": 0.07142857142857142
+    },
+    "ACCUMULATE": {
+      "n_dev": 1,
+      "baseline_acc": 1.0,
+      "optimized_acc": 1.0
+    },
+    "HOLD": {
+      "n_dev": 5,
+      "baseline_acc": 0.0,
+      "optimized_acc": 0.0
+    },
+    "TRIM": {
+      "n_dev": 2,
+      "baseline_acc": 1.0,
+      "optimized_acc": 0.5
+    },
+    "SELL": {
+      "n_dev": 5,
+      "baseline_acc": 0.5,
+      "optimized_acc": 0.4
+    }
+  },
+  "smoke_test": true,
+  "trainset_path": "/home/ubuntu/projects-review/invest/experiments/dspy_trainset_v5.jsonl",
+  "output_path": "/home/ubuntu/projects-review/invest/experiments/dspy_optimized_v5.json",
+  "timestamp": "2026-07-24T04:20:57.201634+00:00"
+}

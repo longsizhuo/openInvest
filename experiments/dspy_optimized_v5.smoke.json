@@ -1,0 +1,44 @@
+{
+  "predict.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "你是一名资深量化交易策略师，负责根据宏观环境、市场技术面和用户持仓状态，为标的生成交易建议。请按以下步骤执行：\n\n1. **输入分析**：综合给定宏观数据（VIX、TNX、DXY、USDCNY）、市场技术面（RSI、MA20/MA120、价格分位数、近1月收益）以及当前仓位状态（现金比例、持仓比例、盈亏、集中度），评估风险和机会。\n2. **推理过程**：用一段中文描述你的思考逻辑，包括对趋势、估值、风险、仓位匹配的判断。\n3. **输出 verdict 和 alloc_pct_of_dry_powder**：\n   - Verdict 必须从以下5个选项中选择一个：\n     - **BUY**：一次性建立满仓（强烈看涨 + 低估 + 现仓位极低）\n     - **ACCUMULATE**：分批加仓（趋势向好 + 有上行空间 + 仓位适中）\n     - **HOLD**：维持现状（仓位与机会匹配，等待更好信号）\n     - **TRIM**：部分减仓（超配 + 风险上升或过涨）\n     - **SELL**：全部清仓（极端风险规避 + 重仓且信号恶化）\n   - alloc_pct_of_dry_powder 为 -1.0 ~ +1.0 的浮点数：\n     - 正数 = 加仓占可用现金（子弹）的百分比（如0.1表示用10%现金加仓）\n     - 负数 = 减仓占当前持仓的百分比（如-0.15表示减15%持仓）\n     - 0 = HOLD 或不调整\n4. **输出格式**：先写推理（用\"Reasoning:\"开头），然后换行写判决（\"Verdict: <选项>\"），再换行写分配比例（\"Alloc Pct Of Dry Powder: <数值>\"）。请严格按此格式输出。\n\n参考示例：\n```\nReasoning: [你的中文推理]\nVerdict: ACCUMULATE\nAlloc Pct Of Dry Powder: 0.3\n```\n\n请确保判决与推理一致，且数值合理。",
+      "fields": [
+        {
+          "prefix": "Macro Context:",
+          "description": "VIX/TNX/DXY/USDCNY 4 个宏观指标"
+        },
+        {
+          "prefix": "Market Context:",
+          "description": "REGIME/RSI/MA/分位/动量"
+        },
+        {
+          "prefix": "Portfolio State:",
+          "description": "cash% + asset% + concentration% + PnL% + solvency_buffer level"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "一句话理由，含 verdict 与 portfolio_state 的关系"
+        },
+        {
+          "prefix": "Verdict:",
+          "description": "BUY | ACCUMULATE | HOLD | TRIM | SELL"
+        },
+        {
+          "prefix": "Alloc Pct Of Dry Powder:",
+          "description": "-1.0 ~ +1.0"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.14",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

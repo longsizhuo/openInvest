@@ -49,7 +49,13 @@ STATS = ROOT / "experiments" / "dspy_trainset_v5.stats.json"
 
 def path_v4(a0: float, fwd: float, sigma30: float) -> tuple:
     """(verdict, target_exposure)。canonical 定义与推导:
-    experiments/oracle_redesign/{calibrate_gamma.py, REPORT.md}(γ/κ 标定见 calibration.json)"""
+    experiments/oracle_redesign/{calibrate_gamma.py, REPORT.md}(γ/κ 标定见 calibration.json)
+
+    NaN 守卫必须在最前(CR 发现):NaN 让每个比较都为 False,会一路穿到最后一行
+    返回 ("TRIM", NaN)——坏价格行会静默变成垃圾 TRIM 标签 + 非法 JSON。"""
+    import math
+    if not (math.isfinite(fwd) and math.isfinite(sigma30) and math.isfinite(a0)):
+        return "SKIP", a0
     var = sigma30 * sigma30
     if var <= 0 or abs(fwd) <= KAPPA * sigma30:
         return "HOLD", a0
@@ -86,6 +92,7 @@ def main() -> None:
           f",每 {SAMPLE_EVERY_N} 交易日 × {STATES_PER_POINT} 状态")
 
     n_written = 0
+    n_bad = 0                      # NaN 守卫命中数(坏价格行)
     label_dist: Counter = Counter()
     bucket_dist: Counter = Counter()
     skipped: Dict[str, str] = {}
@@ -123,6 +130,9 @@ def main() -> None:
                 for (a0, cash, plo, phi) in rng.sample(PORTFOLIO_STATES, STATES_PER_POINT):
                     pnl = None if plo is None else rng.uniform(plo, phi)
                     verdict, target = path_v4(a0, fwd, sigma30)
+                    if verdict == "SKIP":      # NaN 守卫命中：坏价格行不进教材
+                        n_bad += 1
+                        continue
                     bucket = "clean" if date_str > CUTOFF else "head"
                     row = {
                         "decision_date": date_str,
@@ -151,6 +161,7 @@ def main() -> None:
     dist_pct = {k: round(100 * v / max(1, n_written), 2) for k, v in label_dist.most_common()}
     stats = {
         "n_samples": n_written,
+        "n_bad_rows_skipped": n_bad,
         "n_symbols": len(universe) - len(skipped),
         "skipped": skipped,
         "label_dist_pct": dist_pct,
