@@ -79,6 +79,11 @@
         {
           "type": "generic",
           "path": "SKILL.md"
+        },
+        {
+          "type": "json",
+          "path": "/plugin/.codex-plugin/plugin.json",
+          "jsonpath": "$.version"
         }
       ]
     },

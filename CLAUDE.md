@@ -130,7 +130,7 @@ openInvest 有三个调用层，每层服务不同对象：
 
 ### SKILL.md 的 version 字段是 release-please 管的
 
-不要手改 `skills/invest/SKILL.md` 第 3 行的 `version: 0.9.0 # x-release-please-version`——release-please 靠那个注释锚定位置，merge Release PR 时会自动同步。手改了下次发版会被覆盖。
+不要手改 `skills/invest/SKILL.md` 第 3 行的 `version: 0.9.0 # x-release-please-version`——release-please 靠那个注释锚定位置，merge Release PR 时会自动同步。手改了下次发版会被覆盖。`plugin/.codex-plugin/plugin.json` 的 `version` 同理，挂在 invest-skill 版本线的 extra-files 上随 SKILL.md 一起 bump。`plugin/.claude-plugin/plugin.json` **故意不写 `version`**：Claude Code 对 marketplace 里相对路径的插件不写 version 时按 commit SHA 计版本，每个 commit 都能推到用户；写死反而把 invest-setup / invest-backup / `.mcp.json` 的改动冻在用户缓存里（两条都由 `tests/test_plugin_manifest_version.py` 守着）。
 
 ### 第一次发版会怎样
 
