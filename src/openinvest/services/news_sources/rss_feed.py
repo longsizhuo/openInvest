@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import socket
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 import requests.adapters
+import urllib3
 import yaml
 
 from openinvest.services.news_sources import RawNewsItem
@@ -35,22 +37,26 @@ _DEFAULT_YML = Path(__file__).parent / "rss_feeds.yml"
 # normalize 的 LLM 账单交给陌生人
 MAX_EXTRA_FEEDS = 30
 
-# 抓取护栏：(connect, read) 超时 + 读响应体总时长封顶（read 超时只管单次读，
-# 慢速持续吐字节的响应要靠总时长兜住）；重定向手动跟、最多 3 跳；响应体 ≤2MB
+# 抓取护栏：(connect, read) 超时 + 整次抓取（含 DNS 之后的建连/TLS/响应头/重定向/
+# 响应体）一个总时长上限——read 超时只管单次读，慢速持续吐字节要靠总时长 + 到点
+# 强制断开连接兜住；重定向手动跟、最多 3 跳；响应体 ≤2MB
 _FETCH_TIMEOUT = (5, 15)
 _FETCH_DEADLINE_SEC = 30
 _MAX_REDIRECTS = 3
 _MAX_FEED_BYTES = 2 * 1024 * 1024
 
 
-# 内嵌 IPv4 的 IPv6 段（NAT64 两段 + 已废弃的 IPv4 兼容地址）：取低 32 位一起判
-_V4_EMBEDDING_NETS = tuple(ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "::/96"))
+# 内嵌 IPv4 的 IPv6 段（NAT64 两段 / IPv4-translated / 已废弃的 IPv4 兼容地址）：取低 32 位一起判
+_V4_EMBEDDING_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "64:ff9b::/96", "64:ff9b:1::/48", "::ffff:0:0:0/96", "::/96"))
+_REJECTED = "url 被拒：主机必须能解析且只指向公网地址（额外源不经代理、直连）"
 
 
 def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """is_global 已排除 loopback/私网/link-local/保留/未指定，但组播仍算 global；
-    IPv6 里内嵌的 IPv4（mapped / 6to4 / Teredo / NAT64 / 兼容地址）要连同 v6 本身都是公网才放行。"""
-    if ip.is_multicast or not ip.is_global:
+    """is_global 已排除 loopback/私网/link-local/保留/未指定，但组播、已废弃的 site-local
+    （fec0::/10）仍算 global；IPv6 里内嵌的 IPv4（mapped / 6to4 / Teredo / NAT64 /
+    translated / 兼容地址）要连同 v6 本身都是公网才放行。"""
+    if ip.is_multicast or not ip.is_global or getattr(ip, "is_site_local", False):
         return False
     if ip.version == 6:
         embedded = [ip.ipv4_mapped, ip.sixtofour, *(ip.teredo or ())]
@@ -63,7 +69,8 @@ def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 def _check_url(url: str) -> str:
     """只放行 http(s)、不带 userinfo、且主机解析出的每个地址都是公网地址的 URL；否则抛 ValueError。
 
-    返回要连接的地址（解析结果第一条，与系统默认连接顺序一致），供 _PinnedAdapter 钉住。
+    返回要连接的地址（解析结果第一条，与系统默认连接顺序一致），供 _FeedAdapter 钉住。
+    解析失败与非公网对调用方是同一条报错（细节只进日志），不给群聊用户探测内网 DNS。
     """
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
@@ -73,66 +80,136 @@ def _check_url(url: str) -> str:
     try:
         infos = socket.getaddrinfo(parts.hostname, parts.port, type=socket.SOCK_STREAM)
     except (OSError, ValueError) as e:  # gaierror ⊂ OSError；非法端口 parts.port 抛 ValueError
-        raise ValueError(f"url 主机解析失败: {parts.hostname}: {e}") from e
+        log.info(f"RSS url 拒绝（解析失败）: {parts.hostname}: {e}")
+        raise ValueError(_REJECTED) from None
     for *_, sockaddr in infos:
         try:
             ok = _is_public(ipaddress.ip_address(sockaddr[0]))
         except ValueError:
             ok = False
         if not ok:
-            raise ValueError(f"url 主机 {parts.hostname} 解析到非公网地址，拒绝")
+            log.info(f"RSS url 拒绝（非公网地址）: {parts.hostname} -> {sockaddr[0]}")
+            raise ValueError(_REJECTED)
     return infos[0][4][0]
 
 
-class _PinnedAdapter(requests.adapters.HTTPAdapter):
-    """连接直接打到 _check_url 校验过的那个地址（不再二次解析）；Host 头与 TLS SNI/证书校验仍按原主机名。"""
+# 本线程正在抓的 feed 的连接（dup 出的 socket，与真实连接同一条内核 socket）——
+# 到点由看门狗 shutdown，卡在建连/TLS/响应头/响应体任何一步的阻塞读都会立刻返回
+_inflight = threading.local()
 
-    def __init__(self, ip: str):
+
+class _WatchedConn:
+    def _new_conn(self):
+        sock = super()._new_conn()
+        socks = getattr(_inflight, "socks", None)
+        if socks is not None:
+            socks.append(sock.dup())
+        return sock
+
+
+class _WatchedHTTPPool(urllib3.HTTPConnectionPool):
+    ConnectionCls = type("_WatchedHTTPConnection", (_WatchedConn, urllib3.connection.HTTPConnection), {})
+
+
+class _WatchedHTTPSPool(urllib3.HTTPSConnectionPool):
+    ConnectionCls = type("_WatchedHTTPSConnection", (_WatchedConn, urllib3.connection.HTTPSConnection), {})
+
+
+_WATCHED_POOLS = {"http": _WatchedHTTPPool, "https": _WatchedHTTPSPool}
+
+
+class _FeedAdapter(requests.adapters.HTTPAdapter):
+    """所有 feed 的连接都登记给看门狗；ip 非空时连接直接打到 _check_url 校验过的那个地址
+    （不再二次解析），Host 头与 TLS SNI/证书校验仍按原主机名。"""
+
+    def __init__(self, ip: Optional[str] = None):
         self._ip = ip
         super().__init__()
 
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = _WATCHED_POOLS
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        manager = super().proxy_manager_for(proxy, **proxy_kwargs)
+        if type(manager) is urllib3.ProxyManager:  # SOCKS 代理有自己的连接类，不动
+            manager.pool_classes_by_scheme = _WATCHED_POOLS
+        return manager
+
     def build_connection_pool_key_attributes(self, request, verify, cert=None):
         host_params, pool_kwargs = super().build_connection_pool_key_attributes(request, verify, cert)
-        pool_kwargs["server_hostname"] = host_params["host"]  # http 池由 urllib3 自动丢弃
-        host_params["host"] = self._ip
+        if self._ip:
+            pool_kwargs["server_hostname"] = host_params["host"]  # http 池由 urllib3 自动丢弃
+            host_params["host"] = self._ip
         return host_params, pool_kwargs
 
     def add_headers(self, request, **kwargs):
-        request.headers["Host"] = urlsplit(request.url).netloc
+        if self._ip:
+            request.headers["Host"] = urlsplit(request.url).netloc
+
+
+def _shutdown_all(socks: list) -> None:
+    for s in list(socks):
+        try:
+            s.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
 def _fetch_feed(url: str, *, public_only: bool = True):
     """抓 feed 并解析 —— fetch_rss 的所有源都走这里（护栏见 _FETCH_* 常量）。
 
-    public_only=True 时每一跳（含重定向目标）都重新解析+校验，并钉住校验过的地址连接。
+    public_only=True 时每一跳（含重定向目标）都重新解析+校验，钉住校验过的地址直连
+    （不走环境代理）；False（运维默认源）只信任同主机的跳转，跨主机跳转照样校验。
     """
     import feedparser
 
     deadline = time.monotonic() + _FETCH_DEADLINE_SEC
-    for _ in range(_MAX_REDIRECTS + 1):
-        session = requests.Session()
-        if public_only:
-            session.trust_env = False  # 不读环境代理/.netrc：经代理时由代理自行解析主机名，钉住的地址就不生效
-            pinned = _PinnedAdapter(_check_url(url))
-            session.mount("http://", pinned)
-            session.mount("https://", pinned)
-        with session, session.get(url, timeout=_FETCH_TIMEOUT, stream=True, allow_redirects=False,
-                                  headers={"User-Agent": feedparser.USER_AGENT}) as resp:
-            if resp.is_redirect:
-                url = urljoin(url, resp.headers["location"])
-                continue
-            resp.raise_for_status()
-            body = bytearray()
-            # read1：有数据就返回，总时长检查才不会被一次凑满 chunk 的阻塞读架空
-            while chunk := resp.raw.read1(64 * 1024, decode_content=True):
-                body += chunk
-                if len(body) > _MAX_FEED_BYTES or time.monotonic() > deadline:
-                    raise ValueError(f"feed 超过 {_MAX_FEED_BYTES} 字节或 {_FETCH_DEADLINE_SEC}s 上限: {url}")
-            headers = {k.lower(): v for k, v in resp.headers.items()}
-            headers["content-location"] = url  # 相对链接按最终 URL 解析（同原 parse(url) 行为）
-            # BytesIO 包一层：feedparser 收到裸 bytes/str 会尝试当本地路径打开
-            return feedparser.parse(io.BytesIO(body), response_headers=headers)
-    raise ValueError(f"重定向超过 {_MAX_REDIRECTS} 次: {url}")
+    origin_host = urlsplit(url).hostname
+    _inflight.socks = socks = []
+    watchdog = threading.Timer(_FETCH_DEADLINE_SEC, _shutdown_all, (socks,))
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        for _ in range(_MAX_REDIRECTS + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError(f"feed 抓取超过 {_FETCH_DEADLINE_SEC}s 上限: {url}")
+            session = requests.Session()
+            if public_only or urlsplit(url).hostname != origin_host:
+                session.trust_env = False  # 不读环境代理/.netrc：经代理时由代理自行解析主机名，钉住的地址就不生效
+                adapter = _FeedAdapter(_check_url(url))
+            else:
+                adapter = _FeedAdapter()
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            timeout = tuple(min(t, remaining) for t in _FETCH_TIMEOUT)
+            with session, session.get(url, timeout=timeout, stream=True, allow_redirects=False,
+                                      headers={"User-Agent": feedparser.USER_AGENT}) as resp:
+                if resp.is_redirect:
+                    url = urljoin(url, resp.headers["location"])
+                    continue
+                resp.raise_for_status()
+                body = bytearray()
+                # read1：有数据就返回，总时长检查才不会被一次凑满 chunk 的阻塞读架空
+                while chunk := resp.raw.read1(64 * 1024, decode_content=True):
+                    body += chunk
+                    if len(body) > _MAX_FEED_BYTES or time.monotonic() > deadline:
+                        raise ValueError(f"feed 超过 {_MAX_FEED_BYTES} 字节或 {_FETCH_DEADLINE_SEC}s 上限: {url}")
+                headers = {k.lower(): v for k, v in resp.headers.items()}
+                headers["content-location"] = url  # 相对链接按最终 URL 解析（同原 parse(url) 行为）
+                # BytesIO 包一层：feedparser 收到裸 bytes/str 会尝试当本地路径打开
+                return feedparser.parse(io.BytesIO(body), response_headers=headers)
+        raise ValueError(f"重定向超过 {_MAX_REDIRECTS} 次: {url}")
+    except Exception:
+        if time.monotonic() >= deadline:
+            raise ValueError(f"feed 抓取超过 {_FETCH_DEADLINE_SEC}s 上限，已断开: {url}") from None
+        raise
+    finally:
+        watchdog.cancel()
+        _inflight.socks = None
+        for s in socks:
+            s.close()
 
 
 def fetch_rss(name: str, url: str, *, max_items: int = 20) -> List[RawNewsItem]:
@@ -143,7 +220,8 @@ def fetch_rss(name: str, url: str, *, max_items: int = 20) -> List[RawNewsItem]:
     try:
         parsed = _fetch_feed(url, public_only=public_only)
     except Exception as e:
-        log.warning(f"RSS {name} 抓取/解析失败: {e}")
+        direct = "（额外源直连、不经代理）" if public_only else ""
+        log.warning(f"RSS {name} 抓取/解析失败{direct}: {e}")
         return []
 
     items: List[RawNewsItem] = []
@@ -255,7 +333,8 @@ def add_extra_feed(name: str, url: str) -> Dict[str, object]:
     _check_url(url)
     probe = fetch_rss(name, url, max_items=3)
     if not probe:
-        raise ValueError(f"probe 失败：{url} 解析不出任何 RSS/Atom entry（不是 feed 或暂时抓不到）")
+        raise ValueError(f"probe 失败：{url} 解析不出任何 RSS/Atom entry"
+                         "（不是 feed 或暂时抓不到；额外源直连、不经 HTTP(S)_PROXY）")
 
     feed = {"name": name, "url": url}
     _write_extra_feeds(extras + [feed])

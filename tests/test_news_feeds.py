@@ -34,6 +34,8 @@ _DNS = {
     "sixtofour.example.com": ["2002:a00:1::1"],
     "teredo.example.com": ["2001:0:808:808::1"],
     "scoped.example.com": ["fe80::1%eth0"],
+    "sitelocal.example.com": ["fec0::1"],
+    "translated.example.com": ["::ffff:0:a00:1"],
 }
 
 
@@ -125,13 +127,13 @@ def test_default_feeds_env_override(home, monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("host", ["loop", "lan", "linklocal", "mapped", "v6local", "mcast", "zero", "mixed",
-                                  "nat64", "v4compat", "sixtofour", "teredo", "scoped"])
+                                  "nat64", "v4compat", "sixtofour", "teredo", "scoped", "sitelocal", "translated"])
 def test_add_rejects_non_public_address(home, monkeypatch, host):
     """主机解析出任一非公网地址 → 拒绝，且不发 probe、不落盘。"""
     from openinvest.services.news_sources import rss_feed as rf
     probe = MagicMock(return_value=[object()])
     monkeypatch.setattr(rf, "fetch_rss", probe)
-    with pytest.raises(ValueError, match="非公网"):
+    with pytest.raises(ValueError, match="公网"):
         rf.add_extra_feed("x", f"https://{host}.example.com/feed")
     assert not probe.called
     assert rf.load_extra_feeds() == []
@@ -142,8 +144,13 @@ def test_add_rejects_userinfo_and_unresolvable(home, monkeypatch):
     monkeypatch.setattr(rf, "fetch_rss", lambda *a, **k: [object()])
     with pytest.raises(ValueError, match="用户名"):
         rf.add_extra_feed("x", "https://u:p@example.com/feed")
-    with pytest.raises(ValueError, match="解析失败"):
+    # 解析失败与非公网对调用方同一条报错（不给群聊用户探测内网 DNS 的信号）
+    with pytest.raises(ValueError) as unresolvable:
         rf.add_extra_feed("x", "https://nxdomain.example.com/feed")
+    with pytest.raises(ValueError) as private:
+        rf.add_extra_feed("x", "https://lan.example.com/feed")
+    assert str(unresolvable.value) == str(private.value)
+    assert "nxdomain" not in str(unresolvable.value) and "lan." not in str(private.value)
     assert rf.load_extra_feeds() == []
 
 
@@ -222,6 +229,14 @@ def test_operator_default_feeds_skip_address_check(home, fake_get, monkeypatch, 
     custom.write_text(yaml.safe_dump({"feeds": [{"name": "hub", "url": url}]}), encoding="utf-8")
     monkeypatch.setenv("INVEST_RSS_FEEDS_YML", str(custom))
     assert len(rf.fetch_rss("hub", url)) == 1
+    # 默认源只信任同主机跳转；跨主机跳转照样校验
+    routes[url] = _resp(302, headers={"Location": "/rss2"})
+    routes["http://loop.example.com:1200/rss2"] = _resp(200, _RSS)
+    assert len(rf.fetch_rss("hub", url)) == 1
+    routes[url] = _resp(302, headers={"Location": "http://lan.example.com/x"})
+    routes["http://lan.example.com/x"] = _resp(200, _RSS)
+    assert rf.fetch_rss("hub", url) == []
+    assert "http://lan.example.com/x" not in [u for u, _ in calls]
     monkeypatch.delenv("INVEST_RSS_FEEDS_YML")
     routes[url] = _resp(200, _RSS)
     assert rf.fetch_rss("hub", url) == []
@@ -294,3 +309,67 @@ def test_pinned_https_verifies_cert_against_original_hostname(home, pinned_conn,
     assert seen["server_hostname"] == "flip.example.com"
     assert seen["cert_reqs"] == "CERT_REQUIRED"
     assert seen["assert_hostname"] is not False
+
+
+@pytest.mark.parametrize("kind", ["extra", "default"])
+def test_fetch_bounded_by_deadline_when_headers_trickle(home, pinned_conn, monkeypatch, tmp_path, kind):
+    """响应头一字节一字节慢慢吐（单次读永远不超时）→ 整次抓取仍在总时长内返回（默认源同样受管）。"""
+    import threading
+    import time
+
+    from openinvest.services.news_sources import rss_feed as rf
+    _dialed, server = pinned_conn
+    url = "http://flip.example.com/rss"
+    if kind == "default":
+        custom = tmp_path / "custom.yml"
+        custom.write_text(yaml.safe_dump({"feeds": [{"name": "hub", "url": url}]}), encoding="utf-8")
+        monkeypatch.setenv("INVEST_RSS_FEEDS_YML", str(custom))
+    monkeypatch.setattr(rf, "_FETCH_DEADLINE_SEC", 1)
+
+    def _trickle():
+        try:
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                buf += server.recv(4096)
+            server.sendall(b"HTTP/1.1 200 OK\r\n")
+            stop = time.monotonic() + 6
+            while time.monotonic() < stop:
+                server.sendall(b"X")
+                time.sleep(0.2)
+            server.close()
+        except OSError:
+            pass
+
+    threading.Thread(target=_trickle, daemon=True).start()
+    t0 = time.monotonic()
+    assert rf.fetch_rss("t", url) == []
+    assert time.monotonic() - t0 < 2.5
+
+
+def test_add_news_source_tool_does_not_block_event_loop(home, monkeypatch):
+    """MCP 工具的 probe（网络 IO）放 worker 线程：执行期间同一事件循环上的其他协程照常推进。"""
+    import asyncio
+    import time
+
+    from openinvest.connectors import mcp_server
+    from openinvest.services.news_sources import rss_feed as rf
+
+    def _slow_add(name, url):
+        time.sleep(0.5)
+        return {"feed": {"name": name, "url": url}, "probe_items": 1, "already_exists": False}
+    monkeypatch.setattr(rf, "add_extra_feed", _slow_add)
+
+    async def _main():
+        ticks = []
+
+        async def _ticker():
+            while True:
+                ticks.append(1)
+                await asyncio.sleep(0.05)
+        task = asyncio.create_task(_ticker())
+        await asyncio.sleep(0)
+        before = len(ticks)
+        await mcp_server.mcp.call_tool("add_news_source", {"name": "x", "url": "https://example.com/f"})
+        task.cancel()
+        return len(ticks) - before
+    assert asyncio.run(_main()) >= 5

@@ -392,20 +392,24 @@ def news_sources() -> Dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
-def add_news_source(
+async def add_news_source(
     name: Annotated[str, Field(description="Short slug for the feed, [a-z0-9_] (e.g. 'wsj_markets').")],
     url: Annotated[str, Field(description="RSS/Atom feed URL (a real feed, not a webpage).")],
 ) -> Dict[str, Any]:
     """Add an RSS/Atom feed to the crawler's source list. The URL must be
-    http(s) on a public host, and is live-probed before saving — a URL that
-    doesn't parse as a feed is rejected. Idempotent: re-adding an existing URL returns the existing
-    entry. Capped so the list can't grow unbounded.
+    http(s) on a public host (fetched directly, not via HTTP(S)_PROXY), and is
+    live-probed before saving — a URL that doesn't parse as a feed is rejected.
+    Idempotent: re-adding an existing URL returns the existing entry. Capped so
+    the list can't grow unbounded.
 
     Use when someone says "follow <site>'s news" / "加个新闻源".
     """
+    import anyio
+
     from openinvest.services.news_sources.rss_feed import add_extra_feed
     try:
-        return {"status": "ok", **add_extra_feed(name, url)}
+        # probe 是网络 IO：放 worker 线程，不让 sync 工具占住 MCP 事件循环（同实例其他调用照常响应）
+        return {"status": "ok", **await anyio.to_thread.run_sync(add_extra_feed, name, url)}
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
