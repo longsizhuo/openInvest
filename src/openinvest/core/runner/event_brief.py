@@ -6,6 +6,7 @@ from openinvest.core.runner.event_format import format_event_brief  # noqa: F401
 
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,9 @@ def _get_event_store():
     return _EVENT_STORE_SINGLETON
 
 
-def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
+def _resolve_event_brief(
+    symbol: str, override: Optional[str], *, as_of: Optional[datetime] = None,
+) -> str:
     """事件 RAG 召回（feature flag + 调用方 override 两条路）
 
     优先级：
@@ -46,6 +49,9 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
     3. EventStore.recall(symbol) → format_event_brief
 
     任何异常都降级为 ""，不阻断 committee。
+
+    as_of（issue #196）：透传 EventStore.recall(as_of=)，回测 as-of-D 只召回 D 时刻
+    已入库的事件（created_at 口径）。None = 生产现行为。
 
     **默认行为 (2026-05-15 改 default-on)**：env 不设 / 设空 → 当作 true。
     用户记不住 4 步开 RAG 流程，所以默认就让 Macro 看新闻；明确设
@@ -73,6 +79,7 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
             top_k=cfg.event.rag_top_k,
             query_embedding=q_embed,
             aliases=sorted(proxy_symbols_for(symbol)),
+            as_of=as_of,
         )
         return format_event_brief(events)
     except Exception as e:  # noqa: BLE001
@@ -82,7 +89,9 @@ def _resolve_event_brief(symbol: str, override: Optional[str]) -> str:
 
 
 
-def resolve_event_brief_multi(symbols: List[str]) -> str:
+def resolve_event_brief_multi(
+    symbols: List[str], *, as_of: Optional[datetime] = None,
+) -> str:
     """跨资产 event RAG 召回 + 去重，作为 daily_report cron 路径的共享 loader。
 
     跨资产共享 loader：跑一次，结果同时注入
@@ -96,6 +105,8 @@ def resolve_event_brief_multi(symbols: List[str]) -> str:
 
     Args:
         symbols: 所有 target_assets 的 symbol 列表（如 ["NDQ.AX", "GC=F"]）
+        as_of: issue #196 回测 as-of-D 截断（逐 symbol 透传 _resolve_event_brief）；
+            None = 生产现行为
 
     Returns:
         合并去重后的 event_brief 文本，空字符串表示无可用事件。
@@ -108,7 +119,7 @@ def resolve_event_brief_multi(symbols: List[str]) -> str:
     all_briefs: List[str] = []
     for sym in symbols:
         try:
-            brief = _resolve_event_brief(sym, override=None)
+            brief = _resolve_event_brief(sym, override=None, as_of=as_of)
             if brief:
                 all_briefs.append(brief)
         except Exception as e:  # noqa: BLE001

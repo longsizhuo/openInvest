@@ -350,6 +350,45 @@ def test_run_committee_session_event_ids_translates_via_event_store(
     )
 
 
+def test_run_committee_session_event_as_of_reaches_multi_recall(
+    monkeypatch, tmp_path,
+):
+    """issue #196 SENTINEL：session(event_as_of=D) 必须把 D 原样传到
+    resolve_event_brief_multi(as_of=)。0/1：session 吞 kwarg / 漏转发 → captured
+    为空或 None 即红。默认（不传）调用形态不变由上面各测的 `lambda syms:` 桩守。"""
+    from datetime import datetime, timezone
+
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    captured: list = []
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi",
+                        lambda syms, as_of=None: (captured.append(as_of), "ASOF_BRIEF")[1])
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view",
+                        lambda *a, **kw: "M")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    monkeypatch.setattr(
+        "openinvest.core.runner.session.run_committee_for_symbol",
+        lambda sym, **kw: {"verdict": {"verdict": "HOLD", "confidence": 0.5,
+                                       "alloc_cny": 0, "dominant_view": "macro",
+                                       "raw": ""}, "report": None},
+    )
+
+    D = datetime(2026, 5, 1, 6, 0, tzinfo=timezone.utc)
+    from openinvest.core.committee_runner import run_committee_session
+    result = run_committee_session(
+        symbols=["TEST.AX"], event_as_of=D, max_debate_rounds=1,
+    )
+
+    assert captured == [D], f"event_as_of 没透传到 multi 召回: {captured!r}"
+    assert result["event_brief"] == "ASOF_BRIEF"
+    assert result["audit"]["event_brief_source"] == "multi_recall"
+
+
 # ============================================================================
 # 契约 6: Risk Officer 集中度 SENTINEL 覆写（2026-05-20 NDQ.AX 漂移修复）
 # ============================================================================

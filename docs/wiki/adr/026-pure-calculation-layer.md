@@ -68,7 +68,12 @@ severity/symbol 判级 → 幂等入账（同 url/claim 去重）→ RAG 召回 
 
 ## 后续
 
-- event 召回缺 as-of-D 模式：回测今天不消费事件层所以无泄漏，**开始消费前
-  必须先做**（否则 ADR-022 的坑换门重进）——见 GitHub issue。
+- event 召回 as-of-D 模式（issue #196，2026-10-07 已落地召回侧）：
+  `EventStore.recall(as_of=)` → `resolve_event_brief_multi(as_of=)` →
+  `run_committee_session(event_as_of=)`，按 `created_at`（入库时刻）截断，契约测试
+  `tests/test_event_store.py::test_recall_as_of_*`。回测**尚未接通**
+  （`backtest_committee.py` 直调原语，接通时走 `resolve_event_brief_multi(as_of=D)`）。
+  残余口径缺口：同 event_id 后续 upsert 原地改写的 severity / stance /
+  affected_symbols 无历史版本，as_of 还原不了。
 - `pnl_snapshot._outperform_events` 存量 bug（`get_all_series()` 缺参 →
   outperform feed 静默失效）：搬迁时逐字保留未修，另行 issue。

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from openinvest.core.committee import (
@@ -355,6 +356,7 @@ def run_committee_session(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     event_brief_override: Optional[str] = None,
     event_ids: Optional[List[str]] = None,
+    event_as_of: Optional[datetime] = None,
     macro_view_override: Optional[str] = None,
     portfolio_summary_override: Optional[str] = None,
     sentiment_brief_override: Optional[str] = None,
@@ -370,6 +372,9 @@ def run_committee_session(
         event_brief_override: 优先级最高的 event_brief 注入。含空串等价"我不要事件"
         event_ids: Web event-trigger 路径用。session 内部翻译成 brief。与 override
             互斥（override 优先）
+        event_as_of: issue #196 回测 as-of-D 零前视——只截断 multi_recall 路径（召回
+            created_at <= D 的事件；override / event_ids 是 caller 显式指定，不截）。
+            None = 生产现行为。只管事件层，行情 / macro 等其他输入不按 D 截
         macro_view_override: 测试桩用，跳过 run_macro_view
         portfolio_summary_override: cron daily_report 拼了含 total_assets_cny 的
             完整版，传进来让 Risk Officer 看见。其他路径不传走 service 默认精简版
@@ -444,7 +449,9 @@ def run_committee_session(
         event_brief_source = "event_ids"
     else:
         # 默认：跨资产 multi 召回 + 去重
-        event_brief = resolve_event_brief_multi(symbols)
+        # event_as_of=None 时调用形态逐字不变（生产三路径零改动）
+        event_brief = (resolve_event_brief_multi(symbols) if event_as_of is None
+                       else resolve_event_brief_multi(symbols, as_of=event_as_of))
         event_brief_source = "multi_recall" if event_brief else "disabled"
     if event_brief:
         emit("event_brief_loaded", source=event_brief_source,

@@ -160,6 +160,63 @@ def test_recall_vector_rerank(store):
     assert cs[0]["distance"] is not None
 
 
+def test_recall_as_of_excludes_events_created_after_cutoff(store):
+    """issue #196 契约：as_of=D → 召回集内无 created_at > D 的事件（0/1：删 SQL 截断即红）
+
+    - late_*：ts 早于 D 但 D 之后才入库（迟入库 = ts 口径截断的坑），向量最贴 query、
+      ts 也最新——不截断时必然挤占 top_k（向量 / 纯 SQL 两条路都挤）
+    - pre_*：D 前入库，ts 距今 ~10 天 → 时间窗必须以 D 为锚才召得回
+    - D 之后才挂上的源也不许出现
+    """
+    D = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=10)
+
+    def iso(dt):
+        return dt.isoformat(timespec="seconds")
+
+    for i in range(4):
+        _, eid = store.upsert_event({
+            "one_line_claim": f"pre {i}", "stance": "risk", "severity": "high",
+            "ts": iso(D - timedelta(hours=i + 1)), "affected_symbols": ["AAPL"], "entities": [],
+        }, embedding=[1.0, 0.0, 0.0, 0.0])
+        store.conn.execute("UPDATE events SET created_at = ? WHERE event_id = ?",
+                           (iso(D - timedelta(hours=1)), eid))
+        store.add_source(eid, src_name="early", url=f"https://e/{i}",
+                         fetched_at=iso(D - timedelta(hours=1)))
+        store.add_source(eid, src_name="late", url=f"https://l/{i}")  # fetched_at=now > D
+    store.conn.commit()
+    for i in range(3):
+        store.upsert_event({  # created_at = now > D
+            "one_line_claim": f"late {i}", "stance": "risk", "severity": "high",
+            "ts": iso(D - timedelta(minutes=30)), "affected_symbols": ["AAPL"], "entities": [],
+        }, embedding=[0.0, 0.0, 1.0, 0.0])
+
+    out = store.recall("AAPL", min_severity="mid", top_k=3,
+                       query_embedding=[0.0, 0.0, 1.0, 0.0], as_of=D)
+
+    assert len(out) == 3, "合格事件 ≥ k 时 top_k 不能因截断缩水"
+    created = dict(store.conn.execute("SELECT event_id, created_at FROM events").fetchall())
+    assert all(created[e["event_id"]] <= iso(D) for e in out), "召回集混入 D 之后入库的事件"
+    srcs = {s["src_name"] for e in out for s in e["sources"]}
+    assert srcs == {"early"}, f"D 之后挂的源泄漏: {srcs}"
+    with pytest.raises(ValueError):
+        store.recall("AAPL", as_of=D.replace(tzinfo=None))  # naive 口径不明，拒
+
+
+def test_recall_default_does_not_truncate_by_created_at(store):
+    """as_of=None（生产默认）不按 created_at 截断：入库时刻改到远未来也照常召回
+    （0/1：默认若误套 as_of=now 截断即红）"""
+    _, eid = store.upsert_event({
+        "one_line_claim": "Nvidia guidance miss", "stance": "risk", "severity": "high",
+        "ts": _utc_iso(-1), "affected_symbols": ["NDQ.AX"], "entities": [],
+    }, embedding=[1.0, 0.0, 0.0, 0.0])
+    store.conn.execute("UPDATE events SET created_at = '2099-01-01T00:00:00+00:00' "
+                       "WHERE event_id = ?", (eid,))
+    store.conn.commit()
+
+    assert [e["event_id"] for e in store.recall("NDQ.AX", min_severity="mid")] == [eid]
+    assert store.recall("NDQ.AX", min_severity="mid", as_of=datetime.now(timezone.utc)) == []
+
+
 def test_recall_supersedes_marks_older_event_of_same_entity(store):
     # 同实体 fed，两次事件：旧的 hawkish + 新的 dovish。新事件应 .supersedes = 旧 event_id
     _, eid_old = store.upsert_event({

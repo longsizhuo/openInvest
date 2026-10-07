@@ -420,12 +420,20 @@ class EventStore:
         query_embedding: Optional[List[float]] = None,
         extra_tags: Optional[List[str]] = None,
         aliases: Optional[List[str]] = None,
+        as_of: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """按维度召回 + 向量精排 + 时效冲突标注。
 
         - hard filter: 时间窗 + min_severity + (symbol/aliases 在 affected_symbols 或 entity tag 命中)
         - aliases: 代理匹配集合（issue #26，services/symbol_map.proxy_symbols_for——
           持 NDQ.AX 也命中标 ^NDX 的指数事件）；None → 仅 symbol 本身
+        - as_of（issue #196，回测 as-of-D 零前视）：只召回 created_at <= as_of 的事件
+          + 只挂 fetched_at <= as_of 的源，时间窗改以 as_of 为锚。口径定 created_at
+          （系统自写的 UTC 入库时刻 = 硬边界），不用 ts（LLM 标注的发生时刻，可错标 /
+          迟入库）。截断在 SQL 硬过滤里做 → 向量精排只在合格集内排，top_k 不缩水。
+          必须带时区（naive 口径不明直接 ValueError）。None = 现行为（锚 now、不截断）。
+          ⚠️ 只截"事件存不存在"：同 event_id 后续 upsert 原地改写的 severity / stance /
+          affected_symbols 没有历史版本，as_of 还原不了。
         - rerank: 如果 query_embedding 非空且 sqlite-vec 加载成功，按 cosine 距离精排
                  否则就按 ts DESC 返回
         - supersedes: 后处理 —— 同实体的两条事件按时间排序，新事件 .supersedes = 旧 event_id
@@ -439,14 +447,20 @@ class EventStore:
           distance (float | None)
         """
         min_sev_int = _SEVERITY_INT.get(min_severity, 2)
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=time_window_days)).isoformat(timespec="seconds")
+        if as_of is not None and as_of.tzinfo is None:
+            raise ValueError("as_of 必须带时区（naive datetime 口径不明，可能前视）")
+        anchor = as_of.astimezone(timezone.utc) if as_of is not None else datetime.now(timezone.utc)
+        cutoff = (anchor - timedelta(days=time_window_days)).isoformat(timespec="seconds")
+        # created_at 全库统一 isoformat(timespec="seconds") 的 +00:00 串 → 同格式字典序比较精确
+        as_of_iso = anchor.isoformat(timespec="seconds") if as_of is not None else None
         tags = [t.lower() for t in (extra_tags or [])]
 
+        sql, params = "SELECT * FROM events WHERE ts >= ? AND severity >= ?", [cutoff, min_sev_int]
+        if as_of_iso is not None:
+            sql += " AND created_at <= ?"
+            params.append(as_of_iso)
         cur = self.conn.cursor()
-        cur.execute(
-            "SELECT * FROM events WHERE ts >= ? AND severity >= ? ORDER BY ts DESC LIMIT 200",
-            (cutoff, min_sev_int),
-        )
+        cur.execute(sql + " ORDER BY ts DESC LIMIT 200", params)
         rows = cur.fetchall()
 
         match_syms = {symbol.lower()} | {str(a).lower() for a in (aliases or [])}
@@ -484,6 +498,8 @@ class EventStore:
             c["sources"] = [
                 {"src_name": s["src_name"], "url": s["url"], "title": s["title"]}
                 for s in self.get_sources(c["event_id"])
+                # as_of：D 之后才挂上的源（brief 会渲染源名）同样是前视
+                if as_of_iso is None or s["fetched_at"] <= as_of_iso
             ]
             c.pop("_id", None)
 
