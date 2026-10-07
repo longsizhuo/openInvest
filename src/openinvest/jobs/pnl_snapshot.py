@@ -326,6 +326,9 @@ def _auto_push_svg() -> Dict[str, Any]:
                     # 旧代码 worktree add check=False 静默失败，后续 git 在裸 temp dir 里跑，
                     # pushed 永远 False 而 job 报 ok。先显式 fetch 建 ref，两步都 check（失败走
                     # 下方 CalledProcessError 分支、stderr 脱敏）。"+" 强更：分支是 force push 的。
+                    # 被杀/异常留下的 worktree 登记（temp dir 已删）会让 add -B 永远报
+                    # "already used by worktree"——先 prune 自愈
+                    _git(["worktree", "prune"], check=False)
                     _git(["fetch", authed_remote,
                           f"+refs/heads/{branch}:refs/remotes/origin/{branch}"])
                     _git(["worktree", "add", wt_dir, "-B", branch,
@@ -376,9 +379,16 @@ def _auto_push_svg() -> Dict[str, Any]:
                     "commit", "-m", "chore(pnl): hourly snapshot [skip ci]",
                 ], cwd=str(wt), check=True, capture_output=True)
 
-                # Orphan 分支总是 force push（每次 reset 到最新）
+                # Orphan 分支总是 force push 一个**无父** commit（每次 reset 到只含最新 SVG）。
+                # 2026-10-07：worktree 现在基于刚 fetch 的远端 tip，直接推 HEAD 会每次续一个
+                # commit（公开仓库一年 ~1.5k 个 SVG commit）——用同一棵 tree 另起无父 commit 推
+                orphan = subprocess.run(
+                    ["git", "-c", "user.name=pnl-bot", "-c", "user.email=pnl-bot@invest.local",
+                     "commit-tree", "HEAD^{tree}", "-m", "chore(pnl): hourly snapshot [skip ci]"],
+                    cwd=str(wt), check=True, capture_output=True, text=True,
+                ).stdout.strip()
                 push = subprocess.run(
-                    ["git", "push", "--force", authed_remote, f"HEAD:{branch}"],
+                    ["git", "push", "--force", authed_remote, f"{orphan}:refs/heads/{branch}"],
                     cwd=str(wt), capture_output=True, text=True,
                 )
                 _git(["worktree", "remove", "--force", wt_dir], check=False)

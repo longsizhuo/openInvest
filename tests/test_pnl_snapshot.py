@@ -515,14 +515,14 @@ def test_orphan_push_works_on_single_branch_clone(pnl_clone):
     result = _auto_push_svg()
     assert result == {"pushed": True, "branch": "pnl-data", "mode": "orphan"}
     assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) == "<svg>new</svg>"
-    # 在原 pnl-data 历史上续一个 commit（不是另起 orphan）
-    assert _g("rev-list", "--count", "pnl-data", cwd=bare) == "2"
+    # 每次推一个无父 commit：公开仓库的 pnl-data 历史不随推送增长
+    assert _g("rev-list", "--count", "pnl-data", cwd=bare) == "1"
     assert len(_g("worktree", "list", cwd=clone).splitlines()) == 1  # 临时 worktree 已清
 
 
-def test_orphan_worktree_failure_is_surfaced(pnl_clone, tmp_path):
-    """worktree add 真失败（崩过一次留下的孤儿 worktree 仍占着 pnl-data）→ 失败原因
-    原样上报，不再在裸 temp dir 里跑出 "not a git repository" 这种误导结果。"""
+def test_orphan_worktree_registration_self_heals(pnl_clone, tmp_path):
+    """崩过一次留下的孤儿 worktree 登记（目录已被 TemporaryDirectory 删掉）仍占着
+    pnl-data → 先 git worktree prune 自愈，而不是此后每次都 "already used by worktree"。"""
     bare, clone = pnl_clone
     _g("fetch", "-q", str(bare), "+refs/heads/pnl-data:refs/remotes/origin/pnl-data", cwd=clone)
     ghost = tmp_path / "ghost"
@@ -530,11 +530,8 @@ def test_orphan_worktree_failure_is_surfaced(pnl_clone, tmp_path):
     shutil.rmtree(ghost)  # TemporaryDirectory 清掉了目录，但 worktree 登记还在
 
     result = _auto_push_svg()
-    assert result["pushed"] is False
-    assert "already used by worktree" in result["reason"]
-    assert "tok@" not in result["reason"]
-    assert pnl_snapshot._push_status(result) == "push_failed"
-    assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) == "<svg>old</svg>"
+    assert result["pushed"] is True, result
+    assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) != "<svg>old</svg>"
 
 
 def test_run_status_surfaces_push_failure(monkeypatch, tmp_path):

@@ -239,3 +239,38 @@ def test_job_watchdog_yml_registered_and_runs_once(db, tmp_path, monkeypatch):
     assert runner.cmd_once("job_watchdog") == 0
     rows = db.execute("SELECT job_name, status FROM job_runs").fetchall()
     assert rows == [("job_watchdog", "success")]
+
+
+
+def test_interrupted_run_with_finished_at_is_not_hung(db):
+    """KeyboardInterrupt/SystemExit 绕过 except Exception：status 停在 running 但 finished_at 已落。"""
+    _seed_event_watch_until(db, _t("2026-07-30T17:30:00"))
+    db.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status) VALUES (?, ?, ?, 'running')",
+        ("event_watch", _t("2026-07-30T18:00:00").isoformat(timespec="seconds"),
+         _t("2026-07-30T18:00:20").isoformat(timespec="seconds")),
+    )
+    db.commit()
+    found = find_problems(db, [EW_JOB], _t("2026-07-30T19:07:00"))
+    assert not any(":hung:" in f["key"] for f in found)
+
+
+def test_email_failure_after_dm_delivered_does_not_repeat_dm(db, tmp_path, monkeypatch):
+    """DM 已送达、邮件抛错 → 不回滚 claim，下个小时不再重发 DM。"""
+    monkeypatch.setattr(runner, "_load_job_configs", lambda: [
+        {"name": "event_watch", "schedule": EW_CRON, "timezone": "Asia/Shanghai", "enabled": True},
+    ])
+    monkeypatch.setattr(runner, "_resolve_schedule", lambda name, s: s)
+    store = MemoryStore(root=tmp_path / "memory")
+    monkeypatch.setattr(job_watchdog, "MemoryStore", lambda: store)
+    dms = []
+    monkeypatch.setattr(job_watchdog, "send_discord_alert", lambda text: dms.append(text) or True)
+
+    def _boom(**kw):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(job_watchdog, "send_email_html", _boom)
+    _seed_event_watch_until(db, _t("2026-07-30T17:30:00"))
+    job_watchdog.run(now=_t("2026-07-30T19:07:00"))
+    job_watchdog.run(now=_t("2026-07-30T20:07:00"))
+    assert len(dms) == 1

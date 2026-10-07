@@ -68,15 +68,17 @@ def find_problems(
     out: List[Dict[str, Any]] = []
     for name, schedule, tz in jobs:
         last = conn.execute(
-            "SELECT id, started_at, status FROM job_runs WHERE job_name = ? "
+            "SELECT id, started_at, status, finished_at FROM job_runs WHERE job_name = ? "
             "ORDER BY id DESC LIMIT 1", (name,),
         ).fetchone()
         if last is None:
             continue  # 从没跑过 = 没有基线，不猜（新 job 首跑前不误报）
-        run_id, started_s, status = last
+        run_id, started_s, status, finished_s = last
         started = _ts(started_s)
 
-        if status == "running":
+        # finished_at 已落 = 跑完了（KeyboardInterrupt/SystemExit 绕过 except Exception 时
+        # status 会停在 running 但 finally 照样写 finished_at）——不算卡死
+        if status == "running" and finished_s is None:
             # 只看最近一行：更早的孤儿 running（daemon 重启杀掉的）已被后续触发覆盖，不算卡
             durs = [
                 (_ts(f) - _ts(s)).total_seconds()
@@ -139,13 +141,19 @@ def _send(findings: List[Dict[str, Any]]) -> None:
         + "\n\n_排查：`db/jobs.sqlite` 的 job_runs 表 + `logs/invest.log`；"
           "同一异常 24h 内只提醒一次。_"
     )
-    # 与 send_committee_verdict_email 同顺序：DM 先推（best-effort 永不抛），邮件保底归档
-    send_discord_alert(f"**{subject}**\n{md}")
-    send_email_html(
-        subject=subject,
-        html_body=render_markdown_email(md, footer_label="Invest Job Watchdog"),
-        plain_body=md,
-    )
+    # 与 send_committee_verdict_email 同顺序：DM 先推（best-effort 永不抛），邮件保底归档。
+    # DM 已送达时邮件再失败也不抛：否则 run() 回滚 claim，SMTP 挂多久 DM 就每小时重发多久
+    dm_ok = bool(send_discord_alert(f"**{subject}**\n{md}"))
+    try:
+        send_email_html(
+            subject=subject,
+            html_body=render_markdown_email(md, footer_label="Invest Job Watchdog"),
+            plain_body=md,
+        )
+    except Exception:
+        if not dm_ok:
+            raise
+        log.warning("[job_watchdog] 邮件投递失败，DM 已送达，不回滚去重")
 
 
 def run(now: Optional[datetime] = None) -> Dict[str, Any]:
