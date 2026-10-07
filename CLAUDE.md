@@ -110,7 +110,7 @@ openInvest 有三个调用层，每层服务不同对象：
 注意：`skills/invest*` 是指向 `plugin/skills/*` 的符号链接（顶层便捷入口）；release-please
 按**真实路径** `plugin/skills/...` 分流，改文件时两条路径等价，但配置引用要写真实路径。
 
-**改代码时不需要做任何事**——`release-please.yml` 监听 `main` push，自动开 Release PR、生成 `CHANGELOG.md`、merge 后打 tag。invest-skill 发版会同 run 自动 publish 到 ClawHub（skill + bundle-plugin 双条目，`scripts/publish_clawhub.sh`）。
+**改代码时不需要做任何事**——`release-please.yml` 监听 `main` push，自动开 Release PR、生成 `CHANGELOG.md`、merge 后打 tag。invest-skill 发版会同 run 自动 publish 到 ClawHub（skill + bundle-plugin 双条目，`scripts/publish_clawhub.sh`）。**main 头的 `ci.yml` 不绿就整轮不合并、不发版**（workflow 首步最多等 20 分钟，红/超时直接 fail；门检后 main 又进了人类 commit 则本轮不合并，PyPI 只从 release tag 的 sha 构建）——CI 红了先修 main，修绿后下一次 push 或每日 cron 自动接上。
 
 ### 唯一要守的纪律：commit message 严格 conventional commits
 

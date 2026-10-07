@@ -5,7 +5,7 @@ name: release-please
 #   - skills/invest          → tag invest-skill-v0.x.y        + skills/invest/CHANGELOG.md
 #   - skills/invest-setup    → tag invest-setup-skill-v0.x.y  + skills/invest-setup/CHANGELOG.md
 #
-# 全自动闭环（2026-07-05）：开 Release PR → 本 workflow 直接合并 → 再跑一轮
+# 全自动闭环（2026-07-05）：[main CI 绿灯门] → 开 Release PR → 本 workflow 直接合并 → 再跑一轮
 # release-please 切 tag/GitHub Release → 后端（"."）发版时顺手 uv publish 到 PyPI。
 # 不依赖 tag push 事件触发后续 workflow——GITHUB_TOKEN 造的事件不会触发别的
 # workflow，所以全部动作收在同一个 run 里。
@@ -34,6 +34,46 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - id: gate
+        name: CI 绿灯门（main 头 ci.yml 不绿就不合并、不发版）
+        # 门卡在 main 头的 ci.yml push run 上。release PR 自己的 CI 不可信：GITHUB_TOKEN
+        # 开的 PR 不正常触发 workflow（#252 那条 pull_request run 是 0 job 的空壳 failure）。
+        # bot commit（release 合并 / ClawHub 版本盖章）本身不跑 CI，沿 first-parent 跳到
+        # 最近的人类 commit。放在 release-please 之前，Release PR 就基于刚验过的 main 生成；
+        # 每轮重解析 main 头，等待期间来了新 push 就改等新的。验过的 sha 写进 outputs.sha：
+        # 合并前复核 main 没进新的人类 commit，PyPI 从 release tag 的 sha 构建，ClawHub
+        # 发布前同样复核——门检之后才进 main 的 commit 一律不跟着发。
+        # 0.33.0 / 0.33.1 就是 main CI 红着被自动合并发上 PyPI 的（#233-2）。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          resolve_main() {  # main 头 → 最近的人类 commit（API 版，此步还没 checkout）
+            local sha
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha) || return 1
+            while [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq .commit.author.name)" = "github-actions[bot]" ]; do
+              sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.parents[0].sha') || return 1
+            done
+            # 空/null 绝不能流进 --commit 过滤（会退化成不过滤）
+            [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "::error::解析 main 头失败：'$sha'" >&2; return 1; }
+            echo "$sha"
+          }
+          declare -f resolve_main > "$RUNNER_TEMP/resolve_main.sh"   # 合并步复核用同一份
+          for i in $(seq 1 40); do   # 30s × 40 = 20 分钟
+            sha=$(resolve_main)
+            r=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push --commit "$sha" \
+              --json status,conclusion -q '.[0] // empty | "\(.status)/\(.conclusion)"')
+            case "$r" in
+              completed/success) echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "✅ main $sha CI 绿，放行"; exit 0 ;;
+              # ci.yml 在 main 上 cancel-in-progress：被新 push 顶掉的就改等新头
+              completed/cancelled) if [ "$(resolve_main)" != "$sha" ]; then continue; fi ;;&
+              completed/*) echo "::error::main $sha 的 CI 结论 $r——不合并、不发版"; exit 1 ;;
+            esac
+            echo "等 main $sha 的 CI（${r:-run 未出现}）$i/40"
+            sleep 30
+          done
+          echo "::error::main $sha 的 CI 20 分钟内没绿（仍在跑或没有 ci.yml push run）——不合并、不发版"
+          exit 1
+
       - id: rp
         uses: googleapis/release-please-action@v4
         with:
@@ -46,11 +86,22 @@ jobs:
         # 直接扫 open 的 release-please 分支 PR，幂等
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATED: ${{ steps.gate.outputs.sha }}
         run: |
+          . "$RUNNER_TEMP/resolve_main.sh"
           gh pr list --repo "$GITHUB_REPOSITORY" --state open \
             --json number,headRefName \
             -q '.[] | select(.headRefName | startswith("release-please--")) | .number' \
           | while read -r n; do
+            # 门检后 main 进了新的人类 commit → 本轮不合并，push 触发的下一轮会门检新头
+            head=$(resolve_main)
+            if [ "$head" != "$GATED" ]; then
+              echo "::notice::main 已从门检的 $GATED 前进到 $head，本轮不合并 release PR"
+              break
+            fi
+            # 保持 --merge 不换 squash：release 合并 commit 的 body 是 "chore(main): release x"
+            # （隐藏类型 + 正好是 tag 边界），从没进过 CHANGELOG；0.32.0 的重复条目来自人工
+            # 合并 feature PR #239 的 merge body，换这里的合并方式治不了。
             if gh pr merge "$n" --merge --repo "$GITHUB_REPOSITORY"; then
               echo "merged #$n"
             else
@@ -82,7 +133,8 @@ jobs:
         if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
         uses: actions/checkout@v4
         with:
-          ref: main
+          # 精确构建 release tag 指向的 commit，不吃 main 上之后才进来的东西
+          ref: ${{ steps.rp2.outputs.sha || steps.rp.outputs.sha }}
 
       - name: Publish to PyPI
         if: ${{ contains(fromJSON(steps.rp2.outputs.paths_released || '[]'), '.') || contains(fromJSON(steps.rp.outputs.paths_released || '[]'), '.') }}
@@ -91,7 +143,6 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           export PATH="$HOME/.local/bin:$PATH"
-          git pull origin main   # 拿到刚合并的版本 bump
           uv build
           uv publish
           echo "✅ published $(grep '^version' pyproject.toml)"
@@ -142,8 +193,16 @@ jobs:
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATED: ${{ steps.gate.outputs.sha }}
         run: |
           git pull origin main
+          # 盖章 commit 要推回 main，只能从 main 发；改为复核 main 上没有门检之后的人类 commit
+          h=HEAD
+          while [ "$(git log -1 --format=%an "$h")" = "github-actions[bot]" ]; do h="$h^"; done
+          if [ "$(git rev-parse "$h")" != "$GATED" ]; then
+            echo "::error::main 门检后进了未验的 $(git rev-parse "$h")——不发 ClawHub，tag 已切，CI 绿后手动 scripts/publish_clawhub.sh"
+            exit 1
+          fi
           VERSION=$(grep -m1 '^version:' plugin/skills/invest/SKILL.md | sed 's/version:[[:space:]]*//; s/[[:space:]]*#.*//')
           for f in plugin/openclaw.plugin.json plugin/package.json; do
             jq --arg v "$VERSION" '.version = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
