@@ -555,10 +555,13 @@ def set_persisted_override(key: str, value: Any) -> TunableConfig:
     """白名单校验后落盘一条 API override + 失效缓存。返回新 config。"""
     coerced = _coerce_and_validate(key, value)
     from openinvest.core.memory_store import MemoryStore
-    store = MemoryStore()
-    cur = store.state_get(_PERSIST_STATE_NAME, {}) or {}
-    _deep_set(cur, key, coerced)
-    store.state_set(_PERSIST_STATE_NAME, cur)
+
+    def _apply(cur: Any) -> tuple:
+        cur = cur or {}
+        _deep_set(cur, key, coerced)
+        return cur, None
+
+    MemoryStore().state_update(_PERSIST_STATE_NAME, _apply)  # 单锁 RMW，并发不同 key 不丢
     reset_config()
     return load_config()
 
@@ -568,13 +571,16 @@ def clear_persisted_override(key: str) -> TunableConfig:
     if key not in API_SETTABLE:
         raise ValueError(f"config key 不在白名单: {key}")
     from openinvest.core.memory_store import MemoryStore
-    store = MemoryStore()
-    cur = store.state_get(_PERSIST_STATE_NAME, {}) or {}
     section, fld = key.split(".", 1)
-    if isinstance(cur.get(section), dict):
-        cur[section].pop(fld, None)
-        if not cur[section]:
-            cur.pop(section, None)
-    store.state_set(_PERSIST_STATE_NAME, cur)
+
+    def _apply(cur: Any) -> tuple:
+        cur = cur or {}
+        if isinstance(cur.get(section), dict):
+            cur[section].pop(fld, None)
+            if not cur[section]:
+                cur.pop(section, None)
+        return cur, None
+
+    MemoryStore().state_update(_PERSIST_STATE_NAME, _apply)  # 单锁 RMW
     reset_config()
     return load_config()

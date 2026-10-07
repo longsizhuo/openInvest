@@ -469,6 +469,45 @@ class TestApiConfig:
         with pytest.raises(ValueError):
             clear_persisted_override("verdict.alloc_cny_ceiling")  # 非白名单
 
+    def test_concurrent_set_and_clear_different_keys_no_lost_update(self, monkeypatch):
+        """并发改不同 key 全部落盘：读-改-写必须同一把锁（#233-3 web 端点进线程池后
+        并发 PUT /api/config 实测丢 39/40，钱相关的 dca.* 也在白名单里）。"""
+        import threading
+        import time
+        import openinvest.core.config._loader as loader
+        from openinvest.core.memory_store import MemoryStore
+
+        set_persisted_override("verdict.risk_profile", "aggressive")  # 待并发 clear 的 key
+        real = loader._deep_set
+
+        def _slow_deep_set(*a):  # 拉宽 读→写 窗口，无锁 RMW 必现丢更新
+            time.sleep(0.2)
+            return real(*a)
+
+        monkeypatch.setattr(loader, "_deep_set", _slow_deep_set)
+        ops = [
+            lambda: set_persisted_override("verdict.concentration_lens_enabled", True),
+            lambda: set_persisted_override("dca.auto_dca_enabled", True),
+            lambda: clear_persisted_override("verdict.risk_profile"),
+        ]
+        bar, errs = threading.Barrier(len(ops)), []
+
+        def _run(op):
+            bar.wait()
+            try:
+                op()
+            except Exception as e:  # noqa: BLE001
+                errs.append(e)
+
+        ts = [threading.Thread(target=_run, args=(op,)) for op in ops]
+        [t.start() for t in ts]
+        [t.join(10) for t in ts]
+        assert not errs
+        p = MemoryStore().state_get("config_overrides")
+        assert p["verdict"].get("concentration_lens_enabled") is True
+        assert p["dca"].get("auto_dca_enabled") is True
+        assert "risk_profile" not in p["verdict"]
+
     def test_api_override_beats_env(self, monkeypatch):
         """ADR-017 核心：持久 API override 优先级高于 env。"""
         monkeypatch.setenv("INVEST_VERDICT_CONCENTRATION_LENS_ENABLED", "true")
