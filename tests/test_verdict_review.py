@@ -169,3 +169,19 @@ def test_close_on_or_after_past_side_guard():
     assert _close_on_or_after(df, date(2026, 7, 1)) is None
     # 过去侧（本次新增）：2025 年的决议日不得锚到 2026-06-01
     assert _close_on_or_after(df, date(2025, 1, 1)) is None
+
+
+def test_close_on_or_after_tz_aware_index_matches_naive():
+    """searchsorted 改写后 tz-aware index 不能抛 TypeError（旧 .date 写法天然兼容）。"""
+    import datetime as dt
+
+    import pandas as pd
+
+    from openinvest.jobs import verdict_review as vr
+
+    out = []
+    for tz in (None, "Asia/Shanghai"):
+        idx = pd.DatetimeIndex(["2026-10-05", "2026-10-06", "2026-10-08"], tz=tz)
+        df = pd.DataFrame({"Close": [1.0, 2.0, 3.0]}, index=idx)
+        out.append([vr._close_on_or_after(df, dt.date(2026, 10, d)) for d in (1, 6, 7, 9)])
+    assert out[0] == out[1] == [None, 2.0, 3.0, None]

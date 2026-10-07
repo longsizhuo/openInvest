@@ -106,7 +106,7 @@ def _close_on_or_after(df, day) -> Optional[float]:
     # 2026-10：_closes 改拉全历史后，df.index.date 每次物化整列 object 数组（GC=F 1.4 万行，
     # 全量重建几十万次）→ 直接在升序 DatetimeIndex 上 searchsorted（DB 来源 index 为 naive 日期）。
     import pandas as pd
-    t = pd.Timestamp(day)
+    t = pd.Timestamp(day, tz=df.index.tz)  # tz-aware index 也能比（旧 .date 写法天然兼容）
     if t < df.index[0].normalize():
         return None
     i = df.index.searchsorted(t)
@@ -179,7 +179,7 @@ def _detect_macro_shock(
             if df.empty:
                 return None
             # date <= d 的根数（同 _close_on_or_after：searchsorted 代替物化 index.date）
-            i = df.index.searchsorted(pd.Timestamp(d) + pd.Timedelta(days=1))
+            i = df.index.searchsorted(pd.Timestamp(d, tz=df.index.tz) + pd.Timedelta(days=1))
             if i == 0:
                 return None
             return float(df["Close"].iloc[i - 1])
