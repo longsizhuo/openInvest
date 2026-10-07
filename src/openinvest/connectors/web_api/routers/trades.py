@@ -81,6 +81,11 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
         (synced: bool, holding_snapshot: dict | None)
         - synced=False 表示跳过同步（price 缺失/units=0 等边缘情况）
         - holding_snapshot 是同步后该 symbol 的 holding dict（供前端 toast）
+        - 该笔已入过账（synced_trade_ids 命中）→ (True, None)，不再动账本
+
+    幂等（#231）：带 id 的 trade 按 "<id>@<ts>" 记进 portfolio.md 的
+    synced_trade_ids，与 cash/holdings **同一次 atomic write** 落盘——同一笔重复调用
+    只入账一次。PATCH 端点的崩溃恢复（sync_pending）靠这一点才不会双记。
     """
     symbol = trade.get("symbol", "")
     direction = str(trade.get("direction", "")).upper()
@@ -101,9 +106,14 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
         return False, None
 
     synced_holding: Optional[Dict[str, Any]] = None
+    # id + ts：trades.db 被删重建后 id 从 1 重来，单用 id 会把新单误判成已入账
+    sync_key = f"{trade['id']}@{trade.get('ts')}" if trade.get("id") is not None else None
 
     try:
         with pm.with_portfolio_tx() as p:
+            synced_ids = list(p.get("synced_trade_ids") or [])
+            if sync_key is not None and sync_key in synced_ids:
+                raise _AlreadySynced()
             holdings = list(p.get("holdings") or [])
             cash = dict(p.get("cash") or {})  # 同步扣/加 cash 用
 
@@ -197,6 +207,10 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
 
             p["holdings"] = holdings
             p["cash"] = cash
+            if sync_key is not None:
+                # ponytail: 只留最近 _SYNCED_KEYS_KEEP 个键，够覆盖崩溃→重试窗口；
+                # 更老的单子 executed→planned→executed 重放不再去重（同 #231 前行为）
+                p["synced_trade_ids"] = (synced_ids + [sync_key])[-_SYNCED_KEYS_KEEP:]
 
             # 把 cash delta 信息塞进 synced_holding 给前端 toast 用
             if synced_holding is not None and cash_delta_amount > 0:
@@ -219,6 +233,9 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
     except _SkipSync:
         # SELL 但无持仓：不同步，但也不报错（业务上允许"账本有、持仓无"）
         return False, None
+    except _AlreadySynced:
+        log.info(f"_sync_trade_to_portfolio: {sync_key} 已入过账，跳过（幂等）")
+        return True, None
     except Exception as e:
         # with_portfolio_tx 内部（落盘前）异常 → portfolio.md 确实未变动，安全降级
         log.error(f"_sync_trade_to_portfolio 异常，portfolio.md 未变动: {e}", exc_info=True)
@@ -227,6 +244,13 @@ def _sync_trade_to_portfolio(trade: Dict[str, Any]) -> Tuple[bool, Optional[Dict
 
 class _SkipSync(Exception):
     """内部标记异常：让 with_portfolio_tx 回滚但不对外报错"""
+
+
+class _AlreadySynced(Exception):
+    """内部标记异常：该笔已入过账，放弃本次写（#231）"""
+
+
+_SYNCED_KEYS_KEEP = 500
 
 
 @router.patch("/api/trades/{trade_id}/status", tags=["trades"])
@@ -243,14 +267,18 @@ async def patch_trade_status(
 
     响应额外携带 portfolio_synced 和 synced_holding 让前端展示 toast。
 
-    幂等保证靠**状态守卫**，不靠 _sync_trade_to_portfolio 本身——后者是累加的
-    （BUY: cur_units + units、cash -= amount），重复调用会重复入账。所以本端点用
-    trade_before["status"] 做转移判定：仅在非 executed → executed 的真实跃迁才同步；
-    对一笔已经 executed 的单子再次 PATCH executed（双击 / 网络超时重试 / agent 重发）
-    直接幂等返回，绝不二次同步（CLAUDE.md 红线 #4：账本一致性）。
+    幂等（CLAUDE.md 红线 #4 / ADR-016）：
+    1. claim_status_transition 单条 SQL 原子 CAS planned→executed，同时置
+       sync_pending=1；只有赢家往下同步。已 executed 且无 pending 的重放（双击 /
+       超时重试 / agent 重发）直接幂等返回。
+    2. _sync_trade_to_portfolio 按 trade 去重（键与 cash/holdings 同一次 atomic
+       write），同一笔重复同步只入账一次。
 
-    原子性保证：先同步 portfolio（可重试），成功后再提交 trades.db status。
-    同步失败时 trade 保持原状态，重试仍是非 executed → 会重新同步，不会丢账。
+    顺序（2026-10-07 #231 更正：旧 docstring 写"先同步 portfolio 再提交 status"，与
+    代码相反）：先提交 trades.db 的 claim（executed + sync_pending=1）→ 同步 portfolio
+    → 清 sync_pending。同步失败 → release_claim 回退到 planned，重试可重新 claim。
+    claim 落盘后、同步完成前进程被杀 / 协程被取消：行停在 executed + sync_pending=1，
+    重试 PATCH executed 识别到标记 → 接手补同步（已落盘则去重 no-op），不再永久欠账。
     """
     # 先取 trade 原始数据（patch 前），供后面同步用
     trade_before = _get_trades_db().get_trade(trade_id)
@@ -280,21 +308,28 @@ async def patch_trade_status(
     # 同样覆盖顺序重放（双击 / 客户端超时重试 / agent 重发）。
     won = await asyncio.to_thread(
         _get_trades_db().claim_status_transition, trade_id, "executed",
-        from_status="planned",
+        from_status="planned", mark_sync_pending=True,
     )
     if not won:
-        # 已是 executed（并发赢家已抢到 / 重放）→ 首次已同步，本次幂等跳过
-        return {
-            "id": trade_id,
-            "status": "executed",
-            "ok": True,
-            "portfolio_synced": False,
-            "synced_holding": None,
-        }
+        # #231：claim 已落盘但同步没确认完成（崩在两步之间 / 并发赢家仍在同步）的行
+        # 带 sync_pending=1 → 接手同步（_sync 按 trade 去重，已入账则 no-op，不会双记）。
+        # 旧逻辑这里一律早退 → claim 后崩溃的单子永久欠账。
+        cur = _get_trades_db().get_trade(trade_id) or {}
+        if not (cur.get("status") == "executed" and cur.get("sync_pending")):
+            # 已 executed 且同步完（或 #231 前的老行）→ 首次已同步，本次幂等跳过
+            return {
+                "id": trade_id,
+                "status": "executed",
+                "ok": True,
+                "portfolio_synced": False,
+                "synced_holding": None,
+            }
+        log.warning(f"trade_id={trade_id} executed 但 sync_pending 未清，接手补同步 portfolio")
 
-    # 赢得跃迁 → 同步 portfolio.md。失败则把状态回退到原值（释放 claim），让重试
-    # 能重新 claim+同步，不丢账。trade_before 是 claim 前读的原始行，含同步所需的
-    # direction/units/price/symbol（不依赖 status 字段）。
+    # 赢得跃迁（或接手 pending）→ 同步 portfolio.md。失败则 release_claim 回退到
+    # planned（claim 只从 planned 起跳），让重试能重新 claim+同步，不丢账。
+    # trade_before 是 claim 前读的原始行，含同步所需的 id/ts/direction/units/price/
+    # symbol（不依赖 status 字段）。
     portfolio_synced, synced_holding = await asyncio.to_thread(
         _sync_trade_to_portfolio, trade_before
     )
@@ -304,8 +339,7 @@ async def patch_trade_status(
         # 行已不是本请求刚 claim 到的 "executed" 就不写，避免无条件 UPDATE 把
         # 别人的合法状态改动静默覆盖回去。
         released = await asyncio.to_thread(
-            _get_trades_db().release_claim,
-            trade_id, "executed", trade_before.get("status", "planned"),
+            _get_trades_db().release_claim, trade_id, "executed", "planned",
         )
         if not released:
             log.error(
@@ -314,7 +348,7 @@ async def patch_trade_status(
             )
         raise HTTPException(
             status_code=500,
-            detail=f"portfolio 同步失败，trade 已回退至 {trade_before.get('status')} 状态。请重试。"
+            detail="portfolio 同步失败，trade 已回退至 planned 状态。请重试。"
                    f"trade_id={trade_id}, symbol={trade_before.get('symbol')}",
         )
     log.info(
@@ -322,6 +356,11 @@ async def patch_trade_status(
         f"{trade_before.get('direction')} {trade_before.get('units')} "
         f"{trade_before.get('symbol')}"
     )
+    try:
+        await asyncio.to_thread(_get_trades_db().clear_sync_pending, trade_id)
+    except Exception as e:  # noqa: BLE001
+        # 已入账；标记残留只会让下次重试走一遍去重 no-op 再清，不影响账本
+        log.warning(f"trade_id={trade_id} 已同步但清 sync_pending 失败（下次重试自愈）: {e}")
 
     return {
         "id": trade_id,

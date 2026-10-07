@@ -7,10 +7,11 @@
 
 schema：
   trades(id, ts, verdict_id, symbol, direction, units, price, cost_currency, note, status,
-         intended_date)
+         intended_date, sync_pending)
   - ts:            记录意向的 UTC 时间戳（自动生成，ISO 8601）
   - intended_date: 计划成交日期（用户填写，ISO 日期 YYYY-MM-DD，可空）
                    None 表示"记录时就打算立即执行"
+  - sync_pending:  1 = 已 claim 成 executed、portfolio 同步还没确认完成（#231 崩溃恢复标记）
   status 值域：planned → executed → cancelled
 """
 from __future__ import annotations
@@ -76,7 +77,8 @@ class TradesDB:
                     cost_currency  TEXT    DEFAULT 'CNY',
                     note           TEXT,
                     status         TEXT    DEFAULT 'planned',
-                    intended_date  TEXT
+                    intended_date  TEXT,
+                    sync_pending   INTEGER DEFAULT 0
                 )
             """)
             # ---- 在线迁移：旧库补 intended_date 列 ----
@@ -86,6 +88,13 @@ class TradesDB:
             except Exception:
                 # 列已存在（OperationalError: duplicate column name）时静默跳过
                 pass
+            # ---- 在线迁移：旧库补 sync_pending 列（#231）----
+            # 先查列再 ALTER，不吞异常：库被锁等真错误要冒出来让下次初始化重试，
+            # 别静默缺列（缺列 = PATCH executed 的 claim SQL 直接报错）。
+            # 加带常量默认值的列是 O(1) 元数据改动，老行一律 0 = 视为已同步完。
+            cols = {r[1] for r in cur.execute("PRAGMA table_info(trades)")}
+            if "sync_pending" not in cols:
+                cur.execute("ALTER TABLE trades ADD COLUMN sync_pending INTEGER DEFAULT 0")
 
             # 按时间倒序查最近 N 笔是最常见操作
             cur.execute(
@@ -170,7 +179,8 @@ class TradesDB:
             return cur.rowcount > 0  # rowcount==0 → 该 id 不存在
 
     def claim_status_transition(
-        self, trade_id: int, to_status: str, *, from_status: Optional[str] = None
+        self, trade_id: int, to_status: str, *, from_status: Optional[str] = None,
+        mark_sync_pending: bool = False,
     ) -> bool:
         """原子状态跃迁 compare-and-set。
 
@@ -182,6 +192,8 @@ class TradesDB:
                 （cancelled != executed），构成重复入账：planned→executed（记账）
                 → cancelled（ADR-016 不做反向冲销）→ executed（再次记账），units
                 翻倍、现金双扣（CR 数据层 + API 层双 agent 命中）。
+            mark_sync_pending: 同一条 UPDATE 里置 sync_pending=1（#231）——claim 与
+                "portfolio 待同步"标记同时落盘，claim 后崩溃的行重试时可被识别并补同步。
 
         Returns:
             True  → 本次调用赢得了真实跃迁（rowcount==1），调用方独占后续副作用。
@@ -195,16 +207,17 @@ class TradesDB:
             raise ValueError(
                 f"status 必须是 planned / executed / cancelled，收到 {to_status!r}"
             )
+        set_sql = "status = ?, sync_pending = 1" if mark_sync_pending else "status = ?"
         with self._lock:
             cur = self.conn.cursor()
             if from_status is not None:
                 cur.execute(
-                    "UPDATE trades SET status = ? WHERE id = ? AND status = ?",
+                    f"UPDATE trades SET {set_sql} WHERE id = ? AND status = ?",
                     (to_status, trade_id, from_status),
                 )
             else:
                 cur.execute(
-                    "UPDATE trades SET status = ? WHERE id = ? AND status != ?",
+                    f"UPDATE trades SET {set_sql} WHERE id = ? AND status != ?",
                     (to_status, trade_id, to_status),
                 )
             self.conn.commit()
@@ -231,6 +244,12 @@ class TradesDB:
             )
             self.conn.commit()
             return cur.rowcount == 1
+
+    def clear_sync_pending(self, trade_id: int) -> None:
+        """portfolio 同步确认完成后清掉 sync_pending（#231）。"""
+        with self._lock:
+            self.conn.execute("UPDATE trades SET sync_pending = 0 WHERE id = ?", (trade_id,))
+            self.conn.commit()
 
     # ------------------------------------------------------------------
     # 读操作

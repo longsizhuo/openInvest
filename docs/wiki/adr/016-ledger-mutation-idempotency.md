@@ -21,6 +21,8 @@ documents:
     - state_claim
     - state_unclaim
     - record_external_trade
+    - claim_status_transition
+    - clear_sync_pending
     - _sync_trade_to_portfolio
 status: proposed
 date: "2026-06-16"
@@ -92,13 +94,30 @@ superseded_by: []
 静默跳过，需人工 `state_unclaim` 重放。这比"崩在提交之后 = 双重记账真金白银"好，故接受。
 （见 `record_external_trade` 注释。）
 
+**2026-10-07 #231 补记：**
+
+- **`record_external_trade` 的去重键本身曾不稳定**：CommSec `email_id` 原是 IMAP 序号，
+  Gmail 归档/删信（INBOX expunge）后序号整体前移 → 已记账邮件换新序号二次入账、新成交撞旧
+  序号被静默跳过——闸是原子的，键却会漂。改为 `msgid:<Message-ID>`（缺失退化
+  `uid:<UIDVALIDITY>:<UID>`，UID SEARCH/FETCH）。#231 前的纯数字旧键仍按当前序号比对跳过
+  （不比旧实现差；直接无视会让 lookback 内已记账邮件换新键批量重记）。上面的残余窗口不变。
+- **`patch_trade_status` 的同款窗口此前没列在这里**（docstring 还写反了顺序，声称"先同步
+  portfolio 再提交 status"）：CAS claim 先提交 trades.db，崩在同步前 → 行已 executed、账本
+  没动，之后每次重试都命中幂等早退 = **永久欠账**。现已闭合，不再是残余窗口：claim 同一条
+  SQL 置 `sync_pending=1`，同步成功后 `clear_sync_pending`；重试见 executed + pending →
+  接手同步。接手同步可能撞上"崩在 portfolio 已落盘、标记未清"——所以 `_sync_trade_to_portfolio`
+  把 `<trade_id>@<ts>` 写进 portfolio.md `synced_trade_ids`，与 cash/holdings **同一次
+  atomic write**，重复同步去重 no-op。只加 trades.db 标记、portfolio 侧不去重的方案会把后一种
+  崩溃重放成双记（`TestClaimSyncCrashRecovery` 有反证）。副作用：executed→planned→executed
+  也不再二次入账。键只留最近 500 个；更老的单子重放回到 #231 前行为。
+
 ## 2026-06-16 审计结果（全部账本写路径）
 
 | 路径 | 触发 | 语义 | 幂等保证 | 结论 |
 |---|---|---|---|---|
-| `record_external_trade` | 邮件轮询 / `commsec_apply` | 累加 | `state_claim(email_id)` | ✅ #62 |
+| `record_external_trade` | 邮件轮询 / `commsec_apply` | 累加 | `state_claim(email_id)`，email_id = Message-ID / UID（#231，原 IMAP 序号会漂）| ✅ #62 / #231 |
 | `commsec_apply` 端点 | HTTP POST | — | 透传上面 | ✅ |
-| `patch_trade_status → _sync_trade_to_portfolio` | PATCH 重试 / 双击 / 并发 | 累加 | 原子 `claim_status_transition` CAS（#127，取代原状态机守卫）+ 回退用 `release_claim` CAS（#127）| ✅ #127 |
+| `patch_trade_status → _sync_trade_to_portfolio` | PATCH 重试 / 双击 / 并发 | 累加 | 原子 `claim_status_transition` CAS（#127，取代原状态机守卫）+ 回退用 `release_claim` CAS（#127）+ `sync_pending` 崩溃恢复 & portfolio 侧 `synced_trade_ids` 去重（#231）| ✅ #127 / #231 |
 | ~~`payday_check.run → add_income`~~ | cron + 手动 `/payday` 并发 | 累加 | 原子 `state_claim(YYYY-MM)`（本 PR）| ✅（payday_check 已随 #177 删除，行保留作历史审计）|
 | `POST /api/holdings` | HTTP POST | append | symbol 已存在 → 409 | ✅ |
 | `PUT /api/holdings/{symbol}` | HTTP PUT | SET | 覆盖 | ✅ |

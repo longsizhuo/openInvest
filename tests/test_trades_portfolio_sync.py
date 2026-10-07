@@ -393,6 +393,107 @@ class TestPatchStatusIdempotency:
         assert pm2.cash_amount("AUD") == pytest.approx(3700.0)  # 仍 3700，非 2400
 
 
+class TestClaimSyncCrashRecovery:
+    """#231：claim（trades.db executed）先于 portfolio 同步提交，两步之间崩溃不能永久欠账，
+    崩在同步落盘之后也不能被重试双记。崩溃用"异常从同步那一跳冒出"模拟（协程中断，
+    后续 release/clear 都没机会跑 = 进程被杀时的落盘状态）。"""
+
+    def _setup(self, tmp_path, monkeypatch):
+        from openinvest.connectors.web_api.routers import trades as trades_mod
+        db = TradesDB(db_path=str(tmp_path / "trades.db"))
+        trade_id = db.record_trade(symbol="NDQ.AX", direction="BUY", units=10.0,
+                                   price=130.0, cost_currency="AUD")
+        monkeypatch.setattr(trades_mod, "_trades_db", db)
+        pm = _make_pm(tmp_path)
+        monkeypatch.setattr(trades_mod, "PortfolioManager", lambda *a, **k: pm)
+        return trades_mod, db, trade_id, pm
+
+    @staticmethod
+    def _patch(trades_mod, trade_id, status="executed"):
+        import asyncio
+        return asyncio.run(trades_mod.patch_trade_status(trade_id, status=status))
+
+    def _booked(self, pm):
+        fresh = PortfolioManager(pm.store)
+        h = fresh.find_holding("NDQ.AX")
+        return (h["units"] if h else 0.0), fresh.cash_amount("AUD")
+
+    def test_crash_before_sync_then_retry_books_exactly_once(self, tmp_path, monkeypatch):
+        trades_mod, db, trade_id, pm = self._setup(tmp_path, monkeypatch)
+        real_sync = trades_mod._sync_trade_to_portfolio
+
+        def killed(trade):
+            raise SystemExit("killed between claim and sync")
+
+        monkeypatch.setattr(trades_mod, "_sync_trade_to_portfolio", killed)
+        with pytest.raises(SystemExit):
+            self._patch(trades_mod, trade_id)
+        assert db.get_trade(trade_id)["status"] == "executed"  # claim 已落盘
+        assert self._booked(pm) == (0.0, pytest.approx(5000.0))  # 账本没动
+
+        monkeypatch.setattr(trades_mod, "_sync_trade_to_portfolio", real_sync)
+        r = self._patch(trades_mod, trade_id)  # 重试：旧实现在这里幂等早退 → 永久欠账
+        assert r["portfolio_synced"] is True
+        assert self._booked(pm) == (pytest.approx(10.0), pytest.approx(3700.0))
+        assert db.get_trade(trade_id)["sync_pending"] == 0
+
+        r = self._patch(trades_mod, trade_id)  # 标记已清 → 普通幂等重放
+        assert r["portfolio_synced"] is False
+        assert self._booked(pm) == (pytest.approx(10.0), pytest.approx(3700.0))
+
+    def test_crash_after_portfolio_commit_retry_does_not_double_book(self, tmp_path, monkeypatch):
+        """崩在 portfolio 已落盘、sync_pending 未清之间 → 重试接手同步必须去重 no-op。
+        （只有 trades.db 标记、没有 portfolio 侧去重键的方案在这里会双记。）"""
+        trades_mod, db, trade_id, pm = self._setup(tmp_path, monkeypatch)
+        real_sync = trades_mod._sync_trade_to_portfolio
+
+        def sync_then_killed(trade):
+            real_sync(trade)
+            raise SystemExit("killed after portfolio commit")
+
+        monkeypatch.setattr(trades_mod, "_sync_trade_to_portfolio", sync_then_killed)
+        with pytest.raises(SystemExit):
+            self._patch(trades_mod, trade_id)
+        assert db.get_trade(trade_id)["sync_pending"] == 1
+        assert self._booked(pm) == (pytest.approx(10.0), pytest.approx(3700.0))
+
+        monkeypatch.setattr(trades_mod, "_sync_trade_to_portfolio", real_sync)
+        r = self._patch(trades_mod, trade_id)
+        assert r["ok"] is True
+        assert self._booked(pm) == (pytest.approx(10.0), pytest.approx(3700.0))  # 非 20 / 2400
+        assert db.get_trade(trade_id)["sync_pending"] == 0
+
+    def test_executed_planned_executed_does_not_rebook(self, tmp_path, monkeypatch):
+        """executed → planned（无反向冲销）→ executed：CAS 能重新赢（from planned），
+        portfolio 侧去重键挡住第二次入账。"""
+        trades_mod, db, trade_id, pm = self._setup(tmp_path, monkeypatch)
+        self._patch(trades_mod, trade_id)
+        self._patch(trades_mod, trade_id, status="planned")
+        self._patch(trades_mod, trade_id)
+        assert self._booked(pm) == (pytest.approx(10.0), pytest.approx(3700.0))
+        assert db.get_trade(trade_id)["status"] == "executed"
+
+    def test_sync_pending_migration_on_legacy_schema(self, tmp_path):
+        """prod 现有 trades.db（无 sync_pending 列）→ 初始化补列，老行=0，重复初始化幂等。"""
+        import sqlite3
+        path = str(tmp_path / "trades.db")
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE trades (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, "
+            "verdict_id TEXT, symbol TEXT NOT NULL, direction TEXT NOT NULL, units REAL NOT NULL, "
+            "price REAL, cost_currency TEXT DEFAULT 'CNY', note TEXT, "
+            "status TEXT DEFAULT 'planned', intended_date TEXT)"
+        )
+        conn.execute("INSERT INTO trades (ts, symbol, direction, units, status) "
+                     "VALUES ('2026-05-10T00:00:00+00:00', 'NDQ.AX', 'BUY', 5, 'executed')")
+        conn.commit()
+        conn.close()
+        TradesDB(db_path=path)
+        db = TradesDB(db_path=path)  # 第二次初始化不报错
+        assert db.get_trade(1)["sync_pending"] == 0
+        assert db.get_trade(1)["status"] == "executed"
+
+
 class TestConcurrentClaim:
     """#109 并发重复入账：原子 CAS 跃迁保证只有一个请求赢得 planned→executed"""
 

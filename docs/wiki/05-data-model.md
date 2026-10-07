@@ -108,6 +108,10 @@ holdings:
 ---
 ```
 
+可选字段 `synced_trade_ids`（#231，自动维护勿手改）：`PATCH /api/trades/{id}/status`
+已入账单子的 `<trade_id>@<ts>` 去重键（最近 500 个），与 cash/holdings 同一次 atomic
+write，保证崩溃重试不双记。见 [ADR-016](adr/016-ledger-mutation-idempotency.md)。
+
 **核心抽象**：
 - `cash`：`dict[currency_code, amount]`
 - `holdings`：`list[holding]`，每个 holding 自描述（symbol / kind / units / unit_label / cost / channel）
