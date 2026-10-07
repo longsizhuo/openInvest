@@ -40,7 +40,7 @@
     - 不截会让 D=2024-08 的闭卷段 committee 从概率表后门看到 2024-08 之后实际发生的
       统计 → 闭卷段成功率虚高 → 闭卷段白测（经典 look-ahead bias）。
     - 概率表/买回点的所有 OHLC 读取（build_probability_table_from_ohlc /
-      get_reentry_estimate / _ohlc_forward_returns）都经 MarketStore.get_history_df，
+      get_reentry_estimate / get_path_profile）都经 MarketStore.get_history_df，
       patch 这一处即全覆盖，零生产签名改动。
     注意：forward_return_30d（评分用的"答案"）走的是 build_asset_context 里**全历史**
     的 frame（在隔离 context 之外算），需要 D 之后的实际走势 —— 这是合法的事后评分，

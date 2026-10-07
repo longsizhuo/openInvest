@@ -344,17 +344,22 @@ def test_build_probability_table_from_ohlc_stubbed(monkeypatch):
     assert any(rp.effective_n < rp.n for rp in table.values())
 
 
-def test_ohlc_forward_returns_values_exact(monkeypatch):
-    """_ohlc_forward_returns：stub MarketStore，返回值必须等于手算 forward return(%)。
+def test_reentry_estimate_ohlc_values_exact(monkeypatch):
+    """get_reentry_estimate(ohlc)：stub MarketStore，n/中位/p_below 必须等于手算 forward return(%)。
 
     守 CR 🔴#2 + searchsorted 日期对齐：forward return 不能错位一天，regime 过滤后
-    不丢样本/不重复，symbol 接线走 .upper()。
+    不丢样本/不重复，symbol 接线走 .upper()。#234-6 后 OHLC 源经 get_path_profile
+    管线（原 _ohlc_forward_returns 已删）——校准关时数值即原始分布。
     """
+    import statistics
+
     import numpy as np
     import pandas as pd
     import openinvest.db.market_store as ms
-    from openinvest.core.regime_probability import _ohlc_forward_returns, compute_regime_return_frame
+    from openinvest.core.config import set_config_override
+    from openinvest.core.regime_probability import compute_regime_return_frame, get_reentry_estimate
 
+    set_config_override({"path": {"shrinkage_k": 0.0, "band_gamma": 1.0}})
     # n 要够长：ma120 需 120 行 warmup，非 unknown 的行还得有 30d lookahead，故用 300
     n = 300
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
@@ -370,23 +375,23 @@ def test_ohlc_forward_returns_values_exact(monkeypatch):
 
     monkeypatch.setattr(ms, "MarketStore", _StubStore)
 
-    # 手算：fwd_30d[i] = close[i+30]/close[i]-1，×100 转百分比（freq=D → date+30 = 第 i+30 行）
-    expected = {round((close[i + 30] / close[i] - 1) * 100, 9) for i in range(n - 30)}
-
     frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
     regimes = [r for r in frame["regime"].unique() if r != "unknown"]
     assert regimes
-    got = []
+    total = 0
     for rg in regimes:
-        got += _ohlc_forward_returns("test", rg, "30d")  # 传小写验证 .upper() 接线
+        # 手算：fwd_30d[i] = close[i+30]/close[i]-1，×100（freq=D → date+30 = 第 i+30 行）
+        pos = [frame.index.get_loc(t) for t in frame.index[frame["regime"] == rg]]
+        rets = [(close[i + 30] / close[i] - 1) * 100 for i in pos if i + 30 < n]
+        est = get_reentry_estimate("test", rg, 100.0, window="30d")  # 传小写验证 .upper() 接线
+        assert est is not None and est.n == len(rets)
+        assert est.median_return_pct == round(statistics.median(rets), 2)
+        assert est.p_below_current == round(sum(r < 0 for r in rets) / len(rets), 4)
+        total += est.n
     assert captured["symbol"] == "TEST"
-    assert got
-    # 每个返回值都精确等于手算 forward return（无错位一天）
-    assert all(round(v, 9) in expected for v in got)
-    # 覆盖完整：取到的样本数 = 非 unknown 且 fwd 非 NaN 的行数（无丢/无重复）
+    # 覆盖完整：样本数 = 非 unknown 且 fwd 非 NaN 的行数（无丢/无重复）
     valid = frame.dropna(subset=["fwd_30d"])
-    valid = valid[valid["regime"] != "unknown"]
-    assert len(got) == len(valid)
+    assert total == len(valid[valid["regime"] != "unknown"])
 
 
 # ---------- 概率表路径化（2026-06）：多窗 + 路径形状 ----------
@@ -634,6 +639,90 @@ def test_calibrate_profile_reads_config():
         assert abs(p["windows"]["30d"]["median_pct"] - 1.5) < 1e-9
     finally:
         reset_config()
+
+
+# ---------- #234-6：Quant REGIME hint 与 CIO 路径参考过同一校准 ----------
+
+def _random_walk_store(monkeypatch):
+    """多 regime 的确定性随机游走 + stub MarketStore；返回该序列出现的非 unknown regime。"""
+    import numpy as np
+    import pandas as pd
+    import openinvest.db.market_store as ms
+    from openinvest.core.regime_probability import compute_regime_return_frame
+
+    rng = np.random.default_rng(7)
+    n = 900
+    idx = pd.bdate_range("2019-01-01", periods=n)
+    close = 100.0 * np.exp(np.cumsum(rng.normal(0.0003, 0.015, n)))
+    df = pd.DataFrame({"Close": close}, index=idx)
+
+    class _StubStore:
+        def get_history_df(self, symbol, days=730):
+            return df
+
+    monkeypatch.setattr(ms, "MarketStore", _StubStore)
+    frame = compute_regime_return_frame(df, "TEST", windows=("30d",))
+    frame = frame.dropna(subset=["fwd_30d"])
+    return frame, [r for r in frame["regime"].unique() if r != "unknown"]
+
+
+def test_forward_summary_and_path_reference_share_calibration(monkeypatch):
+    """校准开（生产值 80/1.1）时，get_regime_forward_summary（Quant REGIME hint）与
+    build_reentry_reference（CIO 路径参考）对同一 regime 给同一 median/p_below。
+    旧实现 hint 走未校准原始分布 → 两 surface 对同一 regime 引出不同数字。"""
+    from openinvest.core.config import set_config_override
+    from openinvest.core.regime_probability import (
+        build_reentry_reference, get_regime_forward_summary,
+    )
+
+    _frame, regimes = _random_walk_store(monkeypatch)
+    set_config_override({"path": {"shrinkage_k": 0.0, "band_gamma": 1.0}})
+    raw = {rg: get_regime_forward_summary("TEST", rg, 100.0) for rg in regimes}
+    set_config_override({"path": {"shrinkage_k": 80.0, "band_gamma": 1.1}})
+    checked = moved = 0
+    for rg in regimes:
+        _text, profile = build_reentry_reference("TEST", rg, 100.0)
+        hint = get_regime_forward_summary("TEST", rg, 100.0)
+        if profile is None or "30d" not in profile["windows"]:
+            assert hint is None
+            continue
+        st = profile["windows"]["30d"]
+        assert (hint["median_pct"], hint["p_below"]) == (st["median_pct"], st["p_below"])
+        checked += 1
+        moved += (hint["median_pct"], hint["p_below"]) != (raw[rg]["median_pct"], raw[rg]["p_below"])
+    assert checked >= 2
+    assert moved >= 1   # 校准确实改了读数——否则上面的一致性是空转
+
+
+def test_reentry_estimate_calibration_off_is_raw_distribution(monkeypatch):
+    """校准关（0/1）→ get_reentry_estimate(ohlc) 与旧实现（原始 forward return 列表直算）
+    逐字段相等：改走 get_path_profile 管线不改变关闭态输出。"""
+    import statistics
+
+    from openinvest.core.config import set_config_override
+    from openinvest.core.regime_probability import (
+        DEFAULT_THRESHOLD_PCT, MIN_CONFIDENT_N, REENTRY_DOWNSIDE_QUANTILE,
+        ReentryEstimate, _percentile, get_reentry_estimate,
+    )
+
+    frame, regimes = _random_walk_store(monkeypatch)
+    set_config_override({"path": {"shrinkage_k": 0.0, "band_gamma": 1.0}})
+    assert regimes
+    for rg in regimes:
+        rets = (frame.loc[frame["regime"] == rg, "fwd_30d"] * 100).tolist()
+        n = len(rets)
+        eff = max(1, n // 30)
+        down = round(_percentile(rets, REENTRY_DOWNSIDE_QUANTILE), 2)
+        down_px = round(100.0 * (1 + down / 100), 4)
+        assert get_reentry_estimate("TEST", rg, 100.0) == ReentryEstimate(
+            asset="TEST", regime=rg, window="30d", n=n, current_price=100.0,
+            threshold_pct=DEFAULT_THRESHOLD_PCT,
+            p_below_current=round(sum(1 for x in rets if x < 0) / n, 4),
+            p_down=round(sum(1 for x in rets if x < -DEFAULT_THRESHOLD_PCT) / n, 4),
+            median_return_pct=round(statistics.median(rets), 2),
+            downside_pct=down, downside_price=down_px, has_downside=down_px < 100.0,
+            low_confidence=eff < MIN_CONFIDENT_N, effective_n=eff,
+        )
 
 
 def test_get_path_profile_includes_uncond(monkeypatch):

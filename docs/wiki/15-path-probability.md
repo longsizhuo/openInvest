@@ -142,7 +142,9 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
   （形状占比/回踩深度/见底时点），**禁止凭空编路径**
 - TRIM 的 `REENTRY_PRICE ≥ 现价` 仍被 parse_cio_memo Sanity 5 确定性打回 HOLD
 - 概率口径同源：`regime_brief` 的 STRATEGY_HINT（30d 中性概率）与本路径参考来自
-  同一个 `compute_regime_return_frame`，不会互相打架
+  同一个 `get_path_profile` → `calibrate_profile` 管线，不会互相打架
+  （2026-10-07 #234-6 修：此前 hint 走未校准原始分布，校准层 06-11 启用后两者对
+  同一 regime 给出不同中位/跌破概率）
 
 ## 5. 边界与已知局限
 

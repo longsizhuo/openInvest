@@ -132,6 +132,28 @@ def get_regime_probability(
 
 
 
+def _estimate_from_window_stats(
+    asset: str, regime: str, window: str, st: Dict[str, Any], current_price: float,
+    *, currency: str = ReentryEstimate.currency,
+) -> ReentryEstimate:
+    """get_path_profile 单窗统计（已过 calibrate_profile）→ ReentryEstimate。
+    get_reentry_estimate(ohlc) 与 build_reentry_reference 共用，防两 surface 口径分叉（#234-6）。"""
+    downside_price = round(current_price * (1 + st["downside_pct"] / 100), 4)
+    return ReentryEstimate(
+        asset=asset, regime=regime, window=window,
+        n=st["n"], current_price=current_price,
+        threshold_pct=DEFAULT_THRESHOLD_PCT,
+        p_below_current=st["p_below"], p_down=st["p_down"],
+        median_return_pct=st["median_pct"],
+        downside_pct=st["downside_pct"],
+        downside_price=downside_price,
+        has_downside=downside_price < current_price,
+        low_confidence=st["low_confidence"],
+        effective_n=st["effective_n"],
+        currency=currency,
+    )
+
+
 def get_reentry_estimate(
     asset: str,
     regime: str,
@@ -160,7 +182,15 @@ def get_reentry_estimate(
         return None
 
     if source == "ohlc":
-        returns = _ohlc_forward_returns(asset, regime, window, days=days)
+        # 2026-10-07 #234-6：与 build_reentry_reference 走同一条 get_path_profile →
+        # calibrate_profile 管线。旧实现直取未校准分布，而 defaults.yaml 自 2026-06-11
+        # 已启用校准（80/1.1）——Quant REGIME hint 与 CIO 路径参考对同一 regime 引出
+        # 不同 median/p_below。校准关闭时 calibrate_profile 恒等，数值与旧实现一致。
+        # threshold_pct 仅作用于 verdict_review 源；OHLC 源 p_down 固定 DEFAULT_THRESHOLD_PCT
+        # （与路径参考同源——无条件分布按同阈值算，自定义阈值无法校准）。
+        profile = get_path_profile(asset, regime, windows=(window,), shape_window=window, days=days)
+        st = (calibrate_profile(profile) if profile else {}).get("windows", {}).get(window)
+        return _estimate_from_window_stats(asset, regime, window, st, current_price) if st else None
     else:
         # verdict_review 源（保留：命中率/校准仍用；这里只在显式指定时走）
         if records is None:
@@ -182,9 +212,8 @@ def get_reentry_estimate(
         return None
 
     n = len(returns)
-    # OHLC 源是重叠日度 forward return → 独立样本 ≈ n/窗口天数；verdict_review 非重叠 → n。
-    window_days = int(window.rstrip("d")) if source == "ohlc" else 1
-    effective_n = max(1, n // window_days)
+    # verdict_review 源逐决策非重叠 → 独立样本 = n（OHLC 重叠折算在 get_path_profile 里）
+    effective_n = n
     downside_pct = round(_percentile(returns, REENTRY_DOWNSIDE_QUANTILE), 2)
     downside_price = round(current_price * (1 + downside_pct / 100), 4)
     return ReentryEstimate(
@@ -347,20 +376,7 @@ def build_reentry_reference(
             st = (profile or {}).get("windows", {}).get(w)
             est = None
             if st is not None:
-                downside_price = round(current_price * (1 + st["downside_pct"] / 100), 4)
-                est = ReentryEstimate(
-                    asset=asset, regime=regime, window=w,
-                    n=st["n"], current_price=current_price,
-                    threshold_pct=DEFAULT_THRESHOLD_PCT,
-                    p_below_current=st["p_below"], p_down=st["p_down"],
-                    median_return_pct=st["median_pct"],
-                    downside_pct=st["downside_pct"],
-                    downside_price=downside_price,
-                    has_downside=downside_price < current_price,
-                    low_confidence=st["low_confidence"],
-                    effective_n=st["effective_n"],
-                    currency=cur,
-                )
+                est = _estimate_from_window_stats(asset, regime, w, st, current_price, currency=cur)
         else:
             est = get_reentry_estimate(
                 asset, regime, current_price,
@@ -638,20 +654,6 @@ def get_path_profile(
                 "window_median_days": int(s[f"wdays_{sw}"].median()),
             }
     return out if out["windows"] else None
-
-
-def _ohlc_forward_returns(
-    asset: str, regime: str, window: str, *, days: int = 100000,
-) -> List[float]:
-    """从几十年 OHLC 取 (asset, regime) 在 window 的 forward return(%) 列表（0 token）。"""
-    from openinvest.db.market_store import MarketStore
-    df = MarketStore().get_history_df(asset.upper(), days=days)
-    frame = compute_regime_return_frame(df, asset.upper(), windows=(window,))
-    col = f"fwd_{window}"
-    if frame.empty or col not in frame.columns:
-        return []
-    sub = frame[frame["regime"] == regime].dropna(subset=[col])
-    return (sub[col] * 100).tolist()
 
 
 def build_probability_table_from_ohlc(
