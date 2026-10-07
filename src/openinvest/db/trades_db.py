@@ -94,7 +94,12 @@ class TradesDB:
             # 加带常量默认值的列是 O(1) 元数据改动，老行一律 0 = 视为已同步完。
             cols = {r[1] for r in cur.execute("PRAGMA table_info(trades)")}
             if "sync_pending" not in cols:
-                cur.execute("ALTER TABLE trades ADD COLUMN sync_pending INTEGER DEFAULT 0")
+                try:
+                    cur.execute("ALTER TABLE trades ADD COLUMN sync_pending INTEGER DEFAULT 0")
+                except sqlite3.OperationalError as e:
+                    # 多进程（web/MCP/scheduler）重启后同时初始化：两边都查到缺列、后者 ALTER 撞重复列
+                    if "duplicate column" not in str(e).lower():
+                        raise
 
             # 按时间倒序查最近 N 笔是最常见操作
             cur.execute(
