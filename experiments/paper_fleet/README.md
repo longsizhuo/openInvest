@@ -2,8 +2,12 @@
 
 **目的**:持续生产**不受模型升级影响**的干净样本。决策时未来尚不存在 ⇒ 任何未来
 模型都无记忆可穿越(2026-07 deepseek-v4-flash cutoff 事件实证:历史回填桶是相对
-模型的,前瞻样本是唯一免疫源)。`verdict_review`(生产 scheduler 既有 job)在
-30/90 天后自动用真实后市回填评分。
+模型的,前瞻样本是唯一免疫源)。
+
+⚠️ **评分不是自动的**:`jobs/verdict_review.yml` 目前 `enabled: false`(Phase 3
+前留给用户确认频率的闸),生产 scheduler **不会**自动给舰队样本打分。要么把该 job
+改 `enabled: true`,要么手动跑 `uv run python -m openinvest.jobs.verdict_review`
+(纯本地计算,零 API 费用)。在此之前样本只积累不评分。
 
 ## 形态(2026-07-24 重设计,v1 的独立 INVEST_HOME 方案已退役)
 
@@ -24,10 +28,11 @@ SYMS=$(uv run python -c "import yaml; print(','.join(yaml.safe_load(open('experi
 BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective --assets "$SYMS"
 ```
 
-crontab(北京 06:30,美盘收盘后;已于 2026-07-24 挂上):
+crontab(北京 06:30,美盘收盘后;已于 2026-07-24 挂上,07-25 修 PATH——
+cron 的 /bin/sh 不含 ~/.local/bin,首夜因 `uv: not found` 空跑一次):
 
 ```
-30 22 * * * cd /home/ubuntu/projects-review/invest && BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective --assets "$(uv run python -c "import yaml; print(','.join(yaml.safe_load(open('experiments/paper_fleet/universe.yml'))['symbols']))")" >> memory/.backtest/fleet_daily.log 2>&1
+30 22 * * * export PATH="$HOME/.local/bin:$PATH"; cd /home/ubuntu/projects-review/invest && BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective --assets "$(uv run python -c "import yaml; print(','.join(yaml.safe_load(open('experiments/paper_fleet/universe.yml'))['symbols']))")" >> memory/.backtest/fleet_daily.log 2>&1
 ```
 
 ## 标的池
@@ -35,6 +40,20 @@ crontab(北京 06:30,美盘收盘后;已于 2026-07-24 挂上):
 - `universe.yml` — 舰队每日 50 标的(八资产类别)
 - `universe_l2/l3/l4.yml` — 历史回填扩层清单(L2 +100 / L3 +240 / L4 +389,
   与舰队共用 MarketStore 缓存;L4 回填于 2026-07-24 按预算暂停,断点续跑随时可续)
+
+## 保护闸(2026-07-24 CR 后加)
+
+- **行情新鲜度**:逐标的检查缓存最新 bar,**不是当日 bar 就跳过**并打印修复命令——决不拿
+  陈旧收盘价出当天 verdict(那会让 verdict_review 拿真实后市给错标样本打分)。逐标的判定
+  顺带覆盖周末、各市场假日不同步与加密 7×24。
+  ⚠️ **2026-07-25 ~ 2026-09-27 的周末目录是污染样本**:当时阈值是"≤5 天",周末用周五
+  收盘价各出了两份重复 verdict(22 天 × 50 ≈ 1100 份)。评分/统计时按决策日
+  `weekday()>=5` 且非加密标的剔除;2026-10-07 起已改为严格当日。
+- **成本闸**:`--limit N` 在 prospective 下有效(只跑前 N 个标的);`--step` 等回填
+  参数一律拒绝而非静默忽略。
+- **失败可见**:结尾打印 `ok/total`,有失败则 exit 1,cron 日志不会静默成功。
+- **币种**:按 yfinance 后缀映射(.HK→HKD/.T→JPY/.SS→CNY/裸 ticker→USD),
+  取代原先"非 NDQ.AX 一律 CNY"的硬编码。
 
 ## 产出口径
 

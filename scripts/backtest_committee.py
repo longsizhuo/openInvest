@@ -46,6 +46,28 @@ from openinvest.jobs.verdict_review import CONTAMINATION_CUTOFF  # noqa: E402
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
 
+# 前瞻舰队要求的行情新鲜度：该标的最新 bar 必须是"今天"，否则跳过。
+# 决策必须基于当日数据；缓存老化时静默用陈旧收盘价出 verdict、却盖当天日期，
+# 会让 verdict_review 拿真实后市给错标的样本打分（CR 2026-07-24 首条发现）。
+# 2026-10-07：原先"≤5 天"的阈值放过了周末（周五 bar 只旧 1 天）→ 7/25 起每个
+# 周末 50 标的用周五收盘价各出两份重复样本（22 天 ≈1100 份）。cron 在 22:30 UTC
+# （美盘收盘 + backfill 22:00 之后），当日开市的标的都已有当日 bar；休市（周末/
+# 各市场假日）自然没有 → 跳过；加密 7×24 照常。
+
+
+def _currency_of(symbol: str) -> str:
+    """按 yfinance 后缀判币种(CR:原先硬编码 'AUD' if NDQ.AX else 'CNY',
+    50 标的舰队里 48 个被错标成 CNY,事实块里金额语义失真)。"""
+    s = symbol.upper()
+    for suffix, cur in ((".AX", "AUD"), (".HK", "HKD"), (".T", "JPY"),
+                        (".L", "GBP"), (".DE", "EUR"), (".PA", "EUR"),
+                        (".SS", "CNY"), (".SZ", "CNY")):
+        if s.endswith(suffix):
+            return cur
+    if s.endswith("-USD") or s.startswith("^") or s.endswith("=F") or s.endswith("=X"):
+        return "USD"
+    return "USD"  # 裸 ticker 默认美股
+
 
 def _patch_tools_to_date(decision_date: str):
     """返回一个 context manager，把 5 个 tool 的实现全部 patch 成'只看 decision_date 之前'。
@@ -201,7 +223,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
             asset = {
                 "symbol": symbol,
                 "display_name": symbol,
-                "currency": "AUD" if symbol == "NDQ.AX" else "CNY",
+                "currency": _currency_of(symbol),
             }
             try:
                 df = ef.get_history_data(symbol, "2y")
@@ -269,9 +291,18 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 return symbol, {"error": str(e)[:200]}
 
         from concurrent.futures import ThreadPoolExecutor
-        # BACKTEST_WORKERS 可调（默认 4 保守值）。工具全走本地 MarketStore 缓存不碰
-        # yfinance，上限只受 DeepSeek 并发（2500）与本机线程约束——大规模回填可放开
-        with ThreadPoolExecutor(max_workers=min(len(pending), int(os.environ.get("BACKTEST_WORKERS", "4"))) or 1) as ex:
+        # BACKTEST_WORKERS 可调（默认 4 保守值）。已预热的标的走本地 MarketStore 缓存，
+        # 上限只受 DeepSeek 并发（2500）与本机线程约束——大规模回填可放开。
+        # ⚠️ 未预热的冷标的会走 patched_get_history 的空 DB 兜底 → 真打 yfinance，
+        # 高并发下会撞限流：新标的先跑 scripts.backfill_history 预热再放开并发（CR 发现）。
+        # 解析容错：坏值(空串/负数/非数字)不该在 macro LLM 已花钱之后才炸整轮。
+        try:
+            _workers = int(os.environ.get("BACKTEST_WORKERS", "4"))
+        except ValueError:
+            print("⚠️ BACKTEST_WORKERS 非数字，回落默认 4")
+            _workers = 4
+        _workers = max(1, min(_workers, 64))
+        with ThreadPoolExecutor(max_workers=min(len(pending), _workers)) as ex:
             for symbol, vd in ex.map(_run_symbol, pending):
                 if vd is not None:
                     results["verdicts"][symbol] = vd
@@ -310,17 +341,51 @@ def main():
     # 解析时间范围
     today = datetime.now().date()
     if args.prospective:
-        if args.holdout or args.allow_lookahead or args.days or args.start or args.end:
-            raise SystemExit("❌ --prospective 与 --holdout/--allow-lookahead/--days/--start/--end 互斥")
-        if today.weekday() >= 5:
-            print("⏭ 周末休市，前瞻舰队今日无事")
-            return
+        conflicts = [n for n, v in (("--holdout", args.holdout),
+                                    ("--allow-lookahead", args.allow_lookahead),
+                                    ("--days", args.days is not None),
+                                    ("--start", args.start is not None),
+                                    ("--end", args.end is not None),
+                                    ("--step", args.step != 1)) if v]
+        if conflicts:
+            raise SystemExit(f"❌ --prospective 与 {'/'.join(conflicts)} 互斥"
+                             "（--limit 例外：作成本闸，只跑前 N 个标的）")
         d = today.strftime("%Y-%m-%d")
-        print(f"🛰 PROSPECTIVE 前瞻纸面：{d}（未来尚不存在，任何模型无记忆可穿越）")
         asset_symbols = [s.strip() for s in args.assets.split(",") if s.strip()]
-        print(f"🔬 {len(asset_symbols)} 资产 × 1 日 = {len(asset_symbols)} 次 committee")
-        run_one_day(d, asset_symbols)
-        print(f"\n✅ 前瞻纸面完成，已写入 memory/.backtest/{d}/")
+        if args.limit:
+            asset_symbols = asset_symbols[:args.limit]
+
+        # 新鲜度闸(CR 首条发现)：逐标的检查缓存最新 bar。太旧 = 拿陈旧收盘价出
+        # 今天的 verdict，样本会被 verdict_review 系统性错标 → 宁可跳过不产出。
+        # 逐标的判定顺带覆盖各市场假日不同步与加密 7×24（周末仍有新 bar）。
+        from openinvest.db.market_store import MarketStore
+        _store = MarketStore()
+        fresh, stale = [], []
+        for sym in asset_symbols:
+            df = _store.get_history_df(sym, days=5)
+            if df is None or df.empty:
+                stale.append((sym, "no-data"))
+                continue
+            last = df.index.max().date()
+            if last != today:
+                stale.append((sym, f"last={last}"))
+            else:
+                fresh.append(sym)
+        if stale:
+            print(f"⏭ 行情过期跳过 {len(stale)} 个：{stale[:8]}{' ...' if len(stale) > 8 else ''}")
+            print(f"   修复：uv run python -m scripts.backfill_history {' '.join(s for s, _ in stale[:5])} ...")
+        if not fresh:
+            print("❌ 没有任何标的行情是新鲜的——前瞻舰队今日不产出"
+                  "（先跑 backfill_history 刷新缓存，或检查是否休市）")
+            return
+        print(f"🛰 PROSPECTIVE 前瞻纸面：{d}（未来尚不存在，任何模型无记忆可穿越）")
+        print(f"🔬 {len(fresh)} 资产 × 1 日 = {len(fresh)} 次 committee"
+              f"（{len(asset_symbols)} 个中 {len(stale)} 个因行情过期跳过）")
+        res = run_one_day(d, fresh)
+        ok = sum(1 for v in res.get("verdicts", {}).values() if v and not v.get("error"))
+        print(f"\n✅ 前瞻纸面完成：{ok}/{len(fresh)} 成功，写入 memory/.backtest/{d}/")
+        if ok < len(fresh):
+            raise SystemExit(1)   # 让 cron 日志/退出码暴露失败，不静默成功
         return
     if args.days:
         end = today - timedelta(days=1)
