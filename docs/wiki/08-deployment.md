@@ -545,9 +545,10 @@ INVEST_API_TOKEN=...                             # hub 开了才需要
 
 ### 已知限制
 
-- 委员会同步跑会阻塞 uvicorn 事件循环 5-10 分钟（既有限制，远端化放大）：
-  hub 建议 `--workers 2` 多进程部署；长任务全部走"触发 + 轮询"，不会撞 CF
-  ~100s 代理超时。
+- 委员会跑在独立 daemon 线程（#105），其余阻塞端点（event_watch 扫描、
+  committee prepare、yfinance / IMAP 读、sqlite）由 FastAPI 线程池执行
+  （#233-3），不再冻结事件循环，单 worker 即可；委员会长任务走"触发 + 轮询"，
+  不会撞 CF ~100s 代理超时。
 - 客户端与 hub 的"同日 cache"以 **hub 的日期**为准（取自 `/api/health`
   时间戳），跨时区设备不会错位。
 
