@@ -222,11 +222,15 @@ documents:
    ```yaml
    name: weekly_email
    description: 每周日 09:00 发周报
-   schedule: "0 9 * * 0"
+   schedule: "0 9 * * sun"
    timezone: Asia/Shanghai
    entry: jobs.weekly_email:run
    enabled: true
    ```
+
+   `schedule` 按**标准 crontab** 解释（星期 0/7=周日、1=周一），runner 经
+   `scheduler/cron.py:crontab_trigger` 翻译给 APScheduler（其原生 `from_crontab` 是 0=周一，
+   2026-10 前 `1-5` 实际跑周二到周六）。星期字段推荐直接写名字（`mon-fri` / `sun`）。
 
 3. **测试 `tests/test_weekly_email.py`**
 

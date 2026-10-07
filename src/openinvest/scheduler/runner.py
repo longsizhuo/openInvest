@@ -30,8 +30,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from openinvest.paths import INVEST_ROOT
+from openinvest.scheduler.cron import crontab_trigger  # 标准 crontab 星期编号（0/7=周日）
 
 ROOT = INVEST_ROOT
 import openinvest.jobs as _jobs_pkg
@@ -173,7 +173,7 @@ def _resolve_schedule(name: str, yml_schedule: str) -> str:
         from openinvest.core.config import load_config
         sched_str = (getattr(load_config(_force_reload=True).event, attr, "") or "").strip()
         if sched_str:
-            CronTrigger.from_crontab(sched_str)  # 白名单写入时已校验；这里兜底防手改 overrides json
+            crontab_trigger(sched_str)  # 白名单写入时已校验；这里兜底防手改 overrides json
             return sched_str
     except Exception as e:
         log.warning(f"[{name}] 读 config {attr} 失败，退回 yml 默认: {e}")
@@ -210,7 +210,7 @@ def register_jobs(sched: BackgroundScheduler, quiet: bool = False) -> List[Dict[
             registered.append(cfg)
             continue
 
-        trigger = CronTrigger.from_crontab(schedule, timezone=cfg.get("timezone", "Asia/Shanghai"))
+        trigger = crontab_trigger(schedule, timezone=cfg.get("timezone", "Asia/Shanghai"))
         sched.add_job(
             _wrap_job(cfg["name"], cfg["entry"]),
             trigger=trigger,

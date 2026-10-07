@@ -5,6 +5,7 @@ APScheduler 守护进程入口。把 `jobs/` 下的 `.yml` 定义注册成 cron�
 ## 内容
 
 - `runner.py` — main entry：扫描 `jobs/*.yml` → 注册 BackgroundScheduler → 阻塞循环。支持 `--once <job_name>` 单跑某个 job。
+- `cron.py` — crontab 字符串 → APScheduler `CronTrigger`，星期按标准 crontab（0/7=周日）翻译；runner 注册与 config cron 校验共用这一个入口。
 
 ## 启动方式
 
