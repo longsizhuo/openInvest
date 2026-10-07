@@ -23,6 +23,7 @@ dependencies = [
     "pandas-stubs~=2.3.3",
     "markdown>=3.10",
     "requests>=2.32.5",
+    "urllib3>=2.2",  # rss_feed 用 HTTPResponse.read1(decode_content=) 读 feed（2.2 起才有）
     "beautifulsoup4>=4.14.3",
     "lxml>=6.0.2",
     "pandas>=2.3.3",
