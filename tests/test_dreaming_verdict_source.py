@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
 from openinvest.core.config import reset_config, set_config_override
 from openinvest.core.memory_store import MemoryStore
 from openinvest.jobs import dreaming
+
+# 相对今天取日期：light_sleep 按 lookback_days(90) 截断，写死日期会在 90 天后自爆（2026-08 起 CI 全红）
+_RECENT = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +40,7 @@ def _write_reviews(store: MemoryStore, rows):
     path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8")
 
 
-def _review(asset, verdict, hit7, ret7, *, shock=False, date="2026-05-20"):
+def _review(asset, verdict, hit7, ret7, *, shock=False, date=_RECENT):
     # directions = 原始市场方向（verdict 无关），用 ret 符号近似（测试用）
     d = "up" if ret7 > 0 else ("down" if ret7 < 0 else "flat")
     return {
@@ -138,7 +142,7 @@ def test_hold_avoided_down_not_punished(store):
 
 # ---------- crash 样本免责（B 组）----------
 
-def _crash_review(asset, verdict, hit7, ret7, date="2026-05-20"):
+def _crash_review(asset, verdict, hit7, ret7, date=_RECENT):
     """带 regime_at_decision=crash 标记的样本（review 时已留痕）"""
     row = _review(asset, verdict, hit7, ret7, date=date)
     row["regime_at_decision"] = "crash"
@@ -173,7 +177,7 @@ def test_verdict_review_serializes_regime_marker():
     from dataclasses import asdict
     from openinvest.jobs.verdict_review import VerdictReview
     rv = VerdictReview(
-        date="2026-05-20", asset="NDQ.AX", verdict="HOLD", confidence=0.7,
+        date=_RECENT, asset="NDQ.AX", verdict="HOLD", confidence=0.7,
         expected_direction="flat", macro_at_decision={}, regime_at_decision="crash",
     )
     d = asdict(rv)
