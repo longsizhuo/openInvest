@@ -478,9 +478,6 @@ def committee_prepare(body: CommitteePrepareRequest = Body(...)) -> Dict[str, An
     返回 brief + 6 段角色 prompt 全内联——远端客户端的 Claude 据此 spawn 4 个
     subagent，全程不需要本地 memory/。symbol 不在 target_assets 时返回 CLI
     同款 status=error dict（200）。
-
-    注意：内部拉 2y 行情 + 情绪/估值事实块，同步阻塞数十秒（与既有委员会端点
-    同款已知限制，生产建议 --workers 2+）。
     """
     from openinvest.core.committee_runner import prepare_committee_brief
     try:

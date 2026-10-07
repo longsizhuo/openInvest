@@ -281,14 +281,17 @@ async def patch_trade_status(
     重试 PATCH executed 识别到标记 → 接手补同步（已落盘则去重 no-op），不再永久欠账。
     """
     # 先取 trade 原始数据（patch 前），供后面同步用
-    trade_before = await asyncio.to_thread(_get_trades_db().get_trade, trade_id)
+    # 单例首次构造（connect + wal_checkpoint，busy_timeout 5s）也丢线程池；之后
+    # _get_trades_db() 只是取已建好的单例
+    db = await asyncio.to_thread(_get_trades_db)
+    trade_before = await asyncio.to_thread(db.get_trade, trade_id)
     if trade_before is None:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
 
     # ---- 非 executed（planned / cancelled）：无 portfolio 副作用，直接改状态 ----
     if status != "executed":
         try:
-            patched = await asyncio.to_thread(_get_trades_db().patch_status, trade_id, status)
+            patched = await asyncio.to_thread(db.patch_status, trade_id, status)
             if not patched:
                 raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
         except ValueError as e:

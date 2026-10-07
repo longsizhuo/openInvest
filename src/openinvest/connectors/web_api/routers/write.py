@@ -266,17 +266,13 @@ def gold_offset(body: GoldOffsetRequest = Body(...), pm: PortfolioManager = Depe
     if offset is None:
         raise HTTPException(status_code=503, detail="无法获取实时金价，反推失败")
 
-    targets = list(pm.strategy.get("target_assets", []))
-    for a in targets:
-        if a.get("symbol") == "GC=F":
-            a["price_offset_pct"] = round(offset, 4)
-
-    new_data = {
-        "target_assets": targets,
-        "target_allocation_stock": pm.strategy.get("target_allocation_stock", 0.7),
-        "target_allocation_cash": pm.strategy.get("target_allocation_cash", 0.3),
-    }
-    pm.store.write("strategy", "strategy", new_data, pm.strategy.body)
+    # 联网反推（慢）放锁外；写回在 strategy.md 单锁 RMW 内基于最新盘面只改 GC=F 一个字段。
+    # 原先拿请求开始时的 pm.strategy 快照整份覆盖：并发 strategy 写被吞，且只留 3 个
+    # frontmatter key（#233-3 端点进线程池后并发真实发生）。
+    with pm.store.transaction("strategy") as tx:
+        for a in tx.get("target_assets") or []:
+            if a.get("symbol") == "GC=F":
+                a["price_offset_pct"] = round(offset, 4)
     pm._reload()
 
     return WriteResponse(

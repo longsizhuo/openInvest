@@ -58,8 +58,13 @@ def _patch_attr(target):
         # async 的 trades PATCH：残留的 sqlite 点查也必须 to_thread（返回 None → 404）
         (lambda mp, fn: mp.setattr(trades_router, "_trades_db", SimpleNamespace(get_trade=fn)),
          lambda c: c.patch("/api/trades/1/status", json={"status": "cancelled"}), None),
+        # 单例首次构造（wal_checkpoint，busy_timeout 5s）也不能跑在事件循环上
+        (lambda mp, fn: (mp.setattr(trades_router, "_trades_db", None),
+                         mp.setattr(trades_router, "_TradesDB", fn)),
+         lambda c: c.patch("/api/trades/1/status", json={"status": "cancelled"}),
+         SimpleNamespace(get_trade=lambda _id: None)),
     ],
-    ids=["events_check", "committee_live_sse", "trades_patch_status"],
+    ids=["events_check", "committee_live_sse", "trades_patch_status", "trades_db_first_init"],
 )
 def test_blocking_call_does_not_freeze_health(monkeypatch, install, slow_request, ret):
     monkeypatch.delenv("INVEST_API_TOKEN", raising=False)
@@ -87,3 +92,39 @@ def test_blocking_call_does_not_freeze_health(monkeypatch, install, slow_request
             slow.join(10)
             if probe.is_alive():
                 probe.join(10)
+
+
+def test_events_check_overlap_is_single_flight(monkeypatch):
+    """重叠的手动扫描（超时重试 / 双击）不能并行跑两份 event_watch —— 否则同一篇
+    新闻重复触发委员会 + 重复预警邮件。第二个请求立即返回 already_running。"""
+    monkeypatch.delenv("INVEST_API_TOKEN", raising=False)
+    entered, release, calls = threading.Event(), threading.Event(), []
+
+    def _fake_run():
+        calls.append(1)
+        entered.set()
+        release.wait(10)
+        return {"status": "ok"}
+
+    monkeypatch.setattr("openinvest.jobs.event_watch.run", _fake_run)
+    second: dict = {}
+    with TestClient(web_api.app) as c:
+        first = threading.Thread(target=c.post, args=("/api/events/check",))
+        t2 = threading.Thread(target=lambda: second.setdefault("r", c.post("/api/events/check")))
+        first.start()
+        try:
+            assert entered.wait(5)
+            t2.start()
+            t2.join(3)
+            assert "r" in second, "第二个扫描没被单飞挡住，跟第一个一起卡在 event_watch 里"
+            assert second["r"].status_code == 200
+            assert second["r"].json()["status"] == "already_running"
+            assert len(calls) == 1
+        finally:
+            release.set()
+            first.join(10)
+            if t2.is_alive():
+                t2.join(10)
+        # 第一个跑完锁已释放：下一次扫描正常执行
+        assert c.post("/api/events/check").json()["status"] == "ok"
+        assert len(calls) == 2

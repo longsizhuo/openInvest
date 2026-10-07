@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -10,6 +11,11 @@ from openinvest.connectors.web_api.models import EventCheckResponse, EventItem, 
 
 log = logging.getLogger("web_api")
 router = APIRouter()
+
+# 手动扫描单飞：端点进线程池后（#233-3）重叠请求（客户端超时重试 / 双击）会并行跑两份
+# event_watch，同一篇新闻都当未见过 → 重复触发委员会 + 重复预警邮件。
+# ponytail: 进程内锁，挡不住 cron scheduler 进程同时在跑；跨进程要在 event_watch 内加 flock
+_CHECK_LOCK = threading.Lock()
 
 
 @router.get("/api/events/recent", response_model=EventsRecentResponse, tags=["events"])
@@ -56,12 +62,18 @@ def events_check() -> EventCheckResponse:
     """
     import time as _time
     from openinvest.jobs.event_watch import run as event_watch_run
+    if not _CHECK_LOCK.acquire(blocking=False):
+        return EventCheckResponse(
+            status="already_running", fetched=0, new_events=0, triggered=0, duration_ms=0,
+        )
     t0 = _time.perf_counter()
     try:
         result = event_watch_run()
     except Exception as e:
         log.exception(f"events_check failed: {e}")
         raise HTTPException(status_code=500, detail=f"event_watch 跑失败: {e}") from e
+    finally:
+        _CHECK_LOCK.release()
     duration_ms = int((_time.perf_counter() - t0) * 1000)
     return EventCheckResponse(
         status=result.get("status", "ok"),

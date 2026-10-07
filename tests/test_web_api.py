@@ -372,6 +372,38 @@ def test_gold_offset_writes_strategy(client, tmp_store, monkeypatch):
     assert gold["price_offset_pct"] == 0.025
 
 
+def test_gold_offset_keeps_concurrent_strategy_write(client, tmp_store, monkeypatch):
+    """gold/offset 联网反推期间并发的 strategy 写不能被旧快照覆盖，且不丢其它
+    frontmatter key（#233-3：端点进线程池后并发真实发生）"""
+    import threading
+
+    with tmp_store.transaction("strategy") as tx:
+        tx["target_asset"] = "legacy-key"  # 生产 strategy.md 真有的遗留 key
+    entered, added = threading.Event(), threading.Event()
+
+    def _slow_infer(bank_price):  # 代替联网拉金价：等并发写完成再返回
+        entered.set()
+        added.wait(5)
+        return 0.025
+
+    monkeypatch.setattr("openinvest.connectors.web_api.routers.write.infer_offset_pct", _slow_infer)
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("r", client.post("/api/gold/offset", json={"bank_price": 1130.0})))
+    t.start()
+    try:
+        assert entered.wait(5)
+        r_add = client.post("/api/strategy/asset", json={"symbol": "VAS.AX", "max_single_invest_cny": 8000})
+        assert r_add.status_code == 200
+    finally:
+        added.set()
+        t.join(10)
+    assert out["r"].status_code == 200
+    s = tmp_store.read("strategy")
+    assert "VAS.AX" in [a["symbol"] for a in s.get("target_assets")]
+    assert next(a for a in s.get("target_assets") if a["symbol"] == "GC=F")["price_offset_pct"] == 0.025
+    assert s.get("target_asset") == "legacy-key"
+
+
 def test_concurrent_deposit_no_lost_update(client, tmp_store):
     """10 个并发 deposit 100，最终现金 = 原 + 1000，不丢任何一笔（fcntl 锁回归）"""
     import concurrent.futures
