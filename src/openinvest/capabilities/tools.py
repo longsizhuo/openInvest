@@ -156,8 +156,8 @@ def _impl_get_history_data(symbol: str, period: str = "1y") -> Dict[str, Any]:
 
 
 def _impl_analyze_multi_timeframe(symbol: str, label: Optional[str] = None) -> str:
-    from openinvest.utils.exchange_fee import analyze_multi_timeframe, get_history_data
-    df = get_history_data(symbol, "2y")
+    from openinvest.utils.exchange_fee import METRICS_PERIOD, analyze_multi_timeframe, get_history_data
+    df = get_history_data(symbol, METRICS_PERIOD)
     return analyze_multi_timeframe(df, label or symbol)
 
 

@@ -19,7 +19,7 @@ from openinvest.utils.advisory import is_advisory_mode
 from openinvest.utils.exchange_fee import (
     analyze_multi_timeframe, get_history_data, get_macro_data,
 )
-from openinvest.utils.market_metrics import compute_metrics
+from openinvest.utils.market_metrics import METRICS_PERIOD, compute_metrics
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ def run_committee_for_symbol(
 
     # 2. 行情 + 指标 + regime
     try:
-        df = get_history_data(symbol, "2y")
+        df = get_history_data(symbol, METRICS_PERIOD)
     except Exception as e:  # noqa: BLE001
         emit("error", reason=f"行情拉取失败: {e}")
         return {"error": f"行情拉取失败: {e}"}

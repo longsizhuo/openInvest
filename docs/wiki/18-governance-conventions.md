@@ -57,7 +57,7 @@ documents:
 | "近 2 年"窗口 | **504 交易日**（滚动/tail）—— 用户 2026-06-13 裁决：选 504 因**改动面小 + 回测已在用**（非"更对"，504/730 数据证明双向错位、影响很小）；要点=**生产与回测强制同源** | `utils.market_metrics.TRADING_DAYS_2Y`（代码对齐由 #42 落实） | 504/730/全量多处各写 |
 | 价格分位 / VIX 防御分位 | 近 504 交易日内 ≤ 当前值比例 | `_calc_price_quantile` / `_vix_percentile`（tail 504，#42 落实） | 对 `get_history_data` 返回直接算 |
 | 信号→成交时序 | T 日收盘算信号，T+1 生效（`shift(1)`） | 各回测臂 | 同日 lookahead |
-| ⚠ `get_history_data(period)` | `period` **只控 yfinance 抓取**；返回 `get_history_df(默认 days=730)` = **近 730 行**（非全量、非 yfinance"2y"）| `utils.exchange_fee` / `db.market_store` | 假设返回值=period 窗口 |
+| `get_history_data(period)` | `period` **真截断**（2026-10 修，此前被忽略、恒返近 730 行）：`1d/5d`=最近 N 根，`mo/y`=相对最后一根 bar 的日历回看，`max`=全量；喂指标/分位的调用方拉 `METRICS_PERIOD="5y"`（日历 2y 只有 ~484–502 根 < 504）| `calc.timeframe_analysis._apply_period` / `calc.market_metrics.METRICS_PERIOD` | 指标调用方传 `"2y"`；绕过 period 另写 tail(730) |
 
 ## 2. 判据标准（预注册，不许事后改）
 
@@ -94,6 +94,7 @@ documents:
 | 2026-06-13 | 撤回归因："口径 bug 解释 6 月抄底防御偏弱"——**反证**：6 月 transcript `INDEP_DEFENSE_FLAG: on`，防御在触发不是偏弱 | 6/9、6/11 transcript | 删除该归因 |
 | 2026-06-13 | **判据冲突裁决（§0-C 实例）**：黄金防御判据 p_below(本地) vs 中位右偏(论文) 冲突——用户裁决**两者都不采纳**，理由=这条腿要保护的是"高 VIX 期流动性挤兑深跌(左尾)"非涨跌频率 | 用户 §0-C 人话裁决 | 见下条动作 |
 | 2026-06-13 | **生产行为变更（已授权）**：黄金高 VIX/ATR 防御 **全拦 → 强制分批 DCA**（放行 1/3、≥5 交易日/批、≤3 批/20 交易日窗；VIX+ATR 两腿 OR 成单计划）。参数=机制选定圆整值非优化(左尾样本~6-20 脆)。可逆(`gold_defense_dca_enabled=false`)。账本开始记 `defense_gold_dca_*` 供"分批 vs 一次性"长期验证 | 用户"批准。三点"授权 + 确定性全链确认(零 LLM) + pytest 739 绿 | 本 PR 落地 |
+| 2026-10-07 | 根因修复：`get_history_data` 起按 period 截断。两个通道此前都是 ~3 年涨跌：宏观块 "MoM"（DXY/TIP/TNX/VIX）+ Macro agent 自调的 `get_history_data` 工具（tool_calls.jsonl 33,909 次，3mo/6mo 占 98%）。63 个工作日回放：旧口径天天"黄金双顺风"；按真实窗口 DXY/TIP 至少一腿说反——宏观块 59 天、工具 3mo/6mo 63 天，实为双逆风 25 / 42 / 53 天。对账：日报 old 口径复现 TNX/VIX/DXY 63/63、TIP 55/63；窗口内 4,286 次工具调用 n_days=730 且基准价 100% 复现 old | `experiments/macro-mom-fix-2026-10/` | 指标调用方改 `METRICS_PERIOD`，regime/brief/分位/多周期文本前后逐字相同 |
 
 ## 6. 红线（这次定，长期守）
 

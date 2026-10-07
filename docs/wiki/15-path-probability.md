@@ -208,11 +208,11 @@ uv run pytest tests/test_regime_probability.py -q     # 数值精确性 + 形状
 
 ```bash
 uv run python -c "
-from utils.market_metrics import compute_metrics
+from utils.market_metrics import METRICS_PERIOD, compute_metrics
 from utils.exchange_fee import get_history_data
 from core.regime import classify_regime
 from core.regime_probability import build_reentry_reference_text
-df = get_history_data('NDQ.AX', '2y'); m = compute_metrics(df)
+df = get_history_data('NDQ.AX', METRICS_PERIOD); m = compute_metrics(df)
 rg = classify_regime(m, symbol='NDQ.AX')['regime']
 print(build_reentry_reference_text('NDQ.AX', rg, m['current_price']))"
 ```

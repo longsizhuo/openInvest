@@ -27,10 +27,10 @@ router = APIRouter()
 async def get_regime(symbol: str) -> RegimeResponse:
     """实时算指定 symbol 的市场 regime（牛/熊/震荡）+ 给 LLM 看的 brief"""
     from openinvest.core.regime import classify_regime, regime_strategy_hint, format_regime_brief
-    from openinvest.utils.market_metrics import compute_metrics
+    from openinvest.utils.market_metrics import METRICS_PERIOD, compute_metrics
 
     try:
-        df = get_history_data(symbol, "2y")
+        df = get_history_data(symbol, METRICS_PERIOD)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(503, f"行情拉取失败: {e}")
     if df is None or df.empty:

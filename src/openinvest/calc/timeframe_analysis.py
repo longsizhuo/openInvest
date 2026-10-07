@@ -34,6 +34,39 @@ def _apply_cutoff(df: pd.DataFrame, as_of_date: Optional[str]) -> pd.DataFrame:
     return df[df.index <= cutoff]
 
 
+# yfinance period 词表。d = 最近 N 根 bar（Yahoo 的 1d/5d 就是最近 N 个交易时段）；
+# mo/y = 相对**最后一根 bar** 的日历回看，窗口 (last - offset, last]。
+_PERIOD_BARS = {"1d": 1, "5d": 5}
+_PERIOD_OFFSETS = {
+    "1mo": pd.DateOffset(months=1),
+    "3mo": pd.DateOffset(months=3),
+    "6mo": pd.DateOffset(months=6),
+    "1y": pd.DateOffset(years=1),
+    "2y": pd.DateOffset(years=2),
+    "5y": pd.DateOffset(years=5),
+    "10y": pd.DateOffset(years=10),
+}
+
+
+def _apply_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    """按 yfinance period 截取窗口（先 _apply_cutoff 再调，回测=实盘同口径）。
+
+    2026-10 根因修复：get_history_data 此前无视 period、一律返回 ~730 行（≈3 年），
+    取 iloc[0] 的 "1mo MoM"（DXY/TIP/TNX/VIX）实为 ~3 年涨跌，方向可反。
+    "max" = 全历史；未知 period 抛 ValueError（静默忽略正是本 bug 的来源）。
+    """
+    if period not in ("max", "ytd", *_PERIOD_BARS, *_PERIOD_OFFSETS):
+        raise ValueError(f"unsupported period: {period!r}")
+    if df.empty or period == "max":
+        return df
+    if period in _PERIOD_BARS:
+        return df.tail(_PERIOD_BARS[period])
+    last = df.index[-1]
+    if period == "ytd":
+        return df[df.index.year == last.year]
+    return df[df.index > last - _PERIOD_OFFSETS[period]]
+
+
 # ==========================================
 # 数学工具
 # ==========================================
@@ -135,6 +168,7 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
 
 __all__ = [
     "_apply_cutoff",
+    "_apply_period",
     "_calc_change",
     "_calc_max_drawdown",
     "_calc_volatility",

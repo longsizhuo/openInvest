@@ -37,7 +37,9 @@ from openinvest.calc.sentiment import (  # noqa: F401
     _vix_label,
 )
 
-VIX_PERIOD = "2y"  # 数据窗口定义（与 brief 文案"近2年分位"/price_quantile_2y 口径一致，非调参项）
+# 拉取窗口（非分位窗口）：分位窗口由下方 tail(TRADING_DAYS_2Y) 定。日历 "2y" 只有 ~502 根
+# < 504，必须多拉（2026-10 get_history_data 起真按 period 截断）。
+from openinvest.calc.market_metrics import METRICS_PERIOD as VIX_PERIOD
 # 恐慌/贪婪分档 + 快崩哨兵线 → core/config (sentiment 节)，defaults.yaml 可调，
 # env INVEST_SENTIMENT_<KEY> 可覆盖
 
@@ -58,7 +60,7 @@ def _vix_percentile() -> Optional[Tuple[float, float]]:
         return None
     if df is None or df.empty or "Close" not in df:
         return None
-    # 口径修正（2026-06-13）：get_history_data("^VIX","2y") 返回 get_history_df(默认730行)，
+    # 口径修正（2026-06-13）：当时 get_history_data("^VIX","2y") 返回 get_history_df(默认730行)，
     # 此前 (closes <= last).mean() 对 730 行(≈2.9年)算分位 → 与回测/canonical 504 分叉。
     # 强制 tail(TRADING_DAYS_2Y=504)，与 validate_gold_defense rolling(504)、price_quantile_2y
     # 同口径（单一可信源 utils.market_metrics；transcript 4 点校验过生产=730 窗）。

@@ -21,7 +21,7 @@
 为保证"历史回测有效 + 零副作用 + 确定性"做的隔离（见 _pin_to_date_and_isolate）
 ────────────────────────────────────────────────────────────────────────────
 钉到 D（只看 D 之前市场数据）:
-  • utils.exchange_fee.get_history_data → 全历史读 DB → 截 <= D → tail(730)
+  • utils.exchange_fee.get_history_data → 全历史读 DB → 截 <= D → 按 period 截（同 live）
     （复刻 scripts/backtest_committee.py 的修复：底层 get_history_data 先 tail(730)
      再 cutoff，对早期决策日只剩末端窗口、MA120/quantile 退化成 unknown。这里先全
      历史取再截，保证 D 之前有足够根算 MA120 / price_quantile_2y。a72678b 只改了
@@ -161,14 +161,14 @@ def _pin_to_date_and_isolate(decision_date: str):
     real_get_history_df = ms.MarketStore.get_history_df
 
     def patched_get_history(symbol: str, period: str = "2y", as_of_date=None):
-        # 行情/技术/macro：先全历史，再按 D 截，最后 tail(730) —— 保证早期决策日
-        # 也有 ≥250 根算 MA（底层 get_history_data 先 tail(730) 再 cutoff 会退化）。
+        # 行情/技术/macro：先全历史，再按 D 截，最后按 period 截（与 live get_history_data
+        # 同一个 _apply_period；2026-10 前 tail(730) 无视 period → macro "1mo MoM" 实为 ~3 年）。
         df = ef._STORE.get_history_df(symbol, days=100000)
         if df is None or df.empty:
             # DB 没这个 symbol（如 ^VIX/^TNX 可能没入库）→ 退回原实现，带 as_of_date 截到 D
             return real_get_history(symbol, period, as_of_date=decision_date)
         df = df[df.index <= cutoff_ts]
-        return df.tail(730)
+        return ef._apply_period(df, period)
 
     def patched_get_history_df(self, *a, **k):
         # 概率表 + 买回点参考的 OHLC 读取口：截 <= D，修 look-ahead。

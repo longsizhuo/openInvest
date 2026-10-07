@@ -64,7 +64,7 @@ from openinvest.jobs.dreaming_calc import (  # noqa: F401
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.regime import classify_regime
 from openinvest.utils.exchange_fee import get_history_data
-from openinvest.utils.market_metrics import compute_metrics
+from openinvest.utils.market_metrics import METRICS_PERIOD, compute_metrics
 
 # Light Sleep 摄入最近 N 天的 verdict。生产默认 90（只学近期行为）；跑历史 backtest
 # 训练集（如 Phase 1.5 的 2023-2024 leak-free 窗口）时，数据比 wall-clock"现在"老得多，
@@ -166,7 +166,7 @@ def _decision_regime(asset: str, decision_date: str) -> Optional[str]:
     None（该样本不按 regime 细分，进 "any" 桶）。
     """
     try:
-        df = get_history_data(asset, "2y")
+        df = get_history_data(asset, METRICS_PERIOD)
         if df is None or df.empty:
             return None
         df_cut = df[df.index <= pd.to_datetime(decision_date)]

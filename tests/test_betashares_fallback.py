@@ -33,7 +33,7 @@ def _fake_store(monkeypatch, saved):
     def fake_save(symbol, date_str, close, source="yfinance", **kwargs):
         saved.append({"symbol": symbol, "date": date_str, "close": close, "source": source})
 
-    def fake_get(symbol):
+    def fake_get(symbol, days=730):
         rows = [r for r in saved if r["symbol"] == symbol]
         if not rows:
             return pd.DataFrame()

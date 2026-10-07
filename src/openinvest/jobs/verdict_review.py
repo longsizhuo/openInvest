@@ -75,10 +75,14 @@ _GOLD_PROXY_KINDS = {"gold_cny_per_gram"}
 
 
 def _closes(symbol: str):
-    """拉 symbol 近 1 年日线（DataFrame，index=日期）。失败/空返回 None。"""
+    """拉 symbol 全历史日线（DataFrame，index=日期）。失败/空返回 None。
+
+    2026-10：get_history_data 起真按 period 截断，原 "1y" 会让 >1 年的决议全丢收益
+    （此前实际拿到 ~730 行≈3 年）。前向收益查任意历史日，用 "max"。
+    """
     from openinvest.utils.exchange_fee import get_history_data
     try:
-        df = get_history_data(symbol, "1y")
+        df = get_history_data(symbol, "max")
         if df is None or df.empty:
             return None
         return df
@@ -98,13 +102,17 @@ def _close_on_or_after(df, day) -> Optional[float]:
     """
     # 过去侧护栏（issue #179 P1-A⑤）：决议日早于窗口首行时，>= 过滤返回整个
     # frame，iloc[0] 会静默锚到"窗口第一根"而非决议日收盘，收益算错。
-    # _closes 只拉 1y——重打分老决议（backfill / 全量重跑）必然踩到。宁跳过不算错。
-    if day < df.index.date.min():
+    # 早于该 symbol 首根 bar 的决议（上市前）仍会踩到。宁跳过不算错。
+    # 2026-10：_closes 改拉全历史后，df.index.date 每次物化整列 object 数组（GC=F 1.4 万行，
+    # 全量重建几十万次）→ 直接在升序 DatetimeIndex 上 searchsorted（DB 来源 index 为 naive 日期）。
+    import pandas as pd
+    t = pd.Timestamp(day)
+    if t < df.index[0].normalize():
         return None
-    sub = df[df.index.date >= day]
-    if sub.empty:
+    i = df.index.searchsorted(t)
+    if i == len(df):
         return None
-    return float(sub["Close"].iloc[0])
+    return float(df["Close"].iloc[i])
 
 
 def _window_return(
@@ -160,19 +168,21 @@ def _detect_macro_shock(
     ~20%，且 `abs()` 双向连"VIX 下行/市场转好"也误杀。函数与 macro_shock 字段
     保留，仅作历史/参考（verdict_review 报告里仍统计展示），不参与样本剔除。
     """
+    import pandas as pd
     from openinvest.utils.exchange_fee import get_history_data
     shock: Dict[str, Any] = {"detected": False, "drivers": []}
 
     def _get_close_on(symbol: str, date_str: str) -> Optional[float]:
         try:
             d = datetime.strptime(date_str, "%Y-%m-%d").date()
-            df = get_history_data(symbol, "1y")
+            df = get_history_data(symbol, "max")
             if df.empty:
                 return None
-            df_at = df[df.index.date <= d]
-            if df_at.empty:
+            # date <= d 的根数（同 _close_on_or_after：searchsorted 代替物化 index.date）
+            i = df.index.searchsorted(pd.Timestamp(d) + pd.Timedelta(days=1))
+            if i == 0:
                 return None
-            return float(df_at["Close"].iloc[-1])
+            return float(df["Close"].iloc[i - 1])
         except Exception:
             return None
 

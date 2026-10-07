@@ -214,7 +214,7 @@ holdings:
      │     │
      │     └─ run_committee_for_symbol(sym, ...)
      │           │
-     │           ├─ get_history_data(sym, "2y")
+     │           ├─ get_history_data(sym, METRICS_PERIOD)  # "5y"：日历 2y 不够 504 根
      │           ├─ compute_metrics(df) → regime
      │           ├─ regime_brief = format_regime_brief(metrics)
      │           │

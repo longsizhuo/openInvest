@@ -34,6 +34,11 @@ RVOL_WINDOW = 20
 # 2026-06-13 口径审计根因：get_history_data(period) 不截断、返回 get_history_df(默认 730 行)，
 # price_quantile/VIX 分位对"730 行(≈2.9年)"而非 504 算 → 本常量 + tail() 修正(transcript 校验)。
 TRADING_DAYS_2Y = 504
+# 喂 compute_metrics / analyze_multi_timeframe / VIX 分位的 get_history_data period。
+# 2026-10 get_history_data 起真按 period 截断：日历 "2y" 只有 ~484(A股)/~494(港股)/~502(美股)
+# 根 < TRADING_DAYS_2Y → 分位/2Y 切片悄悄变短、与回测 rolling(504) 分叉。拉 5y（⊇ 旧 730 行
+# 窗）再由各指标自己 tail，口径不随 period 漂——所以上面的 tail(504) 仍然必要。
+METRICS_PERIOD = "5y"
 
 
 def _safe_last(series: pd.Series) -> Optional[float]:
@@ -198,9 +203,10 @@ def _calc_price_quantile(close: pd.Series,
     单根历史插针就能压缩整条区间、严重失真，且与"分位"语义不符，已废弃。）
 
     **窗口在函数内强制 tail(window)**（2026-06-13 口径修正）：此前靠 caller 传"恰好 2y"
-    数据，但 get_history_data 实际返回全量 DB → 分位对全量历史算（price_quantile_2y
-    名不副实，且随 DB 增长漂移）。现在无论传入多长，只取最后 window 根，与回测
-    compute_regime_return_frame 的 rolling(TRADING_DAYS_2Y) 同口径。
+    数据，但当时 get_history_data 无视 period、恒返近 730 行 → 分位对 ~2.9 年算
+    （price_quantile_2y 名不副实）。现在无论传入多长，只取最后 window 根，与回测
+    compute_regime_return_frame 的 rolling(TRADING_DAYS_2Y) 同口径。2026-10 起 period
+    真截断，调用方拉 METRICS_PERIOD（5y）保证 ≥ window 根——本 tail 仍是窗口唯一定义处。
     """
     valid = close.dropna()
     if valid.empty:
@@ -334,6 +340,7 @@ __all__ = [
     "LOOKBACK_30D",
     "RVOL_WINDOW",
     "TRADING_DAYS_2Y",
+    "METRICS_PERIOD",
     "_safe_last",
     "_calc_rsi",
     "_atr_pct_series",

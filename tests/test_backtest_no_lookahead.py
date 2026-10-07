@@ -36,7 +36,7 @@ def fake_db_with_future(monkeypatch, tmp_path) -> Iterator[None]:
         index=dates,
     )
 
-    monkeypatch.setattr(ef._STORE, "get_history_df", lambda symbol: fake_df.copy())
+    monkeypatch.setattr(ef._STORE, "get_history_df", lambda symbol, days=730: fake_df.copy())
     # 禁掉 yfinance 网络调用（用 RuntimeError 让 exchange_fee try/except 能 catch；
     # pytest.fail 抛 BaseException 子类会绕过 try/except，造成假阳性）
     yfinance_called = []

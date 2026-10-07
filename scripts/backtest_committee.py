@@ -116,16 +116,17 @@ def _patch_tools_to_date(decision_date: str):
         # 的 tail(730)（取最新到今天的 730 行）再 _apply_cutoff，对历史决议日只剩
         # cutoff 之前落在"最新 730 行窗口"里的那部分（2024-04-02 只剩 ~186 行）
         # → MA250 永远 None、早期日 MA120 也 None → regime 退化 unknown。
-        # 这里按正确顺序重算：取全历史 → 按 decision_date 截断 → 再 tail(730)，
-        # 保证 cutoff 之前有 ≥250 根可算 MA250。仅作用于 backtest 路径，不动 live
-        # get_history_data 逻辑。DB 已回填历史（含 OHLC），直接读 store 即可。
+        # 这里按正确顺序重算：取全历史 → 按 decision_date 截断 → 再按 period 截
+        # （2026-10 起与 live get_history_data 同一个 _apply_period，回测=实盘口径；
+        # 此前 tail(730) 无视 period → 回测 macro "1mo MoM" 同样是 ~3 年涨跌）。
+        # 不直接调 real_get_history：它对老 cutoff 会触发 yfinance 2y 拉取写库。
         import pandas as _pd
         df = ef._STORE.get_history_df(symbol, days=100000)
         if df is None or df.empty:
             # 兜底：DB 没数据时退回原实现（含 yfinance/CSV 兜底）
             return real_get_history(symbol, period, as_of_date=decision_date)
         df = df[df.index <= _pd.to_datetime(decision_date)]
-        return df.tail(730)
+        return ef._apply_period(df, period)
 
     stack.enter_context(patch.object(ef, "get_history_data", patched_get_history))
 
@@ -226,7 +227,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 "currency": _currency_of(symbol),
             }
             try:
-                df = ef.get_history_data(symbol, "2y")
+                df = ef.get_history_data(symbol, ef.METRICS_PERIOD)
                 if df is None or df.empty or len(df) < 30:
                     print(f"  ⏭ {symbol}: skipped (insufficient history: {len(df) if df is not None else 0} rows)")
                     return symbol, None

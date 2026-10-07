@@ -14,7 +14,7 @@ from openinvest.core.committee import (
     regime_label_from_text,
 )
 from openinvest.core.regime import classify_regime, format_regime_brief
-from openinvest.utils.market_metrics import compute_metrics
+from openinvest.utils.market_metrics import METRICS_PERIOD, compute_metrics
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
         }
 
     # 算 metrics + regime 一次，给 analyze_multi_timeframe 和 format_regime_brief 共用
-    df_target = get_history_data(target["symbol"], "2y")
+    df_target = get_history_data(target["symbol"], METRICS_PERIOD)
     metrics = compute_metrics(df_target)
     market = analyze_multi_timeframe(
         df_target,

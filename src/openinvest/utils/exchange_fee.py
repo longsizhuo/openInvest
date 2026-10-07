@@ -13,11 +13,13 @@ from openinvest.db.market_store import MarketStore
 from openinvest.calc.timeframe_analysis import (  # noqa: F401
     _analyze_slice,
     _apply_cutoff,
+    _apply_period,
     _calc_change,
     _calc_max_drawdown,
     _calc_volatility,
     analyze_multi_timeframe,
 )
+from openinvest.calc.market_metrics import METRICS_PERIOD
 from openinvest.calc.transaction_costs import (  # noqa: F401
     CostSnapshot,
     ForexFriction,
@@ -61,6 +63,8 @@ def _betashares_fallback(symbol: str) -> bool:
 # 保证 RSI/MA120/MA250/regime 全部算得出（仅 60 会让 60~249 根的 symbol 仍缺 MA120/MA250
 # → REGIME=unknown）。年轻 symbol（上市不足 ~1 年）会每次拉 2y 取尽可用历史，可接受。
 _MIN_HISTORY_ROWS = 250
+# get_history_df 的 days 是行数上限；取足够大 = 全历史（同 verdict_review / backtest 口径）
+_ALL_ROWS = 100000
 
 
 def _nan_to_none(v):
@@ -85,7 +89,10 @@ def get_history_data(
 
     Args:
         symbol: yfinance ticker（如 NDQ.AX / GC=F / AAPL）
-        period: yfinance 的 period 参数（兼容老调用方）
+        period: yfinance period（1d/5d/1mo/3mo/6mo/1y/2y/5y/10y/ytd/max），**真截断**：
+            d=最近 N 根 bar，mo/y=相对最后一根 bar（as_of_date 时为截断后的最后一根）
+            的日历回看。2026-10 前此参数被忽略、一律返回 ~730 行（≈3 年）→ "1mo MoM"
+            实为 ~3 年涨跌。要喂 compute_metrics 的调用方用 METRICS_PERIOD。
         as_of_date: **回测穿越防护**。如果给定 (ISO 'YYYY-MM-DD')，结果 df 会
             过滤到该日期**之前**（不含当日），所有数据源（DB 缓存 + yfinance 拉新
             + CSV 兜底）都受此约束。backtest_committee.py 的 _patch_tools_to_date
@@ -96,8 +103,9 @@ def get_history_data(
     """
     symbol = symbol.upper()
 
-    # 1. 从数据库获取
-    df_db = _STORE.get_history_df(symbol)
+    # 1. 从数据库获取**全历史**（get_history_df 默认 tail(730) 在 cutoff 之前截，
+    #    as_of 回测日窗口会被锚死在最近 730 行；period 截断统一放到最后）
+    df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
 
     # 2. 判断是否需要更新（如今天还没更新过）
     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -142,9 +150,10 @@ def get_history_data(
             # 偏移多半是 BetaShares NAV 兜底混写（本轮 5d 落库就会覆盖自愈）——
             # 所以 ≥2 个重叠日差 >1% 才判定复权基准变化，升级 2y 全量重取。
             if fetch_period == "5d" and not df_yf.empty and not df_db.empty:
+                # 只建重叠段（df_db 现为全历史，^GSPC 2.5 万行逐行 strftime 会拖慢每次 5d 刷新）
                 db_close = {
                     ts.strftime("%Y-%m-%d"): _nan_to_none(c)
-                    for ts, c in df_db["Close"].items()
+                    for ts, c in df_db["Close"].tail(len(df_yf) + 10).items()
                 }
                 mismatched = []
                 for idx, row in df_yf.iterrows():
@@ -175,7 +184,7 @@ def get_history_data(
                         low=_nan_to_none(row.get('Low')),
                         volume=_nan_to_none(row.get('Volume')),
                     )
-                df_db = _STORE.get_history_df(symbol)
+                df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
         except Exception as e:
             print(f"❌ yfinance sync failed for {symbol}: {e}")
 
@@ -183,10 +192,10 @@ def get_history_data(
         # 只在实盘路径（as_of_date=None）触发：scraper 只有"现在"这一个点，
         # 对历史 cutoff 无意义。
         if not yf_got_data and as_of_date is None and _betashares_fallback(symbol):
-            df_db = _STORE.get_history_df(symbol)
+            df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
 
     if not df_db.empty:
-        return _apply_cutoff(df_db, as_of_date)
+        return _apply_period(_apply_cutoff(df_db, as_of_date), period)
 
     return pd.DataFrame()
 
@@ -259,13 +268,13 @@ def get_full_market_data(target_asset: str, fx_symbol: Optional[str] = None) -> 
             必填——之前默认 "NDQ.AX" 会让 fork 用户错拉到作者持仓数据）
         fx_symbol: 关联汇率 ticker（None 则 daily_report 单独决定）
     """
-    df_asset = get_history_data(target_asset, "2y")
+    df_asset = get_history_data(target_asset, METRICS_PERIOD)
     report_asset = analyze_multi_timeframe(df_asset, f"TARGET ASSET ({target_asset})")
 
     if fx_symbol is None:
         return report_asset
 
-    df_fx = get_history_data(fx_symbol, "2y")
+    df_fx = get_history_data(fx_symbol, METRICS_PERIOD)
     report_fx = analyze_multi_timeframe(df_fx, f"CURRENCY RATE ({fx_symbol})")
     return f"{report_asset}\n\n{report_fx}\n"
 
