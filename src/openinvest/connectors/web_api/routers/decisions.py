@@ -22,7 +22,7 @@ router = APIRouter()
 
 
 @router.get("/api/decisions", response_model=DecisionsResponse, tags=["decisions"])
-async def get_decisions(days: int = Query(90, ge=1, le=3650)) -> DecisionsResponse:
+def get_decisions(days: int = Query(90, ge=1, le=3650)) -> DecisionsResponse:
     """统一决策视图：每条委员会决议 join 规则干预 / 用户执行 / 事后结果。最新在前。"""
     from openinvest.core.decision_ledger import list_decisions, summarize_decisions
     ds = list_decisions(days=days)
@@ -35,7 +35,7 @@ async def get_decisions(days: int = Query(90, ge=1, le=3650)) -> DecisionsRespon
 
 @router.post("/api/decisions/execution", response_model=DecisionExecution,
              tags=["decisions"])
-async def post_execution(body: RecordExecutionRequest) -> DecisionExecution:
+def post_execution(body: RecordExecutionRequest) -> DecisionExecution:
     """记录用户对某决议的执行/拒绝 + 原因（Reason Loop 的存储端，采集在宿主 Agent）。"""
     from openinvest.core.decision_ledger import record_execution
     try:

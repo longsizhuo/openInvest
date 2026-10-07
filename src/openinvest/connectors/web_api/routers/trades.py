@@ -40,7 +40,7 @@ def _get_trades_db() -> _TradesDB:
 
 
 @router.post("/api/trades/record", tags=["trades"])
-async def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
+def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
     """记录一笔计划交易到本地账本（不连真实支付渠道）
 
     写入 db/trades.db，返回 {id, ok: true}。
@@ -63,7 +63,7 @@ async def record_trade(body: RecordTradeRequest = Body(...)) -> Dict[str, Any]:
 
 
 @router.get("/api/trades", response_model=TradesListResponse, tags=["trades"])
-async def list_trades(limit: int = Query(20, ge=1, le=500,
+def list_trades(limit: int = Query(20, ge=1, le=500,
                                          description="最近 N 笔，最多 500")) -> TradesListResponse:
     """按时间倒序返回最近 N 笔账本记录"""
     rows = _get_trades_db().list_trades(limit=limit)
@@ -281,14 +281,14 @@ async def patch_trade_status(
     重试 PATCH executed 识别到标记 → 接手补同步（已落盘则去重 no-op），不再永久欠账。
     """
     # 先取 trade 原始数据（patch 前），供后面同步用
-    trade_before = _get_trades_db().get_trade(trade_id)
+    trade_before = await asyncio.to_thread(_get_trades_db().get_trade, trade_id)
     if trade_before is None:
         raise HTTPException(status_code=404, detail=f"trade id={trade_id} 不存在")
 
     # ---- 非 executed（planned / cancelled）：无 portfolio 副作用，直接改状态 ----
     if status != "executed":
         try:
-            patched = _get_trades_db().patch_status(trade_id, status)
+            patched = await asyncio.to_thread(_get_trades_db().patch_status, trade_id, status)
             if not patched:
                 raise HTTPException(status_code=404, detail=f"trade_id={trade_id} 不存在")
         except ValueError as e:

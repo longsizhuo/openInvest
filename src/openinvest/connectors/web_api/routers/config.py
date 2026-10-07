@@ -23,13 +23,13 @@ def _view() -> ConfigResponse:
 
 
 @router.get("/api/config", response_model=ConfigResponse, tags=["config"])
-async def get_config() -> ConfigResponse:
+def get_config() -> ConfigResponse:
     """读白名单全部配置项的当前生效值（含是否被持久 override + 元信息）。"""
     return _view()
 
 
 @router.put("/api/config", response_model=ConfigResponse, tags=["config"])
-async def put_config(body: ConfigUpdateRequest = Body(...)) -> ConfigResponse:
+def put_config(body: ConfigUpdateRequest = Body(...)) -> ConfigResponse:
     """设一条白名单 override（落盘持久化，跨 web/cron/skill 共读）。非白名单/非法值 → 400。"""
     from openinvest.core.config import set_persisted_override
     try:
@@ -41,7 +41,7 @@ async def put_config(body: ConfigUpdateRequest = Body(...)) -> ConfigResponse:
 
 
 @router.delete("/api/config/{key}", response_model=ConfigResponse, tags=["config"])
-async def delete_config(key: str) -> ConfigResponse:
+def delete_config(key: str) -> ConfigResponse:
     """删一条持久 override，回退到 env/yaml/默认。非白名单 key → 404。"""
     from openinvest.core.config import clear_persisted_override
     try:

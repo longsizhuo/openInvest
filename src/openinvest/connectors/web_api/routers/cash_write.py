@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 @router.post("/api/cash/{currency}/deposit", response_model=WriteResponse, tags=["cash_write"])
-async def cash_deposit(currency: str, body: CashWriteRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def cash_deposit(currency: str, body: CashWriteRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """v2 通用任意币种存款"""
     ccy = currency.upper()
     if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
@@ -42,7 +42,7 @@ async def cash_deposit(currency: str, body: CashWriteRequest = Body(...), pm: Po
 
 
 @router.post("/api/cash/{currency}/withdraw", response_model=WriteResponse, tags=["cash_write"])
-async def cash_withdraw(currency: str, body: CashWriteRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def cash_withdraw(currency: str, body: CashWriteRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """v2 通用任意币种取款（默认禁止扣到负数 — PM 强烈要求；后续可加 force=true 显式越过）
 
     余额检查在 fcntl 锁内执行，避免并发取款 TOCTOU 竞态。

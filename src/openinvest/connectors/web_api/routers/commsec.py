@@ -45,7 +45,7 @@ def _commsec_fetch(lookback_days: int) -> tuple[List[Dict[str, Any]], Optional[s
     response_model=CommsecPreviewResponse,
     tags=["commsec"],
 )
-async def commsec_preview(
+def commsec_preview(
     lookback_days: int = Query(180, ge=1, le=365),
 ) -> CommsecPreviewResponse:
     """预览 CommSec 邮件拉到的新成交（不写入）。GUI [Import] 按钮先调它"""
@@ -64,7 +64,7 @@ async def commsec_preview(
     response_model=CommsecApplyResponse,
     tags=["commsec"],
 )
-async def commsec_apply(
+def commsec_apply(
     body: CommsecApplyRequest = Body(...),
     pm: PortfolioManager = Depends(get_pm),
 ) -> CommsecApplyResponse:

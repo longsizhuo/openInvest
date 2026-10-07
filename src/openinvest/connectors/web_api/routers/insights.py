@@ -33,7 +33,7 @@ router = APIRouter()
 
 
 @router.get("/api/insights", response_model=InsightsResponse, tags=["system"])
-async def get_insights() -> InsightsResponse:
+def get_insights() -> InsightsResponse:
     """Dreaming 整合出的长期模式
 
     优先从 SQLite（db/insights.db）读取，降级到 memory/insights/*.md glob 扫描。
@@ -82,7 +82,7 @@ async def get_insights() -> InsightsResponse:
 
 
 @router.get("/api/insights/fresh", response_model=FreshInsightsResponse, tags=["system"])
-async def get_fresh_insights(
+def get_fresh_insights(
     since_hours: int = Query(48, ge=1, le=720, description="只返回 N 小时内新写入的"),
     limit: int = Query(5, ge=1, le=50),
 ) -> FreshInsightsResponse:
@@ -162,7 +162,7 @@ async def get_fresh_insights(
 
 
 @router.get("/api/reengagement", response_model=ReengagementResponse, tags=["system"])
-async def get_reengagement_alerts(pm: PortfolioManager = Depends(get_pm)) -> ReengagementResponse:
+def get_reengagement_alerts(pm: PortfolioManager = Depends(get_pm)) -> ReengagementResponse:
     """主动 nudge 用户回 GUI 的事件流。前端轮询，detected 就弹 toast。
 
     PM-3 留存漏洞 #3 修复：当前没有任何 outbound 触发器把"事件"推到用户面前。

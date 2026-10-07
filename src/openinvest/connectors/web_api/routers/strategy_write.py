@@ -45,7 +45,7 @@ def _to_http(fn, *args, **kwargs) -> StrategyWriteResponse:
 
 
 @router.put("/api/strategy/allocations", response_model=StrategyWriteResponse, tags=["strategy_write"])
-async def put_allocations(body: AllocationsRequest = Body(...)) -> StrategyWriteResponse:
+def put_allocations(body: AllocationsRequest = Body(...)) -> StrategyWriteResponse:
     """改资产配置目标（stock/cash 比例）。两者之和必须 ≈ 1（schema 强约束）"""
     return _to_http(
         svc.set_allocations, body.target_allocation_stock, body.target_allocation_cash
@@ -53,7 +53,7 @@ async def put_allocations(body: AllocationsRequest = Body(...)) -> StrategyWrite
 
 
 @router.post("/api/strategy/asset", response_model=StrategyWriteResponse, tags=["strategy_write"])
-async def add_target_asset(body: TargetAssetCreate = Body(...)) -> StrategyWriteResponse:
+def add_target_asset(body: TargetAssetCreate = Body(...)) -> StrategyWriteResponse:
     """新增 target_asset。symbol 不能与现有重复"""
     new_asset: Dict[str, Any] = body.model_dump(exclude_none=True, exclude={"extra"})
     if body.extra:
@@ -66,7 +66,7 @@ async def add_target_asset(body: TargetAssetCreate = Body(...)) -> StrategyWrite
     response_model=StrategyWriteResponse,
     tags=["strategy_write"],
 )
-async def update_target_asset(
+def update_target_asset(
     symbol: str,
     body: TargetAssetPatch = Body(...),
 ) -> StrategyWriteResponse:
@@ -80,6 +80,6 @@ async def update_target_asset(
     response_model=StrategyWriteResponse,
     tags=["strategy_write"],
 )
-async def delete_target_asset(symbol: str) -> StrategyWriteResponse:
+def delete_target_asset(symbol: str) -> StrategyWriteResponse:
     """删除 target_asset。schema 要求至少剩 1 个，否则 400"""
     return _to_http(svc.remove_target_asset, symbol)

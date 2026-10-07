@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 @router.post("/api/holdings/import", response_model=HoldingsImportResponse, tags=["holdings_write"])
-async def import_holdings(
+def import_holdings(
     body: HoldingsImportRequest = Body(...), pm: PortfolioManager = Depends(get_pm)
 ) -> HoldingsImportResponse:
     """自由文本/CSV 持仓描述 → LLM 解析成结构化持仓。GUI 小白粘贴券商持仓、agent 批量录入都走这。
@@ -48,7 +48,7 @@ async def import_holdings(
 
 
 @router.post("/api/holdings", response_model=HoldingV2, tags=["holdings_write"])
-async def add_holding(body: HoldingCreateRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> HoldingV2:
+def add_holding(body: HoldingCreateRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> HoldingV2:
     """新增持仓（任意 yfinance symbol）。symbol 已存在 → 409"""
     new_holding = body.model_dump(exclude_none=True)
     new_holding["cost_currency"] = str(new_holding["cost_currency"]).upper()
@@ -68,7 +68,7 @@ async def add_holding(body: HoldingCreateRequest = Body(...), pm: PortfolioManag
 
 
 @router.put("/api/holdings/{symbol}", response_model=HoldingV2, tags=["holdings_write"])
-async def update_holding(symbol: str, body: HoldingPatchRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> HoldingV2:
+def update_holding(symbol: str, body: HoldingPatchRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> HoldingV2:
     """部分字段更新单个 holding（仅传非空字段会被改写）"""
     patch = body.model_dump(exclude_none=True)
     if not patch:
@@ -91,7 +91,7 @@ async def update_holding(symbol: str, body: HoldingPatchRequest = Body(...), pm:
 
 
 @router.delete("/api/holdings/{symbol}", tags=["holdings_write"])
-async def delete_holding(symbol: str, pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
+def delete_holding(symbol: str, pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
     """删除持仓。units > 0 时拒绝（避免数据丢失），用户必须先卖光或显式 set units=0"""
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])

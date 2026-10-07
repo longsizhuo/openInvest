@@ -32,7 +32,7 @@ def _now_iso() -> str:
 # ===== /api/deposit =====
 
 @router.post("/api/deposit", response_model=WriteResponse, tags=["write"])
-async def deposit(body: DepositRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def deposit(body: DepositRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """存入现金（v2: 任意币种 cash dict 写入）。RMW 单锁，并发安全"""
     ccy = body.currency.upper()
 
@@ -63,7 +63,7 @@ async def deposit(body: DepositRequest = Body(...), pm: PortfolioManager = Depen
 # ===== /api/withdraw =====
 
 @router.post("/api/withdraw", response_model=WriteResponse, tags=["write"])
-async def withdraw(body: WithdrawRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def withdraw(body: WithdrawRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """取出现金（v2: 任意币种 + 负数校验）。
     余额不足默认 400 拒绝（PM 关切：避免 AUD -6894 类似事故）
 
@@ -129,7 +129,7 @@ def _gold_channel_defaults(pm: PortfolioManager) -> tuple[str, str]:
 # ===== /api/gold/buy =====（保留旧 path 给前端兼容；内部用 holdings 写）
 
 @router.post("/api/gold/buy", response_model=WriteResponse, tags=["write"])
-async def gold_buy(body: GoldTradeRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def gold_buy(body: GoldTradeRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """记录黄金买入（v2: holdings.upsert("GC=F")）"""
     grams, price = body.grams, body.price_per_gram
     total = grams * price
@@ -179,7 +179,7 @@ async def gold_buy(body: GoldTradeRequest = Body(...), pm: PortfolioManager = De
 # ===== /api/gold/sell =====
 
 @router.post("/api/gold/sell", response_model=WriteResponse, tags=["write"])
-async def gold_sell(body: GoldTradeRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def gold_sell(body: GoldTradeRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """记录黄金卖出（v2: holdings.find + cash["CNY"] 联动）"""
     grams, price = body.grams, body.price_per_gram
 
@@ -228,7 +228,7 @@ async def gold_sell(body: GoldTradeRequest = Body(...), pm: PortfolioManager = D
 # ===== /api/gold/set — 直接覆盖克数（校正用，不计流水）=====
 
 @router.post("/api/gold/set", response_model=WriteResponse, tags=["write"])
-async def gold_set(body: GoldSetRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def gold_set(body: GoldSetRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """直接设置黄金克数（v2: holdings GC=F units 直接覆盖；均价不变）"""
     channel, display_name = _gold_channel_defaults(pm)
     with pm.with_portfolio_tx() as p:
@@ -260,7 +260,7 @@ async def gold_set(body: GoldSetRequest = Body(...), pm: PortfolioManager = Depe
 # ===== /api/gold/offset — 反推渠道点差，写回 strategy.md =====
 
 @router.post("/api/gold/offset", response_model=WriteResponse, tags=["write"])
-async def gold_offset(body: GoldOffsetRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
+def gold_offset(body: GoldOffsetRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """报当日实际买入克价 → 反推点差 offset → 写回 strategy.md。系统自学习渠道溢价"""
     offset = infer_offset_pct(body.bank_price)
     if offset is None:

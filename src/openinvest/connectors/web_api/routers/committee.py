@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from openinvest.capabilities.committee.i18n import get_invest_lang
@@ -238,7 +239,7 @@ def _run_committee_task(
 
 
 @router.post("/api/committee/run", response_model=CommitteeRunResponse, tags=["committee"])
-async def committee_run(body: CommitteeRunRequest = Body(default=CommitteeRunRequest())) -> CommitteeRunResponse:
+def committee_run(body: CommitteeRunRequest = Body(default=CommitteeRunRequest())) -> CommitteeRunResponse:
     """v3 真并行委员会触发（统一端点）
 
     - 不传 symbols → 跑 strategy.target_assets 全部
@@ -283,7 +284,7 @@ async def committee_run(body: CommitteeRunRequest = Body(default=CommitteeRunReq
 
 
 @router.get("/api/committee/{task_id}", response_model=CommitteeStatusResponse, tags=["committee"])
-async def committee_status(task_id: str) -> CommitteeStatusResponse:
+def committee_status(task_id: str) -> CommitteeStatusResponse:
     """查询委员会任务状态（pending → running → done/error）"""
     status = _read_committee_status(task_id)
     if status is None:
@@ -295,7 +296,7 @@ async def committee_status(task_id: str) -> CommitteeStatusResponse:
 
 
 @router.get("/api/committee/{task_id}/view", response_class=HTMLResponse, tags=["committee"])
-async def committee_status_view(task_id: str) -> HTMLResponse:
+def committee_status_view(task_id: str) -> HTMLResponse:
     """跟 committee_status 读同一份 task 状态，渲染成可读 HTML 而非原始 JSON。
 
     GUI 已退役（2026-07-05），但事件预警邮件/Discord 里的"详情"链接不该指向一坨
@@ -396,7 +397,7 @@ async def committee_status_view(task_id: str) -> HTMLResponse:
 
 
 @router.get("/api/committee/{task_id}/audit", tags=["committee"])
-async def committee_audit_meta(task_id: str) -> Dict[str, Any]:
+def committee_audit_meta(task_id: str) -> Dict[str, Any]:
     """读取审计 trail（commit_hash / model / temperature / max_debate_rounds 等）
 
     给合规 / 复盘用：监管来查"那天 verdict 是哪个 commit / 哪个 model 跑的"时一查就有。
@@ -433,7 +434,8 @@ async def committee_live(task_id: str) -> StreamingResponse:
         loop_count = 0
 
         while loop_count < max_iterations:
-            status = _read_committee_status(task_id)
+            # 读盘丢线程池：同步读在 SSE 生成器里会卡住整个事件循环（#233-3）
+            status = await run_in_threadpool(_read_committee_status, task_id)
             if status is None:
                 yield f"event: not_found\ndata: {json.dumps({'task_id': task_id})}\n\n"
                 return
@@ -470,7 +472,7 @@ async def committee_live(task_id: str) -> StreamingResponse:
 
 
 @router.post("/api/committee/prepare", tags=["committee"])
-async def committee_prepare(body: CommitteePrepareRequest = Body(...)) -> Dict[str, Any]:
+def committee_prepare(body: CommitteePrepareRequest = Body(...)) -> Dict[str, Any]:
     """Coordinator 路径的 prep RPC：cmd_prepare_committee 同款自包含 brief
 
     返回 brief + 6 段角色 prompt 全内联——远端客户端的 Claude 据此 spawn 4 个
@@ -494,7 +496,7 @@ async def committee_prepare(body: CommitteePrepareRequest = Body(...)) -> Dict[s
 
 
 @router.post("/api/committee/save", tags=["committee"])
-async def committee_save(body: CommitteeSaveRequest = Body(...)) -> Dict[str, Any]:
+def committee_save(body: CommitteeSaveRequest = Body(...)) -> Dict[str, Any]:
     """Coordinator 路径的 persist RPC：cmd_save_committee 同款落盘
 
     解析 transcript → parse_cio_memo（含确定性防御降级）→ 落

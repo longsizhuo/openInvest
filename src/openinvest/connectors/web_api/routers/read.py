@@ -116,7 +116,7 @@ def _build_portfolio_response(pm: PortfolioManager) -> PortfolioResponse:
 
 
 @router.get("/api/portfolio", response_model=PortfolioResponse, tags=["read"])
-async def get_portfolio(response: Response, pm: PortfolioManager = Depends(get_pm)) -> PortfolioResponse:
+def get_portfolio(response: Response, pm: PortfolioManager = Depends(get_pm)) -> PortfolioResponse:
     """完整持仓快照（v1 兼容输出，前端无感）：现金 CNY/AUD + 黄金 + NDQ.AX
 
     no-store：fork 用户报告"GUI 不同步"——常见原因是反向代理 / 浏览器把这条
@@ -128,7 +128,7 @@ async def get_portfolio(response: Response, pm: PortfolioManager = Depends(get_p
 
 
 @router.get("/api/portfolio/state", tags=["read"])
-async def get_portfolio_state(response: Response) -> Dict[str, Any]:
+def get_portfolio_state(response: Response) -> Dict[str, Any]:
     """轻量同步信号：返回 portfolio.md 的 mtime + size + 一句概要。
 
     GUI / agent 可以用这条做 polling 探针——比 /api/portfolio 便宜，且只要
@@ -207,7 +207,7 @@ def _build_holding_v2(h: Dict[str, Any]) -> HoldingV2:
 
 
 @router.get("/api/holdings", response_model=HoldingsListResponse, tags=["read"])
-async def get_holdings(response: Response, pm: PortfolioManager = Depends(get_pm)) -> HoldingsListResponse:
+def get_holdings(response: Response, pm: PortfolioManager = Depends(get_pm)) -> HoldingsListResponse:
     """v2 通用持仓列表：cash dict + holdings 数组（含实时 quote + 计算 P&L）
 
     no-store：参见 /api/portfolio 同步链路注释——防中间层缓存住，NapCat 写完
@@ -219,7 +219,7 @@ async def get_holdings(response: Response, pm: PortfolioManager = Depends(get_pm
 
 
 @router.get("/api/portfolio/total_value", response_model=TotalValueResponse, tags=["read"])
-async def get_portfolio_total_value(
+def get_portfolio_total_value(
     base: str = Query("CNY", min_length=3, max_length=5, description="折算目标币种"),
     pm: PortfolioManager = Depends(get_pm),
 ) -> TotalValueResponse:
@@ -307,7 +307,7 @@ async def get_portfolio_total_value(
 
 
 @router.get("/api/symbols/search", response_model=SymbolSearchResponse, tags=["read"])
-async def search_symbols(
+def search_symbols(
     q: str = Query(..., min_length=1, max_length=64, description="搜索关键词"),
     limit: int = Query(8, ge=1, le=20),
 ) -> SymbolSearchResponse:
@@ -338,7 +338,7 @@ async def search_symbols(
 # ============ 端点：策略 ============
 
 @router.get("/api/strategy", response_model=StrategyResponse, tags=["read"])
-async def get_strategy(pm: PortfolioManager = Depends(get_pm)) -> StrategyResponse:
+def get_strategy(pm: PortfolioManager = Depends(get_pm)) -> StrategyResponse:
     """当前投资策略：目标比例 + 各资产 cap / 点差 / 费率"""
     targets_raw = pm.strategy.get("target_assets", []) or []
     targets = [
@@ -362,7 +362,7 @@ async def get_strategy(pm: PortfolioManager = Depends(get_pm)) -> StrategyRespon
 # ============ 端点：黄金独立查询 ============
 
 @router.get("/api/gold", response_model=GoldHolding, tags=["read"])
-async def get_gold(pm: PortfolioManager = Depends(get_pm)) -> GoldHolding:
+def get_gold(pm: PortfolioManager = Depends(get_pm)) -> GoldHolding:
     """黄金持仓 + 实时金价 + 渠道参考价（独立端点，前端可单独刷新而不重拉其他资产）"""
     return _build_gold(pm)
 
@@ -370,7 +370,7 @@ async def get_gold(pm: PortfolioManager = Depends(get_pm)) -> GoldHolding:
 # ============ 端点：NDQ 独立查询 ============
 
 @router.get("/api/ndq", response_model=NDQHolding, tags=["read"])
-async def get_ndq(pm: PortfolioManager = Depends(get_pm)) -> NDQHolding:
+def get_ndq(pm: PortfolioManager = Depends(get_pm)) -> NDQHolding:
     """NDQ.AX 持仓 + 实时价 + 日变化（v2: 从 pm.holdings 读）"""
     ndq_h = pm.holdings.find("NDQ.AX")
     shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
@@ -380,7 +380,7 @@ async def get_ndq(pm: PortfolioManager = Depends(get_pm)) -> NDQHolding:
 # ============ 端点：交易历史 ============
 
 @router.get("/api/history", response_model=HistoryResponse, tags=["read"])
-async def get_history(
+def get_history(
     limit: int = Query(100, ge=1, le=1000, description="返回最近 N 笔（按时间倒序）"),
 ) -> HistoryResponse:
     """交易流水（portfolio_history.jsonl），按时间倒序返回最近 limit 条"""
@@ -400,7 +400,7 @@ PNL_CHART_PATH = INVEST_ROOT / "docs" / "pnl_chart.svg"
 
 
 @router.get("/api/pnl_chart.svg", tags=["read"])
-async def get_pnl_chart() -> FileResponse:
+def get_pnl_chart() -> FileResponse:
     """jobs/pnl_snapshot 每 2h 工作日自动生成的 PnL 趋势图（vs 8 个基准）。
     SVG 只含百分比，不暴露绝对金额"""
     if not PNL_CHART_PATH.exists():
@@ -415,7 +415,7 @@ async def get_pnl_chart() -> FileResponse:
 # ============ 端点：daily 决策快照 ============
 
 @router.get("/api/daily", response_model=DailyResponse, tags=["read"])
-async def get_daily(
+def get_daily(
     since: int = Query(7, ge=1, le=90, description="最近 N 天"),
 ) -> DailyResponse:
     """daily/<date>.md 完整 markdown，前端用 react-markdown 渲染"""

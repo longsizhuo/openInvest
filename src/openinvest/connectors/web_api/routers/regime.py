@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 @router.get("/api/regime/{symbol:path}", response_model=RegimeResponse, tags=["system"])
-async def get_regime(symbol: str) -> RegimeResponse:
+def get_regime(symbol: str) -> RegimeResponse:
     """实时算指定 symbol 的市场 regime（牛/熊/震荡）+ 给 LLM 看的 brief"""
     from openinvest.core.regime import classify_regime, regime_strategy_hint, format_regime_brief
     from openinvest.utils.market_metrics import METRICS_PERIOD, compute_metrics
@@ -67,7 +67,7 @@ async def get_regime(symbol: str) -> RegimeResponse:
 
 
 @router.get("/api/regime_rules", response_model=RegimeRulesResponse, tags=["system"])
-async def get_regime_rules() -> RegimeRulesResponse:
+def get_regime_rules() -> RegimeRulesResponse:
     """暴露 invest 项目所有「硬规则」+「LLM 提示词」给 GUI marketing 页
 
     包含：

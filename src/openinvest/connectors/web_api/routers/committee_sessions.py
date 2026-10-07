@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 @router.get("/api/committee_sessions", response_model=CommitteeSessionsResponse, tags=["system"])
-async def list_committee_sessions(
+def list_committee_sessions(
     response: Response,
     limit: int = Query(50, ge=1, le=500),
 ) -> CommitteeSessionsResponse:
@@ -96,7 +96,7 @@ def _parse_committee_header(content: str) -> tuple:
     response_model=CommitteeSessionDetail,
     tags=["system"],
 )
-async def get_committee_session(date: str, symbol: str) -> CommitteeSessionDetail:
+def get_committee_session(date: str, symbol: str) -> CommitteeSessionDetail:
     """单个委员会决议完整 markdown"""
     # 路径穿越校验（issue #179 P2）：date/symbol 直接拼文件路径，".." 或斜杠
     # 变体可逃出 .committee/ 读任意 .md。MCP 同类风险已修，这里补齐。

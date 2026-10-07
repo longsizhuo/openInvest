@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/api/user", response_model=UserProfileResponse, tags=["user"])
-async def get_user_profile() -> UserProfileResponse:
+def get_user_profile() -> UserProfileResponse:
     """读 user.md frontmatter"""
     from openinvest.core.memory_store import MemoryStore
     store = MemoryStore()

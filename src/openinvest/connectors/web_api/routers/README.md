@@ -4,6 +4,10 @@ FastAPI 路由子包，按 tag/域拆分。每个文件只暴露一个 `router =
 由 `connectors/web_api/__init__.py` 的 `include_router` 循环统一挂载（不被
 from-import 符号）。响应模型集中在 `../models.py`，`get_pm` 依赖在 `../deps.py`。
 
+端点一律 `def`（FastAPI 丢线程池）：`async def` 里跑同步 IO 会冻结单 worker
+事件循环（#233-3）。只有不碰 IO、或阻塞调用已全部 await 线程池的才许 `async`，
+白名单 + 守护测试见 `tests/test_web_api_event_loop.py`。
+
 各文件职责：
 
 - `meta.py` — 健康检查（/api/health）。

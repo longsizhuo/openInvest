@@ -30,7 +30,7 @@ router = APIRouter()
 
 
 @router.get("/api/dreams/state", response_model=DreamsStateResponse, tags=["system"])
-async def get_dreams_state(
+def get_dreams_state(
     event_limit: int = Query(20, ge=1, le=200),
 ) -> DreamsStateResponse:
     """Dreaming 子系统当前状态：短期记忆 + 候选池 + 最近 events"""
@@ -65,7 +65,7 @@ async def get_dreams_state(
 
 
 @router.get("/api/pnl_history", response_model=PnLHistoryResponse, tags=["system"])
-async def get_pnl_history(
+def get_pnl_history(
     since: int = Query(60, ge=1, le=2000, description="返回最近 N 条快照"),
 ) -> PnLHistoryResponse:
     """原始 PnL 历史数据点（jobs/pnl_snapshot 工作日每 2h 写一条）"""
@@ -91,7 +91,7 @@ async def get_pnl_history(
 
 
 @router.get("/api/outperform_events", response_model=OutperformEventsResponse, tags=["system"])
-async def get_outperform_events(
+def get_outperform_events(
     since: int = Query(20, ge=1, le=500),
 ) -> OutperformEventsResponse:
     """openInvest 跑赢基准的"可分享瞬间"列表

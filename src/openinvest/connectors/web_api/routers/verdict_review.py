@@ -28,7 +28,7 @@ router = APIRouter()
 
 
 @router.get("/api/verdict_review/data", response_model=VerdictReviewDataResponse, tags=["system"])
-async def get_verdict_review_data(
+def get_verdict_review_data(
     since: int = Query(200, ge=1, le=5000),
 ) -> VerdictReviewDataResponse:
     """读 memory/.dreams/verdict_review.jsonl 原始数据（每条决议事后是否命中）"""
@@ -55,7 +55,7 @@ async def get_verdict_review_data(
 
 
 @router.get("/api/verdict_review/summary", response_model=VerdictReviewSummary, tags=["system"])
-async def get_verdict_review_summary() -> VerdictReviewSummary:
+def get_verdict_review_summary() -> VerdictReviewSummary:
     """命中率汇总（按时间窗口 + 按 verdict 类型）。GUI marketing 主战场"""
     store = MemoryStore()
     path = store.root / ".dreams" / "verdict_review.jsonl"
@@ -155,7 +155,7 @@ async def get_verdict_review_summary() -> VerdictReviewSummary:
 
 
 @router.get("/api/verdict_review/report", response_model=VerdictReviewReportResponse, tags=["system"])
-async def get_verdict_review_report() -> VerdictReviewReportResponse:
+def get_verdict_review_report() -> VerdictReviewReportResponse:
     """完整 docs/verdict_accuracy.md markdown 报告"""
     report_path = INVEST_ROOT / "docs" / "verdict_accuracy.md"
     if not report_path.exists():

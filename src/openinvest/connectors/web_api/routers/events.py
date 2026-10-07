@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/api/events/recent", response_model=EventsRecentResponse, tags=["events"])
-async def events_recent(
+def events_recent(
     hours: int = Query(24, ge=1, le=168, description="时间窗（小时），默认 24h"),
     min_severity: Literal["low", "mid", "high"] = Query("low"),
     limit: int = Query(50, ge=1, le=200),
@@ -46,7 +46,7 @@ async def events_recent(
 
 
 @router.post("/api/events/check", response_model=EventCheckResponse, tags=["events"])
-async def events_check() -> EventCheckResponse:
+def events_check() -> EventCheckResponse:
     """同步触发一次 event_watch（拉新闻 + 归一化 + 入库 + 命中触发委员会）。
 
     给 Events Tab "立即扫描" 按钮用。**同步等待完成**（30-90s 不等），

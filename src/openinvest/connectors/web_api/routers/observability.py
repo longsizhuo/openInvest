@@ -39,7 +39,7 @@ router = APIRouter()
 
 
 @router.get("/api/jobs/status", response_model=JobsStatusResponse, tags=["system"])
-async def get_jobs_status() -> JobsStatusResponse:
+def get_jobs_status() -> JobsStatusResponse:
     """所有 cron job 的配置 + APScheduler 下次触发时间。让 GUI 能看到"什么在静默跑"""
     import yaml
     import openinvest.jobs as _jobs_pkg
@@ -86,7 +86,7 @@ def _next_run_from_cron(schedule: str, tz: str = "Asia/Shanghai") -> Optional[st
 
 
 @router.get("/api/llm/usage", response_model=LlmUsageResponse, tags=["system"])
-async def get_llm_usage(
+def get_llm_usage(
     since: int = Query(200, ge=1, le=5000),
 ) -> LlmUsageResponse:
     """每次 LLM 调用的明细（input/output tokens、延迟、成本、tool 调用数）"""
@@ -101,7 +101,7 @@ async def get_llm_usage(
 
 
 @router.get("/api/llm/summary", response_model=LlmSummaryResponse, tags=["system"])
-async def get_llm_summary(
+def get_llm_summary(
     since_records: int = Query(1000, ge=1, le=10_000),
 ) -> LlmSummaryResponse:
     """LLM 用量汇总：总调用 / 总 token / 总成本，按 agent_role 拆分"""
@@ -117,7 +117,7 @@ async def get_llm_summary(
 
 
 @router.get("/api/data_sources/health", response_model=DataSourcesHealthResponse, tags=["system"])
-async def get_data_sources_health(pm: PortfolioManager = Depends(get_pm)) -> DataSourcesHealthResponse:
+def get_data_sources_health(pm: PortfolioManager = Depends(get_pm)) -> DataSourcesHealthResponse:
     """所有数据源的当前可达性 + 最后成功拉取时间。GUI 透明化"我们用什么数据决策"
 
     B5 通用化（2026-05）：监控 symbol 不再硬编码作者持仓（NDQ.AX/GC=F），
@@ -270,7 +270,7 @@ async def get_data_sources_health(pm: PortfolioManager = Depends(get_pm)) -> Dat
 
 
 @router.get("/api/agents/tool_calls", response_model=ToolCallsResponse, tags=["system"])
-async def get_tool_calls(
+def get_tool_calls(
     since: int = Query(200, ge=1, le=5000),
     asset: Optional[str] = Query(None, description="过滤特定资产 symbol"),
     role: Optional[str] = Query(None, description="过滤特定 agent role"),
@@ -292,7 +292,7 @@ async def get_tool_calls(
 
 
 @router.get("/api/discipline", tags=["system"])
-async def get_discipline() -> dict:
+def get_discipline() -> dict:
     """委员会纪律台账(只读):默认不作为率(HOLD 占比)+ 拦截冲动操作次数 + 反事实省/费钱。
     对齐 ADR-023——委员会可证价值是纪律/透明,不是 alpha。GUI/agent 据此展示"它拦了什么"。
     返回 {summary: {...}, markdown: "..."}(结构化 + 已渲染人话,任选其一用)。"""
