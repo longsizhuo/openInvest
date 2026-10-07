@@ -112,6 +112,7 @@ def _fetch_feed(url: str, *, public_only: bool = True):
     for _ in range(_MAX_REDIRECTS + 1):
         session = requests.Session()
         if public_only:
+            session.trust_env = False  # 不读环境代理/.netrc：经代理时由代理自行解析主机名，钉住的地址就不生效
             pinned = _PinnedAdapter(_check_url(url))
             session.mount("http://", pinned)
             session.mount("https://", pinned)
