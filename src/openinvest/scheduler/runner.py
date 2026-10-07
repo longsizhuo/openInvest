@@ -82,16 +82,48 @@ def _ensure_run_log_table() -> None:
     conn.close()
 
 
+def _record_start(job_name: str, started_at: str) -> Optional[int]:
+    """开跑即落一行 status='running'，返回 row id 供收尾时 UPDATE 同一行。
+
+    2026-10-07：此前只在 finally 里 INSERT（跑完才有行）——event_watch 7/30 卡死在
+    线程池 join，max_instances=1 让之后 21 天的触发全被跳过，job_runs 一行没有，
+    "开始了但没结束"在库里不可见。running 行是 jobs/job_watchdog 判卡死的依据。
+    记录失败只打 warning 返回 None（收尾退回整行 INSERT）——监控写入不能拦住 job 本身。
+    """
+    try:
+        conn = sqlite3.connect(RUN_LOG_DB, check_same_thread=False)
+        try:
+            cur = conn.execute(
+                "INSERT INTO job_runs (job_name, started_at, status) VALUES (?, ?, 'running')",
+                (job_name, started_at),
+            )
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning(f"[{job_name}] 记录 running 行失败（不影响 job 执行）: {e}")
+        return None
+
+
 def _record_run(job_name: str, started_at: str,
                 finished_at: str, status: str,
-                error: Optional[str], output: Optional[str]) -> None:
+                error: Optional[str], output: Optional[str],
+                run_id: Optional[int] = None) -> None:
     conn = sqlite3.connect(RUN_LOG_DB, check_same_thread=False)
     excerpt = (output or "")[:2000]
-    conn.execute(
-        "INSERT INTO job_runs (job_name, started_at, finished_at, status, error, output_excerpt) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (job_name, started_at, finished_at, status, error, excerpt),
-    )
+    if run_id is not None:
+        conn.execute(
+            "UPDATE job_runs SET finished_at = ?, status = ?, error = ?, output_excerpt = ? "
+            "WHERE id = ?",
+            (finished_at, status, error, excerpt, run_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO job_runs (job_name, started_at, finished_at, status, error, output_excerpt) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (job_name, started_at, finished_at, status, error, excerpt),
+        )
     conn.commit()
     conn.close()
 
@@ -126,6 +158,7 @@ def _wrap_job(job_name: str, entry: str) -> Callable[[], None]:
     def wrapped() -> None:
         started = datetime.now().astimezone().isoformat(timespec="seconds")
         log.info(f"[{job_name}] 启动 (started={started})")
+        run_id = _record_start(job_name, started)
         status, error, output = "running", None, None
         try:
             fn = _resolve_entry(entry)
@@ -140,7 +173,7 @@ def _wrap_job(job_name: str, entry: str) -> Callable[[], None]:
             log.exception(f"[{job_name}] 失败")
         finally:
             finished = datetime.now().astimezone().isoformat(timespec="seconds")
-            _record_run(job_name, started, finished, status, error, output)
+            _record_run(job_name, started, finished, status, error, output, run_id)
     return wrapped
 
 

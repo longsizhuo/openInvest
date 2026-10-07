@@ -1,0 +1,9 @@
+name: job_watchdog
+description: 每小时巡检 job_runs——enabled job 错过 2 次触发 / running 超时 / event_watch 连续 6 次 fetched=0 即告警（同一异常 24h 内只报一次）
+# 2026-10-07：event_watch 7/30-8/20 卡死 21 天零告警的补救（runner 开跑即写 running 行 + 本 job 巡检）。
+# 第 7 分钟：避开 :00 一拥而上的 event_watch / pnl_snapshot / price_sentinel，巡检时它们已落完行。
+# 盲区：调度器进程整体挂掉时本 job 也不跑，需外部 dead-man switch。
+schedule: "7 * * * *"
+timezone: Asia/Shanghai
+entry: openinvest.jobs.job_watchdog:run
+enabled: true
