@@ -8,13 +8,19 @@
 """
 from __future__ import annotations
 
+import io
+import ipaddress
 import logging
 import os
 import re
+import socket
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urljoin, urlsplit
 
+import requests
 import yaml
 
 from openinvest.services.news_sources import RawNewsItem
@@ -28,19 +34,72 @@ _DEFAULT_YML = Path(__file__).parent / "rss_feeds.yml"
 # normalize 的 LLM 账单交给陌生人
 MAX_EXTRA_FEEDS = 30
 
+# 抓取护栏：(connect, read) 超时 + 读响应体总时长封顶（read 超时只管单次读，
+# 慢速持续吐字节的响应要靠总时长兜住）；重定向手动跟、最多 3 跳；响应体 ≤2MB
+_FETCH_TIMEOUT = (5, 15)
+_FETCH_DEADLINE_SEC = 30
+_MAX_REDIRECTS = 3
+_MAX_FEED_BYTES = 2 * 1024 * 1024
+
+
+def _check_url(url: str) -> None:
+    """只放行 http(s)、不带 userinfo、且主机解析出的每个地址都是公网地址的 URL；否则抛 ValueError。"""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"url 必须是 http(s) RSS/Atom 地址: {url!r}")
+    if "@" in parts.netloc:
+        raise ValueError(f"url 不能带用户名/密码: {url!r}")
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port, type=socket.SOCK_STREAM)
+    except (OSError, ValueError) as e:  # gaierror ⊂ OSError；非法端口 parts.port 抛 ValueError
+        raise ValueError(f"url 主机解析失败: {parts.hostname}: {e}") from e
+    for *_, sockaddr in infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        ip = getattr(ip, "ipv4_mapped", None) or ip
+        # is_global 已排除 loopback/私网/link-local/保留/未指定，但组播仍算 global
+        if ip.is_multicast or not ip.is_global:
+            raise ValueError(f"url 主机 {parts.hostname} 解析到非公网地址，拒绝")
+
+
+def _fetch_feed(url: str, *, public_only: bool = True):
+    """抓 feed 并解析 —— fetch_rss 的所有源都走这里（护栏见 _FETCH_* 常量）。
+
+    public_only=True 时每一跳（含重定向目标）都过 _check_url。
+    """
+    import feedparser
+
+    deadline = time.monotonic() + _FETCH_DEADLINE_SEC
+    for _ in range(_MAX_REDIRECTS + 1):
+        if public_only:
+            _check_url(url)
+        with requests.get(url, timeout=_FETCH_TIMEOUT, stream=True, allow_redirects=False,
+                          headers={"User-Agent": feedparser.USER_AGENT}) as resp:
+            if resp.is_redirect:
+                url = urljoin(url, resp.headers["location"])
+                continue
+            resp.raise_for_status()
+            body = bytearray()
+            # read1：有数据就返回，总时长检查才不会被一次凑满 chunk 的阻塞读架空
+            while chunk := resp.raw.read1(64 * 1024, decode_content=True):
+                body += chunk
+                if len(body) > _MAX_FEED_BYTES or time.monotonic() > deadline:
+                    raise ValueError(f"feed 超过 {_MAX_FEED_BYTES} 字节或 {_FETCH_DEADLINE_SEC}s 上限: {url}")
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            headers["content-location"] = url  # 相对链接按最终 URL 解析（同原 parse(url) 行为）
+            # BytesIO 包一层：feedparser 收到裸 bytes/str 会尝试当本地路径打开
+            return feedparser.parse(io.BytesIO(body), response_headers=headers)
+    raise ValueError(f"重定向超过 {_MAX_REDIRECTS} 次: {url}")
+
 
 def fetch_rss(name: str, url: str, *, max_items: int = 20) -> List[RawNewsItem]:
     """单个 RSS feed → RawNewsItem 列表"""
+    # 运维配的默认清单（包内 yml / INVEST_RSS_FEEDS_YML）可信——wiki 推荐的自建
+    # RSSHub 常在本机/内网；其余（群聊 add 的额外源、add 时的 probe）只放行公网地址
+    public_only = url not in {f.get("url") for f in load_default_feeds()}
     try:
-        import feedparser
-    except ImportError:
-        log.warning("feedparser 未安装，跳过 rss_feed")
-        return []
-
-    try:
-        parsed = feedparser.parse(url)
+        parsed = _fetch_feed(url, public_only=public_only)
     except Exception as e:
-        log.warning(f"RSS {name} parse 失败: {e}")
+        log.warning(f"RSS {name} 抓取/解析失败: {e}")
         return []
 
     items: List[RawNewsItem] = []
@@ -131,15 +190,14 @@ def add_extra_feed(name: str, url: str) -> Dict[str, object]:
 
     守护（顾问模式下这是暴露给群聊的写入口）：
     - name 规整为 [a-z0-9_]（与默认清单同一约定）
-    - url 必须 http(s)，且 live probe 能解析出至少 1 条 entry（挡"随手贴个网页"）
+    - url 必须 http(s)、不带 userinfo、主机只解析到公网地址（_check_url）
+    - live probe 能解析出至少 1 条 entry（挡"随手贴个网页"）
     - 上限 MAX_EXTRA_FEEDS；url 与默认/已有源重复 = 幂等返回已有条目
     """
     name = re.sub(r"[^a-z0-9_]", "_", (name or "").strip().lower()).strip("_")
     url = (url or "").strip()
     if not name:
         raise ValueError("name 不能为空（规整后仅剩 [a-z0-9_]）")
-    if not url.startswith(("http://", "https://")):
-        raise ValueError(f"url 必须是 http(s) RSS/Atom 地址: {url!r}")
 
     extras = load_extra_feeds()
     for f in load_default_feeds() + extras:
@@ -150,6 +208,7 @@ def add_extra_feed(name: str, url: str) -> Dict[str, object]:
     if len(extras) >= MAX_EXTRA_FEEDS:
         raise ValueError(f"额外源已达上限 {MAX_EXTRA_FEEDS} 个，先 remove 再 add")
 
+    _check_url(url)
     probe = fetch_rss(name, url, max_items=3)
     if not probe:
         raise ValueError(f"probe 失败：{url} 解析不出任何 RSS/Atom entry（不是 feed 或暂时抓不到）")

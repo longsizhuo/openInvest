@@ -396,9 +396,9 @@ def add_news_source(
     name: Annotated[str, Field(description="Short slug for the feed, [a-z0-9_] (e.g. 'wsj_markets').")],
     url: Annotated[str, Field(description="RSS/Atom feed URL (a real feed, not a webpage).")],
 ) -> Dict[str, Any]:
-    """Add an RSS/Atom feed to the crawler's source list. The URL is
-    live-probed before saving — a URL that doesn't parse as a feed is
-    rejected. Idempotent: re-adding an existing URL returns the existing
+    """Add an RSS/Atom feed to the crawler's source list. The URL must be
+    http(s) on a public host, and is live-probed before saving — a URL that
+    doesn't parse as a feed is rejected. Idempotent: re-adding an existing URL returns the existing
     entry. Capped so the list can't grow unbounded.
 
     Use when someone says "follow <site>'s news" / "加个新闻源".

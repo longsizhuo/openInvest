@@ -436,7 +436,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `explain_decision` | ✅ | ✅ |
 | `live_prices` | ✅ | ✅ |
 | `ingest_event` | ✅ 入库 + 命中持仓时按频控触发委员会 | ✅ 只入库，永不触发委员会/报警（防群聊陌生人驱动 LLM 花费/推送） |
-| `news_sources` / `add_news_source` / `remove_news_source` | ✅ | ✅ 管理本实例自己的额外源清单（probe 校验 + 上限 30，群聊自助喂源用） |
+| `news_sources` / `add_news_source` / `remove_news_source` | ✅ | ✅ 管理本实例自己的额外源清单（仅公网 http(s) 地址 + probe 校验 + 上限 30，群聊自助喂源用） |
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
 | `status` / `strategy` / `history` / `discipline` / `decisions` | ✅ | ❌ 不可用 |

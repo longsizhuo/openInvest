@@ -74,7 +74,7 @@ def test_fetch_all_registers_searxng_when_configured(monkeypatch):
 
 
 def test_rss_feed_parses_minimal_feed():
-    """单测 rss_feed.fetch_rss 自身 —— mock feedparser.parse"""
+    """单测 rss_feed.fetch_rss 自身 —— mock 抓取+解析（_fetch_feed）"""
     from openinvest.services.news_sources.rss_feed import fetch_rss
     fake = MagicMock()
     fake.entries = [
@@ -82,7 +82,7 @@ def test_rss_feed_parses_minimal_feed():
          "summary": "<p>hello world</p>", "published_parsed": (2026, 5, 13, 10, 0, 0, 0, 0, 0)},
         {"link": "", "title": "skip me"},  # 无 link 跳过
     ]
-    with patch("feedparser.parse", return_value=fake):
+    with patch("openinvest.services.news_sources.rss_feed._fetch_feed", return_value=fake):
         out = fetch_rss("test", "https://feed", max_items=10)
     assert len(out) == 1
     assert out[0].title == "<b>A</b>"  # title 不剥 HTML（让 LLM 看到原貌）

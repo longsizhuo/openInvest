@@ -1,18 +1,52 @@
 """用户级新闻源清单（INVEST_HOME/rss_feeds.yml）—— add/remove/merge 契约。
 
 这是顾问模式暴露给群聊的写入口（add_news_source），护栏必须有测试钉住：
-probe 校验、name 规整、url 幂等、上限。
+地址校验、probe 校验、name 规整、url 幂等、上限；以及 fetch_rss 的抓取护栏。
+全程离线：DNS 走 _DNS 假表，真实建连被禁。
 """
 from __future__ import annotations
 
+import io
+import socket
+from unittest.mock import MagicMock
+
 import pytest
+import requests
+import urllib3
 import yaml
+
+_PUBLIC = "93.184.215.14"
+_DNS = {
+    "example.com": [_PUBLIC],
+    "feeds.example.com": [_PUBLIC],
+    "loop.example.com": ["127.0.0.1"],
+    "lan.example.com": ["10.1.2.3"],
+    "linklocal.example.com": ["169.254.1.1"],
+    "mapped.example.com": ["::ffff:10.0.0.1"],
+    "v6local.example.com": ["fe80::1"],
+    "mcast.example.com": ["239.1.1.1"],
+    "zero.example.com": ["0.0.0.0"],
+    "mixed.example.com": [_PUBLIC, "10.0.0.1"],
+}
+
+
+def _fake_getaddrinfo(host, port, *_a, **_kw):
+    if host not in _DNS:
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+    return [(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 0))
+            for ip in _DNS[host]]
+
+
+def _no_network(*_a, **_kw):
+    raise OSError("tests are offline")
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     from openinvest import paths
     monkeypatch.setattr(paths, "INVEST_ROOT", tmp_path)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+    monkeypatch.setattr(socket, "create_connection", _no_network)
     return tmp_path
 
 
@@ -80,3 +114,105 @@ def test_default_feeds_env_override(home, monkeypatch, tmp_path):
                       encoding="utf-8")
     monkeypatch.setenv("INVEST_RSS_FEEDS_YML", str(custom))
     assert rf.load_default_feeds() == [{"name": "only", "url": "https://x/f"}]
+
+
+@pytest.mark.parametrize("host", ["loop", "lan", "linklocal", "mapped", "v6local", "mcast", "zero", "mixed"])
+def test_add_rejects_non_public_address(home, monkeypatch, host):
+    """主机解析出任一非公网地址 → 拒绝，且不发 probe、不落盘。"""
+    from openinvest.services.news_sources import rss_feed as rf
+    probe = MagicMock(return_value=[object()])
+    monkeypatch.setattr(rf, "fetch_rss", probe)
+    with pytest.raises(ValueError, match="非公网"):
+        rf.add_extra_feed("x", f"https://{host}.example.com/feed")
+    assert not probe.called
+    assert rf.load_extra_feeds() == []
+
+
+def test_add_rejects_userinfo_and_unresolvable(home, monkeypatch):
+    from openinvest.services.news_sources import rss_feed as rf
+    monkeypatch.setattr(rf, "fetch_rss", lambda *a, **k: [object()])
+    with pytest.raises(ValueError, match="用户名"):
+        rf.add_extra_feed("x", "https://u:p@example.com/feed")
+    with pytest.raises(ValueError, match="解析失败"):
+        rf.add_extra_feed("x", "https://nxdomain.example.com/feed")
+    assert rf.load_extra_feeds() == []
+
+
+_RSS = (b'<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>'
+        b'<item><title>Hello</title><link>/a</link></item></channel></rss>')
+
+
+def _resp(status, body=b"", headers=None):
+    r = requests.Response()
+    r.status_code = status
+    r.headers.update(headers or {})
+    r.raw = urllib3.HTTPResponse(body=io.BytesIO(body), preload_content=False)
+    return r
+
+
+@pytest.fixture
+def fake_get(monkeypatch):
+    """requests.get 假实现：routes = {url: Response}；记录每次调用 (url, kwargs)。"""
+    calls, routes = [], {}
+
+    def _get(url, **kw):
+        calls.append((url, kw))
+        return routes[url]
+    monkeypatch.setattr(requests, "get", _get)
+    return calls, routes
+
+
+def test_fetch_rss_timeouts_and_safe_redirect(home, fake_get):
+    from openinvest.services.news_sources import rss_feed as rf
+    calls, routes = fake_get
+    routes["https://feeds.example.com/old"] = _resp(301, headers={"Location": "/rss"})
+    routes["https://feeds.example.com/rss"] = _resp(200, _RSS, {"Content-Type": "application/rss+xml"})
+    out = rf.fetch_rss("t", "https://feeds.example.com/old")
+    assert [(i.title, i.url) for i in out] == [("Hello", "https://feeds.example.com/a")]  # 相对链接按最终 URL
+    assert [u for u, _ in calls] == ["https://feeds.example.com/old", "https://feeds.example.com/rss"]
+    assert all(kw["timeout"] and kw["allow_redirects"] is False and kw["stream"] for _, kw in calls)
+
+
+def test_fetch_rss_rejects_redirect_to_non_public(home, fake_get):
+    from openinvest.services.news_sources import rss_feed as rf
+    calls, routes = fake_get
+    routes["https://feeds.example.com/rss"] = _resp(302, headers={"Location": "http://lan.example.com/x"})
+    routes["http://lan.example.com/x"] = _resp(200, _RSS)
+    assert rf.fetch_rss("t", "https://feeds.example.com/rss") == []
+    assert [u for u, _ in calls] == ["https://feeds.example.com/rss"]  # 内网那一跳根本没发
+
+
+def test_fetch_rss_caps_redirects_body_and_time(home, fake_get, monkeypatch):
+    from openinvest.services.news_sources import rss_feed as rf
+    calls, routes = fake_get
+    for i in range(5):
+        routes[f"https://feeds.example.com/r{i}"] = _resp(302, headers={"Location": f"/r{i + 1}"})
+    assert rf.fetch_rss("t", "https://feeds.example.com/r0") == []
+    assert len(calls) == rf._MAX_REDIRECTS + 1
+
+    url = "https://feeds.example.com/rss"
+    monkeypatch.setattr(rf, "_MAX_FEED_BYTES", len(_RSS) - 1)
+    routes[url] = _resp(200, _RSS)
+    assert rf.fetch_rss("t", url) == []          # 超体积
+    monkeypatch.setattr(rf, "_MAX_FEED_BYTES", len(_RSS))
+    monkeypatch.setattr(rf, "_FETCH_DEADLINE_SEC", -1)
+    routes[url] = _resp(200, _RSS)
+    assert rf.fetch_rss("t", url) == []          # 超总时长
+    monkeypatch.setattr(rf, "_FETCH_DEADLINE_SEC", 30)
+    routes[url] = _resp(200, _RSS)
+    assert len(rf.fetch_rss("t", url)) == 1      # 对照：上限内照常解析
+
+
+def test_operator_default_feeds_skip_address_check(home, fake_get, monkeypatch, tmp_path):
+    """运维配置的默认清单可信（wiki 推荐自建 RSSHub 常在本机）；非默认源同一地址被拒。"""
+    from openinvest.services.news_sources import rss_feed as rf
+    calls, routes = fake_get
+    url = "http://loop.example.com:1200/rss"
+    routes[url] = _resp(200, _RSS)
+    custom = tmp_path / "custom.yml"
+    custom.write_text(yaml.safe_dump({"feeds": [{"name": "hub", "url": url}]}), encoding="utf-8")
+    monkeypatch.setenv("INVEST_RSS_FEEDS_YML", str(custom))
+    assert len(rf.fetch_rss("hub", url)) == 1
+    monkeypatch.delenv("INVEST_RSS_FEEDS_YML")
+    routes[url] = _resp(200, _RSS)
+    assert rf.fetch_rss("hub", url) == []
