@@ -61,6 +61,8 @@ long-tail operations not covered by CLI/MCP. The Web API is marked deprecated (t
 retired; the remaining endpoints serve remote hub mode, and no new endpoints will be added).
 For remote scenarios, prefer the hub's remote MCP (`openinvest-mcp --http`, 18 tools direct);
 REST forwarding only backfills the long tail MCP doesn't cover.
+If the hub sets `INVEST_API_TOKEN`, every `/api/*` call (except `/api/health`) must carry
+`-H "Authorization: Bearer $INVEST_API_TOKEN"` — loopback included; otherwise it returns 401.
 
 Call these when the user says "record a trade" (记一笔交易) / "I plan to buy X" (我打算买 X) /
 "mark as executed" (标记成交) / "add a new asset" (加新资产):

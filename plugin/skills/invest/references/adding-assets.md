@@ -29,6 +29,7 @@ just analyze (Method 3).
 ```http
 POST /api/holdings
 Content-Type: application/json
+Authorization: Bearer $INVEST_API_TOKEN   # only when the hub sets INVEST_API_TOKEN
 
 {
   "symbol": "AAPL",
