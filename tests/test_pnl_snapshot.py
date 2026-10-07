@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
+import shutil
 import subprocess
+
+import pytest
 
 from openinvest.jobs import pnl_snapshot
 from openinvest.jobs.pnl_snapshot import (
@@ -456,3 +459,123 @@ def test_render_svg_no_holding_symbols(monkeypatch):
     for forbidden in ("NDQ", "GC=F", "GC_F", "Gold", "gold_cny"):
         assert forbidden not in svg, f"公开 SVG 含违禁词 {forbidden!r}（红线 #1）"
     assert "口径：★ 实盘" in svg, "口径脚注缺失（issue #179 P1-A③）"
+
+
+# ---------- orphan 分支 worktree：真 git、本地 bare 远端、零网络（#232-5 回归） ----------
+
+def _g(*args, cwd):
+    return subprocess.run(["git", *args], cwd=str(cwd), check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def pnl_clone(tmp_path, monkeypatch):
+    """bare 远端带 pnl-data 分支 + **单分支 clone main**（refs/remotes/origin/pnl-data 不存在）。
+
+    remote.origin.url 设成 GitHub https 形（_auto_push_svg 只认这种），再用 insteadOf
+    把带 token 的 URL 改写到本地 bare；GIT_ALLOW_PROTOCOL=file 兜底——改写没生效就直接失败，
+    绝不出网。
+    """
+    for k, v in {"GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1",
+                 "GIT_ALLOW_PROTOCOL": "file", "GIT_AUTHOR_NAME": "t",
+                 "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                 "GIT_COMMITTER_EMAIL": "t@t"}.items():
+        monkeypatch.setenv(k, v)
+    bare, seed, clone = tmp_path / "remote.git", tmp_path / "seed", tmp_path / "clone"
+    _g("init", "-q", "--bare", "-b", "main", str(bare), cwd=tmp_path)
+    _g("init", "-q", "-b", "main", str(seed), cwd=tmp_path)
+    _g("commit", "-q", "--allow-empty", "-m", "main", cwd=seed)
+    _g("push", "-q", str(bare), "main", cwd=seed)
+    _g("checkout", "-q", "--orphan", "pnl-data", cwd=seed)
+    (seed / "docs").mkdir()
+    (seed / "docs" / "pnl_chart.svg").write_text("<svg>old</svg>")
+    _g("add", "docs", cwd=seed)
+    _g("commit", "-q", "-m", "old", cwd=seed)
+    _g("push", "-q", str(bare), "pnl-data", cwd=seed)
+    _g("clone", "-q", "--single-branch", "--branch", "main", str(bare), str(clone), cwd=tmp_path)
+    _g("remote", "set-url", "origin", "https://github.com/owner/repo.git", cwd=clone)
+    _g("config", f"url.{bare}.insteadOf",
+       "https://x-access-token:tok@github.com/owner/repo.git", cwd=clone)
+    assert _g("for-each-ref", "refs/remotes/origin/pnl-data", cwd=clone) == ""  # 前置：ref 缺失
+
+    (clone / "docs").mkdir()
+    (clone / "docs" / "pnl_chart.svg").write_text("<svg>new</svg>")
+    monkeypatch.setattr(pnl_snapshot, "ROOT", clone)
+    monkeypatch.setattr(pnl_snapshot, "SVG_PATH", clone / "docs" / "pnl_chart.svg")
+    monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "pnl-data")
+    return bare, clone
+
+
+def test_orphan_push_works_on_single_branch_clone(pnl_clone):
+    """ls-remote 看得到 pnl-data 但本地没 tracking ref——旧代码 worktree add 静默失败，
+    pushed 永远 False；现在先 fetch 建 ref，真的推上去。"""
+    bare, clone = pnl_clone
+    result = _auto_push_svg()
+    assert result == {"pushed": True, "branch": "pnl-data", "mode": "orphan"}
+    assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) == "<svg>new</svg>"
+    # 在原 pnl-data 历史上续一个 commit（不是另起 orphan）
+    assert _g("rev-list", "--count", "pnl-data", cwd=bare) == "2"
+    assert len(_g("worktree", "list", cwd=clone).splitlines()) == 1  # 临时 worktree 已清
+
+
+def test_orphan_worktree_failure_is_surfaced(pnl_clone, tmp_path):
+    """worktree add 真失败（崩过一次留下的孤儿 worktree 仍占着 pnl-data）→ 失败原因
+    原样上报，不再在裸 temp dir 里跑出 "not a git repository" 这种误导结果。"""
+    bare, clone = pnl_clone
+    _g("fetch", "-q", str(bare), "+refs/heads/pnl-data:refs/remotes/origin/pnl-data", cwd=clone)
+    ghost = tmp_path / "ghost"
+    _g("worktree", "add", "-q", str(ghost), "-b", "pnl-data", "origin/pnl-data", cwd=clone)
+    shutil.rmtree(ghost)  # TemporaryDirectory 清掉了目录，但 worktree 登记还在
+
+    result = _auto_push_svg()
+    assert result["pushed"] is False
+    assert "already used by worktree" in result["reason"]
+    assert "tok@" not in result["reason"]
+    assert pnl_snapshot._push_status(result) == "push_failed"
+    assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) == "<svg>old</svg>"
+
+
+def test_run_status_surfaces_push_failure(monkeypatch, tmp_path):
+    """job 顶层 status 反映 push 失败；自动推送关闭 / 无变化仍是 ok。"""
+    from types import SimpleNamespace
+    ps = pnl_snapshot
+    monkeypatch.setattr(ps, "_is_trading_window", lambda: True)
+    monkeypatch.setattr(ps, "MemoryStore", lambda: None)
+    monkeypatch.setattr(ps, "_compute_snapshot", lambda store: SimpleNamespace(ts="t", total_pnl_pct=1.0))
+    monkeypatch.setattr(ps, "_append_history", lambda snap: None)
+    monkeypatch.setattr(ps, "_read_history", lambda: [])
+    monkeypatch.setattr(ps, "SVG_PATH", tmp_path / "docs" / "pnl_chart.svg")
+    monkeypatch.setattr(ps, "render_svg", lambda history: "<svg/>")
+    monkeypatch.setattr(ps, "_outperform_events", lambda snap: [])
+    for push, status in [
+        ({"pushed": False, "reason": "git failure: fatal: x"}, "push_failed"),
+        ({"pushed": False, "reason": "GITHUB_TOKEN env 缺失"}, "push_failed"),
+        ({"pushed": False, "reason": "no svg change", "branch": "pnl-data"}, "ok"),
+        ({"pushed": False, "reason": "INVEST_PNL_AUTOPUSH != 1"}, "ok"),
+        ({"pushed": True, "branch": "pnl-data", "mode": "orphan"}, "ok"),
+    ]:
+        monkeypatch.setattr(ps, "_auto_push_svg", lambda push=push: push)
+        assert ps.run()["status"] == status, push
+
+
+def test_called_process_error_with_bytes_stderr_is_reported(monkeypatch):
+    """orphan 路径的裸 subprocess.run 不带 text=True → CalledProcessError.stderr 是 bytes。
+    旧代码把 bytes 喂 _redact_token_in → TypeError 炸穿 job（生产 2026-08-12 17:00 实证），
+    真正的 git 错误丢失。现在解码后照常脱敏上报。"""
+    monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", _SECRET_TOKEN)
+    monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "main")
+    stderr = f"fatal: boom https://x-access-token:{_SECRET_TOKEN}@github.com/o/r.git".encode()
+
+    def _fake_run(cmd, **kwargs):
+        if cmd[1:3] == ["config", "--get"]:
+            return subprocess.CompletedProcess(cmd, 0, "https://github.com/o/r.git\n", "")
+        raise subprocess.CalledProcessError(128, cmd, b"", stderr)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    result = _auto_push_svg()
+    assert result["pushed"] is False
+    assert "fatal: boom" in result["reason"]
+    assert _SECRET_TOKEN not in result["reason"]
