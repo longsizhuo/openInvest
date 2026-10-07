@@ -38,6 +38,13 @@ def _get_event_store():
     return _EVENT_STORE_SINGLETON
 
 
+def _check_as_of(as_of: Optional[datetime]) -> None:
+    """as_of 用法错误必须大声失败，不能被下面的 graceful except 吞成空 brief——
+    否则回测传 naive/str 日期会静默跑成"无事件层"（2026-10-07 review）。"""
+    if as_of is not None and (not isinstance(as_of, datetime) or as_of.utcoffset() is None):
+        raise ValueError(f"as_of 必须是带时区的 datetime，收到 {as_of!r}")
+
+
 def _resolve_event_brief(
     symbol: str, override: Optional[str], *, as_of: Optional[datetime] = None,
 ) -> str:
@@ -58,6 +65,7 @@ def _resolve_event_brief(
     INVEST_EVENT_RAG_ENABLED=false 才关掉。安全保障：recall 任何失败
     （DB 缺、key 缺、网络挂）都 graceful 退化空字符串。
     """
+    _check_as_of(as_of)
     if override is not None:
         return override
     from openinvest.core.config import load_config
@@ -111,6 +119,7 @@ def resolve_event_brief_multi(
     Returns:
         合并去重后的 event_brief 文本，空字符串表示无可用事件。
     """
+    _check_as_of(as_of)
     if not symbols:
         return ""
 

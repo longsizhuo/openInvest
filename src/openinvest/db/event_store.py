@@ -430,7 +430,9 @@ class EventStore:
         - as_of（issue #196，回测 as-of-D 零前视）：只召回 created_at <= as_of 的事件
           + 只挂 fetched_at <= as_of 的源，时间窗改以 as_of 为锚。口径定 created_at
           （系统自写的 UTC 入库时刻 = 硬边界），不用 ts（LLM 标注的发生时刻，可错标 /
-          迟入库）。截断在 SQL 硬过滤里做 → 向量精排只在合格集内排，top_k 不缩水。
+          迟入库）。截断在 SQL 硬过滤里做 → 向量精排只在合格集内排。
+          ⚠️ 不保证 top_k 满额：现行 `ORDER BY ts DESC LIMIT 200` 先于 symbol 过滤，
+          高频/未来 ts 事件可挤掉目标标的（生产同病，as_of 忠实复现 D 时刻行为）。
           必须带时区（naive 口径不明直接 ValueError）。None = 现行为（锚 now、不截断）。
           ⚠️ 只截"事件存不存在"：同 event_id 后续 upsert 原地改写的 severity / stance /
           affected_symbols 没有历史版本，as_of 还原不了。

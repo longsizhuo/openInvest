@@ -251,3 +251,21 @@ def test_format_output_parseable_by_sentiment_parser():
     assert entries[1]["syms"] == {"OTHER=F"}
     assert entries[1]["ts"] is not None  # Z 后缀可解析
     assert entries[2]["ts"] is None and entries[2]["syms"] == set()
+
+
+def test_as_of_misuse_fails_loudly_not_silently_empty():
+    """naive / str 的 as_of 是调用方用法错误，必须抛出，不能被 graceful except 吞成空 brief
+    （否则回测会静默跑成"无事件层"——2026-10-07 review）。"""
+    from datetime import datetime, timezone
+
+    import pytest
+
+    from openinvest.core.runner import event_brief as eb
+
+    for bad in (datetime(2026, 9, 1), "2026-09-01T00:00:00+00:00"):
+        with pytest.raises(ValueError):
+            eb.resolve_event_brief_multi(["GC=F"], as_of=bad)
+        with pytest.raises(ValueError):
+            eb._resolve_event_brief("GC=F", override=None, as_of=bad)
+    # 合法 tz-aware 值不受影响（override 路径直接返回）
+    assert eb._resolve_event_brief("GC=F", override="x", as_of=datetime(2026, 9, 1, tzinfo=timezone.utc)) == "x"
