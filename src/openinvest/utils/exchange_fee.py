@@ -137,6 +137,7 @@ def get_history_data(
             except ValueError:
                 pass  # 日期格式错误就不拉
 
+    yf_fetch_failed = False
     if should_fetch_yf:
         yf_got_data = False
         try:
@@ -193,9 +194,15 @@ def get_history_data(
         # 对历史 cutoff 无意义。
         if not yf_got_data and as_of_date is None and _betashares_fallback(symbol):
             df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
+        yf_fetch_failed = not yf_got_data
 
     if not df_db.empty:
-        return _apply_period(_apply_cutoff(df_db, as_of_date), period)
+        out = _apply_period(_apply_cutoff(df_db, as_of_date), period)
+        # 本次该刷没刷到（yfinance 挂/空）→ 返回的是库里旧数据。挂在 attrs 上不改返回类型
+        # （调用方零改）；utils.quotes 据此标 is_stale，dca_daily 区分「行情源挂了」
+        # 与「休市没有新 bar」（2026-10）。
+        out.attrs["yf_fetch_failed"] = yf_fetch_failed
+        return out
 
     return pd.DataFrame()
 

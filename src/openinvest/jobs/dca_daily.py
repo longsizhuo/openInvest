@@ -8,6 +8,14 @@
 二次记账。**只在 buy() 落盘前的异常才 unclaim**（取价/算量/买入失败可重试）；buy 一旦
 提交，后续记账不再 unclaim，防「已买 → 后续报错 → unclaim → 次日重买」二次记账。
 
+休市闸：行情最新 bar 日期 ≠ 今天（北京日期）→ 不动账本：行情源本次没拉到（is_stale）
+→ skip(stale_quote) + warning；拉到了但没有今天的 bar → skip(market_closed)。两者都
+unclaim，yml 一天排 15:30/18:30/21:30 三次，交易日 bar 晚到/行情源抖动由后两次补记，
+已记过的后续运行走 already_dca_today。2026-10 前不看开没开盘：国庆 / 中秋 / 周六按
+节前旧价记了幻影买入（见 scripts/reconcile_dca_phantom.py 对账）。
+适用范围：北京时间 15:30 前已收盘的市场（A 股、亚太）；美股等西半球标的此时最新 bar
+是前一交易日，会一直 skip(market_closed)——不记账但也不会记错账。
+
 安全默认：config.dca.auto_dca_enabled 默认 False → fork 用户 / 未配置时本 job 直接
 skip，绝不自动动账本。用户经 /api/config（dca.auto_dca_enabled）或 INVEST_DCA_* 开启。
 """
@@ -16,6 +24,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from openinvest.core.config import load_config
 from openinvest.core.portfolio_manager import PortfolioManager, _guess_kind_from_symbol
@@ -25,7 +34,7 @@ log = logging.getLogger(__name__)
 
 
 class _DcaSkip(Exception):
-    """定投前置条件不满足（未持有 / 取不到价 / 无汇率 / 金额太小）→ 跳过该 symbol。"""
+    """定投前置条件不满足（未持有 / 取不到价 / 行情旧 / 休市 / 无汇率 / 金额太小）→ 跳过该 symbol。"""
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
@@ -58,7 +67,8 @@ def run() -> Dict[str, Any]:
         return {"status": "skipped", "reason": "non_positive_amount"}
 
     pm = PortfolioManager()
-    today = datetime.now().strftime("%Y-%m-%d")
+    # 北京日期：job 按 Asia/Shanghai 收盘后跑，机器 TZ 可能是 UTC；幂等键与休市闸同一口径
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
     results: List[Dict[str, Any]] = []
 
     for symbol in symbols:
@@ -77,6 +87,17 @@ def run() -> Dict[str, Any]:
             snap = get_quote(holding)
             if snap is None or snap.price is None or snap.price <= 0:
                 raise _DcaSkip("no_price")
+            # 休市闸：最新 bar 不是今天 → 按旧价记账就是幻影买入。先分清是行情源挂了
+            # （stale_quote，交易日也可能，告警）还是确实没开盘（market_closed）。
+            # ponytail: 按北京日期比——美股等西半球标的会一直 market_closed（见模块 docstring），
+            # 真要定投这类标的再改成按交易所时区 + 收盘时刻比对。
+            # last_updated=None（黄金 proxy 不带日期）无从判断，照旧记账。
+            if snap.last_updated is not None and snap.last_updated != today:
+                if snap.is_stale:
+                    log.warning(f"[DCA] {symbol} 行情源未拉到新数据（最新 bar {snap.last_updated}），"
+                                f"本次跳过，当日后续运行重试")
+                    raise _DcaSkip("stale_quote")
+                raise _DcaSkip("market_closed")
             ccy = (snap.currency or "CNY").upper()
             if ccy == "CNY":
                 amount_local = amount_cny

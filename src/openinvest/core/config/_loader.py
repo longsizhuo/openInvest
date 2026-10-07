@@ -365,7 +365,7 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
     "dca.auto_dca_enabled": {
         "type": "bool",
         "label": "自动定投",
-        "help": "开启=jobs/dca_daily 每日给配置的 symbols 记一笔 external_funding 买入（不扣子弹池现金）；默认关",
+        "help": "开启=jobs/dca_daily 每个交易日给配置的 symbols 记一笔 external_funding 买入（不扣子弹池现金）；仅适用北京 15:30 前收盘的市场（A 股/亚太），休市日不记；默认关",
     },
     "dca.auto_dca_amount_cny": {
         "type": "float",

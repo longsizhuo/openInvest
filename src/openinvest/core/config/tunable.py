@@ -220,7 +220,7 @@ class DCAConfig:
     """
     auto_dca_enabled: bool = False              # 总开关（默认关）
     auto_dca_amount_cny: float = 100.0          # 每个 symbol 每次定投基准金额（CNY）
-    auto_dca_symbols: tuple[str, ...] = ()      # 定投标的 yfinance symbol，如 ("510300.SS",)
+    auto_dca_symbols: tuple[str, ...] = ()      # 定投标的 yfinance symbol，如 ("510300.SS",)；仅北京 15:30 前收盘的市场（休市闸按北京日期比 bar，见 ADR-018）
 
 
 @dataclass(frozen=True)

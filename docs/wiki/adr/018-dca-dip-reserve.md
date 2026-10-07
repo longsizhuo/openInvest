@@ -55,6 +55,14 @@ RSI/MA120/MA250/regime 全 N/A、`REGIME=unknown`（510500.SS / SPY 复现）。
    - 经 `/api/config`（白名单，ADR-017）或 `INVEST_DCA_*` env 开启；
    - 每日对每个 symbol 用 `get_quote` 取价 → `units = amount_cny / price` → `buy(source_type="external_funding")`；
    - 每个 `(date, symbol)` 一把 `state_claim` 幂等闸（ADR-016），买入失败 `unclaim` 可重试。
+   - 休市闸（2026-10 补）：行情最新 bar 日期 ≠ 今天（北京日期）→ 不动账本：行情源本次没拉到 →
+     `skip(stale_quote)` + warning，拉到了但没今天的 bar → `skip(market_closed)`；都 `unclaim`。
+     job 平日北京 15:30 / 18:30 / 21:30 跑三次，bar 晚到 / 行情源抖动由后两次补记，已记过的走
+     `already_dca_today`。此前国庆 / 中秋 / 周六按节前旧价记了幻影买入，存量差异用
+     `scripts/reconcile_dca_phantom.py` 对账（默认 dry-run）。
+   - **适用范围**：北京时间 15:30 前已收盘的市场（A 股 / 亚太）。美股等西半球标的在这些时刻的
+     最新 bar 是前一交易日，会一直 `skip(market_closed)`——安全（不记错账）但不记账；要支持需改成
+     按交易所时区 + 收盘时刻比对（未做：行情库只存日期，且需逐交易所收盘时刻表）。
 
 3. **数据深度自愈**：`get_history_data` 在 DB 历史 < `_MIN_HISTORY_ROWS`（60 根）时首次拉 2y 全量回填，
    保证长周期指标 / regime 算得出；已有足够历史才 5d 增量。

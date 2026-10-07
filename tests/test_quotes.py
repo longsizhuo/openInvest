@@ -139,3 +139,14 @@ def test_get_quote_default_proxy_kind_is_direct(monkeypatch):
     q = quotes.get_quote({"symbol": "AAPL", "cost_currency": "USD", "unit_label": "股"})
     assert q is not None
     assert q.symbol == "AAPL"
+
+
+def test_get_quote_direct_stale_when_fetch_failed(monkeypatch):
+    """get_history_data 标了本次拉取失败（返回库里旧数据）→ direct quote is_stale=True"""
+    df = _fake_df()
+    df.attrs["yf_fetch_failed"] = True
+    monkeypatch.setattr(quotes, "get_history_data", lambda s, p="5d": df)
+    q = quotes.get_quote({"symbol": "AAPL", "cost_currency": "USD", "proxy_kind": "direct"})
+    assert q.is_stale is True
+    monkeypatch.setattr(quotes, "get_history_data", lambda s, p="5d": _fake_df())
+    assert quotes.get_quote({"symbol": "AAPL", "cost_currency": "USD"}).is_stale is False

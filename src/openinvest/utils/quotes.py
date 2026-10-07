@@ -29,7 +29,7 @@ class QuoteSnapshot:
     字段语义：
     - price：单位价格，单位为 currency（如 CNY/克 → price=1031, currency=CNY, unit=克）
     - last_updated：行情日期 YYYY-MM-DD；None 表示数据源不提供时间戳
-    - is_stale：来自 DB / 历史均值兜底（yfinance 挂或休市）
+    - is_stale：本次行情源没拉到、用的是 DB / 历史均值兜底（yfinance 挂）；休市不算 stale
     - extra：proxy 特有的额外字段（金价的 bank_cny_per_gram、direct 的 day_change_pct 等）
     """
     symbol: str
@@ -101,6 +101,7 @@ def _quote_fx(symbol: str, proxy_symbol: str, holding: Dict[str, Any]) -> Option
         currency=str(holding.get("cost_currency", "")),
         unit="rate",
         last_updated=df.index[-1].strftime("%Y-%m-%d"),
+        is_stale=bool(df.attrs.get("yf_fetch_failed", False)),
     )
 
 
@@ -122,6 +123,7 @@ def _quote_direct(symbol: str, proxy_symbol: str, holding: Dict[str, Any]) -> Op
         currency=str(holding.get("cost_currency", "")),
         unit=str(holding.get("unit_label", "share")),
         last_updated=df.index[-1].strftime("%Y-%m-%d"),
+        is_stale=bool(df.attrs.get("yf_fetch_failed", False)),
         extra={
             "prev_close": prev,
             "day_change_pct": round(pct, 4),

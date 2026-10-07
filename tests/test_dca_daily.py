@@ -5,10 +5,14 @@
 - 启用后按 amount_cny 记一笔 external_funding 买入：持仓增加、**cash 不动**
 - 同日重复跑不二次记账（state_claim 幂等闸，ADR-016）
 - 拉不到价 → 跳过且 unclaim（同日可重试）
+- 休市（最新 bar 不是今天：节假日/周末）→ skip(market_closed)、不动账本、unclaim 可重试
+- 行情源没拉到（is_stale）→ skip(stale_quote)；同日 18:30 / 21:30 重跑补记且只记一次
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -56,9 +60,14 @@ def seeded(tmp_path, monkeypatch):
     return s
 
 
-def _fixed_quote(price=5.0):
+def _fixed_quote(price=5.0, bar_date=None, is_stale=False):
     return lambda holding: QuoteSnapshot(
-        symbol=str(holding.get("symbol")), price=price, currency="CNY", unit="股")
+        symbol=str(holding.get("symbol")), price=price, currency="CNY", unit="股",
+        last_updated=bar_date, is_stale=is_stale)
+
+
+def _sh_date(days_ago=0) -> str:
+    return (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
 
 
 def test_disabled_skips(seeded, monkeypatch):
@@ -172,3 +181,57 @@ def test_no_price_skips_and_unclaims(seeded, monkeypatch):
     assert out2["results"][0]["status"] == "bought"
     pm = PortfolioManager(seeded)
     assert pm.find_holding("510300.SS")["units"] == pytest.approx(320.0)
+
+
+def test_market_closed_stale_bar_skips_without_ledger_write(seeded, monkeypatch):
+    """2026-10 国庆事故：休市日 yfinance 最新 bar 是节前 → 不得按旧价记账。
+
+    skip(market_closed)：持仓 / 流水 / 幂等闸全不动（三次运行都一样）。
+    """
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "510300.SS")
+    monkeypatch.setattr(dca, "get_quote", _fixed_quote(5.0, bar_date=_sh_date(days_ago=1)))
+    history_before = len(PortfolioManager(seeded).store.read_history())
+
+    for _ in range(3):
+        out = dca.run()
+        assert out["results"][0] == {"symbol": "510300.SS", "status": "skipped",
+                                     "reason": "market_closed"}
+    pm = PortfolioManager(seeded)
+    assert pm.find_holding("510300.SS")["units"] == 300.0
+    assert len(pm.store.read_history()) == history_before
+    assert pm.store.state_get("dca_applied", []) == []   # 已 unclaim
+
+
+def test_trading_day_retry_books_exactly_once(seeded, monkeypatch):
+    """交易日 15:30 行情源抖动（旧 bar + is_stale）→ stale_quote 跳过；18:30 拿到今天的 bar
+    → 记一次；21:30 → already_dca_today。整天只记一笔（ADR-016）。"""
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_ENABLED", "true")
+    monkeypatch.setenv("INVEST_DCA_AUTO_DCA_SYMBOLS", "510300.SS")
+    history_before = len(PortfolioManager(seeded).store.read_history())
+
+    monkeypatch.setattr(dca, "get_quote",
+                        _fixed_quote(5.0, bar_date=_sh_date(days_ago=1), is_stale=True))
+    assert dca.run()["results"][0]["reason"] == "stale_quote"          # 15:30
+    monkeypatch.setattr(dca, "get_quote", _fixed_quote(5.0, bar_date=_sh_date()))
+    assert dca.run()["results"][0]["status"] == "bought"               # 18:30
+    assert dca.run()["results"][0]["reason"] == "already_dca_today"    # 21:30
+
+    pm = PortfolioManager(seeded)
+    assert pm.find_holding("510300.SS")["units"] == pytest.approx(320.0)
+    assert len(pm.store.read_history()) == history_before + 1
+
+
+def test_schedule_runs_three_times_after_close():
+    """yml 排程：平日北京 15:30 / 18:30 / 21:30（收盘后首跑 + 两次补记机会），周末不跑。"""
+    import yaml
+    from openinvest.scheduler.cron import crontab_trigger
+    cfg = yaml.safe_load((Path(dca.__file__).with_suffix(".yml")).read_text(encoding="utf-8"))
+    trig = crontab_trigger(cfg["schedule"], timezone=cfg["timezone"])
+    now = datetime(2026, 10, 9, 0, 0, 30, tzinfo=ZoneInfo("Asia/Shanghai"))  # 周五
+    fires = []
+    for _ in range(4):
+        nxt = trig.get_next_fire_time(None, now)
+        fires.append(nxt.strftime("%a %H:%M"))
+        now = nxt + timedelta(seconds=1)
+    assert fires == ["Fri 15:30", "Fri 18:30", "Fri 21:30", "Mon 15:30"]
