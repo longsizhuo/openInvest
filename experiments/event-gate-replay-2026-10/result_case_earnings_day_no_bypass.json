@@ -1,0 +1,168 @@
+{
+  "params": {
+    "start": "2026-08-19",
+    "warmup_from": "2026-08-12",
+    "end": "2026-08-20",
+    "source": "all",
+    "min_severity": "mid",
+    "cooldown_hours": 12,
+    "daily_cap": 4,
+    "no_escalation_bypass": true,
+    "trace_from": "2026-08-19",
+    "trace_to": "2026-08-21"
+  },
+  "watched_count": 4,
+  "replay": {
+    "events_in_window": 437,
+    "last_created_at": "2026-08-20T18:30:13+00:00",
+    "gate_pass_events": 111,
+    "committees_without_throttle": 111,
+    "committees": 7,
+    "by_door": {
+      "hermes-sentinel": 5,
+      "crawler": 2
+    },
+    "per_symbol": {
+      "S2": 3,
+      "S3": 2,
+      "S4": 1,
+      "S1": 1
+    },
+    "per_day_max": 3,
+    "days_with_committee": 3,
+    "days_at_cap": 0,
+    "symbol_hits_by_severity": {
+      "sev2": {
+        "run": 2,
+        "run-escalation": 0,
+        "cooldown": 66,
+        "cap": 6
+      },
+      "sev3": {
+        "run": 5,
+        "run-escalation": 0,
+        "cooldown": 27,
+        "cap": 5
+      }
+    },
+    "lower_sev_cooldowns_swallowing_sev3": 2,
+    "first_trigger_beijing": {
+      "S4": "2026-08-19T10:22+08:00",
+      "S2": "2026-08-19T17:17+08:00",
+      "S3": "2026-08-19T21:17+08:00",
+      "S1": "2026-08-21T00:01+08:00"
+    },
+    "per_day": {
+      "2026-08-19": 3,
+      "2026-08-20": 3,
+      "2026-08-21": 1
+    },
+    "trace": {
+      "symbol": "S3",
+      "events": [
+        {
+          "beijing": "2026-08-19T09:35+08:00",
+          "door": "hermes-sentinel",
+          "sev": 2,
+          "outcome": "cap"
+        },
+        {
+          "beijing": "2026-08-19T10:22+08:00",
+          "door": "hermes-sentinel",
+          "sev": 2,
+          "outcome": "cap"
+        },
+        {
+          "beijing": "2026-08-19T17:17+08:00",
+          "door": "hermes-sentinel",
+          "sev": 2,
+          "outcome": "cap"
+        },
+        {
+          "beijing": "2026-08-19T18:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 2,
+          "outcome": "cap"
+        },
+        {
+          "beijing": "2026-08-19T21:17+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "run"
+        },
+        {
+          "beijing": "2026-08-19T22:17+08:00",
+          "door": "hermes-sentinel",
+          "sev": 2,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-19T23:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 2,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T08:20+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T10:17+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cap"
+        },
+        {
+          "beijing": "2026-08-20T11:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "run"
+        },
+        {
+          "beijing": "2026-08-20T12:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T13:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T14:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T15:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T17:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T18:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        },
+        {
+          "beijing": "2026-08-20T19:16+08:00",
+          "door": "hermes-sentinel",
+          "sev": 3,
+          "outcome": "cooldown"
+        }
+      ]
+    }
+  }
+}
