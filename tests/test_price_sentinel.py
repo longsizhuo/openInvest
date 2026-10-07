@@ -107,9 +107,9 @@ def sentinel_env(tmp_path, monkeypatch):
     # 用同一个 manager 录制调用顺序（时序契约的关键断言点）
     manager = MagicMock()
     monkeypatch.setattr("openinvest.services.event_notifier.send_event_alert", manager.alert)
-    monkeypatch.setattr("openinvest.jobs.event_watch._trigger_committee", manager.trigger)
+    monkeypatch.setattr("openinvest.services.event_trigger._trigger_committee", manager.trigger)
     manager.trigger.return_value = "task-123"
-    monkeypatch.setattr("openinvest.jobs.event_watch._holdings_snapshot", lambda syms: {})
+    monkeypatch.setattr("openinvest.services.event_trigger._holdings_snapshot", lambda syms: {})
     return manager
 
 
@@ -197,8 +197,8 @@ class TestRun:
         }
         monkeypatch.setattr(ps, "_fetch_frames", lambda sym: frames)
         monkeypatch.setattr(ps, "_latest_verdict", lambda sym, committee_root=None: "近期无委员会 verdict")
-        monkeypatch.setattr("openinvest.jobs.event_watch._trigger_committee", lambda *a, **k: "task-1")
-        monkeypatch.setattr("openinvest.jobs.event_watch._holdings_snapshot", lambda syms: {})
+        monkeypatch.setattr("openinvest.services.event_trigger._trigger_committee", lambda *a, **k: "task-1")
+        monkeypatch.setattr("openinvest.services.event_trigger._holdings_snapshot", lambda syms: {})
         monkeypatch.setattr("openinvest.services.event_notifier.send_event_alert", lambda *a, **k: None)
 
         from openinvest.db.event_store import EventStore

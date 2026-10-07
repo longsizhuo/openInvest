@@ -201,6 +201,13 @@ sudo systemctl restart invest-web
 
 **重要**：systemd unit 不会自动 reload 新代码。每次升级完必须 `restart`。
 
+**stdio MCP 子进程也要重启**：agent 宿主（Hermes / OpenClaw / Claude Code 等）按
+config 自己 spawn 的 `openinvest-mcp` stdio 子进程不归 systemd 管，升级包、重启
+invest-web/scheduler 都碰不到它——它会一直跑旧代码，直到宿主重启该 MCP client
+（重启宿主 gateway/会话，或宿主自带的 MCP reload）。凡是改了 MCP 工具背后代码的
+版本（例：2026-10 `ingest_event` 接上委员会触发闸），升级后要同时重启 agent 宿主的
+MCP client，否则投喂门还是旧行为、爬虫门已是新行为。
+
 （前端升级流程已随 GUI 退役删除——invest-gui 仓库封存待重做。）
 
 ---
@@ -428,7 +435,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `run_committee` | ✅ 任意标的 | ✅ 任意标的 |
 | `explain_decision` | ✅ | ✅ |
 | `live_prices` | ✅ | ✅ |
-| `ingest_event` | ✅ | ✅ |
+| `ingest_event` | ✅ 入库 + 命中持仓时按频控触发委员会 | ✅ 只入库，永不触发委员会/报警（防群聊陌生人驱动 LLM 花费/推送） |
 | `news_sources` / `add_news_source` / `remove_news_source` | ✅ | ✅ 管理本实例自己的额外源清单（probe 校验 + 上限 30，群聊自助喂源用） |
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |

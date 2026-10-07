@@ -132,6 +132,7 @@ jobs:
           uv run python -c "from openinvest.services.event_normalizer import normalize, NormalizedEvent"
           uv run python -c "from openinvest.services.event_ingest import ingest_events"
           uv run python -c "from openinvest.services.event_notifier import send_event_alert"
+          uv run python -c "from openinvest.services.event_trigger import trigger_for_new_events, admit, is_triggerable"
           uv run python -c "from openinvest.services.news_sources import fetch_all, RawNewsItem"
           uv run python -c "from openinvest.services.news_sources.rss_feed import load_default_feeds"
           uv run python -c "from openinvest.jobs.event_watch import run as event_watch_run"

@@ -41,6 +41,13 @@ openInvest 在本次提交前是**纯定时驱动**：`daily_report` 10:00、`we
    - flash LLM 归一化为结构化事件（一次批调用）
    - 维度命中（severity ≥ mid + 影响到 holdings/target_assets + stance ≠ neutral）→ 发 digest 邮件 + POST `/api/committee/run`
 
+   > **2026-10 闸提成共享 service**：判级闸 + 触发 + 报警搬进 `services/event_trigger.py`，
+   > agent 投喂门（MCP/CLI `ingest_event`）入库后走同一道闸——此前只入库，Hermes 哨兵
+   > 喂的事件 committee_task_id 全 NULL。新增两门共享频控：同 symbol 冷却
+   > `event.committee_cooldown_hours`（12h）+ 滚动 24h 上限 `event.committee_daily_cap`（4，
+   > 按 symbol 计，额度紧时高 severity 先占）+ 冷却期内 severity 严格升级越级放行
+   > （`event.committee_escalation_bypass`）；顾问模式只入库不触发。
+
    > **2026-07-03 窗口修正**：上线至今实跑北京 0:00-7:30（旧 yml 注释把 cron 误标成
    > UTC 语义，实际 `CronTrigger.from_crontab(..., timezone="Asia/Shanghai")` 按北京解释）——
    > 错开 A股/ASX 白天与美盘上半场（ADP/非农/Fed 讲话都在北京 20:15-21:30），

@@ -1357,6 +1357,9 @@ def test_config_endpoints_roundtrip(client):
         "event.enabled", "event.min_severity", "event.max_rounds",
         "event.max_per_source", "event.rag_top_k", "event.rag_window_days",
         "event.rag_min_severity",
+        # 2026-10: 事件触发委员会频控（两条门共享，services/event_trigger）
+        "event.committee_cooldown_hours", "event.committee_daily_cap",
+        "event.committee_escalation_bypass",
         # 2026-07-03: event_watch 扫描窗口 + 价格异动哨兵(ADR-025)
         "event.watch_schedule",
         "event.sentinel_enabled", "event.sentinel_atr_mult",

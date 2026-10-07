@@ -8,6 +8,9 @@ runtime 只守护城河：归一化、判级、去重、持仓关联。
 
 幂等（ADR-016）：复用管道两级去重——url 已见跳过（sources 表）+ claim 哈希
 upsert（event_id 唯一键）。agent 重发同一条新闻不会重复入账。
+
+2026-10：新事件入库后走 services/event_trigger（与 event_watch 同一道闸 + 冷却/日上限）
+——此前只入库不触发，Hermes 哨兵喂进来的持仓风险事件从没触发过委员会。
 """
 from __future__ import annotations
 
@@ -28,7 +31,8 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
 
     Returns:
         {status, ingested, duplicates, events: [{event_id, one_line_claim,
-         event_type, stance, severity, affected_symbols}]}
+         event_type, stance, severity, affected_symbols}], committee_task_id}
+        committee_task_id: 新事件过闸且未被冷却/日上限拦下时触发的委员会 task（否则 None）
         缺 LLM key → {status: "error", error, hint}（归一化必须 LLM，无降级路径）
     """
     from openinvest.db.event_store import EventStore
@@ -56,7 +60,8 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
     unseen = [it for it in raw if not store.is_seen_url(it.url)]
     duplicates = len(raw) - len(unseen)
     if not unseen:
-        return {"status": "ok", "ingested": 0, "duplicates": duplicates, "events": []}
+        return {"status": "ok", "ingested": 0, "duplicates": duplicates, "events": [],
+                "committee_task_id": None}
 
     normalized = normalize(unseen)
     if not normalized:
@@ -71,6 +76,7 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
         return {"status": "error", "error": "归一化失败（LLM 调用异常），事件未入库"}
 
     out = []
+    new_events: List[Dict[str, Any]] = []
     for ne in normalized:
         ne.event["ingested_by"] = ingested_by  # normalizer 输出全来自 LLM——溯源在入库前注入
         was_new, eid = store.upsert_event(ne.event, embedding=ne.embedding)
@@ -87,6 +93,7 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
             duplicates += 1
             continue
         ev = ne.event
+        new_events.append({**ev, "event_id": eid})
         out.append({
             "event_id": eid,
             "one_line_claim": ev.get("one_line_claim"),
@@ -96,4 +103,11 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
             "affected_symbols": ev.get("affected_symbols") or [],
         })
     log.info(f"[event_ingest] agent 投喂 {len(raw)} 条 → 新事件 {len(out)}，去重 {duplicates}")
-    return {"status": "ok", "ingested": len(out), "duplicates": duplicates, "events": out}
+    task_id = None
+    try:
+        from openinvest.services.event_trigger import trigger_for_new_events
+        task_id = trigger_for_new_events(new_events, store=store)["committee_task_id"]
+    except Exception as e:  # 事件已入库，触发失败不能让 agent 以为没喂进去
+        log.warning(f"[event_ingest] 触发闸失败: {type(e).__name__}: {e}")
+    return {"status": "ok", "ingested": len(out), "duplicates": duplicates, "events": out,
+            "committee_task_id": task_id}

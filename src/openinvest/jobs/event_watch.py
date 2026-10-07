@@ -5,9 +5,9 @@
 2. 构 query → fetch_all 多源新闻
 3. event_normalizer.normalize → 结构化事件
 4. dedup（同 url 跳过）+ event_store.upsert_event
-5. 对 newly_inserted 中 severity ≥ mid 且影响到关注 symbol 的：
-   → POST /api/committee/run（触发委员会重跑）
-   → send_event_alert（digest 邮件）
+5. 新入库事件交 services/event_trigger（与 agent 投喂 ingest_event 共用同一道闸）：
+   severity ≥ mid + stance ≠ neutral + 影响到关注 symbol → 冷却/日上限 →
+   POST /api/committee/run（触发委员会重跑）+ send_event_alert（digest 邮件）
 
 环境变量：
   INVEST_EVENT_MIN_SEVERITY    默认 mid（trigger 阈值）
@@ -31,13 +31,11 @@ from typing import Any, Dict, List, Optional
 from openinvest.db.event_store import EventStore
 from openinvest.services.embeddings import DEFAULT_DIM
 from openinvest.services.event_normalizer import NormalizedEvent, normalize
-from openinvest.services.event_notifier import send_event_alert
+from openinvest.services.event_trigger import trigger_for_new_events
 from openinvest.services.news_sources import fetch_all
 from openinvest.services.news_sources.rss_feed import load_feeds
 
 log = logging.getLogger(__name__)
-
-_SEVERITY_RANK = {"low": 1, "mid": 2, "high": 3}
 
 # "是否持金"语义白名单（合理常量，不是用户持仓硬编码——持仓列表始终动态读 PM）：
 # 金期货 / 美澳中各地金 ETF。命中任一才追加黄金常驻 queries（anti-noise：
@@ -92,76 +90,6 @@ def _load_user_context() -> Dict[str, Any]:
         "watching": watching,
         "queries": list(dict.fromkeys(queries)),  # 去重保序
     }
-
-
-def _holdings_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    """给邮件正文用：每个受影响 symbol 当前 units / 现价 / pnl
-
-    现价必须经 get_quote(holding) 拿——它按 holding 的 proxy_kind/cost_currency
-    把行情换算成与 avg_cost 同币种、同单位的价格（如黄金积存金 GC=F USD/oz
-    经 /31.1035*USDCNY 反推成 CNY/克）。早期直接用 get_history_data 拿原始
-    GC=F 价（USD/oz≈4523），跟 CNY/克 成本（≈1008）相除，把真实浮亏 -1% 算成
-    了 +348%——币种/单位错配 bug，统一走 get_quote 后根除。
-    """
-    try:
-        from openinvest.core.portfolio_manager import PortfolioManager
-        from openinvest.utils.quotes import get_quote
-        pm = PortfolioManager()
-    except Exception:
-        return {}
-
-    snap: Dict[str, Dict[str, Any]] = {}
-    for sym in symbols:
-        h = pm.holdings.find(sym)
-        if not h:
-            continue
-        units = float(h.get("units", 0) or 0)
-        avg_cost = float(h.get("avg_cost", 0) or 0)
-        try:
-            quote = get_quote(h)
-        except Exception:
-            quote = None
-        entry: Dict[str, Any] = {"units": units}
-        if quote is not None:
-            # price 与 avg_cost 现在保证同币种同单位，相除才有意义
-            entry["price"] = round(quote.price, 2)
-            entry["currency"] = quote.currency
-            # 追踪仓 / 无成本不算 P&L，只报现价（对齐 web_api._build_holding_v2）
-            if not h.get("is_tracking_only") and units > 0:
-                entry["mv"] = quote.price * units
-                if avg_cost > 0:
-                    entry["pnl_pct"] = (quote.price / avg_cost) - 1.0
-        snap[sym] = entry
-    return snap
-
-
-def _trigger_committee(symbols: List[str], event_ids: List[str]) -> Optional[str]:
-    """调本机 web_api /api/committee/run 触发委员会重跑。返回 task_id"""
-    if not symbols:
-        return None
-    import requests
-    from openinvest.core.config import load_config
-    base = os.getenv("INVEST_EVENT_API_URL", "http://127.0.0.1:8765")
-    # hub 开了 INVEST_API_TOKEN 时 loopback 也要带（#106 起 token 全域强制）
-    _tok = os.getenv("INVEST_API_TOKEN", "").strip()
-    headers = {"Authorization": f"Bearer {_tok}"} if _tok else {}
-    try:
-        r = requests.post(
-            f"{base.rstrip('/')}/api/committee/run",
-            headers=headers,
-            json={
-                "symbols": symbols,
-                "max_debate_rounds": load_config().event.max_rounds,
-                "note": f"triggered by event_watch event_ids={','.join(event_ids[:4])}",
-                "event_ids": event_ids,
-            },
-            timeout=10,
-        )
-        r.raise_for_status()
-        return r.json().get("task_id")
-    except Exception as e:
-        log.warning(f"trigger committee 失败: {type(e).__name__}: {e}")
-        return None
 
 
 # #153②：RSS 泛头条预过滤的 symbol 别名表——RSS feed 不分 symbol 全量入库时，
@@ -248,11 +176,7 @@ def run(
     log.info(f"[event_watch] normalized {len(normalized)} events")
 
     # 入库 + 收集新事件
-    min_sev = cfg.event.min_severity
-    min_sev_rank = _SEVERITY_RANK.get(min_sev, 2)
-    watched_set = {s.lower() for s in watched}
-
-    triggerable_events: List[Dict[str, Any]] = []
+    new_events: List[Dict[str, Any]] = []
     for ne in normalized:
         was_new, eid = store.upsert_event(ne.event, embedding=ne.embedding)
         if ne.raw_item:
@@ -264,73 +188,26 @@ def run(
                 snippet=ne.raw_item.snippet,
                 fetched_at=ne.raw_item.fetched_at,
             )
-        if not was_new:
-            continue
+        if was_new:
+            new_events.append({**ne.event, "event_id": eid})
 
-        ev = ne.event
-        sev_rank = _SEVERITY_RANK.get(ev["severity"], 1)
-        if sev_rank < min_sev_rank:
-            continue
-        if ev["stance"] == "neutral":
-            continue
-
-        affected_lower = {s.lower() for s in (ev["affected_symbols"] or [])}
-        if not (affected_lower & watched_set):
-            continue
-
-        # 这条事件值得触发
-        ev_for_email = dict(ev)
-        ev_for_email["event_id"] = eid
-        ev_for_email["sources"] = store.get_sources(eid)
-        triggerable_events.append(ev_for_email)
-
-    log.info(f"[event_watch] triggerable={len(triggerable_events)}")
-
-    if not triggerable_events:
-        return {
-            "status": "ok",
-            "fetched": len(raw_items),
-            "new_events": sum(1 for _ in normalized),
-            "triggered": 0,
-        }
-
-    # 受影响 symbols 合并去重，只对真持仓 / 关注列表跑委员会。
-    # 大小写不敏感匹配 + 映射回 canonical 写法——triggerable 判定（上方）就是
-    # .lower() 交集，这里若用大小写敏感 `s in list`，LLM 归一化吐出 "ndq.ax"
-    # 时邮件会发但委员会静默不触发（CR 命中；events.db 实查暂无变体，防御性守卫）。
-    _canonical = {s.lower(): s for s in (ctx["holdings"] + ctx["watching"])}
-    affected_syms = sorted({
-        _canonical[s.lower()]
-        for ev in triggerable_events for s in (ev["affected_symbols"] or [])
-        if s.lower() in _canonical
-    })
-
-    task_id = None
-    if not dry_run:
-        task_id = _trigger_committee(
-            symbols=affected_syms,
-            event_ids=[ev["event_id"] for ev in triggerable_events],
+    # 闸 + 冷却/日上限 + 触发 + 报警：与 agent 投喂门共用（services/event_trigger）。
+    # 事件已入库，触发环节出错只记日志，不能让 job 失败把入库成果一起算成失败
+    try:
+        trig = trigger_for_new_events(
+            new_events, store=store, watched=ctx["holdings"] + ctx["watching"], dry_run=dry_run,
         )
-        if task_id:
-            for ev in triggerable_events:
-                store.mark_committee_task(ev["event_id"], task_id)
-
-        try:
-            send_event_alert(
-                triggerable_events,
-                committee_task_id=task_id,
-                holdings_snapshot=_holdings_snapshot(affected_syms),
-            )
-        except Exception as e:
-            log.warning(f"send_event_alert 失败: {type(e).__name__}: {e}")
+    except Exception as e:
+        log.warning(f"[event_watch] 触发闸失败（事件已入库）: {type(e).__name__}: {e}")
+        trig = {"triggered": 0, "affected_symbols": [], "committee_symbols": [],
+                "committee_task_id": None, "trigger_error": f"{type(e).__name__}: {e}"}
+    log.info(f"[event_watch] triggerable={trig['triggered']} committee={trig['committee_symbols']}")
 
     return {
         "status": "ok",
         "fetched": len(raw_items),
         "new_events": len(normalized),
-        "triggered": len(triggerable_events),
-        "committee_task_id": task_id,
-        "affected_symbols": affected_syms,
+        **trig,
         "dry_run": dry_run,
     }
 

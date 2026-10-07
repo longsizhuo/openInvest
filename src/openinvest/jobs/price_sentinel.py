@@ -148,7 +148,8 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
     from openinvest.core.config import load_config
     from openinvest.core.memory_store import MemoryStore
     from openinvest.db.event_store import EventStore
-    from openinvest.jobs.event_watch import _holdings_snapshot, _load_user_context, _trigger_committee
+    from openinvest.jobs.event_watch import _load_user_context
+    from openinvest.services.event_trigger import _holdings_snapshot, _trigger_committee
     from openinvest.services.event_notifier import send_event_alert
 
     if dry_run is None:

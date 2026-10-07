@@ -240,6 +240,14 @@ class EventConfig:
     rss_prefilter_enabled: bool = True
     min_severity: str = "mid"                   # 触发重跑委员会的最低严重度级别
     max_rounds: int = 2                         # 触发重跑委员会时的最大辩论轮数
+    # 事件触发委员会的频控（2026-10，services/event_trigger.py）：爬虫 event_watch 与
+    # agent 投喂 ingest_event 两条门共享。agent 投喂门接上触发闸后 Hermes 哨兵每天
+    # 喂 20-30 条，不限频会把委员会跑成刷屏。按 symbol 计（多 symbol task 算 N 个）。
+    committee_cooldown_hours: int = 12          # 同 symbol 事件触发委员会后的冷却小时数
+    committee_daily_cap: int = 4                # 任意滚动 24h 内事件触发委员会上限（0=停触发）
+    # 冷却期内新事件 severity 严格高于开冷却那条 → 越级放行（仍受日上限）。回放发现
+    # sev-2 前瞻开的 12h 冷却会吞掉随后的 sev-3 实锤（财报前瞻 → 财报结果）。
+    committee_escalation_bypass: bool = True
     # event_watch 扫描窗口（5 字段 crontab，按 jobs/event_watch.yml 的 timezone=Asia/Shanghai 解释）。
     # 默认北京 8:00-次日 2:30 每半小时——覆盖 A股/ASX 白天 + 美盘（含 ADP/非农/Fed 讲话时段）。
     # 2026-07-03 修正：旧 yml "*/30 0-7 * * 1-5" 实际跑在北京 0-7:30（注释误标成 UTC），

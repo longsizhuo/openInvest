@@ -4,6 +4,14 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _inert_trigger_gate(monkeypatch, tmp_path):
+    """本文件只测入库语义：触发闸见空关注列表（不读真实 PM、不打本机 8765），
+    冷却状态落 tmp。触发行为本身在 test_event_trigger.py 守。"""
+    monkeypatch.setattr("openinvest.services.event_trigger._watched_symbols", lambda: [])
+    monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", tmp_path / "memory")
+
+
 # ---------- ingest_events ----------
 
 class _FakeStore:
@@ -59,7 +67,8 @@ def test_ingest_url_dedup_skips_llm(monkeypatch):
     monkeypatch.setattr("openinvest.services.event_normalizer.normalize",
                         lambda items, **kw: called.append(1) or [])
     out = mod.ingest_events([{"title": "t", "url": "https://caixin.com/x"}])
-    assert out == {"status": "ok", "ingested": 0, "duplicates": 1, "events": []}
+    assert out == {"status": "ok", "ingested": 0, "duplicates": 1, "events": [],
+                   "committee_task_id": None}
     assert not called  # 已见 url 不烧 LLM
 
 

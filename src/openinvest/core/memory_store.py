@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import frontmatter
 from openinvest.paths import INVEST_ROOT
@@ -328,6 +328,24 @@ class MemoryStore:
             cur.append(item)
             _atomic_write_text(path, json.dumps(cur, ensure_ascii=False, indent=2))
             return True
+
+    def state_update(self, name: str, fn: Callable[[Any], Tuple[Any, Any]]) -> Any:
+        """同一把 fcntl 锁内 read → fn → write（state_claim 的通用版，杜绝两进程
+        state_get/state_set 交错互相覆盖）。fn(cur) -> (new_value, result)，返回 result。
+        cur=None 表示文件不存在或被写坏（坏 JSON 不抛，当空状态重建）。
+        """
+        path = self.root / ".state" / f"{name}.json"
+        with _file_lock(path):
+            cur = None
+            if path.exists():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        cur = json.load(f)
+                except ValueError:
+                    cur = None
+            new, result = fn(cur)
+            _atomic_write_text(path, json.dumps(new, ensure_ascii=False, indent=2))
+            return result
 
     def state_unclaim(self, name: str, item: str) -> None:
         """撤销 state_claim（claim 后续操作失败时回滚，让该键下次能重试）。

@@ -363,7 +363,10 @@ def ingest_event(
             distinct in meaning from `source`.
 
     Returns:
-        Ingestion result with the normalized event id(s) and dedup status.
+        Ingestion result with the normalized event id(s), dedup status, and
+        `committee_task_id` — set when a new holding-relevant event (severity
+        ≥ mid, non-neutral) triggered a rate-limited committee re-run; never
+        set in advisory mode.
     """
     from openinvest.services.event_ingest import ingest_events
     return ingest_events([{"title": title, "url": url, "snippet": snippet,

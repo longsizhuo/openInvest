@@ -409,6 +409,21 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "重跑最大辩论轮数",
         "help": "触发重跑委员会时的最大辩论轮数（默认 2 轮）",
     },
+    "event.committee_cooldown_hours": {
+        "type": "int",
+        "label": "事件触发委员会冷却(小时)",
+        "help": "同 symbol 被事件触发委员会后，此小时数内不再重跑（爬虫与 agent 投喂两条门共享；默认 12）",
+    },
+    "event.committee_daily_cap": {
+        "type": "int",
+        "label": "事件触发委员会日上限",
+        "help": "任意滚动 24 小时内事件触发的委员会次数上限，按 symbol 计（默认 4；0=停用事件触发）",
+    },
+    "event.committee_escalation_bypass": {
+        "type": "bool",
+        "label": "事件委员会冷却越级",
+        "help": "冷却期内新事件严重度严格高于开冷却那条时仍放行（仍受日上限；默认开）",
+    },
     "event.watch_schedule": {
         "type": "cron",
         "label": "event_watch 扫描窗口",

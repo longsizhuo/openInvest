@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from openinvest.jobs import event_watch
+from openinvest.services import event_trigger
 from openinvest.services.event_normalizer import NormalizedEvent
 from openinvest.services.news_sources import RawNewsItem
 
@@ -21,6 +23,8 @@ def tmp_event_db(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "events.db")
         monkeypatch.setattr("openinvest.db.event_store.DB_PATH", path)
+        # 触发冷却状态落 memory/.state（services/event_trigger）——隔离，防跨测试串冷却
+        monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", Path(d) / "memory")
         yield path
 
 
@@ -64,8 +68,8 @@ def test_run_no_trigger_when_neutral_or_low(tmp_event_db, monkeypatch):
     ])
     trigger = MagicMock()
     send = MagicMock()
-    monkeypatch.setattr(event_watch, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_watch, "send_event_alert", send)
+    monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
+    monkeypatch.setattr(event_trigger, "send_event_alert", send)
 
     out = event_watch.run()
     assert out["triggered"] == 0
@@ -88,11 +92,11 @@ def test_run_triggers_when_affected_high_risk(tmp_event_db, monkeypatch):
     monkeypatch.setattr(event_watch, "normalize", lambda items: [
         _ne(0, "Nvidia miss", "risk", "high", ["NDQ.AX"]),
     ])
-    monkeypatch.setattr(event_watch, "_holdings_snapshot", lambda syms: {})
+    monkeypatch.setattr(event_trigger, "_holdings_snapshot", lambda syms: {})
     trigger = MagicMock(return_value="task-abc")
     send = MagicMock()
-    monkeypatch.setattr(event_watch, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_watch, "send_event_alert", send)
+    monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
+    monkeypatch.setattr(event_trigger, "send_event_alert", send)
 
     out = event_watch.run()
     assert out["triggered"] == 1
@@ -117,8 +121,8 @@ def test_run_dry_run_skips_email_and_committee(tmp_event_db, monkeypatch):
     ])
     trigger = MagicMock()
     send = MagicMock()
-    monkeypatch.setattr(event_watch, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_watch, "send_event_alert", send)
+    monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
+    monkeypatch.setattr(event_trigger, "send_event_alert", send)
 
     out = event_watch.run(dry_run=True)
     assert out["triggered"] == 1
@@ -132,15 +136,15 @@ def test_run_skips_duplicated_urls(tmp_event_db, monkeypatch):
     ctx = {"holdings": ["NDQ.AX"], "watching": [], "macro_tags": [], "queries": ["x"]}
     monkeypatch.setattr(event_watch, "_load_user_context", lambda: ctx)
     monkeypatch.setattr(event_watch, "load_feeds", lambda: [])
-    monkeypatch.setattr(event_watch, "_holdings_snapshot", lambda syms: {})
+    monkeypatch.setattr(event_trigger, "_holdings_snapshot", lambda syms: {})
 
     items = [RawNewsItem(src_name="r", title="t", url="https://r.co/0", snippet="s")]
     monkeypatch.setattr(event_watch, "fetch_all", lambda **kw: items)
     monkeypatch.setattr(event_watch, "normalize", lambda its: [
         _ne(0, "evt-x", "risk", "high", ["NDQ.AX"]),
     ])
-    monkeypatch.setattr(event_watch, "_trigger_committee", lambda **kw: "t1")
-    monkeypatch.setattr(event_watch, "send_event_alert", lambda *a, **kw: "rcv")
+    monkeypatch.setattr(event_trigger, "_trigger_committee", lambda **kw: "t1")
+    monkeypatch.setattr(event_trigger, "send_event_alert", lambda *a, **kw: "rcv")
 
     first = event_watch.run()
     assert first["triggered"] == 1
@@ -184,8 +188,8 @@ def test_holdings_snapshot_pnl_uses_quote_currency(monkeypatch):
         ),
     )
 
-    snap = event_watch._holdings_snapshot(["GC=F"])
-    entry = snap["GC=F"]
+    snap = event_trigger._holdings_snapshot([gold["symbol"]])
+    entry = snap[gold["symbol"]]
 
     assert entry["price"] == pytest.approx(1000.28, abs=0.01)
     assert entry["currency"] == "CNY"
