@@ -42,7 +42,7 @@ def crontab_dow_to_names(field: str) -> str:
     for term in field.lower().split(","):
         rng, slash, step = term.partition("/")
         if rng == "*":
-            lo, hi = 0, 6
+            lo, hi, dash = 0, 6, ""
         else:
             a, dash, b = rng.partition("-")
             if slash and not dash:  # "6/2"：非标准写法（各家 cron 解释不一），直接拒
@@ -50,6 +50,8 @@ def crontab_dow_to_names(field: str) -> str:
             lo = _dow_index(a)
             hi = _dow_index(b) if dash else lo  # "1-" / "-1" 的空端点在 _dow_index 里拒
         n = int(step) if slash else 1  # "1-5/" / "1-5/x" → int 抛 ValueError
+        if dash and hi == 0 and lo > 0:  # "sat-sun" / "5-0"：区间以周日结尾 = 7
+            hi = 7
         if lo > hi or n < 1:
             raise ValueError(f"非法 day_of_week: {term!r}")
         days.update(d % 7 for d in range(lo, hi + 1, n))

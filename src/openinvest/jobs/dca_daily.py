@@ -13,8 +13,8 @@
 unclaim，yml 一天排 15:30/18:30/21:30 三次，交易日 bar 晚到/行情源抖动由后两次补记，
 已记过的后续运行走 already_dca_today。2026-10 前不看开没开盘：国庆 / 中秋 / 周六按
 节前旧价记了幻影买入（见 scripts/reconcile_dca_phantom.py 对账）。
-适用范围：北京时间 15:30 前已收盘的市场（A 股、亚太）；美股等西半球标的此时最新 bar
-是前一交易日，会一直 skip(market_closed)——不记账但也不会记错账。
+适用范围：北京时间 15:30 前已收盘的市场（A 股、亚太）。15:30 后才收盘的市场（美股、欧股）
+不受支持：多数时刻 skip(market_closed)，但 21:30 档恰逢美东开盘、欧股盘中时可能按盘中价记账。
 
 安全默认：config.dca.auto_dca_enabled 默认 False → fork 用户 / 未配置时本 job 直接
 skip，绝不自动动账本。用户经 /api/config（dca.auto_dca_enabled）或 INVEST_DCA_* 开启。
@@ -89,7 +89,7 @@ def run() -> Dict[str, Any]:
                 raise _DcaSkip("no_price")
             # 休市闸：最新 bar 不是今天 → 按旧价记账就是幻影买入。先分清是行情源挂了
             # （stale_quote，交易日也可能，告警）还是确实没开盘（market_closed）。
-            # ponytail: 按北京日期比——美股等西半球标的会一直 market_closed（见模块 docstring），
+            # ponytail: 按北京日期比——15:30 后收盘的市场不受支持（见模块 docstring），
             # 真要定投这类标的再改成按交易所时区 + 收盘时刻比对。
             # last_updated=None（黄金 proxy 不带日期）无从判断，照旧记账。
             if snap.last_updated is not None and snap.last_updated != today:

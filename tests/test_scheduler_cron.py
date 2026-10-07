@@ -24,6 +24,9 @@ SH = ZoneInfo("Asia/Shanghai")
     ("0", "sun"),
     ("7", "sun"),
     ("1,3,5", "mon,wed,fri"),
+    ("sat-sun", "sun,sat"),      # 以周日结尾的区间 = 7（APScheduler / croniter 都认）
+    ("fri-sun", "sun,fri,sat"),
+    ("5-0", "sun,fri,sat"),
     ("*/2", "sun,tue,thu,sat"),              # crontab 从 0=周日 起步
     ("0-6", "sun,mon,tue,wed,thu,fri,sat"),  # 原样交给 APScheduler 会变成 "sun-sat" 区间非法
     ("5-7", "sun,fri,sat"),
@@ -35,7 +38,7 @@ def test_dow_translation_table(field, expected):
     assert crontab_dow_to_names(field) == expected
 
 
-@pytest.mark.parametrize("bad", ["8", "sat-sun", "x", "1,,2", "?", "1-", "-1", "6/2", "7/2",
+@pytest.mark.parametrize("bad", ["8", "x", "1,,2", "?", "1-", "-1", "6/2", "7/2",
                                  "1-5/0", "1-5/", "*/x", "1-5/-1"])
 def test_bad_dow_raises(bad):
     with pytest.raises(ValueError):
