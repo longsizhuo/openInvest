@@ -21,6 +21,21 @@ def _is_phantom_weekend(symbol: str, date_str: str) -> bool:
         return False
 
 
+# 2026-10-07 #231：原 INSERT OR REPLACE = 删旧行再插 → 只传 close 的写入（gold_price
+# 现价缓存 GC=F/USDCNY=X、betashares NAV 兜底）把同日已回填的 high/low/volume 冲成
+# NULL，ATR/RVOL 静默退化成收盘价差。改 upsert：close/source 后写者赢（同旧语义），
+# OHLCV 新值为 NULL 时保留旧值。
+_UPSERT_DAILY_PRICE = (
+    "INSERT INTO daily_prices (symbol, date, close, source, high, low, volume) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+    "ON CONFLICT(symbol, date) DO UPDATE SET "
+    "close = excluded.close, source = excluded.source, "
+    "high = COALESCE(excluded.high, high), "
+    "low = COALESCE(excluded.low, low), "
+    "volume = COALESCE(excluded.volume, volume)"
+)
+
+
 class MarketStore:
     """线程安全 + 多进程并发安全的 SQLite 行情库
 
@@ -109,12 +124,11 @@ class MarketStore:
     def save_ndq_snapshot(self, date_str, nav, stats, holdings, sectors):
         with self._lock:
             cursor = self.conn.cursor()
-            # 列名显式写出（表已扩 OHLCV 列，positional VALUES 会列数不匹配报错）。
-            # betashares NAV 只有收盘，high/low/volume 留 NULL；NDQ.AX 的 OHLC 由
-            # get_history_data 的 yfinance 刷新填（同 PK INSERT OR REPLACE，后写者赢）。
+            # betashares NAV 只有收盘：close/source 后写者赢，high/low/volume 走
+            # _UPSERT_DAILY_PRICE 的 COALESCE 保留 yfinance 已填的 OHLCV（#231）。
             cursor.execute(
-                "INSERT OR REPLACE INTO daily_prices (symbol, date, close, source) VALUES (?, ?, ?, ?)",
-                ("NDQ.AX", date_str, nav, "betashares_scraper"),
+                _UPSERT_DAILY_PRICE,
+                ("NDQ.AX", date_str, nav, "betashares_scraper", None, None, None),
             )
             for k, v in stats.items():
                 cursor.execute("INSERT OR REPLACE INTO etf_stats VALUES (?, ?, ?, ?)", ("NDQ.AX", date_str, k, v))
@@ -217,16 +231,15 @@ class MarketStore:
                            high=None, low=None, volume=None):
         """存储一日行情。close 必填；high/low/volume 可选（OHLCV 回填 / 日常刷新用）。
 
-        向后兼容：只传 close 的老调用方行为不变（high/low/volume 落 NULL）。
+        只传 close 的调用方（gold_price 现价缓存 / betashares 兜底）：新行
+        high/low/volume 落 NULL；已有行只改 close/source，OHLCV 保留（#231）。
         """
         if _is_phantom_weekend(symbol, date_str):
             return
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "INSERT OR REPLACE INTO daily_prices "
-                "(symbol, date, close, source, high, low, volume) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                _UPSERT_DAILY_PRICE,
                 (symbol, date_str, close, source, high, low, volume),
             )
             self.conn.commit()
