@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 import urllib3
+import urllib3.util.connection
 import yaml
 
 _PUBLIC = "93.184.215.14"
@@ -27,6 +28,12 @@ _DNS = {
     "mcast.example.com": ["239.1.1.1"],
     "zero.example.com": ["0.0.0.0"],
     "mixed.example.com": [_PUBLIC, "10.0.0.1"],
+    # IPv6 内嵌 IPv4 的各种形态
+    "nat64.example.com": ["64:ff9b::7f00:1"],
+    "v4compat.example.com": ["::127.0.0.1"],
+    "sixtofour.example.com": ["2002:a00:1::1"],
+    "teredo.example.com": ["2001:0:808:808::1"],
+    "scoped.example.com": ["fe80::1%eth0"],
 }
 
 
@@ -47,6 +54,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "INVEST_ROOT", tmp_path)
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
     monkeypatch.setattr(socket, "create_connection", _no_network)
+    monkeypatch.setattr(urllib3.util.connection, "create_connection", _no_network)
     return tmp_path
 
 
@@ -116,7 +124,8 @@ def test_default_feeds_env_override(home, monkeypatch, tmp_path):
     assert rf.load_default_feeds() == [{"name": "only", "url": "https://x/f"}]
 
 
-@pytest.mark.parametrize("host", ["loop", "lan", "linklocal", "mapped", "v6local", "mcast", "zero", "mixed"])
+@pytest.mark.parametrize("host", ["loop", "lan", "linklocal", "mapped", "v6local", "mcast", "zero", "mixed",
+                                  "nat64", "v4compat", "sixtofour", "teredo", "scoped"])
 def test_add_rejects_non_public_address(home, monkeypatch, host):
     """主机解析出任一非公网地址 → 拒绝，且不发 probe、不落盘。"""
     from openinvest.services.news_sources import rss_feed as rf
@@ -152,13 +161,13 @@ def _resp(status, body=b"", headers=None):
 
 @pytest.fixture
 def fake_get(monkeypatch):
-    """requests.get 假实现：routes = {url: Response}；记录每次调用 (url, kwargs)。"""
+    """Session.get 假实现：routes = {url: Response}；记录每次调用 (url, kwargs)。"""
     calls, routes = [], {}
 
-    def _get(url, **kw):
+    def _get(_self, url, **kw):
         calls.append((url, kw))
         return routes[url]
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(requests.Session, "get", _get)
     return calls, routes
 
 
@@ -216,3 +225,47 @@ def test_operator_default_feeds_skip_address_check(home, fake_get, monkeypatch, 
     monkeypatch.delenv("INVEST_RSS_FEEDS_YML")
     routes[url] = _resp(200, _RSS)
     assert rf.fetch_rss("hub", url) == []
+
+
+def test_fetch_connects_to_the_validated_address(home, monkeypatch):
+    """校验时解析到公网、连接时再解析变成内网 → 必须连校验过的那个地址，且 Host 头保持原主机名。"""
+    import threading
+
+    from openinvest.services.news_sources import rss_feed as rf
+
+    answers = iter([[_PUBLIC], ["10.0.0.1"]])  # 第一次解析公网，之后变内网
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, *a, **k: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 0))
+        for ip in (next(answers) if host == "flip.example.com" else _DNS[host])])
+
+    client, server = socket.socketpair()
+    dialed, request = [], []
+
+    def _fake_create_connection(address, *_a, **_kw):  # 模拟 urllib3 建连：主机名会再解析一次
+        host = address[0]
+        dialed.append(host if host[0].isdigit() else socket.getaddrinfo(host, address[1])[0][4][0])
+        return client
+
+    def _serve():
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            buf += server.recv(4096)
+        request.append(buf)
+        server.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(_RSS) + _RSS)
+        server.close()
+
+    monkeypatch.setattr(urllib3.util.connection, "create_connection", _fake_create_connection)
+    threading.Thread(target=_serve, daemon=True).start()
+    out = rf.fetch_rss("t", "http://flip.example.com/rss")
+    assert dialed == [_PUBLIC]
+    assert b"\r\nHost: flip.example.com\r\n" in request[0]
+    assert [i.title for i in out] == ["Hello"]
+
+
+def test_pinned_adapter_keeps_tls_hostname():
+    """https 连接钉 IP 时，SNI / 证书校验仍按原主机名。"""
+    from openinvest.services.news_sources import rss_feed as rf
+    req = requests.Request("GET", "https://feeds.example.com/rss").prepare()
+    host_params, pool_kwargs = rf._PinnedAdapter(_PUBLIC).build_connection_pool_key_attributes(req, True)
+    assert host_params["host"] == _PUBLIC
+    assert pool_kwargs["server_hostname"] == "feeds.example.com"

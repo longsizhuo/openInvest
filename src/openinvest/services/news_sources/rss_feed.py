@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlsplit
 
 import requests
+import requests.adapters
 import yaml
 
 from openinvest.services.news_sources import RawNewsItem
@@ -42,8 +43,28 @@ _MAX_REDIRECTS = 3
 _MAX_FEED_BYTES = 2 * 1024 * 1024
 
 
-def _check_url(url: str) -> None:
-    """只放行 http(s)、不带 userinfo、且主机解析出的每个地址都是公网地址的 URL；否则抛 ValueError。"""
+# 内嵌 IPv4 的 IPv6 段（NAT64 两段 + 已废弃的 IPv4 兼容地址）：取低 32 位一起判
+_V4_EMBEDDING_NETS = tuple(ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "::/96"))
+
+
+def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """is_global 已排除 loopback/私网/link-local/保留/未指定，但组播仍算 global；
+    IPv6 里内嵌的 IPv4（mapped / 6to4 / Teredo / NAT64 / 兼容地址）要连同 v6 本身都是公网才放行。"""
+    if ip.is_multicast or not ip.is_global:
+        return False
+    if ip.version == 6:
+        embedded = [ip.ipv4_mapped, ip.sixtofour, *(ip.teredo or ())]
+        if any(ip in n for n in _V4_EMBEDDING_NETS):
+            embedded.append(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+        return all(_is_public(v4) for v4 in embedded if v4 is not None)
+    return True
+
+
+def _check_url(url: str) -> str:
+    """只放行 http(s)、不带 userinfo、且主机解析出的每个地址都是公网地址的 URL；否则抛 ValueError。
+
+    返回要连接的地址（解析结果第一条，与系统默认连接顺序一致），供 _PinnedAdapter 钉住。
+    """
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError(f"url 必须是 http(s) RSS/Atom 地址: {url!r}")
@@ -54,26 +75,48 @@ def _check_url(url: str) -> None:
     except (OSError, ValueError) as e:  # gaierror ⊂ OSError；非法端口 parts.port 抛 ValueError
         raise ValueError(f"url 主机解析失败: {parts.hostname}: {e}") from e
     for *_, sockaddr in infos:
-        ip = ipaddress.ip_address(sockaddr[0])
-        ip = getattr(ip, "ipv4_mapped", None) or ip
-        # is_global 已排除 loopback/私网/link-local/保留/未指定，但组播仍算 global
-        if ip.is_multicast or not ip.is_global:
+        try:
+            ok = _is_public(ipaddress.ip_address(sockaddr[0]))
+        except ValueError:
+            ok = False
+        if not ok:
             raise ValueError(f"url 主机 {parts.hostname} 解析到非公网地址，拒绝")
+    return infos[0][4][0]
+
+
+class _PinnedAdapter(requests.adapters.HTTPAdapter):
+    """连接直接打到 _check_url 校验过的那个地址（不再二次解析）；Host 头与 TLS SNI/证书校验仍按原主机名。"""
+
+    def __init__(self, ip: str):
+        self._ip = ip
+        super().__init__()
+
+    def build_connection_pool_key_attributes(self, request, verify, cert=None):
+        host_params, pool_kwargs = super().build_connection_pool_key_attributes(request, verify, cert)
+        pool_kwargs["server_hostname"] = host_params["host"]  # http 池由 urllib3 自动丢弃
+        host_params["host"] = self._ip
+        return host_params, pool_kwargs
+
+    def add_headers(self, request, **kwargs):
+        request.headers["Host"] = urlsplit(request.url).netloc
 
 
 def _fetch_feed(url: str, *, public_only: bool = True):
     """抓 feed 并解析 —— fetch_rss 的所有源都走这里（护栏见 _FETCH_* 常量）。
 
-    public_only=True 时每一跳（含重定向目标）都过 _check_url。
+    public_only=True 时每一跳（含重定向目标）都重新解析+校验，并钉住校验过的地址连接。
     """
     import feedparser
 
     deadline = time.monotonic() + _FETCH_DEADLINE_SEC
     for _ in range(_MAX_REDIRECTS + 1):
+        session = requests.Session()
         if public_only:
-            _check_url(url)
-        with requests.get(url, timeout=_FETCH_TIMEOUT, stream=True, allow_redirects=False,
-                          headers={"User-Agent": feedparser.USER_AGENT}) as resp:
+            pinned = _PinnedAdapter(_check_url(url))
+            session.mount("http://", pinned)
+            session.mount("https://", pinned)
+        with session, session.get(url, timeout=_FETCH_TIMEOUT, stream=True, allow_redirects=False,
+                                  headers={"User-Agent": feedparser.USER_AGENT}) as resp:
             if resp.is_redirect:
                 url = urljoin(url, resp.headers["location"])
                 continue
