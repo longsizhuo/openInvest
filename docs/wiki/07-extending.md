@@ -114,6 +114,10 @@ documents:
    没有原生 RSS 的站点推荐自建 [RSSHub](https://github.com/DIYgod/RSSHub)
    （`docker run -d -p 1200:1200 diygod/rsshub`，5000+ 路由含财新/华尔街见闻/雪球等），
    feed URL 指向自己的实例。泛市场 feed 会过持仓别名/macro 关键词预过滤（`event.rss_prefilter_enabled`）。
+
+   **内网/本机自建源（如上面的 RSSHub）要写进 `INVEST_RSS_FEEDS_YML` 指向的文件**——它整体替换包内默认清单，
+   所以先把包内 `rss_feeds.yml` 的条目抄进去再追加自己的。`add_news_source` / `news_sources --add`
+   加的额外源只接受公网地址、直连不走代理，填 `localhost` / 内网地址会被拒。
 2. **中文快讯 wire（内置）**：watched 含 A 股 symbol（.SS/.SZ/.BJ）时自动激活
    akshare 东财快讯 + 新浪 7×24（`news_sources/akshare_news.py`）；境内部署可照样式加财联社电报。
 3. **agent 投喂（最通用）**：任何市场/语言，宿主 agent 搜到直接 `ingest_event` 喂进管道——

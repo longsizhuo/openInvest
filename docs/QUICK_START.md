@@ -279,6 +279,9 @@ INVEST_HOME=~/openInvest python -m openinvest.jobs.commsec_sync
 
 首次运行需网络从 PyPI 拉包。检查网络后重试；公司代理环境设好 `HTTPS_PROXY`。
 
+注意：`add_news_source` / `news_sources --add` 加的额外 RSS 源一律**直连、不走 `HTTPS_PROXY`**
+（只接受公网地址）；必须经代理才能访问的源放进 `INVEST_RSS_FEEDS_YML`，运维默认清单照常走代理。
+
 ### 2. 跑 committee 报 401 / DeepSeek 错
 
 ```
