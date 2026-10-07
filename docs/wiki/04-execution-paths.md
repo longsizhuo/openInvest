@@ -187,6 +187,8 @@ Claude API 抖？Direct 路径不受影响，自动化照跑。
 │  capabilities/committee/{macro,quant,risk,cio}.py 的 prompt                    │ ← 共享
 ├────────────────────────────────────────────────────────────────┤
 │  core/regime.py REGIME 分类 + 概率口径                         │ ← 共享
+│  确定性后处理：parse_cio_memo（含 Sanity5 现价校验）+          │ ← 共享
+│  runner/intervention.py 黄金 DCA 闸 / 干预记账（#234-5 补齐）  │
 ├────────────────────────────────────────────────────────────────┤
 │  core/committee/debate.py run_committee 编排逻辑               │ ← 仅 Direct 用
 │  skills/invest/scripts/run.sh prepare_committee 提示生成       │ ← 仅 Coordinator 用

@@ -222,7 +222,8 @@ def save_committee_transcript(
 ) -> Dict[str, Any]:
     """把 coordinator 模式产出的 6 段 transcript 落到 memory/.committee/<date>/<asset>.md
 
-    解析 CIO 段 → parse_cio_memo（含确定性防御降级后处理）→ 落盘 + dream_event。
+    解析 CIO 段 → parse_cio_memo（含确定性防御降级 / Sanity5 / 黄金 DCA 闸后处理）
+    → 落盘 + 干预记账 + dream_event（与 Direct 路径同一组后处理入口，#234-5）。
     返回 {"saved": <path>, "verdict": {...}}。
 
     Args:
@@ -250,12 +251,37 @@ def save_committee_transcript(
     # risk_profile / 快崩防御 后处理输入（与 direct 路径同款）：transcript 里有
     # 粘贴进去的确定性 regime_brief（REGIME:/INPUTS:/THRESHOLDS: 行）和
     # sentiment_brief（INDEP_DEFENSE_FLAG 行）
+    regime = regime_label_from_text(raw)
+    atr_defense_on = atr_defense_from_text(raw)
+    # 2026-10-07 #234-5：补齐 Direct 路径的三条确定性后处理——Sanity5 现价校验
+    # （current_price）/ 黄金防御分批 DCA 闸 / 干预反事实记账，与 session 共用
+    # intervention.py 同一组入口。transcript 不含绝对价位（ADR-022），现价与交易日
+    # 日历按 Direct 同口径在 save 时取（get_history_data 2y → compute_metrics）。
+    from openinvest.core.portfolio_manager import PortfolioManager
+    from openinvest.core.runner.intervention import gold_defense_dca_plan, record_intervention
+    from openinvest.utils.exchange_fee import get_history_data
+    try:
+        df = get_history_data(symbol, "2y")
+    except Exception as e:  # noqa: BLE001  行情拉不到 → 现价 None（Sanity5 跳过），不阻断落盘
+        log.warning(f"save_committee 行情拉取失败 graceful：{e}")
+        df = None
+    has_df = df is not None and not df.empty
+    current_price = compute_metrics(df).get("current_price") if has_df else None
+    try:
+        target = next(
+            (a for a in PortfolioManager().strategy.get("target_assets", [])
+             if a.get("symbol") == symbol),
+            {},
+        )
+    except Exception:  # noqa: BLE001  策略读不到 → 当非黄金（defense_dca=None 旧全拦）
+        target = {}
+    defense_dca = gold_defense_dca_plan(symbol, target, df.index if has_df else [])
     verdict = parse_cio_memo(
         cio_text,
-        regime=regime_label_from_text(raw),
-        defense_flag_on=(
-            "INDEP_DEFENSE_FLAG: on" in raw or atr_defense_from_text(raw)
-        ),
+        current_price=current_price,
+        regime=regime,
+        defense_flag_on=("INDEP_DEFENSE_FLAG: on" in raw or atr_defense_on),
+        defense_dca=defense_dca,
     )
 
     store = MemoryStore()
@@ -283,6 +309,7 @@ def save_committee_transcript(
         lines.append(f"\n### RAW (未分段)\n\n{raw}\n")
 
     path.write_text("\n".join(lines), encoding="utf-8")
+    record_intervention(symbol, regime or "", current_price, verdict, atr_defense_on)
     store.dream_event({
         "phase": "committee_finished_skill",
         "asset": symbol,

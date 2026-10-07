@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 from openinvest.core.runner.event_brief import _get_event_store, _resolve_event_brief, format_event_brief, resolve_event_brief_multi
 from openinvest.core.runner.loaders import _build_default_portfolio_summary, load_prior_insights, load_sentiment_brief, load_valuation_brief
-from openinvest.core.runner.intervention import _extract_regime_label, _gold_defense_dca_gate, _intervention_record, _log_intervention, _save_path_snapshot
+from openinvest.core.runner.intervention import _extract_regime_label, _save_path_snapshot, gold_defense_dca_plan, record_intervention
 
 def run_committee_for_symbol(
     symbol: str,
@@ -240,23 +240,10 @@ def run_committee_for_symbol(
     # 中位右偏(典型涨不该禁)，用时间分散吃厚左尾(挤兑坑)。两条腿(VIX/ATR)已在
     # run_committee 里 OR 成单 defense_flag_on，故只算一份合成计划（非各腿独立分批，
     # 否则会叠成 1/9）。非黄金/未启用 → defense_dca=None → 旧全拦行为。
-    # _force_reload：长驻 scheduler 经 /api/config 动态改 verdict 类开关后,这里必须重读
-    # 否则吃陈旧缓存静默失效（对齐 jobs/dca_daily.py 的写法）。
-    _vcfg = _load_config(_force_reload=True).verdict
-    defense_dca = None
-    if target.get("type") == "metal" and _vcfg.gold_defense_dca_enabled:
-        try:
-            defense_dca = _gold_defense_dca_gate(
-                symbol, df.index,
-                n_tranches=_vcfg.gold_defense_dca_n_tranches,
-                fraction=_vcfg.gold_defense_dca_fraction,
-                min_spacing_days=_vcfg.gold_defense_dca_min_spacing_days,
-                window_days=_vcfg.gold_defense_dca_window_days,
-            )
-            emit("gold_defense_dca_gate", asset=symbol, **defense_dca)
-        except Exception as e:  # noqa: BLE001  闸算失败 → 退回 None=旧全拦（安全侧）
-            log.warning(f"黄金 DCA 闸计算失败 graceful，退回全拦：{e}")
-            defense_dca = None
+    # 配置重读 / graceful 退回全拦 在共用入口里（#234-5：Coordinator save 同调这一份）。
+    defense_dca = gold_defense_dca_plan(symbol, target, df.index)
+    if defense_dca is not None:
+        emit("gold_defense_dca_gate", asset=symbol, **defense_dca)
 
     # 6. 跑多轮辩论 + CIO
     # 顾问模式不落 transcript 到真实 memory——群聊问的资产多半不在用户 target_assets
@@ -301,17 +288,14 @@ def run_committee_for_symbol(
     # 6.6. 反事实记账：确定性规则改写了 CIO 裁决 → 落 interventions.jsonl
     # （"如果没拦会怎样"由 jobs/intervention_review.py 事后回填）。graceful。
     # 顾问模式跳过：合成的空 target 模板没有真实拦截意义，落账只会污染 discipline 统计。
+    # 共用入口（#234-5：Coordinator save 同调这一份），graceful 在入口内。
     if not _advisory:
-        try:
-            _rec = _intervention_record(
-                symbol, regime_label, current_price,
-                result.get("verdict"), atr_defense_on,
-            )
-            if _rec is not None:
-                _log_intervention(_rec)
-                emit("intervention_logged", asset=symbol, rule=_rec["rule"])
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"干预记账失败 graceful 跳过: {e}")
+        _rec = record_intervention(
+            symbol, regime_label, current_price,
+            result.get("verdict"), atr_defense_on,
+        )
+        if _rec is not None:
+            emit("intervention_logged", asset=symbol, rule=_rec["rule"])
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
     if probability_table is not None:

@@ -206,6 +206,58 @@ def _gold_defense_dca_gate(
     return {"allow": True, "fraction": frac, "reason": "ok", "tranche_idx": tranche_idx}
 
 
+# ---------------------------------------------------------------------------
+# 两路径共用的确定性后处理（2026-10-07 #234-5）：Direct（session.run_committee_for_symbol）
+# 与 Coordinator（coordinator.save_committee_transcript）都经这两个入口 + parse_cio_memo，
+# 不再各写一份——此前 Coordinator save 漏了 DCA 闸与干预记账，同日黄金 ACCUMULATE 遇
+# 防御：Direct 放行 ⅓ 批并记账，Coordinator 静默全拦且反事实账本对整笔 entry 盲。
+# ---------------------------------------------------------------------------
+
+def gold_defense_dca_plan(
+    symbol: str, target: Optional[Dict[str, Any]], trading_days: Any,
+) -> Optional[Dict[str, Any]]:
+    """黄金防御分批 DCA 闸的 parse_cio_memo 输入：仅黄金(type==metal)且配置开启时算；
+    非黄金/未启用/计算失败 → None（= 旧全拦行为，安全侧）。
+
+    _force_reload：长驻 scheduler 经 /api/config 动态改 verdict 类开关后必须重读，
+    否则吃陈旧缓存静默失效（对齐 jobs/dca_daily.py 的写法）。
+    """
+    from openinvest.core.config import load_config
+    vcfg = load_config(_force_reload=True).verdict
+    if (target or {}).get("type") != "metal" or not vcfg.gold_defense_dca_enabled:
+        return None
+    try:
+        return _gold_defense_dca_gate(
+            symbol, trading_days,
+            n_tranches=vcfg.gold_defense_dca_n_tranches,
+            fraction=vcfg.gold_defense_dca_fraction,
+            min_spacing_days=vcfg.gold_defense_dca_min_spacing_days,
+            window_days=vcfg.gold_defense_dca_window_days,
+        )
+    except Exception as e:  # noqa: BLE001  闸算失败 → 退回 None=旧全拦（安全侧）
+        log.warning(f"黄金 DCA 闸计算失败 graceful，退回全拦：{e}")
+        return None
+
+
+def record_intervention(
+    symbol: str,
+    regime_label: str,
+    current_price: Optional[float],
+    verdict: Optional[Dict[str, Any]],
+    atr_defense_on: bool,
+) -> Optional[Dict[str, Any]]:
+    """确定性规则改写了 CIO 裁决 → 落 interventions.jsonl（"如果没拦会怎样"由
+    jobs/intervention_review.py 事后回填）。返回落账记录；无干预/失败 → None（graceful）。"""
+    try:
+        rec = _intervention_record(symbol, regime_label, current_price, verdict, atr_defense_on)
+        if rec is not None:
+            _log_intervention(rec)
+        return rec
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"干预记账失败 graceful 跳过: {e}")
+        return None
+
+
 def _save_path_snapshot(
     symbol: str,
     regime_label: str,
@@ -243,5 +295,7 @@ __all__ = [
     "_intervention_record",
     "_log_intervention",
     "_gold_defense_dca_gate",
+    "gold_defense_dca_plan",
+    "record_intervention",
     "_save_path_snapshot",
 ]

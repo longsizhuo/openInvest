@@ -8,8 +8,18 @@ Coordinator 协议——Hermes 接入后会把 Hermes 产出的 transcript 误�
 """
 from __future__ import annotations
 
+import pandas as pd
+import pytest
+
 from openinvest.core import memory_store as ms
 from openinvest.core.runner.coordinator import save_committee_transcript
+
+
+@pytest.fixture(autouse=True)
+def _no_market_io(monkeypatch):
+    """#234-5 起 save 会取现价/交易日历（Sanity5 / 黄金 DCA 闸输入）——钉空行情，不触网。"""
+    import openinvest.utils.exchange_fee as ef
+    monkeypatch.setattr(ef, "get_history_data", lambda *a, **k: pd.DataFrame())
 
 _RAW = """
 === MACRO ===
