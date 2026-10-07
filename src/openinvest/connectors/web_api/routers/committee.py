@@ -309,7 +309,7 @@ async def committee_status_view(task_id: str) -> HTMLResponse:
     """
     import html as html_escape
     from openinvest.calc.symbols import safe_symbol
-    from openinvest.core.committee.cio_parse import regime_label_from_text
+    from openinvest.core.committee_runner import regime_label_from_text
     from openinvest.core.regime_probability import get_path_profile
     from openinvest.calc.regime_probability import calibrate_profile
     from openinvest.services.committee_charts import (
