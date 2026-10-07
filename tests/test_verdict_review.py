@@ -152,36 +152,50 @@ def test_summarize_holdout_sub30_suppresses_rates():
     assert "hit_rate" in s["contaminated"]["by_window"]["7d"]
 
 
-def test_close_on_or_after_past_side_guard():
+def test_window_return_past_side_guard(monkeypatch):
     """issue #179 P1-A⑤：决议日早于数据窗口首行 → None（跳过），
     绝不静默锚到窗口第一根算出错误收益。"""
-    import pandas as pd
-    from datetime import date
-    from openinvest.jobs.verdict_review import _close_on_or_after
-
-    df = pd.DataFrame(
-        {"Close": [10.0, 11.0, 12.0]},
-        index=pd.to_datetime(["2026-06-01", "2026-06-02", "2026-06-03"]),
-    )
-    # 窗口内正常锚定
-    assert _close_on_or_after(df, date(2026, 6, 2)) == 11.0
+    df = _df([("2026-06-01", 10.0), ("2026-06-02", 11.0), ("2026-06-03", 12.0)])
+    monkeypatch.setattr(vr, "_closes", lambda s: df)
+    direct = {"proxy_kind": "direct"}
+    # 窗口内正常锚定：base=06-02 收盘 11 → target=06-03 收盘 12
+    assert vr._window_return("X", direct, "2026-06-02", 1) == pytest.approx(12 / 11 - 1)
     # 未来侧（原有护栏）
-    assert _close_on_or_after(df, date(2026, 7, 1)) is None
-    # 过去侧（本次新增）：2025 年的决议日不得锚到 2026-06-01
-    assert _close_on_or_after(df, date(2025, 1, 1)) is None
+    assert vr._window_return("X", direct, "2026-06-03", 30) is None
+    # 过去侧：2025 年的决议日不得锚到 2026-06-01
+    assert vr._window_return("X", direct, "2025-01-01", 1) is None
+    # 非正 base（原 start<=0 护栏，迁入 forward_return 后仍成立）→ None 不除零
+    monkeypatch.setattr(vr, "_closes", lambda s: _df([("2026-06-01", 0.0), ("2026-06-02", 1.0)]))
+    assert vr._window_return("X", direct, "2026-06-01", 1) is None
 
 
-def test_close_on_or_after_tz_aware_index_matches_naive():
-    """searchsorted 改写后 tz-aware index 不能抛 TypeError（旧 .date 写法天然兼容）。"""
-    import datetime as dt
+def test_window_return_weekend_base_is_last_close_on_or_before(monkeypatch):
+    """#234-2：hit-rate base 与概率表/path_review 同口径——base = 决议日**当日或之前**
+    最后收盘（单一可信源 forward_return）。周六决议的 base 是周五收盘，周一跳空计入；
+    旧口径（当日或之后首根=周一）会把跳空排除在外，1d 窗更塌成 base==target 恒 0。"""
+    from openinvest.core.regime_probability import forward_return
 
-    import pandas as pd
+    df = _df([
+        ("2026-04-02", 99.0),   # 周四
+        ("2026-04-03", 100.0),  # 周五
+        ("2026-04-06", 110.0),  # 周一：跳空 +10%
+        ("2026-04-13", 120.0),  # 下周一
+    ])
+    monkeypatch.setattr(vr, "_closes", lambda s: df)
+    direct = {"proxy_kind": "direct"}
+    sat = "2026-04-04"
+    # 1d：target=周日→周一 110；base=周五 100 → +10%（旧口径 base=周一 → 0）
+    assert vr._window_return("X", direct, sat, 1) == pytest.approx(0.10)
+    # 7d：target=04-11(周六)→04-13 120；base=周五 100 → +20%（旧口径 120/110-1）
+    assert vr._window_return("X", direct, sat, 7) == pytest.approx(0.20)
+    # 与 path_review/概率表共用的 forward_return 逐位一致
+    for w in (1, 7):
+        assert vr._window_return("X", direct, sat, w) == forward_return("X", sat, w, closes=df["Close"])
+    # 交易日决议：两口径本就重合，行为不变
+    assert vr._window_return("X", direct, "2026-04-03", 1) == pytest.approx(0.10)
 
-    from openinvest.jobs import verdict_review as vr
-
-    out = []
-    for tz in (None, "Asia/Shanghai"):
-        idx = pd.DatetimeIndex(["2026-10-05", "2026-10-06", "2026-10-08"], tz=tz)
-        df = pd.DataFrame({"Close": [1.0, 2.0, 3.0]}, index=idx)
-        out.append([vr._close_on_or_after(df, dt.date(2026, 10, d)) for d in (1, 6, 7, 9)])
-    assert out[0] == out[1] == [None, 2.0, 3.0, None]
+    # 黄金 CNY/克代理：两腿同口径各自锚定
+    fx = _df([("2026-04-03", 7.0), ("2026-04-06", 7.0 * 1.02)])
+    monkeypatch.setattr(vr, "_closes", lambda s: fx if s == "USDCNY=X" else df)
+    ret = vr._window_return("GC=F", {"proxy_kind": "gold_cny_per_gram"}, sat, 1)
+    assert ret == pytest.approx(1.10 * 1.02 - 1.0)

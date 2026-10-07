@@ -47,6 +47,7 @@ sys.path.insert(0, str(ROOT))
 log = logging.getLogger(__name__)
 
 from openinvest.core.memory_store import MemoryStore  # noqa: E402
+from openinvest.core.regime_probability import forward_return  # noqa: E402
 
 
 
@@ -91,30 +92,6 @@ def _closes(symbol: str):
         return None
 
 
-def _close_on_or_after(df, day) -> Optional[float]:
-    """取 index 日期 >= day 的第一根 Close。
-
-    决议日锚点：day=决议日 → 拿"决议日或下一交易日"收盘。
-    窗口到期点：day=决议日+window → 拿"到期日或之后第一交易日"收盘。
-    **关键**：若 day 落在未来（行情还没到那天），>= 过滤后为空 → 返回 None，
-    自动过滤未成熟窗口。旧 bug 用 `<= target 的最后一根` 在 target 未来时
-    会塌缩成"今天的收盘"，把只过了 3 天的样本标成 30d 收益。
-    """
-    # 过去侧护栏（issue #179 P1-A⑤）：决议日早于窗口首行时，>= 过滤返回整个
-    # frame，iloc[0] 会静默锚到"窗口第一根"而非决议日收盘，收益算错。
-    # 早于该 symbol 首根 bar 的决议（上市前）仍会踩到。宁跳过不算错。
-    # 2026-10：_closes 改拉全历史后，df.index.date 每次物化整列 object 数组（GC=F 1.4 万行，
-    # 全量重建几十万次）→ 直接在升序 DatetimeIndex 上 searchsorted（DB 来源 index 为 naive 日期）。
-    import pandas as pd
-    t = pd.Timestamp(day, tz=df.index.tz)  # tz-aware index 也能比（旧 .date 写法天然兼容）
-    if t < df.index[0].normalize():
-        return None
-    i = df.index.searchsorted(t)
-    if i == len(df):
-        return None
-    return float(df["Close"].iloc[i])
-
-
 def _window_return(
     symbol: str, holding: Optional[Dict[str, Any]], decision_date: str, window_days: int,
 ) -> Optional[float]:
@@ -125,13 +102,18 @@ def _window_return(
       汇率漂移，系统性偏置黄金命中率信号（与 Event Watch 邮件同一类单位错配）。
     - 其余（NDQ.AX 原生 AUD 等）：原生币种比值即用户体验收益，无需换算。
 
-    成熟度：D+window 落在未来 → 任一端 _close_on_or_after 返回 None → 整体 None。
+    口径（2026-10-07 #234-2）：委托 regime_probability.forward_return 单一可信源
+    （path_review / intervention_review 同用）——base = 决议日**当日或之前**最后一根
+    收盘，target = ≥ D+window 日历天首根收盘。旧实现 base 取"当日或之后首根"：
+    周末/假日决议把周一跳空排除在命中归因之外（1d 窗还会塌成 base==target 恒 0），
+    与它被验证 against 的概率表路径分布测的不是同一个量。
+    成熟度：target 落在行情尾部之外 → None；过去侧：决议日早于数据首行 → None
+    （issue #179 P1-A⑤ 护栏由 forward_return 的 i<0 分支承接）。
     """
     try:
-        d = datetime.strptime(decision_date, "%Y-%m-%d").date()
+        datetime.strptime(decision_date, "%Y-%m-%d")
     except ValueError:
         return None
-    target = d + timedelta(days=window_days)
     proxy_kind = (holding or {}).get("proxy_kind", "direct")
 
     if proxy_kind in _GOLD_PROXY_KINDS:
@@ -139,19 +121,17 @@ def _window_return(
         fx = _closes("USDCNY=X")     # 人民币汇率
         if gc is None or fx is None:
             return None
-        gc_s, gc_e = _close_on_or_after(gc, d), _close_on_or_after(gc, target)
-        fx_s, fx_e = _close_on_or_after(fx, d), _close_on_or_after(fx, target)
-        if None in (gc_s, gc_e, fx_s, fx_e) or gc_s * fx_s <= 0:
+        # 两腿各自在本序列上锚定，(1+r_gc)(1+r_fx)-1 ≡ (gc_e·fx_e)/(gc_s·fx_s)-1
+        r_gc = forward_return(symbol, decision_date, window_days, closes=gc["Close"])
+        r_fx = forward_return("USDCNY=X", decision_date, window_days, closes=fx["Close"])
+        if r_gc is None or r_fx is None:
             return None
-        return (gc_e * fx_e) / (gc_s * fx_s) - 1.0
+        return (1.0 + r_gc) * (1.0 + r_fx) - 1.0
 
     df = _closes(symbol)
     if df is None:
         return None
-    start, end = _close_on_or_after(df, d), _close_on_or_after(df, target)
-    if start is None or end is None or start <= 0:
-        return None
-    return (end / start) - 1.0
+    return forward_return(symbol, decision_date, window_days, closes=df["Close"])
 
 
 # ---------- 宏观突变检测 ----------

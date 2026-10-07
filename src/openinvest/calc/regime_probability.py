@@ -265,7 +265,10 @@ def forward_return(
     j = idx.searchsorted(ts + pd.Timedelta(days=calendar_days), side="left")
     if j >= len(idx):
         return None
-    return float(closes.iloc[j]) / float(closes.iloc[i]) - 1.0
+    base = float(closes.iloc[i])
+    if base <= 0:   # 非正价（如 2020-04 原油期货负价）收益无意义 → None；verdict_review 迁入前的旧护栏
+        return None
+    return float(closes.iloc[j]) / base - 1.0
 
 
 def _percentile_rank(window):  # window: np.ndarray
