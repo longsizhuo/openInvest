@@ -150,3 +150,86 @@ class TestRealSettlementSemantics:
                                         units=5.0, total_amount=750.0, email_id="O1"))
         assert pm.find_holding("NDQ.AX")["units"] == pytest.approx(0.0)  # 夹到 0
         assert pm.cash_amount("AUD") == pytest.approx(5750.0)            # 全额计
+
+
+# ============ #231：IMAP 去重键必须稳定（序号会随 expunge 重编号）============
+
+def _mail(msgid: Optional[str], body: str) -> bytes:
+    hdr = f"Message-ID: {msgid}\r\n" if msgid else ""
+    return (f"From: CommSec <noreply@commsec.com.au>\r\n{hdr}"
+            f"Subject: CommSec\r\n\r\n{body}\r\n").encode()
+
+
+def _confirm(units: int, code: str, total: str) -> str:
+    return (f"You've bought {units} units in SOME FUND ({code}) at a price of $1.00 "
+            f"per unit. The total settlement amount, including brokerage, is ${total}.")
+
+
+class _FakeInbox:
+    """最小 imaplib 替身（不连网）：序号 = 当前位置（expunge 后整体前移），UID 不变。
+    同时实现序号版 search/fetch 与 uid()，#231 前后的实现都能跑同一场景。"""
+
+    def __init__(self, msgs):
+        self.msgs = list(msgs)  # [(uid, raw_bytes)]
+
+    def select(self, box):
+        return "OK", [str(len(self.msgs)).encode()]
+
+    def response(self, code):
+        return code, [b"7"]  # UIDVALIDITY
+
+    def _part(self, i):
+        uid, raw = self.msgs[i]
+        return [(f"{i + 1} (UID {uid} RFC822 {{{len(raw)}}}".encode(), raw), b")"]
+
+    def search(self, charset, criteria):
+        return "OK", [" ".join(str(i + 1) for i in range(len(self.msgs))).encode()]
+
+    def fetch(self, seq, spec):
+        return "OK", self._part(int(seq) - 1)
+
+    def uid(self, cmd, *args):
+        if cmd == "SEARCH":
+            return "OK", [" ".join(str(u) for u, _ in self.msgs).encode()]
+        return "OK", self._part(next(i for i, (u, _) in enumerate(self.msgs) if u == int(args[0])))
+
+
+def _sync(pm: PortfolioManager, inbox: _FakeInbox) -> None:
+    """jobs/commsec_sync.run 的循环体（去掉 IMAP 连接）"""
+    from openinvest.services.commsec_reader import CommSecReader
+    reader = CommSecReader("u", "p")
+    reader.mail = inbox
+    for t in reader.fetch_trade_confirmations(processed_ids=pm.get_processed_emails()):
+        pm.record_external_trade(t)
+
+
+class TestImapDedupKey:
+    def test_expunge_neither_rebooks_nor_skips(self, tmp_path):
+        """归档一封非成交邮件 → 后面邮件序号前移：已记账的 A 不能二次入账，
+        新到的 B 不能因撞上 A 的旧序号被静默跳过（旧实现两样都中）。"""
+        pm = _make_pm(tmp_path)
+        inbox = _FakeInbox([
+            (101, _mail("<news@commsec>", "Your monthly statement is ready.")),
+            (102, _mail("<a@commsec>", _confirm(10, "NDQ", "1,000.00"))),
+        ])
+        _sync(pm, inbox)
+        assert pm.find_holding("NDQ.AX")["units"] == pytest.approx(10.0)
+
+        inbox.msgs.pop(0)  # Gmail 归档 = INBOX expunge：A 从序号 2 变 1
+        inbox.msgs.append((103, _mail("<b@commsec>", _confirm(5, "BHP", "500.00"))))  # B 落到序号 2
+        _sync(pm, inbox)
+
+        assert pm.find_holding("NDQ.AX")["units"] == pytest.approx(10.0)  # 旧实现 20（双记）
+        assert pm.find_holding("BHP.AX") is not None                      # 旧实现跳过 B
+        assert pm.cash_amount("AUD") == pytest.approx(3500.0)            # 5000-1000-500
+
+    def test_uid_fallback_and_legacy_seq_keys(self, tmp_path):
+        """无 Message-ID → uid:<UIDVALIDITY>:<UID>；#231 前的纯数字序号旧键仍按序号跳过
+        （否则升级后 lookback 内已记账邮件换新键批量重记）。"""
+        from openinvest.services.commsec_reader import CommSecReader
+        reader = CommSecReader("u", "p")
+        reader.mail = _FakeInbox([(201, _mail(None, _confirm(3, "NDQ", "300.00")))])
+        [t] = reader.fetch_trade_confirmations(processed_ids=[])
+        assert t["email_id"] == "uid:7:201"
+        assert reader.fetch_trade_confirmations(processed_ids=["uid:7:201"]) == []
+        assert reader.fetch_trade_confirmations(processed_ids=["1"]) == []  # 旧序号键

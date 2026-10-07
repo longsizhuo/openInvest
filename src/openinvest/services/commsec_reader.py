@@ -32,35 +32,54 @@ class CommSecReader:
             pass
 
     def fetch_trade_confirmations(self, lookback_days=180, processed_ids=None) -> List[Dict]:
-        if processed_ids is None:
-            processed_ids = []
+        # 2026-10-07 #231：去重键从 IMAP 序号改为 Message-ID（缺失退化 UIDVALIDITY:UID）。
+        # 序号是"当前第几封"，任何 expunge（Gmail 归档/删信即 INBOX expunge）都会让后面的
+        # 邮件整体前移 → 已记账的邮件换了新序号被二次记账，新邮件撞上旧序号被静默跳过。
+        # 新键带 msgid:/uid: 前缀，与旧的纯数字序号键不可能相撞。
+        processed = {str(k) for k in processed_ids or []}
+        # #231 前写入的旧键是纯数字序号：仍按旧语义拿当前序号比对跳过（不比旧代码差），
+        # 否则升级后 lookback 内所有已记账邮件换新键重新入账 = 批量双记。
+        legacy_seqs = {k for k in processed if k.isdigit()}
+        if legacy_seqs:
+            log.warning(
+                "processed_emails 含 %d 条 #231 前的 IMAP 序号旧键，仍按序号跳过（会随 expunge "
+                "漂移）；确认对应邮件都已过 lookback 窗口后可删掉这些纯数字键", len(legacy_seqs),
+            )
 
         self.mail.select("inbox")
+        uidvalidity = ((self.mail.response("UIDVALIDITY")[1] or [None])[0] or b"").decode()
 
         date_since = (datetime.date.today() - datetime.timedelta(days=lookback_days)).strftime("%d-%b-%Y")
         search_criteria = f'(FROM "commsec.com.au" SINCE "{date_since}")'
         
-        status, messages = self.mail.search(None, search_criteria)
+        status, messages = self.mail.uid("SEARCH", None, search_criteria)
         if status != "OK" or not messages[0]:
             log.warning("No CommSec emails found since %s", date_since)
             return []
 
         trades = []
-        email_ids = messages[0].split()
+        uids = messages[0].split()
 
-        log.info("Found %d emails from CommSec. Scanning for trades...", len(email_ids))
+        log.info("Found %d emails from CommSec. Scanning for trades...", len(uids))
 
-        for e_id in email_ids:
-            e_id_str = e_id.decode()
-            if e_id_str in processed_ids:
-                continue
-
+        for uid in uids:
+            uid_str = uid.decode()
             try:
-                # 获取邮件内容
-                _, msg_data = self.mail.fetch(e_id, "(RFC822)")
+                # 获取邮件内容（UID FETCH：UID 不受 expunge 重编号影响）。
+                # ponytail: 已处理的邮件也整封拉下来再按 Message-ID 跳过；CommSec 邮件小、
+                # 量少，嫌流量再改成先 BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)] 批量取头
+                _, msg_data = self.mail.uid("FETCH", uid, "(RFC822)")
                 for response_part in msg_data:
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1])
+                        message_id = str(msg.get("Message-ID") or "").strip()
+                        email_id = f"msgid:{message_id}" if message_id else f"uid:{uidvalidity}:{uid_str}"
+                        if email_id in processed:
+                            continue
+                        # FETCH 响应首个 token 是该邮件当前序号（仅供旧键比对）
+                        if legacy_seqs and response_part[0].split()[0].decode() in legacy_seqs:
+                            continue
+
                         subject = self._get_subject(msg)
                         body = self._get_body(msg)
                         
@@ -68,12 +87,12 @@ class CommSecReader:
                         trade_data = self._parse_commsec_body(body, subject)
                         
                         if trade_data:
-                            trade_data['email_id'] = e_id_str
+                            trade_data['email_id'] = email_id
                             trade_data['date_processed'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             trades.append(trade_data)
                             log.info("Found Trade: %s %s %s", trade_data['action'], trade_data['units'], trade_data['symbol'])
             except Exception as e:
-                log.warning("Error parsing email %s: %s", e_id_str, e)
+                log.warning("Error parsing email uid=%s: %s", uid_str, e)
 
         return trades
 
