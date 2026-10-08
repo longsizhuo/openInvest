@@ -17,21 +17,25 @@
    "events_new": 216,
    "days_0_to_pos": 2,
    "days_pos_to_0": 0,
-   "days_changed": 26,
-   "events_changed": 97,
+   "days_changed": 27,
+   "events_changed": 96,
    "future_ts_old": 0,
    "future_ts_new": 0,
    "fresh": 126,
    "old_fresh": 89,
-   "new_fresh": 111,
+   "new_fresh": 113,
    "fresh_high": 28,
    "old_fresh_high": 23,
-   "new_fresh_high": 22,
+   "new_fresh_high": 23,
+   "stale_slots_old": 29,
+   "stale_slots_new": 0,
+   "stale_days_old": 13,
+   "stale_days_new": 0,
    "days_with_fresh": 21,
    "days_old_brief_has_fresh": 21,
    "days_new_brief_has_fresh": 21,
    "median_age_h_old": 20.4,
-   "median_age_h_new": 23.1
+   "median_age_h_new": 21.9
   },
   "S2": {
    "days": 27,
@@ -40,7 +44,7 @@
    "days_0_to_pos": 0,
    "days_pos_to_0": 0,
    "days_changed": 27,
-   "events_changed": 183,
+   "events_changed": 187,
    "future_ts_old": 17,
    "future_ts_new": 0,
    "fresh": 941,
@@ -48,12 +52,16 @@
    "new_fresh": 210,
    "fresh_high": 308,
    "old_fresh_high": 43,
-   "new_fresh_high": 76,
+   "new_fresh_high": 56,
+   "stale_slots_old": 161,
+   "stale_slots_new": 0,
+   "stale_days_old": 27,
+   "stale_days_new": 0,
    "days_with_fresh": 27,
    "days_old_brief_has_fresh": 27,
    "days_new_brief_has_fresh": 27,
    "median_age_h_old": 17.3,
-   "median_age_h_new": 4.4
+   "median_age_h_new": 4.0
   },
   "S3": {
    "days": 27,
@@ -71,6 +79,10 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "stale_slots_old": 0,
+   "stale_slots_new": 0,
+   "stale_days_old": 0,
+   "stale_days_new": 0,
    "days_with_fresh": 2,
    "days_old_brief_has_fresh": 2,
    "days_new_brief_has_fresh": 2,
@@ -84,15 +96,19 @@
    "days_0_to_pos": 15,
    "days_pos_to_0": 0,
    "days_changed": 21,
-   "events_changed": 62,
+   "events_changed": 60,
    "future_ts_old": 0,
    "future_ts_new": 0,
    "fresh": 16,
    "old_fresh": 12,
-   "new_fresh": 13,
+   "new_fresh": 14,
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "stale_slots_old": 2,
+   "stale_slots_new": 0,
+   "stale_days_old": 1,
+   "stale_days_new": 0,
    "days_with_fresh": 5,
    "days_old_brief_has_fresh": 5,
    "days_new_brief_has_fresh": 5,
@@ -115,6 +131,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     40.8,
     40.9,
@@ -124,8 +142,8 @@
     40.8,
     40.9,
     40.9,
-    52.7,
     50.4,
+    52.7,
     53.4,
     53.9,
     59.8
@@ -145,6 +163,8 @@
    "fresh_high": 9,
    "old_fresh_high": 0,
    "new_fresh_high": 1,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     -830.0,
     15.9,
@@ -156,12 +176,12 @@
     39.0
    ],
    "new_age_h": [
-    7.5,
     0.5,
     1.1,
     1.7,
     7.0,
     7.0,
+    7.5,
     9.1,
     13.0
    ]
@@ -180,6 +200,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     35.5
    ],
@@ -201,6 +223,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     105.4
@@ -220,6 +244,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 2,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     12.9,
     14.0,
@@ -234,7 +260,7 @@
     64.8,
     64.9,
     64.9,
-    76.7
+    74.4
    ]
   },
   {
@@ -242,7 +268,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 8,
+   "changed": 7,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 53,
@@ -251,6 +277,8 @@
    "fresh_high": 28,
    "old_fresh_high": 4,
    "new_fresh_high": 6,
+   "old_stale": 6,
+   "new_stale": 0,
    "old_age_h": [
     8.0,
     8.1,
@@ -263,13 +291,13 @@
    ],
    "new_age_h": [
     0.6,
-    4.6,
-    8.0,
     2.5,
-    12.0,
     4.1,
-    12.8,
-    12.9
+    4.6,
+    6.0,
+    6.9,
+    8.0,
+    8.0
    ]
   },
   {
@@ -286,6 +314,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     1.7
    ],
@@ -308,6 +338,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     17.9,
     24.0,
@@ -321,10 +353,10 @@
     17.9,
     24.0,
     26.4,
+    27.5,
     30.0,
     33.5,
     34.0,
-    27.5,
     38.0
    ]
   },
@@ -342,6 +374,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     13.8,
     19.3,
@@ -350,9 +384,9 @@
    "new_age_h": [
     13.8,
     19.3,
+    30.1,
     36.9,
     38.0,
-    30.1,
     40.9,
     46.0,
     88.8
@@ -363,7 +397,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 5,
+   "changed": 6,
    "old_future_ts": 1,
    "new_future_ts": 0,
    "fresh": 45,
@@ -371,7 +405,9 @@
    "new_fresh": 8,
    "fresh_high": 6,
    "old_fresh_high": 0,
-   "new_fresh_high": 1,
+   "new_fresh_high": 0,
+   "old_stale": 4,
+   "new_stale": 0,
    "old_age_h": [
     -782.0,
     1.7,
@@ -388,9 +424,9 @@
     2.3,
     2.3,
     2.3,
-    10.5,
-    10.5,
-    12.0
+    7.5,
+    8.1,
+    8.2
    ]
   },
   {
@@ -407,6 +443,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     25.7
    ],
@@ -429,15 +467,17 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     41.9,
     48.0,
     50.4,
+    51.5,
     54.0,
     57.5,
     58.0,
-    51.5,
     62.0
    ]
   },
@@ -455,6 +495,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     10.8,
     18.9
@@ -466,8 +508,8 @@
     37.5,
     37.8,
     43.3,
-    60.9,
-    62.0
+    54.1,
+    60.9
    ]
   },
   {
@@ -475,7 +517,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 7,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 61,
@@ -483,7 +525,9 @@
    "new_fresh": 8,
    "fresh_high": 18,
    "old_fresh_high": 4,
-   "new_fresh_high": 5,
+   "new_fresh_high": 2,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     10.9,
     13.0,
@@ -496,13 +540,13 @@
    ],
    "new_age_h": [
     1.0,
-    7.9,
     2.4,
-    10.7,
-    10.9,
-    13.0,
-    13.0,
-    13.1
+    5.5,
+    6.0,
+    7.9,
+    8.0,
+    8.0,
+    9.0
    ]
   },
   {
@@ -519,6 +563,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     49.7,
@@ -539,15 +585,17 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     65.9,
     72.0,
     74.3,
+    75.5,
     78.0,
     81.5,
     82.0,
-    75.5,
     86.0
    ]
   },
@@ -565,6 +613,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     59.0,
@@ -590,7 +640,9 @@
    "new_fresh": 8,
    "fresh_high": 1,
    "old_fresh_high": 0,
-   "new_fresh_high": 1,
+   "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     -2198.0,
     -686.0,
@@ -608,8 +660,8 @@
     11.0,
     11.5,
     12.7,
-    21.5,
-    21.6
+    15.0,
+    15.6
    ]
   },
   {
@@ -626,6 +678,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     121.7
@@ -645,16 +699,18 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     66.9,
     137.9,
     144.0,
     146.3,
+    147.5,
     150.0,
     153.5,
-    154.0,
-    147.5
+    154.0
    ]
   },
   {
@@ -671,6 +727,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     83.0,
@@ -696,7 +754,9 @@
    "new_fresh": 8,
    "fresh_high": 9,
    "old_fresh_high": 1,
-   "new_fresh_high": 3,
+   "new_fresh_high": 2,
+   "old_stale": 6,
+   "new_stale": 0,
    "old_age_h": [
     -2174.0,
     -662.0,
@@ -713,9 +773,9 @@
     1.1,
     2.5,
     2.5,
-    14.4,
     7.0,
-    9.5
+    9.5,
+    10.0
    ]
   },
   {
@@ -732,6 +792,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     145.7
@@ -751,6 +813,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     90.9,
@@ -774,6 +838,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     9.6,
     9.7,
@@ -804,6 +870,8 @@
    "fresh_high": 12,
    "old_fresh_high": 3,
    "new_fresh_high": 6,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     -638.0,
     12.9,
@@ -839,6 +907,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -856,6 +926,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     114.9
@@ -875,6 +947,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     21.0,
     33.6,
@@ -897,7 +971,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 5,
+   "changed": 6,
    "old_future_ts": 1,
    "new_future_ts": 0,
    "fresh": 48,
@@ -905,7 +979,9 @@
    "new_fresh": 8,
    "fresh_high": 9,
    "old_fresh_high": 1,
-   "new_fresh_high": 1,
+   "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     -614.0,
     1.1,
@@ -919,12 +995,12 @@
    "new_age_h": [
     1.1,
     2.0,
-    10.5,
-    10.5,
-    10.5,
     2.6,
     2.9,
-    12.5
+    7.0,
+    8.4,
+    8.5,
+    8.5
    ]
   },
   {
@@ -941,6 +1017,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     24.5
    ],
@@ -962,6 +1040,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     138.9
@@ -972,7 +1052,7 @@
    "sym": "S1",
    "old": 8,
    "new": 8,
-   "changed": 3,
+   "changed": 2,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 14,
@@ -980,7 +1060,9 @@
    "new_fresh": 8,
    "fresh_high": 4,
    "old_fresh_high": 3,
-   "new_fresh_high": 0,
+   "new_fresh_high": 1,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     13.5,
     13.5,
@@ -994,12 +1076,12 @@
    "new_age_h": [
     12.0,
     12.0,
-    13.5,
-    13.5,
-    14.1,
-    15.5,
     13.3,
-    13.3
+    13.3,
+    13.5,
+    13.5,
+    13.5,
+    14.1
    ]
   },
   {
@@ -1015,7 +1097,9 @@
    "new_fresh": 8,
    "fresh_high": 12,
    "old_fresh_high": 3,
-   "new_fresh_high": 5,
+   "new_fresh_high": 3,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     -2102.0,
     -590.0,
@@ -1027,14 +1111,14 @@
     19.1
    ],
    "new_age_h": [
+    0.7,
+    0.7,
     1.6,
-    0.7,
-    0.7,
     2.0,
     2.0,
     2.4,
-    12.5,
-    13.4
+    6.0,
+    8.0
    ]
   },
   {
@@ -1051,6 +1135,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     48.5
@@ -1070,6 +1156,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     162.9
@@ -1089,6 +1177,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 1,
+   "old_stale": 1,
+   "new_stale": 0,
    "old_age_h": [
     0.8,
     9.9,
@@ -1124,6 +1214,8 @@
    "fresh_high": 7,
    "old_fresh_high": 1,
    "new_fresh_high": 3,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     9.1,
     19.5,
@@ -1137,12 +1229,12 @@
    "new_age_h": [
     0.9,
     1.1,
-    3.0,
     1.7,
-    16.4,
+    3.0,
     8.5,
     9.0,
-    9.1
+    9.1,
+    11.5
    ]
   },
   {
@@ -1159,6 +1251,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     120.5
@@ -1178,6 +1272,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     72.4
@@ -1188,7 +1284,7 @@
    "sym": "S1",
    "old": 8,
    "new": 8,
-   "changed": 2,
+   "changed": 1,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 10,
@@ -1197,6 +1293,8 @@
    "fresh_high": 3,
    "old_fresh_high": 2,
    "new_fresh_high": 2,
+   "old_stale": 1,
+   "new_stale": 0,
    "old_age_h": [
     6.0,
     10.7,
@@ -1210,12 +1308,12 @@
    "new_age_h": [
     6.0,
     10.7,
-    18.8,
     11.6,
-    20.0,
     12.2,
     12.4,
-    20.6
+    18.8,
+    19.5,
+    20.0
    ]
   },
   {
@@ -1223,7 +1321,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 7,
+   "changed": 8,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 57,
@@ -1232,6 +1330,8 @@
    "fresh_high": 27,
    "old_fresh_high": 6,
    "new_fresh_high": 6,
+   "old_stale": 8,
+   "new_stale": 0,
    "old_age_h": [
     12.9,
     18.8,
@@ -1246,11 +1346,11 @@
     1.0,
     1.0,
     6.4,
+    7.0,
     7.9,
     7.9,
-    11.3,
-    12.8,
-    12.9
+    8.4,
+    8.5
    ]
   },
   {
@@ -1267,6 +1367,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     144.5
@@ -1286,6 +1388,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     96.4
@@ -1305,6 +1409,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 2,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     2.0,
     11.6,
@@ -1317,12 +1423,12 @@
    ],
    "new_age_h": [
     2.0,
+    9.1,
     11.0,
     11.6,
     11.6,
-    16.6,
-    9.1,
     12.5,
+    16.6,
     17.2
    ]
   },
@@ -1331,7 +1437,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 5,
    "old_future_ts": 1,
    "new_future_ts": 0,
    "fresh": 34,
@@ -1339,7 +1445,9 @@
    "new_fresh": 8,
    "fresh_high": 13,
    "old_fresh_high": 2,
-   "new_fresh_high": 3,
+   "new_fresh_high": 2,
+   "old_stale": 4,
+   "new_stale": 0,
    "old_age_h": [
     -470.0,
     4.6,
@@ -1351,14 +1459,14 @@
     36.9
    ],
    "new_age_h": [
-    1.0,
-    4.6,
-    8.1,
     0.5,
-    9.2,
+    1.0,
     2.8,
+    4.6,
     7.8,
-    16.5
+    8.1,
+    8.6,
+    9.2
    ]
   },
   {
@@ -1375,6 +1483,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1392,6 +1502,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     11.5
    ],
@@ -1414,6 +1526,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 2,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     17.5,
     12.5,
@@ -1421,11 +1535,11 @@
     17.9
    ],
    "new_age_h": [
-    17.5,
     12.5,
+    17.5,
+    17.9,
+    17.9,
     21.7,
-    17.9,
-    17.9,
     23.1,
     24.0,
     26.0
@@ -1444,7 +1558,9 @@
    "new_fresh": 8,
    "fresh_high": 29,
    "old_fresh_high": 2,
-   "new_fresh_high": 5,
+   "new_fresh_high": 3,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     -446.0,
     1.7,
@@ -1457,13 +1573,13 @@
    ],
    "new_age_h": [
     0.5,
+    0.5,
     0.6,
-    1.1,
-    1.1,
-    2.0,
-    3.5,
-    7.5,
-    7.6
+    0.9,
+    1.0,
+    1.0,
+    1.0,
+    1.1
    ]
   },
   {
@@ -1480,6 +1596,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1497,6 +1615,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     35.5,
@@ -1517,6 +1637,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     13.2,
     13.7,
@@ -1525,14 +1647,14 @@
     30.0
    ],
    "new_age_h": [
+    6.0,
     13.2,
     13.7,
-    6.0,
     16.9,
     30.0,
     33.0,
-    41.5,
-    36.5
+    36.5,
+    41.5
    ]
   },
   {
@@ -1549,6 +1671,8 @@
    "fresh_high": 9,
    "old_fresh_high": 4,
    "new_fresh_high": 1,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     -422.0,
     11.8,
@@ -1560,14 +1684,14 @@
     17.0
    ],
    "new_age_h": [
-    2.1,
-    2.2,
-    2.2,
-    5.0,
     0.5,
     1.9,
     2.0,
-    2.7
+    2.1,
+    2.2,
+    2.2,
+    2.7,
+    5.0
    ]
   },
   {
@@ -1584,6 +1708,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1601,6 +1727,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     59.5,
@@ -1621,6 +1749,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     35.6,
     52.1,
@@ -1637,7 +1767,7 @@
     56.8,
     63.5,
     74.9,
-    77.0
+    76.7
    ]
   },
   {
@@ -1645,7 +1775,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 8,
+   "changed": 7,
    "old_future_ts": 1,
    "new_future_ts": 0,
    "fresh": 12,
@@ -1654,6 +1784,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 0,
    "old_age_h": [
     -350.0,
     12.0,
@@ -1665,13 +1797,13 @@
     68.0
    ],
    "new_age_h": [
-    2.2,
-    9.3,
     1.5,
+    2.2,
     2.5,
     4.3,
+    9.3,
     11.0,
-    19.2,
+    12.0,
     19.2
    ]
   },
@@ -1689,6 +1821,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1706,6 +1840,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     131.5
@@ -1725,6 +1861,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 3,
+   "new_stale": 0,
    "old_age_h": [
     9.4,
     11.3,
@@ -1736,14 +1874,14 @@
     59.6
    ],
    "new_age_h": [
-    9.4,
-    11.3,
-    11.7,
-    12.0,
     4.6,
     5.8,
     6.0,
-    8.6
+    8.6,
+    9.4,
+    11.3,
+    11.7,
+    12.0
    ]
   },
   {
@@ -1751,7 +1889,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 7,
    "old_future_ts": 1,
    "new_future_ts": 0,
    "fresh": 34,
@@ -1759,7 +1897,9 @@
    "new_fresh": 8,
    "fresh_high": 7,
    "old_fresh_high": 0,
-   "new_fresh_high": 3,
+   "new_fresh_high": 1,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     -326.0,
     2.7,
@@ -1773,12 +1913,12 @@
    "new_age_h": [
     1.8,
     2.7,
+    6.0,
+    10.3,
+    10.8,
     11.9,
     11.9,
-    12.0,
-    13.0,
-    13.1,
-    6.0
+    12.0
    ]
   },
   {
@@ -1795,6 +1935,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1812,6 +1954,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     155.5
@@ -1827,10 +1971,12 @@
    "new_future_ts": 0,
    "fresh": 7,
    "old_fresh": 3,
-   "new_fresh": 6,
+   "new_fresh": 7,
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     4.0,
     17.5,
@@ -1842,14 +1988,14 @@
     26.0
    ],
    "new_age_h": [
-    4.0,
     1.7,
+    4.0,
+    11.8,
     12.4,
     17.5,
-    11.8,
+    19.2,
     21.1,
-    24.8,
-    25.5
+    24.8
    ]
   },
   {
@@ -1866,6 +2012,8 @@
    "fresh_high": 4,
    "old_fresh_high": 0,
    "new_fresh_high": 1,
+   "old_stale": 6,
+   "new_stale": 0,
    "old_age_h": [
     -302.0,
     1.7,
@@ -1877,14 +2025,14 @@
     25.6
    ],
    "new_age_h": [
+    1.7,
+    1.7,
     2.4,
-    1.7,
-    1.7,
     2.6,
-    11.2,
     3.7,
     4.0,
-    6.0
+    6.0,
+    8.5
    ]
   },
   {
@@ -1901,6 +2049,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1918,6 +2068,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1935,6 +2087,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     1.9,
     11.7,
@@ -1947,11 +2101,11 @@
    ],
    "new_age_h": [
     1.9,
-    11.7,
     6.0,
+    11.7,
+    15.4,
     16.6,
     17.8,
-    15.4,
     24.8,
     25.0
    ]
@@ -1970,6 +2124,8 @@
    "fresh_high": 21,
    "old_fresh_high": 2,
    "new_fresh_high": 2,
+   "old_stale": 8,
+   "new_stale": 0,
    "old_age_h": [
     14.4,
     11.4,
@@ -1981,14 +2137,14 @@
     40.8
    ],
    "new_age_h": [
-    2.2,
-    8.0,
-    8.0,
-    9.1,
     1.5,
     2.0,
+    2.2,
     2.5,
-    2.6
+    2.6,
+    2.8,
+    6.0,
+    6.0
    ]
   },
   {
@@ -2005,6 +2161,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2022,6 +2180,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2030,7 +2190,7 @@
    "sym": "S1",
    "old": 8,
    "new": 8,
-   "changed": 4,
+   "changed": 3,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 4,
@@ -2039,6 +2199,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 1,
+   "old_stale": 3,
+   "new_stale": 0,
    "old_age_h": [
     12.5,
     25.0,
@@ -2052,12 +2214,12 @@
    "new_age_h": [
     12.5,
     17.5,
+    18.7,
     20.0,
     25.0,
     25.8,
     25.9,
-    26.5,
-    18.7
+    26.0
    ]
   },
   {
@@ -2065,7 +2227,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 7,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 36,
@@ -2073,7 +2235,9 @@
    "new_fresh": 8,
    "fresh_high": 10,
    "old_fresh_high": 1,
-   "new_fresh_high": 4,
+   "new_fresh_high": 2,
+   "old_stale": 6,
+   "new_stale": 0,
    "old_age_h": [
     2.6,
     11.1,
@@ -2089,10 +2253,10 @@
     0.7,
     0.7,
     1.6,
-    10.1,
     2.6,
-    11.1,
-    11.9
+    5.8,
+    9.6,
+    10.1
    ]
   },
   {
@@ -2109,6 +2273,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2126,6 +2292,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2143,6 +2311,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     57.3,
     67.8
@@ -2152,10 +2322,10 @@
     67.8,
     84.5,
     89.5,
+    90.7,
     92.0,
     97.0,
-    97.0,
-    97.8
+    97.0
    ]
   },
   {
@@ -2172,6 +2342,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 1,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     9.0,
     52.2,
@@ -2183,13 +2355,13 @@
     74.6
    ],
    "new_age_h": [
+    0.7,
+    0.7,
     1.0,
-    0.7,
-    0.7,
-    16.3,
-    16.7,
     9.0,
     11.5,
+    16.3,
+    16.7,
     25.5
    ]
   },
@@ -2207,6 +2379,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2224,6 +2398,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2232,7 +2408,7 @@
    "sym": "S1",
    "old": 8,
    "new": 8,
-   "changed": 1,
+   "changed": 2,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 9,
@@ -2241,6 +2417,8 @@
    "fresh_high": 4,
    "old_fresh_high": 3,
    "new_fresh_high": 4,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     11.2,
     12.6,
@@ -2252,14 +2430,14 @@
     24.9
    ],
    "new_age_h": [
-    11.2,
-    12.6,
-    16.8,
     8.9,
     9.3,
+    11.2,
     11.8,
+    12.6,
+    16.8,
     19.9,
-    22.5
+    20.0
    ]
   },
   {
@@ -2275,7 +2453,9 @@
    "new_fresh": 8,
    "fresh_high": 33,
    "old_fresh_high": 3,
-   "new_fresh_high": 5,
+   "new_fresh_high": 4,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     2.6,
     11.0,
@@ -2287,14 +2467,14 @@
     23.3
    ],
    "new_age_h": [
+    1.2,
     1.5,
     2.5,
-    1.2,
     2.6,
-    11.0,
-    11.0,
-    11.2,
-    12.2
+    6.0,
+    7.7,
+    8.0,
+    11.0
    ]
   },
   {
@@ -2311,6 +2491,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     19.0
    ],
@@ -2332,6 +2514,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2340,7 +2524,7 @@
    "sym": "S1",
    "old": 8,
    "new": 8,
-   "changed": 0,
+   "changed": 2,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 3,
@@ -2349,6 +2533,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 2,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     11.0,
     11.4,
@@ -2366,8 +2552,8 @@
     25.0,
     26.0,
     26.7,
-    35.2,
-    36.6
+    32.9,
+    33.3
    ]
   },
   {
@@ -2375,7 +2561,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 7,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 27,
@@ -2383,7 +2569,9 @@
    "new_fresh": 8,
    "fresh_high": 12,
    "old_fresh_high": 2,
-   "new_fresh_high": 4,
+   "new_fresh_high": 2,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     11.0,
     11.8,
@@ -2399,10 +2587,10 @@
     1.7,
     3.5,
     3.5,
-    9.3,
-    11.0,
-    11.3,
-    11.8
+    5.0,
+    5.6,
+    6.5,
+    9.0
    ]
   },
   {
@@ -2419,6 +2607,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     43.0
@@ -2438,6 +2628,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     20.3,
     21.8
@@ -2461,6 +2653,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     2.0,
     12.2,
@@ -2484,7 +2678,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 7,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 32,
@@ -2492,7 +2686,9 @@
    "new_fresh": 8,
    "fresh_high": 8,
    "old_fresh_high": 1,
-   "new_fresh_high": 3,
+   "new_fresh_high": 2,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     2.5,
     13.2,
@@ -2504,14 +2700,14 @@
     30.5
    ],
    "new_age_h": [
-    3.8,
-    8.7,
     2.5,
-    12.0,
-    12.2,
-    13.2,
-    13.3,
-    13.5
+    3.8,
+    7.0,
+    7.9,
+    8.7,
+    9.4,
+    9.8,
+    11.5
    ]
   },
   {
@@ -2528,6 +2724,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     67.0
@@ -2547,6 +2745,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     18.0
    ],
@@ -2561,15 +2761,17 @@
    "sym": "S1",
    "old": 8,
    "new": 8,
-   "changed": 2,
+   "changed": 1,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 8,
    "old_fresh": 7,
-   "new_fresh": 7,
+   "new_fresh": 8,
    "fresh_high": 3,
    "old_fresh_high": 3,
    "new_fresh_high": 3,
+   "old_stale": 1,
+   "new_stale": 0,
    "old_age_h": [
     12.0,
     10.1,
@@ -2581,14 +2783,14 @@
     36.2
    ],
    "new_age_h": [
-    12.0,
     10.1,
+    12.0,
     18.6,
     18.6,
+    19.4,
     19.8,
     20.8,
-    20.9,
-    26.0
+    20.9
    ]
   },
   {
@@ -2605,6 +2807,8 @@
    "fresh_high": 10,
    "old_fresh_high": 2,
    "new_fresh_high": 4,
+   "old_stale": 5,
+   "new_stale": 0,
    "old_age_h": [
     -86.0,
     1.4,
@@ -2616,14 +2820,14 @@
     37.2
    ],
    "new_age_h": [
+    0.7,
     0.8,
     1.2,
     1.4,
     1.8,
-    2.5,
-    0.7,
     2.2,
-    2.3
+    2.3,
+    2.5
    ]
   },
   {
@@ -2640,6 +2844,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     91.0
@@ -2659,6 +2865,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     42.0
    ],
@@ -2682,6 +2890,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     58.7,
     60.0,
@@ -2699,7 +2909,7 @@
     61.5,
     61.5,
     61.5,
-    84.0
+    82.0
    ]
   },
   {
@@ -2716,6 +2926,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 7,
+   "new_stale": 0,
    "old_age_h": [
     23.4,
     50.0,
@@ -2728,10 +2940,10 @@
    ],
    "new_age_h": [
     12.0,
-    23.4,
     21.5,
-    31.8,
+    23.4,
     30.0,
+    31.8,
     32.0,
     33.5,
     35.5
@@ -2751,6 +2963,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     163.0
@@ -2770,6 +2984,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     65.8,
     67.7,
@@ -2780,11 +2996,11 @@
    ],
    "new_age_h": [
     65.8,
+    65.8,
     67.7,
     67.9,
     71.0,
     72.6,
-    65.8,
     114.0,
     140.3
    ]
@@ -2803,6 +3019,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 3,
+   "new_stale": 0,
    "old_age_h": [
     11.4,
     11.5,
@@ -2815,9 +3033,9 @@
    ],
    "new_age_h": [
     1.5,
+    6.0,
     11.4,
     11.5,
-    6.0,
     12.7,
     15.7,
     20.7,
@@ -2829,7 +3047,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 7,
+   "changed": 6,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 30,
@@ -2838,6 +3056,8 @@
    "fresh_high": 6,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 0,
    "old_age_h": [
     9.0,
     9.5,
@@ -2851,12 +3071,12 @@
    "new_age_h": [
     2.0,
     2.0,
-    13.1,
-    13.2,
     5.5,
     6.0,
-    15.1,
-    9.0
+    9.0,
+    9.5,
+    10.5,
+    11.0
    ]
   },
   {
@@ -2873,6 +3093,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2890,14 +3112,16 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
+    89.8,
     89.8,
     91.7,
     91.9,
     95.0,
     96.6,
-    89.8,
     138.0,
     164.3
    ]
@@ -2916,6 +3140,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     12.1,
     12.4,
@@ -2928,12 +3154,12 @@
    ],
    "new_age_h": [
     3.6,
+    5.4,
     12.1,
     12.4,
     12.5,
-    5.4,
     25.5,
-    35.5,
+    30.0,
     35.5
    ]
   },
@@ -2951,6 +3177,8 @@
    "fresh_high": 6,
    "old_fresh_high": 0,
    "new_fresh_high": 2,
+   "old_stale": 8,
+   "new_stale": 0,
    "old_age_h": [
     12.0,
     12.1,
@@ -2967,9 +3195,9 @@
     2.0,
     2.2,
     2.5,
-    10.6,
     4.0,
-    14.9
+    7.5,
+    10.6
    ]
   },
   {
@@ -2986,6 +3214,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2994,15 +3224,17 @@
    "sym": "S4",
    "old": 8,
    "new": 8,
-   "changed": 5,
+   "changed": 3,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 10,
    "old_fresh": 6,
-   "new_fresh": 7,
+   "new_fresh": 8,
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 0,
    "old_age_h": [
     7.7,
     22.0,
@@ -3015,22 +3247,22 @@
    ],
    "new_age_h": [
     7.7,
+    18.3,
+    18.4,
+    18.4,
     22.0,
     22.5,
     22.5,
-    22.5,
-    24.1,
-    18.3,
-    18.4
+    22.5
    ]
   }
  ],
  "default_path": {
-  "run_at": "2026-10-08T06:18:00+00:00",
+  "run_at": "2026-10-08T06:32:16+00:00",
   "S1": {
    "old": 8,
    "new": 8,
-   "changed": 4,
+   "changed": 5,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 10,
@@ -3038,26 +3270,28 @@
    "new_fresh": 8,
    "fresh_high": 5,
    "old_fresh_high": 2,
-   "new_fresh_high": 3,
+   "new_fresh_high": 4,
+   "old_stale": 4,
+   "new_stale": 0,
    "old_age_h": [
-    4.4,
-    6.7,
-    19.1,
-    19.6,
-    34.3,
-    34.3,
-    40.4,
-    40.8
+    4.7,
+    6.9,
+    19.4,
+    19.8,
+    34.5,
+    34.5,
+    40.7,
+    41.0
    ],
    "new_age_h": [
-    4.4,
-    6.7,
-    16.6,
+    4.7,
+    6.9,
+    15.5,
     16.8,
-    18.9,
-    19.1,
-    19.6,
-    20.7
+    17.0,
+    18.2,
+    19.2,
+    19.4
    ]
   },
   "S2": {
@@ -3072,25 +3306,27 @@
    "fresh_high": 10,
    "old_fresh_high": 1,
    "new_fresh_high": 3,
+   "old_stale": 8,
+   "new_stale": 0,
    "old_age_h": [
-    12.3,
-    12.3,
-    15.8,
+    12.5,
+    12.5,
     16.0,
-    28.2,
-    20.7,
+    16.2,
+    28.4,
     21.0,
-    30.3
+    21.2,
+    30.5
    ],
    "new_age_h": [
-    1.3,
-    4.6,
-    11.0,
-    3.8,
-    11.9,
-    12.2,
-    4.3,
-    12.3
+    0.0,
+    1.6,
+    4.0,
+    4.5,
+    4.5,
+    4.8,
+    6.5,
+    6.8
    ]
   },
   "S3": {
@@ -3105,6 +3341,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -3120,18 +3358,20 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
-    21.6
+    21.8
    ],
    "new_age_h": [
-    21.6,
-    36.0,
-    50.3,
-    50.8,
-    50.8,
-    50.8,
-    52.4,
-    46.6
+    21.8,
+    36.2,
+    46.8,
+    46.9,
+    46.9,
+    50.5,
+    51.0,
+    51.1
    ]
   }
  }

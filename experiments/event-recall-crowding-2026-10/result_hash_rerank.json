@@ -27,6 +27,10 @@
    "fresh_high": 28,
    "old_fresh_high": 23,
    "new_fresh_high": 6,
+   "stale_slots_old": 29,
+   "stale_slots_new": 147,
+   "stale_days_old": 13,
+   "stale_days_new": 27,
    "days_with_fresh": 21,
    "days_old_brief_has_fresh": 21,
    "days_new_brief_has_fresh": 15,
@@ -40,7 +44,7 @@
    "days_0_to_pos": 0,
    "days_pos_to_0": 0,
    "days_changed": 27,
-   "events_changed": 153,
+   "events_changed": 152,
    "future_ts_old": 17,
    "future_ts_new": 0,
    "fresh": 941,
@@ -49,11 +53,15 @@
    "fresh_high": 308,
    "old_fresh_high": 43,
    "new_fresh_high": 15,
+   "stale_slots_old": 161,
+   "stale_slots_new": 206,
+   "stale_days_old": 27,
+   "stale_days_new": 27,
    "days_with_fresh": 27,
    "days_old_brief_has_fresh": 27,
    "days_new_brief_has_fresh": 20,
    "median_age_h_old": 17.3,
-   "median_age_h_new": 71.5
+   "median_age_h_new": 70.2
   },
   "S3": {
    "days": 27,
@@ -71,6 +79,10 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "stale_slots_old": 0,
+   "stale_slots_new": 0,
+   "stale_days_old": 0,
+   "stale_days_new": 0,
    "days_with_fresh": 2,
    "days_old_brief_has_fresh": 2,
    "days_new_brief_has_fresh": 2,
@@ -93,6 +105,10 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "stale_slots_old": 2,
+   "stale_slots_new": 9,
+   "stale_days_old": 1,
+   "stale_days_new": 6,
    "days_with_fresh": 5,
    "days_old_brief_has_fresh": 5,
    "days_new_brief_has_fresh": 5,
@@ -115,6 +131,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [
     40.8,
     40.9,
@@ -145,6 +163,8 @@
    "fresh_high": 9,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     -830.0,
     15.9,
@@ -156,8 +176,8 @@
     39.0
    ],
    "new_age_h": [
-    25.9,
     22.7,
+    25.9,
     37.5,
     50.0,
     83.5,
@@ -180,6 +200,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     35.5
    ],
@@ -201,6 +223,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     105.4
@@ -220,6 +244,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 1,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [
     12.9,
     14.0,
@@ -251,6 +277,8 @@
    "fresh_high": 28,
    "old_fresh_high": 4,
    "new_fresh_high": 1,
+   "old_stale": 6,
+   "new_stale": 7,
    "old_age_h": [
     8.0,
     8.1,
@@ -286,6 +314,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     1.7
    ],
@@ -308,6 +338,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 1,
    "old_age_h": [
     17.9,
     24.0,
@@ -342,6 +374,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [
     13.8,
     19.3,
@@ -372,6 +406,8 @@
    "fresh_high": 6,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 4,
+   "new_stale": 7,
    "old_age_h": [
     -782.0,
     1.7,
@@ -407,6 +443,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     25.7
    ],
@@ -429,6 +467,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 1,
    "old_age_h": [],
    "new_age_h": [
     41.9,
@@ -455,6 +495,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 7,
    "old_age_h": [
     10.8,
     18.9
@@ -484,6 +526,8 @@
    "fresh_high": 18,
    "old_fresh_high": 4,
    "new_fresh_high": 1,
+   "old_stale": 5,
+   "new_stale": 7,
    "old_age_h": [
     10.9,
     13.0,
@@ -495,14 +539,14 @@
     20.0
    ],
    "new_age_h": [
-    13.3,
     6.0,
+    13.3,
     20.0,
     27.1,
     36.0,
     37.5,
     56.0,
-    82.0
+    60.5
    ]
   },
   {
@@ -519,6 +563,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     49.7,
@@ -539,15 +585,17 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     65.9,
     72.0,
     74.3,
+    75.5,
     78.0,
     81.5,
     82.0,
-    75.5,
     86.0
    ]
   },
@@ -565,15 +613,17 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [],
    "new_age_h": [
     80.0,
     82.5,
     82.8,
     109.5,
+    126.1,
     132.9,
     134.0,
-    126.1,
     136.9
    ]
   },
@@ -591,6 +641,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 7,
    "old_age_h": [
     -2198.0,
     -686.0,
@@ -604,8 +656,8 @@
    "new_age_h": [
     11.5,
     59.7,
-    85.3,
     78.0,
+    85.3,
     92.0,
     99.2,
     108.0,
@@ -626,6 +678,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     121.7
@@ -645,6 +699,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 1,
    "old_age_h": [],
    "new_age_h": [
     66.9,
@@ -671,15 +727,17 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [],
    "new_age_h": [
     104.0,
     106.5,
     106.8,
     133.5,
+    150.1,
     156.9,
     158.0,
-    150.1,
     160.9
    ]
   },
@@ -697,6 +755,8 @@
    "fresh_high": 9,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 8,
    "old_age_h": [
     -2174.0,
     -662.0,
@@ -711,11 +771,11 @@
     23.5,
     35.5,
     36.7,
-    109.3,
+    83.7,
     102.0,
+    109.3,
     116.0,
-    123.2,
-    132.0
+    123.2
    ]
   },
   {
@@ -732,6 +792,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     145.7
@@ -751,6 +813,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     90.9,
@@ -774,6 +838,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 2,
    "old_age_h": [
     9.6,
     9.7,
@@ -804,6 +870,8 @@
    "fresh_high": 12,
    "old_fresh_high": 3,
    "new_fresh_high": 1,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     -638.0,
     12.9,
@@ -821,8 +889,8 @@
     50.0,
     59.5,
     60.7,
-    133.3,
-    126.0
+    126.0,
+    133.3
    ]
   },
   {
@@ -839,6 +907,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -856,6 +926,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     114.9
@@ -875,6 +947,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 0,
+   "new_stale": 3,
    "old_age_h": [
     21.0,
     33.6,
@@ -906,6 +980,8 @@
    "fresh_high": 9,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 8,
    "old_age_h": [
     -614.0,
     1.1,
@@ -941,6 +1017,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     24.5
    ],
@@ -962,6 +1040,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     138.9
@@ -981,6 +1061,8 @@
    "fresh_high": 4,
    "old_fresh_high": 3,
    "new_fresh_high": 1,
+   "old_stale": 2,
+   "new_stale": 5,
    "old_age_h": [
     13.5,
     13.5,
@@ -1016,6 +1098,8 @@
    "fresh_high": 12,
    "old_fresh_high": 3,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 7,
    "old_age_h": [
     -2102.0,
     -590.0,
@@ -1051,6 +1135,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     48.5
@@ -1070,6 +1156,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     162.9
@@ -1089,6 +1177,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 1,
+   "new_stale": 5,
    "old_age_h": [
     0.8,
     9.9,
@@ -1124,6 +1214,8 @@
    "fresh_high": 7,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     9.1,
     19.5,
@@ -1159,6 +1251,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     120.5
@@ -1178,6 +1272,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     72.4
@@ -1197,6 +1293,8 @@
    "fresh_high": 3,
    "old_fresh_high": 2,
    "new_fresh_high": 0,
+   "old_stale": 1,
+   "new_stale": 6,
    "old_age_h": [
     6.0,
     10.7,
@@ -1232,6 +1330,8 @@
    "fresh_high": 27,
    "old_fresh_high": 6,
    "new_fresh_high": 2,
+   "old_stale": 8,
+   "new_stale": 8,
    "old_age_h": [
     12.9,
     18.8,
@@ -1244,8 +1344,8 @@
    ],
    "new_age_h": [
     12.9,
-    21.8,
     14.5,
+    21.8,
     24.0,
     68.0,
     71.5,
@@ -1267,6 +1367,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     144.5
@@ -1286,6 +1388,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     96.4
@@ -1305,6 +1409,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 5,
    "old_age_h": [
     2.0,
     11.6,
@@ -1317,8 +1423,8 @@
    ],
    "new_age_h": [
     2.0,
-    16.6,
     9.1,
+    16.6,
     23.1,
     35.6,
     66.6,
@@ -1340,6 +1446,8 @@
    "fresh_high": 13,
    "old_fresh_high": 2,
    "new_fresh_high": 1,
+   "old_stale": 4,
+   "new_stale": 8,
    "old_age_h": [
     -470.0,
     4.6,
@@ -1353,9 +1461,9 @@
    "new_age_h": [
     21.0,
     36.9,
-    45.8,
     38.5,
     41.5,
+    45.8,
     48.0,
     92.0,
     95.5
@@ -1375,6 +1483,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1392,6 +1502,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     11.5
    ],
@@ -1414,6 +1526,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [
     17.5,
     12.5,
@@ -1445,6 +1559,8 @@
    "fresh_high": 29,
    "old_fresh_high": 2,
    "new_fresh_high": 1,
+   "old_stale": 5,
+   "new_stale": 7,
    "old_age_h": [
     -446.0,
     1.7,
@@ -1457,12 +1573,12 @@
    ],
    "new_age_h": [
     1.7,
-    15.0,
     13.9,
+    15.0,
     26.5,
     60.9,
-    69.8,
     62.5,
+    69.8,
     72.0
    ]
   },
@@ -1480,6 +1596,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1497,6 +1615,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     35.5,
@@ -1517,6 +1637,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 6,
    "old_age_h": [
     13.2,
     13.7,
@@ -1528,9 +1650,9 @@
     36.5,
     41.9,
     50.0,
-    64.6,
     57.1,
     64.5,
+    64.6,
     71.1,
     114.6
    ]
@@ -1549,6 +1671,8 @@
    "fresh_high": 9,
    "old_fresh_high": 4,
    "new_fresh_high": 3,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     -422.0,
     11.8,
@@ -1561,12 +1685,12 @@
    ],
    "new_age_h": [
     12.0,
-    22.5,
     17.0,
-    39.0,
+    22.5,
+    25.7,
     37.9,
+    39.0,
     50.5,
-    93.8,
     86.5
    ]
   },
@@ -1584,6 +1708,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1601,6 +1727,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     59.5,
@@ -1621,6 +1749,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 7,
    "old_age_h": [
     35.6,
     52.1,
@@ -1634,9 +1764,9 @@
     108.5,
     113.9,
     122.0,
-    136.6,
     129.1,
     136.5,
+    136.6,
     143.1
    ]
   },
@@ -1654,6 +1784,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 8,
    "old_age_h": [
     -350.0,
     12.0,
@@ -1668,10 +1800,10 @@
     36.1,
     49.7,
     84.0,
-    94.5,
     89.0,
-    111.0,
+    94.5,
     109.9,
+    111.0,
     122.5
    ]
   },
@@ -1689,6 +1821,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1706,6 +1840,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     131.5
@@ -1725,6 +1861,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 3,
+   "new_stale": 8,
    "old_age_h": [
     9.4,
     11.3,
@@ -1740,9 +1878,9 @@
     132.5,
     137.9,
     146.0,
-    160.6,
     153.1,
     160.5,
+    160.6,
     167.1
    ]
   },
@@ -1760,6 +1898,8 @@
    "fresh_high": 7,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 8,
    "old_age_h": [
     -326.0,
     2.7,
@@ -1774,11 +1914,11 @@
     60.1,
     73.7,
     108.0,
-    118.5,
     113.0,
+    118.5,
     121.7,
-    135.0,
-    133.9
+    133.9,
+    135.0
    ]
   },
   {
@@ -1795,6 +1935,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1812,6 +1954,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     155.5
@@ -1831,6 +1975,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 5,
+   "new_stale": 7,
    "old_age_h": [
     4.0,
     17.5,
@@ -1843,9 +1989,9 @@
    ],
    "new_age_h": [
     11.8,
-    30.0,
-    30.0,
     26.0,
+    30.0,
+    30.0,
     100.2,
     122.9,
     156.5,
@@ -1866,6 +2012,8 @@
    "fresh_high": 4,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 7,
    "old_age_h": [
     -302.0,
     1.7,
@@ -1878,8 +2026,8 @@
    ],
    "new_age_h": [
     1.7,
-    16.8,
     10.0,
+    16.8,
     25.6,
     84.1,
     97.7,
@@ -1901,6 +2049,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1918,6 +2068,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -1935,6 +2087,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 6,
    "old_age_h": [
     1.9,
     11.7,
@@ -1949,9 +2103,9 @@
     1.9,
     17.8,
     35.8,
-    54.0,
-    54.0,
     50.0,
+    54.0,
+    54.0,
     124.2,
     146.9
    ]
@@ -1970,6 +2124,8 @@
    "fresh_high": 21,
    "old_fresh_high": 2,
    "new_fresh_high": 1,
+   "old_stale": 8,
+   "new_stale": 8,
    "old_age_h": [
     14.4,
     11.4,
@@ -1985,8 +2141,8 @@
     22.3,
     22.7,
     25.7,
-    40.8,
     34.0,
+    40.8,
     49.6,
     108.1
    ]
@@ -2005,6 +2161,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2022,6 +2180,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2039,6 +2199,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 3,
+   "new_stale": 7,
    "old_age_h": [
     12.5,
     25.0,
@@ -2053,9 +2215,9 @@
     25.9,
     41.8,
     59.8,
-    78.0,
-    78.0,
     74.0,
+    78.0,
+    78.0,
     148.2,
     170.9
    ]
@@ -2074,6 +2236,8 @@
    "fresh_high": 10,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 8,
    "old_age_h": [
     2.6,
     11.1,
@@ -2090,8 +2254,8 @@
     46.3,
     46.7,
     49.7,
-    64.8,
     58.0,
+    64.8,
     73.6
    ]
   },
@@ -2109,6 +2273,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2126,6 +2292,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2143,6 +2311,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [
     57.3,
     67.8
@@ -2153,9 +2323,9 @@
     97.9,
     113.8,
     131.8,
+    146.0,
     150.0,
-    150.0,
-    146.0
+    150.0
    ]
   },
   {
@@ -2163,7 +2333,7 @@
    "sym": "S2",
    "old": 8,
    "new": 8,
-   "changed": 6,
+   "changed": 5,
    "old_future_ts": 0,
    "new_future_ts": 0,
    "fresh": 7,
@@ -2172,6 +2342,8 @@
    "fresh_high": 1,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     9.0,
     52.2,
@@ -2183,13 +2355,13 @@
     74.6
    ],
    "new_age_h": [
-    75.0,
     68.0,
+    71.2,
+    75.0,
     83.8,
     107.4,
     118.7,
     121.7,
-    136.8,
     130.0
    ]
   },
@@ -2207,6 +2379,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2224,6 +2398,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2241,6 +2417,8 @@
    "fresh_high": 4,
    "old_fresh_high": 3,
    "new_fresh_high": 1,
+   "old_stale": 2,
+   "new_stale": 7,
    "old_age_h": [
     11.2,
     12.6,
@@ -2276,6 +2454,8 @@
    "fresh_high": 33,
    "old_fresh_high": 3,
    "new_fresh_high": 2,
+   "old_stale": 5,
+   "new_stale": 7,
    "old_age_h": [
     2.6,
     11.0,
@@ -2290,10 +2470,10 @@
     11.0,
     17.6,
     76.2,
-    99.0,
     92.0,
-    103.0,
     95.2,
+    99.0,
+    103.0,
     107.8
    ]
   },
@@ -2311,6 +2491,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     19.0
    ],
@@ -2332,6 +2514,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2349,6 +2533,8 @@
    "fresh_high": 2,
    "old_fresh_high": 2,
    "new_fresh_high": 1,
+   "old_stale": 2,
+   "new_stale": 5,
    "old_age_h": [
     11.0,
     11.4,
@@ -2384,6 +2570,8 @@
    "fresh_high": 12,
    "old_fresh_high": 2,
    "new_fresh_high": 0,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     11.0,
     11.8,
@@ -2395,13 +2583,13 @@
     36.0
    ],
    "new_age_h": [
-    26.0,
     24.1,
+    26.0,
     35.0,
     41.6,
-    123.0,
     116.0,
     119.2,
+    123.0,
     131.8
    ]
   },
@@ -2419,6 +2607,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     43.0
@@ -2438,6 +2628,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     20.3,
     21.8
@@ -2461,6 +2653,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 5,
    "old_age_h": [
     2.0,
     12.2,
@@ -2493,6 +2687,8 @@
    "fresh_high": 8,
    "old_fresh_high": 1,
    "new_fresh_high": 1,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     2.5,
     13.2,
@@ -2505,13 +2701,13 @@
    ],
    "new_age_h": [
     13.2,
-    50.0,
     48.1,
+    50.0,
     59.0,
     65.6,
-    147.0,
+    124.2,
     140.0,
-    151.0
+    143.2
    ]
   },
   {
@@ -2528,6 +2724,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     67.0
@@ -2547,6 +2745,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     18.0
    ],
@@ -2570,6 +2770,8 @@
    "fresh_high": 3,
    "old_fresh_high": 3,
    "new_fresh_high": 1,
+   "old_stale": 1,
+   "new_stale": 6,
    "old_age_h": [
     12.0,
     10.1,
@@ -2605,6 +2807,8 @@
    "fresh_high": 10,
    "old_fresh_high": 2,
    "new_fresh_high": 1,
+   "old_stale": 5,
+   "new_stale": 7,
    "old_age_h": [
     -86.0,
     1.4,
@@ -2619,10 +2823,10 @@
     1.4,
     17.3,
     37.2,
-    74.0,
     72.1,
-    83.0,
+    74.0,
     80.0,
+    83.0,
     89.6
    ]
   },
@@ -2640,6 +2844,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     91.0
@@ -2659,6 +2865,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [
     42.0
    ],
@@ -2682,6 +2890,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 7,
    "old_age_h": [
     58.7,
     60.0,
@@ -2716,6 +2926,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 7,
+   "new_stale": 8,
    "old_age_h": [
     23.4,
     50.0,
@@ -2729,8 +2941,8 @@
    "new_age_h": [
     58.1,
     61.5,
-    73.4,
     71.7,
+    73.4,
     109.2,
     146.0,
     155.0,
@@ -2751,6 +2963,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": [
     163.0
@@ -2770,6 +2984,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 1,
    "old_age_h": [
     65.8,
     67.7,
@@ -2780,11 +2996,11 @@
    ],
    "new_age_h": [
     65.8,
+    65.8,
     67.7,
     67.9,
     71.0,
     72.6,
-    65.8,
     140.3,
     141.8
    ]
@@ -2803,6 +3019,8 @@
    "fresh_high": 1,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 3,
+   "new_stale": 5,
    "old_age_h": [
     11.4,
     11.5,
@@ -2814,9 +3032,9 @@
     85.5
    ],
    "new_age_h": [
+    6.0,
     11.4,
     11.5,
-    6.0,
     85.5,
     116.8,
     155.4,
@@ -2838,6 +3056,8 @@
    "fresh_high": 6,
    "old_fresh_high": 1,
    "new_fresh_high": 0,
+   "old_stale": 6,
+   "new_stale": 7,
    "old_age_h": [
     9.0,
     9.5,
@@ -2851,10 +3071,10 @@
    "new_age_h": [
     9.5,
     82.1,
-    85.5,
     83.9,
-    97.4,
+    85.5,
     95.7,
+    97.4,
     133.2,
     170.0
    ]
@@ -2873,6 +3093,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -2890,14 +3112,16 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 1,
    "old_age_h": [],
    "new_age_h": [
+    89.8,
     89.8,
     91.7,
     91.9,
     95.0,
     96.6,
-    89.8,
     164.3,
     165.8
    ]
@@ -2916,6 +3140,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 3,
    "old_age_h": [
     12.1,
     12.4,
@@ -2929,9 +3155,9 @@
    "new_age_h": [
     12.1,
     12.4,
-    35.5,
-    35.5,
     30.0,
+    35.5,
+    35.5,
     109.5,
     140.8,
     140.9
@@ -2951,6 +3177,8 @@
    "fresh_high": 6,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 8,
+   "new_stale": 8,
    "old_age_h": [
     12.0,
     12.1,
@@ -2965,10 +3193,10 @@
     12.0,
     33.5,
     106.1,
-    109.5,
     107.9,
-    121.4,
+    109.5,
     119.7,
+    121.4,
     157.2
    ]
   },
@@ -2986,6 +3214,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 0,
+   "new_stale": 0,
    "old_age_h": [],
    "new_age_h": []
   },
@@ -3003,6 +3233,8 @@
    "fresh_high": 0,
    "old_fresh_high": 0,
    "new_fresh_high": 0,
+   "old_stale": 2,
+   "new_stale": 4,
    "old_age_h": [
     7.7,
     22.0,

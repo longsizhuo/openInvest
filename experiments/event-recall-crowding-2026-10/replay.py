@@ -80,11 +80,17 @@ def compare(old, new, sym: str, as_of, args) -> dict:
     fresh_high = {e["event_id"] for e in fresh if e["severity"] == "high"}
     o_ids, n_ids = {e["event_id"] for e in o}, {e["event_id"] for e in n}
     o_age, n_age = [_age_h(e["ts"], anchor) for e in o], [_age_h(e["ts"], anchor) for e in n]
+    # 陈旧槽位：brief 里比"真·第 k 新"合格事件还老 1h 以上的条数。真·最新 k 条在 Python 里按解析后的
+    # 时刻排（不信 SQL 的排序）；合格集取最新 200 条——串序最多偏 8h，200 条远超 8h，真·最新 k 条一定在里面
+    pool7 = sorted(_age_h(e["ts"], anchor) for e in
+                   new.recall(sym, **win | {"top_k": 200}, query_embedding=None))
+    kth = pool7[:args.top_k][-1] if pool7 else 0
     return {"old": len(o), "new": len(n), "changed": len(n_ids - o_ids),
             "old_future_ts": sum(a < 0 for a in o_age), "new_future_ts": sum(a < 0 for a in n_age),
             "fresh": len(fresh_ids), "old_fresh": len(o_ids & fresh_ids), "new_fresh": len(n_ids & fresh_ids),
             "fresh_high": len(fresh_high), "old_fresh_high": len(o_ids & fresh_high),
             "new_fresh_high": len(n_ids & fresh_high),
+            "old_stale": sum(a > kth + 1 for a in o_age), "new_stale": sum(a > kth + 1 for a in n_age),
             "old_age_h": o_age, "new_age_h": n_age}
 
 
@@ -142,6 +148,11 @@ def main() -> None:
                 # 近 24h 合格事件进 brief 的条数（high = 只数 severity=high）
                 **{k: sum(r[k] for r in rs) for k in ("fresh", "old_fresh", "new_fresh",
                                                      "fresh_high", "old_fresh_high", "new_fresh_high")},
+                # brief 里比真·第 k 新还老 >1h 的槽位数 / 出现过的天数（新版应为 0：按真实时刻取最新 k 条）
+                "stale_slots_old": sum(r["old_stale"] for r in rs),
+                "stale_slots_new": sum(r["new_stale"] for r in rs),
+                "stale_days_old": sum(r["old_stale"] > 0 for r in rs),
+                "stale_days_new": sum(r["new_stale"] > 0 for r in rs),
                 "days_with_fresh": sum(r["fresh"] > 0 for r in rs),
                 "days_old_brief_has_fresh": sum(r["old_fresh"] > 0 for r in rs),
                 "days_new_brief_has_fresh": sum(r["new_fresh"] > 0 for r in rs),
