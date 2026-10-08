@@ -390,11 +390,11 @@ def test_run_committee_session_event_as_of_reaches_multi_recall(
 
 
 # ============================================================================
-# 契约 6: Risk Officer 集中度 SENTINEL 覆写（2026-05-20 NDQ.AX 漂移修复）
+# 契约 6: Risk Officer 集中度 SENTINEL 覆写（2026-05-20 集中度漂移修复）
 # ============================================================================
 # 历史教训：portfolio_summary 字面写"**集中度 33.6%**"喂给 Risk Officer，但
 # DeepSeek 仍偶发 hallucinate 编成 70.2%（前一日同 prompt 输出 33.4% 正确）。
-# CIO 据此误喊 TRIM ¥15,000。修复方案：service layer 在 Risk Officer 输出后
+# CIO 据此误喊 TRIM。修复方案：service layer 在 Risk Officer 输出后
 # 用 portfolio_summary 字面值强制覆写 CONCENTRATION_PCT 行。
 #
 # 本测验证 helper 真把脏数字改回，不是只在 prompt 里讲讲。
@@ -406,21 +406,21 @@ def test_extract_concentration_from_summary_picks_correct_asset():
 
     summary = (
         "用户风险偏好: Aggressive\n"
-        "总资产估算: ¥220,371\n"
-        "  - **BetaShares Nasdaq 100 ETF** (NDQ.AX) (CommSec): 256.0000 股, "
-        "均价 $53.86, 现价 $59.82, 浮盈 +11.06%, "
-        "**集中度 33.6%** (CNY 市值 ¥74,060 / 总资产 ¥220,371)\n"
-        "  - **伦敦金 (浙商积存金)** (GC=F) (浙商积存金): 133.8842 克, "
-        "均价 ¥1008.34, 现价 ¥976.97, 浮盈 -3.11%, "
-        "**集中度 59.4%** (CNY 市值 ¥130,800 / 总资产 ¥220,371)\n"
+        "总资产估算: ¥80,000\n"
+        "  - **Demo ETF** (TEST.AX) (DemoBroker): 100.0000 股, "
+        "均价 $50.00, 现价 $55.00, 浮盈 +10.00%, "
+        "**集中度 33.6%** (CNY 市值 ¥26,880 / 总资产 ¥80,000)\n"
+        "  - **Demo Gold** (GC=F) (DemoBank): 50.0000 克, "
+        "均价 ¥900.00, 现价 ¥950.00, 浮盈 +5.56%, "
+        "**集中度 59.4%** (CNY 市值 ¥47,500 / 总资产 ¥80,000)\n"
     )
 
-    assert _extract_concentration_from_summary(summary, "NDQ.AX") == 33.6
+    assert _extract_concentration_from_summary(summary, "TEST.AX") == 33.6
     assert _extract_concentration_from_summary(summary, "GC=F") == 59.4
     # 不在 summary 里的 asset
-    assert _extract_concentration_from_summary(summary, "ASIA.AX") is None
+    assert _extract_concentration_from_summary(summary, "MISSING.AX") is None
     # 空输入容忍
-    assert _extract_concentration_from_summary("", "NDQ.AX") is None
+    assert _extract_concentration_from_summary("", "TEST.AX") is None
     assert _extract_concentration_from_summary(summary, "") is None
 
 
@@ -433,7 +433,7 @@ def test_override_concentration_rewrites_hallucinated_value():
         "STRENGTH: 8\n"
         "CONCENTRATION_PCT: 70.2%\n"
         "DRY_POWDER_CNY: ¥0\n"
-        "PNL_PCT: +11.06%\n"
+        "PNL_PCT: +10.00%\n"
         "ONE_LINER: NDQ集中度70%远超上限...\n"
     )
 
@@ -687,10 +687,10 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
     # 构造典型 portfolio_summary（与 utils.portfolio_summary 输出格式一致）
     fake_summary = (
         "用户风险偏好: Aggressive\n"
-        "总资产估算: ¥220,371\n"
-        "  - **BetaShares Nasdaq 100 ETF** (NDQ.AX) (CommSec): 256 股, "
-        "均价 $53.86, 现价 $59.82, 浮盈 +11.06%, "
-        "**集中度 33.6%** (CNY 市值 ¥74,060 / 总资产 ¥220,371)\n"
+        "总资产估算: ¥80,000\n"
+        "  - **Demo ETF** (TEST.AX) (DemoBroker): 100 股, "
+        "均价 $50.00, 现价 $55.00, 浮盈 +10.00%, "
+        "**集中度 33.6%** (CNY 市值 ¥26,880 / 总资产 ¥80,000)\n"
     )
 
     # mock _create_agent → 返回一个会输出固定字符串的假 agent
@@ -706,7 +706,7 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
         "STRENGTH: 8\n"
         "CONCENTRATION_PCT: 70.2%\n"  # ← LLM 编的
         "DRY_POWDER_CNY: ¥0\n"
-        "PNL_PCT: +11.06%\n"
+        "PNL_PCT: +10.00%\n"
         "ONE_LINER: 集中度过高\n"
     )
     FAKE_QUANT = (
@@ -742,7 +742,7 @@ def test_run_committee_overrides_risk_concentration_end_to_end(monkeypatch):
     monkeypatch.setattr("openinvest.core.committee.debate._persist", lambda *a, **kw: None)
 
     result = cmt.run_committee(
-        asset={"symbol": "NDQ.AX", "display_name": "BetaShares Nasdaq 100 ETF"},
+        asset={"symbol": "TEST.AX", "display_name": "Demo ETF"},
         market_data="fake market",
         macro_view="fake macro",
         portfolio_summary=fake_summary,

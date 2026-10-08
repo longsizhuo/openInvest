@@ -34,8 +34,8 @@ Superseded（solvency 触发部分）— 2026-05-28 立，2026-06-23 由 ADR-019
 
 ## 背景
 
-2026-05-28 黄金 GC=F 委员会输出 TRIM，原因是 Risk Officer 报集中度 > 60%。
-但实际上用户有 ¥4M 家族 backup（SOLVENCY_BUFFER_LEVEL=strong），投资账户
+2026-05-28 某持仓的委员会输出 TRIM，原因是 Risk Officer 报集中度 > 60%。
+但实际上用户有大额家族 backup（SOLVENCY_BUFFER_LEVEL=strong），投资账户
 归零不影响生存。集中度高只意味着"账户内偏科"，不意味着"真实财富风险"。
 
 PR #14（已合入）在 CIO prompt 层加了"零花钱账户 TRIM 约束"，但这是纯 prompt

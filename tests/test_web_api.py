@@ -56,9 +56,9 @@ def _seed_memory(store: MemoryStore) -> None:
             {
                 "symbol": "NDQ.AX",
                 "kind": "etf",
-                "units": 128.0,
+                "units": 100.0,
                 "unit_label": "股",
-                "avg_cost": 53.86,
+                "avg_cost": 50.0,
                 "cost_currency": "AUD",
                 "channel": "CommSec",
                 "display_name": "BetaShares Nasdaq 100",
@@ -162,7 +162,7 @@ def test_portfolio_full(client):
     assert b["gold"]["is_stale"] is False
 
     # NDQ.AX：last 42.5 / prev 41.5 → +2.41%
-    assert b["ndq"]["shares"] == 128.0
+    assert b["ndq"]["shares"] == 100.0
     assert b["ndq"]["last_price_aud"] == 42.5
     assert b["ndq"]["prev_close_aud"] == 41.5
     assert b["ndq"]["day_change_pct"] == pytest.approx(2.4096, rel=1e-3)
@@ -195,7 +195,7 @@ def test_ndq_endpoint(client):
     r = client.get("/api/ndq")
     assert r.status_code == 200
     b = r.json()
-    assert b["shares"] == 128.0
+    assert b["shares"] == 100.0
     assert b["last_price_aud"] == 42.5
 
 
@@ -315,7 +315,7 @@ def test_withdraw(client, tmp_store):
 
 
 def test_withdraw_insufficient_blocked(client):
-    """v2 阶段 5: AUD 余额 100 但扣 500 → 拒绝（防 AUD -6894 类事故）"""
+    """v2 阶段 5: AUD 余额 100 但扣 500 → 拒绝（防 AUD 现金扣成负数）"""
     r = client.post("/api/withdraw", json={"currency": "aud", "amount": 500.0})
     assert r.status_code == 400
     assert "余额不足" in r.json()["detail"]
@@ -766,7 +766,7 @@ def test_cash_deposit_any_currency(client, tmp_store):
 
 
 def test_cash_withdraw_negative_blocked(client, tmp_store):
-    """v2 withdraw 余额不足 → 400（PM 关切的'AUD -6894 不再发生'）"""
+    """v2 withdraw 余额不足 → 400（PM 关切的'AUD 现金不再被扣成负数'）"""
     r = client.post("/api/cash/USD/withdraw", json={"amount": 100})
     assert r.status_code == 400
     assert "余额不足" in r.json()["detail"]
@@ -1191,7 +1191,7 @@ def test_skill_sell_returns_cash(skill_client, tmp_store):
     })
     assert r.status_code == 200
     b = r.json()
-    assert b["remaining_units"] == 100.0
+    assert b["remaining_units"] == 72.0
     pm = PortfolioManager(store=tmp_store)
     # 卖出按 cost_currency=AUD 还现金：100 + 28*42 = 1276
     assert pm.cash_amount("AUD") == pytest.approx(1276.0)

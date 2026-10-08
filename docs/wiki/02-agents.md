@@ -156,7 +156,7 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 # 用户当前持仓：
   CNY: ¥50,000 / AUD: $1,000 / NDQ.AX 50 股 @ A$38.50（浮盈 +12%）
 # 长期模式（Dreaming，学委员会自己的 verdict vs 实际盘）：
-  ⚠️ downtrend 里对 NDQ.AX 反复 HOLD，30 天后 100% 踏空（平均 +12%，n=11）→ 降低 HOLD 倾向
+  ⚠️ downtrend 里对该资产反复 HOLD，30 天后 90% 踏空（平均 +9%，n=10）→ 降低 HOLD 倾向
 请按 Risk Officer 格式输出风险评估。
 ```
 

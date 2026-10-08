@@ -17,15 +17,15 @@ from scripts.migrate_portfolio_to_holdings import migrate, render_portfolio_body
 
 @pytest.fixture
 def v1_store(tmp_path):
-    """构造一份典型的 v1 portfolio.md（生产真实形态）"""
+    """构造一份典型的 v1 portfolio.md（虚构数值）"""
     store = MemoryStore(tmp_path / "memory")
     store.write("portfolio", "state", {
-        "cash_cny": 15511.30,
-        "aud_cash": -6894.42,
-        "ndq_shares": 256.0,
-        "ndq_avg_cost_aud_per_share": 53.86,
-        "gold_grams": 133.88,
-        "gold_avg_cost_cny_per_gram": 1008.34,
+        "cash_cny": 12345.67,
+        "aud_cash": -500.00,
+        "ndq_shares": 50.0,
+        "ndq_avg_cost_aud_per_share": 38.50,
+        "gold_grams": 30.5,
+        "gold_avg_cost_cny_per_gram": 750.00,
     }, "# 旧 body 应该被重写")
     return store
 
@@ -42,21 +42,21 @@ def test_migrate_basic(v1_store):
     # 读迁移后的数据
     p = v1_store.read("portfolio")
     assert p.get("schema_version") == 2
-    assert p.get("cash") == {"CNY": 15511.30, "AUD": -6894.42}
+    assert p.get("cash") == {"CNY": 12345.67, "AUD": -500.00}
     assert "cash_cny" not in p.metadata, "v1 旧字段必须被清除"
     assert "aud_cash" not in p.metadata
     assert "ndq_shares" not in p.metadata
 
     holdings = p.get("holdings")
     ndq = next(h for h in holdings if h["symbol"] == "NDQ.AX")
-    assert ndq["units"] == 256.0
-    assert ndq["avg_cost"] == 53.86
+    assert ndq["units"] == 50.0
+    assert ndq["avg_cost"] == 38.50
     assert ndq["cost_currency"] == "AUD"
     assert ndq["kind"] == "etf"
 
     gold = next(h for h in holdings if h["symbol"] == "GC=F")
-    assert gold["units"] == 133.88
-    assert gold["avg_cost"] == 1008.34
+    assert gold["units"] == 30.5
+    assert gold["avg_cost"] == 750.00
     assert gold["cost_currency"] == "CNY"
     assert gold["proxy_kind"] == "gold_cny_per_gram"
     assert gold["sell_fee_pct"] == 0.0038
@@ -79,7 +79,7 @@ def test_migrate_creates_backup(v1_store, tmp_path):
 
 
 def test_migrate_negative_cash_preserved(tmp_path):
-    """AUD 负数现金（你刚遇到的 -6894 场景）必须保留进 cash dict"""
+    """AUD 负数现金（买入后欠款场景）必须保留进 cash dict"""
     store = MemoryStore(tmp_path / "memory")
     store.write("portfolio", "state", {
         "cash_cny": 0,

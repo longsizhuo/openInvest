@@ -292,7 +292,7 @@ class PaperTradeSimulator:
         """date 当日 close（用 as_of_date 防穿越）。
 
         黄金代理特例：GC=F 原生报价是 USD/oz，但本模拟器把它的计价币种标为
-        CNY（用户持的是积存金 CNY/克，见 ASSET_CURRENCY）——必须补 USDCNY 腿，
+        CNY（按积存金 CNY/克 口径记账，见 ASSET_CURRENCY）——必须补 USDCNY 腿，
         否则买/卖/估值全程 fx=1，窗口收益漏掉人民币汇率漂移，系统性偏置黄金腿
         （与 jobs/verdict_review._window_return 的 GC=F×USDCNY 口径对齐，
         issue #179 P1-A①）。oz→克的常数因子在收益比值里消掉，无需换算。

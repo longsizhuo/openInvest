@@ -159,7 +159,7 @@ class CommSecReader:
             symbol = match.group(3).upper()
             price = float(match.group(4))
         else:
-            # Regex 2: Simple "Bought 54 units of NDQ"
+            # Regex 2: Simple "Bought 100 units of XYZ"
             # 这种格式通常在 Subject 里
             pattern_simple = r"(bought|sold)\s+([\d,]+)\s+units\s+of\s+(\w+)"
             match_simple = re.search(pattern_simple, clean_body, re.IGNORECASE)

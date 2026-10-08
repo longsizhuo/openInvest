@@ -183,9 +183,9 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 **根因**：Risk Officer prompt 里 `DRY_POWDER_CNY < 1000` → high_risk，
 没有"off-portfolio 兜底"概念。
 
-**实测 E2E**（同样 portfolio 上下文：cash ¥500 + NDQ 重仓 99.9%）：
+**实测 E2E**（同样 portfolio 上下文：cash ¥500 + 单一 ETF 重仓 99.9%）：
 
-| 维度 | A (无 backup) | B (¥4M backup) |
+| 维度 | A (无 backup) | B (大额家族 backup) |
 |---|---|---|
 | Risk SIGNAL | `high_risk` | **`concerned`** |
 | Risk STRENGTH | 10 | **8** |
@@ -195,7 +195,7 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 **关键语义**（commit 待 / capabilities/committee/wealth_context_officer.py）：
 - `INVESTABLE_CASH_CNY = portfolio cash`（永远不加 backup）
 - `BACKUP_BUFFER_CNY = off-portfolio 应急金`（**仅风险兜底，不可投资**）
-- 家族 ¥4M 只让 SIGNAL 从 high_risk → concerned，**不让 CIO 喊"BUY ¥1M"**
+- 大额家族兜底只让 SIGNAL 从 high_risk → concerned，**不让 CIO 喊"BUY ¥1M"**
 
 → 主张证实：**用户上下文缺失是真问题，加一个独立角色能精准修复**——LLM 推理逻辑
 没错，错的是它看到的前提条件。

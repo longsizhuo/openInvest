@@ -17,7 +17,7 @@ CIO prompt（`capabilities/committee/cio/cio.md`）里有一段「🔥 现金仓
 1. **它对默认用户过于强势**。和 ADR-020 的集中度 lens 同理：openInvest 持仓常是自选/watchlist，"现在不加仓"完全可能是正确决策（估值 99% 分位、downtrend、等更低位）。把 HOLD 直接判成"错误的 default"剥夺了委员会说"现在什么都不做最好"的能力——而"少做错事"正是 ADR-023 的诚实定位核心。
 2. **它名义上像个开关，其实关不掉**。`core/config/locked.py` 里有 `cash_opportunity_cost_rule: bool = True`，挂在 `LockedPromptIdentity`（ADR-007 锁死区），看着像配置项——但**全仓没有任何代码读它**，只有一条测试断言它 == True。真正生效的是 SKILL.md 里的硬编码 prompt 文本，没接任何开关。
 
-实测影响（2026-06-30，用户加 ¥10k 现金后跑委员会）：510300.SS 估值处 2 年 99% 分位、Quant neutral，CIO 本倾向 HOLD，但被该规则强制改判 `ACCUMULATE ¥2,100`——理由栏直接写「现金仓位机会成本规则：CONCENTRATION_PCT 0.9% < 20%，因此不允许 HOLD」。用户裁决：删掉这条强制。
+实测影响（2026-06-30）：一只 A 股指数 ETF 估值处 2 年 99% 分位、Quant neutral，CIO 本倾向 HOLD，但被该规则强制改判 `ACCUMULATE`——理由栏直接写「现金仓位机会成本规则：CONCENTRATION_PCT 低于 20%，因此不允许 HOLD」。用户裁决：删掉这条强制。
 
 ## Decision
 

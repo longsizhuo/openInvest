@@ -36,8 +36,8 @@ cash_cny: 50000
 aud_cash: 1000
 ndq_shares: 50
 ndq_avg_cost_aud_per_share: 38.50
-gold_grams: 124
-gold_avg_cost_cny_per_gram: 1008.79
+gold_grams: 30.5
+gold_avg_cost_cny_per_gram: 750.00
 ---
 ```
 
@@ -73,9 +73,9 @@ holdings:
     proxy_kind: direct
   - symbol: GC=F
     kind: metal
-    units: 124.0
+    units: 30.5
     unit_label: 克
-    avg_cost: 1008.79
+    avg_cost: 750.00
     cost_currency: CNY
     channel: 浙商积存金
     yfinance_proxy: GC=F
@@ -144,7 +144,7 @@ holdings:
     units: 50
   GC=F:
     kind: metal
-    units: 124
+    units: 30.5
 ```
 
 **拒绝**：YAML 里 dict 顺序不稳定（不同库可能 reorder）；list 自带顺序，UI 显示时一致。

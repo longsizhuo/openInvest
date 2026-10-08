@@ -211,8 +211,8 @@ class MemoryStore:
         给"读两个字段联动写"或"先改 frontmatter 再重渲染 body"这类多步操作用：
 
             with store.transaction("portfolio") as p:
-                p["cash_cny"] = float(p.get("cash_cny", 0)) - 6894
-                p["ndq_shares"] = float(p.get("ndq_shares", 0)) + 128
+                p["cash_cny"] = float(p.get("cash_cny", 0)) - 5000
+                p["ndq_shares"] = float(p.get("ndq_shares", 0)) + 100
                 p.set_body(render_body(p))
             # 退出 with 时自动一次性 atomic write
 

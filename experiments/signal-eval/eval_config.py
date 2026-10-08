@@ -5,7 +5,7 @@ Q1 / Q2 / harness 全部 import 这里,杜绝 ASSETS / CUTOFF 在多个脚本各
 """
 from __future__ import annotations
 
-# 用户的养老定投篮子(Q2 篮子择时测试对象)——黄金 / A股 / 纳指
+# Q2 篮子择时测试对象——黄金 / A股 / 纳指
 BASKET_ASSETS = ["GC=F", "510300.SS", "NDQ.AX"]
 
 # LLM 训练 cutoff:旧 MiMo 自报 2024-12-31。⚠ 已切 DeepSeek-v4-flash,M3 跑 LLM 前必须

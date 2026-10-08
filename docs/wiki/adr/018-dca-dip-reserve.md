@@ -31,10 +31,10 @@ superseded_by: []
 
 ## 背景
 
-用户用第三方平台（如京东金融）做**每日自动定投**，扣款来自工资 / 银行卡。但 openInvest
+不少用户在第三方平台（基金 App / 银行）做**每日自动定投**，扣款来自工资 / 银行卡。但 openInvest
 的 `buy()` 一律从 `portfolio.cash` 扣钱（账本一致：买 X 元 = 扣 X 元现金）。若把日定投
 也按这套记账，会把 portfolio cash **错误消耗**——而 portfolio cash 的真实语义是"现在能立刻
-拿去抄底的子弹（dip-reserve）"，不是日定投的资金来源。实测：¥30k 子弹按 ¥100/天定投扣，
+拿去抄底的子弹（dip-reserve）"，不是日定投的资金来源。例如 ¥30k 子弹按 ¥100/天定投扣，
 约 10 个月归零，之后委员会逢跌想加仓却显示"没子弹"。
 
 根因：`buy()` 把"资金来源"写死成"扣 portfolio cash"，无法表达"外部新钱进场建仓、子弹池
@@ -75,7 +75,7 @@ RSI/MA120/MA250/regime 全 N/A、`REGIME=unknown`（510500.SS / SPY 复现）。
   基金余额对账校准**。智慧定投实际金额浮动，`amount_cny` 是估算基准。
 - **币种**：CNY 标的直接 `amount_cny / price`；非 CNY 标的经 `utils.fx.to_base` 折算后再除价。
 - **代理跟踪**：场外联接基金（yfinance 取不到净值）按同指数的场内 ETF symbol 做价值代理记账
-  （如京东 110020 → openInvest 记 510300.SS），份额是价值代理、市值/PnL 同指数跟得准。
+  （如某沪深 300 联接基金 → openInvest 记同指数的场内 ETF），份额是价值代理、市值/PnL 同指数跟得准。
 - **开口池模型（已实现）**：`wealth_context.monthly_contribution_cny` —— 用户每月从外部补充进
   投资池的额度。WealthContextOfficer 据此把 portfolio cash 当**流量**而非封闭快照：低现金更不算
   流动性风险、30% 现金目标软化（铁律不变：本次加仓上限仍 = **当前** portfolio cash）。

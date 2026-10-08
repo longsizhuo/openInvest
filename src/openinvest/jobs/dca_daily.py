@@ -1,7 +1,7 @@
 """每日自动定投（DCA）—— 子弹池模型（见 ADR-018）
 
 按 config.dca 配置，对每个 symbol 记一笔 **external_funding** 买入：日定投的钱来自
-京东/银行卡（工资），不是 portfolio 抄底子弹池现金 → 不扣 cash。本系统看不到京东
+第三方平台/银行卡（工资），不是 portfolio 抄底子弹池现金 → 不扣 cash。本系统看不到第三方平台
 真实成交，按 amount_cny 估算每日买入量记账，月度用真实基金余额对账校准。
 
 幂等（ADR-016）：每个 (date, symbol) 一把 state_claim 闸，杜绝 cron 重跑 / 手动重触发

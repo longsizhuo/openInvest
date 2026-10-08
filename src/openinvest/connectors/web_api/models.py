@@ -250,7 +250,7 @@ class SymbolSearchResponse(BaseModel):
 
 class DepositRequest(BaseModel):
     """POST /api/deposit body"""
-    currency: Literal["cny", "aud"] = Field("cny", description="cny=人民币 / aud=澳元（NDQ 子弹）")
+    currency: Literal["cny", "aud"] = Field("cny", description="cny=人民币 / aud=澳元")
     amount: float = Field(..., gt=0, description="正数金额")
 
 

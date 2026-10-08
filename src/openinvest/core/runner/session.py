@@ -150,7 +150,7 @@ def run_committee_for_symbol(
     # 5.1. Portfolio summary
     # 2026-05-19 修复 Direct 路径集中度漂移：之前 service layer 自拼简化版
     # （只 4 行: 风险/CNY/AUD/目标资产单位），没有总资产、没有所有持仓、没有集中度
-    # 数字，Risk Officer 自己算集中度连续 6 天错算（NDQ 真实 33.4% → LLM 算成
+    # 数字，Risk Officer 自己算集中度连续 6 天错算（某持仓真实 33.4% → LLM 算成
     # 81.6%）。现在默认走 utils.portfolio_summary.portfolio_summary_text 拼完整版
     # （含每个 asset 的 concentration_pct + 总资产 + 浮盈），与 cron / Coordinator
     # 路径对齐。caller override 仍优先（cron daily_report 已经自己拼好了 +

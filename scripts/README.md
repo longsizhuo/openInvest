@@ -50,7 +50,6 @@ CLI 脚本入口 + 维护工具。**不在生产 cron 里跑**（生产 cron 走
 | 脚本 | 退役原因 |
 |------|------|
 | `init_market_db.py` | 已被 yfinance 通用路径取代 |
-| `upgrade_to_multi_asset.py` | B7 起仅原作者 fork 用，fork 用户勿跑 |
 | `backfill_ohlcv.py` | High/Low/Volume schema 扩列回填，已完成 |
 | `backfill_pnl_history.py` | pnl_history.jsonl 一次性回填，已完成 |
 | `import_gold_trades.py` | 浙商黄金交易一次性导入（缺私有文件时回落合成 demo 数据） |

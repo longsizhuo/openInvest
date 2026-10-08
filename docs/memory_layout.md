@@ -72,9 +72,9 @@ holdings:
     proxy_kind: direct
   - symbol: GC=F
     kind: metal
-    units: 124.0
+    units: 30.5
     unit_label: 克
-    avg_cost: 1008.79
+    avg_cost: 750.00
     cost_currency: CNY
     channel: 浙商积存金
     display_name: 伦敦金 (浙商积存金)
@@ -86,7 +86,7 @@ holdings:
 # 当前持仓
 - CNY 现金: ¥50,000 / AUD 现金: $1,000
 - NDQ.AX: 50 股 @ A$38.50 (CommSec)
-- 黄金: 124 g @ ¥1008.79/g (浙商积存金)
+- 黄金: 30.5 g @ ¥750.00/g (浙商积存金)
 ```
 
 - **frontmatter**：结构化数据的 source of truth（代码读写）
@@ -133,10 +133,7 @@ uv run python scripts/migrate_profile.py
 # v1 portfolio.md → v2 (cash dict + holdings list)
 uv run python scripts/migrate_portfolio_to_holdings.py
 
-# 升级单资产 → 多资产
-uv run python scripts/archive/upgrade_to_multi_asset.py
-
-# 导入实际黄金交易历史（按需，给原作者用的）
+# 导入黄金交易历史（按需；读 git-ignored 私有文件，缺失时用合成 demo 数据）
 uv run python scripts/archive/import_gold_trades.py
 
 # 手动导入 CommSec 邮件成交（替代旧 cron 自动模式，2026-05+）

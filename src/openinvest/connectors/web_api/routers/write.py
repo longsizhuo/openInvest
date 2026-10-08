@@ -65,7 +65,7 @@ def deposit(body: DepositRequest = Body(...), pm: PortfolioManager = Depends(get
 @router.post("/api/withdraw", response_model=WriteResponse, tags=["write"])
 def withdraw(body: WithdrawRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> WriteResponse:
     """取出现金（v2: 任意币种 + 负数校验）。
-    余额不足默认 400 拒绝（PM 关切：避免 AUD -6894 类似事故）
+    余额不足默认 400 拒绝（PM 关切：避免 AUD 现金被扣成负数这类事故）
 
     余额检查在 fcntl 锁内执行，避免并发取款 TOCTOU 竞态。
     """

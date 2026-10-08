@@ -123,9 +123,9 @@ class TestCashAmount:
     def test_negative_balance_preserved(self, tmp_path):
         """负数余额（如 AUD 购买后欠款）应原值返回"""
         s = _make_store(tmp_path)
-        _seed_docs(s, cash={"CNY": 5000.0, "AUD": -6894.42})
+        _seed_docs(s, cash={"CNY": 5000.0, "AUD": -500.25})
         pm2 = PortfolioManager(s)
-        assert pm2.cash_amount("AUD") == pytest.approx(-6894.42)
+        assert pm2.cash_amount("AUD") == pytest.approx(-500.25)
 
 
 # ============ 任务 1b：holdings property ============
@@ -142,18 +142,18 @@ class TestHoldingsProperty:
 
     def test_single_holding_iterable(self, tmp_path):
         """单条 holding 能迭代，字段完整"""
-        h = {"symbol": "NDQ.AX", "kind": "etf", "units": 256.0,
-             "unit_label": "股", "avg_cost": 53.86, "cost_currency": "AUD",
-             "channel": "CommSec", "display_name": "BetaShares Nasdaq 100 ETF",
+        h = {"symbol": "DEMO.AX", "kind": "etf", "units": 50.0,
+             "unit_label": "股", "avg_cost": 38.50, "cost_currency": "AUD",
+             "channel": "DemoBroker", "display_name": "Demo ETF",
              "proxy_kind": "direct"}
         s = _make_store(tmp_path)
         _seed_docs(s, holdings=[h])
         pm2 = PortfolioManager(s)
         items = list(pm2.holdings)
         assert len(items) == 1
-        assert items[0]["symbol"] == "NDQ.AX"
-        assert items[0]["units"] == 256.0
-        assert items[0]["avg_cost"] == 53.86
+        assert items[0]["symbol"] == "DEMO.AX"
+        assert items[0]["units"] == 50.0
+        assert items[0]["avg_cost"] == 38.50
 
     def test_multiple_holdings_multi_currency(self, tmp_path):
         """多条多币种持仓全部返回"""
@@ -203,13 +203,13 @@ class TestFindHolding:
 
     def test_find_existing_symbol(self, tmp_path):
         """能命中已有 holding"""
-        h = {"symbol": "NDQ.AX", "kind": "etf", "units": 128.0, "cost_currency": "AUD"}
+        h = {"symbol": "NDQ.AX", "kind": "etf", "units": 100.0, "cost_currency": "AUD"}
         s = _make_store(tmp_path)
         _seed_docs(s, holdings=[h])
         pm2 = PortfolioManager(s)
         found = pm2.find_holding("NDQ.AX")
         assert found is not None
-        assert found["units"] == 128.0
+        assert found["units"] == 100.0
 
     def test_find_missing_symbol_returns_none(self, pm):
         """不存在的 symbol 返回 None 而不抛异常"""
@@ -589,7 +589,7 @@ class TestBuyFundingSource:
 
     - source_type="cash_deduct"（默认）：买入扣减对应币种现金 = 现有行为，不变
     - source_type="external_funding"：外部新钱建仓，portfolio cash 不动
-      （日定投走京东/工资银行卡，钱不来自子弹池现金 → 不该扣 cash，
+      （日定投走第三方平台/工资银行卡，钱不来自子弹池现金 → 不该扣 cash，
        否则 ¥30k 子弹池会被日定投错误消耗，10 个月归零）
     """
 

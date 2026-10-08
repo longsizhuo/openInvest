@@ -120,7 +120,7 @@ def get_llm_summary(
 def get_data_sources_health(pm: PortfolioManager = Depends(get_pm)) -> DataSourcesHealthResponse:
     """所有数据源的当前可达性 + 最后成功拉取时间。GUI 透明化"我们用什么数据决策"
 
-    B5 通用化（2026-05）：监控 symbol 不再硬编码作者持仓（NDQ.AX/GC=F），
+    B5 通用化（2026-05）：监控 symbol 不再硬编码固定列表，
     动态读用户实际 holdings；额外保留宏观指标（VIX/TNX/USDCNY 等）作背景。
     """
     sources: List[DataSourceHealth] = []

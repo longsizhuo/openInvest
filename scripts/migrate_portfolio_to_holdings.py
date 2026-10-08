@@ -3,10 +3,10 @@
 v1 字段:
 - cash_cny: 1234.56
 - aud_cash: -100.00
-- ndq_shares: 256.0
-- ndq_avg_cost_aud_per_share: 53.86
-- gold_grams: 133.88
-- gold_avg_cost_cny_per_gram: 1008.34
+- ndq_shares: 50.0
+- ndq_avg_cost_aud_per_share: 38.50
+- gold_grams: 30.5
+- gold_avg_cost_cny_per_gram: 750.00
 
 v2 结构:
 - cash: {"CNY": 1234.56, "AUD": -100.00}

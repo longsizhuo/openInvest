@@ -96,8 +96,8 @@ documents:
 
 按 `(asset, verdict, regime)` 分桶，统计每个组合 7d/30d 的命中率。例如：
 
-- "range_bound 里委员会 TRIM 黄金 → 7d 命中率 80%（n=5）"
-- "downtrend 里委员会 HOLD 纳指 → 30d 实际涨 +12%，踏空 100%（n=11）"
+- "range_bound 里委员会对 ABC TRIM → 7d 命中率 70%（n=6）"
+- "downtrend 里委员会对 XYZ HOLD → 30d 实际涨 +9%，踏空 90%（n=10）"
 
 **两个纪律**：
 - **黑天鹅免责**：`macro_shock` 标记的样本剔除，不让委员会因不可预测的突变被记成"判断差"。
@@ -143,20 +143,20 @@ HOLD 没命中时再分方向：
 通过门的写入 `memory/insights/*.md`（一条一文件）+ 更新 `MEMORY.md` 索引。
 可选 LLM 验伪（`INVEST_DREAMING_LLM_VERIFY=1`）再过滤一道 spurious correlation。
 
-### 固化出的 insight 例子（caution）
+### 固化出的 insight 例子（caution，示例数据）
 
 ```markdown
-# ⚠️ 告诫: downtrend 里对 NDQ.AX HOLD 频繁踏空
+# ⚠️ 告诫: downtrend 里对 XYZ HOLD 频繁踏空
 
 ## 统计
-- 样本数: 11
-- 30天后命中率: 0.0%
-- 平均 30天后实际涨跌: +12.02%
-- 踏空率(HOLD 但市场涨): 100.0% / 躲跌率: 0.0%
+- 样本数: 10
+- 30天后命中率: 10.0%
+- 平均 30天后实际涨跌: +9.10%
+- 踏空率(HOLD 但市场涨): 90.0% / 躲跌率: 10.0%
 
 ## 解读
-历史上当市场处于 downtrend 时，委员会对 NDQ.AX 给出 HOLD，但 30 天后有 100%
-的情况市场明显上涨（平均 +12.02%，n=11）——子弹揣在兜里踏空了。
+历史上当市场处于 downtrend 时，委员会对 XYZ 给出 HOLD，但 30 天后有 90%
+的情况市场明显上涨（平均 +9.10%，n=10）——子弹揣在兜里踏空了。
 
 > 行动建议：该 regime 下应降低 HOLD 倾向，更积极考虑 BUY/ACCUMULATE。
 ```

@@ -186,7 +186,7 @@ def get_history_data(
                 for idx, row in df_yf.iterrows():
                     # 数据源闸：close=NaN（yfinance 收盘前半成型 bar）不落库。
                     # 否则它以 NULL 入 daily_prices，下游读价 float(NULL)→NaN，穿过
-                    # 全链路 is-None 守卫污染总资产（510300.SS 2026-06-23 根因）。
+                    # 全链路 is-None 守卫污染总资产（2026-06-23 根因）。
                     close = _nan_to_none(row.get('Close'))
                     if close is None:
                         continue
@@ -286,7 +286,7 @@ def get_full_market_data(target_asset: str, fx_symbol: Optional[str] = None) -> 
 
     Args:
         target_asset: yfinance ticker（510300.SS / AAPL / NDQ.AX 等都行，
-            必填——之前默认 "NDQ.AX" 会让 fork 用户错拉到作者持仓数据）
+            必填——之前写死一个默认 ticker，会让 fork 用户错拉到与自己无关的标的数据）
         fx_symbol: 关联汇率 ticker（None 则 daily_report 单独决定）
     """
     df_asset = get_history_data(target_asset, METRICS_PERIOD)

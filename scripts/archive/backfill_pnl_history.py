@@ -4,7 +4,7 @@
 一个点），方便 README 上的图直接展示 30 天 / 90 天的真实趋势。
 
 数据源：
-- 黄金 7 笔交易 → 硬编码（用户在对话里给的浙商积存金完整明细）
+- 黄金交易 → git-ignored 私有文件（缺失时用合成 demo 数据，见 _load_gold_trades）
 - NDQ.AX 当前持仓 → 从 memory/portfolio.md 读 ndq_shares + 均价
 - 历史价格 → yfinance（GC=F / USDCNY=X / NDQ.AX / AUDCNY=X 都从 2025-03-20 起可拉）
 
@@ -67,9 +67,9 @@ GOLD_OZ_PER_GRAM = 31.1035
 # 覆盖；本脚本是 one-shot backfill，不动态读 strategy 简化）
 GOLD_OFFSET_PCT = 0.0
 
-# 回填窗口：只填最近 N 天。早期数据有 yfinance GC=F 现货价 vs 浙商积存金
+# 回填窗口：只填最近 N 天。早期数据有 yfinance GC=F 现货价 vs 渠道
 # 实际报价的固有 spread（银行点差 + 期货-现货差），算出来会有 -27% 的虚假浮亏，
-# 误导性强。最近 60 天用户的均价已经接近最新 spot，spread 可忽略。
+# 误导性强。最近 60 天 spread 可忽略。
 BACKFILL_DAYS = 60
 END_DATE = datetime.now().date()
 START_DATE = max(

@@ -65,11 +65,11 @@ agent 自己 OCR 后走 `import`。
 委员会给了建议之后，**告诉 agent 你做没做**——这是闭环的入口：
 
 ```
-委员会：ACCUMULATE 510300.SS ¥2100
+委员会：ACCUMULATE AAPL ¥2000
 你：这次我不买了。
 agent：好的，方便说下原因吗？（估值 / 资金 / 不同意？）
 你：现金留着交房租。
-agent → record_execution("2026-07-02/510300.SS", rejected, reason="现金留给房租")
+agent → record_execution("2026-07-02/AAPL", rejected, reason="现金留给房租")
 ```
 
 之后随时问：

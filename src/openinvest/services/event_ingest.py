@@ -1,7 +1,7 @@
 """Agent 投喂事件入口（#153 方案①）—— MCP `ingest_event` / CLI `ingest_event` 共用。
 
 设计动机（events.db 10,553 条审计，2026-07-06）：自托管爬虫 92% 产出与持仓无关，
-而持仓盲区（510300.SS 三十天 0 条、NDQ.AX 1 条）恰是爬虫最难覆盖的（中文源反爬、
+而 A 股 ETF、海外上市 ETF 这类盲区（实测三十天仅 0–1 条）恰是爬虫最难覆盖的（中文源反爬、
 区域源长尾）。宿主 agent 自带比任何爬虫都强的搜索——本模块让 agent 把看到的新闻
 推进**既有管道**（normalize → severity/symbol 判级 → events.db → RAG 召回），
 runtime 只守护城河：归一化、判级、去重、持仓关联。

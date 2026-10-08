@@ -202,7 +202,7 @@ def run_committee(
         (risk_agent_r1, risk_input_r1),
     ])
     # SENTINEL 覆写：portfolio_summary 字面给了集中度数字，LLM 仍偶发 hallucinate
-    # (2026-05-20 NDQ 真实 33.6% 编成 70.2%)。这里强制改回真值。
+    # (2026-05-20 某持仓真实 33.6% 被编成 70.2%)。这里强制改回真值。
     _true_conc = _extract_concentration_from_summary(portfolio_summary, sym)
     risk_r1 = _override_concentration_in_risk_output(risk_r1, _true_conc)
     quant_history.append(quant_r1)

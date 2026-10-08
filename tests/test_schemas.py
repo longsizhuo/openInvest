@@ -178,7 +178,7 @@ def test_portfolio_with_data():
     p = PortfolioData(
         cash={"CNY": 12345.67, "AUD": -100.0},
         holdings=[
-            {"symbol": "NDQ.AX", "kind": "etf", "units": 256, "cost_currency": "AUD"},
+            {"symbol": "NDQ.AX", "kind": "etf", "units": 100, "cost_currency": "AUD"},
             {"symbol": "GC=F", "kind": "metal", "units": 50, "cost_currency": "CNY"},
         ],
     )

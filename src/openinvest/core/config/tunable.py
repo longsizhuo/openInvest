@@ -213,7 +213,7 @@ class RewardConfig:
 class DCAConfig:
     """自动定投（DCA）参数 — 子弹池模型（见 ADR-018）
 
-    日定投在京东/银行卡侧自动扣款，钱不来自 portfolio 子弹池现金 → 走
+    日定投在第三方平台/银行卡侧自动扣款，钱不来自 portfolio 子弹池现金 → 走
     buy(source_type="external_funding") 入账（不扣 cash）。本系统按 amount_cny
     估算每日买入量记账，月度用真实基金余额对账校准。
 
