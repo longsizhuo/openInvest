@@ -72,11 +72,11 @@ def test_fetch_failure_flagged_in_attrs(recording_yf, monkeypatch):
     （dca_daily 据此区分「行情源挂了」与「休市」）；库已是今天 → 不拉取、不标。"""
     old = pd.DataFrame({"Close": [1.0] * 300},
                        index=pd.date_range("2020-01-01", periods=300, freq="D"))
-    monkeypatch.setattr(ef._STORE, "get_history_df", lambda s: old.copy())
+    monkeypatch.setattr(ef._STORE, "get_history_df", lambda s, days=730: old.copy())
     assert ef.get_history_data("STALE.SS").attrs["yf_fetch_failed"] is True
 
     recording_yf.last_period = None
     today = pd.DataFrame({"Close": [1.0]}, index=[pd.Timestamp.now().normalize()])
-    monkeypatch.setattr(ef._STORE, "get_history_df", lambda s: today.copy())
+    monkeypatch.setattr(ef._STORE, "get_history_df", lambda s, days=730: today.copy())
     assert ef.get_history_data("FRESH2.SS").attrs["yf_fetch_failed"] is False
     assert recording_yf.last_period is None  # 库已是今天，没拉取
