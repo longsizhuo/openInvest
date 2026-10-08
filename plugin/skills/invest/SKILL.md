@@ -283,7 +283,7 @@ a signal worth recording.
 ## Constraints (guard these, do not break them)
 
 - **Before analyzing portfolio / concentration / risk, always read `GET /api/user` for wealth_context** —
-  forget this and you repeat **the 2026-05-12 mistake**: the user had entered a ¥4M family
+  forget this and you repeat **the 2026-05-12 mistake**: the user had entered a large family
   backup, the agent ran `status` without reading user, and per legacy PWM logic shouted
   "60% concentration overweight → recommend TRIM". Wrong. The correct approach:
   - No wealth_context filled in → judge liquidity by portfolio cash + use the 25-35% concentration alert band
