@@ -1,88 +1,89 @@
 {
-  "generated_at": "2026-07-10T21:29:34+00:00",
+  "generated_at": "2026-10-08T11:51:43+00:00",
+  "weekend_dup_excluded": 63,
   "windows": {
     "30d": {
-      "direction_hit_rate": 0.6216,
-      "sample_size": 37,
+      "direction_hit_rate": 0.6818,
+      "sample_size": 66,
       "hit_horizon": "30d",
       "by_direction": {
         "bullish": {
           "hit": null,
-          "total": 4,
+          "total": 0,
           "rate": null
         },
         "bearish": {
           "hit": null,
-          "total": 9,
+          "total": 0,
           "rate": null
         },
         "hold": {
-          "hit": null,
-          "total": 24,
-          "rate": null
+          "hit": 45,
+          "total": 66,
+          "rate": 0.6818
         }
       },
       "base_rate": {
-        "n": 37,
-        "up": 0.1622,
-        "down": 0.3243,
-        "flat": 0.5135
+        "n": 66,
+        "up": 0.0,
+        "down": 0.3182,
+        "flat": 0.6818
       }
     },
     "90d": {
-      "direction_hit_rate": 0.566,
-      "sample_size": 53,
+      "direction_hit_rate": null,
+      "sample_size": 154,
       "hit_horizon": "30d",
       "by_direction": {
         "bullish": {
           "hit": null,
-          "total": 4,
+          "total": 14,
           "rate": null
         },
         "bearish": {
           "hit": null,
-          "total": 15,
+          "total": 1,
           "rate": null
         },
         "hold": {
-          "hit": 18,
-          "total": 34,
-          "rate": 0.5294
+          "hit": 97,
+          "total": 139,
+          "rate": 0.6978
         }
       },
       "base_rate": {
-        "n": 53,
-        "up": 0.1698,
-        "down": 0.3396,
-        "flat": 0.4906
+        "n": 154,
+        "up": 0.0909,
+        "down": 0.2078,
+        "flat": 0.7013
       }
     },
     "all": {
-      "direction_hit_rate": 0.566,
-      "sample_size": 53,
+      "direction_hit_rate": null,
+      "sample_size": 234,
       "hit_horizon": "30d",
       "by_direction": {
         "bullish": {
-          "hit": null,
-          "total": 4,
-          "rate": null
+          "hit": 7,
+          "total": 30,
+          "rate": 0.2333
         },
         "bearish": {
           "hit": null,
-          "total": 15,
+          "total": 18,
           "rate": null
         },
         "hold": {
-          "hit": 18,
-          "total": 34,
-          "rate": 0.5294
+          "hit": 122,
+          "total": 186,
+          "rate": 0.6559
         }
       },
       "base_rate": {
-        "n": 53,
-        "up": 0.1698,
-        "down": 0.3396,
-        "flat": 0.4906
+        "n": 234,
+        "up": 0.1197,
+        "down": 0.2308,
+        "flat": 0.6496
       }
     }
   }
