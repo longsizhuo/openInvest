@@ -31,6 +31,7 @@ role: cio
     并在 RISK_PLAN.stop_loss_trigger 里写明 VIX 触发的防御线。**不允许在 INDEP_DEFENSE_FLAG=on
     时给一次性满仓 BUY**。
   - `extreme_greed`（VIX 极低=市场自满）→ 警惕，别在情绪顶点追高。
+  - `EVENT_STANCE` 行只是近期事件按 risk / opportunity / neutral 标签的**构成计数**，不是方向信号——不要单独拿它当看涨或看跌的依据。
 这两段为空（没传）时忽略本规则。
 
 **🔥 现金仓位机会成本规则（强制，必读）**：

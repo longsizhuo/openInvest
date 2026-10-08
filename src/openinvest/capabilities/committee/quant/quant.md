@@ -38,6 +38,7 @@ baseline brief 已经在 prompt 里给了基础数据，**如果你需要更深�
 - `# 市场情绪表盘`（FEAR_GREED_GAUGE / INDEP_DEFENSE_FLAG）：VIX 分位 + 恐慌贪婪。
   **INDEP_DEFENSE_FLAG=on**（VIX 处近2年高位）时，即使 REGIME=uptrend 也要在
   KEY_DATA 里报告"市场恐慌升温"——这是独立于 MA regime 的快速崩盘信号，别只看趋势。
+  `EVENT_STANCE` 行只是近期事件按 risk / opportunity / neutral 标签的**构成计数**，不是方向信号——不要单独拿它当看涨或看跌的依据。
 收到这两段时**必须在 KEY_DATA 至少各引用一条**；没收到（空）就忽略。
 
 **输出要求**：

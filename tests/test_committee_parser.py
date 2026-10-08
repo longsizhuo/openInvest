@@ -160,6 +160,22 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
     assert "10.0%" in prompt
 
 
+# ---------- EVENT_STANCE 是构成计数、不是方向信号（#210 下游）----------
+
+def test_cio_and_quant_prompts_say_event_stance_is_not_directional():
+    """CIO（文本 + JSON 模式）和 Quant opening prompt 都要带这句提示"""
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.quant import build_quant_prompt
+    asset = {"symbol": "GC=F", "display_name": "黄金"}
+    note = "`EVENT_STANCE` 行只是近期事件按 risk / opportunity / neutral 标签的**构成计数**，不是方向信号"
+    for prompt in (
+        build_cio_prompt(asset),
+        build_cio_prompt(asset, json_mode=True),
+        build_quant_prompt(asset, "opening"),
+    ):
+        assert note in prompt
+
+
 # ---------- 现金仓位机会成本规则开关（ADR-024）----------
 
 def test_cio_prompt_cash_opp_cost_directive_when_off_by_default():
