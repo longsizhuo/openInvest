@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+import pandas as pd
 import yfinance as yf
 
 # 纯计算核已迁 calc 层（ADR-026）——导回保持历史导出面；本文件只剩 IO shell。
@@ -52,6 +53,30 @@ def _get_db_fallback_snapshot(offset_pct: float) -> Optional[GoldPriceSnapshot]:
         return None
 
 
+def _cache_bars(store, symbol: str, df) -> None:
+    """按每根 bar 自己的（交易所本地）日期落库，带 High/Low/Volume。
+
+    2026-10 前用进程本地"今天"只写 close：美国假日、周末（FX ``=X`` 豁免幽灵周末闸）、
+    日线未出前的盘中都会造出无 H/L 的行，ATR 退化成收盘价差。按 bar 日期写后：
+    非交易日只刷新上一交易日已有行（upsert 保留 OHLCV），盘中行带当日 H/L。
+    写整段 5d 而不只最后一根：今天这根带了 H/L 后 get_history_data 判"已最新"不再
+    5d 刷新，前一交易日的盘中值要靠这里定稿。close=NaN 的半成型 bar 不落库（同
+    exchange_fee 数据源闸）。
+    """
+    def num(v):
+        return None if v is None or pd.isna(v) else float(v)
+
+    for idx, row in df.iterrows():
+        close = num(row.get("Close"))
+        if close is None:
+            continue
+        store.save_generic_price(
+            symbol, idx.strftime("%Y-%m-%d"), close, source="yfinance",
+            high=num(row.get("High")), low=num(row.get("Low")),
+            volume=num(row.get("Volume")),
+        )
+
+
 def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
     """拉一次实时黄金 + 美元人民币，算出克价。
 
@@ -59,13 +84,14 @@ def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
                 推断值覆盖；用 /gold_offset 命令报当日实际买入克价让系统学习）
 
     数据通路（audit algo M7 加了 DB 兜底）：
-    1. 主：yfinance GC=F + USDCNY=X 实时 → 写 DB cache → 返回 fresh snapshot
+    1. 主：yfinance GC=F + USDCNY=X 实时 → 按 bar 日期写 DB cache → 返回 fresh snapshot
     2. 兜底：yfinance 失败时从 DB 读最近一条，返回 is_stale=True 的 snapshot
     3. 都失败：返回 None
     """
     try:
-        gold_df = yf.Ticker("GC=F").history(period="1d")
-        usdcny_df = yf.Ticker("USDCNY=X").history(period="1d")
+        # 5d 而不是 1d：缓存时顺手把前几根定稿（见 _cache_bars）；现价仍取最后一根
+        gold_df = yf.Ticker("GC=F").history(period="5d")
+        usdcny_df = yf.Ticker("USDCNY=X").history(period="5d")
         if gold_df.empty or usdcny_df.empty:
             print("⚠️ 黄金数据为空，尝试 DB 兜底")
             return _get_db_fallback_snapshot(offset_pct)
@@ -77,12 +103,10 @@ def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
 
     # 写 DB cache 给下次兜底用
     try:
-        from datetime import datetime as _dt
         from openinvest.db.market_store import MarketStore
         _store = MarketStore()
-        today = _dt.now().strftime("%Y-%m-%d")
-        _store.save_generic_price("GC=F", today, gold_usd, source="yfinance")
-        _store.save_generic_price("USDCNY=X", today, usdcny, source="yfinance")
+        _cache_bars(_store, "GC=F", gold_df)
+        _cache_bars(_store, "USDCNY=X", usdcny_df)
     except Exception as e:
         print(f"⚠️ 黄金 DB 写缓存失败（不影响本次返回）: {e}")
 
