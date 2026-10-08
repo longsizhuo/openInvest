@@ -275,7 +275,7 @@ def test_event_stance_line_for_symbol_no_match_returns_none():
 
 def test_event_stance_opportunity_carries_reversal_caveat():
     """issue #210 回归：net opportunity 必须带历史基线提示（opportunity 事件后
-    5 日超额 -0.48%、命中率不到一半、按标的聚类不显著，不是买入信号），否则
+    5 日超额 -0.48%、其后 5 日上涨不到一半、按标的聚类不显著，不是买入信号），否则
     committee 容易把这行措辞误读成方向性利好。net risk / net neutral 不受影响。
     D12（2026-10）：旧文案"-1.07%、cluster-robust 显著"已被重跑推翻，不得回来。"""
     from openinvest.utils.sentiment import _event_stance_line, event_stance_line_for_symbol
