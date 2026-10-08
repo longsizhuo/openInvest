@@ -271,9 +271,9 @@ def cmd_discipline(_: argparse.Namespace) -> None:
 def cmd_decisions(args: argparse.Namespace) -> None:
     """统一决策视图(只读,零 LLM)：决议 ↔ 规则干预 ↔ 用户执行 ↔ 事后结果 读时 join。
     等价 GET /api/decisions。issue #133 Decision 9。"""
-    from openinvest.core.decision_ledger import list_decisions, summarize_decisions
-    ds = list_decisions(days=args.days)
-    _print_json({"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds})
+    from openinvest.core.decision_ledger import decisions_view
+    _print_json(decisions_view(days=args.days, symbol=args.symbol,
+                               verdict=args.verdict, limit=args.limit))
 
 
 def cmd_record_execution(args: argparse.Namespace) -> None:

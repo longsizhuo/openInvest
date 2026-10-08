@@ -22,12 +22,13 @@ Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import Field
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from openinvest.utils.advisory import is_advisory_mode
 from openinvest.utils.symbols import safe_symbol
@@ -226,27 +227,36 @@ def discipline() -> Dict[str, Any]:
 
 @mcp.tool(annotations=_RO)
 def decisions(
-    days: Annotated[int, Field(description="Look-back window in days.")] = 90,
+    days: Annotated[int, Field(description="Look-back window in days.", ge=1)] = 90,
+    symbol: Annotated[Optional[str], Field(description="Only this ticker (case-insensitive), e.g. 'GC=F'.")] = None,
+    verdict: Annotated[Optional[str], Field(description="Only this verdict, e.g. 'ACCUMULATE', 'HOLD', 'TRIM'.")] = None,
+    limit: Annotated[int, Field(description="Max decisions listed, newest first; 0 = all.", ge=0)] = 20,
 ) -> Dict[str, Any]:
     """Get the unified decision ledger: every committee verdict joined with
     rule interventions, the user's actual executions or refusals (with
     reasons), and post-hoc outcome data — plus an adoption-rate summary.
 
     Answers "how often did I follow the advice", "which recommendations did
-    I skip", and "what did the safety rules rewrite". Read-only.
+    I skip", and "what did the safety rules rewrite". Read-only. Filter by
+    `symbol` / `verdict` to answer questions about one asset or one kind of
+    call; the list is capped at `limit` (newest first) so a year of history
+    doesn't flood the context — `count` and `summary` still cover every match.
 
     Args:
         days: Look-back window in days (default 90).
+        symbol: Only decisions on this ticker (case-insensitive).
+        verdict: Only decisions with this verdict.
+        limit: Max decisions listed (default 20; 0 = all).
 
     Returns:
-        Object with `count`, `summary` (adoption rate and aggregates), and
-        `decisions` (list; each entry has decision_id, verdict, confidence,
+        Object with `count` (all matches), `returned` (listed), `summary`
+        (adoption rate and aggregates over all matches), and `decisions`
+        (newest first; each entry has decision_id, verdict, confidence,
         intervention, executed flag, matched trades, and outcome).
     """
     _check_advisory()
-    from openinvest.core.decision_ledger import list_decisions, summarize_decisions
-    ds = list_decisions(days=days)
-    return {"count": len(ds), "summary": summarize_decisions(ds), "decisions": ds}
+    from openinvest.core.decision_ledger import decisions_view
+    return decisions_view(days=days, symbol=symbol, verdict=verdict, limit=limit)
 
 
 @mcp.tool(annotations=_RO)
@@ -647,11 +657,14 @@ def untrack_asset(
 
 # ---------- 委员会（Direct 路径） ----------
 
+_COMMITTEE_LOCK = asyncio.Lock()
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
-def run_committee(
+async def run_committee(
     symbol: Annotated[str, Field(description="Any yfinance ticker (US / HK / A-share / ETF / crypto / commodities), e.g. 'AAPL', 'GC=F', '510300.SS'.")],
     force: Annotated[bool, Field(description="Re-run even if a verdict already exists for today.")] = False,
     max_rounds: Annotated[int, Field(description="Cross-challenge debate rounds.", ge=1)] = 1,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """Run the 4-role LLM investment committee on a symbol (Direct path):
     Macro Strategist, Quant Analyst, and Risk Officer debate from isolated
@@ -660,8 +673,9 @@ def run_committee(
 
     Requires a backend LLM key (e.g. DEEPSEEK_API_KEY) and takes 30-90s on
     a cache miss. If the symbol was already analyzed today, the cached
-    verdict is returned instantly unless `force` is set. Decision support
-    only — the human always executes.
+    verdict is returned instantly unless `force` is set. Sends MCP progress
+    notifications per debate phase when the client asks for them. Decision
+    support only — the human always executes.
 
     Args:
         symbol: Any yfinance ticker (US / HK / A-share / ETF / crypto /
@@ -692,8 +706,30 @@ def run_committee(
                     "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),
                                                             with_raw=False)}
 
+    import anyio
+
     from openinvest.core.committee_runner import run_committee_session
-    out = run_committee_session(symbols=[symbol], max_debate_rounds=max_rounds)
+
+    step = 0
+
+    def _on_phase(ev: Dict[str, Any]) -> None:
+        # 委员会在 worker 线程里回调；进度通知回事件循环发。client 没给 progressToken
+        # （或 HTTP json_response 模式没有流）时 report_progress 本身就是 no-op
+        nonlocal step
+        if ctx is None:
+            return
+        step += 1
+        try:
+            anyio.from_thread.run(ctx.report_progress, step, None, str(ev.get("phase", "")))
+        except Exception:  # noqa: BLE001  进度只是提示，发不出去不影响委员会
+            pass
+
+    # issue #133 差距 #2：30-90s 的委员会放 worker 线程，事件循环照常响应同实例其他调用。
+    # ponytail: 进程内全局锁保持原来"同一时刻只跑一个委员会"的语义（sync 工具时代是
+    # 隐式串行，去掉它会暴露并发写，同 #233-3）；要并行再换成按 symbol 分锁
+    async with _COMMITTEE_LOCK:
+        out = await anyio.to_thread.run_sync(lambda: run_committee_session(
+            symbols=[symbol], max_debate_rounds=max_rounds, progress_callback=_on_phase))
     res = (out.get("asset_committees") or {}).get(symbol) or {}
     v = res.get("verdict") if isinstance(res, dict) else None
     return {

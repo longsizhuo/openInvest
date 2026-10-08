@@ -95,6 +95,10 @@ def main() -> None:
     p = sub.add_parser("decisions",
         help="统一决策视图：决议↔干预↔执行↔结果 join + 采纳率（等价 GET /api/decisions）")
     p.add_argument("--days", type=int, default=90, help="回看天数，默认 90")
+    p.add_argument("--symbol", default=None, help="只看某标的（不分大小写）")
+    p.add_argument("--verdict", default=None, help="只看某裁决，如 ACCUMULATE / HOLD / TRIM")
+    p.add_argument("--limit", type=int, default=20,
+                   help="最多列出最近 N 条（summary 仍按全部匹配算），0 = 全部，默认 20")
     p.set_defaults(func=cmd_decisions)
 
     p = sub.add_parser("record_execution",

@@ -248,10 +248,29 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
 
 
 
+def decisions_view(days: int = 90, symbol: Optional[str] = None,
+                   verdict: Optional[str] = None, limit: int = 20) -> Dict[str, Any]:
+    """MCP / CLI 共用的 decisions 输出：过滤后的 summary + 最近 limit 条（limit<=0 = 全部）。
+
+    issue #133 差距 #3：全量 join 结果直接灌进 agent context，积累一年会撑爆。
+    count / summary 按过滤后的全集算，只有 decisions 列表被截断。
+    symbol 不分大小写（LLM 吐的 ticker 大小写会漂，同 #232-4）。
+    """
+    ds = list_decisions(days=days)
+    if symbol:
+        ds = [d for d in ds if str(d["symbol"]).upper() == symbol.strip().upper()]
+    if verdict:
+        ds = [d for d in ds if str(d["verdict"]).upper() == verdict.strip().upper()]
+    shown = ds if limit <= 0 else ds[:limit]
+    return {"count": len(ds), "returned": len(shown),
+            "summary": summarize_decisions(ds), "decisions": shown}
+
+
 __all__ = [
     "parse_committee_file",
     "record_execution",
     "list_decisions",
+    "decisions_view",
     "summarize_decisions",
     "MATCH_WINDOW_DAYS",
 ]

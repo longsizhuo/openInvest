@@ -323,7 +323,7 @@ verdict / 建议金额 / sanity 降级 / high_confidence_buy / 第二天 Quant/R
 `decision_id = "<date>/<symbol>"`（committee md 天然主键）；`trades.db` 现有 `verdict_id`
 列填同一格式即完成硬关联；无显式关联时按「决议日起 7 天内同标的同向成交」自动匹配。
 数据源全是既有账本（committee md / interventions / verdict_review / trades.db / executions），
-不物化新视图文件。CLI 等价：`decisions` / `record_execution`。
+不物化新视图文件。CLI 等价：`decisions` / `record_execution`。CLI 和 MCP 的 `decisions` 另支持 `symbol` / `verdict` 过滤和 `limit` 截断（默认 20，0 = 全部；`count` / `summary` 按全部匹配算），REST 端点不变。
 
 ### 数据源健康
 

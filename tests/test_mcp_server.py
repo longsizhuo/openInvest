@@ -146,3 +146,60 @@ def test_cli_mcp_subcommand_strips_argv(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["openinvest", "mcp"])
     cli.main()
     assert seen["argv"] == ["openinvest"]
+
+
+# ============================================================================
+# issue #133 merge 后差距 #2 / #3
+# ============================================================================
+
+def test_run_committee_reports_progress_over_real_mcp_session(monkeypatch):
+    """差距 #2：委员会 phase 回调必须变成 client 收得到的 MCP progress 通知
+    （走真实 client↔server 内存会话，不是直接调函数）。删掉 progress_callback
+    透传或 report_progress 那行，client 收到 0 条，这条就红。"""
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    from openinvest.connectors.mcp_server import mcp
+
+    def fake_session(*, symbols, max_debate_rounds, progress_callback):
+        for phase in ("round_1_start", "round_1_done", "cio_start", "cio_done"):
+            progress_callback({"phase": phase})
+        return {"asset_committees": {symbols[0]: {"verdict": {"verdict": "HOLD", "confidence": 0.5}}}}
+
+    monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session", fake_session)
+    monkeypatch.setattr("openinvest.jobs.verdict_review.load_confidence_lookup", lambda: {})
+
+    got = []
+
+    async def on_progress(progress, total, message):
+        got.append((progress, message))
+
+    async def go():
+        async with create_connected_server_and_client_session(mcp) as client:
+            return await client.call_tool(
+                "run_committee", {"symbol": "AAPL", "force": True},
+                progress_callback=on_progress)
+
+    res = asyncio.run(go())
+    assert not res.isError
+    assert got == [(1, "round_1_start"), (2, "round_1_done"), (3, "cio_start"), (4, "cio_done")]
+
+
+def test_decisions_view_filters_and_caps(monkeypatch):
+    """差距 #3：symbol（不分大小写）/ verdict 过滤 + limit 只截列表，
+    count / summary 仍按全部匹配算。"""
+    from openinvest.core import decision_ledger as dl
+
+    def d(i, sym, verdict, executed):
+        return {"decision_id": f"2026-10-{i:02d}/{sym}", "symbol": sym, "verdict": verdict,
+                "executed": executed, "intervention": None, "execution": None}
+
+    rows = [d(9, "GC=F", "ACCUMULATE", True), d(8, "AAPL", "HOLD", None),
+            d(7, "GC=F", "ACCUMULATE", False), d(6, "GC=F", "HOLD", None)]
+    monkeypatch.setattr(dl, "list_decisions", lambda days=90: list(rows))
+
+    out = dl.decisions_view(symbol="gc=f", verdict="accumulate", limit=1)
+    assert out["count"] == 2 and out["returned"] == 1
+    assert out["decisions"][0]["decision_id"] == "2026-10-09/GC=F"  # 最新在前
+    assert out["summary"]["executed"] == 1 and out["summary"]["not_executed"] == 1
+
+    assert dl.decisions_view(limit=0)["returned"] == 4  # 0 = 全部
