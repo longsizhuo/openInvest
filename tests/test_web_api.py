@@ -1437,3 +1437,34 @@ def test_committee_session_path_traversal_rejected(client):
         "/api/committee_sessions/2026-07-01/GC=F",  # 未转义 symbol（合法名恒为 safe_symbol 输出）
     ):
         assert client.get(bad).status_code == 404, f"{bad} 应 404"
+
+
+def test_verdict_review_summary_splits_by_source(client, tmp_store):
+    """ADR-022 / D4：live / backtest / contaminated 三桶分开，绝不合并成一个命中率；
+    只有 live 是业绩；n<30 的格子命中率为 null。"""
+    import json
+
+    def row(date, source, verdict, hit, contaminated=False):
+        return {"date": date, "asset": "AAPL", "verdict": verdict, "confidence": 0.6,
+                "source": source, "contaminated": contaminated,
+                "hits": {"1d": hit, "7d": hit, "30d": hit}}
+
+    rows = ([row("2026-03-02", "live", "HOLD", True)] * 30
+            + [row("2026-03-03", "live", "ACCUMULATE", False)] * 5
+            + [row("2025-09-01", "backtest", "ACCUMULATE", True)] * 40
+            + [row("2024-01-02", "backtest", "HOLD", True, contaminated=True)] * 10)
+    p = tmp_store.root / ".dreams" / "verdict_review.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    s = client.get("/api/verdict_review/summary").json()
+    assert s["total"] == 85
+    live, bt, ct = s["live"], s["backtest"], s["contaminated"]
+    assert (live["n"], bt["n"], ct["n"]) == (35, 40, 10)
+    assert live["is_performance"] and not bt["is_performance"] and not ct["is_performance"]
+    assert live["by_window"]["7d"] == {"n": 35, "hit_rate": round(30 / 35, 4)}   # 只含 live
+    assert live["by_verdict"]["HOLD"]["hit_rate_7d"] == 1.0
+    assert live["by_verdict"]["ACCUMULATE"]["hit_rate_7d"] is None              # 格子 n=5 <30
+    assert live["directional_n"] == 5 and live["directional_only_hit_rate"] is None
+    assert bt["directional_only_hit_rate"] == 1.0
+    assert ct["rates_suppressed_sub30"] and ct["by_window"]["7d"]["hit_rate"] is None

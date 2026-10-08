@@ -13,9 +13,11 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Query
 
 from openinvest.core.memory_store import MemoryStore
+from openinvest.jobs.review_calc import CONTAMINATION_CUTOFF
 
 from openinvest.paths import INVEST_ROOT
 from openinvest.connectors.web_api.models import (
+    VerdictReviewBucket,
     VerdictReviewDataResponse,
     VerdictReviewItem,
     VerdictReviewReportResponse,
@@ -54,102 +56,96 @@ def get_verdict_review_data(
     return VerdictReviewDataResponse(count=len(items_sorted), items=items_sorted)
 
 
+# 红线 #2：命中率 n<30 不出具体数字（与 review_calc / export_accuracy 同阈值）
+_MIN_N = 30
+_DIRECTIONAL = ("BUY", "ACCUMULATE", "SELL", "TRIM")
+_BUCKET_META = {
+    "live": (True, "live 实盘决议（唯一业绩口径）"),
+    "backtest": (False, "回测干净段（中性模拟持仓，非业绩，不可外推 live）"),
+    "contaminated": (False, "污染桶（决议日落在 LLM 训练窗口，记忆穿越，非业绩）"),
+}
+
+
+def _rate(hits: int, n: int):
+    return round(hits / n, 4) if n >= _MIN_N else None
+
+
+def _bucket_of(it: Dict[str, Any]) -> str:
+    """contaminated 优先（不分 source），其余按 source。日期兜底：cutoff 只会往后挪。"""
+    if it.get("contaminated") or str(it.get("date") or "") <= CONTAMINATION_CUTOFF:
+        return "contaminated"
+    return "backtest" if it.get("source") == "backtest" else "live"
+
+
+def _summarize_bucket(name: str, items: List[Dict[str, Any]]) -> VerdictReviewBucket:
+    is_perf, label = _BUCKET_META[name]
+    n = len(items)
+    suppressed = n < _MIN_N
+    hit = lambda it, w: (it.get("hits") or {}).get(w)  # noqa: E731
+
+    by_window: Dict[str, Dict[str, Any]] = {}
+    for w in ("1d", "7d", "30d"):
+        hs = [h for it in items if (h := hit(it, w)) is not None]
+        if hs:
+            by_window[w] = {"n": len(hs), "hit_rate": None if suppressed else _rate(sum(hs), len(hs))}
+
+    by_verdict: Dict[str, Dict[str, Any]] = {}
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for it in items:
+        groups.setdefault((it.get("verdict") or "UNKNOWN").upper(), []).append(it)
+    for v, rows in groups.items():
+        d: Dict[str, Any] = {
+            "n": len(rows),
+            "avg_confidence": round(sum(float(r.get("confidence") or 0) for r in rows) / len(rows), 3),
+        }
+        for w in ("1d", "7d", "30d"):
+            hs = [h for r in rows if (h := hit(r, w)) is not None]
+            d[f"hit_rate_{w}"] = None if suppressed or not hs else _rate(sum(hs), len(hs))
+        by_verdict[v] = d
+
+    # 方向性 7d 命中：分母只算 7d 已成熟的 BUY/ACCUMULATE/SELL/TRIM（未成熟不当 miss，UNCLEAR 不算方向）
+    dir_hits = [h for it in items
+                if (it.get("verdict") or "").upper() in _DIRECTIONAL and (h := hit(it, "7d")) is not None]
+    return VerdictReviewBucket(
+        n=n, is_performance=is_perf, label=label, rates_suppressed_sub30=suppressed,
+        by_window=by_window, by_verdict=by_verdict,
+        directional_only_hit_rate=None if suppressed else _rate(sum(dir_hits), len(dir_hits)),
+        directional_n=len(dir_hits),
+    )
+
+
 @router.get("/api/verdict_review/summary", response_model=VerdictReviewSummary, tags=["system"])
 def get_verdict_review_summary() -> VerdictReviewSummary:
-    """命中率汇总（按时间窗口 + 按 verdict 类型）。GUI marketing 主战场"""
+    """命中率汇总，按来源分 live / backtest / contaminated 三桶（ADR-022：绝不合并成一个数）。
+
+    只有 live 桶是业绩；另两桶标注非业绩。任何格子 n<30 命中率置 null（红线 #2）。
+    """
     store = MemoryStore()
     path = store.root / ".dreams" / "verdict_review.jsonl"
     report_path = INVEST_ROOT / "docs" / "verdict_accuracy.md"
 
-    if not path.exists():
-        return VerdictReviewSummary(
-            total=0, by_window={}, by_verdict={},
-            has_report_md=report_path.exists(),
-        )
+    items: List[Dict[str, Any]] = []
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        items.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"summary 读 verdict_review 失败: {e}")
+            items = []
 
-    items = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    items.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:  # noqa: BLE001
-        log.warning(f"summary 读 verdict_review 失败: {e}")
-        return VerdictReviewSummary(
-            total=0, by_window={}, by_verdict={},
-            has_report_md=report_path.exists(),
-        )
-
-    total = len(items)
-
-    # 按时间窗口聚合 hit_rate
-    by_window: Dict[str, Dict[str, Any]] = {}
-    for w in ("1d", "7d", "30d"):
-        n = 0
-        hits = 0
-        for it in items:
-            h = (it.get("hits") or {}).get(w)
-            if h is None:
-                continue
-            n += 1
-            if h:
-                hits += 1
-        if n > 0:
-            by_window[w] = {
-                "n": n,
-                "hit_rate": round(hits / n, 4),
-            }
-
-    # 按 verdict 类型聚合
-    by_verdict: Dict[str, Dict[str, Any]] = {}
+    buckets: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _BUCKET_META}
     for it in items:
-        v = (it.get("verdict") or "UNKNOWN").upper()
-        d = by_verdict.setdefault(v, {
-            "n": 0,
-            "conf_sum": 0.0,
-            "hits_1d": 0, "hits_7d": 0, "hits_30d": 0,
-            "n_1d": 0, "n_7d": 0, "n_30d": 0,
-        })
-        d["n"] += 1
-        d["conf_sum"] += float(it.get("confidence") or 0)
-        for w in ("1d", "7d", "30d"):
-            h = (it.get("hits") or {}).get(w)
-            if h is not None:
-                d[f"n_{w}"] += 1
-                if h:
-                    d[f"hits_{w}"] += 1
-    # 整理输出
-    by_verdict_clean: Dict[str, Dict[str, Any]] = {}
-    for v, d in by_verdict.items():
-        by_verdict_clean[v] = {
-            "n": d["n"],
-            "avg_confidence": round(d["conf_sum"] / d["n"], 3) if d["n"] else 0,
-            "hit_rate_1d": round(d["hits_1d"] / d["n_1d"], 4) if d["n_1d"] else None,
-            "hit_rate_7d": round(d["hits_7d"] / d["n_7d"], 4) if d["n_7d"] else None,
-            "hit_rate_30d": round(d["hits_30d"] / d["n_30d"], 4) if d["n_30d"] else None,
-        }
-
-    # 剔除 HOLD 后的真实方向性 hit rate（report 里特别强调的指标）
-    directional_total = sum(1 for it in items if (it.get("verdict") or "").upper() != "HOLD")
-    directional_hits = sum(
-        1 for it in items
-        if (it.get("verdict") or "").upper() != "HOLD"
-        and (it.get("hits") or {}).get("7d") is True
-    )
-    directional_only = (
-        round(directional_hits / directional_total, 4) if directional_total else None
-    )
-
+        buckets[_bucket_of(it)].append(it)
     return VerdictReviewSummary(
-        total=total,
-        by_window=by_window,
-        by_verdict=by_verdict_clean,
-        directional_only_hit_rate=directional_only,
+        total=len(items),
+        **{k: _summarize_bucket(k, rows) for k, rows in buckets.items()},
         has_report_md=report_path.exists(),
     )
 

@@ -627,12 +627,31 @@ class VerdictReviewDataResponse(BaseModel):
     items: List[VerdictReviewItem]
 
 
-class VerdictReviewSummary(BaseModel):
-    """命中率汇总"""
-    total: int
+class VerdictReviewBucket(BaseModel):
+    """单个来源桶的命中率聚合。ADR-022：桶之间绝不合并成一个命中率。
+
+    n<30 的格子命中率置 null（红线 #2），只留 n。
+    """
+    n: int
+    is_performance: bool                      # 只有 live 桶可当业绩看
+    label: str                                # 人话标签（GUI 直接展示）
+    rates_suppressed_sub30: bool              # 桶 n<30 → 全部命中率置 null
     by_window: Dict[str, Dict[str, Any]]      # { "1d": {n, hit_rate}, "7d": ..., "30d": ... }
-    by_verdict: Dict[str, Dict[str, Any]]     # { "BUY": {n, avg_conf, 1d_hit, ...}, ... }
-    directional_only_hit_rate: Optional[float] = None  # 剔除 HOLD 后真实 alpha
+    by_verdict: Dict[str, Dict[str, Any]]     # { "BUY": {n, avg_confidence, hit_rate_1d/7d/30d}, ... }
+    directional_only_hit_rate: Optional[float] = None  # BUY/ACCUMULATE/TRIM/SELL 的 7d 命中
+    directional_n: int = 0                    # 上面那个比率的分母（7d 已成熟的方向性决议）
+
+
+class VerdictReviewSummary(BaseModel):
+    """命中率汇总——按来源分三桶（2026-10 D4，ADR-022）。
+
+    live = 实盘决议（唯一业绩口径）；backtest = 干净段回测（中性模拟持仓，非业绩）；
+    contaminated = 决议日落在 LLM 训练窗口（记忆穿越，非业绩，不分 source）。
+    """
+    total: int                                # 三桶合计行数（仅计数，不对应任何命中率）
+    live: VerdictReviewBucket
+    backtest: VerdictReviewBucket
+    contaminated: VerdictReviewBucket
     has_report_md: bool
 
 
@@ -982,6 +1001,7 @@ __all__ = [
     "DataSourcesHealthResponse",
     "VerdictReviewItem",
     "VerdictReviewDataResponse",
+    "VerdictReviewBucket",
     "VerdictReviewSummary",
     "VerdictReviewReportResponse",
     "ToolCallRecord",

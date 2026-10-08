@@ -261,9 +261,21 @@ POST body schema：
 
 | Method | Path | 用途 |
 |--------|------|------|
-| GET | `/api/verdict_review/summary` | 1d / 7d / 30d 命中率 × verdict 类型 |
+| GET | `/api/verdict_review/summary` | 按来源分三桶的 1d / 7d / 30d 命中率 × verdict 类型 |
 | GET | `/api/verdict_review/data` | 原始数据点 |
 | GET | `/api/verdict_review/report` | docs/verdict_accuracy.md 完整 markdown |
+
+`summary` 返回 `{total, live, backtest, contaminated, has_report_md}`（2026-10 D4，[ADR-022](adr/022-backtest-memory-contamination-and-holdout-discipline.md)：桶之间绝不合并成一个命中率）。
+每个桶是 `{n, is_performance, label, rates_suppressed_sub30, by_window, by_verdict, directional_only_hit_rate, directional_n}`：
+
+- `live`：实盘决议，**唯一业绩口径**（`is_performance=true`）。
+- `backtest`：干净段回测，中性模拟持仓，非业绩、不可外推 live。
+- `contaminated`：决议日 ≤ `CONTAMINATION_CUTOFF`（LLM 训练窗口内，记忆穿越），不分 source，非业绩。
+- 任何格子 n<30 命中率为 `null`，只留 n（红线 #2）；桶 n<30 时 `rates_suppressed_sub30=true`。
+- `directional_only_hit_rate` = BUY/ACCUMULATE/SELL/TRIM 的 7d 命中，分母 `directional_n` 只算 7d 已成熟的。
+
+数据来自 `verdict_review` job（每天 02:00 Asia/Shanghai，只复盘 live、只读行情库），所以日常 `backtest` / `contaminated` 两桶为 0；
+研究要含回测的全量重建手动跑 `python -m openinvest.jobs.verdict_review --include-backtest`（数小时级，会整份覆盖 jsonl）。
 
 ### 纪律台账（ADR-023）
 
@@ -272,6 +284,7 @@ POST body schema：
 | GET | `/api/discipline` | 委员会纪律量化：不作为率 + 拦冲动次数 + 反事实损益 |
 
 返回 `{summary:{inaction:{total_verdicts,by_verdict,hold,hold_rate}, interventions:{total,by_family,...}}, markdown}`。
+`inaction` 只数 verdict_review.jsonl 里 `source=="live"` 的行（2026-10 D4：回测行是模拟持仓下的回放，不算"委员会对你的不作为"）。
 诚实定位（不吹 alpha，量化「少做错事」），见 [adr/023](adr/023-honest-positioning-not-alpha.md)。CLI `openinvest discipline` / MCP `discipline` 消费（原 GUI「纪律」页已退役）。
 
 ### Decision Accounting（issue #133 Decision 9）

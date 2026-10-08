@@ -309,7 +309,7 @@ memory/
 │   ├── candidates.json
 │   ├── events.jsonl
 │   ├── interventions.jsonl    # 规则干预账本（原始 verdict → 最终 verdict，反事实记账）
-│   ├── verdict_review.jsonl   # 决议事后命中率（verdict_review cron 回填）
+│   ├── verdict_review.jsonl   # live 决议事后命中率（verdict_review 每日 cron 整份重写，只 live）
 │   └── executions.jsonl       # 用户执行/拒绝声明（decision accounting，issue #133 Decision 9）
 └── .state/                    # 简单 KV
     └── processed_emails.json
