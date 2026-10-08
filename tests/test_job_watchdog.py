@@ -274,3 +274,18 @@ def test_email_failure_after_dm_delivered_does_not_repeat_dm(db, tmp_path, monke
     job_watchdog.run(now=_t("2026-07-30T19:07:00"))
     job_watchdog.run(now=_t("2026-07-30T20:07:00"))
     assert len(dms) == 1
+
+
+def test_schedule_change_does_not_count_old_cron_misses_as_stale(db):
+    """2026-10-08 实际误报：dca_daily 从 15:00 改成 30 15,18,21 并于 12:18 部署，看门狗拿新 cron
+    去套旧 cron 下 10-07 15:00 的最后一次运行，报"应在 10-07 15:30/18:30 启动"。"""
+    job = ("dca_daily", "30 15,18,21 * * mon-fri", "Asia/Shanghai")
+    _add(db, "dca_daily", _t("2026-10-07T15:00:00"))
+    since = {"dca_daily": _t("2026-10-08T12:18:00")}
+    # 不传生效时刻（--once / 旧行为）→ 误报
+    assert find_problems(db, [job], _t("2026-10-08T14:07:00"))
+    # 传了 → 新 cron 生效后还没到该跑的时刻，不报
+    assert find_problems(db, [job], _t("2026-10-08T14:07:00"), since) == []
+    # 新 cron 生效后 15:30、18:30 都没跑 → 照样报停摆
+    late = find_problems(db, [job], _t("2026-10-08T22:00:00"), since)
+    assert len(late) == 1 and ":stale:" in late[0]["key"]

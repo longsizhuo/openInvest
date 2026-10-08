@@ -54,6 +54,7 @@ def _trigger(schedule: str, tz: str) -> CronTrigger:
 
 def find_problems(
     conn: sqlite3.Connection, jobs: List[Tuple[str, str, str]], now: datetime,
+    scheduled_since: Optional[Dict[str, datetime]] = None,
 ) -> List[Dict[str, Any]]:
     """纯读 job_runs → 异常列表。jobs = [(name, cron, timezone)]，只传 enabled 的。
 
@@ -97,7 +98,10 @@ def find_problems(
             continue
 
         trig = _trigger(schedule, tz)
-        f1 = trig.get_next_fire_time(started, started)  # 严格晚于 started 的下一次
+        # 起点取"上次启动"与"当前 schedule 生效时刻"中较晚者：改 schedule / 重启后，
+        # 旧 cron 时代没跑的时刻不算停摆（runner._SCHEDULED_SINCE；--once 下为空 = 不截）
+        anchor = max(started, (scheduled_since or {}).get(name, started))
+        f1 = trig.get_next_fire_time(anchor, anchor)  # 严格晚于 anchor 的下一次
         f2 = trig.get_next_fire_time(f1, f1) if f1 else None
         if f2 is not None and now > f2 + GRACE:
             out.append({
@@ -163,7 +167,7 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
     ]
     conn = sqlite3.connect(runner.RUN_LOG_DB)
     try:
-        findings = find_problems(conn, jobs, now)
+        findings = find_problems(conn, jobs, now, runner._SCHEDULED_SINCE)
     finally:
         conn.close()
     for f in findings:
