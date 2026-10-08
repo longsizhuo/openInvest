@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.notifier import (
@@ -69,7 +70,9 @@ def send_event_alert(
         api_base_url=api_base_url,
         holdings_snapshot=holdings_snapshot or {},
     )
-    html = render_markdown_email(md, footer_label="Invest Event Watch")
+    html = render_markdown_email(
+        md, footer_label="Invest Event Watch", link_hosts=_link_hosts(events, api_base_url),
+    )
     # Discord DM 先推（实时通道，best-effort 永不抛）；邮件随后作为保底归档，
     # 顺序保证邮件投递失败（EmailDeliveryError）不影响 Discord 已送达
     send_discord_alert(
@@ -104,6 +107,13 @@ def _build_discord_text(
         )
     lines.append("-# 详情在邮件里；直接回复这条消息可让 AI 助手就地分析")
     return "\n".join(lines)
+
+
+def _link_hosts(events: List[Dict[str, Any]], api_base_url: str) -> set:
+    """本封预警里模板自己拼的链接的 host（委员会链接 + 经 md_url 的新闻来源）——
+    渲染白名单只放行这些 host 的 href，正文里别的链接都退化成文字。"""
+    urls = [api_base_url] + [md_url(s.get("url")) for e in events for s in (e.get("sources") or [])[:4]]
+    return {urlsplit(u).hostname for u in urls if u} - {None}
 
 
 def _build_subject(events: List[Dict[str, Any]]) -> str:

@@ -23,6 +23,7 @@ re-export（向后兼容，2026-05-19）：
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 # re-export 给 jobs/daily_report.py + scripts/skill.py:cmd_prepare_committee 用
@@ -338,6 +339,15 @@ def assemble_full_report(
     Returns:
         完整 markdown 报告字符串
     """
+    # LLM 文本（宏观/备忘/分析师/翻译官/Gemini/路径预期）在 email 变体里先把"像标签的 <"
+    # 转成文字：python-markdown 会把 "MA20<MA120 … >" 当标签吞掉，备忘里的 </div> 也能
+    # 提前关掉分析师卡片。安全兜底在 notifier.md_to_safe_html 白名单（本模块是纯函数层，
+    # 不能 import services，故就地一行，同 /view 的 _defang）。chat 变体不转：聊天平台
+    # 不解析 HTML，&lt; 会原样露出来。
+    def _t(text: Any) -> str:
+        s = str(text)
+        return re.sub(r"<(?=[A-Za-z/!?])", "&lt;", s) if render_target == "email" else s
+
     # 各资产委员会区块
     active_assets = [a for a in target_assets if a["symbol"] not in skipped_assets
                      and a["symbol"] in asset_committees]
@@ -348,7 +358,7 @@ def assemble_full_report(
         v = c["verdict"]
         # 小白友好：人话解读。优先翻译官（LLM，能调和矛盾/解释防御拦截），
         # 该资产缺失/失败 → 回落确定性一句话（零 LLM）
-        translated = (plain_summaries or {}).get(sym, "").strip()
+        translated = _t((plain_summaries or {}).get(sym, "").strip())
         plain_block = (
             f"**人话解读**: {translated}\n\n" if translated
             else plain_verdict_summary(v, c.get("path_profile"))
@@ -363,8 +373,8 @@ def assemble_full_report(
         if v.get("verdict") == "TRIM":
             rp = v.get("reentry_price")
             rp_txt = f"¥{rp:,.2f}" if rp is not None else "未给出"
-            cond = v.get("reentry_condition") or "未给出"
-            path = v.get("expected_path") or "未给出"
+            cond = _t(v.get("reentry_condition") or "未给出")
+            path = _t(v.get("expected_path") or "未给出")
             lines.append(
                 f"**减仓路径**: 预期路径 {path} → 买回点 {rp_txt}"
                 f"（触发条件：{cond}）| 不达买回点则继续持有\n\n"
@@ -381,7 +391,7 @@ def assemble_full_report(
         elif (v.get("_original_verdict") == "TRIM"
               and v.get("_original_trim_reason") == "concentration"
               and v.get("_concentration_lens") == "disabled"):
-            _path = v.get("expected_path")
+            _path = _t(v.get("expected_path") or "")
             _orig_alloc = v.get("_original_alloc", v.get("alloc_cny", 0))
             lines.append(
                 f"**减仓未执行（集中度 lens 已关）**: CIO 想因集中度减仓（建议金额 "
@@ -453,12 +463,12 @@ def assemble_full_report(
         else:
             lines.extend([
                 "### CIO 备忘\n\n",
-                f'<div class="analyst" markdown="1">\n\n{c["report"].cio_memo}\n\n</div>\n\n',
+                f'<div class="analyst" markdown="1">\n\n{_t(c["report"].cio_memo)}\n\n</div>\n\n',
                 "### 分析师意见（专家区）\n\n",
                 "**Quant（技术面）**\n\n",
-                f'<div class="analyst" markdown="1">\n\n{c["report"].quant_view}\n\n</div>\n\n',
+                f'<div class="analyst" markdown="1">\n\n{_t(c["report"].quant_view)}\n\n</div>\n\n',
                 "**Risk Officer（风控）**\n\n",
-                f'<div class="analyst" markdown="1">\n\n{c["report"].risk_view}\n\n</div>\n',
+                f'<div class="analyst" markdown="1">\n\n{_t(c["report"].risk_view)}\n\n</div>\n',
             ])
         return "".join(lines)
 
@@ -485,7 +495,7 @@ def assemble_full_report(
 # 投资委员会日报 ({today})
 {tldr_section}
 ## 1. 宏观环境 (跨资产共享)
-{macro_view}
+{_t(macro_view)}
 
 ---
 
@@ -508,7 +518,7 @@ def assemble_full_report(
 ---
 
 ## {n+3}. Gemini 第二意见 (独立 challenge)
-{final_decision_gemini}
+{_t(final_decision_gemini)}
 
 ---
 

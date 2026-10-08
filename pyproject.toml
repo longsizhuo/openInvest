@@ -39,6 +39,7 @@ dependencies = [
     "sqlite-vec>=0.1.6",   # 事件层向量精排（SQLite 扩展，不需要独立向量库）
     "mcp>=1.28.1",
     "akshare>=1.18.64",
+    "nh3>=0.3.7",  # 邮件 / /view 渲染期 HTML 白名单（ammonia 绑定，见 services/notifier.md_to_safe_html）
 ]
 
 [project.urls]
