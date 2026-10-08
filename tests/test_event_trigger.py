@@ -19,7 +19,8 @@ from openinvest.services.event_trigger import admit
 from openinvest.services.news_sources import RawNewsItem
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
-WATCHED = ["AAPL", "MSFT", "TSLA", "NVDA", "SPY"]
+WATCHED = ["AAPL", "MSFT", "TSLA", "NVDA", "SPY"]  # 都在 target_assets
+HELD_ONLY = "IBM"  # 只在持仓、不在 target_assets：session 拒跑委员会
 
 
 def _iso(dt):
@@ -89,7 +90,8 @@ def test_admit_tolerates_bad_state():
 def env(monkeypatch, tmp_path):
     monkeypatch.setattr("openinvest.db.event_store.DB_PATH", str(tmp_path / "events.db"))
     monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", tmp_path / "memory")
-    monkeypatch.setattr(event_trigger, "_watched_symbols", lambda: list(WATCHED))
+    monkeypatch.setattr(event_trigger, "_watched_symbols", lambda: list(WATCHED) + [HELD_ONLY])
+    monkeypatch.setattr(event_trigger, "_target_symbols", lambda: list(WATCHED))
     snapshot = MagicMock(return_value={})
     monkeypatch.setattr(event_trigger, "_holdings_snapshot", snapshot)
     trigger = MagicMock(side_effect=lambda symbols, event_ids: f"task-{len(trigger.mock_calls)}")
@@ -123,9 +125,9 @@ def _feed(monkeypatch, claim, affected, *, stance="risk", severity="high"):
                          ingested_by="hermes-sentinel")
 
 
-def _run_watch(monkeypatch, events, holdings):
+def _run_watch(monkeypatch, events, holdings, targets=None):
     monkeypatch.setattr(event_watch, "_load_user_context", lambda: {
-        "holdings": holdings, "watching": [], "queries": ["x"]})
+        "holdings": holdings, "watching": holdings if targets is None else targets, "queries": ["x"]})
     monkeypatch.setattr(event_watch, "load_feeds", lambda: [])
     items = [ne.raw_item for ne in events]
     monkeypatch.setattr(event_watch, "fetch_all", lambda **kw: items)
@@ -279,9 +281,31 @@ def test_adr_tagged_event_triggers_hk_listing_committee(env, monkeypatch):
     ETF→指数跟踪不进闸（指数事件不触发 ETF 委员会，现行为）。"""
     trigger, _, _ = env
     monkeypatch.setattr(event_trigger, "_watched_symbols", lambda: ["0700.HK", "QQQ"])
+    monkeypatch.setattr(event_trigger, "_target_symbols", lambda: ["0700.HK", "QQQ"])
     out = _feed(monkeypatch, "adr-guidance-cut", ["TCEHY"])
     assert trigger.call_args.kwargs["symbols"] == ["0700.HK"]
     from openinvest.db.event_store import EventStore
     assert EventStore().get_event(out["events"][0]["event_id"])["committee_task_id"] == out["committee_task_id"]
     assert _feed(monkeypatch, "index-slide", ["^NDX"])["committee_task_id"] is None
     assert trigger.call_count == 1
+
+
+def test_held_only_symbol_alerts_but_never_runs_or_reserves(env, monkeypatch, tmp_path):
+    """只在持仓、不在 target_assets 的标的：过闸照报警，但不 POST、不占冷却/日额度
+    （session 拒非 target → 之前每次必报错 + 错误邮件，还白占共享额度）。"""
+    trigger, alert, _ = env
+    out = _feed(monkeypatch, "held-only-downgrade", [HELD_ONLY])
+    assert out["committee_task_id"] is None
+    trigger.assert_not_called()
+    alert.assert_called_once()
+    assert not (tmp_path / "memory" / ".state" / "event_committee_triggers.json").exists()
+    assert _feed(monkeypatch, "aapl-after", ["AAPL"])["committee_task_id"] == "task-1"  # 额度没被占
+
+
+def test_mixed_event_runs_only_target_symbol(env, monkeypatch, tmp_path):
+    trigger, _, _ = env
+    out = _run_watch(monkeypatch, [_ne("sector-hit", [HELD_ONLY, "MSFT"])], [HELD_ONLY, "MSFT"], ["MSFT"])
+    assert out["affected_symbols"] == [HELD_ONLY, "MSFT"]  # 关联 / 报警口径不变
+    assert out["committee_symbols"] == ["MSFT"]
+    assert trigger.call_args.kwargs["symbols"] == ["MSFT"]
+    assert set(_state(tmp_path)["last"]) == {"MSFT"} and len(_state(tmp_path)["runs"]) == 1

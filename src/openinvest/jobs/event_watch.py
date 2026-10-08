@@ -195,7 +195,8 @@ def run(
     # 事件已入库，触发环节出错只记日志，不能让 job 失败把入库成果一起算成失败
     try:
         trig = trigger_for_new_events(
-            new_events, store=store, watched=ctx["holdings"] + ctx["watching"], dry_run=dry_run,
+            new_events, store=store, watched=ctx["holdings"] + ctx["watching"],
+            targets=ctx["watching"], dry_run=dry_run,
         )
     except Exception as e:
         log.warning(f"[event_watch] 触发闸失败（事件已入库）: {type(e).__name__}: {e}")

@@ -80,7 +80,7 @@ def test_run_no_trigger_when_neutral_or_low(tmp_event_db, monkeypatch):
 def test_run_triggers_when_affected_high_risk(tmp_event_db, monkeypatch):
     ctx = {
         "holdings": ["NDQ.AX"],
-        "watching": [],
+        "watching": ["NDQ.AX"],  # 委员会只跑 target_assets
         "macro_tags": [],
         "queries": ["x"],
     }

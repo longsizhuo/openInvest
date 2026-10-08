@@ -5,6 +5,10 @@ holdings ∪ target_assets）和"触发委员会 + 报警"此前只写在 event_
 agent 投喂门（MCP/CLI ingest_event，Hermes market-intel-sentinel 走这条）只入库
 不触发——哨兵喂进来的持仓风险事件 committee_task_id 全 NULL，一次委员会都没跑过。
 
+委员会只跑 strategy.target_assets（session 拒非 target 标的）：只在持仓、不在 target_assets
+的标的照样过闸 / 报警，但不占冷却 / 额度、不 POST（2026-10 修：之前照 POST，任务必报错，
+还白占共享日额度）。
+
 频控（两门共享，状态落 memory/.state/event_committee_triggers.json，同
 price_sentinel 冷却先例）：
 - 冷却：同 symbol 触发后 event.committee_cooldown_hours（默认 12h）内不重跑；
@@ -118,6 +122,17 @@ def _watched_symbols() -> List[str]:
     return list(dict.fromkeys(held + targets))
 
 
+def _target_symbols() -> List[str]:
+    """strategy.target_assets（canonical 写法）= 委员会肯跑的集合。PM 不可用 → []（= 什么都不跑）。"""
+    try:
+        from openinvest.core.portfolio_manager import PortfolioManager
+        pm = PortfolioManager()
+    except Exception as e:
+        log.warning(f"PortfolioManager 不可用，事件触发不跑委员会: {e}")
+        return []
+    return [a.get("symbol") for a in (pm.strategy.get("target_assets") or []) if a.get("symbol")]
+
+
 def _holdings_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     """给邮件正文用：每个受影响 symbol 当前 units / 现价 / pnl
 
@@ -195,6 +210,7 @@ def trigger_for_new_events(
     *,
     store: Any,
     watched: Optional[List[str]] = None,
+    targets: Optional[List[str]] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """对一批**新入库**事件（须含 event_id）过闸 → 冷却/上限 → 触发委员会 → 报警。
@@ -203,6 +219,7 @@ def trigger_for_new_events(
         new_events: upsert 返回 was_new 的事件（重复事件不该再触发）
         store: EventStore（取 sources 给报警、mark_committee_task 打链接）
         watched: holdings ∪ target_assets；None → 现读 PortfolioManager
+        targets: strategy.target_assets（委员会只肯跑这些）；None → 现读 PortfolioManager
         dry_run: 只算闸，不触发不报警不落冷却
 
     Returns:
@@ -245,6 +262,12 @@ def trigger_for_new_events(
     if not triggerable or dry_run:
         return out
 
+    # 只在持仓、不在 target_assets 的标的：session 会拒跑 → 不占冷却/额度、不 POST（报警照发）
+    targets = set(_target_symbols() if targets is None else targets)
+    runnable = [s for s in affected if s in targets]
+    if set(affected) - targets:
+        log.info(f"[event_trigger] 不在 target_assets，不跑委员会: {sorted(set(affected) - targets)}")
+
     from openinvest.core.memory_store import MemoryStore
     ms = MemoryStore()
     now = datetime.now(timezone.utc)
@@ -253,7 +276,7 @@ def trigger_for_new_events(
     def _reserve(cur: Any):
         # 文件锁内 read → admit → write：额度在 HTTP 触发前就占下，两门并发不互相覆盖
         admitted, new_state = admit(
-            cur, [(s, sev_by_sym[s]) for s in affected], now,
+            cur, [(s, sev_by_sym[s]) for s in runnable], now,
             cooldown_hours=cfg.committee_cooldown_hours, daily_cap=cfg.committee_daily_cap,
             escalation_bypass=cfg.committee_escalation_bypass)
         prev_last = cur.get("last") if isinstance(cur, dict) and isinstance(cur.get("last"), dict) else {}
@@ -276,7 +299,7 @@ def trigger_for_new_events(
                 runs.remove(mine["ts"])
         return {"last": last, "runs": runs}, None
 
-    admitted = ms.state_update(_STATE_NAME, _reserve)
+    admitted = ms.state_update(_STATE_NAME, _reserve) if runnable else []
     if admitted:
         adm = set(admitted)
         fed = [ev for ev in triggerable
@@ -288,8 +311,8 @@ def trigger_for_new_events(
             out.update(committee_symbols=admitted, committee_task_id=task_id)
         else:
             ms.state_update(_STATE_NAME, _release)
-    if set(affected) - set(admitted):
-        log.info(f"[event_trigger] 冷却/日上限拦下 {sorted(set(affected) - set(admitted))}")
+    if set(runnable) - set(admitted):
+        log.info(f"[event_trigger] 冷却/日上限拦下 {sorted(set(runnable) - set(admitted))}")
 
     # 持仓快照要拉行情：只在报警真会发时才算（send_event_alert 默认静默，判据同它内部）
     alerts_on = os.getenv("INVEST_EVENT_ALERT", "0") == "1"
