@@ -124,6 +124,53 @@ _SECOND_OPINION_CLI_CANDIDATES = ("agy", "gemini")
 _MAX_PROMPT_ARG_BYTES = 100_000
 
 
+_MARKET_WIDE_EVENT_TYPES = frozenset({"macro", "policy", "geopolitical"})
+_SEV_RANK = {"low": 1, "mid": 2, "high": 3}
+
+
+def _load_asset_events(target_assets: list) -> Dict[str, list]:
+    """D17：单股资产近 7 天已入库、severity≥mid 的资产专属事件 → {symbol: [event]}。
+
+    资产专属 = 打标含本标的（含同公司跨市场代码），非宏观类（macro/policy/geopolitical），
+    且打标的单一公司 ≤ 2 家（同公司各市场代码算一家；指数/ETF/商品不计）。severity 降序、
+    同级新→旧；同一条新闻的多家转述（措辞相似度 ≥ 0.6）合成一条，计数记在 similar。
+    **只给邮件渲染**：在委员会 session 之后读，不进委员会 / Gemini / 翻译官输入
+    （tests/test_daily_report_asset_events.py 守）。任何失败 graceful → {}。
+    """
+    from difflib import SequenceMatcher
+
+    from openinvest.services.symbol_map import is_single_stock, listing_aliases
+    out: Dict[str, list] = {}
+    try:
+        from openinvest.db.event_store import EventStore
+        from openinvest.services.embeddings import DEFAULT_DIM
+        store = EventStore(embedding_dim=DEFAULT_DIM)
+        for a in target_assets:
+            sym = a["symbol"]
+            if not is_single_stock(sym, tracks=a.get("tracks")):
+                continue
+            evs = [e for e in store.recall(sym, time_window_days=7, min_severity="mid", top_k=200,
+                                           aliases=sorted(listing_aliases(sym)))
+                   if e.get("event_type") not in _MARKET_WIDE_EVENT_TYPES
+                   and len({listing_aliases(x) for x in e.get("affected_symbols") or []
+                            if is_single_stock(x)}) <= 2]
+            kept: list = []
+            # ponytail: O(n²) 相似度去重，n ≤ recall 上限 200
+            for e in sorted(evs, key=lambda e: -_SEV_RANK.get(e.get("severity"), 0)):
+                claim = str(e.get("one_line_claim") or "").lower()
+                twin = next((k for k in kept if SequenceMatcher(
+                    None, str(k.get("one_line_claim") or "").lower(), claim).ratio() >= 0.6), None)
+                if twin is None:
+                    kept.append({**e, "similar": 1})
+                else:
+                    twin["similar"] += 1
+            if kept:
+                out[sym] = kept
+    except Exception as e:  # noqa: BLE001  邮件附加信息，失败不阻断日报
+        log.warning("资产专属事件读取失败 graceful: %s", e)
+    return out
+
+
 def _run_gemini_cli_review(prompt: str) -> str:
     override = os.getenv("INVEST_SECOND_OPINION_CLI")
     candidates = (override,) if override else _SECOND_OPINION_CLI_CANDIDATES
@@ -546,6 +593,9 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         log.warning(f"纪律台账渲染失败 graceful: {e}")
         discipline_md = ""
 
+    # D17：委员会 / Gemini / 翻译官都已跑完才读——只进邮件，不进任何 LLM 输入
+    asset_events = _load_asset_events(target_assets)
+
     full_report = assemble_full_report(
         today=today,
         macro_view=macro_view,
@@ -561,6 +611,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         # send_email=False 只会是宿主 agent cron（cmd_daily_report）调用——
         # 报告投递去 Discord/Weixin/QQ 等聊天平台，走无 HTML 的 chat 变体。
         render_target="email" if send_email else "chat",
+        asset_events=asset_events,
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）

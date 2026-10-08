@@ -36,6 +36,7 @@ STALE_LABEL_SOFT = "stale"       # 软警告（超阈值但在熔断阈值内）
 STALE_LABEL_HARD = "very_stale"  # 硬熔断
 STALE_LABEL_MISSING = "missing"  # 完全没价
 STALE_LABEL_FRESH = "fresh"      # 新鲜
+ASSET_EVENT_LINES = 5            # D17 每个资产最多列几条资产专属事件
 
 
 # ============ 1. 辅助：Staleness 分类 ============
@@ -312,6 +313,7 @@ def assemble_full_report(
     discipline_md: str = "",
     *,
     render_target: str = "email",
+    asset_events: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -335,6 +337,9 @@ def assemble_full_report(
             | "chat"（宿主 agent cron 投递 Discord/Weixin/QQ 等聊天平台用；
             这些平台不解析原生 HTML，"email" 变体的 `<div>` 会以字面文本泄露——
             见 2026-07-14 Hermes cron 渲染事故）：同样内容不裹 HTML，纯 markdown。
+        asset_events: {symbol: [event]}（D17，entry 层已筛好"资产专属"、排序、相似转述合并）
+            ——在该资产裁决旁列前 ASSET_EVENT_LINES 条（日期 + severity + 一句话 + 相似报道数）。
+            只展示，不进任何 LLM 输入。
 
     Returns:
         完整 markdown 报告字符串
@@ -425,6 +430,20 @@ def assemble_full_report(
                     f"**防御降级**: CIO 想 {v['_original_verdict']}（¥{_oa:,.0f}），VIX/ATR "
                     f"快崩哨兵触发 → 降级 {v['verdict']} ¥{_fa:,.0f}\n\n"
                 )
+
+        # D17：近 7 天资产专属事件。只展示，这张列表不额外喂委员会（委员会照旧经 event_brief 召回看事件流）
+        evs = (asset_events or {}).get(sym) or []
+        if evs:
+            # claim 是新闻归一化来的不可信文本：过 _t（email 里 "<" 变文字），再把 \ [ ] ` 转义成文字——
+            # chat 变体也转，Discord 会把 [x](url) 渲染成可点的蒙版链接。邮件另有 md_to_safe_html 白名单兜底。
+            rows = [f"- {str(e.get('ts') or '')[:10]} [{e.get('severity')}] "
+                    + re.sub(r"[\\\[\]`]", r"\\\g<0>", _t(e.get("one_line_claim") or ""))
+                    + (f"（相似报道 ×{e['similar']}）" if (e.get("similar") or 1) > 1 else "")
+                    for e in evs[:ASSET_EVENT_LINES]]
+            if len(evs) > ASSET_EVENT_LINES:
+                rows.append(f"- …另有 {len(evs) - ASSET_EVENT_LINES} 条")
+            lines.append("**近 7 天资产专属事件**（已入库、severity≥mid；只给你看，没有额外喂给委员会）:\n\n"
+                         + "\n".join(rows) + "\n\n")
 
         # 概率分布（regime 概率表）
         prob = c.get("regime_probability")

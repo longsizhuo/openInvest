@@ -176,7 +176,8 @@ uvx openinvest daily_report   # 完整日报管道，stdout = 邮件正文同源
 ```
 
 **报告格式由后端统一保证**（同一条 `assemble_full_report` 管道：多资产委员会 +
-Gemini 第二意见 + 翻译官人话解读 + 纪律台账）——所有用户、所有 agent 的 cron
+Gemini 第二意见 + 翻译官人话解读 + 纪律台账；单股资产的裁决旁另列"近 7 天已入库、
+severity≥mid 的资产专属事件"，最多 5 条、相似转述合并——只展示，不额外喂给委员会）——所有用户、所有 agent 的 cron
 拿到的日报一模一样，不需要在 prompt 里教 agent 怎么写报告。
 
 以 Hermes 为例（`--no-agent` = 脚本 stdout 原样投递，Hermes 侧零 LLM token）：

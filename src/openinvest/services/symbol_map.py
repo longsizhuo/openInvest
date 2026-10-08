@@ -151,11 +151,28 @@ def proxy_symbols_for(
     return frozenset(out)
 
 
+# A 股指数（沪 000xxx / 深 399xxx）与场内基金（沪 5xxxxx / 深 15–18xxxx）代码段
+_A_SHARE_NON_STOCK = re.compile(r"^(?:000\d{3}|5\d{5})\.SS$|^(?:399\d{3}|1[5-8]\d{4})\.SZ$")
+
+
+def is_single_stock(symbol: str, *, tracks: Optional[Iterable[str] | str] = None) -> bool:
+    """单一公司股票？指数(^) / 期货·汇率(=) / 加密(-USD) / 跟踪型 ETF（白名单或 tracks 声明）/
+    A 股指数·基金代码段 → False。
+    ponytail: 纯代码规则不联网查 quoteType；白名单外的港美 ETF 会被当成单股，有误判再补白名单。"""
+    s = normalize_symbol(symbol)
+    if not s or s.startswith("^") or "=" in s or s.endswith(("-USD", "-USDT")):
+        return False
+    if proxy_symbols_for(s, tracks=tracks) - listing_aliases(s):
+        return False
+    return not _A_SHARE_NON_STOCK.match(s)
+
+
 __all__ = [
     "ENTITY_CANONICAL_PATTERNS",
     "HK_CROSS_LISTINGS",
     "TRACKING_WHITELIST",
     "canonical_symbols_for_entities",
+    "is_single_stock",
     "listing_aliases",
     "normalize_symbol",
     "proxy_symbols_for",
