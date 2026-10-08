@@ -118,3 +118,26 @@ def test_price_sentinel_prefers_config(monkeypatch):
         lambda *a, **k: _FakeCfg(YML_DEFAULT, sentinel_schedule="*/10 8-23 * * *"),
     )
     assert _resolve_schedule("price_sentinel", "*/5 0-2,8-23 * * *") == "*/10 8-23 * * *"
+
+
+def test_register_jobs_stamps_scheduled_since_on_register_and_change(monkeypatch):
+    """job_watchdog 靠 runner._SCHEDULED_SINCE 判"新 cron 何时生效"；这根线断了看门狗会
+    静默退回"拿新 cron 套旧运行"的误报（#272），而它自己的测试照绿。"""
+    import openinvest.scheduler.runner as runner
+
+    monkeypatch.setattr(runner, "_SCHEDULED_SINCE", {})
+    monkeypatch.setattr(runner, "_LAST_SCHEDULES", {})
+    cfg = {"name": "fake_job", "schedule": "*/5 * * * *", "timezone": "UTC",
+           "entry": "openinvest.jobs.dca_daily:run", "enabled": True}
+    monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg)])
+    sched = BackgroundScheduler()
+    register_jobs(sched)
+    first = runner._SCHEDULED_SINCE["fake_job"]
+
+    register_jobs(sched, quiet=True)  # schedule 没变：不刷新
+    assert runner._SCHEDULED_SINCE["fake_job"] == first
+
+    monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg, schedule="*/7 * * * *")])
+    register_jobs(sched, quiet=True)  # schedule 变了：刷新
+    assert runner._SCHEDULED_SINCE["fake_job"] >= first
+    assert runner._LAST_SCHEDULES["fake_job"] == "*/7 * * * *"
