@@ -37,6 +37,22 @@ def test_summary_smoke():
     assert "total" in s["interventions"] and "by_family" in s["interventions"]
 
 
+def test_inaction_counts_live_rows_only(tmp_path, monkeypatch):
+    """回测/污染行不进不作为率(D4):手动全量重建后的 jsonl 也只数 live。"""
+    import json
+
+    from openinvest.core import memory_store as ms
+    from openinvest.services.discipline import _inaction
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    rows = ([{"verdict": "HOLD", "source": "live"}] * 3 + [{"verdict": "ACCUMULATE", "source": "live"}]
+            + [{"verdict": "ACCUMULATE", "source": "backtest"}] * 6)
+    (tmp_path / ".dreams").mkdir()
+    (tmp_path / ".dreams" / "verdict_review.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    ia = _inaction()
+    assert ia["total_verdicts"] == 4 and ia["hold"] == 3 and ia["hold_rate"] == 0.75
+
+
 if __name__ == "__main__":
     test_render_inaction_and_interventions()
     test_empty_graceful()

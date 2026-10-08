@@ -5,7 +5,7 @@ ADR-023 钉死:委员会不是 alpha 机器,方向预测低于随机;它唯一�
 一个 summary,供 daily_report 邮件 / CLI / Web API 共用(单一可信源,防三处漂移)。
 
 读两个已有台账,零 LLM:
-- memory/.dreams/verdict_review.jsonl → 按 verdict 计数(HOLD 占比=不作为率)
+- memory/.dreams/verdict_review.jsonl → 只数 source==live 行,按 verdict 计数(HOLD 占比=不作为率)
 - interventions.jsonl(经 jobs.intervention_review 聚合)→ 拦截次数 + 反事实省/费钱
 """
 from __future__ import annotations
@@ -21,7 +21,11 @@ _FAMILY_LABEL = {"buy_defense": "拦加仓(快崩防御)", "trim_blocked": "拦�
 
 
 def _inaction() -> Dict[str, Any]:
-    """从 verdict_review.jsonl 按 verdict 计数 → 不作为率(HOLD 占比)。"""
+    """从 verdict_review.jsonl 的 **live** 行按 verdict 计数 → 不作为率(HOLD 占比)。
+
+    2026-10 D4:回测/污染行是模拟持仓下的回放,不是"委员会对你做了什么"——混进来时
+    显示的 52% 有 99.9% 是回测行。jsonl 若被手动全量重建(--include-backtest)也不受影响。
+    """
     p = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
     rows = []
     if p.exists():
@@ -30,9 +34,11 @@ def _inaction() -> Dict[str, Any]:
             if not line:
                 continue
             try:
-                rows.append(json.loads(line))
+                r = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if r.get("source") == "live":
+                rows.append(r)
     c = Counter(r.get("verdict", "UNCLEAR") for r in rows)
     n = len(rows)
     return {
@@ -79,7 +85,7 @@ def render_discipline_md(s: Optional[Dict[str, Any]] = None) -> str:
     lines = ["## 🛡️ 纪律台账(累计 · 委员会的可证价值:不作为 + 拦冲动,**非 alpha**)"]
     if ia["total_verdicts"]:
         lines.append(
-            f"- **默认不作为**:HOLD {ia['hold']}/{ia['total_verdicts']} = "
+            f"- **默认不作为**(live 决议):HOLD {ia['hold']}/{ia['total_verdicts']} = "
             f"**{ia['hold_rate'] * 100:.0f}%** → 低换手、少折腾。"
             "(方向性 verdict 预测力低于随机,价值不在判方向——见 ADR-023)"
         )
