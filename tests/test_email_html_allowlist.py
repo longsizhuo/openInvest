@@ -6,6 +6,9 @@ LLM 备忘、新闻转述、异常文本都会拼进 markdown 再转 HTML。这�
 """
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
@@ -128,6 +131,26 @@ def _daily_report(text: str) -> str:
         plain_summaries={"AAA": text},
     )
     return render_markdown_email(md)
+
+
+def test_render_terminates_on_corpus():
+    """整份注入样本在子进程里渲染，必须限时返回。
+
+    markdown 依赖 stdlib html.parser，两者版本组合不当时个别输入会让渲染不终止——
+    那会卡死发邮件的调度 job。放在子进程里，回归时是快速失败而不是把 CI 挂到超时。
+    放在参数化用例之前，先跑。
+    """
+    code = (
+        "import json, sys\n"
+        "from openinvest.services.notifier import render_markdown_email\n"
+        "for p in json.loads(sys.stdin.read()):\n"
+        "    render_markdown_email('x ' + p + ' y', footer_label='t')\n"
+    )
+    try:
+        subprocess.run([sys.executable, "-c", code], input=json.dumps(PAYLOADS),
+                       text=True, check=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("render_markdown_email 在注入样本上不终止（检查 markdown / Python 版本组合）")
 
 
 @pytest.mark.parametrize("payload", PAYLOADS)
