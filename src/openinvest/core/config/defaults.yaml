@@ -59,7 +59,7 @@ sentiment:
   atr_defense_spike_ratio: 2.0
   # EVENT_STANCE 聚合: 默认 = 逐位等价旧纯计数（等权+无衰减+band 0）。
   # 2026-06-11 eval_event_stance.py 判 INSUFFICIENT_DATA；2026-10-08 重评结案：
-  # 加权/衰减相对纯计数无增益（仅 1/4 格胜出，达不到预注册 ≥2/3 规则）→ 保持纯计数，
+  # 加权/衰减未达预注册判据（仅 1/4 格胜出，需 ≥2/3）→ 保持纯计数，
   # 数值不动。日后若重开须重新预注册（ADR-010 rule 4）；启用衰减必须同时设 band>0。
   event_stance_w_low: 1.0
   event_stance_w_mid: 1.0

@@ -138,8 +138,8 @@ class SentimentConfig:
     # EVENT_STANCE 聚合（utils/sentiment.py）：severity 权重 + 时效半衰期。
     # **默认值 = 逐位等价旧纯计数**（等权 + half_life=0 禁用衰减 + band=0）。
     # 2026-06-11 经 scripts/research/eval_event_stance.py 验证判 INSUFFICIENT_DATA
-    # （事件史仅 ~25d、信号日 7-17）；2026-10-08 重评结案：加权/衰减相对纯计数无增益
-    # （仅 1/4 格胜出，达不到预注册 ≥2/3 规则）→ **保持纯计数，默认值不动**。日后若重开
+    # （事件史仅 ~25d、信号日 7-17）；2026-10-08 重评结案：加权/衰减未达预注册判据
+    # （仅 1/4 格胜出，需 ≥2/3）→ **保持纯计数，默认值不动**。日后若重开
     # 须重新预注册（ADR-010 rule 4 同款纪律，先例 trim_no_trim_loss_pct）；
     # 启用衰减必须同时设 neutral_band>0。
     event_stance_w_low: float = 1.0
