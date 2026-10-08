@@ -1,0 +1,2430 @@
+{
+ "params": {
+  "start": "2026-09-01",
+  "end": "2026-10-07",
+  "hour_utc": 2,
+  "old_rev": "a4d6fc2",
+  "window_days": 7,
+  "min_severity": "mid",
+  "top_k": 8,
+  "default_path": true,
+  "no_rerank": false
+ },
+ "summary": {
+  "S1": {
+   "days": 27,
+   "events_old": 152,
+   "events_new": 216,
+   "days_0_to_pos": 2,
+   "days_pos_to_0": 0,
+   "days_changed": 27,
+   "events_changed": 165,
+   "future_ts_old": 0,
+   "future_ts_new": 0,
+   "median_age_h_old": 20.4,
+   "median_age_h_new": 92.3
+  },
+  "S2": {
+   "days": 27,
+   "events_old": 216,
+   "events_new": 216,
+   "days_0_to_pos": 0,
+   "days_pos_to_0": 0,
+   "days_changed": 27,
+   "events_changed": 153,
+   "future_ts_old": 17,
+   "future_ts_new": 0,
+   "median_age_h_old": 17.3,
+   "median_age_h_new": 71.5
+  },
+  "S3": {
+   "days": 27,
+   "events_old": 5,
+   "events_new": 18,
+   "days_0_to_pos": 10,
+   "days_pos_to_0": 0,
+   "days_changed": 12,
+   "events_changed": 13,
+   "future_ts_old": 0,
+   "future_ts_new": 0,
+   "median_age_h_old": 24.5,
+   "median_age_h_new": 63.2
+  },
+  "S4": {
+   "days": 27,
+   "events_old": 26,
+   "events_new": 83,
+   "days_0_to_pos": 15,
+   "days_pos_to_0": 0,
+   "days_changed": 21,
+   "events_changed": 61,
+   "future_ts_old": 0,
+   "future_ts_new": 0,
+   "median_age_h_old": 26.5,
+   "median_age_h_new": 75.5
+  }
+ },
+ "rows": [
+  {
+   "date": "2026-09-01",
+   "sym": "S1",
+   "old": 3,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    40.8,
+    40.9,
+    40.9
+   ],
+   "new_age_h": [
+    40.9,
+    52.7,
+    53.9,
+    80.8,
+    91.9,
+    106.0,
+    109.5,
+    170.0
+   ]
+  },
+  {
+   "date": "2026-09-01",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -830.0,
+    15.9,
+    17.6,
+    25.9,
+    21.3,
+    22.7,
+    37.5,
+    39.0
+   ],
+   "new_age_h": [
+    25.9,
+    22.7,
+    37.5,
+    50.0,
+    83.5,
+    92.7,
+    104.5,
+    122.2
+   ]
+  },
+  {
+   "date": "2026-09-01",
+   "sym": "S3",
+   "old": 1,
+   "new": 1,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    35.5
+   ],
+   "new_age_h": [
+    35.5
+   ]
+  },
+  {
+   "date": "2026-09-01",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    105.4
+   ]
+  },
+  {
+   "date": "2026-09-02",
+   "sym": "S1",
+   "old": 4,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    12.9,
+    14.0,
+    16.9,
+    22.0
+   ],
+   "new_age_h": [
+    12.9,
+    16.9,
+    64.9,
+    77.9,
+    104.8,
+    115.9,
+    130.0,
+    133.5
+   ]
+  },
+  {
+   "date": "2026-09-02",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    8.0,
+    8.1,
+    16.8,
+    12.5,
+    22.0,
+    25.0,
+    17.3,
+    34.0
+   ],
+   "new_age_h": [
+    8.0,
+    12.5,
+    34.0,
+    46.7,
+    61.5,
+    74.0,
+    107.5,
+    116.7
+   ]
+  },
+  {
+   "date": "2026-09-02",
+   "sym": "S3",
+   "old": 1,
+   "new": 2,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    1.7
+   ],
+   "new_age_h": [
+    1.7,
+    59.5
+   ]
+  },
+  {
+   "date": "2026-09-02",
+   "sym": "S4",
+   "old": 7,
+   "new": 8,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    17.9,
+    24.0,
+    26.4,
+    30.0,
+    33.5,
+    34.0,
+    27.5
+   ],
+   "new_age_h": [
+    17.9,
+    24.0,
+    26.4,
+    30.0,
+    33.5,
+    34.0,
+    38.0,
+    129.4
+   ]
+  },
+  {
+   "date": "2026-09-03",
+   "sym": "S1",
+   "old": 3,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    13.8,
+    19.3,
+    36.9
+   ],
+   "new_age_h": [
+    36.9,
+    40.9,
+    88.9,
+    101.9,
+    128.8,
+    139.9,
+    154.0,
+    157.5
+   ]
+  },
+  {
+   "date": "2026-09-03",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -782.0,
+    1.7,
+    2.3,
+    12.0,
+    8.6,
+    13.5,
+    24.6,
+    25.3
+   ],
+   "new_age_h": [
+    1.7,
+    12.0,
+    13.5,
+    32.0,
+    36.5,
+    58.0,
+    70.7,
+    85.5
+   ]
+  },
+  {
+   "date": "2026-09-03",
+   "sym": "S3",
+   "old": 1,
+   "new": 2,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    25.7
+   ],
+   "new_age_h": [
+    25.7,
+    83.5
+   ]
+  },
+  {
+   "date": "2026-09-03",
+   "sym": "S4",
+   "old": 0,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    41.9,
+    48.0,
+    50.4,
+    54.0,
+    57.5,
+    58.0,
+    62.0,
+    153.4
+   ]
+  },
+  {
+   "date": "2026-09-04",
+   "sym": "S1",
+   "old": 2,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    10.8,
+    18.9
+   ],
+   "new_age_h": [
+    60.9,
+    62.0,
+    64.9,
+    112.9,
+    124.7,
+    125.9,
+    152.8,
+    163.9
+   ]
+  },
+  {
+   "date": "2026-09-04",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    10.9,
+    13.0,
+    13.3,
+    6.0,
+    9.3,
+    10.0,
+    11.2,
+    20.0
+   ],
+   "new_age_h": [
+    13.3,
+    6.0,
+    20.0,
+    27.1,
+    36.0,
+    37.5,
+    56.0,
+    82.0
+   ]
+  },
+  {
+   "date": "2026-09-04",
+   "sym": "S3",
+   "old": 0,
+   "new": 2,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    49.7,
+    107.5
+   ]
+  },
+  {
+   "date": "2026-09-04",
+   "sym": "S4",
+   "old": 0,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    65.9,
+    72.0,
+    74.3,
+    78.0,
+    81.5,
+    82.0,
+    75.5,
+    86.0
+   ]
+  },
+  {
+   "date": "2026-09-07",
+   "sym": "S1",
+   "old": 0,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    80.0,
+    82.5,
+    82.8,
+    109.5,
+    132.9,
+    134.0,
+    126.1,
+    136.9
+   ]
+  },
+  {
+   "date": "2026-09-07",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 2,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -2198.0,
+    -686.0,
+    11.5,
+    22.0,
+    34.6,
+    47.1,
+    50.0,
+    52.0
+   ],
+   "new_age_h": [
+    11.5,
+    59.7,
+    85.3,
+    78.0,
+    92.0,
+    99.2,
+    108.0,
+    109.5
+   ]
+  },
+  {
+   "date": "2026-09-07",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    121.7
+   ]
+  },
+  {
+   "date": "2026-09-07",
+   "sym": "S4",
+   "old": 0,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    66.9,
+    137.9,
+    144.0,
+    146.3,
+    150.0,
+    153.5,
+    154.0,
+    158.0
+   ]
+  },
+  {
+   "date": "2026-09-08",
+   "sym": "S1",
+   "old": 0,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    104.0,
+    106.5,
+    106.8,
+    133.5,
+    156.9,
+    158.0,
+    150.1,
+    160.9
+   ]
+  },
+  {
+   "date": "2026-09-08",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 2,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -2174.0,
+    -662.0,
+    21.0,
+    17.5,
+    23.5,
+    24.6,
+    35.5,
+    36.7
+   ],
+   "new_age_h": [
+    23.5,
+    35.5,
+    36.7,
+    109.3,
+    102.0,
+    116.0,
+    123.2,
+    132.0
+   ]
+  },
+  {
+   "date": "2026-09-08",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    145.7
+   ]
+  },
+  {
+   "date": "2026-09-08",
+   "sym": "S4",
+   "old": 0,
+   "new": 5,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    90.9,
+    161.9,
+    168.0,
+    170.3,
+    174.0
+   ]
+  },
+  {
+   "date": "2026-09-09",
+   "sym": "S1",
+   "old": 3,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    9.6,
+    9.7,
+    11.9
+   ],
+   "new_age_h": [
+    9.6,
+    9.7,
+    11.9,
+    128.0,
+    130.5,
+    130.8,
+    149.9,
+    157.5
+   ]
+  },
+  {
+   "date": "2026-09-09",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -638.0,
+    12.9,
+    14.5,
+    23.7,
+    16.0,
+    16.0,
+    16.3,
+    21.0
+   ],
+   "new_age_h": [
+    16.0,
+    16.3,
+    47.5,
+    50.0,
+    59.5,
+    60.7,
+    133.3,
+    126.0
+   ]
+  },
+  {
+   "date": "2026-09-09",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-09",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    114.9
+   ]
+  },
+  {
+   "date": "2026-09-10",
+   "sym": "S1",
+   "old": 4,
+   "new": 8,
+   "changed": 4,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    21.0,
+    33.6,
+    33.7,
+    35.9
+   ],
+   "new_age_h": [
+    21.0,
+    33.6,
+    33.7,
+    35.9,
+    36.4,
+    152.0,
+    154.5,
+    154.8
+   ]
+  },
+  {
+   "date": "2026-09-10",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -614.0,
+    1.1,
+    2.0,
+    10.5,
+    18.0,
+    18.9,
+    28.0,
+    22.7
+   ],
+   "new_age_h": [
+    40.0,
+    40.3,
+    71.5,
+    74.0,
+    83.5,
+    84.7,
+    129.5,
+    131.7
+   ]
+  },
+  {
+   "date": "2026-09-10",
+   "sym": "S3",
+   "old": 1,
+   "new": 1,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    24.5
+   ],
+   "new_age_h": [
+    24.5
+   ]
+  },
+  {
+   "date": "2026-09-10",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    138.9
+   ]
+  },
+  {
+   "date": "2026-09-11",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 4,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    13.5,
+    13.5,
+    14.1,
+    13.3,
+    13.3,
+    13.5,
+    21.8,
+    23.8
+   ],
+   "new_age_h": [
+    13.5,
+    13.5,
+    14.1,
+    21.8,
+    57.6,
+    57.7,
+    59.9,
+    176.0
+   ]
+  },
+  {
+   "date": "2026-09-11",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 2,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -2102.0,
+    -590.0,
+    0.7,
+    2.0,
+    2.4,
+    13.4,
+    8.0,
+    19.1
+   ],
+   "new_age_h": [
+    8.0,
+    21.5,
+    64.0,
+    64.3,
+    95.5,
+    98.0,
+    107.5,
+    108.7
+   ]
+  },
+  {
+   "date": "2026-09-11",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    48.5
+   ]
+  },
+  {
+   "date": "2026-09-11",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    162.9
+   ]
+  },
+  {
+   "date": "2026-09-14",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    0.8,
+    9.9,
+    15.7,
+    18.6,
+    18.6,
+    26.0,
+    58.6,
+    61.1
+   ],
+   "new_age_h": [
+    9.9,
+    15.7,
+    18.6,
+    85.5,
+    85.5,
+    85.5,
+    93.8,
+    129.7
+   ]
+  },
+  {
+   "date": "2026-09-14",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    9.1,
+    19.5,
+    36.7,
+    44.8,
+    44.0,
+    47.5,
+    56.0,
+    56.8
+   ],
+   "new_age_h": [
+    44.0,
+    47.5,
+    80.0,
+    84.0,
+    92.8,
+    93.5,
+    106.5,
+    114.0
+   ]
+  },
+  {
+   "date": "2026-09-14",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    120.5
+   ]
+  },
+  {
+   "date": "2026-09-14",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    72.4
+   ]
+  },
+  {
+   "date": "2026-09-15",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    6.0,
+    10.7,
+    18.8,
+    11.6,
+    20.0,
+    12.2,
+    24.8,
+    19.5
+   ],
+   "new_age_h": [
+    11.6,
+    12.2,
+    39.7,
+    42.6,
+    109.5,
+    109.5,
+    117.8,
+    153.7
+   ]
+  },
+  {
+   "date": "2026-09-15",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    12.9,
+    18.8,
+    19.8,
+    21.8,
+    14.5,
+    16.5,
+    16.8,
+    17.5
+   ],
+   "new_age_h": [
+    12.9,
+    21.8,
+    14.5,
+    24.0,
+    68.0,
+    71.5,
+    104.0,
+    108.0
+   ]
+  },
+  {
+   "date": "2026-09-15",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    144.5
+   ]
+  },
+  {
+   "date": "2026-09-15",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    96.4
+   ]
+  },
+  {
+   "date": "2026-09-16",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 4,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    2.0,
+    11.6,
+    16.6,
+    9.1,
+    12.5,
+    17.2,
+    23.1,
+    34.7
+   ],
+   "new_age_h": [
+    2.0,
+    16.6,
+    9.1,
+    23.1,
+    35.6,
+    66.6,
+    133.5,
+    141.8
+   ]
+  },
+  {
+   "date": "2026-09-16",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -470.0,
+    4.6,
+    2.8,
+    8.6,
+    21.0,
+    14.8,
+    36.0,
+    36.9
+   ],
+   "new_age_h": [
+    21.0,
+    36.9,
+    45.8,
+    38.5,
+    41.5,
+    48.0,
+    92.0,
+    95.5
+   ]
+  },
+  {
+   "date": "2026-09-16",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-16",
+   "sym": "S4",
+   "old": 1,
+   "new": 2,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    11.5
+   ],
+   "new_age_h": [
+    11.5,
+    120.4
+   ]
+  },
+  {
+   "date": "2026-09-17",
+   "sym": "S1",
+   "old": 4,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    17.5,
+    12.5,
+    21.7,
+    17.9
+   ],
+   "new_age_h": [
+    12.5,
+    17.9,
+    26.0,
+    40.6,
+    47.1,
+    90.6,
+    157.5,
+    165.8
+   ]
+  },
+  {
+   "date": "2026-09-17",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -446.0,
+    1.7,
+    1.7,
+    15.0,
+    7.5,
+    7.5,
+    21.6,
+    13.9
+   ],
+   "new_age_h": [
+    1.7,
+    15.0,
+    13.9,
+    26.5,
+    60.9,
+    69.8,
+    62.5,
+    72.0
+   ]
+  },
+  {
+   "date": "2026-09-17",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-17",
+   "sym": "S4",
+   "old": 0,
+   "new": 2,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    35.5,
+    144.4
+   ]
+  },
+  {
+   "date": "2026-09-18",
+   "sym": "S1",
+   "old": 5,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    13.2,
+    13.7,
+    6.0,
+    16.9,
+    30.0
+   ],
+   "new_age_h": [
+    36.5,
+    41.9,
+    50.0,
+    64.6,
+    57.1,
+    64.5,
+    71.1,
+    114.6
+   ]
+  },
+  {
+   "date": "2026-09-18",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -422.0,
+    11.8,
+    12.0,
+    12.0,
+    10.4,
+    13.4,
+    22.5,
+    17.0
+   ],
+   "new_age_h": [
+    12.0,
+    22.5,
+    17.0,
+    39.0,
+    37.9,
+    50.5,
+    93.8,
+    86.5
+   ]
+  },
+  {
+   "date": "2026-09-18",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-18",
+   "sym": "S4",
+   "old": 0,
+   "new": 2,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    59.5,
+    168.4
+   ]
+  },
+  {
+   "date": "2026-09-21",
+   "sym": "S1",
+   "old": 6,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    35.6,
+    52.1,
+    52.2,
+    56.8,
+    56.8,
+    63.5
+   ],
+   "new_age_h": [
+    52.2,
+    108.5,
+    113.9,
+    122.0,
+    136.6,
+    129.1,
+    136.5,
+    143.1
+   ]
+  },
+  {
+   "date": "2026-09-21",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -350.0,
+    12.0,
+    36.1,
+    49.7,
+    48.5,
+    56.0,
+    65.0,
+    68.0
+   ],
+   "new_age_h": [
+    36.1,
+    49.7,
+    84.0,
+    94.5,
+    89.0,
+    111.0,
+    109.9,
+    122.5
+   ]
+  },
+  {
+   "date": "2026-09-21",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-21",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    131.5
+   ]
+  },
+  {
+   "date": "2026-09-22",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    9.4,
+    11.3,
+    11.7,
+    4.6,
+    8.6,
+    17.0,
+    45.4,
+    59.6
+   ],
+   "new_age_h": [
+    76.2,
+    132.5,
+    137.9,
+    146.0,
+    160.6,
+    153.1,
+    160.5,
+    167.1
+   ]
+  },
+  {
+   "date": "2026-09-22",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -326.0,
+    2.7,
+    12.0,
+    14.6,
+    16.5,
+    17.3,
+    33.3,
+    36.0
+   ],
+   "new_age_h": [
+    60.1,
+    73.7,
+    108.0,
+    118.5,
+    113.0,
+    121.7,
+    135.0,
+    133.9
+   ]
+  },
+  {
+   "date": "2026-09-22",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-22",
+   "sym": "S4",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    155.5
+   ]
+  },
+  {
+   "date": "2026-09-23",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 4,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    4.0,
+    17.5,
+    11.8,
+    35.3,
+    35.7,
+    30.0,
+    30.0,
+    26.0
+   ],
+   "new_age_h": [
+    11.8,
+    30.0,
+    30.0,
+    26.0,
+    100.2,
+    122.9,
+    156.5,
+    161.9
+   ]
+  },
+  {
+   "date": "2026-09-23",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 4,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -302.0,
+    1.7,
+    16.8,
+    10.0,
+    14.3,
+    16.3,
+    19.5,
+    25.6
+   ],
+   "new_age_h": [
+    1.7,
+    16.8,
+    10.0,
+    25.6,
+    84.1,
+    97.7,
+    132.0,
+    137.0
+   ]
+  },
+  {
+   "date": "2026-09-23",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-23",
+   "sym": "S4",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-24",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    1.9,
+    11.7,
+    6.0,
+    17.8,
+    28.0,
+    25.7,
+    26.0,
+    41.5
+   ],
+   "new_age_h": [
+    1.9,
+    17.8,
+    35.8,
+    54.0,
+    54.0,
+    50.0,
+    124.2,
+    146.9
+   ]
+  },
+  {
+   "date": "2026-09-24",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 3,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    14.4,
+    11.4,
+    14.0,
+    22.0,
+    22.3,
+    22.7,
+    25.7,
+    40.8
+   ],
+   "new_age_h": [
+    11.4,
+    22.3,
+    22.7,
+    25.7,
+    40.8,
+    34.0,
+    49.6,
+    108.1
+   ]
+  },
+  {
+   "date": "2026-09-24",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-24",
+   "sym": "S4",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-25",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    12.5,
+    25.0,
+    25.8,
+    25.9,
+    26.0,
+    35.7,
+    29.0,
+    30.0
+   ],
+   "new_age_h": [
+    25.9,
+    41.8,
+    59.8,
+    78.0,
+    78.0,
+    74.0,
+    148.2,
+    170.9
+   ]
+  },
+  {
+   "date": "2026-09-25",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    2.6,
+    11.1,
+    11.8,
+    19.0,
+    26.0,
+    26.5,
+    36.3,
+    38.4
+   ],
+   "new_age_h": [
+    11.8,
+    35.4,
+    46.3,
+    46.7,
+    49.7,
+    64.8,
+    58.0,
+    73.6
+   ]
+  },
+  {
+   "date": "2026-09-25",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-25",
+   "sym": "S4",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-28",
+   "sym": "S1",
+   "old": 2,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    57.3,
+    67.8
+   ],
+   "new_age_h": [
+    57.3,
+    97.0,
+    97.9,
+    113.8,
+    131.8,
+    150.0,
+    150.0,
+    146.0
+   ]
+  },
+  {
+   "date": "2026-09-28",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    9.0,
+    52.2,
+    70.1,
+    75.0,
+    68.0,
+    79.0,
+    71.2,
+    74.6
+   ],
+   "new_age_h": [
+    75.0,
+    68.0,
+    83.8,
+    107.4,
+    118.7,
+    121.7,
+    136.8,
+    130.0
+   ]
+  },
+  {
+   "date": "2026-09-28",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-28",
+   "sym": "S4",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-29",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    11.2,
+    12.6,
+    16.8,
+    8.9,
+    9.3,
+    19.9,
+    22.5,
+    24.9
+   ],
+   "new_age_h": [
+    8.9,
+    22.5,
+    81.3,
+    121.0,
+    121.9,
+    131.7,
+    137.8,
+    155.8
+   ]
+  },
+  {
+   "date": "2026-09-29",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    2.6,
+    11.0,
+    8.0,
+    17.0,
+    17.6,
+    19.5,
+    16.5,
+    23.3
+   ],
+   "new_age_h": [
+    11.0,
+    17.6,
+    76.2,
+    99.0,
+    92.0,
+    103.0,
+    95.2,
+    107.8
+   ]
+  },
+  {
+   "date": "2026-09-29",
+   "sym": "S3",
+   "old": 1,
+   "new": 1,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    19.0
+   ],
+   "new_age_h": [
+    19.0
+   ]
+  },
+  {
+   "date": "2026-09-29",
+   "sym": "S4",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-09-30",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    11.0,
+    11.4,
+    23.5,
+    25.0,
+    26.0,
+    26.7,
+    35.2,
+    36.6
+   ],
+   "new_age_h": [
+    11.4,
+    23.5,
+    32.9,
+    105.3,
+    145.0,
+    145.9,
+    155.7,
+    161.8
+   ]
+  },
+  {
+   "date": "2026-09-30",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    11.0,
+    11.8,
+    6.5,
+    26.0,
+    24.1,
+    26.6,
+    35.0,
+    36.0
+   ],
+   "new_age_h": [
+    26.0,
+    24.1,
+    35.0,
+    41.6,
+    123.0,
+    116.0,
+    119.2,
+    131.8
+   ]
+  },
+  {
+   "date": "2026-09-30",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    43.0
+   ]
+  },
+  {
+   "date": "2026-09-30",
+   "sym": "S4",
+   "old": 2,
+   "new": 2,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    20.3,
+    21.8
+   ],
+   "new_age_h": [
+    20.3,
+    21.8
+   ]
+  },
+  {
+   "date": "2026-10-01",
+   "sym": "S1",
+   "old": 5,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    2.0,
+    12.2,
+    21.4,
+    35.0,
+    35.4
+   ],
+   "new_age_h": [
+    35.4,
+    47.5,
+    50.0,
+    56.9,
+    70.5,
+    129.3,
+    169.0,
+    169.8
+   ]
+  },
+  {
+   "date": "2026-10-01",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    2.5,
+    13.2,
+    14.7,
+    20.0,
+    22.2,
+    35.0,
+    35.8,
+    30.5
+   ],
+   "new_age_h": [
+    13.2,
+    50.0,
+    48.1,
+    59.0,
+    65.6,
+    147.0,
+    140.0,
+    151.0
+   ]
+  },
+  {
+   "date": "2026-10-01",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    67.0
+   ]
+  },
+  {
+   "date": "2026-10-01",
+   "sym": "S4",
+   "old": 1,
+   "new": 3,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    18.0
+   ],
+   "new_age_h": [
+    18.0,
+    44.3,
+    45.8
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    12.0,
+    10.1,
+    18.6,
+    18.6,
+    20.8,
+    20.9,
+    19.4,
+    36.2
+   ],
+   "new_age_h": [
+    20.8,
+    20.9,
+    59.4,
+    71.5,
+    74.0,
+    80.9,
+    94.5,
+    153.3
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 1,
+   "new_future_ts": 0,
+   "old_age_h": [
+    -86.0,
+    1.4,
+    2.2,
+    17.3,
+    18.0,
+    14.6,
+    26.5,
+    37.2
+   ],
+   "new_age_h": [
+    1.4,
+    17.3,
+    37.2,
+    74.0,
+    72.1,
+    83.0,
+    80.0,
+    89.6
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    91.0
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "sym": "S4",
+   "old": 1,
+   "new": 3,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    42.0
+   ],
+   "new_age_h": [
+    42.0,
+    68.3,
+    69.8
+   ]
+  },
+  {
+   "date": "2026-10-05",
+   "sym": "S1",
+   "old": 7,
+   "new": 8,
+   "changed": 7,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    58.7,
+    60.0,
+    60.1,
+    61.1,
+    61.5,
+    61.5,
+    61.5
+   ],
+   "new_age_h": [
+    61.5,
+    92.8,
+    92.9,
+    131.4,
+    143.5,
+    146.0,
+    152.9,
+    166.5
+   ]
+  },
+  {
+   "date": "2026-10-05",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    23.4,
+    50.0,
+    58.1,
+    61.5,
+    59.9,
+    60.6,
+    60.9,
+    73.4
+   ],
+   "new_age_h": [
+    58.1,
+    61.5,
+    73.4,
+    71.7,
+    109.2,
+    146.0,
+    155.0,
+    161.6
+   ]
+  },
+  {
+   "date": "2026-10-05",
+   "sym": "S3",
+   "old": 0,
+   "new": 1,
+   "changed": 1,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    163.0
+   ]
+  },
+  {
+   "date": "2026-10-05",
+   "sym": "S4",
+   "old": 6,
+   "new": 8,
+   "changed": 2,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    65.8,
+    67.7,
+    67.9,
+    71.0,
+    72.6,
+    65.8
+   ],
+   "new_age_h": [
+    65.8,
+    67.7,
+    67.9,
+    71.0,
+    72.6,
+    65.8,
+    140.3,
+    141.8
+   ]
+  },
+  {
+   "date": "2026-10-06",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    11.4,
+    11.5,
+    6.0,
+    20.7,
+    23.1,
+    84.0,
+    84.1,
+    85.5
+   ],
+   "new_age_h": [
+    11.4,
+    11.5,
+    6.0,
+    85.5,
+    116.8,
+    155.4,
+    167.5,
+    170.0
+   ]
+  },
+  {
+   "date": "2026-10-06",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 5,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    9.0,
+    9.5,
+    19.2,
+    47.4,
+    63.7,
+    74.0,
+    82.1,
+    85.5
+   ],
+   "new_age_h": [
+    9.5,
+    82.1,
+    85.5,
+    83.9,
+    97.4,
+    95.7,
+    133.2,
+    170.0
+   ]
+  },
+  {
+   "date": "2026-10-06",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-10-06",
+   "sym": "S4",
+   "old": 0,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": [
+    89.8,
+    91.7,
+    91.9,
+    95.0,
+    96.6,
+    89.8,
+    164.3,
+    165.8
+   ]
+  },
+  {
+   "date": "2026-10-07",
+   "sym": "S1",
+   "old": 8,
+   "new": 8,
+   "changed": 3,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    12.1,
+    12.4,
+    5.4,
+    35.5,
+    35.5,
+    30.0,
+    36.7,
+    44.7
+   ],
+   "new_age_h": [
+    12.1,
+    12.4,
+    35.5,
+    35.5,
+    30.0,
+    109.5,
+    140.8,
+    140.9
+   ]
+  },
+  {
+   "date": "2026-10-07",
+   "sym": "S2",
+   "old": 8,
+   "new": 8,
+   "changed": 6,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    12.0,
+    12.1,
+    12.8,
+    17.0,
+    33.0,
+    33.5,
+    43.2,
+    44.7
+   ],
+   "new_age_h": [
+    12.0,
+    33.5,
+    106.1,
+    109.5,
+    107.9,
+    121.4,
+    119.7,
+    157.2
+   ]
+  },
+  {
+   "date": "2026-10-07",
+   "sym": "S3",
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  {
+   "date": "2026-10-07",
+   "sym": "S4",
+   "old": 8,
+   "new": 8,
+   "changed": 3,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    7.7,
+    22.0,
+    18.4,
+    18.4,
+    22.5,
+    22.6,
+    26.6,
+    26.6
+   ],
+   "new_age_h": [
+    7.7,
+    22.0,
+    22.5,
+    22.6,
+    26.6,
+    115.9,
+    119.0,
+    120.6
+   ]
+  }
+ ],
+ "default_path": {
+  "run_at": "2026-10-08T05:55:48+00:00",
+  "S1": {
+   "old": 8,
+   "new": 8,
+   "changed": 3,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    4.1,
+    6.3,
+    18.8,
+    19.2,
+    33.9,
+    33.9,
+    40.0,
+    40.4
+   ],
+   "new_age_h": [
+    6.3,
+    18.8,
+    19.2,
+    40.0,
+    40.4,
+    63.4,
+    63.4,
+    57.9
+   ]
+  },
+  "S2": {
+   "old": 8,
+   "new": 8,
+   "changed": 4,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    11.9,
+    11.9,
+    15.4,
+    15.6,
+    27.8,
+    20.4,
+    20.6,
+    29.9
+   ],
+   "new_age_h": [
+    11.9,
+    27.8,
+    20.4,
+    29.9,
+    39.9,
+    137.4,
+    149.3,
+    147.7
+   ]
+  },
+  "S3": {
+   "old": 0,
+   "new": 0,
+   "changed": 0,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [],
+   "new_age_h": []
+  },
+  "S4": {
+   "old": 1,
+   "new": 8,
+   "changed": 8,
+   "old_future_ts": 0,
+   "new_future_ts": 0,
+   "old_age_h": [
+    21.2
+   ],
+   "new_age_h": [
+    35.6,
+    49.9,
+    50.4,
+    50.5,
+    54.5,
+    143.9,
+    146.9,
+    148.6
+   ]
+  }
+ }
+}
