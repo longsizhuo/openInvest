@@ -40,7 +40,6 @@ from typing import Any
 SKIP_RELPATHS = {
     "docs/verdict_accuracy.md",   # gitignored: contains real hit-rate data
     "docs/path_calibration.md",   # gitignored: regenerated report
-    "docs/path_calibration_live.md",  # gitignored: weekly live report
 }
 
 # Glob patterns (relative to repo root) that make up the OKF knowledge base.

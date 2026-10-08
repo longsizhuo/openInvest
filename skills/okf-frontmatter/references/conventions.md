@@ -7,7 +7,7 @@ The OKF knowledge base is everything matched by `find_docs.py`'s globs:
 - `docs/*.md` — loose docs (`type: reference` / `report` / `readme`)
 
 Gitignored, machine-regenerated reports are **excluded** (the script skips
-`docs/verdict_accuracy.md`, `docs/path_calibration.md` and `docs/path_calibration_live.md`). Don't add frontmatter to those.
+`docs/verdict_accuracy.md` and `docs/path_calibration.md`). Don't add frontmatter to those.
 
 ## Frontmatter schema
 
