@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.38.0](https://github.com/longsizhuo/openInvest/compare/v0.37.2...v0.38.0) (2026-10-08)
+
+
+### Features
+
+* **display:** show a deterministic same-kind lookup (live + paper fleet) next to verdicts instead of the CIO's self-reported confidence ([#296](https://github.com/longsizhuo/openInvest/issues/296)) ([aee3ad7](https://github.com/longsizhuo/openInvest/commit/aee3ad76bec62c2fd2f68c608b506e4209d9f699))
+* **paper-fleet:** add a T2-CONFIDENCE CIO trial arm behind --t2-confidence-arm ([#293](https://github.com/longsizhuo/openInvest/issues/293)) ([6349beb](https://github.com/longsizhuo/openInvest/commit/6349beba20617ea8fa31e10707fab38ddba3d074))
+* **report:** list recent asset-specific events next to single-stock verdicts in the daily email ([#289](https://github.com/longsizhuo/openInvest/issues/289)) ([a49f09d](https://github.com/longsizhuo/openInvest/commit/a49f09d5915cca2f3357b42374b21e456a434e51))
+* **review:** unified weekend rule + re-export public accuracy summary ([#291](https://github.com/longsizhuo/openInvest/issues/291)) ([88ce9ff](https://github.com/longsizhuo/openInvest/commit/88ce9ffd1b48037244999af6f01ac97b4822c7d0))
+
+
+### Bug Fixes
+
+* **committee:** note that EVENT_STANCE is composition, not direction ([#286](https://github.com/longsizhuo/openInvest/issues/286)) ([bd8b2e5](https://github.com/longsizhuo/openInvest/commit/bd8b2e541adea8fb064f3322f4d40dc13de637c5))
+* **events:** map HK names' US ADR/OTC tickers and common CSI 300 ETFs ([#288](https://github.com/longsizhuo/openInvest/issues/288)) ([39fdf07](https://github.com/longsizhuo/openInvest/commit/39fdf070d60ab18647993af6252193ba9a9005f4))
+* **gold:** key spot-cache rows by bar date and write High/Low ([#287](https://github.com/longsizhuo/openInvest/issues/287)) ([482d17e](https://github.com/longsizhuo/openInvest/commit/482d17eb25123205e7d9a074e8360e939d166654))
+
 ## [0.37.2](https://github.com/longsizhuo/openInvest/compare/v0.37.1...v0.37.2) (2026-10-08)
 
 
