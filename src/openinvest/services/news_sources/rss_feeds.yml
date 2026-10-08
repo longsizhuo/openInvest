@@ -7,15 +7,11 @@
 # - url 必须是真正的 RSS / Atom（不是网页）—— 用 feedparser 解析
 
 feeds:
-  - name: reuters_business
-    url: https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best
+  # 2026-10-08 移除 reuters_business / yahoo_finance_headline / caixin_global：
+  # 三个源早已 404（改前改后都抓 0 条），留着只会每轮刷一条 WARNING。
   - name: bbc_business
     url: https://feeds.bbci.co.uk/news/business/rss.xml
   - name: ft_markets
     url: https://www.ft.com/markets?format=rss
-  - name: yahoo_finance_headline
-    url: https://finance.yahoo.com/news/rssindex
   - name: seeking_alpha_market
     url: https://seekingalpha.com/market_currents.xml
-  - name: caixin_global
-    url: https://www.caixinglobal.com/feed/
