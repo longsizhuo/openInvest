@@ -213,11 +213,15 @@ class EventStore:
         eid = event.get("event_id") or claim_to_event_id(claim)
         affected = event.get("affected_symbols") or []
         entities = event.get("entities") or []
-        ts = event.get("ts") or datetime.now(timezone.utc).isoformat(timespec="seconds")
         created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        ts = event.get("ts") or created_at
 
         with self._lock:
             cur = self.conn.cursor()
+            # 2026-10-08：ts 晚于入库时刻 = 错标（LLM 把预告日期当发生时刻），按入库时刻存；
+            # 与 recall 读侧 eff_ts 同一 julianday 口径（存量行由读侧兜底，不做数据迁移）
+            if cur.execute("SELECT julianday(?) > julianday(?)", (ts, created_at)).fetchone()[0]:
+                ts = created_at
             cur.execute(
                 "SELECT id, severity, affected_symbols_json, entities_json "
                 "FROM events WHERE event_id = ?", (eid,),
@@ -424,15 +428,15 @@ class EventStore:
     ) -> List[Dict[str, Any]]:
         """按维度召回 + 向量精排 + 时效冲突标注。
 
-        - hard filter: 时间窗 + min_severity + (symbol/aliases 在 affected_symbols 或 entity tag 命中)
+        - hard filter: 时间窗 + min_severity + (symbol/aliases 在 affected_symbols 或 entity tag 命中)，
+          全在 SQL 里先于 LIMIT 200 做（只在本标的合格集里取最新 200 条进精排）
+        - 未来 ts（ts 晚于 created_at）按 created_at 算：窗口、排序、返回的 ts 字段都用它
         - aliases: 代理匹配集合（issue #26，services/symbol_map.proxy_symbols_for——
           持 NDQ.AX 也命中标 ^NDX 的指数事件）；None → 仅 symbol 本身
         - as_of（issue #196，回测 as-of-D 零前视）：只召回 created_at <= as_of 的事件
           + 只挂 fetched_at <= as_of 的源，时间窗改以 as_of 为锚。口径定 created_at
           （系统自写的 UTC 入库时刻 = 硬边界），不用 ts（LLM 标注的发生时刻，可错标 /
           迟入库）。截断在 SQL 硬过滤里做 → 向量精排只在合格集内排。
-          ⚠️ 不保证 top_k 满额：现行 `ORDER BY ts DESC LIMIT 200` 先于 symbol 过滤，
-          高频/未来 ts 事件可挤掉目标标的（生产同病，as_of 忠实复现 D 时刻行为）。
           必须带时区（naive 口径不明直接 ValueError）。None = 现行为（锚 now、不截断）。
           ⚠️ 只截"事件存不存在"：同 event_id 后续 upsert 原地改写的 severity / stance /
           affected_symbols 没有历史版本，as_of 还原不了。
@@ -455,23 +459,32 @@ class EventStore:
         cutoff = (anchor - timedelta(days=time_window_days)).isoformat(timespec="seconds")
         # created_at 全库统一 isoformat(timespec="seconds") 的 +00:00 串 → 同格式字典序比较精确
         as_of_iso = anchor.isoformat(timespec="seconds") if as_of is not None else None
-        tags = [t.lower() for t in (extra_tags or [])]
+        tags = sorted({t.lower() for t in (extra_tags or [])})
+        match_syms = sorted({symbol.lower()} | {str(a).lower() for a in (aliases or [])})
 
-        sql, params = "SELECT * FROM events WHERE ts >= ? AND severity >= ?", [cutoff, min_sev_int]
+        # 2026-10-08：symbol/alias/tag 匹配下推进 SQL、先于 LIMIT。旧版先取全库最新 200 条
+        # 再在 Python 里按 symbol 过滤——7 天窗 ~1000 条时 200 条只覆盖 ~2 天，持仓标的自己的
+        # 事件被别的标的挤掉（生产快照：某持仓标的合格 8 条召回 0）。匹配口径同旧版：大小写不敏感的精确相等。
+        # ponytail: SQLite lower() 只折 ASCII；ticker / macro tag 全 ASCII，有非 ASCII tag 再注册 py lower
+        match = ("EXISTS (SELECT 1 FROM json_each(affected_symbols_json) WHERE lower(value) IN "
+                 f"({','.join('?' * len(match_syms))}))")
+        if tags:
+            match += (" OR EXISTS (SELECT 1 FROM json_each(entities_json) WHERE lower(value) IN "
+                      f"({','.join('?' * len(tags))}))")
+        # 未来 ts（LLM 把预告日期当发生时刻，存量最远到 12 月）按入库时刻算：
+        # created_at >= cutoff 让它入库满窗口即出窗；eff_ts 让它按入库时刻排序/展示，不钉在榜首。
+        # julianday 比的是真实时刻（ts 混着 +08:00 / Z / naive，字符串比不准）
+        # INDEXED BY：ORDER BY 不再是裸 ts 后，无 stat 的规划器会改走 severity 索引扫大半张表（实测 4x 慢）
+        sql = ("SELECT *, CASE WHEN julianday(ts) > julianday(created_at) THEN created_at "
+               "ELSE ts END AS eff_ts FROM events INDEXED BY idx_events_ts "
+               f"WHERE ts >= ? AND created_at >= ? AND severity >= ? AND ({match})")
+        params = [cutoff, cutoff, min_sev_int, *match_syms, *tags]
         if as_of_iso is not None:
             sql += " AND created_at <= ?"
             params.append(as_of_iso)
         cur = self.conn.cursor()
-        cur.execute(sql + " ORDER BY ts DESC LIMIT 200", params)
-        rows = cur.fetchall()
-
-        match_syms = {symbol.lower()} | {str(a).lower() for a in (aliases or [])}
-        candidates: List[Dict[str, Any]] = []
-        for r in rows:
-            affected = [s.lower() for s in json.loads(r["affected_symbols_json"] or "[]")]
-            ents = [s.lower() for s in json.loads(r["entities_json"] or "[]")]
-            if match_syms.intersection(affected) or any(t in ents for t in tags):
-                candidates.append(_row_to_event(r))
+        cur.execute(sql + " ORDER BY eff_ts DESC LIMIT 200", params)
+        candidates = [{**_row_to_event(r), "ts": r["eff_ts"]} for r in cur.fetchall()]
         if not candidates:
             return []
 

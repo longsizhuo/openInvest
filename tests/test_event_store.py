@@ -297,3 +297,70 @@ def test_ingested_by_migration_on_legacy_db():
         assert "ingested_by" in cols
         s2 = EventStore(db_path=path, embedding_dim=4)  # 再开一次 = 幂等
         s2.conn.close(); s.conn.close()
+
+
+def test_recall_symbol_not_crowded_out_by_other_symbols(store):
+    """2026-10-08：symbol 过滤必须先于 LIMIT 200。生产 7 天窗 ~1000 条，旧版取全库最新 200 条
+    再按 symbol 过滤 → 持仓标的稍早的事件被别的标的挤光（0/1：过滤挪回 LIMIT 之后即红）"""
+    for i in range(210):
+        store.upsert_event({
+            "one_line_claim": f"other news {i}", "stance": "risk", "severity": "high",
+            "ts": _utc_iso(0), "affected_symbols": ["OTHER"], "entities": [],
+        })
+    for i in range(3):
+        store.upsert_event({
+            "one_line_claim": f"ndq news {i}", "stance": "risk", "severity": "high",
+            "ts": _utc_iso(-3), "affected_symbols": ["NDQ.AX"], "entities": [],
+        })
+    out = store.recall("NDQ.AX", min_severity="mid")
+    assert sorted(e["one_line_claim"] for e in out) == [f"ndq news {i}" for i in range(3)]
+
+
+def test_recall_match_semantics_case_insensitive_exact(store):
+    """SQL 下推后匹配口径同旧 Python 版：symbol/alias/tag 大小写不敏感、精确相等（非子串）"""
+    def add(claim, syms, ents=()):
+        store.upsert_event({"one_line_claim": claim, "stance": "risk", "severity": "high",
+                            "ts": _utc_iso(-1), "affected_symbols": syms, "entities": list(ents)})
+    add("lower sym", ["ndq.ax"])
+    add("alias", ["^NDX"])
+    add("tag", ["GC=F"], ["US_Rates"])
+    add("substring", ["NDQ.AXX"])
+    add("other", ["NVDA"], ["nvidia"])
+    out = store.recall("NDQ.AX", aliases=["^ndx"], extra_tags=["us_rates"], min_severity="mid")
+    assert sorted(e["one_line_claim"] for e in out) == ["alias", "lower sym", "tag"]
+
+
+def test_recall_future_ts_not_pinned_at_top(store):
+    """存量未来 ts（LLM 把预告日期当发生时刻）按 created_at 算：入库满窗口即出窗；
+    窗口内按入库时刻排序、返回的 ts 也换成入库时刻（0/1：去掉 eff_ts / created_at 窗口即红）"""
+    def add(claim, ts, created_at):
+        _, eid = store.upsert_event({"one_line_claim": claim, "stance": "risk", "severity": "high",
+                                     "ts": _utc_iso(-1), "affected_symbols": ["NVDA"]})
+        # 绕过写侧钳制，模拟修复前已入库的存量行
+        store.conn.execute("UPDATE events SET ts = ?, created_at = ? WHERE event_id = ?",
+                           (ts, created_at, eid))
+    add("stale future", _utc_iso(60), _utc_iso(-10))   # 入库 10 天前，ts 在 2 个月后
+    fresh_created = _utc_iso(-2)
+    add("fresh future", _utc_iso(60), fresh_created)   # 入库 2 天前，ts 在 2 个月后
+    add("fresh real", _utc_iso(-1), _utc_iso(-1))
+    store.conn.commit()
+
+    out = store.recall("NVDA", min_severity="mid")
+    assert [e["one_line_claim"] for e in out] == ["fresh real", "fresh future"]
+    assert out[1]["ts"] == fresh_created  # 返回的 ts 换成入库时刻
+    assert [e["one_line_claim"] for e in store.recall("NVDA", min_severity="mid", top_k=1)] \
+        == ["fresh real"]
+
+
+def test_upsert_clamps_future_ts_to_created_at(store):
+    """写侧：ts 真实时刻晚于入库时刻 → 存 created_at；+08:00 写法字符串更大但时刻更早的不动"""
+    _, eid = store.upsert_event({"one_line_claim": "FOMC on Dec 7", "stance": "risk",
+                                 "severity": "high", "ts": _utc_iso(60), "affected_symbols": ["X"]})
+    row = store.conn.execute("SELECT ts, created_at FROM events WHERE event_id = ?", (eid,)).fetchone()
+    assert row["ts"] == row["created_at"]
+
+    cst = (datetime.now(timezone.utc) - timedelta(hours=1)).astimezone(
+        timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+    _, eid2 = store.upsert_event({"one_line_claim": "CST stamped", "stance": "risk",
+                                  "severity": "high", "ts": cst, "affected_symbols": ["X"]})
+    assert store.get_event(eid2)["ts"] == cst
