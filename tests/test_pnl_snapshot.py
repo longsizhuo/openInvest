@@ -233,6 +233,9 @@ def test_outperform_events_nonempty_on_happy_path(monkeypatch):
     assert captured_args == [("2026-06-01",)]  # start_date 必须传，不能裸调
     assert events != []
     assert events[0]["benchmark"] == "纳指"  # BenchmarkSeries 只有 .key，没有 .label
+    # #234-3：两侧口径不同，对外 label 只写方向 + 口径说明，不量化差值
+    assert events[0]["label"] == "作者账户过去 2 个数据点 跑赢纳指（口径不同，只看方向）"
+    assert events[0]["diff_pct"] == 3.0  # 原始字段保留
 
 
 # ---------- README outperform feed 署名按 git remote 推断（fork 不挂作者账户） ----------

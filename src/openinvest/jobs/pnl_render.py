@@ -304,15 +304,16 @@ def _outperform_events(
     history: List[Dict[str, Any]],
     all_series: List[BenchmarkSeries],
 ) -> List[Dict[str, Any]]:
-    """对比所有基准的当前累计涨幅 → 找出"openInvest 跑赢 X 多少"的事件
+    """对比所有基准的当前累计涨幅 → 每个基准一条"跑赢 / 跑输"方向事件
 
-    PM-3 增长杠杆：每次 pnl_snapshot 都生成事件化文本，让用户拥有"可分享的瞬间"
-    （"我跑赢了余额宝 +2.3%"截图发朋友圈），而不是只有一张静态图。事件落盘到
-    docs/outperform_events.jsonl 给后续 daily digest / web GUI 引用。
+    事件落盘到 docs/outperform_events.jsonl，README feed / web API 引用。
 
-    返回 List[{"benchmark": str, "diff_pct": float, "label": str, "user_pct": float,
-              "bench_pct": float, "ts": ISO}]，按 diff_pct 倒序。**diff_pct 必须 > 0**
-    才算 outperform 事件 —— 落后基准时不生成"事件"（避免每次都报负面）。
+    返回 List[{"benchmark", "user_pct", "bench_pct", "diff_pct", "is_outperform",
+              "label", "ts"}]，跑赢跑输都记，按 |diff_pct| 倒序。
+
+    口径（#234-3）：user_pct 是实盘累计成本收益（分批建仓），bench_pct 是窗口首日
+    一次性买入——两侧不可比，diff_pct 只有正负有意义。label 是对外文案，只写方向
+    + 口径说明，不写差值（与 SVG 底部脚注同一口径）；diff_pct 留作原始字段。
     """
     if snap.total_pnl_pct is None:
         return []
@@ -343,10 +344,10 @@ def _outperform_events(
             "is_outperform": win,
             "label": (
                 f"作者账户过去 {len(history)} 个数据点 "
-                f"{'跑赢' if win else '跑输'}{series.key} {diff:+.2f}%"
+                f"{'跑赢' if win else '跑输'}{series.key}（口径不同，只看方向）"
             ),
         })
-    # 按 |diff| 排序（绝对幅度大的优先展示），不再"只挑赢的"
+    # 按 |diff| 排序只决定展示顺序（README 取前 3），不对外展示差值本身
     events.sort(key=lambda e: abs(e["diff_pct"]), reverse=True)
     return events
 
