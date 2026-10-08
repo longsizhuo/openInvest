@@ -286,3 +286,38 @@ def test_sync_pending_migration_tolerates_concurrent_add(tmp_path, monkeypatch):
     monkeypatch.setattr(tdb.sqlite3, "connect", lambda *a, **k: _Conn(real_connect(*a, **k)))
     db = TradesDB(str(path))  # 旧码：OperationalError duplicate column name
     assert db is not None
+
+
+
+def test_concurrent_first_open_of_legacy_db_migrates_cleanly(tmp_path):
+    """web/MCP/scheduler（及线程池里的 web 端点）重启后同时首开未迁移的旧库：不能有一个失败。"""
+    import sqlite3
+    import threading
+
+    errors = []
+    for i in range(15):
+        path = tmp_path / f"legacy{i}.db"
+        c = sqlite3.connect(path)
+        c.execute("PRAGMA journal_mode=WAL")  # 生产库自 #104 起就是 WAL
+        c.execute(
+            "CREATE TABLE trades (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, "
+            "verdict_id TEXT, symbol TEXT, action TEXT, quantity REAL, price REAL, currency TEXT, "
+            "note TEXT, status TEXT, intended_date TEXT)"
+        )
+        c.commit()
+        c.close()
+        barrier = threading.Barrier(4)
+
+        def _open():
+            barrier.wait()
+            try:
+                TradesDB(str(path))
+            except Exception as e:  # noqa: BLE001
+                errors.append(repr(e))
+
+        ts = [threading.Thread(target=_open) for _ in range(4)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    assert errors == []

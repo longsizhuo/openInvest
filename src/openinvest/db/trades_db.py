@@ -56,6 +56,9 @@ class TradesDB:
         except Exception:
             pass
         self.conn.commit()
+        # checkpoint 结果行没读完的游标会挂着读事务，_init_db 的 ALTER 拿不到写锁、
+        # 绕过 busy_timeout 立刻 "database is locked"（多进程/线程同时首开旧库）
+        cur.close()
 
         self._lock = threading.RLock()
         self._init_db()
