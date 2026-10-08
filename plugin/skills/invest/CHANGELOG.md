@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.2](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.20.1...invest-skill-v0.20.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **events:** 触发闸提成共享 service——Hermes 投喂的事件接上委员会触发，两门共享冷却/日上限 ([#261](https://github.com/longsizhuo/openInvest/issues/261)) ([b633cf2](https://github.com/longsizhuo/openInvest/commit/b633cf20f88e3969117013719586fdd6bd5b0eb5))
+* **news:** RSS 抓取加整次总时限与地址校验，add_news_source 只收公网源且不阻塞 MCP ([#262](https://github.com/longsizhuo/openInvest/issues/262)) ([566538f](https://github.com/longsizhuo/openInvest/commit/566538fd1973ab3f19e032ff55452f2fa676f7e2))
+
 ## [0.20.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.20.0...invest-skill-v0.20.1) (2026-07-17)
 
 
