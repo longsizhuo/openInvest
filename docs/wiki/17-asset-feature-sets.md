@@ -33,7 +33,7 @@ documents:
 | trailing PE 估值分档 | ✅ | ❌ **不喂**（黄金无盈利；估值 brief 仅权益类出）| `utils/valuation.py` |
 | CNN Fear&Greed | ✅（graceful 退化）| 跟随市场级 sentiment brief（非黄金专属信号）| `utils/sentiment.py` |
 | 货币因素（DXY + TIP 实际利率代理）| ❌ | ✅（进 Macro prompt）| Macro 维度 |
-| 事件层（新闻 RAG + EVENT_STANCE）| ✅（经 symbol_map 代理映射）| ✅（gold/bullion/xau 实体兜底 + 持金常驻 queries）| `services/symbol_map.py` |
+| 事件层（新闻 RAG + EVENT_STANCE）| ✅（经 symbol_map 代理映射：ETF→指数白名单含沪深 300 常见 ETF；港股↔美股 ADR/OTC 同公司代码表——触发闸只认后者，指数事件不触发 ETF 委员会）| ✅（gold/bullion/xau 实体兜底 + 持金常驻 queries）| `services/symbol_map.py` |
 | COT 持仓（CFTC 非商业净持仓）| ❌ | ❌ **暂不喂**——test_ta 实验中机械映射 2022 年 61.3% vs 基率 51.4%（未显著），挂前向验证队列 | wiki 16 §5b 残余线索 |
 
 ## 黄金防御语义：分批 DCA（2026-06-13 裁决，取代旧"全拦"）

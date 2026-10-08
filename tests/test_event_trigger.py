@@ -272,3 +272,16 @@ def test_advisory_mcp_ingest_never_triggers_or_alerts(env, monkeypatch):
     trigger.assert_not_called()
     alert.assert_not_called()
     watched.assert_not_called()  # 顾问模式不读持仓
+
+
+def test_adr_tagged_event_triggers_hk_listing_committee(env, monkeypatch):
+    """事件打标美股 ADR 代码、关注的是港股上市：照样过闸，委员会按关注写法跑，事件打上链接。
+    ETF→指数跟踪不进闸（指数事件不触发 ETF 委员会，现行为）。"""
+    trigger, _, _ = env
+    monkeypatch.setattr(event_trigger, "_watched_symbols", lambda: ["0700.HK", "QQQ"])
+    out = _feed(monkeypatch, "adr-guidance-cut", ["TCEHY"])
+    assert trigger.call_args.kwargs["symbols"] == ["0700.HK"]
+    from openinvest.db.event_store import EventStore
+    assert EventStore().get_event(out["events"][0]["event_id"])["committee_task_id"] == out["committee_task_id"]
+    assert _feed(monkeypatch, "index-slide", ["^NDX"])["committee_task_id"] is None
+    assert trigger.call_count == 1

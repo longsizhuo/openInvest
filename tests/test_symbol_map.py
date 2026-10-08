@@ -162,3 +162,40 @@ def test_normalizer_writes_canonical_hk_symbol():
     }, offset=0)
     assert ev is not None
     assert ev.event["affected_symbols"] == ["1234.HK"]
+
+
+# ---------- 同公司跨市场代码（港股 ↔ ADR/OTC）+ 沪深 300 ETF 批量 ----------
+
+def test_listing_aliases_bidirectional():
+    from openinvest.services.symbol_map import listing_aliases
+    assert listing_aliases("9988.HK") == frozenset({"9988.HK", "BABA", "BABAF"})
+    assert listing_aliases("BABA") == listing_aliases("9988.HK")
+    assert listing_aliases("00700.HK") == frozenset({"0700.HK", "TCEHY", "TCTZF"})  # 补零写法先归一
+    assert listing_aliases("AAPL") == frozenset({"AAPL"})
+    assert listing_aliases("") == frozenset()
+
+
+def test_proxy_includes_cross_listings_and_csi300_etfs():
+    assert proxy_symbols_for("0700.HK") == frozenset({"0700.HK", "TCEHY", "TCTZF"})
+    assert "9988.HK" in proxy_symbols_for("BABA")
+    for etf in ("510310.SS", "159919.SZ"):
+        assert proxy_symbols_for(etf) == frozenset({etf, "000300.SS"})
+
+
+def test_recall_and_stance_match_adr_tagged_event(tmp_path):
+    """打标 ADR 代码的事件，持港股上市的用户召回命中 + EVENT_STANCE 有值。"""
+    from datetime import datetime, timezone
+    from openinvest.db.event_store import EventStore
+    from openinvest.utils.sentiment import event_stance_line_for_symbol
+
+    store = EventStore(db_path=tmp_path / "ev.db", embedding_dim=4)
+    store.upsert_event({
+        "one_line_claim": "Regulator fines internet platform",
+        "event_type": "regulatory", "stance": "risk", "severity": "high",
+        "source_reliability": "high", "ts": datetime.now(timezone.utc).isoformat(),
+        "entities": ["platform"], "affected_symbols": ["TCEHY"],
+    }, embedding=None)
+    assert len(store.recall("0700.HK", aliases=sorted(proxy_symbols_for("0700.HK")))) == 1
+    brief = "[2026-06-10T08:00:00+00:00] [risk/high] [BABA] (sources: r)\nadr event\n"
+    assert event_stance_line_for_symbol(brief, "9988.HK") is not None
+    assert event_stance_line_for_symbol(brief, "0700.HK") is None

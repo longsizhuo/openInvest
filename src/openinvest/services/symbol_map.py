@@ -52,6 +52,44 @@ def normalize_symbol(symbol: str) -> str:
     return f"{digits.zfill(4) if len(digits) < 4 else digits}.HK"
 
 
+# 同一家公司的跨市场代码：港股上市 ↔ 美股 ADR / OTC。LLM 归一化器常用美股/OTC 代码给
+# 港股公司打标（打标 OTC 代码的事件对持港股的用户召回 / 触发 / EVENT_STANCE 全不可见）。
+# 通用金融知识批量表，准入标准同 TRACKING_WHITELIST：任何用户持有该 ticker 都成立。
+HK_CROSS_LISTINGS: Dict[str, FrozenSet[str]] = {
+    "0700.HK": frozenset({"TCEHY", "TCTZF"}),   # Tencent
+    "9988.HK": frozenset({"BABA", "BABAF"}),    # Alibaba
+    "3690.HK": frozenset({"MPNGY", "MPNGF"}),   # Meituan
+    "1810.HK": frozenset({"XIACY", "XIACF"}),   # Xiaomi
+    "1024.HK": frozenset({"KUASF"}),            # Kuaishou
+    "9618.HK": frozenset({"JD"}),               # JD.com
+    "9888.HK": frozenset({"BIDU"}),             # Baidu
+    "9999.HK": frozenset({"NTES"}),             # NetEase
+    "1211.HK": frozenset({"BYDDY", "BYDDF"}),   # BYD
+    "2015.HK": frozenset({"LI"}),               # Li Auto
+    "9866.HK": frozenset({"NIO"}),              # NIO
+    "9868.HK": frozenset({"XPEV"}),             # XPeng
+    "9961.HK": frozenset({"TCOM"}),             # Trip.com
+    "9626.HK": frozenset({"BILI"}),             # Bilibili
+    "2318.HK": frozenset({"PNGAY", "PIAIF"}),   # Ping An
+    "1299.HK": frozenset({"AAGIY", "AAIGF"}),   # AIA
+    "0388.HK": frozenset({"HKXCY", "HKXCF"}),   # HKEX
+    "2020.HK": frozenset({"ANPDY", "ANPDF"}),   # Anta
+    "0175.HK": frozenset({"GELYY", "GELYF"}),   # Geely
+    "0992.HK": frozenset({"LNVGY", "LNVGF"}),   # Lenovo
+}
+_ALIAS_TO_HK: Dict[str, str] = {a: hk for hk, als in HK_CROSS_LISTINGS.items() for a in als}
+
+
+def listing_aliases(symbol: str) -> FrozenSet[str]:
+    """同一家公司的全部上市代码（双向：港股 ↔ ADR/OTC），不在表里 → {自身}；空 → 空集合。
+    只含"同一资产"，不含跟踪关系（ETF→指数走 proxy_symbols_for）。"""
+    s = normalize_symbol(symbol)
+    if not s:
+        return frozenset()
+    hk = _ALIAS_TO_HK.get(s, s)
+    return frozenset({s, hk} | HK_CROSS_LISTINGS.get(hk, frozenset()))
+
+
 def canonical_symbols_for_entities(entities: Iterable[str]) -> List[str]:
     """entities 命中第一层映射 → canonical symbol 列表（保序去重）。纯代码规则，零 LLM。"""
     joined = " ".join(str(e).lower() for e in entities if str(e).strip())
@@ -81,6 +119,12 @@ TRACKING_WHITELIST: Dict[str, FrozenSet[str]] = {
     "IAU": frozenset({"GC=F"}),
     "PMGOLD.AX": frozenset({"GC=F"}),
     "518880.SS": frozenset({"GC=F"}),
+    # 沪深 300（常见 ETF，沪深两所）
+    "510300.SS": frozenset({"000300.SS"}),
+    "510310.SS": frozenset({"000300.SS"}),
+    "510330.SS": frozenset({"000300.SS"}),
+    "159919.SZ": frozenset({"000300.SS"}),
+    "159925.SZ": frozenset({"000300.SS"}),
 }
 
 
@@ -89,7 +133,7 @@ def proxy_symbols_for(
     *,
     tracks: Optional[Iterable[str] | str] = None,
 ) -> FrozenSet[str]:
-    """用户标的的代理匹配集合：{自身} ∪ {追踪的 canonical}。
+    """用户标的的代理匹配集合：{自身} ∪ {同公司跨市场代码} ∪ {追踪的 canonical}。
 
     tracks: strategy.target_assets 里该资产的可选 `tracks` 字段（str 或 list），
     用户显式声明优先——白名单覆盖不到的新 ETF 由用户自己配，零代码改动。
@@ -98,7 +142,7 @@ def proxy_symbols_for(
     s = str(symbol or "").strip().upper()
     if not s:
         return frozenset()
-    out = {s}
+    out = {s} | listing_aliases(s)
     out |= TRACKING_WHITELIST.get(s, frozenset())
     if tracks:
         if isinstance(tracks, str):
@@ -109,8 +153,10 @@ def proxy_symbols_for(
 
 __all__ = [
     "ENTITY_CANONICAL_PATTERNS",
+    "HK_CROSS_LISTINGS",
     "TRACKING_WHITELIST",
     "canonical_symbols_for_entities",
+    "listing_aliases",
     "normalize_symbol",
     "proxy_symbols_for",
 ]

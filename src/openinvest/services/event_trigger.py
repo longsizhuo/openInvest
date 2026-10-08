@@ -219,7 +219,12 @@ def trigger_for_new_events(
     cfg = load_config(_force_reload=True).event
     if watched is None:
         watched = _watched_symbols()
-    canonical = {s.lower(): s for s in watched}
+    # 关注标的 ∪ 它的同公司跨市场代码（打标美股 ADR/OTC 代码的港股公司事件也过闸），
+    # 映射回关注写法；自身写法优先（同时关注 ADR 和港股时各归各）。
+    # 不含 ETF→指数跟踪（proxy_symbols_for）：指数事件不触发 ETF 委员会，现行为不变
+    from openinvest.services.symbol_map import listing_aliases
+    canonical = {a.lower(): s for s in watched for a in listing_aliases(s)}
+    canonical.update({s.lower(): s for s in watched})
 
     triggerable: List[Dict[str, Any]] = []
     sev_by_sym: Dict[str, int] = {}  # 本批每个命中 symbol 的最高 severity（越级 / 额度排序用）
@@ -273,9 +278,9 @@ def trigger_for_new_events(
 
     admitted = ms.state_update(_STATE_NAME, _reserve)
     if admitted:
-        adm = {s.lower() for s in admitted}
+        adm = set(admitted)
         fed = [ev for ev in triggerable
-               if {s.lower() for s in (ev.get("affected_symbols") or [])} & adm]
+               if {canonical.get(s.lower()) for s in (ev.get("affected_symbols") or [])} & adm]
         task_id = _trigger_committee(symbols=admitted, event_ids=[ev["event_id"] for ev in fed])
         if task_id:
             for ev in fed:
