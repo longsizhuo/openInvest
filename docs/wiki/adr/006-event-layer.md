@@ -39,7 +39,7 @@ openInvest 在本次提交前是**纯定时驱动**：`daily_report` 10:00，没
 1. **Trigger 路径**（盘中实时）—— `jobs/event_watch.py` cron 默认 `*/30 0-2,8-23 * * *`（按 Asia/Shanghai，即北京 8:00-次日 2:30；可经 config `event.watch_schedule` 运行时改，ADR-017，scheduler ≤10 分钟自动拾取）：
    - 多源拉新闻（DDGS news / RSS / yfinance.Ticker.news）
    - flash LLM 归一化为结构化事件（一次批调用）
-   - 维度命中（severity ≥ mid + 影响到 holdings/target_assets + stance ≠ neutral）→ 发 digest 邮件 + POST `/api/committee/run`
+   - 维度命中（severity ≥ mid + 影响到 holdings/target_assets + stance ≠ neutral）→ 发 digest 邮件；其中命中 target_assets 的再 POST `/api/committee/run`（只在持仓的标的委员会跑不了）
 
    > **2026-10 闸提成共享 service**：判级闸 + 触发 + 报警搬进 `services/event_trigger.py`，
    > agent 投喂门（MCP/CLI `ingest_event`）入库后走同一道闸——此前只入库，Hermes 哨兵

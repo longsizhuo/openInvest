@@ -3,7 +3,7 @@
 #261 起，爬虫 event_watch 和 agent 投喂 ingest_event（Hermes 哨兵走这条）共用
 services/event_trigger 的闸 + 冷却 + 日上限。本脚本统计窗口内**实际**触发了多少次委员会、
 各来自哪道门，并对照上线前的回放 experiments/event-gate-replay-2026-10
-（两门合计·越级开，49 天：爬虫 95 : 哨兵 59）。
+（两门合计·越级开，49 天：爬虫 87 : 哨兵 47，已扣除只在持仓的标的——#306 起它们不跑委员会）。
 
 触发记录从哪来：触发成功后，触发方给喂进委员会的事件打 events.committee_task_id。
 - 门 = 这些事件的 ingested_by（NULL = 爬虫管道）；event_type=price_action 是
@@ -30,7 +30,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # experiments/event-gate-replay-2026-10/result_all_doors.json（2026-08-20→10-07，49 个北京自然日）
-REPLAY = {"pipeline": 95, "hermes-sentinel": 59, "days": 49}
+# 对照基准扣掉"只在持仓、不在 target_assets"的运行（#306 起这类事件不再跑委员会，旧基准 95/59 含它们）
+REPLAY = {"pipeline": 87, "hermes-sentinel": 47, "days": 49}
 DAILY_CAP = 4  # event.committee_daily_cap 默认值；只用于"顶到上限的天数"这一描述量
 _CN = ZoneInfo("Asia/Shanghai")  # 按日口径同回放：北京自然日
 

@@ -233,12 +233,16 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
                              holdings_snapshot=_holdings_snapshot([sym]))
         except Exception as e:
             log.warning(f"[{sym}] 报警邮件发送失败: {e}")
-        try:
-            task_id = _trigger_committee([sym], [eid])
-            if task_id:
-                store.mark_committee_task(eid, task_id)
-        except Exception as e:
-            log.warning(f"[{sym}] 委员会触发失败（报警已发出，不回滚）: {e}")
+        # 委员会只能跑 target_assets（session 拒绝其它 symbol）：只在持仓的标的只报警
+        if sym not in ctx["watching"]:
+            log.info(f"[{sym}] 不在 target_assets，只报警不跑委员会")
+        else:
+            try:
+                task_id = _trigger_committee([sym], [eid])
+                if task_id:
+                    store.mark_committee_task(eid, task_id)
+            except Exception as e:
+                log.warning(f"[{sym}] 委员会触发失败（报警已发出，不回滚）: {e}")
 
         state[f"{sym}:{hit['direction']}"] = now.isoformat(timespec="seconds")
         alerted.append(sym)

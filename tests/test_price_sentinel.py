@@ -92,7 +92,7 @@ def sentinel_env(tmp_path, monkeypatch):
     # run() 内是 `from jobs.event_watch import _load_user_context`（调用时解析），打源模块
     monkeypatch.setattr(
         "openinvest.jobs.event_watch._load_user_context",
-        lambda: {"holdings": ["GC=F"], "watching": [], "macro_tags": [], "queries": []},
+        lambda: {"holdings": ["GC=F"], "watching": ["GC=F"], "macro_tags": [], "queries": []},
     )
     now = datetime.now(timezone.utc)
     # 垂直线场景：10 分钟 +1.77%，ATR 1.16%
@@ -120,6 +120,17 @@ class TestRun:
         assert out["alerted"] == 1 and out["symbols"] == ["GC=F"]
         names = [c[0] for c in sentinel_env.mock_calls]
         assert names.index("alert") < names.index("trigger")
+
+    def test_holdings_only_symbol_alerts_without_committee(self, sentinel_env, monkeypatch):
+        """只在持仓、不在 target_assets：照样报警，但不触发委员会（session 会拒绝它）。"""
+        monkeypatch.setattr(
+            "openinvest.jobs.event_watch._load_user_context",
+            lambda: {"holdings": ["GC=F"], "watching": [], "macro_tags": [], "queries": []},
+        )
+        out = ps.run(dry_run=False)
+        assert out["alerted"] == 1
+        sentinel_env.alert.assert_called_once()
+        sentinel_env.trigger.assert_not_called()
 
     def test_committee_failure_does_not_kill_alert(self, sentinel_env):
         """委员会路径炸了：报警已发出，run 不抛。"""
