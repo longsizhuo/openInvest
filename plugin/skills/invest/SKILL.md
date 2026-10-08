@@ -143,6 +143,7 @@ JSON output:
   "status": "ok",
   "asset": {...},
   "verdict": {"verdict": "ACCUMULATE", "confidence": 0.72, ...},
+  "confidence_lookup": "样本不足（n=12）",
   "cio_memo": "<full CIO memo markdown>",
   "transcript_path": "memory/.committee/2026-05-09/NDQ.AX.md",
   "next_step": "..."
@@ -259,6 +260,7 @@ core duty (issue #133 Decision 2).
 
 **User asks "why HOLD today / why did it tell me to sell"** (Decision Review):
 1. `explain_decision <decision_id>` for the full 4-role debate transcript + CIO memo + path snapshot
+   (+ `confidence_lookup`, the number to quote next to the verdict — see Constraints)
 2. Combine with `status` (current portfolio) + `GET /api/user` (wealth_context) if needed
 3. Answer using evidence from the transcript — do not invent reasons yourself
 
@@ -303,6 +305,18 @@ a signal worth recording.
 - **Do not rerun the committee for the same asset on the same day** — `run_committee` reads the cache by default;
   on the Coordinator path, check with `ls memory/.committee/<today>/<SYM>.md` first.
 - **Do not fabricate CIO confidence.** When workers disagree sharply, honestly write `confidence: 0.4-0.5`.
+- **Next to a verdict, quote `confidence_lookup`, not `confidence`.** `run_committee` (CLI + MCP),
+  `explain_decision`, `/api/committee_sessions` and `/api/committee/{task_id}` return it: how similar
+  verdicts turned out 30 days later (deterministic table refreshed by the daily `verdict_review` job
+  from live verdicts plus the prospective paper fleet; when this install has n<30 for that verdict
+  it falls back to a fleet-only default table shipped with the package). The text ends with its
+  source — 含纸面舰队样本 / 默认表 / 本机样本 — keep it when you quote the number: paper-fleet runs use
+  a neutral portfolio and no event/valuation/sentiment inputs. For HOLD it is the share whose 30-day
+  move stayed inside the normal volatility band, shown next to the market's own sideways base rate —
+  that measures how sideways the market was, **not** accuracy, so never call it a hit rate. n<30 reads "样本不足（n=…）";
+  rule-forced HOLDs / self-reported ≤0.4 read "输入缺失/强制 HOLD". `confidence` is the CIO's
+  self-reported number, kept for the record only (historically no better than a constant); if you
+  mention it, label it self-reported (自报).
 - **Do not leak the user's email or other personally identifying information** — never hard-code it in output.
 
 ## Where to look when something breaks
