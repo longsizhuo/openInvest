@@ -40,10 +40,10 @@ def test_lookup_pool_filters_source_mix_and_n30_suppression():
         + [_rv("ACCUMULATE", True, source="backtest", flat=False)] * 9    # 20+9=29 → 不给数
     )
     lk = build_confidence_lookup(live, fleet)
-    assert lk["by_verdict"]["HOLD"] == {"n": 48, "rate": round(30 / 48, 3),
+    assert lk["by_verdict"]["HOLD"] == {"n": 48, "rate": round(30 / 48, 2),
                                         "n_live": 38, "n_fleet": 10}
     assert lk["by_verdict"]["ACCUMULATE"] == {"n": 29, "rate": None, "n_live": 20, "n_fleet": 9}
-    assert lk["market_flat"] == {"n": 77, "rate": round(30 / 77, 3), "n_live": 58, "n_fleet": 19}
+    assert lk["market_flat"] == {"n": 77, "rate": round(30 / 77, 2), "n_live": 58, "n_fleet": 19}
     # 只给舰队（默认表生成器的用法）：n_live 恒 0
     assert build_confidence_lookup([], fleet)["by_verdict"]["HOLD"]["n_live"] == 0
 

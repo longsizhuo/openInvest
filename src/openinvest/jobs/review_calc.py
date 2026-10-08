@@ -253,7 +253,7 @@ def build_confidence_lookup(live: List[VerdictReview],
         got = {src: [flag(r) for r in rows if keep(r)] for src, rows in pools.items()}
         flags = got["live"] + got["fleet"]
         n = len(flags)
-        return {"n": n, "rate": round(sum(flags) / n, 3) if n >= LOOKUP_MIN_N else None,
+        return {"n": n, "rate": round(sum(flags) / n, 2) if n >= LOOKUP_MIN_N else None,
                 "n_live": len(got["live"]), "n_fleet": len(got["fleet"])}
 
     verdicts = sorted({r.verdict for rows in pools.values() for r in rows})
