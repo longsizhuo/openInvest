@@ -35,6 +35,20 @@ cron 的 /bin/sh 不含 ~/.local/bin,首夜因 `uv: not found` 空跑一次):
 30 22 * * * export PATH="$HOME/.local/bin:$PATH"; cd /home/ubuntu/projects-review/invest && BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective --assets "$(uv run python -c "import yaml; print(','.join(yaml.safe_load(open('experiments/paper_fleet/universe.yml'))['symbols']))")" >> memory/.backtest/fleet_daily.log 2>&1
 ```
 
+## 试跑臂：T2 CONFIDENCE 定义(D11 P2,2026-10)
+
+`--prospective --t2-confidence-arm`:对照臂(上面那份,写 `memory/.backtest/`)跑完后,
+同一批新鲜标的再跑一整轮委员会,只有 CIO prompt 不同——删掉"三方一致 confidence ≥ 0.85"
+数字规则,加上 CONFIDENCE 定义("30 个日历天后被 verdict_review 判为命中的概率";HOLD
+命中 = 30 天涨跌留在该资产正常波动带内)。T2 臂写 `memory/.backtest_t2conf/<今天>/`,
+verdict_review / dreaming / #141 样本计数都只读 `.backtest`,碰不到它。成本 ×2(≈ ¥3/月 → ¥6/月)。
+
+- 变体在 `scripts/backtest_committee.py:build_cio_prompt_t2`;live 委员会不 import 本脚本,
+  live CIO prompt 逐字节不变(`tests/test_fleet_confidence_t2.py`)
+- cio.md 改了那两处锚点措辞 → T2 臂在花 LLM 钱前直接报错退出(对照臂照常落盘),要同步改变体
+- 开 / 停:在上面 crontab 那行 `--prospective` 后加 / 删 `--t2-confidence-arm`
+- 判读口径(臂、指标、护栏、停止规则)按私有归档里的预注册,不在本 repo
+
 ## 标的池
 
 - `universe.yml` — 舰队每日 50 标的(八资产类别)

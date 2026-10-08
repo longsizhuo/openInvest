@@ -54,6 +54,56 @@ DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
 # （美盘收盘 + backfill 22:00 之后），当日开市的标的都已有当日 bar；休市（周末/
 # 各市场假日）自然没有 → 跳过；加密 7×24 照常。
 
+# D11 P2 舰队试跑：CIO 的 CONFIDENCE 改用 T2 定义（verdict_review 30 天命中概率）。
+# 只由 `--prospective --t2-confidence-arm` 打开，作为同日同标的的第二臂（对照臂 =
+# 原 memory/.backtest/ 不变）。live 委员会不 import 本脚本 → live prompt 逐字节不变。
+# T2 臂写独立目录：verdict_review / dreaming / #141 样本计数都只读 .backtest，碰不到它。
+T2_ARM_SUBDIR = ".backtest_t2conf"
+_CIO_085_RULE = "1. **三方一致**: confidence ≥ 0.85，按一致方向给 verdict"
+_CIO_T2_ANCHOR = "**Verdict 选项**"
+
+
+def build_cio_prompt_t2(asset: Dict[str, Any], json_mode: bool = False) -> str:
+    """live CIO prompt 的 T2 变体：删"三方一致 ≥0.85"数字规则 + 注入 CONFIDENCE 定义。
+
+    锚点失效（cio.md 改了措辞）直接抛错：T2 臂宁可停也不静默跑出"定义 + 0.85"混合 prompt。
+    """
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.i18n import bilingual
+
+    prompt = build_cio_prompt(asset, json_mode=json_mode)
+    for anchor in (_CIO_085_RULE, _CIO_T2_ANCHOR):
+        if prompt.count(anchor) != 1:
+            raise RuntimeError(f"cio.md 已变，T2 变体锚点失效：{anchor!r}")
+    definition = bilingual(
+        "**📏 CONFIDENCE 的定义（强制）**：\n"
+        "CONFIDENCE = 这条 VERDICT 在 30 个日历天后被系统复盘判为「命中」的概率（0.0-1.0），"
+        "不是你主观上有多自信。复盘规则是确定性的：\n"
+        "- BUY / ACCUMULATE：30 天后价格高于今天 = 命中\n"
+        "- TRIM / SELL：30 天后价格低于今天 = 命中\n"
+        "- HOLD：30 天涨跌幅的绝对值留在该资产的正常波动带内（≈ 日 ATR% × √30，封顶 8%）= 命中。"
+        "所以 HOLD 的 CONFIDENCE 就是你判断「未来 30 天不会走出正常波动带」的概率\n"
+        "照这个概率如实填：大约一半可能就写 0.5 左右，不要为显得果断而抬高，也不要为保守而压低。",
+        "**📏 Definition of CONFIDENCE (mandatory)**:\n"
+        "CONFIDENCE = the probability (0.0-1.0) that this VERDICT is judged a \"hit\" by the system's review "
+        "30 calendar days from now -- not how sure you feel. The review rule is deterministic:\n"
+        "- BUY / ACCUMULATE: price higher than today after 30 days = hit\n"
+        "- TRIM / SELL: price lower than today after 30 days = hit\n"
+        "- HOLD: the absolute 30-day return stays inside the asset's normal volatility band "
+        "(~ daily ATR% x sqrt(30), capped at 8%) = hit. So a HOLD's CONFIDENCE is your probability that "
+        "the next 30 days stay inside that normal band\n"
+        "Report that probability honestly: if it is roughly a coin flip, write about 0.5; do not inflate it to "
+        "sound decisive or deflate it to sound cautious.",
+    )
+    prompt = prompt.replace(_CIO_085_RULE, "1. **三方一致**: 按一致方向给 verdict")
+    return prompt.replace(_CIO_T2_ANCHOR, f"{definition}\n\n{_CIO_T2_ANCHOR}")
+
+
+def _t2_arm():
+    """T2 臂唯一开关：换掉 run_committee 解析的 build_cio_prompt（钉 debate 命名空间，
+    façade patch 无效）。patch 是进程级的，但两臂串行——对照臂跑完才进，退出即还原。"""
+    return patch("openinvest.core.committee.debate.build_cio_prompt", build_cio_prompt_t2)
+
 
 def _currency_of(symbol: str) -> str:
     """按 yfinance 后缀判币种(CR:原先硬编码 'AUD' if NDQ.AX else 'CNY',
@@ -337,7 +387,14 @@ def main():
              "verdict_review 会在 30/90d 后用真实后市回填评分。与 --start/--end/--days"
              "/--holdout 互斥。",
     )
+    parser.add_argument(
+        "--t2-confidence-arm", action="store_true",
+        help="（仅 --prospective）D11 P2 舰队试跑：对照臂跑完后，同一批标的再跑一臂 CIO 用 T2 "
+             f"CONFIDENCE 定义的委员会，写 memory/{T2_ARM_SUBDIR}/<今天>/；对照臂不变。",
+    )
     args = parser.parse_args()
+    if args.t2_confidence_arm and not args.prospective:
+        raise SystemExit("❌ --t2-confidence-arm 只能和 --prospective 一起用（舰队试跑，不碰回填）")
 
     # 解析时间范围
     today = datetime.now().date()
@@ -385,7 +442,15 @@ def main():
         res = run_one_day(d, fresh)
         ok = sum(1 for v in res.get("verdicts", {}).values() if v and not v.get("error"))
         print(f"\n✅ 前瞻纸面完成：{ok}/{len(fresh)} 成功，写入 memory/.backtest/{d}/")
-        if ok < len(fresh):
+        failed = ok < len(fresh)
+        if args.t2_confidence_arm:
+            build_cio_prompt_t2({"symbol": "PREFLIGHT"})  # 锚点失效在花 LLM 钱之前就炸
+            with _t2_arm():
+                res_t2 = run_one_day(d, fresh, out_subdir=T2_ARM_SUBDIR)
+            ok_t2 = sum(1 for v in res_t2.get("verdicts", {}).values() if v and not v.get("error"))
+            print(f"\n✅ T2 臂完成：{ok_t2}/{len(fresh)} 成功，写入 memory/{T2_ARM_SUBDIR}/{d}/")
+            failed = failed or ok_t2 < len(fresh)
+        if failed:
             raise SystemExit(1)   # 让 cron 日志/退出码暴露失败，不静默成功
         return
     if args.days:
