@@ -121,23 +121,48 @@ def test_price_sentinel_prefers_config(monkeypatch):
 
 
 def test_register_jobs_stamps_scheduled_since_on_register_and_change(monkeypatch):
-    """job_watchdog 靠 runner._SCHEDULED_SINCE 判"新 cron 何时生效"；这根线断了看门狗会
+    """job_watchdog 靠 scheduler.cron.SCHEDULED_SINCE 判"新 cron 何时生效"；这根线断了看门狗会
     静默退回"拿新 cron 套旧运行"的误报（#272），而它自己的测试照绿。"""
+    import openinvest.scheduler.cron as cron
     import openinvest.scheduler.runner as runner
 
-    monkeypatch.setattr(runner, "_SCHEDULED_SINCE", {})
+    monkeypatch.setattr(cron, "SCHEDULED_SINCE", {})
+    monkeypatch.setattr(runner, "SCHEDULED_SINCE", cron.SCHEDULED_SINCE)
     monkeypatch.setattr(runner, "_LAST_SCHEDULES", {})
     cfg = {"name": "fake_job", "schedule": "*/5 * * * *", "timezone": "UTC",
            "entry": "openinvest.jobs.dca_daily:run", "enabled": True}
     monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg)])
     sched = BackgroundScheduler()
     register_jobs(sched)
-    first = runner._SCHEDULED_SINCE["fake_job"]
+    first = cron.SCHEDULED_SINCE["fake_job"]
 
     register_jobs(sched, quiet=True)  # schedule 没变：不刷新
-    assert runner._SCHEDULED_SINCE["fake_job"] == first
+    assert cron.SCHEDULED_SINCE["fake_job"] == first
 
     monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg, schedule="*/7 * * * *")])
     register_jobs(sched, quiet=True)  # schedule 变了：刷新
-    assert runner._SCHEDULED_SINCE["fake_job"] >= first
+    assert cron.SCHEDULED_SINCE["fake_job"] >= first
     assert runner._LAST_SCHEDULES["fake_job"] == "*/7 * * * *"
+
+
+def test_scheduled_since_visible_when_runner_runs_as_main(monkeypatch):
+    """daemon 是 `python -m openinvest.scheduler.runner`：runner 在进程里叫 __main__，
+    job_watchdog 里 import 到的是另一份模块副本。注册状态必须放在两边共享的模块里，
+    否则看门狗读到空表（2026-10-08 #272 在生产没生效的原因）。"""
+    import importlib.util
+
+    import openinvest.scheduler.cron as cron
+    import openinvest.scheduler.runner as canonical
+
+    monkeypatch.setattr(cron, "SCHEDULED_SINCE", {})
+    spec = importlib.util.spec_from_file_location("runner_as_main", canonical.__file__)
+    as_main = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(as_main)  # 模拟 python -m：同一份源码、不同模块对象
+    assert as_main is not canonical
+    cfg = {"name": "fake_job", "schedule": "*/5 * * * *", "timezone": "UTC",
+           "entry": "openinvest.jobs.dca_daily:run", "enabled": True}
+    monkeypatch.setattr(as_main, "_load_job_configs", lambda: [cfg])
+    as_main.register_jobs(BackgroundScheduler())
+    # 看门狗读的那张表（job_watchdog 从 scheduler.cron 导入）必须看得到 __main__ 副本的注册
+    from openinvest.jobs import job_watchdog
+    assert "fake_job" in job_watchdog.SCHEDULED_SINCE

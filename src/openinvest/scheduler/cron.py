@@ -14,9 +14,17 @@ ponytail: 只翻译 day_of_week 编号。crontab "日 和 星期 同时受限 = 
 """
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Dict
 
 from apscheduler.triggers.cron import CronTrigger
+
+# 每个 job 按当前 schedule 生效的起点：runner 注册 / schedule 变更时写，job_watchdog 读
+# （只把这之后的应触发时刻算"该跑没跑"）。放这里而不是 runner：daemon 以
+# `python -m openinvest.scheduler.runner` 启动，runner 在进程里是 __main__，job 里
+# `from openinvest.scheduler import runner` 会再加载一份模块副本、状态是空的——
+# 2026-10-08 #272 就因此在生产没生效（15:07 照样判停摆）。本模块两边都按正常名导入。
+SCHEDULED_SINCE: Dict[str, datetime] = {}
 
 # crontab 编号顺序：0=sun … 6=sat（7 也是 sun，取模处理）
 _DOW = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")

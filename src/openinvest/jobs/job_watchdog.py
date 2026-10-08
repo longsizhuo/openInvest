@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from apscheduler.triggers.cron import CronTrigger
 
 from openinvest.core.memory_store import MemoryStore
-from openinvest.scheduler.cron import crontab_trigger
+from openinvest.scheduler.cron import SCHEDULED_SINCE, crontab_trigger
 from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.notifier import render_markdown_email, send_email_html
 
@@ -99,7 +99,7 @@ def find_problems(
 
         trig = _trigger(schedule, tz)
         # 起点取"上次启动"与"当前 schedule 生效时刻"中较晚者：改 schedule / 重启后，
-        # 旧 cron 时代没跑的时刻不算停摆（runner._SCHEDULED_SINCE；--once 下为空 = 不截）
+        # 旧 cron 时代没跑的时刻不算停摆（scheduler.cron.SCHEDULED_SINCE；--once 下为空 = 不截）
         anchor = max(started, (scheduled_since or {}).get(name, started))
         f1 = trig.get_next_fire_time(anchor, anchor)  # 严格晚于 anchor 的下一次
         f2 = trig.get_next_fire_time(f1, f1) if f1 else None
@@ -167,7 +167,7 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
     ]
     conn = sqlite3.connect(runner.RUN_LOG_DB)
     try:
-        findings = find_problems(conn, jobs, now, runner._SCHEDULED_SINCE)
+        findings = find_problems(conn, jobs, now, SCHEDULED_SINCE)
     finally:
         conn.close()
     for f in findings:
