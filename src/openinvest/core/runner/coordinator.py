@@ -256,12 +256,12 @@ def save_committee_transcript(
     # 2026-10-07 #234-5：补齐 Direct 路径的三条确定性后处理——Sanity5 现价校验
     # （current_price）/ 黄金防御分批 DCA 闸 / 干预反事实记账，与 session 共用
     # intervention.py 同一组入口。transcript 不含绝对价位（ADR-022），现价与交易日
-    # 日历按 Direct 同口径在 save 时取（get_history_data 2y → compute_metrics）。
+    # 日历按 Direct 同口径在 save 时取（get_history_data METRICS_PERIOD → compute_metrics）。
     from openinvest.core.portfolio_manager import PortfolioManager
     from openinvest.core.runner.intervention import gold_defense_dca_plan, record_intervention
     from openinvest.utils.exchange_fee import get_history_data
     try:
-        df = get_history_data(symbol, "2y")
+        df = get_history_data(symbol, METRICS_PERIOD)
     except Exception as e:  # noqa: BLE001  行情拉不到 → 现价 None（Sanity5 跳过），不阻断落盘
         log.warning(f"save_committee 行情拉取失败 graceful：{e}")
         df = None

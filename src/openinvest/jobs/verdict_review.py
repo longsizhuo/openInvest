@@ -158,7 +158,7 @@ def _detect_macro_shock(
             df = get_history_data(symbol, "max")
             if df.empty:
                 return None
-            # date <= d 的根数（同 _close_on_or_after：searchsorted 代替物化 index.date）
+            # date <= d 的根数（searchsorted 代替物化 index.date）
             i = df.index.searchsorted(pd.Timestamp(d, tz=df.index.tz) + pd.Timedelta(days=1))
             if i == 0:
                 return None
