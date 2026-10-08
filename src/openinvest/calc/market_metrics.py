@@ -83,41 +83,35 @@ def _calc_rsi(close: pd.Series, period: int = 14) -> Optional[float]:
     return float(100 - (100 / (1 + rs)))
 
 
-def _atr_pct_series(df: pd.DataFrame, period: int = 14) -> Optional[pd.Series]:
-    """逐日 ATR%（ATR / 当日收盘 * 100）序列，Wilder 平滑。
+def _true_range(df: pd.DataFrame) -> pd.Series:
+    """逐行 True Range = max(high-low, |high-prev_close|, |low-prev_close|)，**含跳空**。
 
-    True Range = max(high-low, |high-prev_close|, |low-prev_close|)，
-    **正确包含跳空**（gap）。仅当 DataFrame 带 High/Low 列时走真 TR；DB 只有
-    Close 时退化为 |ΔClose|（B 组补存 OHLC 后此退化分支不再走）。
+    逐行判定：缺 High 或 Low 的行（现价/NAV 缓存只写 close 的行、未回填老数据）
+    该行退化为 |ΔClose|，其余行照走真 TR；整表无 High/Low 列时全序列 |ΔClose|。
+    （旧口径"近 period+1 根有一根缺 H/L 就整条序列退化"——一根盘中现价行就把
+    ATR 压到真实波动的 ~40%。）regime_probability 的全序列回放也调这里，两路径同源。
     """
+    close = df["Close"].astype(float)
+    prev_close = close.shift(1)
+    close_diff = (close - prev_close).abs()
+    if "High" not in df.columns or "Low" not in df.columns:
+        return close_diff
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    # max(axis=1) 默认 skipna：首行 prev_close 为 NaN 时退化为 (high-low)
+    tr = pd.concat(
+        [(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    return tr.where(high.notna() & low.notna(), close_diff)
+
+
+def _atr_pct_series(df: pd.DataFrame, period: int = 14) -> Optional[pd.Series]:
+    """逐日 ATR%（ATR / 当日收盘 * 100）序列，Wilder 平滑，TR 见 _true_range。"""
     if len(df) < period + 1:
         return None
-    close = df["Close"]
-    # 仅当 High/Low 列存在**且近 period+1 根无 NaN** 时才走真 TR。
-    # （列存在但值为 NaN = 老数据未回填，此时退化为收盘价差，不能让 ATR 变 None）
-    use_high_low = (
-        "High" in df.columns and "Low" in df.columns
-        and bool(df["High"].tail(period + 1).notna().all())
-        and bool(df["Low"].tail(period + 1).notna().all())
-    )
-    if use_high_low:
-        high = df["High"]
-        low = df["Low"]
-        prev_close = close.shift(1)
-        # max(axis=1) 默认 skipna：首行 prev_close 为 NaN 时退化为 (high-low)
-        tr = pd.concat(
-            [
-                (high - low).abs(),
-                (high - prev_close).abs(),
-                (low - prev_close).abs(),
-            ],
-            axis=1,
-        ).max(axis=1)
-    else:
-        # 退化分支：DB 仅有 Close（无 High/Low）。低估真实波动，B 组补 OHLC 后失效。
-        tr = close.diff().abs()
-    atr = tr.ewm(alpha=1.0 / period, adjust=False).mean()
-    return atr / close * 100
+    atr = _true_range(df).ewm(alpha=1.0 / period, adjust=False).mean()
+    return atr / df["Close"] * 100
 
 
 def _calc_atr_pct(df: pd.DataFrame, period: int = 14) -> Optional[float]:
@@ -276,8 +270,8 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     """从历史 K 线 DataFrame 算出所有市场指标。
 
     Args:
-        df: pandas DataFrame，必须有 'Close' 列；'High'/'Low' 有则 ATR 走真 TR，
-            'Volume' 有则能算 rvol
+        df: pandas DataFrame，必须有 'Close' 列；'High'/'Low' 有则 ATR 逐行走真 TR
+            （缺 H/L 的行退化 |ΔClose|），'Volume' 有则能算 rvol
 
     Returns:
         dict 字段（缺数据时为 None）:
@@ -343,6 +337,7 @@ __all__ = [
     "METRICS_PERIOD",
     "_safe_last",
     "_calc_rsi",
+    "_true_range",
     "_atr_pct_series",
     "_calc_atr_pct",
     "_calc_atr_spike_ratio",

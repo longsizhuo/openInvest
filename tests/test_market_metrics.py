@@ -117,6 +117,51 @@ def test_atr_includes_gap():
     assert atr > atr_close, f"含跳空的真 TR ATR 应 > 收盘价差版: {atr} vs {atr_close}"
 
 
+def _ohlc_frame(n: int = 300) -> pd.DataFrame:
+    """随机游走收盘 ±0.5%/日，日内振幅 ±1%：真 TR ≈ 2%，收盘价差 ≈ 0.4%（差 ~5 倍）"""
+    rng = np.random.default_rng(3)
+    close = 100 * np.cumprod(1 + rng.normal(0, 0.005, n))
+    idx = pd.bdate_range("2025-01-01", periods=n)
+    return pd.DataFrame({"Close": close, "High": close * 1.01, "Low": close * 0.99}, index=idx)
+
+
+def _with_close_only_row(df: pd.DataFrame) -> pd.DataFrame:
+    """末尾追加一根只有收盘价的行（现价缓存写入的盘中/节假日行），涨 1.5%"""
+    row = pd.DataFrame({"Close": [df["Close"].iloc[-1] * 1.015]},
+                       index=[df.index[-1] + pd.Timedelta(days=1)])
+    return pd.concat([df, row])
+
+
+def test_atr_trailing_close_only_row_does_not_collapse_series():
+    """一根缺 H/L 的末行只该让这一行退化 |ΔClose|，不能把整条序列打成收盘价差
+    （旧口径：近 15 根任一缺 H/L → 全序列退化，ATR 掉到真实值的 ~20-40%）"""
+    df = _ohlc_frame()
+    clean, dirty = compute_metrics(df), compute_metrics(_with_close_only_row(df))
+    for key in ("atr_pct", "atr_pct_median_1y", "atr_spike_ratio"):
+        assert abs(dirty[key] / clean[key] - 1) < 0.05, (key, clean[key], dirty[key])
+
+
+def test_atr_close_only_frame_uses_close_diff():
+    """无 High/Low 列（或列全 NaN = 老数据未回填）→ 仍走 |ΔClose| 的 Wilder ATR"""
+    df = _ohlc_frame(60)
+    close = df["Close"]
+    expected = float((close.diff().abs().ewm(alpha=1 / 14, adjust=False).mean() / close * 100).iloc[-1])
+    assert abs(_calc_atr_pct(df[["Close"]], period=14) - expected) < 1e-9
+    df_nan_hl = df.assign(High=np.nan, Low=np.nan)
+    assert abs(_calc_atr_pct(df_nan_hl, period=14) - expected) < 1e-9
+
+
+def test_atr_regime_frame_matches_market_metrics_with_close_only_row():
+    """regime_probability 全序列回放与 market_metrics 同源：含缺 H/L 行时逐日 ATR% 完全一致"""
+    from openinvest.calc.market_metrics import _atr_pct_series
+    from openinvest.calc.regime_probability import compute_regime_return_frame
+
+    df = _with_close_only_row(_ohlc_frame())
+    df.iloc[100, df.columns.get_loc("High")] = np.nan  # 中段再挖一根（节假日现价行）
+    frame = compute_regime_return_frame(df, windows=("30d",))
+    np.testing.assert_allclose(frame["atr_pct"].values, _atr_pct_series(df, 14).values, rtol=1e-12)
+
+
 # ---------------- 价格分位: 真百分位排名 ----------------
 
 def test_price_quantile_is_percentile_rank():
