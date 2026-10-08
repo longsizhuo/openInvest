@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from openinvest.core.committee_runner import _resolve_event_brief, format_event_brief
@@ -126,6 +128,69 @@ def test_resolve_multi_threads_as_of_to_recall(monkeypatch):
         resolve_event_brief_multi(["NVDA"])
 
     assert seen == [D, D, None]
+
+
+def test_resolve_hash_provider_skips_rerank_openai_keeps_it(monkeypatch):
+    """2026-10-08：hash provider 下不传 query_embedding（hash 精排 = 随机挑 top_k）；
+    真 embedding（openai）照常传。0/1：旧版无条件 embed_text(symbol) → hash 下非 None 即红。"""
+    monkeypatch.setenv("INVEST_EVENT_RAG_ENABLED", "true")
+    seen = []
+
+    class FakeStore:
+        vec_loaded = True
+
+        def recall(self, symbol, **kwargs):
+            seen.append(kwargs["query_embedding"])
+            return []
+
+    with patch("openinvest.core.runner.event_brief._get_event_store", return_value=FakeStore()):
+        monkeypatch.delenv("INVEST_EMBEDDING_PROVIDER", raising=False)
+        _resolve_event_brief("NVDA", override=None)
+        monkeypatch.setenv("INVEST_EMBEDDING_PROVIDER", "hash")
+        _resolve_event_brief("NVDA", override=None)
+        monkeypatch.setenv("INVEST_EMBEDDING_PROVIDER", "openai")
+        with patch("openinvest.services.embeddings._openai_embed", return_value=[0.5] * 4):
+            _resolve_event_brief("NVDA", override=None)
+        # openai 调用失败 → None（按时间序），不退回 hash 随机精排
+        with patch("openinvest.services.embeddings._openai_embed", return_value=None):
+            _resolve_event_brief("NVDA", override=None)
+
+    assert seen == [None, None, [0.5] * 4, None]
+
+
+def test_resolve_brief_keeps_newest_events_under_hash_provider(monkeypatch, tmp_path):
+    """端到端（真 EventStore + sqlite-vec）：30 条同标的事件散在 7 天窗里，默认 hash provider 下
+    brief 必须是最新的 top_k 条，不是 hash 精排洗出来的随机 8 条（旧版：近一天新闻被挤掉）。"""
+    from datetime import datetime, timedelta, timezone
+
+    from openinvest.db.event_store import EventStore
+    from openinvest.services.embeddings import DEFAULT_DIM, embed_text
+
+    store = EventStore(db_path=str(tmp_path / "events.db"), embedding_dim=DEFAULT_DIM)
+    if not store.vec_loaded:
+        store.conn.close()
+        pytest.skip("sqlite-vec not loaded")
+    now = datetime.now(timezone.utc)
+    for i in range(30):  # i 越小越新，5h 一条，全在 7 天窗内
+        claim = f"NVDA headline marker{i:02d}x"
+        store.upsert_event({
+            "one_line_claim": claim, "stance": "risk", "severity": "high",
+            "ts": (now - timedelta(hours=5 * i + 1)).isoformat(timespec="seconds"),
+            "affected_symbols": ["NVDA"], "entities": [],
+        }, embedding=embed_text(claim))
+    monkeypatch.setenv("INVEST_EVENT_RAG_ENABLED", "true")
+    monkeypatch.setenv("INVEST_EVENT_RAG_WINDOW_DAYS", "7")
+    monkeypatch.setenv("INVEST_EVENT_RAG_MIN_SEVERITY", "mid")
+    monkeypatch.setenv("INVEST_EVENT_RAG_TOP_K", "8")
+    monkeypatch.delenv("INVEST_EMBEDDING_PROVIDER", raising=False)
+    try:
+        with patch("openinvest.core.runner.event_brief._get_event_store", return_value=store):
+            brief = _resolve_event_brief("NVDA", override=None)
+    finally:
+        store.conn.close()
+
+    picked = sorted(i for i in range(30) if f"marker{i:02d}x" in brief)
+    assert picked == list(range(8))
 
 
 # ============================================================================

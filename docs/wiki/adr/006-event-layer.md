@@ -71,6 +71,9 @@ openInvest 在本次提交前是**纯定时驱动**：`daily_report` 10:00、`we
 
 DeepSeek **没有**公开 embedding API（plan 早期一稿写错）。当前实现：
 - 默认：deterministic hash 1024 维（够做粗去重；硬过滤负责重活）
+  > **2026-10-08**：hash 向量无语义，召回时不再拿它精排（`embeddings.embed_query` 返回 None），
+  > 合格集按时间倒序取 top_k；只有真 embedding 才精排。同批修了召回的 symbol 过滤晚于 `LIMIT 200`
+  > 导致低频标的被挤掉、以及未来 ts 钉榜首（回放见 `experiments/event-recall-crowding-2026-10/`）。
 - 升级路径：`INVEST_EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` → text-embedding-3-small（1024 维截断）
 
 ## 跨 agent 隔离

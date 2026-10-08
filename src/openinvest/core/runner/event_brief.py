@@ -73,11 +73,12 @@ def _resolve_event_brief(
     if not cfg.event.enabled:
         return ""
     try:
-        from openinvest.services.embeddings import embed_text
+        from openinvest.services.embeddings import embed_query
         store = _get_event_store()
         if store is None:
             return ""
-        q_embed = embed_text(symbol) if store.vec_loaded else None
+        # embed_query：hash provider 返回 None → 不精排、按时间倒序（hash 精排 = 随机挑，2026-10-08）
+        q_embed = embed_query(symbol) if store.vec_loaded else None
         # issue #26: 召回时把用户标的扩展为代理集合（NDQ.AX 也命中 ^NDX 指数事件）
         from openinvest.services.symbol_map import proxy_symbols_for
         events = store.recall(

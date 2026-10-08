@@ -343,9 +343,9 @@ def cmd_event_check(args: argparse.Namespace) -> None:
 
     if args.recall:
         from openinvest.db.event_store import EventStore
-        from openinvest.services.embeddings import DEFAULT_DIM, embed_text
+        from openinvest.services.embeddings import DEFAULT_DIM, embed_query
         store = EventStore(embedding_dim=DEFAULT_DIM)
-        q_embed = embed_text(args.recall) if store.vec_loaded else None
+        q_embed = embed_query(args.recall) if store.vec_loaded else None
         events = store.recall(args.recall, query_embedding=q_embed)
         print(_json.dumps(events, ensure_ascii=False, indent=2, default=str))
         return

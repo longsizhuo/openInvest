@@ -38,6 +38,22 @@ def embed_text(text: str, *, dim: int = DEFAULT_DIM) -> List[float]:
     return _hash_embed(text, dim=dim)
 
 
+def embed_query(text: str, *, dim: int = DEFAULT_DIM) -> Optional[List[float]]:
+    """事件召回精排用的查询向量：只有真 embedding（openai）才返回；hash provider / 调用失败 → None，
+    recall 不精排、按时间倒序取 top_k。
+
+    2026-10-08：hash 向量无语义（不同文本余弦距离全挤在 ~1.0），拿它精排 = 确定性随机洗牌。
+    召回合格集修成覆盖整个 7 天窗后（event_store.recall 挤占修复），随机挑 top_k 会把最近一天的
+    新闻挤出 brief（生产快照回放 27 天：某持仓标的近 24h 事件进 brief 旧版 89 条，hash 精排 35 条，
+    按时间序 111 条；experiments/event-recall-crowding-2026-10）。
+    入库存向量仍走 embed_text（hash 也存，换 provider 时不用回填）。
+    """
+    text = (text or "").strip()
+    if text and os.getenv("INVEST_EMBEDDING_PROVIDER", "hash").lower() == "openai":
+        return _openai_embed(text, dim=dim)
+    return None
+
+
 def _hash_embed(text: str, *, dim: int) -> List[float]:
     """确定性 hash embedding —— 用多个 sha256 拼字节，转 float32，L2 归一化
 

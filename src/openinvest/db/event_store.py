@@ -441,7 +441,8 @@ class EventStore:
           ⚠️ 只截"事件存不存在"：同 event_id 后续 upsert 原地改写的 severity / stance /
           affected_symbols 没有历史版本，as_of 还原不了。
         - rerank: 如果 query_embedding 非空且 sqlite-vec 加载成功，按 cosine 距离精排
-                 否则就按 ts DESC 返回
+                 否则就按 eff_ts DESC 取 top_k（生产默认 hash provider 下调用方传 None，
+                 见 services/embeddings.embed_query）
         - supersedes: 后处理 —— 同实体的两条事件按时间排序，新事件 .supersedes = 旧 event_id
 
         返回的每条 event 字典含:
