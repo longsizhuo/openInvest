@@ -1452,13 +1452,14 @@ def test_verdict_review_summary_splits_by_source(client, tmp_store):
     rows = ([row("2026-03-02", "live", "HOLD", True)] * 30
             + [row("2026-03-03", "live", "ACCUMULATE", False)] * 5
             + [row("2025-09-01", "backtest", "ACCUMULATE", True)] * 40
-            + [row("2024-01-02", "backtest", "HOLD", True, contaminated=True)] * 10)
+            + [row("2024-01-02", "backtest", "HOLD", True, contaminated=True)] * 10
+            + [row("2026-03-07", "live", "ACCUMULATE", False)] * 4)   # 周六：周五样本重复（D8）
     p = tmp_store.root / ".dreams" / "verdict_review.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
 
     s = client.get("/api/verdict_review/summary").json()
-    assert s["total"] == 85
+    assert s["total"] == 89 and s["weekend_dup_excluded"] == 4   # 周末行不进任何桶
     live, bt, ct = s["live"], s["backtest"], s["contaminated"]
     assert (live["n"], bt["n"], ct["n"]) == (35, 40, 10)
     assert live["is_performance"] and not bt["is_performance"] and not ct["is_performance"]

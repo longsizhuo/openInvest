@@ -249,7 +249,7 @@ def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
             f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
     md = ROOT / "docs" / f"path_calibration{suffix}.md"
     lines = ["# 路径预测校准报告（gitignored，本地分析用）", "",
-             f"样本 {summ['n']} 条", ""]
+             f"样本 {summ['n']} 条（另有周末重复 {summ['weekend_dup_excluded']} 条不计）", ""]
     if live:
         lines += ["> live 快照逐日重叠：独立样本 ≥30（约 2027-05）之前不读这些数字。", ""]
     lines += ["| 窗 | n | P10-P90 覆盖(目标0.8) | p_below Brier | 基率 Brier | 中位|误差|pp | 中位偏差pp |",

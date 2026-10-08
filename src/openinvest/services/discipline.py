@@ -25,6 +25,8 @@ def _inaction() -> Dict[str, Any]:
 
     2026-10 D4:回测/污染行是模拟持仓下的回放,不是"委员会对你做了什么"——混进来时
     显示的 52% 有 99.9% 是回测行。jsonl 若被手动全量重建(--include-backtest)也不受影响。
+    周末决议(weekend_dup)故意**保留**:这里数的是委员会实际发出了几次什么 verdict(频率),
+    不是事后命中——周末那次委员会确实跑了、verdict 确实产出;"周五样本重复"只污染命中率分母(D8)。
     """
     p = MemoryStore().root / ".dreams" / "verdict_review.jsonl"
     rows = []

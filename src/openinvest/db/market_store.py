@@ -1,24 +1,16 @@
-import datetime as _dt
 import os
 import sqlite3
 import threading
+from openinvest.calc.symbols import is_closed_weekend
 from openinvest.paths import INVEST_ROOT
 
 DB_PATH = str(INVEST_ROOT / "db" / "market_data.db")
 
 
-def _is_phantom_weekend(symbol: str, date_str: str) -> bool:
-    """周末日期的 bar 对【周一~周五交易】的标的是幽灵 —— 多半是 tz 错位造的(把 Asia/AU
-    的周一挂牌错位成周日)，且该 bar 收盘常 == 次日真实价 → 未来泄漏 + 滚动指标失真。
-    豁免:FX(``=X``,~24/5) 和加密(``-USD``,24/7) 真实有周末报价，放行。
-    这是写库 chokepoint 的后挡 —— 即便某条 ingestion 路径忘了用 tz_localize，也漏不出幽灵。"""
-    s = (symbol or "").upper()
-    if s.endswith("=X") or s.endswith("-USD"):
-        return False
-    try:
-        return _dt.date.fromisoformat(date_str).weekday() >= 5
-    except (ValueError, TypeError):
-        return False
+# 周末 bar 对【周一~周五交易】的标的是幽灵 —— 多半是 tz 错位造的(把 Asia/AU 的周一
+# 挂牌错位成周日)，且该 bar 收盘常 == 次日真实价 → 未来泄漏 + 滚动指标失真。
+# 写库 chokepoint 的后挡；口径与复盘的周末重复样本共用 calc.symbols.is_closed_weekend。
+_is_phantom_weekend = is_closed_weekend
 
 
 # 2026-10-07 #231：原 INSERT OR REPLACE = 删旧行再插 → 只传 close 的写入（gold_price

@@ -648,7 +648,8 @@ class VerdictReviewSummary(BaseModel):
     live = 实盘决议（唯一业绩口径）；backtest = 干净段回测（中性模拟持仓，非业绩）；
     contaminated = 决议日落在 LLM 训练窗口（记忆穿越，非业绩，不分 source）。
     """
-    total: int                                # 三桶合计行数（仅计数，不对应任何命中率）
+    total: int                                # jsonl 全部行数（仅计数，不对应任何命中率）
+    weekend_dup_excluded: int                 # 周末休市资产的周末决议（=周五样本重复），不进任何桶（D8）
     live: VerdictReviewBucket
     backtest: VerdictReviewBucket
     contaminated: VerdictReviewBucket

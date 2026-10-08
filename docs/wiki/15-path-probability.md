@@ -200,7 +200,8 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
    `memory/.dreams/path_review_live.jsonl` + `docs/path_calibration_live.md`；
    recompute 基线 `path_review.jsonl`（fit 脚本的输入）只由手动
    `--recompute-weekly-since` 重写，cron 不碰。live 快照逐日重叠，独立样本
-   ≥30（约 2027-05）之前不读 live 校准数字
+   ≥30（约 2027-05）之前不读 live 校准数字。周末休市资产的周末快照（基准=周五收盘，
+   周五样本的重复）不进校准汇总，只在报告里计数（2026-10 D8 统一周末口径，见 06-api）
 
 ## 7. 怎么验证
 

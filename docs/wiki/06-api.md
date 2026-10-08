@@ -265,7 +265,7 @@ POST body schema：
 | GET | `/api/verdict_review/data` | 原始数据点 |
 | GET | `/api/verdict_review/report` | docs/verdict_accuracy.md 完整 markdown |
 
-`summary` 返回 `{total, live, backtest, contaminated, has_report_md}`（2026-10 D4，[ADR-022](adr/022-backtest-memory-contamination-and-holdout-discipline.md)：桶之间绝不合并成一个命中率）。
+`summary` 返回 `{total, weekend_dup_excluded, live, backtest, contaminated, has_report_md}`（2026-10 D4，[ADR-022](adr/022-backtest-memory-contamination-and-holdout-discipline.md)：桶之间绝不合并成一个命中率）。
 每个桶是 `{n, is_performance, label, rates_suppressed_sub30, by_window, by_verdict, directional_only_hit_rate, directional_n}`：
 
 - `live`：实盘决议，**唯一业绩口径**（`is_performance=true`）。
@@ -273,6 +273,10 @@ POST body schema：
 - `contaminated`：决议日 ≤ `CONTAMINATION_CUTOFF`（LLM 训练窗口内，记忆穿越），不分 source，非业绩。
 - 任何格子 n<30 命中率为 `null`，只留 n（红线 #2）；桶 n<30 时 `rates_suppressed_sub30=true`。
 - `directional_only_hit_rate` = BUY/ACCUMULATE/SELL/TRIM 的 7d 命中，分母 `directional_n` 只算 7d 已成熟的。
+- **周末重复样本不进任何桶**（2026-10 D8）：周末不交易的资产（FX `=X`、加密 `-USD` 以外的一切）在周六/日的决议只能拿周五收盘当基准，
+  是周五样本的重复。`total` 仍是 jsonl 全部行数，被剔的行数在 `weekend_dup_excluded`；jsonl 行本身保留并带 `weekend_dup: true`。
+  同一口径（`calc.symbols.is_closed_weekend`，也是行情库拒写周末幽灵 bar 的那条）用于 path_review 校准汇总和公开的
+  `docs/accuracy_summary.json`（`scripts/export_accuracy.py`）。`/api/discipline` 的不作为率**不剔**：它数的是 verdict 频率，不是事后命中。
 
 数据来自 `verdict_review` job（每天 02:00 Asia/Shanghai，只复盘 live、只读行情库），所以日常 `backtest` / `contaminated` 两桶为 0；
 研究要含回测的全量重建手动跑 `python -m openinvest.jobs.verdict_review --include-backtest`（数小时级，会整份覆盖 jsonl）。

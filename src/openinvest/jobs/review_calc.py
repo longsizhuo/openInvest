@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from openinvest.calc.symbols import is_closed_weekend
+
 # =====================================================================
 # verdict_review 纯核
 # =====================================================================
@@ -58,6 +60,7 @@ class VerdictReview:
     directions: Dict[str, str] = field(default_factory=dict)  # 每窗口原始市场方向 up/down/flat（verdict 无关；给 Dreaming 算 regime 基率 + caution lift）
     source: str = "live"  # "live" 或 "backtest"
     contaminated: bool = False  # 决议日 ≤ CONTAMINATION_CUTOFF：落在 LLM 训练窗口，记忆穿越非业绩
+    weekend_dup: bool = False  # 周末休市资产（FX/加密除外）的周末决议：基准=周五收盘，是周五样本的重复，不进命中率（D8）
 
 
 # HOLD "没动" 的判定阈值 = K_FLAT × 资产日波动(atr_pct) × sqrt(窗口天数)，再封顶。
@@ -157,14 +160,18 @@ def summarize_verdict_reviews(reviews: List[VerdictReview]) -> Dict[str, Any]:
     窗口，记忆穿越非业绩）**绝不合并成一个命中率**——本函数不产出任何跨桶 union 数字，
     两桶各自独立 `_summarize_bucket`。partition assert 守"每条 review 非此即彼，无遗漏无重叠"。
     holdout 桶 n<30 按红线 #2 不出命中率切片；contaminated 桶数字带 note 标注"含记忆穿越,非业绩"。
+    周末重复样本（is_closed_weekend）先剔除，只计数；total 仍是全部行。
     """
+    total = len(reviews)
+    reviews = [r for r in reviews if not is_closed_weekend(r.asset, r.date)]
     holdout = [r for r in reviews if not r.contaminated]
     contaminated = [r for r in reviews if r.contaminated]
     assert len(holdout) + len(contaminated) == len(reviews), \
         "contaminated 分桶必须无遗漏无重叠（每条 review 非 holdout 即 contaminated）"
 
     return {
-        "total": len(reviews),
+        "total": total,
+        "weekend_dup_excluded": total - len(reviews),
         "cutoff": CONTAMINATION_CUTOFF,
         "holdout": _summarize_bucket(holdout, suppress_rates=len(holdout) < 30),
         "contaminated": {
@@ -263,7 +270,11 @@ class PathReview:
 # 汇总
 # ---------------------------------------------------------------------------
 def summarize_path_reviews(reviews: List[PathReview]) -> Dict[str, Any]:
-    summ: Dict[str, Any] = {"n": len(reviews), "windows": {}, "shape": {}}
+    # 周末重复快照（基准=周五收盘）不进校准；jsonl 行保留（D8）
+    total = len(reviews)
+    reviews = [r for r in reviews if not is_closed_weekend(r.asset, r.date)]
+    summ: Dict[str, Any] = {"n": len(reviews), "weekend_dup_excluded": total - len(reviews),
+                            "windows": {}, "shape": {}}
     for w in WINDOWS:
         rows = [r.windows[w] for r in reviews if w in r.windows]
         if not rows:

@@ -105,6 +105,11 @@ def test_summarize_math():
     assert abs(x["p_below_brier"] - 0.34) < 1e-6
     # 基率=0.5 → Brier=0.25
     assert abs(x["base_rate_brier"] - 0.25) < 1e-6
+    # D8：周末休市资产的周末快照（基准=周五收盘）不进校准，只计数
+    rvs[1].date = "2026-06-06"   # 周六
+    s = pr.summarize(rvs)
+    assert s["n"] == 1 and s["weekend_dup_excluded"] == 1
+    assert s["windows"]["30d"]["band_coverage"] == 1.0
 
 
 def test_collect_live_snapshots(tmp_path, monkeypatch):

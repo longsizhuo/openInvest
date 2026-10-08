@@ -129,9 +129,9 @@ def _rv(date: str, verdict: str, hit: bool) -> "vr.VerdictReview":
 def test_summarize_buckets_never_merge():
     """holdout 与 contaminated 分两桶，summarize 不产出任何跨桶 union 命中率。"""
     reviews = [_rv("2024-03-01", "BUY", True),   # contaminated (≤ cutoff)
-               _rv("2025-06-01", "BUY", False)]  # holdout (> cutoff)
+               _rv("2025-06-02", "BUY", False)]  # holdout (> cutoff)
     s = vr.summarize(reviews)
-    assert set(s) == {"total", "cutoff", "holdout", "contaminated"}
+    assert set(s) == {"total", "weekend_dup_excluded", "cutoff", "holdout", "contaminated"}
     assert s["total"] == 2
     assert s["holdout"]["n"] == 1 and s["contaminated"]["n"] == 1
     # 绝不存在合并成一个数的顶层命中率
@@ -141,8 +141,8 @@ def test_summarize_buckets_never_merge():
 
 def test_summarize_holdout_sub30_suppresses_rates():
     """holdout n<30 → 红线 #2：只留样本量，不出命中率数字；contaminated 桶不抑制。"""
-    reviews = [_rv("2025-06-01", "BUY", True) for _ in range(5)] + \
-              [_rv("2024-06-01", "BUY", True) for _ in range(5)]
+    reviews = [_rv("2025-06-02", "BUY", True) for _ in range(5)] + \
+              [_rv("2024-06-03", "BUY", True) for _ in range(5)]
     s = vr.summarize(reviews)
     assert s["holdout"]["rates_suppressed_sub30"] is True
     assert "hit_rate" not in s["holdout"]["by_window"].get("7d", {})  # 命中率被抑制
@@ -150,6 +150,18 @@ def test_summarize_holdout_sub30_suppresses_rates():
     # contaminated 桶从不抑制（本就标注非业绩）
     assert s["contaminated"]["rates_suppressed_sub30"] is False
     assert "hit_rate" in s["contaminated"]["by_window"]["7d"]
+
+
+def test_summarize_excludes_weekend_dups():
+    """D8：周末休市资产的周末决议（基准=周五收盘）不进命中率，只计数；加密周末照算。"""
+    sat, mon = "2025-06-07", "2025-06-09"
+    reviews = [_rv(mon, "BUY", True)] * 30 + [_rv(sat, "BUY", False)] * 10
+    s = vr.summarize(reviews)
+    assert s["total"] == 40 and s["weekend_dup_excluded"] == 10
+    assert s["holdout"]["n"] == 30 and s["holdout"]["by_window"]["7d"]["hit_rate"] == 1.0
+    btc = vr.VerdictReview(date=sat, asset="BTC-USD", verdict="HOLD", confidence=0.5,
+                           expected_direction="flat", macro_at_decision={})
+    assert vr.summarize([btc])["weekend_dup_excluded"] == 0
 
 
 def test_window_return_past_side_guard(monkeypatch):

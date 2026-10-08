@@ -6,6 +6,7 @@
 **脱敏红线**：
 - 绝对不输出 symbol / threshold / verdict 原文 / asset / 任何持仓字段
 - 只输出命中率聚合数字 + 样本量
+- 周末休市资产的周末决议（周五样本的重复）剔除，只输出被剔条数 weekend_dup_excluded
 - by_direction 按 bullish / bearish / hold 分组（不出现具体标的）
 
 用法：
@@ -25,6 +26,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from openinvest.calc.symbols import is_closed_weekend
 
 ROOT = Path(__file__).parent.parent
 
@@ -178,9 +181,12 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
     - 窗口整体 sample_size < MIN_SAMPLE_FOR_PUBLIC → direction_hit_rate 置 None
     - 每个方向 total < MIN_SAMPLE_FOR_PUBLIC → 该方向 rate **和 hit** 都置 None
       （只藏 rate 的话 hit/total 一次除法就能还原被抑制数字——issue #179 P0-2）
-    - 恰好只有一个方向被抑制时，direction_hit_rate 也一并置 None：否则
-      被抑制桶的 hit = round(direction_hit_rate × sample_size) − Σ 其余桶 hit，
-      减法通道仍然精确可逆（统计披露控制里的 complementary suppression）
+    - 被抑制桶的 total 合计在 (0, MIN_SAMPLE_FOR_PUBLIC) 时，direction_hit_rate 也一并置 None：
+      否则 被抑制桶合计 hit = round(direction_hit_rate × sample_size) − Σ 其余桶 hit，
+      减法通道精确还原一个 n<30 的命中率（统计披露控制里的 complementary suppression）。
+      原规则只管"恰好一个桶被抑制"；两个桶合计 <30 同样会漏——其中一桶很小时另一桶
+      几乎被钉死（如 1 + 12 条：合计命中 3 ⇒ 12 条那桶只能是 2 或 3）。2026-10 D8 补。
+      合计 0 条时没有可还原的东西，不抑制。
 
     保留 total 计数（GUI 需要展示 n=XX「样本不足」）。
     返回新 dict（不就地改入参，便于测试对照）。
@@ -192,15 +198,17 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
     by_dir = out.get("by_direction") or {}
     new_by_dir: Dict[str, Any] = {}
     n_suppressed = 0
+    suppressed_total = 0
     for bucket, counts in by_dir.items():
         c = dict(counts)
         if int(c.get("total", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
             c["rate"] = None
             c["hit"] = None
             n_suppressed += 1
+            suppressed_total += int(c.get("total", 0) or 0)
         new_by_dir[bucket] = c
     out["by_direction"] = new_by_dir
-    if n_suppressed == 1:
+    if 0 < suppressed_total < MIN_SAMPLE_FOR_PUBLIC:
         out["direction_hit_rate"] = None
 
     # base_rate 是市场属性不是模型业绩，但小样本占比同样噪音大且可被截图误读——
@@ -237,6 +245,10 @@ def build_summary(jsonl_path: Path) -> Dict[str, Any]:
     # 污染段(决议日 ≤ 训练 cutoff)记忆穿越会虚高命中率，干净 holdout 也是回测而非实盘战绩；
     # 两者都不属于"live committee 准确率"。缺 source 的老条目按 live（jsonl 早于 backtest 集成时全是 live）。
     rows = [r for r in rows if str(r.get("source", "live")) == "live"]
+    # 周末休市资产（FX/加密除外）的周末决议基准=周五收盘，是周五样本的重复（D8 统一周末口径）——不计入任何窗口
+    n_live = len(rows)
+    rows = [r for r in rows
+            if not is_closed_weekend(str(r.get("asset") or ""), str(r.get("date") or ""))]
     now = datetime.now(timezone.utc)
 
     windows = {
@@ -248,6 +260,7 @@ def build_summary(jsonl_path: Path) -> Dict[str, Any]:
     return {
         # 生成时间戳（UTC ISO）
         "generated_at": now.isoformat(timespec="seconds"),
+        "weekend_dup_excluded": n_live - len(rows),
         "windows": {
             # 红线 #2：公开输出抹掉小样本命中率（_aggregate 仍算原始统计，
             # 抑制只发生在对外这一层）

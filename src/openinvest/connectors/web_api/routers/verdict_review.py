@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Query
 
+from openinvest.calc.symbols import is_closed_weekend
 from openinvest.core.memory_store import MemoryStore
 from openinvest.jobs.review_calc import CONTAMINATION_CUTOFF
 
@@ -119,6 +120,7 @@ def get_verdict_review_summary() -> VerdictReviewSummary:
     """命中率汇总，按来源分 live / backtest / contaminated 三桶（ADR-022：绝不合并成一个数）。
 
     只有 live 桶是业绩；另两桶标注非业绩。任何格子 n<30 命中率置 null（红线 #2）。
+    周末休市资产（FX/加密除外）的周末决议（基准=周五收盘，周五样本的重复）不进任何桶，只计 weekend_dup_excluded。
     """
     store = MemoryStore()
     path = store.root / ".dreams" / "verdict_review.jsonl"
@@ -141,10 +143,15 @@ def get_verdict_review_summary() -> VerdictReviewSummary:
             items = []
 
     buckets: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _BUCKET_META}
+    dup = 0
     for it in items:
+        if is_closed_weekend(str(it.get("asset") or ""), str(it.get("date") or "")):
+            dup += 1
+            continue
         buckets[_bucket_of(it)].append(it)
     return VerdictReviewSummary(
         total=len(items),
+        weekend_dup_excluded=dup,
         **{k: _summarize_bucket(k, rows) for k, rows in buckets.items()},
         has_report_md=report_path.exists(),
     )

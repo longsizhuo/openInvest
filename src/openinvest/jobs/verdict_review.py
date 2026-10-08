@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from openinvest.calc.symbols import is_closed_weekend
 from openinvest.utils.symbols import safe_symbol
 # 统计纯核已迁 jobs/review_calc（ADR-026）——导回保持历史导出面
 from openinvest.jobs.review_calc import (  # noqa: F401
@@ -355,6 +356,7 @@ def review_one(
         # 决议日落在 LLM 训练窗口 → 记忆穿越，下游分桶/Dreaming 据此剔出业绩统计。
         # ISO 日期字典序比较等价于时间序，无需 parse。
         contaminated=decision_date <= CONTAMINATION_CUTOFF,
+        weekend_dup=is_closed_weekend(real_symbol, decision_date),
     )
 
     # 波动率阈值按资产定（HOLD 的"没动"判定 + 方向分类共用同一个 flat band）。
@@ -441,7 +443,8 @@ def write_report(reviews: List[VerdictReview], summary: Dict[str, Any]) -> Path:
         "# Verdict Accuracy Report",
         f"\n*Generated: {datetime.now().isoformat(timespec='seconds')}*",
         f"\n**总 verdict 数**: {summary['total']}  "
-        f"(holdout {holdout['n']} + contaminated {contaminated['n']}, cutoff {summary['cutoff']})",
+        f"(holdout {holdout['n']} + contaminated {contaminated['n']}"
+        f" + 周末重复 {summary['weekend_dup_excluded']} 条不计, cutoff {summary['cutoff']})",
         "\n> 🔒 机器强制分桶：holdout（cutoff 之后，干净业绩）与 contaminated（决议日落在 LLM "
         "训练窗口，记忆穿越非业绩）**分别统计，绝不合并成一个命中率**。",
     ]

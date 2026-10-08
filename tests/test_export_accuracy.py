@@ -34,7 +34,7 @@ def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
     - 窗口 sample_size < MIN_SAMPLE_FOR_PUBLIC ⇒ direction_hit_rate 必须为 None
     - 每个方向 bucket total < MIN_SAMPLE_FOR_PUBLIC ⇒ bucket 的 rate **和 hit** 都必须为 None
       （hit/total 一次除法可精确还原被抑制的 rate）
-    - 恰好一个 bucket 被抑制 ⇒ 窗口 direction_hit_rate 也必须为 None
+    - 被抑制 bucket 的 total 合计在 (0, MIN_SAMPLE_FOR_PUBLIC) ⇒ 窗口 direction_hit_rate 也必须为 None
       （否则 hit = round(rate×n) − Σ其余桶 hit 减法可逆）
 
     total 计数保留（GUI 展示 n=XX「样本不足」）。where 仅用于失败信息定位。
@@ -50,20 +50,23 @@ def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
                 f"{window.get('direction_hit_rate')!r}（红线 #2）"
             )
         n_suppressed = 0
+        suppressed_total = 0
         for bucket_name, bucket in (window.get("by_direction") or {}).items():
             total = int(bucket.get("total", 0) or 0)
             if total < MIN_SAMPLE_FOR_PUBLIC:
                 n_suppressed += 1
+                suppressed_total += total
                 for field in ("rate", "hit"):
                     assert bucket.get(field) is None, (
                         f"{where}: 窗口 {name!r} 方向 {bucket_name!r} total={total} "
                         f"< {MIN_SAMPLE_FOR_PUBLIC} 却泄露了 {field}="
                         f"{bucket.get(field)!r}（红线 #2）"
                     )
-        if n_suppressed == 1:
+        if 0 < suppressed_total < MIN_SAMPLE_FOR_PUBLIC:
             assert window.get("direction_hit_rate") is None, (
-                f"{where}: 窗口 {name!r} 恰好 1 个方向被抑制，direction_hit_rate="
-                f"{window.get('direction_hit_rate')!r} 仍暴露 ⇒ 被抑制桶的 hit 可由"
+                f"{where}: 窗口 {name!r} 被抑制桶合计 total={suppressed_total} <"
+                f" {MIN_SAMPLE_FOR_PUBLIC}，direction_hit_rate="
+                f"{window.get('direction_hit_rate')!r} 仍暴露 ⇒ 被抑制桶的合计 hit 可由"
                 f"减法精确还原（红线 #2 补充抑制）"
             )
         br = window.get("base_rate") or {}
@@ -119,6 +122,18 @@ def test_backtest_entries_excluded_from_public(tmp_path):
     # 缺 source 的老条目按 live 计入(向后兼容:jsonl 早于 backtest 集成时全是 live)
     _write_jsonl(jsonl, [_make_row("2025-03-03", "up", True)])
     assert build_summary(jsonl)["windows"]["all"]["sample_size"] == 1
+
+
+def test_weekend_dups_excluded_from_public(tmp_path):
+    """D8 统一周末口径：周末休市资产的周末决议（=周五样本重复）不计入任何窗口，只输出被剔条数。"""
+    jsonl = tmp_path / "verdict_review.jsonl"
+    rows = ([_make_row("2025-03-07", "up", True)] * 3        # 周五
+            + [_make_row("2025-03-08", "up", True)] * 2      # 周六 → 剔
+            + [_make_row("2025-03-09", "up", True, asset="BTC-USD")])  # 加密周日照算
+    _write_jsonl(jsonl, rows)
+    s = build_summary(jsonl)
+    assert s["weekend_dup_excluded"] == 2
+    assert s["windows"]["all"]["sample_size"] == 4
 
 
 # ---------- 脱敏红线测试 ----------
@@ -264,24 +279,44 @@ def test_suppress_single_small_direction_also_nulls_overall():
     assert out["by_direction"]["hold"]["hit"] == 30
 
 
-def test_suppress_two_small_directions_keeps_overall():
-    """2 个方向都 n<30：各自 rate+hit 抹掉，但 overall 保留——
-    减法只能还原两桶之和，无法分离个体，overall n>=30 本身合规"""
+def test_suppress_two_small_directions_combined_sub30_nulls_overall():
+    """2 个方向都 n<30 且合计也 <30：overall 也抹——减法还原的两桶合计命中本身就是
+    n<30 的命中率；一桶很小时另一桶几乎被钉死（2026-10 D8 补，原规则只管恰好一个桶）"""
     window = {
-        "direction_hit_rate": 0.85,
-        "sample_size": 40,
+        "direction_hit_rate": 0.646,
+        "sample_size": 113,
         "by_direction": {
-            "bullish": {"hit": 2, "total": 4, "rate": 0.5},
-            "bearish": {"hit": 5, "total": 6, "rate": 0.8333},
-            "hold": {"hit": 27, "total": 30, "rate": 0.9},
+            "bullish": {"hit": 3, "total": 12, "rate": 0.25},
+            "bearish": {"hit": 0, "total": 1, "rate": 0.0},
+            "hold": {"hit": 70, "total": 100, "rate": 0.7},
         },
     }
     out = _suppress_small_samples(window)
-    assert out["direction_hit_rate"] == 0.85
+    assert out["direction_hit_rate"] is None
     for b in ("bullish", "bearish"):
         assert out["by_direction"][b]["rate"] is None
         assert out["by_direction"][b]["hit"] is None
-    assert out["by_direction"]["hold"]["hit"] == 27
+    assert out["by_direction"]["hold"]["hit"] == 70
+
+
+def test_suppress_small_directions_combined_ge30_or_empty_keeps_overall():
+    """被抑制桶合计 ≥30（减法只得到 n≥30 的合计）或合计 0 条（无可还原）→ overall 保留"""
+    window = {
+        "direction_hit_rate": 0.85,
+        "sample_size": 80,
+        "by_direction": {
+            "bullish": {"hit": 10, "total": 20, "rate": 0.5},
+            "bearish": {"hit": 15, "total": 20, "rate": 0.75},
+            "hold": {"hit": 27, "total": 40, "rate": 0.675},
+        },
+    }
+    assert _suppress_small_samples(window)["direction_hit_rate"] == 0.85
+    window["by_direction"] = {
+        "bullish": {"hit": 0, "total": 0, "rate": None},
+        "bearish": {"hit": 0, "total": 0, "rate": None},
+        "hold": {"hit": 68, "total": 80, "rate": 0.85},
+    }
+    assert _suppress_small_samples(window)["direction_hit_rate"] == 0.85
 
 
 def test_build_summary_suppresses_small_sample_public_output(tmp_path):
