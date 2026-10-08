@@ -1,3 +1,4 @@
+import html
 import os
 import smtplib
 import socket
@@ -8,6 +9,7 @@ from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
+from urllib.parse import quote, urlsplit
 
 import markdown
 from dotenv import load_dotenv
@@ -77,6 +79,26 @@ _DEFAULT_EMAIL_CSS = """
     .footer { font-size: 12px; color: #9aa5b1; margin-top: 34px; padding-top: 18px; border-top: 1px solid #e4e9ee; text-align: center; }
     .highlight { background: #fff3cd; padding: 2px 5px; border-radius: 4px; }
 """
+
+
+def md_text(text: object) -> str:
+    """不可信纯文本（新闻标题/来源名/归一化后的事件 claim）插进邮件 markdown 前过一遍。
+
+    python-markdown 原样透传 HTML（render_markdown_email 也靠这点渲染自家 <div>），所以
+    外部文本里的 <img>/<a>/<style> 会直接进邮件，[x](url) / ![x](url) 会变成链接/图片。
+    只做 HTML 转义 + 方括号转义，其余 markdown 字符不动（不影响阅读）。
+    """
+    return html.escape(str(text or ""), quote=False).replace("[", r"\[").replace("]", r"\]")
+
+
+def md_url(url: object) -> str:
+    """不可信 URL 放进 markdown 链接的 (...) 前：只放行 http(s)，并编码掉能提前闭合括号、
+    插入 HTML 或 title 的字符（空格 ( ) < > " [ ]）。其它 scheme（javascript:/data:…）返回
+    空串，调用方据此只出文字不出链接。"""
+    u = str(url or "").strip()
+    if urlsplit(u).scheme.lower() not in ("http", "https"):
+        return ""
+    return quote(u, safe=":/?#&=%.-_~+,;@!$*'")
 
 
 def render_markdown_email(content_md: str, *, footer_label: str = "Invest Agent") -> str:

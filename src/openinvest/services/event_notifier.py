@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.notifier import (
+    md_text,
+    md_url,
     render_markdown_email,
     send_email_html,
 )
@@ -145,18 +147,19 @@ def _build_markdown(
         ts = e.get("ts", "")
         sources = e.get("sources") or []
 
-        lines.append(f"\n## {i}. {icon} {e.get('one_line_claim', '')}")
+        lines.append(f"\n## {i}. {icon} {md_text(e.get('one_line_claim', ''))}")
         lines.append("")
         lines.append(f"- **Stance**: {stance} / **Severity**: {severity}")
-        lines.append(f"- **Affected**: {', '.join(symbols) if symbols else '(macro/无指定 symbol)'}")
+        lines.append(f"- **Affected**: {md_text(', '.join(symbols)) if symbols else '(macro/无指定 symbol)'}")
         lines.append(f"- **Event time**: {ts or 'n/a'}")
         if sources:
             src_lines = []
             for s in sources[:4]:
-                title = s.get("title") or "(no title)"
-                url = s.get("url") or ""
-                name = s.get("src_name") or "?"
-                src_lines.append(f"  - [{title}]({url}) ({name})")
+                # 标题/来源名/URL 都来自外部新闻源：转义后再拼，非 http(s) 链接只出文字
+                title = md_text(s.get("title") or "(no title)")
+                url = md_url(s.get("url"))
+                name = md_text(s.get("src_name") or "?")
+                src_lines.append(f"  - [{title}]({url}) ({name})" if url else f"  - {title} ({name})")
             lines.append("- **Sources**:")
             lines.extend(src_lines)
 
