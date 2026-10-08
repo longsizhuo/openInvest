@@ -8,7 +8,6 @@
 |-----|------|------|-------|
 | `daily_report` | 每天 10:00 | `0 10 * * *` | `jobs.daily_report:run` |
 | `commsec_sync` | 每 2 小时 | `0 */2 * * *` | `jobs.commsec_sync:run` |
-| `weekly_review` | 周日 11:00 | `0 11 * * sun` | `jobs.weekly_review:run` |
 | `dreaming` | 每天 03:00 | `0 3 * * *` | `jobs.dreaming:run` |
 
 ## 启动调度器
@@ -22,4 +21,4 @@
 ## 持久化
 
 - `db/jobs.sqlite` — APScheduler jobstore（崩了重启状态保留）
-- `db/jobs.sqlite` 内的 `job_runs` 表 — 每次执行的 run log（用于 weekly_review 复盘）
+- `db/jobs.sqlite` 内的 `job_runs` 表 — 每次执行的 run log（job_watchdog 巡检用）

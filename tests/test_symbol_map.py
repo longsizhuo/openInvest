@@ -125,23 +125,22 @@ def test_event_stance_line_matches_proxied_event():
     assert line2 is not None and "EVENT_STANCE(TRACK.AX)" in line2
 
 
-# ---------- 港股 ticker 归一化（2026-08-20 快手信号丢失回归） ----------
+# ---------- 港股 ticker 归一化（补零写法信号丢失回归） ----------
 
 def test_normalize_symbol_hk_zero_padding():
     """HKEX 补零写法必须归一成 yfinance 4 位写法。
 
-    events.db 里 1024.HK(34) 与 01024.HK(11) 长期并存，而 recall / event_watch
-    触发闸都是精确字符串交集 → 补零那批对委员会不可见，8/19 快手财报最重的
-    sev3 事件就是这么丢的。
+    events.db 里同一标的的 4 位与补零 5 位写法长期并存，而 recall / event_watch
+    触发闸都是精确字符串交集 → 补零那批对委员会不可见，曾因此丢过高严重度事件。
     """
     from openinvest.services.symbol_map import normalize_symbol
 
-    assert normalize_symbol("01024.HK") == "1024.HK"
-    assert normalize_symbol("1024.HK") == "1024.HK"
+    assert normalize_symbol("01234.HK") == "1234.HK"
+    assert normalize_symbol("1234.HK") == "1234.HK"
     assert normalize_symbol("00981.HK") == "0981.HK"
     assert normalize_symbol("700.HK") == "0700.HK"
     assert normalize_symbol("0700.HK") == "0700.HK"
-    assert normalize_symbol("01024.hk") == "1024.HK"
+    assert normalize_symbol("01234.hk") == "1234.HK"
     # 真 5 位代码（人民币柜台）不能被截断
     assert normalize_symbol("80737.HK") == "80737.HK"
     # 非港股原样（只 strip + upper）
@@ -157,9 +156,9 @@ def test_normalizer_writes_canonical_hk_symbol():
 
     ev = _sanitize_event({
         "idx": 0,
-        "one_line_claim": "快手 Q2 净利同比降 30%",
+        "one_line_claim": "某港股公司季度净利同比大降",
         "stance": "risk", "severity": "high",
-        "entities": ["kuaishou"], "affected_symbols": ["01024.HK"],
+        "entities": ["examplecorp"], "affected_symbols": ["01234.HK"],
     }, offset=0)
     assert ev is not None
-    assert ev.event["affected_symbols"] == ["1024.HK"]
+    assert ev.event["affected_symbols"] == ["1234.HK"]

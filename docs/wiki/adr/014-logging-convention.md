@@ -122,7 +122,7 @@ log = logging.getLogger(__name__)
 | `jobs/pnl_snapshot.py` | 2 | P2 |
 | `jobs/payday_check.py` | 1 | P2 |
 | `jobs/commsec_sync.py` | 1 | P2 |
-| `jobs/weekly_review.py` | 1 | P2 |
+| ~~`jobs/weekly_review.py`~~ | 1 | 已删除（2026-10，从未启用的占位）|
 | `scheduler/runner.py` | 3 | P2 — 已大部分用 log |
 
 ## 后续步骤

@@ -3,7 +3,7 @@
 替代旧的 scheduler.py（while True + sleep）。
 - jobs/*.yml 自动发现并注册
 - 持久化到 db/jobs.sqlite（崩了重启状态不丢）
-- 每次任务执行写 run_log 表，供 weekly_review 复盘命中率
+- 每次任务执行写 run_log 表（job_runs），供 job_watchdog 巡检
 - 支持 --once <job_name> 单次执行模式（cli 触发）
 - 支持 --list 列出所有任务
 
@@ -66,7 +66,7 @@ logging.basicConfig(
 log = logging.getLogger("openinvest.scheduler.runner")
 
 
-# ---------- run_log 表（命中率复盘用） ----------
+# ---------- run_log 表（job_watchdog 巡检用） ----------
 
 def _ensure_run_log_table() -> None:
     conn = sqlite3.connect(RUN_LOG_DB, check_same_thread=False)
