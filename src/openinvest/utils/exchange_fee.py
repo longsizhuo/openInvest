@@ -65,6 +65,9 @@ def _betashares_fallback(symbol: str) -> bool:
 _MIN_HISTORY_ROWS = 250
 # get_history_df 的 days 是行数上限；取足够大 = 全历史（同 verdict_review / backtest 口径）
 _ALL_ROWS = 100000
+# symbol → 今天已为「今天这根缺 H/L」补刷过的日期。每进程每 symbol 每天最多补一次：
+# yfinance 本就给不出 H/L 的 bar（FX 周末、盘中半成型）不会每次调用都重拉。
+_OHLCV_GAP_TRIED: dict[str, str] = {}
 
 
 def _nan_to_none(v):
@@ -110,6 +113,16 @@ def get_history_data(
     # 2. 判断是否需要更新（如今天还没更新过）
     today_str = datetime.now().strftime('%Y-%m-%d')
     needs_update = df_db.empty or df_db.index[-1].strftime('%Y-%m-%d') != today_str
+    # 2026-10：今天这根只有 close（gold_price 现价缓存 GC=F/USDCNY=X、betashares 兜底先写了）
+    # → 上面判"已是今天"，5d 刷新整天跳过，H/L 一直 NULL，ATR/RVOL 静默退化成收盘价差
+    # （生产 USDCNY=X 近 60 天 22 根）。该 symbol 平时有 H/L（列在）而今天这根缺 → 照样刷一次。
+    ohlcv_gap = (
+        not needs_update and as_of_date is None
+        and "High" in df_db.columns and pd.isna(df_db["High"].iloc[-1])
+        and _OHLCV_GAP_TRIED.get(symbol) != today_str
+    )
+    if ohlcv_gap:
+        _OHLCV_GAP_TRIED[symbol] = today_str
 
     # backtest 模式 yfinance 策略：
     # - 实盘（as_of_date=None）：照常拉最新 5d
@@ -118,7 +131,7 @@ def get_history_data(
     #   cutoff 之前的足够数据让 RSI/ATR 等指标算得出来）
     # - backtest cutoff >= today - 30d：保守，仍 skip（防边界情况）
     should_fetch_yf = False
-    if needs_update:
+    if needs_update or ohlcv_gap:
         if as_of_date is None:
             should_fetch_yf = True
             # 深度不足（empty 或仅几天）→ 全量回填 2y，保证 RSI/MA120/MA250/regime
@@ -191,10 +204,11 @@ def get_history_data(
 
         # yfinance 失败/返回空（被墙/被限流）→ BetaShares 官网兜底当前 NAV。
         # 只在实盘路径（as_of_date=None）触发：scraper 只有"现在"这一个点，
-        # 对历史 cutoff 无意义。
-        if not yf_got_data and as_of_date is None and _betashares_fallback(symbol):
+        # 对历史 cutoff 无意义。只补 H/L 那次刷失败：库里今天的 close 本就是新的
+        # → 不兜底、不标 stale。
+        if not yf_got_data and needs_update and as_of_date is None and _betashares_fallback(symbol):
             df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
-        yf_fetch_failed = not yf_got_data
+        yf_fetch_failed = needs_update and not yf_got_data
 
     if not df_db.empty:
         out = _apply_period(_apply_cutoff(df_db, as_of_date), period)
