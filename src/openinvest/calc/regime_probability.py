@@ -259,6 +259,8 @@ def forward_return(
         return None
     idx = closes.index
     ts = pd.Timestamp(asof)
+    if getattr(idx, "tz", None) is not None and ts.tzinfo is None:  # tz-aware index 也能比
+        ts = ts.tz_localize(idx.tz)
     i = idx.searchsorted(ts, side="right") - 1
     if i < 0:
         return None

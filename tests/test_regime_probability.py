@@ -816,3 +816,17 @@ def test_forward_return_immature_returns_none():
     s = _mk_closes()
     last = s.index[-1].strftime("%Y-%m-%d")
     assert forward_return("X", last, 90, closes=s) is None
+
+
+def test_forward_return_tz_aware_index_matches_naive():
+    """verdict_review 也走 forward_return：tz-aware index 不能抛 TypeError。"""
+    import pandas as pd
+
+    from openinvest.calc.regime_probability import forward_return
+
+    out = []
+    for tz in (None, "Asia/Shanghai"):
+        idx = pd.DatetimeIndex(["2026-10-05", "2026-10-06", "2026-10-08", "2026-10-09"], tz=tz)
+        s = pd.Series([1.0, 2.0, 3.0, 4.0], index=idx)
+        out.append((forward_return("X", "2026-10-07", 1, closes=s), forward_return("X", "2026-10-06", 2, closes=s)))
+    assert out[0] == out[1] == (0.5, 0.5)
