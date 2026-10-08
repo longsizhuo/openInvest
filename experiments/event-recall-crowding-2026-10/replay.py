@@ -106,6 +106,8 @@ def main() -> None:
     ap.add_argument("--min-severity", default="mid")
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--default-path", action="store_true")
+    ap.add_argument("--with-rows", action="store_true",
+                    help="输出逐日明细（含每条事件年龄）——只供本地排查，别提交：对照公开新闻时间线可能反推出标的")
     ap.add_argument("--new-hash-rerank", action="store_true",
                     help="对照：新版也用 embed_text(symbol) hash 精排（本分支第一版口径）")
     args = ap.parse_args()
@@ -161,7 +163,9 @@ def main() -> None:
                 "median_age_h_new": _median([a for r in rs for a in r["new_age_h"]]),
             }
         out = {"params": {k: v for k, v in vars(args).items() if k not in ("db", "watched")},
-               "summary": summary, "rows": rows}
+               "summary": summary}
+        if args.with_rows:
+            out["rows"] = rows
         if args.default_path:
             out["default_path"] = {
                 "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

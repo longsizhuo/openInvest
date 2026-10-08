@@ -29,16 +29,17 @@
 DB=$INVEST_HOME/db/events.db; W=<holdings ∪ target_assets，逗号分隔>
 R="uv run python experiments/event-recall-crowding-2026-10/replay.py --db $DB --watched $W --start 2026-09-01 --end 2026-10-07"
 O=experiments/event-recall-crowding-2026-10
-$R --default-path    > $O/result.json              # 生产口径：旧（hash 精排）vs 新（时间序）
+$R                   > $O/result.json              # 生产口径：旧（hash 精排）vs 新（时间序）
 $R --new-hash-rerank > $O/result_hash_rerank.json  # 对照：新版也 hash 精排（本分支第一版，被否掉）
 ```
 
-- **去标识**：关注 symbol 按 `--watched` 顺序记为 S1..S4，结果文件只有计数和事件年龄，没有 ticker / 事件文本。
+- **去标识**：关注 symbol 按 `--watched` 顺序记为 S1..S4；提交的结果文件只含汇总计数（逐日明细与今天的实时计数
+  对照公开新闻时间线可能反推出标的，只在本地用 `--with-rows` / `--default-path` 看，不提交）。
 - **新鲜度（fresh）**：新版口径下合格、且 eff_ts 落在 as_of 前 24h 内的事件；数其中有多少进了 brief。
 - **陈旧槽位（stale）**：brief 里比"真·第 8 新"合格事件还老 1h 以上的条数；真·最新 8 条在 Python 里按
   解析后的时刻排（不信 SQL 的排序）。新版应恒为 0。
 - 快照上界：`max(created_at) ≈ 2026-10-08T06:16Z`（约 2.5 万行）（库还在长；as_of 路径按 `created_at <= as_of` 截断，
-  过去的日子同快照重跑逐字节一致）。`default_path`（as_of=None，生产现行路径）随运行时刻变，带 `run_at`。
+  过去的日子同快照重跑逐字节一致）。
 - as_of 只截"事件存不存在"：同 event_id 后续 upsert 原地改写的 severity / affected_symbols 还原不了（#196 已知限制）。
 
 ## 结果（2026-09-01 → 2026-10-07，27 个工作日 × 4 个关注标的）
@@ -56,9 +57,6 @@ $R --new-hash-rerank > $O/result_hash_rerank.json  # 对照：新版也 hash 精
 | 召回里的未来 ts 事件 | 0 → 0 | **17 → 0** | 0 → 0 | 0 → 0 |
 | 陈旧槽位（比真·第 8 新老 >1h）条数 / 天数 | 29 / 13 → **0** | 161 / 27 → **0** | 0 → 0 | 2 / 1 → **0** |
 | 召回事件距 as_of 小时数中位 | 20.4 → 21.9 | 17.3 → **4.0** | 24.5 → 63.2 | 26.5 → 71.0 |
-
-今天（`default_path`，run_at 2026-10-08T06:32Z）：S1 8 → 8 条（近 24h 4 → 8，high 2 → 4）、S2 8 → 8（近 24h
-6 → 8，8 条全换）、S3 0 → 0、**S4 1 → 8**。
 
 对照 `result_hash_rerank.json`（新版也 hash 精排）：近 24h 进 brief S1 89 → **35**、S2 128 → **40**，
 high S1 23 → 6、S2 43 → 15；brief 里有近 24h 事件的天数 S1 21 → 15、S2 27 → 20；年龄中位
