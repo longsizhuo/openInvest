@@ -19,6 +19,7 @@ CLI 脚本入口 + 维护工具。**不在生产 cron 里跑**（生产 cron 走
 | `export_accuracy.py` | verdict_review.jsonl → 脱敏 `docs/accuracy_summary.json` | 按需 |
 | `snapshot.py` | memory/db/委员会历史打包快照与恢复（hub 迁移/备份） | 按需 |
 | `reconcile_dca_phantom.py` | 自动定投幻影买入（周末/节假日）/ 漏记交易日对账；默认 dry-run，`--apply` 经 with_portfolio_tx 幂等修账 | 一次 |
+| `purge_close_only_rows.py` | 删行情源没有 bar 的"仅收盘价行"（旧金价现价缓存造的周末/假日行）；默认 dry-run，`--apply` 才删，交易日缺 H/L 的行留给 `backfill_history` | 一次 |
 | `refresh_benchmarks.py` | 拉取/缓存外部 benchmark NAV | 周度候选 |
 | `check_benchmark_freshness.py` | 硬编码 benchmark 收益率过期告警（cron 友好退出码） | cron 候选 |
 | `backtest_committee.py` | 历史日期跑委员会，工具全部截 as-of-D 防 look-ahead | 研究用 |
