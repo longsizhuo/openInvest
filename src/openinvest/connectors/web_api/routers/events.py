@@ -14,7 +14,7 @@ router = APIRouter()
 
 # 手动扫描单飞：端点进线程池后（#233-3）重叠请求（客户端超时重试 / 双击）会并行跑两份
 # event_watch，同一篇新闻都当未见过 → 重复触发委员会 + 重复预警邮件。
-# ponytail: 进程内锁，挡不住 cron scheduler 进程同时在跑；跨进程要在 event_watch 内加 flock
+# 局限：进程内锁，挡不住 cron scheduler 进程同时在跑；跨进程要在 event_watch 内加 flock
 _CHECK_LOCK = threading.Lock()
 
 
