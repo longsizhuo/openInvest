@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.37.0](https://github.com/longsizhuo/openInvest/compare/v0.36.4...v0.37.0) (2026-10-08)
+
+
+### Features
+
+* **path-review:** write live results to path_review_live.jsonl and enable the weekly job ([#278](https://github.com/longsizhuo/openInvest/issues/278)) ([70f4d4b](https://github.com/longsizhuo/openInvest/commit/70f4d4bcd35802363b577c5eef548c138c81a419))
+* **verdict-review:** live-only daily review, DB-only prices, summary split by source ([#279](https://github.com/longsizhuo/openInvest/issues/279)) ([4382f7e](https://github.com/longsizhuo/openInvest/commit/4382f7e0b1045e2fea2285d84c4c7982879685e8))
+
+
+### Bug Fixes
+
+* **sentiment:** update the opportunity caveat to the re-run evidence (−0.48%, not significant) ([#280](https://github.com/longsizhuo/openInvest/issues/280)) ([f2171bc](https://github.com/longsizhuo/openInvest/commit/f2171bc0272806f272e31f5333280f2c42f0b7a3))
+
 ## [0.36.4](https://github.com/longsizhuo/openInvest/compare/v0.36.3...v0.36.4) (2026-10-08)
 
 
