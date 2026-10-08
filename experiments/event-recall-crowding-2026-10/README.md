@@ -80,6 +80,23 @@ S1 92.3h、S2 70.2h。→ 合格集变大后 hash 精排就是在一周里随机
   1 → 0，这 6 天近 24h 合格事件都有 10–61 条），17 个更多；合计 S1 high 23 → 23、S2 43 → 56。低频标的（S3/S4）的年龄中位变大是因为多出来的事件来自一周里更早的
   日子（旧版这些天是 0 条），近 24h 的事件一条没少。
 
+## 下游：情绪表盘里的「事件净情绪」行也跟着变
+
+brief 换了，`session.py` 由 brief 算出的逐资产 `EVENT_STANCE(sym)` 行（net risk / neutral / opportunity）
+也会变——这行进的是 debate 注入的「MARKET SENTIMENT 表盘（确定性事实，必须纳入）」。同一 27 个工作日，
+按生产多标的路径（`resolve_event_brief_multi`，as_of = 当日 02:00Z）新旧 brief 各喂
+`event_stance_line_for_symbol`：
+
+| | S1 | S2 | S3 | S4 |
+|---|---|---|---|---|
+| 净情绪标签变了的天数（/27） | 9 | 7 | 9 | 15 |
+| 其中 risk ↔ opportunity 方向翻转 | 0 | **5（risk → opportunity）** | 0 | 0 |
+| 主要变化 | neutral → risk 5 天 | risk → neutral 2 天 | 无此行 → risk 6 天 | 无此行 → risk 8 / opportunity 7 天 |
+
+合计 108 个标的·日里 40 个变了。S3/S4 的变化几乎都是「旧版 0 条事件所以没有这一行 → 新版有」；
+S2 的 5 天方向翻转来自旧版 hash 随机抽到的偏旧风险新闻被换成最新事件（opportunity 还会带上
+"短线反向指标"提示）。复算脚本含真实标的未提交，口径同上表即可复现。
+
 ## 性能（快照 25k 事件，`EXPLAIN QUERY PLAN`）
 
 - 新查询钉 `idx_events_ts`（`INDEXED BY`）：不钉时无 stat 的规划器改走 `idx_events_severity`
