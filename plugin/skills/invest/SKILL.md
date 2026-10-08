@@ -275,7 +275,9 @@ core duty (issue #133 Decision 2).
 pair with `discipline` for the counterfactual P&L of rule-blocked actions (its inaction rate counts
 **live** verdicts only). For hit rates use `GET /api/verdict_review/summary`: it returns separate
 `live` / `backtest` / `contaminated` buckets — quote only `live` as performance, never add the
-buckets together, and say "sample too small" when a rate is `null` (n<30). When the user
+buckets together, and say "sample too small" when a rate is `null` (n<30). Weekend decisions on
+weekend-closed assets reuse Friday's close, so they are left out of every bucket and counted in
+`weekend_dup_excluded` — that is why `live.n` is below the number of live decisions. When the user
 rejects the same class of recommendation several times in a row, proactively point out
 "the divergence pattern between you and the committee" — that is not a bad thing; it is
 a signal worth recording.
