@@ -236,6 +236,7 @@ def test_run_committee_full_flow(recorder, monkeypatch, capfd):
             "task_id": "tsk123", "status": "done", "phase": "done",
             "result": {"by_asset": {"NDQ.AX": {
                 "verdict": {"verdict": "HOLD", "confidence": 0.6},
+                "confidence_lookup": "LOOKUP-TEXT",
                 "cio_memo": "## verdict\nHOLD",
             }}},
         }),
@@ -247,6 +248,7 @@ def test_run_committee_full_flow(recorder, monkeypatch, capfd):
     assert out["status"] == "ok"
     assert out["verdict"]["verdict"] == "HOLD"
     assert out["cio_memo"].startswith("## verdict")
+    assert out["confidence_lookup"] == "LOOKUP-TEXT"   # hub 的查表文本原样透传给 spoke agent
     run_call = next(c for c in recorder["calls"] if c["url"].endswith("/api/committee/run"))
     assert run_call["json"]["symbols"] == ["NDQ.AX"]
     assert run_call["json"]["max_debate_rounds"] == 1
@@ -257,7 +259,7 @@ def test_run_committee_same_day_cache(recorder, capfd):
     r[f"GET {BASE}/api/health"] = FakeResponse(
         200, {"ok": True, "timestamp": "2026-06-12T10:00:00+08:00"})
     r[f"GET {BASE}/api/committee_sessions/2026-06-12/NDQ_AX"] = FakeResponse(
-        200, {"content": "# Committee: NDQ.AX\n..."})
+        200, {"content": "# Committee: NDQ.AX\n...", "confidence_lookup": "LOOKUP-TEXT"})
 
     rd.maybe_dispatch_remote(Namespace(
         cmd="run_committee", symbol="NDQ.AX", force=False, max_rounds=1))
@@ -265,6 +267,7 @@ def test_run_committee_same_day_cache(recorder, capfd):
     assert out["status"] == "cached"
     assert "--force" in out["reason"]
     assert out["transcript_md"].startswith("# Committee")
+    assert out["confidence_lookup"] == "LOOKUP-TEXT"
     # cache 命中后不应触发 run
     assert not any(c["url"].endswith("/api/committee/run") for c in recorder["calls"])
 

@@ -237,8 +237,11 @@ def test_committee_view_sanitizes_transcript_but_keeps_charts(tmp_path, monkeypa
 
     monkeypatch.setattr(sb, "_COMMITTEE_DIR", tmp_path)
     monkeypatch.setattr(router, "COMMITTEE_DIR", tmp_path)
+    import openinvest.jobs.verdict_review as vr
+    from openinvest.jobs.review_calc import confidence_display
     from openinvest.services.committee_charts import render_verdict_tile
 
+    monkeypatch.setattr(vr, "load_confidence_lookup", lambda: None)
     verdict = {"verdict": "HOLD", "confidence": 0.6, "dominant_view": "risk", "alloc_cny": 0}
     sb.write_committee_status("vt", {
         "task_id": "vt", "status": "done", "started_at": "2026-01-02T08:00:00+08:00",
@@ -249,7 +252,7 @@ def test_committee_view_sanitizes_transcript_but_keeps_charts(tmp_path, monkeypa
 
     r = router.committee_status_view("vt")
     head, rest = r.body.decode().split("</head>", 1)
-    tile = render_verdict_tile(verdict)
+    tile = render_verdict_tile(verdict, confidence_display(verdict, None))
     assert tile in rest                              # 可信卡片在白名单之后拼，原样保留
     assert "<style>" in head and "<style" not in rest  # CHART_CSS 进 <head>，正文无 style
     assert _violations(rest.replace(tile, "")) == []  # 其余（transcript 等）只剩白名单标签

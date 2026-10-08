@@ -445,6 +445,8 @@ class TestAssembleFullReport:
             skipped_assets=set(), total_assets_cny=0.0,
             final_decision_gemini="",
             render_target="chat",
+            confidence_lookup={"by_verdict": {"ACCUMULATE": {"n": 40, "rate": 0.55, "n_fleet": 30,
+                                                             "from": "local"}}},
         )
         title_pos = report.index("投资委员会日报")
         tldr_pos = report.index("今日速览")
@@ -452,7 +454,9 @@ class TestAssembleFullReport:
         assert title_pos < tldr_pos < macro_pos  # 速览夹在标题和正文之间
         assert "🟩" in report  # ACCUMULATE 徽章（_make_committees fixture 用的裁决）
         assert "纳指ETF" in report and "NDQ.AX" in report
-        assert "置信度 75%" in report
+        # D10 P1：裁决旁是同类决议查表，不是 CIO 自报的"置信度 75%"
+        assert "同类 ACCUMULATE 30 天后方向判对的比例 55%（n=40；含纸面舰队样本）（自报 0.75）" in report
+        assert "置信度 75%" not in report
 
     def test_email_render_target_has_no_tldr(self):
         """email 变体不加速览块——邮件本来就一次性看全文，不需要重复摘要。"""
@@ -618,13 +622,15 @@ class TestBuildTldrBlock:
         )
         assert "⚪" in block
 
-    def test_line_includes_confidence_and_alloc(self):
+    def test_line_includes_lookup_and_alloc(self):
         block = build_tldr_block(
             [{"symbol": "GC=F", "display_name": "伦敦金"}],
             self._committees(verdict="TRIM", confidence=0.8, alloc_cny=3000),
+            {"by_verdict": {"TRIM": {"n": 18, "rate": None}}},
         )
         assert "伦敦金" in block and "GC=F" in block
-        assert "置信度 80%" in block
+        assert "样本不足（n=18）（自报 0.80）" in block
+        assert "置信度" not in block
         assert "¥3,000" in block
 
 

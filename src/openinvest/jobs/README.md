@@ -10,7 +10,7 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `commsec_sync.py` | 每 2h | 拉 CommSec 成交回执邮件，更新 portfolio.holdings |
 | `dreaming.py` | 每天 3am | 三阶段记忆整合（Light → REM → Deep Sleep），insights/ 沉淀长期模式 |
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |
-| `verdict_review.py` | 每天 2am（Asia/Shanghai） | 只复盘 live 委员会决议，命中率刷进 verdict_review.jsonl（纪律台账 / GUI 命中率页上游）；只读行情库、不触网 |
+| `verdict_review.py` | 每天 2am（Asia/Shanghai） | 只复盘 live 委员会决议，命中率刷进 verdict_review.jsonl（纪律台账 / GUI 命中率页上游）；尾巴顺手刷新 confidence_lookup.json（邮件/事件提醒/API 裁决旁的同类决议查表，样本 = live + 前瞻纸面舰队，舰队只进这张表）；只读行情库、不触网 |
 | `event_watch.py` | 北京 8:00-次日 2:30 每 30min（config `event.watch_schedule` 可改）| 扫多源新闻 → LLM 归一化 → 命中持仓则邮件 + 触发委员会（ADR-006）|
 | `price_sentinel.py` | 同窗口每 5min（config `event.sentinel_schedule` 可改）| 价格垂直线检测（10min vs 日ATR%，零 LLM）→ **先报警邮件后触发委员会**（ADR-025）|
 | `job_watchdog.py` | 每小时第 7 分钟 | 巡检 `db/jobs.sqlite` job_runs：enabled job 错过 2 次触发（+15min）/ running 超 max(60min, 3×中位耗时) / event_watch 连续 6 次 fetched=0 → Discord+邮件告警，同一异常 24h 内只报一次（2026-10-07，event_watch 卡死 21 天零告警的补救）|

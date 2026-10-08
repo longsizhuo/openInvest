@@ -122,6 +122,10 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
     if transcript_path.exists() and not args.force:
         from openinvest.capabilities.committee.i18n import bilingual
+        from openinvest.core.decision_ledger import parse_committee_file
+        from openinvest.jobs.review_calc import confidence_display
+        from openinvest.jobs.verdict_review import load_confidence_lookup
+        parsed = parse_committee_file(transcript_path)
         _print_json({
             "status": "cached",
             "reason": bilingual(
@@ -130,6 +134,9 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
             ),
             "transcript_path": str(transcript_path),
             "transcript_md": transcript_path.read_text(encoding="utf-8"),
+            # 与 fresh 路径 / MCP run_committee cached 同款
+            "confidence_lookup": (confidence_display(parsed, load_confidence_lookup(), with_raw=False)
+                                  if parsed else None),
         })
         return
 
@@ -187,10 +194,14 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
             "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
         )
 
+    from openinvest.jobs.review_calc import confidence_display
+    from openinvest.jobs.verdict_review import load_confidence_lookup
     _print_json({
         "status": "ok",
         "asset": target,
         "verdict": verdict,
+        # 给用户看这个，不是 verdict.confidence（CIO 自报，只留档）——D10 P1
+        "confidence_lookup": confidence_display(verdict, load_confidence_lookup(), with_raw=False),
         "cio_memo": cio_memo,
         "transcript_path": str(transcript_path) if transcript_path.exists() else "",
         "next_step": next_step,

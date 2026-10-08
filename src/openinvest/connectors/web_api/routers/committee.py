@@ -176,11 +176,17 @@ def _run_committee_task(
         results = session["asset_committees"]
 
         # 提取 verdict 摘要（避免序列化整个 CommitteeReport 对象）
+        from openinvest.jobs.review_calc import confidence_display
+        from openinvest.jobs.verdict_review import load_confidence_lookup
+        lookup = load_confidence_lookup()
         summary = {}
         for sym, res in results.items():
             if isinstance(res, dict):
                 summary[sym] = {
                     "verdict": res.get("verdict"),
+                    # 给人看的同类决议查表（D10 P1）；verdict.confidence 仍是 CIO 自报原数
+                    "confidence_lookup": (confidence_display(res["verdict"], lookup, with_raw=False)
+                                          if res.get("verdict") else None),
                     # CLI run_committee 输出含 cio_memo（Markdown，agent 渲染给用户）；
                     # web 路径补齐，远端模式下客户端轮询 done 后直接拿到同款字段
                     "cio_memo": (
@@ -340,6 +346,9 @@ def committee_status_view(task_id: str) -> HTMLResponse:
         return HTMLResponse(
             f"<h1>task_id {_esc(task_id)} 不存在</h1>", status_code=404, headers=_VIEW_HEADERS,
         )
+    from openinvest.jobs.review_calc import confidence_display
+    from openinvest.jobs.verdict_review import load_confidence_lookup
+    lookup = load_confidence_lookup()
 
     result = status.get("result") or {}
     symbols = result.get("symbols") or []
@@ -356,7 +365,7 @@ def committee_status_view(task_id: str) -> HTMLResponse:
         asset_blocks = []
         verdict = (by_asset.get(sym) or {}).get("verdict")
         if verdict:
-            asset_blocks.append(render_verdict_tile(verdict))
+            asset_blocks.append(render_verdict_tile(verdict, confidence_display(verdict, lookup)))
 
         safe_sym = safe_symbol(sym)
         md_path = COMMITTEE_DIR / date / f"{safe_sym}.md"

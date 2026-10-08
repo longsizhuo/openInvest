@@ -597,7 +597,8 @@ def test_committee_view_renders_verdict_tile_and_charts(client, tmp_store, monke
     body = r.text
     assert 'class="verdict-tile"' in body
     assert 'class="verdict-badge">HOLD' in body
-    assert "置信度" in body and "65%" in body
+    # D10 P1：卡片给同类决议查表（本机查表未生成 → 随包默认表），不再是"置信度 65%"
+    assert "同类 HOLD" in body and "默认表）（自报 0.65）" in body and "置信度" not in body
     assert "90 天路径形状分布" in body
     assert "<svg" in body
     assert "先跌后涨" in body and "40%" in body  # pct_dip_then_up
@@ -1040,11 +1041,23 @@ def test_committee_sessions_reads_disk_after_first_run(client, tmp_store):
     assert s["verdict"] == "HOLD"
     assert s["confidence"] == 0.62
     assert s["suggested_alloc_cny"] == 0.0
+    # D10 P1：本机查表没跑过 → 随包默认表；自报原数仍在 confidence 字段
+    assert s["confidence_lookup"].startswith("同类 HOLD") and s["confidence_lookup"].endswith("默认表）")
 
     # 详情端点也必须能读到完整 markdown
     r2 = client.get("/api/committee_sessions/2026-05-19/NDQ_AX")
     assert r2.status_code == 200
     assert "BetaShares" in r2.json()["content"]
+
+    # verdict_review 写出查表后，两个端点都换成同类 HOLD 的查表文字
+    tmp_store.write_dream_state("confidence_lookup", {
+        "by_verdict": {"HOLD": {"n": 40, "rate": 0.7, "n_live": 10, "n_fleet": 30}},
+        "market_flat": {"n": 50, "rate": 0.66, "n_live": 12, "n_fleet": 38},
+    })
+    want = "同类 HOLD 之后 30 天涨跌留在正常波动带内的比例 70%（n=40；同期市场横盘基率 66%；含纸面舰队样本）"
+    assert client.get("/api/committee_sessions").json()["sessions"][0]["confidence_lookup"] == want
+    assert r2.json()["confidence_lookup"].endswith("默认表）")
+    assert client.get("/api/committee_sessions/2026-05-19/NDQ_AX").json()["confidence_lookup"] == want
 
 
 def test_committee_sessions_lists_multiple_dates_reverse_sorted(client, tmp_store):

@@ -1,10 +1,12 @@
 """Verdict 后验复盘 — 算 1d/7d/30d 命中率 + 区分宏观突变 vs 模型差。
 
 输入：memory/.committee/<date>/<symbol>.md（含 macro_context_at_decision）
-     memory/.backtest/<date>/<symbol>.md（backtest 产生的，同 schema；仅 --include-backtest 手动全量时读）
+     memory/.backtest/<date>/<symbol>.md（backtest 产生的，同 schema；仅 --include-backtest 手动全量时读；
+         其中前瞻纸面舰队那部分每天另读一遍，只进 confidence_lookup，见 review_fleet）
      db/market_data.db（只读，不触网——2026-10 D4）
 输出：docs/verdict_accuracy.md (gitignored, 含真数字给本地分析用)
      memory/.dreams/verdict_review.jsonl（结构化结果，给 dreaming 用）
+     memory/.dreams/confidence_lookup.json（裁决旁展示的同类决议查表，D10 P1）
 
 命中率定义：
 - BUY / ACCUMULATE → 后续涨 >0% = hit
@@ -22,7 +24,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass, asdict, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -38,6 +40,8 @@ from openinvest.jobs.review_calc import (  # noqa: F401
     VerdictReview,
     _bucket_lines,
     _flat_band,
+    build_confidence_lookup,
+    merge_confidence_lookup,
     _is_hit,
     _summarize_bucket,
 )
@@ -315,11 +319,14 @@ def review_one(
     committee_dir: Path,
     stem: str,
     resolver: Optional[Dict[str, Dict[str, Any]]] = None,
+    *,
+    regime: bool = True,
 ) -> Optional[VerdictReview]:
     """对单个 verdict 文件做事后 review。
 
     stem: committee 文件名去掉 .md（可能是转义名 GC_F，也可能是 NDQ.AX）。
     resolver: 转义名 → holding 映射，用于旧文件拿回真实 symbol + proxy_kind。
+    regime: False 时不算 regime_at_decision（只要标签的调用方省掉一半耗时，见 review_fleet）。
     """
     decision_date = committee_dir.name  # YYYY-MM-DD
     path = committee_dir / f"{stem}.md"
@@ -381,7 +388,7 @@ def review_one(
         )
 
     # 决议日 regime 标记（crash 样本留痕但下游免责）。截断到决议日，无穿越。
-    rv.regime_at_decision = _decision_regime(real_symbol, decision_date)
+    rv.regime_at_decision = _decision_regime(real_symbol, decision_date) if regime else None
 
     return rv
 
@@ -502,6 +509,69 @@ def write_jsonl(reviews: List[VerdictReview]) -> Path:
     return out
 
 
+FLEET_START = "2026-07-24"  # 第一天 --prospective 纸面舰队；更早的 .backtest/<date> 是历史回填
+
+
+def review_fleet() -> List[VerdictReview]:
+    """前瞻纸面舰队 → 查表样本（只进 confidence_lookup，不进 jsonl / 命中率页 / 纪律台账）。
+
+    舰队和历史回填共用 .backtest/，transcript 里没有来源标记，按两条认前瞻：决议日 ≥ FLEET_START，
+    且文件在决议日当天或次日写出（--prospective 只跑今天；事后补跑的历史回测 mtime 远晚于决议日）。
+    T2 试跑臂写 .backtest_t2conf/，不在这里。resolver={}：舰队是中性持仓，按标的原生计价打标签，
+    不套本机持仓的积存金口径。标签和行情同 live：T2 30d 规则，只读 market_data.db、不触网。
+    ponytail: 靠 mtime 认前瞻；备份还原没保留 mtime 时舰队样本整体排除（退回默认表），不会误收。
+    ponytail: 每天把已成熟的舰队行全量重打标签（今天 ~1,600 行 ≈ 20 秒，每月 +~1,000 行）；
+    慢到碍事时按 (date, symbol) 缓存已成熟的 30d 标签。
+    """
+    base = MemoryStore().root / ".backtest"
+    matured_by = date.today() - timedelta(days=30)   # 更晚的决议 30d 窗口还没到，标签必为空
+    out: Dict[Tuple[str, str], VerdictReview] = {}
+    for d in sorted(base.iterdir()) if base.exists() else []:
+        try:
+            day = date.fromisoformat(d.name)
+        except ValueError:
+            continue
+        if not d.is_dir() or d.name < FLEET_START or day > matured_by:
+            continue
+        for md in sorted(d.glob("*.md")):
+            written = datetime.fromtimestamp(md.stat().st_mtime).date()
+            if not day <= written <= day + timedelta(days=1):
+                continue
+            rv = review_one(d, md.stem, {}, regime=False)
+            if rv:
+                out.setdefault((rv.date, rv.asset), rv)
+    return list(out.values())
+
+
+CONFIDENCE_LOOKUP = "confidence_lookup"  # .dreams/confidence_lookup.json（D10 P1 展示查表）
+# 包内默认表：只用舰队样本生成（scripts/gen_confidence_lookup_default.py），给本机某 verdict n<30 时兜底
+DEFAULT_LOOKUP_PATH = Path(__file__).with_name("confidence_lookup_default.json")
+
+
+def write_confidence_lookup(reviews: List[VerdictReview]) -> Path:
+    """每日复盘尾巴顺手刷新展示查表（纯算术）。样本 = live + 前瞻舰队。邮件/事件提醒/API 读它。"""
+    data = {**build_confidence_lookup(reviews, review_fleet()),
+            "generated_at": datetime.now().isoformat(timespec="seconds")}
+    return MemoryStore().write_dream_state(CONFIDENCE_LOOKUP, data)
+
+
+def _valid_lookup(read) -> Optional[Dict[str, Any]]:
+    try:
+        data = read()
+    except Exception as e:  # noqa: BLE001
+        log.warning("读查表失败，按缺表处理: %s", e)
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("by_verdict"), dict) else None
+
+
+def load_confidence_lookup() -> Optional[Dict[str, Any]]:
+    """读展示查表：本机（.dreams）某 verdict n≥30 用本机，否则用包内默认表（merge_confidence_lookup）。
+    两边都没有/坏了 → None（展示按 n=0 显示"样本不足"，不阻断任何发送）。"""
+    local = _valid_lookup(lambda: MemoryStore().read_dream_state(CONFIDENCE_LOOKUP))
+    default = _valid_lookup(lambda: json.loads(DEFAULT_LOOKUP_PATH.read_text(encoding="utf-8")))
+    return merge_confidence_lookup(local, default)
+
+
 def run(*, include_backtest: bool = False) -> Dict[str, Any]:
     """job entry。cron 默认只复盘 live（D4 签字方案）。
 
@@ -515,6 +585,7 @@ def run(*, include_backtest: bool = False) -> Dict[str, Any]:
     summary = summarize(reviews)
     md_path = write_report(reviews, summary)
     jsonl_path = write_jsonl(reviews)
+    write_confidence_lookup(reviews)
     return {
         "status": "ok",
         "summary": summary,

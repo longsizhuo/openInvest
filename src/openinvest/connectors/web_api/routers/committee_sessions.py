@@ -7,11 +7,13 @@ _parse_committee_header 私有 helper 随 list_committee_sessions 同模块搬�
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from openinvest.core.memory_store import MemoryStore
+from openinvest.jobs.review_calc import confidence_display
+from openinvest.jobs.verdict_review import load_confidence_lookup
 
 from openinvest.connectors.web_api.models import (
     CommitteeSessionDetail,
@@ -41,6 +43,7 @@ def list_committee_sessions(
     sessions: List[CommitteeSessionSummary] = []
     if not base.exists():
         return CommitteeSessionsResponse(count=0, sessions=[])
+    lookup = load_confidence_lookup()
     # 日期目录倒序
     for date_dir in sorted(base.iterdir(), reverse=True):
         if not date_dir.is_dir():
@@ -56,6 +59,7 @@ def list_committee_sessions(
                 symbol=md.stem,
                 verdict=verdict,
                 confidence=confidence,
+                confidence_lookup=_lookup_text(verdict, confidence, lookup),
                 dominant_view=dominant,
                 suggested_alloc_cny=alloc,
                 file_path=str(md.relative_to(store.root.parent)),
@@ -63,6 +67,14 @@ def list_committee_sessions(
             if len(sessions) >= limit:
                 return CommitteeSessionsResponse(count=len(sessions), sessions=sessions)
     return CommitteeSessionsResponse(count=len(sessions), sessions=sessions)
+
+
+def _lookup_text(verdict, confidence, lookup) -> Optional[str]:
+    """md 头只有封顶后的数：强制 HOLD 靠 ≤0.4 认出（D10 P1）。自报原数在 confidence 字段。"""
+    if not verdict:
+        return None
+    return confidence_display({"verdict": verdict.upper(), "confidence": confidence}, lookup,
+                              with_raw=False)
 
 
 def _parse_committee_header(content: str) -> tuple:
@@ -108,8 +120,11 @@ def get_committee_session(date: str, symbol: str) -> CommitteeSessionDetail:
     md = store.root / ".committee" / date / f"{symbol}.md"
     if not md.exists():
         raise HTTPException(404, f"未找到 {date}/{symbol}")
+    content = md.read_text(encoding="utf-8")
+    verdict, confidence, _, _ = _parse_committee_header(content)
     return CommitteeSessionDetail(
         date=date,
         symbol=symbol,
-        content=md.read_text(encoding="utf-8"),
+        content=content,
+        confidence_lookup=_lookup_text(verdict, confidence, load_confidence_lookup()),
     )

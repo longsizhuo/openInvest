@@ -218,7 +218,7 @@ CIO 不能编造，必须从这 5 个里选：
 | `SELL` | 全部卖出（极少见）| -20000 ~ -100000 CNY |
 
 CIO 同时输出：
-- `confidence: 0.0~1.0`（被 sanity check clamp）
+- `confidence: 0.0~1.0`（被 sanity check clamp）——只留档；邮件 / API / GUI 裁决旁给人看的是同类决议查表 `confidence_lookup`（见 [06-api](06-api.md)「委员会」节）
 - `alloc_cny: int`（建议金额）
 - `dominant_view: macro|quant|risk`（哪一方说服了 CIO）
 - `execution_plan` + `risk_plan`（详细执行 + 止损）

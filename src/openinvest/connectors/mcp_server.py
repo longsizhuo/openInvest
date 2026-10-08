@@ -265,8 +265,11 @@ def explain_decision(
             returned in the `decisions` tool output.
 
     Returns:
-        Object with verdict, confidence, alloc_cny, `transcript_markdown`
-        (render this to the user), and `path_snapshot` (may be null).
+        Object with verdict, confidence (the CIO's self-reported number, kept
+        for the record), `confidence_lookup` (show this to the user instead:
+        how similar verdicts (live + paper fleet) turned out 30 days later), alloc_cny,
+        `transcript_markdown` (render this to the user), and `path_snapshot`
+        (may be null).
     """
     import json
     from openinvest.core.decision_ledger import parse_committee_file
@@ -292,9 +295,12 @@ def explain_decision(
             path_snapshot = json.loads(path_json.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             pass
+    from openinvest.jobs.review_calc import confidence_display
+    from openinvest.jobs.verdict_review import load_confidence_lookup
     return {
         "decision_id": decision_id,
         **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny")},
+        "confidence_lookup": confidence_display(parsed, load_confidence_lookup(), with_raw=False),
         "transcript_markdown": md.read_text(encoding="utf-8"),
         "path_snapshot": path_snapshot,
     }
@@ -664,12 +670,15 @@ def run_committee(
         max_rounds: Cross-challenge debate rounds (default 1).
 
     Returns:
-        Object with `decision_id`, `cached` flag, and `verdict` (verdict,
-        confidence, suggested allocation, CIO memo).
+        Object with `decision_id`, `cached` flag, `verdict` (verdict,
+        confidence, suggested allocation, CIO memo) and `confidence_lookup`
+        (show this to the user instead of the self-reported confidence).
     """
     import json
     from openinvest.core.decision_ledger import parse_committee_file
     from openinvest.core.memory_store import MemoryStore
+    from openinvest.jobs.review_calc import confidence_display
+    from openinvest.jobs.verdict_review import load_confidence_lookup
     from datetime import datetime
 
     if not force:
@@ -679,7 +688,9 @@ def run_committee(
         parsed = parse_committee_file(cached)
         if parsed:
             return {"cached": True, "decision_id": f"{today}/{symbol}",
-                    **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny")}}
+                    **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny")},
+                    "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),
+                                                            with_raw=False)}
 
     from openinvest.core.committee_runner import run_committee_session
     out = run_committee_session(symbols=[symbol], max_debate_rounds=max_rounds)
@@ -689,6 +700,8 @@ def run_committee(
         "cached": False,
         "decision_id": f"{datetime.now().strftime('%Y-%m-%d')}/{symbol}",
         "verdict": json.loads(json.dumps(v if v is not None else res, default=str)),
+        "confidence_lookup": (confidence_display(v, load_confidence_lookup(), with_raw=False)
+                              if isinstance(v, dict) else None),
     }
 
 

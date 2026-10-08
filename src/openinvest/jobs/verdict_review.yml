@@ -1,6 +1,7 @@
 # verdict_review：消费 memory/.committee 的 live 委员会快照 → 整份重写 .dreams/verdict_review.jsonl
 # 下游：纪律台账（services/discipline，只数 live）、GUI 命中率页（/api/verdict_review/summary，
-# 按来源分桶）、decision_ledger。不进委员会 prompt，零 LLM、零发送。
+# 按来源分桶）、decision_ledger；顺手写 .dreams/confidence_lookup.json（裁决旁展示的同类决议
+# 查表，D10 P1；样本 = live + .backtest/ 里的前瞻纸面舰队，舰队行只进这张表，约 +20 秒）。不进委员会 prompt，零 LLM、零发送。
 # 2026-10 D4 签字开启：run() 只复盘 live（研究用全量重建手动跑 --include-backtest），
 # 行情只读 market_data.db、不触网（进程内缓存）。
 # 时区：02:00 Asia/Shanghai = 前一天 18:00 UTC，周日/周一两次落在 UTC 周六/周日——

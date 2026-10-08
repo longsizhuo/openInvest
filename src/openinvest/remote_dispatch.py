@@ -288,6 +288,8 @@ def _h_run_committee(args: argparse.Namespace) -> None:
                 ),
                 "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
                 "transcript_md": r.json().get("content", ""),
+                # 与 fresh 路径 / 本地 CLI 同款；旧 hub 没这个字段 → None
+                "confidence_lookup": r.json().get("confidence_lookup"),
             })
             return
 
@@ -379,6 +381,8 @@ def _h_run_committee(args: argparse.Namespace) -> None:
     _print_json({
         "status": "ok",
         "verdict": asset_result.get("verdict", {}),
+        # 给用户看这个，不是 verdict.confidence（CIO 自报）；旧 hub 没这个字段 → None
+        "confidence_lookup": asset_result.get("confidence_lookup"),
         "cio_memo": asset_result.get("cio_memo") or "",
         "transcript_path": f"(hub) memory/.committee/{today}/{safe_sym}.md",
         "next_step": next_step,

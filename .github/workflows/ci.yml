@@ -182,19 +182,21 @@ jobs:
 
       - name: 脱敏聚合输出无敏感字段（金融视角红线）
         # PM-Growth 妥协方案：accuracy_summary.json 公开数据绝不能含 symbol / threshold / verdict 等
-        # 用仓库自带的 docs/accuracy_summary.json 作 fixture 验证
+        # 用仓库自带的 docs/accuracy_summary.json 作 fixture 验证；随包发的默认查表
+        # （confidence_lookup_default.json，只含舰队聚合）同一条红线
         run: |
-          if [ -f docs/accuracy_summary.json ]; then
+          for f in docs/accuracy_summary.json src/openinvest/jobs/confidence_lookup_default.json; do
+            [ -f "$f" ] || continue
             # 字段名按带引号 JSON key 匹配；symbol 值（NDQ.AX / GC=F）按子串匹配
             # ——旧写法 "\"NDQ\"" 匹配不到值 "NDQ.AX"，防线形同虚设（issue #179 P2）
             for keyword in '"symbol"' '"threshold"' '"verdict_id"' '"asset"' NDQ 'GC=F'; do
-              if grep -qF "$keyword" docs/accuracy_summary.json; then
-                echo "❌ accuracy_summary.json 含敏感字段 '$keyword'"
+              if grep -qF "$keyword" "$f"; then
+                echo "❌ $f 含敏感字段 '$keyword'"
                 exit 1
               fi
             done
-            echo "✅ 脱敏聚合输出无敏感字段"
-          fi
+          done
+          echo "✅ 脱敏聚合输出无敏感字段"
 
       - name: OKF 文档 frontmatter lint（非阻塞：未迁移文档不算失败）
         # okf-frontmatter skill：已迁移文档的断链 / schema_source 指向消失符号 / 缺 type 才 fail。

@@ -43,6 +43,7 @@ memory/
 ├── .dreams/                   # Dreaming 子系统私有
 │   ├── short-term-recall.json # Light Sleep 摄入信号
 │   ├── candidates.json        # REM Sleep 候选模式
+│   ├── confidence_lookup.json # verdict_review 每日写：裁决旁展示的同类决议查表（live + 前瞻纸面舰队，每格记 n_live/n_fleet）
 │   └── events.jsonl           # 三阶段审计日志
 └── .state/                    # 简单 KV (已处理邮件 ID 等)
     └── processed_emails.json

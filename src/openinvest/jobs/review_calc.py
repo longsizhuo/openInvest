@@ -221,6 +221,110 @@ def _bucket_lines(title: str, bucket: Dict[str, Any], *, note: Optional[str] = N
 
 
 # =====================================================================
+# 置信度展示查表（2026-10 D10 P1，只改展示层）
+# =====================================================================
+# 给用户看的"置信度"不再是 CIO 自报的 0-1 数（历史上几乎不带信息：没有一个格子显著好于
+# 常数），改成"同类决议 30 天后怎样"的确定性查表。只改展示：verdict / alloc /
+# sanity / high_confidence_buy / transcript 里的 `(confidence X)` 一律不动，自报原数照常落盘。
+# 样本池 = live + 前瞻纸面舰队（签字口径 = R3 池）；本机某 verdict n<30 时改用包里随附的
+# 默认表（只用舰队样本生成，见 scripts/gen_confidence_lookup_default.py）。
+
+LOOKUP_MIN_N = 30            # 红线 #2 同阈值：n<30 只给 n
+# 强制 HOLD 的封顶（Sanity 3/4，config 默认 0.4）+ 自报 ≤0.4 的低分行：展示时打标不查表。
+# 查表样本不按自报分剔除（签字口径 = R3 池：只剔周末）；按自报分切样本要先 PREREG。
+LOOKUP_FORCED_CONF = 0.4
+
+
+def build_confidence_lookup(live: List[VerdictReview],
+                            fleet: List[VerdictReview] = ()) -> Dict[str, Any]:
+    """按 verdict 的 30d 查表。样本 = live（source=="live"）+ 舰队，都要非污染、30d 已成熟、
+    非周末重复（is_closed_weekend），不按自报分剔除（≤0.4 只在展示时打标）。HOLD 的 rate =
+    30 天涨跌留在 flat band 内的比例（= hits["30d"]）；有方向的 = 方向判对比例。
+    market_flat = 同一批样本（不分 verdict）30 天落在 flat band 内的比例，给 HOLD 当基率对照。
+    每格带来源构成 n_live / n_fleet。n<30 → rate=None。"""
+    def _ok(r: VerdictReview) -> bool:
+        return (not r.contaminated and "30d" in r.hits and r.verdict in EXPECTED_DIRECTION
+                and not is_closed_weekend(r.asset, r.date))
+
+    pools = {"live": [r for r in live if r.source == "live" and _ok(r)],
+             "fleet": [r for r in fleet if _ok(r)]}
+
+    def _cell(flag, keep=lambda r: True) -> Dict[str, Any]:
+        got = {src: [flag(r) for r in rows if keep(r)] for src, rows in pools.items()}
+        flags = got["live"] + got["fleet"]
+        n = len(flags)
+        return {"n": n, "rate": round(sum(flags) / n, 3) if n >= LOOKUP_MIN_N else None,
+                "n_live": len(got["live"]), "n_fleet": len(got["fleet"])}
+
+    verdicts = sorted({r.verdict for rows in pools.values() for r in rows})
+    return {
+        "source": "live+fleet", "window": "30d", "min_n": LOOKUP_MIN_N,
+        "by_verdict": {v: _cell(lambda r: r.hits["30d"], lambda r, v=v: r.verdict == v)
+                       for v in verdicts},
+        "market_flat": _cell(lambda r: r.directions.get("30d") == "flat"),
+    }
+
+
+def merge_confidence_lookup(local: Optional[Dict[str, Any]],
+                            default: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """逐个 verdict 选表：本机 n≥30 用本机；否则内置默认表（只含舰队）n≥30 用默认表；
+    两边都不够 → 留本机的 n（显示"样本不足"）。选中的格子带 from=local/default，
+    以及同一张表的 market_flat（HOLD 的基率必须和它出自同一个样本池）。"""
+    if local is None and default is None:
+        return None
+    tables = {"local": local or {}, "default": default or {}}
+    out: Dict[str, Any] = {}
+    for v in {v for t in tables.values() for v in (t.get("by_verdict") or {})}:
+        for src in ("local", "default"):
+            cell = (tables[src].get("by_verdict") or {}).get(v) or {}
+            if cell.get("rate") is not None and int(cell.get("n") or 0) >= LOOKUP_MIN_N:
+                out[v] = {**cell, "from": src, "market_flat": tables[src].get("market_flat") or {}}
+                break
+        else:
+            n = int(((tables["local"].get("by_verdict") or {}).get(v) or {}).get("n") or 0)
+            out[v] = {"n": n, "rate": None, "from": "local"}
+    return {"by_verdict": out}
+
+
+def is_forced_or_low_confidence(v: Dict[str, Any]) -> bool:
+    """被规则强制成 HOLD（WORKER_UNAVAILABLE / 集中度 lens / TRIM 没买回点 / 防御拦买），
+    或自报 ≤0.4（含 UNCLEAR 的 0.0）。transcript 只留封顶后的数，所以从 md 读到的只能靠
+    ≤0.4 认出 Sanity 3/4；内存里的 verdict dict 还带 _original_* 溯源。"""
+    try:
+        conf = float(v.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    forced = "_original_confidence_unavailable" in v or (
+        v.get("verdict") == "HOLD" and v.get("_original_verdict") not in (None, "HOLD"))
+    return forced or conf <= LOOKUP_FORCED_CONF
+
+
+def confidence_display(v: Dict[str, Any], lookup: Optional[Dict[str, Any]],
+                       *, with_raw: bool = True) -> str:
+    """裁决旁展示的那串字（邮件 / 事件提醒 / API）。lookup = merge_confidence_lookup 的结果；
+    None（job 没跑过且没有默认表）按 n=0。HOLD 不叫命中率：它衡量的是那段时间市场横没横盘，
+    所以同时给同一样本池的市场基率。末尾注明样本来源（含纸面舰队样本 / 默认表 / 本机样本）。"""
+    raw = v.get("confidence")
+    raw_txt = (f"（自报 {raw:.2f}）"
+               if with_raw and isinstance(raw, (int, float)) else "")
+    if is_forced_or_low_confidence(v):
+        return f"输入缺失/强制 HOLD，不查表{raw_txt}"
+    verdict = str(v.get("verdict") or "").upper()
+    cell = ((lookup or {}).get("by_verdict") or {}).get(verdict) or {}
+    n, rate = int(cell.get("n") or 0), cell.get("rate")
+    if rate is None or n < LOOKUP_MIN_N:
+        return f"样本不足（n={n}）{raw_txt}"
+    note = ("默认表" if cell.get("from") == "default"
+            else "含纸面舰队样本" if cell.get("n_fleet") else "本机样本")
+    if verdict == "HOLD":
+        mk = cell.get("market_flat") or {}
+        base = f"；同期市场横盘基率 {mk['rate']:.0%}" if mk.get("rate") is not None else ""
+        return (f"同类 HOLD 之后 30 天涨跌留在正常波动带内的比例 {rate:.0%}"
+                f"（n={n}{base}；{note}）{raw_txt}")
+    return f"同类 {verdict} 30 天后方向判对的比例 {rate:.0%}（n={n}；{note}）{raw_txt}"
+
+
+# =====================================================================
 # path_review 纯核
 # =====================================================================
 
@@ -331,6 +435,8 @@ __all__ = [
     "VerdictReview", "K_FLAT", "FLAT_CEILING_PCT",
     "_flat_band", "_is_hit", "_summarize_bucket",
     "summarize_verdict_reviews", "_bucket_lines",
+    "LOOKUP_MIN_N", "LOOKUP_FORCED_CONF", "build_confidence_lookup", "merge_confidence_lookup",
+    "is_forced_or_low_confidence", "confidence_display",
     "WINDOWS", "SHAPE_WINDOW", "SHAPE_CLASSES",
     "realized_shape", "PathReview", "summarize_path_reviews",
 ]

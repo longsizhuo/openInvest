@@ -240,6 +240,10 @@ def send_committee_verdict_email(
     if event_ids:
         lines.append(f"触发事件: `{', '.join(event_ids[:6])}`")
     lines.append(f"任务: `{task_id}` · {datetime.now():%Y-%m-%d %H:%M}\n")
+    # 裁决旁给同类决议查表，不给 CIO 自报 confidence（D10 P1，只改展示）
+    from openinvest.jobs.review_calc import confidence_display
+    from openinvest.jobs.verdict_review import load_confidence_lookup
+    lookup = load_confidence_lookup()
     for sym in symbols:
         a = by_asset.get(sym) or {}
         if a.get("error"):
@@ -248,8 +252,8 @@ def send_committee_verdict_email(
         v = a.get("verdict") or {}
         lines.append(f"## {sym} — **{v.get('verdict', 'UNCLEAR')}**")
         bits = []
-        if v.get("confidence") is not None:
-            bits.append(f"confidence {v['confidence']:.2f}")
+        if v.get("verdict"):
+            bits.append(confidence_display(v, lookup))
         if v.get("dominant_view"):
             bits.append(f"主导视角 {v['dominant_view']}")
         if v.get("alloc_cny") is not None:

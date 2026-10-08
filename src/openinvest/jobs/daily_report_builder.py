@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 # re-export 给 jobs/daily_report.py + scripts/skill.py:cmd_prepare_committee 用
 # （保留旧 import path 的向后兼容）
 from openinvest.utils.portfolio_summary import portfolio_summary_text  # noqa: F401
+from openinvest.jobs.review_calc import confidence_display
 
 # ============ 常量（可被 daily_report.py 的 env 读取覆盖后传入，无默认值依赖） ============
 
@@ -172,8 +173,9 @@ _VERDICT_EMOJI = {
 def build_tldr_block(
     active_assets: List[Dict[str, Any]],
     asset_committees: Dict[str, Dict[str, Any]],
+    confidence_lookup: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """chat 变体专用：逐资产一行摘要（emoji 裁决徽章 + 置信度 + 建议金额），
+    """chat 变体专用：逐资产一行摘要（emoji 裁决徽章 + 同类决议查表 + 建议金额），
     整块置顶在报告最前面。
 
     动机：Hermes/OpenClaw cron 把完整报告转发到 Discord，Discord 单条消息
@@ -191,7 +193,7 @@ def build_tldr_block(
         emoji = _VERDICT_EMOJI.get(v["verdict"], "⚪")
         lines.append(
             f"{emoji} **{a.get('display_name', sym)}** ({sym}): "
-            f"{v['verdict']} · 置信度 {v['confidence']:.0%} · "
+            f"{v['verdict']} · {confidence_display(v, confidence_lookup)} · "
             f"建议 ¥{v['alloc_cny']:,.0f}"
         )
     return "\n".join(lines) + "\n"
@@ -283,7 +285,9 @@ def parse_translator_output(text: str) -> Dict[str, str]:
 _GLOSSARY = """## 术语表（看不懂的词在这里查）
 
 - **裁决**: 委员会结论。HOLD=持有不动；ACCUMULATE=小额加仓；BUY=买入；TRIM=减一部分；SELL=清仓
-- **置信度**: 委员会对这个结论的把握（0-1）。0.5 上下=分歧大，0.8+=很有把握
+- **同类决议查表**（裁决旁那串字）: 过去同类决议（实盘 + 纸面舰队，括号里注明来源；本机样本不够时用随包的默认表）30 天后怎样。HOLD 写的是"涨跌留在正常波动带内的比例"，旁边给同期市场横盘基率——两者差不多说明只是市场在横盘，不代表判断准；加仓/减仓写的是方向判对的比例。样本 <30 显示"样本不足"
+- **自报**: CIO 自己写的 0-1 把握度，只作留档（历史上它高低和对错基本无关）
+- **输入缺失/强制 HOLD**: 被规则强制改成 HOLD（数据缺失 / 集中度 lens / 没给买回点 / 防御拦截）或自报 ≤0.4，不查表
 - **主导方**: 这次结论主要听谁的——macro=宏观面 / quant=技术面 / risk=风控
 - **regime**: 系统对当前行情的粗分类（uptrend 上行 / downtrend 下行 / crash 急跌 / recovery 修复 / range 震荡）
 - **n 与"重叠窗口独立≈k"**: 历史样本量。相邻交易日的窗口高度重叠，真实独立样本只有 ≈k 个；带 ⚠样本不足 的行别太当真
@@ -314,6 +318,7 @@ def assemble_full_report(
     *,
     render_target: str = "email",
     asset_events: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    confidence_lookup: Optional[Dict[str, Any]] = None,
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -340,6 +345,8 @@ def assemble_full_report(
         asset_events: {symbol: [event]}（D17，entry 层已筛好"资产专属"、排序、相似转述合并）
             ——在该资产裁决旁列前 ASSET_EVENT_LINES 条（日期 + severity + 一句话 + 相似报道数）。
             只展示，不进任何 LLM 输入。
+        confidence_lookup: verdict_review 刷新的同类决议查表（entry 层读好传入）；
+            裁决旁显示它而不是 CIO 自报的 confidence（D10 P1）。None → "样本不足（n=0）"。
 
     Returns:
         完整 markdown 报告字符串
@@ -370,7 +377,7 @@ def assemble_full_report(
         )
         lines = [
             f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n",
-            f"**裁决**: {v['verdict']} | 置信度 {v['confidence']:.2f} | "
+            f"**裁决**: {v['verdict']} | {confidence_display(v, confidence_lookup)} | "
             f"主导方 {v['dominant_view']} | 建议金额 ¥{v['alloc_cny']}\n\n",
             plain_block,
         ]
@@ -506,7 +513,7 @@ def assemble_full_report(
     # chat 变体置顶速览（见 build_tldr_block 动机）；email 不加——邮件本来就
     # 一次性看全文，标题+目录结构已经够用，不需要重复摘要。
     tldr_section = (
-        f"\n{build_tldr_block(active_assets, asset_committees)}\n---\n"
+        f"\n{build_tldr_block(active_assets, asset_committees, confidence_lookup)}\n---\n"
         if render_target == "chat" else ""
     )
 

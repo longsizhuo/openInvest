@@ -240,6 +240,27 @@ POST body schema：
 
 详见 [02-agents.md](02-agents.md) 看每个 phase 含义。
 
+**裁决旁给人看的数 = `confidence_lookup`（2026-10 D10 P1，只改展示层）**：`/api/committee_sessions`（列表和单条）、
+`/api/committee/{task_id}` 的 `result.by_asset[sym]`、`/view` 页、MCP `explain_decision` / `run_committee`、
+CLI `run_committee`（含同日缓存命中、远端 hub 模式 `INVEST_API_BASE`），以及日报邮件（速览 + 详情 + 人话解读的输入）、事件触发的 verdict 邮件，都显示同一串字：
+
+- HOLD：`同类 HOLD 之后 30 天涨跌留在正常波动带内的比例 X%（n=…；同期市场横盘基率 Y%；来源）`——衡量的是那段时间市场横没横盘，**不叫命中率**；
+- ACCUMULATE / BUY / TRIM / SELL：`同类 <verdict> 30 天后方向判对的比例 X%（n=…；来源）`；
+- 来源：`含纸面舰队样本`（本机查表，样本里有纸面舰队）/ `默认表`（本机这个 verdict 不到 30 条，用随包的默认表）/ `本机样本`（本机查表，只有 live）；
+- n<30：`样本不足（n=…）`；
+- 被规则强制成 HOLD（WORKER_UNAVAILABLE / 集中度 lens / TRIM 没给买回点 / 防御拦买）或自报 ≤0.4：`输入缺失/强制 HOLD，不查表`
+  （从 transcript 读时只剩封顶后的数，只能靠 ≤0.4 认出 Sanity 3/4；内存里的 verdict 还带 `_original_*` 溯源）。
+
+邮件 / `/view` 页末尾的小字 `（自报 0.xx）` 是 CIO 自报原数；API / MCP / CLI 的 `confidence_lookup` 不带这段，自报原数照旧在 `confidence` 字段（留档）。transcript 里 `**Verdict**: X (confidence Y)`、
+verdict / 建议金额 / sanity 降级 / high_confidence_buy / 第二天 Quant/Risk 读到的历史决议全部不变。
+查表由下面的 `verdict_review` job 每天写到 `memory/.dreams/confidence_lookup.json`：样本 = live 决议 + 前瞻纸面舰队
+（`memory/.backtest/<日期>/`，日期 ≥ 2026-07-24 且文件在决议日当天/次日写出；T2 试跑臂的 `.backtest_t2conf/` 和事后补跑的回测都不进），
+都要非污染、30d 已成熟、不是周末重复（`calc.symbols.is_closed_weekend`），不按自报分剔除（≤0.4 只在展示时打标）。
+标签同 verdict_review：T2 30d 规则（HOLD = 涨跌留在 flat band 内，有方向的 = 方向对），行情只读 `market_data.db`。
+舰队是中性持仓、没有事件/估值/情绪输入，所以每格都记来源构成 `n_live` / `n_fleet`。市场横盘基率 = 同一批样本不分 verdict 30 天落在波动带内的比例。
+本机某个 verdict 不到 30 条时，改用随包的 `src/openinvest/jobs/confidence_lookup_default.json`——只用纸面舰队生成的聚合数
+（按 verdict 的 n / 比例 + 横盘基率，没有标的），由 `scripts/gen_confidence_lookup_default.py` 重新生成；两边都不到 30 条才显示「样本不足」。
+
 ---
 
 ## 5. 透明化端点（v3）
@@ -280,6 +301,7 @@ POST body schema：
 
 数据来自 `verdict_review` job（每天 02:00 Asia/Shanghai，只复盘 live、只读行情库），所以日常 `backtest` / `contaminated` 两桶为 0；
 研究要含回测的全量重建手动跑 `python -m openinvest.jobs.verdict_review --include-backtest`（数小时级，会整份覆盖 jsonl）。
+同一个 job 的尾巴顺手刷新 `memory/.dreams/confidence_lookup.json`（裁决旁的同类决议查表，见上文「委员会」节）。
 
 ### 纪律台账（ADR-023）
 

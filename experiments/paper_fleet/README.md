@@ -4,10 +4,7 @@
 模型都无记忆可穿越(2026-07 deepseek-v4-flash cutoff 事件实证:历史回填桶是相对
 模型的,前瞻样本是唯一免疫源)。
 
-⚠️ **评分不是自动的**:`jobs/verdict_review.yml` 目前 `enabled: false`(Phase 3
-前留给用户确认频率的闸),生产 scheduler **不会**自动给舰队样本打分。要么把该 job
-改 `enabled: true`,要么手动跑 `uv run python -m openinvest.jobs.verdict_review`
-(纯本地计算,零 API 费用)。在此之前样本只积累不评分。
+⚠️ **评分口径**:`jobs/verdict_review` 每天 02:00 只把 live 写进 `verdict_review.jsonl`;舰队样本(本目录前瞻部分)每天另打一遍 30d 标签,**只进**裁决旁的同类决议查表 `.dreams/confidence_lookup.json`(每格记 n_live / n_fleet),不进命中率页和纪律台账。舰队进 jsonl 的全量重建仍是手动`uv run python -m openinvest.jobs.verdict_review --include-backtest`(纯本地计算,零 API 费用)。
 
 ## 形态(2026-07-24 重设计,v1 的独立 INVEST_HOME 方案已退役)
 

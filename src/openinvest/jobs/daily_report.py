@@ -535,6 +535,11 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
     # t_inputs 构造是纯数据组装（不碰网络/LLM）——放在 try 外：verdict schema
     # 漂移抛的 KeyError/AttributeError 应该炸出来被看见，而不是被当"翻译官失败
     # graceful 回落"吞掉导致白话摘要从每封日报永久消失（#197 类，CR 命中）。
+    # 裁决旁展示同类决议查表，不展示 CIO 自报 confidence（D10 P1，只改展示；
+    # 自报原数照常进 transcript / daily 摘要 / 返回值）
+    from openinvest.jobs.review_calc import confidence_display
+    from openinvest.jobs.verdict_review import load_confidence_lookup
+    confidence_lookup = load_confidence_lookup()
     t_inputs = []
     for a in target_assets:
         sym = a["symbol"]
@@ -564,7 +569,9 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         t_inputs.append({
             "symbol": sym,
             "display_name": a.get("display_name", sym),
-            "verdict_line": (f"{v['verdict']}，置信度 {v['confidence']:.2f}，"
+            # 翻译官只拿查表（不给自报数，免得它把自报复述成"把握"）
+            "verdict_line": (f"{v['verdict']}，"
+                             f"{confidence_display(v, confidence_lookup, with_raw=False)}，"
                              f"建议金额 ¥{v['alloc_cny']}"),
             "defense_note": defense_note,
             "path_lines": path_lines,
@@ -612,6 +619,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         # 报告投递去 Discord/Weixin/QQ 等聊天平台，走无 HTML 的 chat 变体。
         render_target="email" if send_email else "chat",
         asset_events=asset_events,
+        confidence_lookup=confidence_lookup,
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）

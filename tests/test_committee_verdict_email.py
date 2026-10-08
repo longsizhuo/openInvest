@@ -21,6 +21,9 @@ def _patch_email(monkeypatch, sink: dict):
 def test_verdict_email_renders_verdict(monkeypatch):
     sink: dict = {}
     _patch_email(monkeypatch, sink)
+    from openinvest.jobs import verdict_review
+    monkeypatch.setattr(verdict_review, "load_confidence_lookup",
+                        lambda: {"by_verdict": {"TRIM": {"n": 33, "rate": 0.6, "from": "default"}}})
     by_asset = {
         "GC=F": {
             "verdict": {"verdict": "TRIM", "confidence": 0.82,
@@ -36,7 +39,9 @@ def test_verdict_email_renders_verdict(monkeypatch):
     assert "TRIM" in sink["subject"]
     body = sink["body"]
     assert "GC=F" in body and "TRIM" in body
-    assert "0.82" in body                       # confidence
+    # D10 P1：给同类决议查表，自报原数只小字留档
+    assert "同类 TRIM 30 天后方向判对的比例 60%（n=33；默认表）（自报 0.82）" in body
+    assert "confidence 0.82" not in body
     assert "ae69eb380b01" in body               # task link
     assert "7d0205cc9042eb13" in body           # 触发事件
 

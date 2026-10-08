@@ -1,0 +1,26 @@
+{
+ "source": "fleet",
+ "window": "30d",
+ "min_n": 30,
+ "by_verdict": {
+  "ACCUMULATE": {
+   "n": 83,
+   "rate": 0.639,
+   "n_live": 0,
+   "n_fleet": 83
+  },
+  "HOLD": {
+   "n": 1060,
+   "rate": 0.753,
+   "n_live": 0,
+   "n_fleet": 1060
+  }
+ },
+ "market_flat": {
+  "n": 1143,
+  "rate": 0.728,
+  "n_live": 0,
+  "n_fleet": 1143
+ },
+ "generated_on": "2026-10-08"
+}

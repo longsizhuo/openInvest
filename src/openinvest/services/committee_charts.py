@@ -53,14 +53,13 @@ def _esc(v: Any) -> str:
     return html.escape(str(v))
 
 
-def render_verdict_tile(verdict: Dict[str, Any]) -> str:
-    """裁决 + 置信度的大字号状态卡片。verdict 是状态而非分类系列——用
+def render_verdict_tile(verdict: Dict[str, Any], confidence_text: str = "—") -> str:
+    """裁决 + 同类决议查表的大字号状态卡片。verdict 是状态而非分类系列——用
     status palette（语义色，never 挪作系列色），不是 categorical 色板。
+    confidence_text: review_calc.confidence_display 的结果（D10 P1：不再显示 CIO 自报数）。
     """
     v = str(verdict.get("verdict") or "?").upper()
     light, dark = _STATUS.get(v, _STATUS_DEFAULT)
-    confidence = verdict.get("confidence")
-    conf_pct = f"{confidence * 100:.0f}%" if isinstance(confidence, (int, float)) else "—"
     dominant = _esc(verdict.get("dominant_view") or "—")
     alloc = verdict.get("alloc_cny")
     alloc_txt = f"¥{alloc:+,.0f}" if isinstance(alloc, (int, float)) else "—"
@@ -69,7 +68,7 @@ def render_verdict_tile(verdict: Dict[str, Any]) -> str:
 <div class="verdict-tile" style="--v-light:{light}; --v-dark:{dark};">
   <div class="verdict-badge">{_esc(v)}</div>
   <div class="verdict-meta">
-    <span>置信度 <b>{_esc(conf_pct)}</b></span>
+    <span>{_esc(confidence_text)}</span>
     <span>主导 <b>{dominant}</b></span>
     <span>建议 <b>{_esc(alloc_txt)}</b></span>
   </div>

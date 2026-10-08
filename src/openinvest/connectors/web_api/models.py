@@ -485,7 +485,9 @@ class CommitteeSessionSummary(BaseModel):
     date: str
     symbol: str
     verdict: Optional[str] = None
-    confidence: Optional[float] = None
+    confidence: Optional[float] = Field(None, description="CIO 自报原数（留档；展示请用 confidence_lookup）")
+    confidence_lookup: Optional[str] = Field(
+        None, description="给人看的同类决议查表：同类决议（live + 纸面舰队）30 天后怎样，末尾注明样本来源；或「样本不足」/「强制 HOLD」标签")
     dominant_view: Optional[str] = None
     suggested_alloc_cny: Optional[float] = None
     file_path: str
@@ -500,6 +502,8 @@ class CommitteeSessionDetail(BaseModel):
     date: str
     symbol: str
     content: str
+    confidence_lookup: Optional[str] = Field(
+        None, description="同 CommitteeSessionSummary.confidence_lookup")
 
 
 class FreshInsightItem(BaseModel):
