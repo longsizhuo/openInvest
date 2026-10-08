@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from apscheduler.triggers.cron import CronTrigger
 
 from openinvest.core.memory_store import MemoryStore
+from openinvest.scheduler.cron import crontab_trigger
 from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.notifier import render_markdown_email, send_email_html
 
@@ -47,13 +48,7 @@ def _ts(s: str) -> datetime:
 
 def _trigger(schedule: str, tz: str) -> CronTrigger:
     # 看门狗必须和调度器用同一套 cron 解释（runner 注册 trigger 的同一个函数），
-    # 否则 day_of_week 口径一修就互相误报。scheduler.cron 随 fix/scheduler-dow-dca-holiday
-    # 合入；合入前 runner 用的就是 from_crontab，回退值与之一致。
-    # ponytail: 两个分支都合入后删掉 ImportError 回退。
-    try:
-        from openinvest.scheduler.cron import crontab_trigger
-    except ImportError:
-        return CronTrigger.from_crontab(schedule, timezone=tz)
+    # 否则 day_of_week 口径一修就互相误报。
     return crontab_trigger(schedule, timezone=tz)
 
 
