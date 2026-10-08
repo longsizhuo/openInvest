@@ -104,10 +104,12 @@ def _format_stance_line(
 ) -> Optional[str]:
     """净情绪行格式化。默认 config 下输出与旧纯计数版完全一致（不显示 score）。
 
-    net opportunity 的场合附一句校准提示（issue #210 预注册事件研究：opportunity
-    类事件后 5 日均值 -1.07%、cluster-robust t=-2.82 显著，经验上是短线反向指标，
-    不是买入信号）——不加提示的话 committee/CIO 读到"net opportunity"这个措辞
-    容易直接当成方向性利好，这正是研究要纠正的误读。
+    net opportunity 的场合附一句校准提示（issue #210 事件研究，2026-10 用约 4 倍数据
+    原样重跑 experiments/event_stance_baseline_study.py：opportunity 类事件后 5 日超额
+    -0.48%，按 symbol 聚类 t=-0.76 不显著；命中率 39.5% 仍不到一半。早先"-1.07%、
+    cluster-robust 显著"的说法已不成立，只保留方向上的提醒）——不加提示的话
+    committee/CIO 读到"net opportunity"这个措辞容易直接当成方向性利好，这正是研究
+    要纠正的误读。
     """
     if risk == 0 and opp == 0:
         return None
@@ -130,12 +132,12 @@ def _format_stance_line(
     caveat = ""
     if net == "opportunity":
         caveat = bilingual(
-            "；历史基线：opportunity 类事件后 5 日均值 -1.07%（命中率 40%，"
-            "cluster-robust 显著），经验上是短线反向指标而非买入信号，不应单独作为加仓依据",
-            "; historical baseline: 'opportunity'-tagged events show a mean -1.07% "
-            "5-day forward return (40% win rate, cluster-robust significant) — "
-            "empirically a short-term reversal signal, not a buy trigger; don't treat "
-            "it as a standalone accumulate cue",
+            "；历史基线：opportunity 类事件后 5 日超额均值 -0.48%（命中率 39.5%，不到一半；"
+            "按标的聚类不显著），不是买入信号，不应单独作为加仓依据",
+            "; historical baseline: 'opportunity'-tagged events show a mean -0.48% "
+            "5-day excess return (39.5% hit rate, below half; not significant once "
+            "clustered by symbol) — not a buy trigger; don't treat it as a standalone "
+            "accumulate cue",
         )
     return f"{label}: net {net} ({extra}risk={risk} opportunity={opp}, {suffix}){caveat}"
 

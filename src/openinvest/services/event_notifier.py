@@ -19,9 +19,9 @@ from openinvest.services.notifier import (
 log = logging.getLogger(__name__)
 
 
-# opportunity 曾用 🎯（暗示"命中/买入"）——issue #210 预注册事件研究：opportunity
-# 类事件后 5 日均值 -1.07%、cluster-robust 显著，经验上是短线反向指标而非买入信号。
-# 换成 🔍（"留意/值得细看"），不再给用户方向性暗示。
+# opportunity 曾用 🎯（暗示"命中/买入"）——issue #210 事件研究：opportunity 类事件后
+# 5 日超额 -0.48%、按标的聚类不显著（2026-10 重跑；早先"-1.07% 显著"已不成立），
+# 命中率 39.5% 不到一半，不能当买入信号。换成 🔍（"留意/值得细看"），不给用户方向性暗示。
 _STANCE_ICON = {"risk": "🚨", "opportunity": "🔍", "neutral": "📰"}
 
 

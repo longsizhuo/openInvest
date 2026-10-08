@@ -1,5 +1,5 @@
 """event_notifier 单测 —— stance→icon 映射（issue #210 回归：opportunity 曾用 🎯
-暗示买入，经验研究显示反向指标，换成中性的 🔍）。"""
+暗示买入，事件研究显示其后命中率不到一半，换成中性的 🔍）。"""
 from __future__ import annotations
 
 from openinvest.services.event_notifier import _build_subject, _STANCE_ICON
