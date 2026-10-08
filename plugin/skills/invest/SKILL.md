@@ -272,7 +272,10 @@ core duty (issue #133 Decision 2).
 
 **User asks "how often did I follow the advice / is the committee reliable"**:
 `decisions --days 90` → adoption rate + the full verdict↔intervention↔execution↔outcome chain per decision;
-pair with `discipline` for the counterfactual P&L of rule-blocked actions. When the user
+pair with `discipline` for the counterfactual P&L of rule-blocked actions (its inaction rate counts
+**live** verdicts only). For hit rates use `GET /api/verdict_review/summary`: it returns separate
+`live` / `backtest` / `contaminated` buckets — quote only `live` as performance, never add the
+buckets together, and say "sample too small" when a rate is `null` (n<30). When the user
 rejects the same class of recommendation several times in a row, proactively point out
 "the divergence pattern between you and the committee" — that is not a bad thing; it is
 a signal worth recording.

@@ -18,7 +18,7 @@
 | `strategy` | Universal | View strategy | target_assets + Dreaming insights |
 | `history [-n N]` | Universal | View the transaction log | last N trades + committee verdicts |
 | `live_prices` | Universal | Background market data | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |
-| `discipline` | Universal | "what did the committee block / how is my discipline" (委员会拦了什么/纪律如何) | inaction rate (HOLD share) + count of blocked impulsive actions + counterfactual money saved/lost (read-only, zero LLM, aligned with ADR-023). Equivalent to `GET /api/discipline` |
+| `discipline` | Universal | "what did the committee block / how is my discipline" (委员会拦了什么/纪律如何) | inaction rate (HOLD share of **live** verdicts) + count of blocked impulsive actions + counterfactual money saved/lost (read-only, zero LLM, aligned with ADR-023). Equivalent to `GET /api/discipline` |
 | `decisions [--days N]` | Universal | "how many recommendations did I follow / which ones weren't executed" (我听了几次建议/哪些没执行) | verdict↔intervention↔execution↔outcome join + adoption rate (read-only, zero LLM). Equivalent to `GET /api/decisions` (issue #133 Decision 9) |
 | `ingest_event` | Write | agent feeds news into the event ledger (normalization + severity grading, idempotent; requires backend LLM key). Holding-relevant severity ≥ mid non-neutral items auto-trigger a rate-limited committee re-run (`committee_task_id` in the result; never in advisory mode) | `--title --url [--snippet --source --ts]` |
 | `record_execution DECISION_ID [--rejected] [--reason "..."]` | Universal, write | Write back when the user says "I didn't buy / I bought it" (我没买/我买了) | Idempotent append to executions.jsonl. **When the user rejects a recommendation, proactively ask why before recording** (you are the collection end of the Reason Loop). Equivalent to `POST /api/decisions/execution` |
@@ -81,7 +81,8 @@ Call these when the user says "record a trade" (记一笔交易) / "I plan to bu
 | `POST /api/gold/buy` / `/sell` | Gold buy/sell (sell_fee computed automatically) | `{grams, price_per_gram}` |
 | `POST /api/strategy/asset` | Add a target_assets entry. **Native equivalents already exist**: MCP `track_asset` / CLI `track_asset` (plus `untrack_asset`, `set_allocations`) — prefer the native ones; stop curling this | `{symbol, channel?, max_single_invest_cny}` |
 | `GET /api/events/recent?hours=24&min_severity=low&limit=50` | List news perceived by the event layer in the last N hours (ADR-006). For debugging / "what is the system currently aware of" (系统现在感知到什么) | — |
-| `GET /api/discipline` | Committee discipline ledger: inaction rate (HOLD share) + count of blocked impulsive actions + counterfactual P&L (aligned with ADR-023; lets the agent show "what it blocked") | — |
+| `GET /api/discipline` | Committee discipline ledger: inaction rate (HOLD share of live verdicts) + count of blocked impulsive actions + counterfactual P&L (aligned with ADR-023; lets the agent show "what it blocked") | — |
+| `GET /api/verdict_review/summary` | Verdict hit rates split into `live` / `backtest` / `contaminated` buckets (ADR-022). Only `live` is performance; never sum buckets; a `null` rate means n<30 | — |
 | `GET /api/decisions?days=90` | Unified decision view: verdict↔intervention↔execution↔outcome join + adoption rate (issue #133 Decision 9) | — |
 | `POST /api/decisions/execution` | Write back the user's execution/rejection of a verdict + the reason (idempotent, ADR-016) | `{decision_id: "2026-07-03/GC=F", executed: false, reason?: "..."}` |
 | `POST /api/events/check` | Manually run event_watch once (fetch news + normalize + store + trigger the committee on hits). Synchronous, 30-90s | — |
