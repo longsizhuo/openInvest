@@ -49,7 +49,7 @@ forward return 差异显著**（见 [12-verification.md](12-verification.md)）�
 | return_30d | close[i]/close[i−30] − 1 |
 | rebound_off_30d_low | close[i]/近 30 日最低 − 1 |
 | price_quantile_2y | 滚动 504 交易日窗内 (closes ≤ 当日)/n 真百分位 |
-| atr_pct | Wilder TR = max(H−L, \|H−prevC\|, \|L−prevC\|)，ewm(α=1/14) ÷ 当日 close ×100；无 H/L 列退化 \|ΔClose\| |
+| atr_pct | Wilder TR = max(H−L, \|H−prevC\|, \|L−prevC\|)，ewm(α=1/14, 跳过 NaN) ÷ 当日 close ×100；缺 H/L 的行（现价/节假日缓存行）不计入、沿用前值，整表无 H/L 才全序列退化 \|ΔClose\| |
 
 逐日调 **production 的 `classify_regime(metrics, symbol)`**——与实盘委员会同一个函数、
 同一套 per-asset 阈值，保证历史分布与今天的 regime 标签口径一致。warmup 不足

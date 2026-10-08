@@ -353,7 +353,7 @@ def compute_regime_return_frame(
     # ATR%（Wilder RMA）—— 与 market_metrics._atr_pct_series 同一个 _true_range（逐行真 TR，
     # 缺 H/L 的行退化 |ΔClose|），两路径必须同源（#113 后 atr 喂两条归一化腿）；保留全序列
     tr = _true_range(df)
-    atr_pct = tr.ewm(alpha=1.0 / 14, adjust=False).mean() / close * 100.0
+    atr_pct = tr.ewm(alpha=1.0 / 14, adjust=False, ignore_na=True).mean() / close * 100.0
     # #113 尺度无关分类需要的两个归一化序列（口径同 market_metrics：252 窗 / ≥120 样本中位）
     atr_med = atr_pct.rolling(252, min_periods=120).median()
     # 分母 ≤0（长期横盘/填充价）→ NaN → _v() 转 None，与 live _calc_atr_spike_ratio 同语义

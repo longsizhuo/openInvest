@@ -133,7 +133,7 @@ def _with_close_only_row(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def test_atr_trailing_close_only_row_does_not_collapse_series():
-    """一根缺 H/L 的末行只该让这一行退化 |ΔClose|，不能把整条序列打成收盘价差
+    """一根缺 H/L 的末行（盘中现价缓存）不计入 TR、ATR 沿用前值，不能把整条序列打成收盘价差
     （旧口径：近 15 根任一缺 H/L → 全序列退化，ATR 掉到真实值的 ~20-40%）"""
     df = _ohlc_frame()
     clean, dirty = compute_metrics(df), compute_metrics(_with_close_only_row(df))
@@ -142,13 +142,24 @@ def test_atr_trailing_close_only_row_does_not_collapse_series():
 
 
 def test_atr_close_only_frame_uses_close_diff():
-    """无 High/Low 列（或列全 NaN = 老数据未回填）→ 仍走 |ΔClose| 的 Wilder ATR"""
+    """整表无 High/Low（无列或列全 NaN）→ 仍走 |ΔClose| 的 Wilder ATR"""
     df = _ohlc_frame(60)
     close = df["Close"]
     expected = float((close.diff().abs().ewm(alpha=1 / 14, adjust=False).mean() / close * 100).iloc[-1])
     assert abs(_calc_atr_pct(df[["Close"]], period=14) - expected) < 1e-9
     df_nan_hl = df.assign(High=np.nan, Low=np.nan)
     assert abs(_calc_atr_pct(df_nan_hl, period=14) - expected) < 1e-9
+
+
+def test_atr_unbackfilled_old_segment_does_not_inflate_spike():
+    """前段老数据没回填 H/L、后段 OHLC 不到 120 根：老段不进 1 年中位（旧口径同款排除），
+    spike 不能被"老段 |ΔClose| 拉低的中位"虚抬成快崩（≥2.0）"""
+    df = _ohlc_frame(400)
+    df.iloc[:300, df.columns.get_loc("High")] = np.nan
+    df.iloc[:300, df.columns.get_loc("Low")] = np.nan
+    m = compute_metrics(df)
+    assert m["atr_spike_ratio"] is None or m["atr_spike_ratio"] < 1.5
+    assert m["atr_pct"] > 1.5  # 后段真 TR ≈ 2%，不被老段收盘价差稀释
 
 
 def test_atr_regime_frame_matches_market_metrics_with_close_only_row():

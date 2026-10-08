@@ -86,16 +86,18 @@ def _calc_rsi(close: pd.Series, period: int = 14) -> Optional[float]:
 def _true_range(df: pd.DataFrame) -> pd.Series:
     """逐行 True Range = max(high-low, |high-prev_close|, |low-prev_close|)，**含跳空**。
 
-    逐行判定：缺 High 或 Low 的行（现价/NAV 缓存只写 close 的行、未回填老数据）
-    该行退化为 |ΔClose|，其余行照走真 TR；整表无 High/Low 列时全序列 |ΔClose|。
-    （旧口径"近 period+1 根有一根缺 H/L 就整条序列退化"——一根盘中现价行就把
-    ATR 压到真实波动的 ~40%。）regime_probability 的全序列回放也调这里，两路径同源。
+    缺 High 或 Low 的行不是完整日线（现价/NAV 缓存只写 close 的盘中/节假日/周末行、
+    未回填的老段）：该行 TR 记 NaN，ATR 侧 ewm(ignore_na=True) 跳过它沿用前值——
+    零星缓存行既不拉低也不抖动 ATR，未回填老段自动排除在 1 年中位之外。整表没有任何
+    High/Low 时才全序列退化 |ΔClose|。（旧口径"近 period+1 根有一根缺 H/L 就整条序列
+    退化"——一根盘中现价行就把 ATR 压到真实波动的 ~40%。）regime_probability 的全序列
+    回放也调这里，两路径同源。
     """
     close = df["Close"].astype(float)
     prev_close = close.shift(1)
-    close_diff = (close - prev_close).abs()
-    if "High" not in df.columns or "Low" not in df.columns:
-        return close_diff
+    if not ("High" in df.columns and "Low" in df.columns
+            and df["High"].notna().any() and df["Low"].notna().any()):
+        return (close - prev_close).abs()
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
     # max(axis=1) 默认 skipna：首行 prev_close 为 NaN 时退化为 (high-low)
@@ -103,14 +105,14 @@ def _true_range(df: pd.DataFrame) -> pd.Series:
         [(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()],
         axis=1,
     ).max(axis=1)
-    return tr.where(high.notna() & low.notna(), close_diff)
+    return tr.where(high.notna() & low.notna())
 
 
 def _atr_pct_series(df: pd.DataFrame, period: int = 14) -> Optional[pd.Series]:
     """逐日 ATR%（ATR / 当日收盘 * 100）序列，Wilder 平滑，TR 见 _true_range。"""
     if len(df) < period + 1:
         return None
-    atr = _true_range(df).ewm(alpha=1.0 / period, adjust=False).mean()
+    atr = _true_range(df).ewm(alpha=1.0 / period, adjust=False, ignore_na=True).mean()
     return atr / df["Close"] * 100
 
 
