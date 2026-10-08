@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.21.2...invest-skill-v0.22.0) (2026-10-08)
+
+
+### Features
+
+* **mcp:** run_committee 上报辩论进度、decisions 支持过滤与截断（[#133](https://github.com/longsizhuo/openInvest/issues/133)） ([#309](https://github.com/longsizhuo/openInvest/issues/309)) ([447ab58](https://github.com/longsizhuo/openInvest/commit/447ab58a7d5875346f4bc92d45fde4640c630d92))
+
 ## [0.21.2](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.21.1...invest-skill-v0.21.2) (2026-10-08)
 
 
