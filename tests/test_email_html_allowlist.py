@@ -257,3 +257,25 @@ def test_committee_view_sanitizes_transcript_but_keeps_charts(tmp_path, monkeypa
     assert "img-src 'none'" in csp and "base-uri 'none'" in csp and "form-action 'none'" in csp
     assert r.headers["referrer-policy"] == "no-referrer"
     assert router.committee_status_view("missing").headers["content-security-policy"] == csp
+
+
+def test_href_filter_fails_closed():
+    """host 校验回调出错或 host 解读有歧义时一律不给链接（nh3 在回调抛异常时会保留原值）。"""
+    hosts = {"hub.example"}
+    md = ("[a](http://[hub.example/) [b](https://hub.example\\@evil.example/) "
+          "[c](https://user@hub.example/) [ok](https://hub.example/x)")
+    out = md_to_safe_html(md, link_hosts=hosts)
+    assert out.count("href=") == 1 and 'href="https://hub.example/x"' in out
+
+
+def test_comment_like_input_renders_in_bounded_time():
+    """注释形输入不进 markdown 解析（模板不产出注释），渲染限时返回、与库版本无关。"""
+    code = (
+        "from openinvest.services.notifier import md_to_safe_html\n"
+        "for s in ['text <!-->x', 'a <!-- b <!-- c', '<div>\\n\\n<!-->x-->\\n\\n</div>']:\n"
+        "    md_to_safe_html(s)\n"
+    )
+    try:
+        subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        pytest.fail("注释形输入让渲染不终止")

@@ -101,7 +101,11 @@ def md_url(url: object) -> str:
     插入 HTML 或 title 的字符（空格 ( ) < > " [ ]）。其它 scheme（javascript:/data:…）返回
     空串，调用方据此只出文字不出链接。"""
     u = str(url or "").strip()
-    if urlsplit(u).scheme.lower() not in ("http", "https"):
+    try:
+        scheme = urlsplit(u).scheme.lower()
+    except ValueError:  # 畸形 URL（如未闭合的 [ IPv6 字面量）→ 只出文字
+        return ""
+    if scheme not in ("http", "https"):
         return ""
     return quote(u, safe=":/?#&=%.-_~+,;@!$*'")
 
@@ -131,10 +135,19 @@ def md_to_safe_html(content_md: str, *, link_hosts: Iterable[str] = ()) -> str:
     def _keep_href(tag: str, attr: str, value: str) -> str | None:
         if attr != "href":
             return value
-        u = urlsplit(value)
-        ok = u.scheme.lower() in ("http", "https") and (u.hostname or "") in hosts
+        # 必须 fail-closed：回调一抛异常，nh3 就保留原值（链接照样可点）。
+        # 反斜杠 / userinfo：浏览器和 urlsplit 对 host 的解读会不一致，直接不给链接。
+        try:
+            u = urlsplit(value)
+            ok = (u.scheme.lower() in ("http", "https") and "\\" not in value
+                  and u.username is None and (u.hostname or "") in hosts)
+        except Exception:  # noqa: BLE001
+            return None
         return value if ok else None
 
+    # "<!" 先转义：模板从不产出注释/声明，而 python-markdown 对某些注释形输入会不收敛
+    # （与版本、html.parser 实现有关），这里一刀切掉，不依赖库版本。
+    content_md = content_md.replace("<!", "&lt;!")
     return nh3.clean(
         markdown.markdown(content_md, extensions=_MD_EXTENSIONS),
         tags=_SAFE_TAGS,
