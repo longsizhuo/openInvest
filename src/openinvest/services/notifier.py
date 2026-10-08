@@ -82,13 +82,15 @@ _DEFAULT_EMAIL_CSS = """
 
 
 def md_text(text: object) -> str:
-    """不可信纯文本（新闻标题/来源名/归一化后的事件 claim）插进邮件 markdown 前过一遍。
+    r"""不可信纯文本（新闻标题/来源名/归一化后的事件 claim）插进邮件 markdown 前过一遍。
 
     python-markdown 原样透传 HTML（render_markdown_email 也靠这点渲染自家 <div>），所以
     外部文本里的 <img>/<a>/<style> 会直接进邮件，[x](url) / ![x](url) 会变成链接/图片。
-    只做 HTML 转义 + 方括号转义，其余 markdown 字符不动（不影响阅读）。
+    做 HTML 转义 + 反斜杠/方括号/反引号转义（先转反斜杠，否则外部文本自带的 \ 会和新加的
+    凑成 \\ 把后面的 [ 放出来，\[x\](url) 照样成链接），其余 markdown 字符不动。
     """
-    return html.escape(str(text or ""), quote=False).replace("[", r"\[").replace("]", r"\]")
+    s = html.escape(str(text or ""), quote=False).replace("\\", "\\\\")
+    return s.replace("[", r"\[").replace("]", r"\]").replace("`", r"\`")
 
 
 def md_url(url: object) -> str:

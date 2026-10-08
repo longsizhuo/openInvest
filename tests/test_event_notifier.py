@@ -37,7 +37,8 @@ def test_untrusted_event_text_cannot_inject_html_or_links_into_email():
     from openinvest.services.event_notifier import _build_markdown
     from openinvest.services.notifier import render_markdown_email
 
-    evil = '<img src=x onerror=alert(1)><a href="http://evil.example">BUY NOW</a> [click](http://evil.example)'
+    evil = ('<img src=x onerror=alert(1)><a href="http://evil.example">BUY NOW</a> [click](http://evil.example)'
+            r' \[BUY\](http://evil.example) `<b>`')
     md = _build_markdown(
         [{
             "one_line_claim": evil,
@@ -52,7 +53,7 @@ def test_untrusted_event_text_cannot_inject_html_or_links_into_email():
     )
     out = render_markdown_email(md)
     # 注入内容只能以转义后的文字出现（&lt;img …），不能成为真标签 / 真链接
-    for bad in ("<img", '<a href="http://evil', "javascript:", "<b>X", "<i>feed"):
+    for bad in ("<img", '<a href="http://evil', "javascript:", "<b>X", "<i>feed", "&amp;lt;"):
         assert bad not in out, bad
     assert "&lt;img src=x onerror=alert(1)&gt;" in out
     assert 'href="http://news.example/a%29%20%3Cimg%20src=y%3E%20%22t%22"' in out  # 正常 http 链接保留、特殊字符被编码

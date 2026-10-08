@@ -149,9 +149,9 @@ def _build_markdown(
 
         lines.append(f"\n## {i}. {icon} {md_text(e.get('one_line_claim', ''))}")
         lines.append("")
-        lines.append(f"- **Stance**: {stance} / **Severity**: {severity}")
+        lines.append(f"- **Stance**: {md_text(stance)} / **Severity**: {md_text(severity)}")
         lines.append(f"- **Affected**: {md_text(', '.join(symbols)) if symbols else '(macro/无指定 symbol)'}")
-        lines.append(f"- **Event time**: {ts or 'n/a'}")
+        lines.append(f"- **Event time**: {md_text(ts) or 'n/a'}")
         if sources:
             src_lines = []
             for s in sources[:4]:
