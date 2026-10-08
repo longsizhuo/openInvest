@@ -109,3 +109,62 @@ def test_review_all_live_path_parses_seeded_snapshots(monkeypatch, tmp_path):
     assert len(reviews) == 3, f"应解析 3 条种入的 live 快照，实际 {len(reviews)}"
     assert all(r.source == "live" for r in reviews), "include_backtest=False 不应混入 backtest 样本"
     assert {r.asset for r in reviews} == {"AAPL", "MSFT", "NVDA"}
+
+
+# ---------- e. 开火形态：cron run() 只复盘 live + 只读行情库、零网络（2026-10 D4） ----------
+
+def test_run_is_live_only_and_never_touches_network(monkeypatch, tmp_path):
+    """run()（scheduler 无参调用）：只写 live 行；行情全从 market_data.db 来。
+
+    任何网络尝试（get_history_data 刷新 / yfinance / socket.connect）都被记下并抛错——
+    代码里的 try/except 会吞异常，所以断言"零调用"而不是等异常冒泡。
+    同时断言收益/宏观突变真算出来了：证明数据来自库，不是全退化成 None。
+    """
+    import json
+    import socket
+
+    import yfinance as yf
+
+    from openinvest.core import memory_store as ms
+    from openinvest.db import market_store as mstore
+    from openinvest.jobs import verdict_review as vr
+    from openinvest.utils import exchange_fee as ef
+
+    mem = tmp_path / "memory"
+    monkeypatch.setattr(ms, "MEMORY_ROOT", mem)
+    monkeypatch.setattr(vr, "ROOT", tmp_path)                 # docs/verdict_accuracy.md 写 tmp
+    monkeypatch.setattr(mstore, "DB_PATH", str(tmp_path / "market_data.db"))
+    monkeypatch.setattr(vr, "_STORE", None)                   # 让 _closes 连上 tmp 库
+    for sub, d, sym, v in [(".committee", "2026-01-05", "AAPL", "HOLD"),
+                           (".committee", "2026-01-06", "MSFT", "ACCUMULATE"),
+                           (".backtest", "2026-01-05", "AAPL", "HOLD")]:
+        _write_committee(mem, sub, d, sym, v)
+
+    store = mstore.MarketStore()
+    for i, day in enumerate(pd.bdate_range("2025-01-01", "2026-03-31")):
+        for sym, base in [("AAPL", 100.0), ("MSFT", 200.0), ("^VIX", 15.0),
+                          ("^TNX", 4.0), ("USDCNY=X", 7.0)]:
+            c = base * (1 + 0.001 * i)
+            store.save_generic_price(sym, day.strftime("%Y-%m-%d"), c,
+                                     high=c * 1.01, low=c * 0.99, volume=1e6)
+
+    calls = []
+
+    def _net(*a, **k):
+        calls.append(a[:2])
+        raise RuntimeError("network attempted during verdict_review")
+
+    monkeypatch.setattr(ef, "get_history_data", _net)
+    monkeypatch.setattr(yf, "Ticker", _net)
+    monkeypatch.setattr(yf, "download", _net)
+    monkeypatch.setattr(socket.socket, "connect", _net)
+    monkeypatch.setattr(vr, "_build_symbol_resolver", lambda: {})  # 快照自带 **Symbol** 行
+
+    out = vr.run()
+
+    assert calls == [], f"verdict_review 不许触网，实际尝试 {calls}"
+    assert out["status"] == "ok"
+    rows = [json.loads(x) for x in (mem / ".dreams" / "verdict_review.jsonl").read_text().splitlines()]
+    assert len(rows) == 2 and {r["source"] for r in rows} == {"live"}
+    assert all("30d" in r["actual_returns"] for r in rows), "收益应从库里算出"
+    assert all("detected" in r["macro_shock"] for r in rows), "macro_shock 应从库里算出"

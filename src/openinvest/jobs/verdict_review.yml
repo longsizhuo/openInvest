@@ -1,11 +1,13 @@
-# verdict_review：消费 memory/.committee 的 live 委员会快照 → 刷新 .dreams/verdict_review.jsonl
-# 这是 dreaming 的上游：dreaming 读 verdict-outcome（命中率 + HOLD 机会成本）做记忆整合，
-# 训练样本若不持续吃 live，dreaming 永远只在 backtest 牛市集上学。
-# enabled 暂 false：Phase 3 开火时由用户确认 cron 频率后，与 dreaming.yml 一并改 true。
-# 频率待定（见 ADR / rationale 的 open question）：月度太稀疏，建议每日/每周让 jsonl 持续吃 live 样本。
+# verdict_review：消费 memory/.committee 的 live 委员会快照 → 整份重写 .dreams/verdict_review.jsonl
+# 下游：纪律台账（services/discipline，只数 live）、GUI 命中率页（/api/verdict_review/summary，
+# 按来源分桶）、decision_ledger。不进委员会 prompt，零 LLM、零发送。
+# 2026-10 D4 签字开启：run() 只复盘 live（研究用全量重建手动跑 --include-backtest），
+# 行情只读 market_data.db、不触网（进程内缓存）。
+# 时区：02:00 Asia/Shanghai = 前一天 18:00 UTC，周日/周一两次落在 UTC 周六/周日——
+# 库里没有新 bar，结果与前一次基本相同（仅日历成熟度推进），只读库、秒级，不打 yfinance。
 name: verdict_review
-description: 消费 .committee live 快照刷新 .dreams/verdict_review.jsonl（dreaming 上游）；Phase 3 前 enabled=false
+description: 每日复盘 live 委员会决议（只读行情库）→ 刷新 .dreams/verdict_review.jsonl（纪律台账 / GUI 命中率页上游）
 schedule: "0 2 * * *"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.verdict_review:run
-enabled: false  # Phase 3 开火前由用户确认 cron 频率后改 true，与 dreaming.yml 一并启用
+enabled: true

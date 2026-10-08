@@ -1,7 +1,8 @@
 """Verdict 后验复盘 — 算 1d/7d/30d 命中率 + 区分宏观突变 vs 模型差。
 
 输入：memory/.committee/<date>/<symbol>.md（含 macro_context_at_decision）
-     memory/.backtest/<date>/<symbol>.md（backtest 产生的，同 schema）
+     memory/.backtest/<date>/<symbol>.md（backtest 产生的，同 schema；仅 --include-backtest 手动全量时读）
+     db/market_data.db（只读，不触网——2026-10 D4）
 输出：docs/verdict_accuracy.md (gitignored, 含真数字给本地分析用)
      memory/.dreams/verdict_review.jsonl（结构化结果，给 dreaming 用）
 
@@ -75,21 +76,33 @@ from openinvest.core.decision_ledger import parse_committee_file as _parse_commi
 _GOLD_PROXY_KINDS = {"gold_cny_per_gram"}
 
 
-def _closes(symbol: str):
-    """拉 symbol 全历史日线（DataFrame，index=日期）。失败/空返回 None。
+# market_data.db 读连接 + 全历史行情的进程内缓存（review_all 开头清空）
+_STORE = None
+_CLOSES_CACHE: Dict[str, Any] = {}
 
-    2026-10：get_history_data 起真按 period 截断，原 "1y" 会让 >1 年的决议全丢收益
-    （此前实际拿到 ~730 行≈3 年）。前向收益查任意历史日，用 "max"。
+
+def _closes(symbol: str):
+    """symbol 全历史日线（DataFrame，index=日期）。**只读 market_data.db**，进程内缓存。空 → None。
+
+    2026-10 D4：不再走 get_history_data——它见库尾不是"今天"就去打 yfinance，一次复盘
+    ~2,400 次调用（cron 跑在 UTC 周末时几乎全打网，且与 price_sentinel 同进程）。
+    行情新鲜度归 daily_report / price_sentinel 的刷新，本 job 只消费库。
+    缓存键=大写 symbol（同 get_history_data 口径）；scheduler 是常驻进程，
+    review_all 每次开跑先清空，跨天不复用旧快照。
     """
-    from openinvest.utils.exchange_fee import get_history_data
-    try:
-        df = get_history_data(symbol, "max")
-        if df is None or df.empty:
-            return None
-        return df
-    except Exception as e:
-        log.warning("_closes(%s) 失败: %s", symbol, e)
-        return None
+    global _STORE
+    sym = symbol.upper()
+    if sym not in _CLOSES_CACHE:
+        try:
+            if _STORE is None:
+                from openinvest.db.market_store import MarketStore
+                _STORE = MarketStore()
+            df = _STORE.get_history_df(sym, days=100000)  # 全历史
+            _CLOSES_CACHE[sym] = None if df is None or df.empty else df
+        except Exception as e:  # noqa: BLE001
+            log.warning("_closes(%s) 失败: %s", symbol, e)
+            _CLOSES_CACHE[sym] = None
+    return _CLOSES_CACHE[sym]
 
 
 def _window_return(
@@ -149,14 +162,13 @@ def _detect_macro_shock(
     保留，仅作历史/参考（verdict_review 报告里仍统计展示），不参与样本剔除。
     """
     import pandas as pd
-    from openinvest.utils.exchange_fee import get_history_data
     shock: Dict[str, Any] = {"detected": False, "drivers": []}
 
     def _get_close_on(symbol: str, date_str: str) -> Optional[float]:
         try:
             d = datetime.strptime(date_str, "%Y-%m-%d").date()
-            df = get_history_data(symbol, "max")
-            if df.empty:
+            df = _closes(symbol)  # 只读库 + 缓存（原每条决议 3 次全历史读 + 可能打网）
+            if df is None:
                 return None
             # date <= d 的根数（searchsorted 代替物化 index.date）
             i = df.index.searchsorted(pd.Timestamp(d, tz=df.index.tz) + pd.Timedelta(days=1))
@@ -212,15 +224,11 @@ def _atr_pct_asof(symbol: str, decision_date: str) -> float:
     的 hit/directions 会随当日 ATR 变化翻转，直接污染 #141 Brier 校准的标签稳定性。
     与 _decision_regime 同口径：DB 全历史 → 截断决议日 → tail(400) 算 ATR。
     """
-    global _REGIME_STORE
     try:
         import pandas as pd
         from openinvest.utils.market_metrics import compute_metrics
-        if _REGIME_STORE is None:
-            from openinvest.db.market_store import MarketStore
-            _REGIME_STORE = MarketStore()
-        df = _REGIME_STORE.get_history_df(symbol, days=100000)
-        if df is None or df.empty:
+        df = _closes(symbol)
+        if df is None:
             return DEFAULT_DAILY_VOL_PCT
         df = df[df.index <= pd.to_datetime(decision_date)].tail(400)
         if len(df) < 20:
@@ -230,10 +238,6 @@ def _atr_pct_asof(symbol: str, decision_date: str) -> float:
     except Exception as e:  # noqa: BLE001
         log.warning("_atr_pct_asof(%s,%s) 兜底: %s", symbol, decision_date, e)
         return DEFAULT_DAILY_VOL_PCT
-
-
-# regime 计算复用一个 MarketStore 连接（避免每条 review 新开 sqlite 连接）
-_REGIME_STORE = None
 
 
 def _decision_regime(symbol: str, decision_date: str) -> Optional[str]:
@@ -249,16 +253,12 @@ def _decision_regime(symbol: str, decision_date: str) -> Optional[str]:
     一半样本误标 unknown，污染 jsonl 并可能让真 crash 日被错标 unknown 而漏掉免责）。
     与 backtest patch 的窗口逻辑一致，保证 committee 看到的 regime == 这里复盘的 regime。
     """
-    global _REGIME_STORE
     try:
         import pandas as pd
         from openinvest.utils.market_metrics import compute_metrics
         from openinvest.core.regime import classify_regime
-        if _REGIME_STORE is None:
-            from openinvest.db.market_store import MarketStore
-            _REGIME_STORE = MarketStore()
-        df = _REGIME_STORE.get_history_df(symbol, days=100000)  # 全历史
-        if df is None or df.empty:
+        df = _closes(symbol)  # DB 全历史（缓存）
+        if df is None:
             return None
         df = df[df.index <= pd.to_datetime(decision_date)].tail(730)
         if len(df) < 30:
@@ -331,8 +331,8 @@ def review_one(
     # 真实 symbol 优先级：文件内 **Symbol** 行 > holdings 映射 > 转义还原启发式
     real_symbol = parsed.get("symbol") or (holding.get("symbol") if holding else None)
     if not real_symbol and "_" in stem:
-        # 已不持有的历史资产（如卖掉的 ASIA.AX）：试把 _ 还原成 .（最常见的
-        # 交易所后缀转义），用 yfinance 验证确有数据才采用，否则继续放弃——
+        # 已不持有的历史资产（如已卖出的 XXX.AX）：试把 _ 还原成 .（最常见的
+        # 交易所后缀转义），行情库里确有数据才采用，否则继续放弃——
         # 宁可跳过也不瞎猜出脏 symbol 污染学习信号。
         candidate = stem.replace("_", ".")
         if _closes(candidate) is not None:
@@ -386,6 +386,8 @@ def review_one(
 
 def review_all(*, include_backtest: bool = True, include_live: bool = True) -> List[VerdictReview]:
     """扫所有历史 verdict 做 review"""
+    _CLOSES_CACHE.clear()  # 常驻 scheduler 进程：每次复盘重读库，不吃昨天的快照
+    _ATR_CACHE.clear()
     store = MemoryStore()
     reviews: List[VerdictReview] = []
 
@@ -497,9 +499,14 @@ def write_jsonl(reviews: List[VerdictReview]) -> Path:
     return out
 
 
-def run() -> Dict[str, Any]:
-    """job entry"""
-    reviews = review_all()
+def run(*, include_backtest: bool = False) -> Dict[str, Any]:
+    """job entry。cron 默认只复盘 live（D4 签字方案）。
+
+    include_backtest=True 是研究用全量重建（.backtest 14 万+ 文件，数小时级），
+    只手动跑：`python -m openinvest.jobs.verdict_review --include-backtest`。
+    两种模式都整份覆盖 jsonl。
+    """
+    reviews = review_all(include_backtest=include_backtest)
     if not reviews:
         return {"status": "skipped", "reason": "no committee verdicts to review"}
     summary = summarize(reviews)
@@ -514,5 +521,5 @@ def run() -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    result = run()
+    result = run(include_backtest="--include-backtest" in sys.argv)
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -10,12 +10,12 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `commsec_sync.py` | 每 2h | 拉 CommSec 成交回执邮件，更新 portfolio.holdings |
 | `dreaming.py` | 每天 3am | 三阶段记忆整合（Light → REM → Deep Sleep），insights/ 沉淀长期模式 |
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |
-| `verdict_review.py` | 每天 2am（`enabled: false`，Phase 3 待开） | 委员会决策命中率刷进 verdict_review.jsonl（dreaming 上游训练源） |
+| `verdict_review.py` | 每天 2am（Asia/Shanghai） | 只复盘 live 委员会决议，命中率刷进 verdict_review.jsonl（纪律台账 / GUI 命中率页上游）；只读行情库、不触网 |
 | `event_watch.py` | 北京 8:00-次日 2:30 每 30min（config `event.watch_schedule` 可改）| 扫多源新闻 → LLM 归一化 → 命中持仓则邮件 + 触发委员会（ADR-006）|
 | `price_sentinel.py` | 同窗口每 5min（config `event.sentinel_schedule` 可改）| 价格垂直线检测（10min vs 日ATR%，零 LLM）→ **先报警邮件后触发委员会**（ADR-025）|
 | `job_watchdog.py` | 每小时第 7 分钟 | 巡检 `db/jobs.sqlite` job_runs：enabled job 错过 2 次触发（+15min）/ running 超 max(60min, 3×中位耗时) / event_watch 连续 6 次 fetched=0 → Discord+邮件告警，同一异常 24h 内只报一次（2026-10-07，event_watch 卡死 21 天零告警的补救）|
 
-> `verdict_review.yml`（cron `0 2 * * *`，`enabled: false`）：把 `.committee` live 委员会快照刷进 `.dreams/verdict_review.jsonl`，是 `dreaming` 的上游训练源。Phase 3 自学习开火时由用户确认频率后，与 `dreaming.yml` 一并改 `enabled: true`。
+> `verdict_review.yml`（cron `0 2 * * *` Asia/Shanghai，2026-10 起 `enabled: true`）：只把 `.committee` live 快照刷进 `.dreams/verdict_review.jsonl`（整份覆盖）。行情只读 `db/market_data.db` + 进程内缓存，不调 yfinance。研究要含回测的全量重建（数小时级）手动跑 `python -m openinvest.jobs.verdict_review --include-backtest`。`dreaming` 仍关。
 
 - `INDEX.md` — 所有 job 的输入/输出 spec（人类参考）
 - `*.yml` — APScheduler cron 配置（声明式）
