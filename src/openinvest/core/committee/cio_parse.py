@@ -14,6 +14,8 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+from openinvest.core.committee.agent_io import AGENT_UNAVAILABLE_MARKER
+
 log = logging.getLogger(__name__)
 
 
@@ -32,8 +34,8 @@ REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
 EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
 # regime 标签（format_regime_brief 输出首行 / coordinator transcript 里的同款行）
 REGIME_LABEL_RE = re.compile(r"^REGIME:\s*([a-z_]+)\s*$", re.MULTILINE)
-# worker 失败哨兵的完整前缀（agent_io.AGENT_UNAVAILABLE_MARKER + " reason="）
-_WU_SENTINEL = "[WORKER_UNAVAILABLE] reason="
+# worker 失败哨兵的完整前缀（agent_io._ask 的唯一产出格式）
+_WU_SENTINEL = f"{AGENT_UNAVAILABLE_MARKER} reason="
 # 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS 行提取波动突变比
 ATR_SPIKE_RE = re.compile(r"\batr_spike_ratio=([\d.]+)")
 

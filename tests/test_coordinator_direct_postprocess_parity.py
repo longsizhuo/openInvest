@@ -135,3 +135,25 @@ def test_coordinator_matches_direct_postprocess(world, monkeypatch, memo, sentim
     assert [r["rule"] for r in rows_direct] == [expect_rule]   # 场景确实触发了干预
     assert v_coord == v_direct
     assert rows_coord == rows_direct
+
+
+def test_coordinator_catches_worker_failure_outside_cio_section(world):
+    """worker 失败哨兵在 QUANT 段、不在 CIO 段：coordinator 也得强制 HOLD（cio_text 只剩 CIO 段，
+    靠 worker_brief=raw 才看得到）；CIO 段的否定句提及不算失败。"""
+    _, regime_brief = world
+    from openinvest.core.committee.agent_io import AGENT_UNAVAILABLE_MARKER
+    from openinvest.core.runner.coordinator import save_committee_transcript
+    memo = "VERDICT: BUY\nCONFIDENCE: 0.9\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 5000"
+    raw = (
+        "=== MACRO ===\nMOCK_MACRO\n\n"
+        f"=== QUANT_R1 ===\n{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted\n\n"
+        "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
+        f"=== CIO ===\n{memo}\n"
+    )
+    v = save_committee_transcript(SYM, raw)["verdict"]
+    assert v["verdict"] == "HOLD" and v["confidence"] <= 0.4 and v["alloc_cny"] == 0
+
+    ok = save_committee_transcript(SYM, raw.replace(
+        f"{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted",
+        f"SIGNAL: bullish\n无 {AGENT_UNAVAILABLE_MARKER} 标记"))["verdict"]
+    assert "_original_confidence_unavailable" not in ok
