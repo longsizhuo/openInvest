@@ -10,6 +10,7 @@
 | `commsec_sync` | 每 2 小时 | `0 */2 * * *` | `jobs.commsec_sync:run` |
 | `weekly_review` | 周日 11:00 | `0 11 * * sun` | `jobs.weekly_review:run` |
 | `dreaming` | 每天 03:00 | `0 3 * * *` | `jobs.dreaming:run` |
+| `path_review` | 周日 11:30 | `30 11 * * sun` | `jobs.path_review:run` |
 
 ## 启动调度器
 

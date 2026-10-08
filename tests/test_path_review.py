@@ -153,6 +153,30 @@ def test_run_live_path_end_to_end(monkeypatch, tmp_path):
     assert out["summary"]["n"] == 1
     assert set(out["summary"]["windows"]) == {"30d", "60d", "90d"}
     jl = Path(out["jsonl"])
+    assert jl == tmp_path / ".dreams" / "path_review_live.jsonl"
     assert jl.exists() and jl.read_text().strip() != ""
     md = Path(out["report"])
+    assert md.name == "path_calibration_live.md"
     assert md.exists() and "路径预测校准报告" in md.read_text()
+
+
+def test_live_run_never_writes_recompute_baseline(monkeypatch, tmp_path):
+    """cron 跑的 run()（无 recompute）绝不能覆盖 .dreams/path_review.jsonl
+    —— 那是 fit_path_calibration.py 依赖的 walk-forward 校准基线（旧版 write_outputs
+    整份 "w" 覆盖，开 cron 第一次就把基线换成几条 live）。docs/path_calibration.md
+    同理。空 live（零快照）也算：旧代码同样会写出空基线。"""
+    import openinvest.core.memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    monkeypatch.setattr(pr, "ROOT", tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / ".dreams").mkdir()
+    baseline = tmp_path / ".dreams" / "path_review.jsonl"
+    report = tmp_path / "docs" / "path_calibration.md"
+    baseline.write_bytes(b'{"source": "recompute", "sentinel": 1}\n')
+    report.write_bytes(b"baseline report\n")
+    before = (baseline.read_bytes(), report.read_bytes())
+
+    out = pr.run()
+
+    assert (baseline.read_bytes(), report.read_bytes()) == before
+    assert Path(out["jsonl"]).name == "path_review_live.jsonl"

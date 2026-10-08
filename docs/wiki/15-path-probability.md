@@ -196,7 +196,11 @@ CIO brief 的 `=== 卖出后路径 / 买回点参考 ===` 段。真实样例（2
    差距缩到 0.5-1.5% 但未反超（事后基率不可预知，仅参考）。
    重拟合流程：walk-forward recompute → fit 脚本重跑（recompute 快照永远存
    未校准原始分布，校准只在生产出口应用——fit 数据不会被自己污染）。
-   live 快照攒到 n≥30 后启用周度 path_review job 持续追踪
+   周度 path_review job（周日 11:30）已启用，只评 live 快照，写
+   `memory/.dreams/path_review_live.jsonl` + `docs/path_calibration_live.md`；
+   recompute 基线 `path_review.jsonl`（fit 脚本的输入）只由手动
+   `--recompute-weekly-since` 重写，cron 不碰。live 快照逐日重叠，独立样本
+   ≥30（约 2027-05）之前不读 live 校准数字
 
 ## 7. 怎么验证
 

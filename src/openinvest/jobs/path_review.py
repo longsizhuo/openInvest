@@ -17,8 +17,16 @@
 - 形状：预测分布给实际形状类的概率（probability score，vs uniform 0.25）+ top1 命中
 - 时点：实际见底交易日 vs 预测中位（MAE，仅 dipped 样本）
 
-输出：memory/.dreams/path_review.jsonl + docs/path_calibration.md（gitignored，
-含 symbol 真名只供本地）。成熟度过滤：窗口未走完的不评。
+输出（gitignored，含 symbol 真名只供本地）。成熟度过滤：窗口未走完的不评。
+- cron / 裸 run()（只评 live）→ memory/.dreams/path_review_live.jsonl
+  + docs/path_calibration_live.md
+- 手动 --recompute-weekly-since → memory/.dreams/path_review.jsonl
+  + docs/path_calibration.md = walk-forward 校准基线，
+  scripts/research/fit_path_calibration.py 的输入（shrinkage_k / band_gamma 的依据）。
+  cron 绝不能写它：live 只有几百行，一覆盖基线就没了。
+
+⚠️ live 校准数字攒到 ≥30 条**独立**样本（按窗口长度去重叠，预计 ~2027-05）之前
+不读、不据此调参：名义 n 是逐日重叠快照，独立样本远少于 n。周度 cron 只负责攒账。
 """
 from __future__ import annotations
 
@@ -229,18 +237,23 @@ def recompute_snapshots(
 
 
 
-def write_outputs(reviews: List[PathReview], summ: Dict[str, Any]) -> Tuple[Path, Path]:
+def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
+                  live: bool = True) -> Tuple[Path, Path]:
+    """live=True（cron）写 *_live 两件；False（recompute）写校准基线两件。"""
+    suffix = "_live" if live else ""
     store = MemoryStore()
-    jl = store.root / ".dreams" / "path_review.jsonl"
+    jl = store.root / ".dreams" / f"path_review{suffix}.jsonl"
     jl.parent.mkdir(parents=True, exist_ok=True)
     with jl.open("w", encoding="utf-8") as f:
         for r in reviews:
             f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
-    md = ROOT / "docs" / "path_calibration.md"
+    md = ROOT / "docs" / f"path_calibration{suffix}.md"
     lines = ["# 路径预测校准报告（gitignored，本地分析用）", "",
-             f"样本 {summ['n']} 条", "",
-             "| 窗 | n | P10-P90 覆盖(目标0.8) | p_below Brier | 基率 Brier | 中位|误差|pp | 中位偏差pp |",
-             "|---|---|---|---|---|---|---|"]
+             f"样本 {summ['n']} 条", ""]
+    if live:
+        lines += ["> live 快照逐日重叠：独立样本 ≥30（约 2027-05）之前不读这些数字。", ""]
+    lines += ["| 窗 | n | P10-P90 覆盖(目标0.8) | p_below Brier | 基率 Brier | 中位|误差|pp | 中位偏差pp |",
+              "|---|---|---|---|---|---|---|"]
     for w, x in summ["windows"].items():
         lines.append(f"| {w} | {x['n']} | {x['band_coverage']:.0%} | {x['p_below_brier']} "
                      f"| {x['base_rate_brier']} | {x['median_abs_err_pp']} | {x['median_err_pp']:+} |")
@@ -276,7 +289,7 @@ def run(*, recompute_dates: Optional[List[str]] = None,
         if r is not None:
             reviews.append(r)
     summ = summarize(reviews)
-    jl, md = write_outputs(reviews, summ)
+    jl, md = write_outputs(reviews, summ, live=not recompute_dates)
     return {"reviews": len(reviews), "summary": summ,
             "jsonl": str(jl), "report": str(md)}
 

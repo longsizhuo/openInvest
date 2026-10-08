@@ -1,6 +1,9 @@
+# path_review：只评 live 快照，写 .dreams/path_review_live.jsonl + docs/path_calibration_live.md。
+# 不碰 .dreams/path_review.jsonl（walk-forward recompute 校准基线，fit_path_calibration.py 的输入）。
+# 零 LLM、不进 prompt、不改决策和邮件。live 独立样本 ≥30（约 2027-05）之前不读校准数字。
 name: path_review
-description: 周日 11:30 路径预测后验校准（live 快照 + 成熟度过滤；与 verdict_review 互补）
+description: 周日 11:30 路径预测后验校准（只评 live 快照 → path_review_live.jsonl；不覆盖 recompute 基线）
 schedule: "30 11 * * sun"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.path_review:run
-enabled: false  # live 快照攒到 n≥30 再启用；当前用 --recompute-weekly-since 出校准基线
+enabled: true

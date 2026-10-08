@@ -1,6 +1,8 @@
 """路径分布校准参数拟合 — fit/OOS 分割，预注册验收（确定性，纯算术）。
 
-输入：memory/.dreams/path_review.jsonl（walk-forward recompute，行内自带
+输入：memory/.dreams/path_review.jsonl（walk-forward recompute 基线，只由
+`jobs/path_review.py --recompute-weekly-since` 重写；周度 cron 写的是
+path_review_live.jsonl，不碰这里。行内自带
 原始条件/无条件预测统计 pred/uncond）。
 变换直接调 core/regime_probability.calibrate_profile（单源，防公式两处漂移）：
   λ = eff_n / (eff_n + k)；stat' = λ·cond + (1−λ)·uncond     （小样本收缩）
