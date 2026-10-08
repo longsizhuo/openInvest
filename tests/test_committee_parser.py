@@ -81,11 +81,24 @@ SUGGESTED_ALLOC_CNY: 8000
 
 def test_multiple_sanity_checks_can_combine():
     """既 unavailable 又 overconfident BUY → 应该被 unavailable 检查接管"""
-    text = f"{AGENT_UNAVAILABLE_MARKER}\nVERDICT: BUY\nCONFIDENCE: 0.99\nSUGGESTED_ALLOC_CNY: 5000"
+    text = f"{AGENT_UNAVAILABLE_MARKER} reason=agent_not_constructed\nVERDICT: BUY\nCONFIDENCE: 0.99\nSUGGESTED_ALLOC_CNY: 5000"
     r = parse_cio_memo(text)
     assert r["verdict"] == "HOLD"
     assert r["confidence"] == 0.4
     assert r["alloc_cny"] == 0
+
+
+def test_cio_mentioning_marker_in_negation_not_forced():
+    """CIO 写"无 [WORKER_UNAVAILABLE] 标记"不是 worker 失败（2026-09~10 live 6/6 强制 HOLD 均为此误判）"""
+    text = (
+        "Quant/Risk 均正常。三方无 [WORKER_UNAVAILABLE] 标记，也未出现 [WORKER_UNAVAILABLE]。\n"
+        "VERDICT: ACCUMULATE\nCONFIDENCE: 0.62\nSUGGESTED_ALLOC_CNY: 3000"
+    )
+    brief = "QUANT: bullish 6\nRISK: ok，无 [WORKER_UNAVAILABLE]\n"
+    r = parse_cio_memo(text, worker_brief=brief)
+    assert r["verdict"] == "ACCUMULATE"
+    assert r["confidence"] == 0.62
+    assert "_original_confidence_unavailable" not in r
 
 
 def test_unclear_verdict_when_missing():

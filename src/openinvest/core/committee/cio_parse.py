@@ -32,6 +32,8 @@ REENTRY_CONDITION_RE = re.compile(r"REENTRY_CONDITION:\s*(.+)")
 EXPECTED_PATH_RE = re.compile(r"EXPECTED_PATH:\s*(.+)")
 # regime 标签（format_regime_brief 输出首行 / coordinator transcript 里的同款行）
 REGIME_LABEL_RE = re.compile(r"^REGIME:\s*([a-z_]+)\s*$", re.MULTILINE)
+# worker 失败哨兵的完整前缀（agent_io.AGENT_UNAVAILABLE_MARKER + " reason="）
+_WU_SENTINEL = "[WORKER_UNAVAILABLE] reason="
 # 独立快崩防御 ATR 腿：从 format_regime_brief 的确定性 INPUTS 行提取波动突变比
 ATR_SPIKE_RE = re.compile(r"\batr_spike_ratio=([\d.]+)")
 
@@ -228,9 +230,12 @@ def parse_cio_memo(
     # Sanity check 3（audit algo M4）: worker 输入失败时 confidence 降级
     # 上游传来的 raw 是 brief，含 macro/quant/risk 内容；如果 brief 里出现 worker
     # unavailable 哨兵，CIO 大概率是在 garbage 上综合
+    # 只认哨兵的产出格式（agent_io._ask 恒为 "[WORKER_UNAVAILABLE] reason=..."）：裸子串会把
+    # CIO 自己写的"无 [WORKER_UNAVAILABLE] 标记"当成 worker 失败——2026-09~10 live 6 次
+    # 强制 HOLD 全是这种误判（阶段四 R4 核查）。
     floor = _verdict_cfg.worker_unavailable_confidence_floor
-    _wu = "[WORKER_UNAVAILABLE]" in text or (
-        worker_brief is not None and "[WORKER_UNAVAILABLE]" in worker_brief
+    _wu = _WU_SENTINEL in text or (
+        worker_brief is not None and _WU_SENTINEL in worker_brief
     )
     if _wu and out["confidence"] > floor:
         out["_original_confidence_unavailable"] = out["confidence"]

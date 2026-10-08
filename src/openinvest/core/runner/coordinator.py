@@ -278,6 +278,7 @@ def save_committee_transcript(
     defense_dca = gold_defense_dca_plan(symbol, target, df.index if has_df else [])
     verdict = parse_cio_memo(
         cio_text,
+        worker_brief=raw,  # 分段时 cio_text 只剩 CIO 段，worker 失败哨兵在别的段里
         current_price=current_price,
         regime=regime,
         defense_flag_on=("INDEP_DEFENSE_FLAG: on" in raw or atr_defense_on),
