@@ -364,3 +364,33 @@ def test_upsert_clamps_future_ts_to_created_at(store):
     _, eid2 = store.upsert_event({"one_line_claim": "CST stamped", "stance": "risk",
                                   "severity": "high", "ts": cst, "affected_symbols": ["X"]})
     assert store.get_event(eid2)["ts"] == cst
+
+
+def test_recall_orders_by_real_moment_not_ts_string(store):
+    """ts 混着 +08:00 / +00:00：取 top_k、返回顺序、supersedes 都按真实时刻，不按字符串
+    （+08:00 串比同一时刻的 UTC 串大 8h → 6h 前的 CST 事件曾挤掉 1h 前的 UTC 事件；0/1：ORDER BY 换回 eff_ts 串即红）"""
+    now = datetime.now(timezone.utc)
+    cst_6h = (now - timedelta(hours=6)).astimezone(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+    utc_1h = (now - timedelta(hours=1)).isoformat(timespec="seconds")
+    assert cst_6h > utc_1h  # 前提：字符串序与真实时刻相反
+    _, old_id = store.upsert_event({"one_line_claim": "cst 6h", "stance": "risk", "severity": "high",
+                                    "ts": cst_6h, "affected_symbols": ["GC=F"], "entities": ["gold"]})
+    store.upsert_event({"one_line_claim": "utc 1h", "stance": "risk", "severity": "high",
+                        "ts": utc_1h, "affected_symbols": ["GC=F"], "entities": ["gold"]})
+
+    assert [e["one_line_claim"] for e in store.recall("GC=F", min_severity="mid", top_k=1)] == ["utc 1h"]
+    out = store.recall("GC=F", min_severity="mid")
+    assert [e["one_line_claim"] for e in out] == ["utc 1h", "cst 6h"]
+    assert out[0]["supersedes"] == old_id and out[1]["supersedes"] is None
+
+
+def test_recall_unparseable_ts_falls_back_to_created_at(store):
+    """LLM 给的 ts 解析不了（julianday NULL）→ 按入库时刻算，不钉榜首、不让按真实时刻排序撞 None 崩"""
+    store.upsert_event({"one_line_claim": "bad ts", "stance": "risk", "severity": "high",
+                        "ts": "next week", "affected_symbols": ["GC=F"]})
+    store.upsert_event({"one_line_claim": "fresh", "stance": "risk", "severity": "high",
+                        "ts": _utc_iso(0), "affected_symbols": ["GC=F"]})
+    store.conn.execute("UPDATE events SET created_at = ? WHERE one_line_claim = 'bad ts'", (_utc_iso(-1),))
+    store.conn.commit()
+    out = store.recall("GC=F", min_severity="mid")
+    assert [e["one_line_claim"] for e in out] == ["fresh", "bad ts"]

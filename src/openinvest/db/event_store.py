@@ -430,7 +430,7 @@ class EventStore:
 
         - hard filter: 时间窗 + min_severity + (symbol/aliases 在 affected_symbols 或 entity tag 命中)，
           全在 SQL 里先于 LIMIT 200 做（只在本标的合格集里取最新 200 条进精排）
-        - 未来 ts（ts 晚于 created_at）按 created_at 算：窗口、排序、返回的 ts 字段都用它
+        - 未来 ts（ts 晚于 created_at）或解析不了的 ts 按 created_at 算：窗口、排序、返回的 ts 字段都用它
         - aliases: 代理匹配集合（issue #26，services/symbol_map.proxy_symbols_for——
           持 NDQ.AX 也命中标 ^NDX 的指数事件）；None → 仅 symbol 本身
         - as_of（issue #196，回测 as-of-D 零前视）：只召回 created_at <= as_of 的事件
@@ -441,7 +441,7 @@ class EventStore:
           ⚠️ 只截"事件存不存在"：同 event_id 后续 upsert 原地改写的 severity / stance /
           affected_symbols 没有历史版本，as_of 还原不了。
         - rerank: 如果 query_embedding 非空且 sqlite-vec 加载成功，按 cosine 距离精排
-                 否则就按 eff_ts DESC 取 top_k（生产默认 hash provider 下调用方传 None，
+                 否则就按 eff_ts 的真实时刻（julianday，非字符串）倒序取 top_k（生产默认 hash provider 下调用方传 None，
                  见 services/embeddings.embed_query）
         - supersedes: 后处理 —— 同实体的两条事件按时间排序，新事件 .supersedes = 旧 event_id
 
@@ -474,18 +474,21 @@ class EventStore:
                       f"({','.join('?' * len(tags))}))")
         # 未来 ts（LLM 把预告日期当发生时刻，存量最远到 12 月）按入库时刻算：
         # created_at >= cutoff 让它入库满窗口即出窗；eff_ts 让它按入库时刻排序/展示，不钉在榜首。
-        # julianday 比的是真实时刻（ts 混着 +08:00 / Z / naive，字符串比不准）
+        # julianday 比的是真实时刻（ts 混着 +08:00 / Z / naive，字符串比不准）——取 top_k、
+        # supersedes、返回顺序全按 eff_jd 排（2026-10-08：曾按 eff_ts 串排，+08:00 行虚高 8h 挤掉更新的 UTC 行）
         # INDEXED BY：ORDER BY 不再是裸 ts 后，无 stat 的规划器会改走 severity 索引扫大半张表（实测 4x 慢）
-        sql = ("SELECT *, CASE WHEN julianday(ts) > julianday(created_at) THEN created_at "
-               "ELSE ts END AS eff_ts FROM events INDEXED BY idx_events_ts "
+        # ts 解析不了（julianday 为 NULL）同样落到 created_at → eff_jd 永不为 NULL，下面 Python 排序不会撞 None
+        eff = "CASE WHEN julianday(ts) <= julianday(created_at) THEN ts ELSE created_at END"
+        sql = (f"SELECT *, {eff} AS eff_ts, julianday({eff}) AS eff_jd "
+               "FROM events INDEXED BY idx_events_ts "
                f"WHERE ts >= ? AND created_at >= ? AND severity >= ? AND ({match})")
         params = [cutoff, cutoff, min_sev_int, *match_syms, *tags]
         if as_of_iso is not None:
             sql += " AND created_at <= ?"
             params.append(as_of_iso)
         cur = self.conn.cursor()
-        cur.execute(sql + " ORDER BY eff_ts DESC LIMIT 200", params)
-        candidates = [{**_row_to_event(r), "ts": r["eff_ts"]} for r in cur.fetchall()]
+        cur.execute(sql + " ORDER BY eff_jd DESC LIMIT 200", params)
+        candidates = [{**_row_to_event(r), "ts": r["eff_ts"], "_jd": r["eff_jd"]} for r in cur.fetchall()]
         if not candidates:
             return []
 
@@ -520,7 +523,9 @@ class EventStore:
             c.pop("_id", None)
 
         # 时效冲突：同 entity 的两条事件按时间排序，新覆盖旧
-        top_sorted = sorted(top, key=lambda c: c["ts"])
+        top_sorted = sorted(top, key=lambda c: c["_jd"])
+        for c in top_sorted:
+            del c["_jd"]
         for i in range(len(top_sorted) - 1, 0, -1):
             cur_e = top_sorted[i]
             for j in range(i - 1, -1, -1):
@@ -530,7 +535,7 @@ class EventStore:
                     break
 
         # 最终按时间倒序返回（最新在前），保持 caller 期望
-        return sorted(top, key=lambda c: c["ts"], reverse=True)
+        return top_sorted[::-1]
 
 
 def _row_to_event(row: sqlite3.Row) -> Dict[str, Any]:
