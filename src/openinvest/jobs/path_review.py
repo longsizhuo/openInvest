@@ -270,6 +270,8 @@ def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
 
 def run(*, recompute_dates: Optional[List[str]] = None,
         symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+    # 常驻 scheduler 只 import 一次本模块：缓存只活一次 run，否则新落库的价格永远看不到
+    _HIST.clear()
     snaps = [(s, "live") for s in collect_live_snapshots()]
     if recompute_dates:
         if symbols is None:
