@@ -7,6 +7,9 @@
 - 支持 --once <job_name> 单次执行模式（cli 触发）
 - 支持 --list 列出所有任务
 
+daemon 以 `python -m` 启动，本模块在进程里叫 __main__：job 里 `import runner` 拿到的是
+另一份空副本。跨 job 共享的进程级状态别放这里，放 scheduler/cron.py 这类按名导入的模块。
+
 使用：
     python -m openinvest.scheduler.runner               # 后台跑所有 enabled job
     python -m openinvest.scheduler.runner --once daily_report

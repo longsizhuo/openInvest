@@ -5,6 +5,8 @@
 - config 层异常 / 空值 / 非法 cron → 一律退回 yml 兜底值，绝不拦住调度器启动
 - 非 event_watch 的 job 不受 config 影响
 """
+from unittest.mock import patch
+
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -126,23 +128,24 @@ def test_register_jobs_stamps_scheduled_since_on_register_and_change(monkeypatch
     import openinvest.scheduler.cron as cron
     import openinvest.scheduler.runner as runner
 
-    monkeypatch.setattr(cron, "SCHEDULED_SINCE", {})
-    monkeypatch.setattr(runner, "SCHEDULED_SINCE", cron.SCHEDULED_SINCE)
+    assert runner.SCHEDULED_SINCE is cron.SCHEDULED_SINCE
     monkeypatch.setattr(runner, "_LAST_SCHEDULES", {})
     cfg = {"name": "fake_job", "schedule": "*/5 * * * *", "timezone": "UTC",
            "entry": "openinvest.jobs.dca_daily:run", "enabled": True}
     monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg)])
     sched = BackgroundScheduler()
-    register_jobs(sched)
-    first = cron.SCHEDULED_SINCE["fake_job"]
+    # 原地清空再恢复（patch.dict），不重绑名字：重绑会让已 import 的模块各拿一个 dict
+    with patch.dict(cron.SCHEDULED_SINCE, clear=True):
+        register_jobs(sched)
+        first = cron.SCHEDULED_SINCE["fake_job"]
 
-    register_jobs(sched, quiet=True)  # schedule 没变：不刷新
-    assert cron.SCHEDULED_SINCE["fake_job"] == first
+        register_jobs(sched, quiet=True)  # schedule 没变：不刷新
+        assert cron.SCHEDULED_SINCE["fake_job"] == first
 
-    monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg, schedule="*/7 * * * *")])
-    register_jobs(sched, quiet=True)  # schedule 变了：刷新
-    assert cron.SCHEDULED_SINCE["fake_job"] >= first
-    assert runner._LAST_SCHEDULES["fake_job"] == "*/7 * * * *"
+        monkeypatch.setattr(runner, "_load_job_configs", lambda: [dict(cfg, schedule="*/7 * * * *")])
+        register_jobs(sched, quiet=True)  # schedule 变了：刷新
+        assert cron.SCHEDULED_SINCE["fake_job"] >= first
+        assert runner._LAST_SCHEDULES["fake_job"] == "*/7 * * * *"
 
 
 def test_scheduled_since_visible_when_runner_runs_as_main(monkeypatch):
@@ -154,7 +157,6 @@ def test_scheduled_since_visible_when_runner_runs_as_main(monkeypatch):
     import openinvest.scheduler.cron as cron
     import openinvest.scheduler.runner as canonical
 
-    monkeypatch.setattr(cron, "SCHEDULED_SINCE", {})
     spec = importlib.util.spec_from_file_location("runner_as_main", canonical.__file__)
     as_main = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(as_main)  # 模拟 python -m：同一份源码、不同模块对象
@@ -162,7 +164,9 @@ def test_scheduled_since_visible_when_runner_runs_as_main(monkeypatch):
     cfg = {"name": "fake_job", "schedule": "*/5 * * * *", "timezone": "UTC",
            "entry": "openinvest.jobs.dca_daily:run", "enabled": True}
     monkeypatch.setattr(as_main, "_load_job_configs", lambda: [cfg])
-    as_main.register_jobs(BackgroundScheduler())
-    # 看门狗读的那张表（job_watchdog 从 scheduler.cron 导入）必须看得到 __main__ 副本的注册
     from openinvest.jobs import job_watchdog
-    assert "fake_job" in job_watchdog.SCHEDULED_SINCE
+    with patch.dict(cron.SCHEDULED_SINCE, clear=True):
+        as_main.register_jobs(BackgroundScheduler())
+        # 看门狗读的那张表（job_watchdog 从 scheduler.cron 导入）必须看得到 __main__ 副本的注册
+        assert job_watchdog.SCHEDULED_SINCE is cron.SCHEDULED_SINCE
+        assert "fake_job" in job_watchdog.SCHEDULED_SINCE
