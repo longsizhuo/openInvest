@@ -273,7 +273,8 @@ core duty (issue #133 Decision 2).
    same-direction fill within 7 days is also auto-matched as a fallback)
 
 **User asks "how often did I follow the advice / is the committee reliable"**:
-`decisions --days 90` → adoption rate + the full verdict↔intervention↔execution↔outcome chain per decision;
+`decisions --days 90` → adoption rate + the full verdict↔intervention↔execution↔outcome chain per decision
+(lists the newest 20 — narrow with `--symbol` / `--verdict`, `--limit 0` for all; `count` and `summary` always cover every match);
 pair with `discipline` for the counterfactual P&L of rule-blocked actions (its inaction rate counts
 **live** verdicts only). For hit rates use `GET /api/verdict_review/summary`: it returns separate
 `live` / `backtest` / `contaminated` buckets — quote only `live` as performance, never add the
