@@ -128,7 +128,7 @@ openclaw plugins install clawhub:openinvest
 ### 2. 独立使用 —— MCP server 或 CLI（无需 clone）
 后端已发布至 [PyPI](https://pypi.org/project/openinvest/)，`~/openInvest` 只存放你的数据：
 ```bash
-# MCP（18 个工具，任意 MCP client；加 --http 可启动 remote streamable-HTTP server —— BETA）
+# MCP（任意 MCP client；加 --http 可启动 remote streamable-HTTP server —— BETA）
 claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 
 # 或直接用 CLI

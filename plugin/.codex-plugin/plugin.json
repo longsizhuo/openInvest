@@ -1,7 +1,7 @@
 {
   "name": "invest",
   "version": "0.22.1",
-  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. Ships an MCP server (18 tools incl. decision accounting: decisions / explain_decision / record_execution) + the committee-workflow skills. Backend installs from PyPI via uvx on first call — no clone, no venv. Never places real orders.",
+  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. Ships an MCP server (incl. decision accounting: decisions / explain_decision / record_execution) + the committee-workflow skills. Backend installs from PyPI via uvx on first call — no clone, no venv. Never places real orders.",
   "skills": "./skills/",
   "author": {
     "name": "longsizhuo",
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "openInvest",
     "shortDescription": "AI investment committee & portfolio runtime",
-    "longDescription": "Four LLM roles (Macro Strategist, Quant, Risk Officer, CIO) debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict with a written memo. Multi-currency portfolio ledger, decision accounting (which advice you followed, and the PnL of what the rules blocked), 18 MCP tools with destructive-action hints. Backend installs from PyPI via uvx — no clone, no daemon. Never places real orders; not investment advice.",
+    "longDescription": "Four LLM roles (Macro Strategist, Quant, Risk Officer, CIO) debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict with a written memo. Multi-currency portfolio ledger, decision accounting (which advice you followed, and the PnL of what the rules blocked), MCP tools with destructive-action hints. Backend installs from PyPI via uvx — no clone, no daemon. Never places real orders; not investment advice.",
     "developerName": "longsizhuo",
     "category": "Productivity",
     "capabilities": [
