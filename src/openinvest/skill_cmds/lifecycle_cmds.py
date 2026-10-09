@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
 
+from openinvest.services.skill_views import INIT_PAYLOAD_SHAPE
 from openinvest.skill_cmds._helpers import _print_json
 
 # 本模块必须自有 ROOT：cmd_doctor / cmd_init 在全局读 ROOT，是 test patch 重定向主目标
@@ -75,12 +76,17 @@ def _write_v2_portfolio(
       2. 任何成功覆盖前都先备份到 portfolio.md.bak.<timestamp>，事故可恢复
 
     fresh=True：portfolio.md 不是要保护的真实数据（init 前不存在，或 --force 时仍是 init 兜底），
-    由 cmd_init 判定，见 _untouched_init_fallback。
+    由 cmd_init 判定，见 _untouched_init_fallback。fresh 只跳过拒绝，不跳过备份。
     """
     store = MemoryStore()
+    # 先备份（不论 fresh 与否）：任何覆盖/拒绝前现有 portfolio.md 都留一份，事故可恢复
+    current_path = store.path_of("portfolio")
+    backup_path = store.root / f"portfolio.md.bak.{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    if current_path.exists():
+        backup_path.write_bytes(current_path.read_bytes())
     # Safety guard：检查现有 portfolio.md 是否已含真实数据
-    existing = store.read("portfolio")
-    if existing is not None and not fresh:
+    existing = None if fresh else store.read("portfolio")
+    if existing is not None:
         existing_cash = existing.get("cash") or {}
         existing_holdings = existing.get("holdings") or []
         has_real_data = (
@@ -88,19 +94,11 @@ def _write_v2_portfolio(
             or len(existing_holdings) > 0
         )
         if has_real_data:
-            # 备份当前 portfolio.md（事故时可恢复）
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            backup_path = store.root / f"portfolio.md.bak.{ts}"
-            current_path = store.root / "portfolio.md"
-            if current_path.exists():
-                backup_path.write_text(
-                    current_path.read_text(encoding="utf-8"), encoding="utf-8",
-                )
             raise RuntimeError(
                 f"⚠️ portfolio.md 已含真实数据（cash={existing_cash}, "
                 f"{len(existing_holdings)} 条 holdings），拒绝被 cmd_init 覆盖。"
-                f"已备份当前到 {backup_path.name}。如确实想重置，删 portfolio.md "
-                f"再重跑 init，或调 web_api 的 holdings/cash 端点逐项修改。"
+                f"已备份当前到 {backup_path.name}。缺的仓位用 `buy --existing-position` "
+                f"逐只补录（不扣现金）。"
             )
     portfolio_data: Dict[str, Any] = {
         "schema_version": 2,
@@ -162,19 +160,6 @@ def _untouched_init_fallback() -> bool:
         return False
 
 
-# cmd_init 拒收错 shape 时回给 agent 的样例（与下方 docstring 同步）
-_INIT_PAYLOAD_SHAPE: Dict[str, Any] = {
-    "profile": {
-        "name": "<display name>",
-        "risk_tolerance": "Conservative|Balanced|Aggressive",
-        "holdings_description": "<用户原话描述持仓，有 LLM key 时后端解析>",
-        "current_assets": {"cash_cny": 0, "aud_cash": 0},
-        "investment_strategy": {"max_single_invest_cny": 10000},
-    },
-    "env": {"LLM_API_KEY": "<optional>", "EMAIL_SENDER": "<optional>", "EMAIL_PASSWORD": "<optional>"},
-}
-
-
 def cmd_init(args: argparse.Namespace) -> None:
     """交互式 / 半交互式 onboarding 入口。
 
@@ -222,7 +207,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             "status": "error",
             "error": "payload 必须是 {\"profile\": {...}, \"env\": {...}}；顶层缺 \"profile\" 对象",
             "got_top_level_keys": sorted(payload) if isinstance(payload, dict) else type(payload).__name__,
-            "expected_shape": _INIT_PAYLOAD_SHAPE,
+            "expected_shape": INIT_PAYLOAD_SHAPE,
         })
         sys.exit(1)
     profile = payload["profile"]
@@ -289,6 +274,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     holdings_text = str(profile.get("holdings_description") or "").strip()
     holdings_parse_note: str = ""
     _v2_write_error = ""
+    _parse_failed = False
 
     if not holdings_v2 and holdings_text:
         # 优先 LLM_API_KEY（通用），兼容 DEEPSEEK_API_KEY（fork 用户老 env）
@@ -311,11 +297,12 @@ def cmd_init(args: argparse.Namespace) -> None:
                 )
                 holdings_parse_note = "parsed via LLM"
             except Exception as exc:  # noqa: BLE001 LLM 失败不阻塞 onboarding
+                _parse_failed = True
                 holdings_parse_note = f"LLM parse failed ({exc!s}); fell back to v1 fields"
         else:
             holdings_parse_note = (
                 "holdings_description 提供了，但 LLM_API_KEY / DEEPSEEK_API_KEY 缺失 —— "
-                "已回退到 v1 cash/ndq_shares 字段。配 key 后跑 init --force 重做。"
+                "只录了 current_assets 现金。配 key 后跑 init --force 重做（还没补录任何仓位时才会写入）。"
             )
 
     if holdings_v2 and (holdings_v2.get("cash") or holdings_v2.get("holdings")):
@@ -331,6 +318,26 @@ def cmd_init(args: argparse.Namespace) -> None:
             holdings_parse_note += f"; v2 write failed: {exc!s}"
     # 写失败时 parsed holdings 只是预览，不能让 agent 当成已入账读给用户确认
     _holdings_written = bool(holdings_v2.get("holdings")) and not _v2_write_error
+    # 话术只说实际落库的现金（payload 没给 current_assets 时现金是空的，不能说"录了现金"）
+    try:
+        _cash = (MemoryStore().read("portfolio") or {}).get("cash") or {}
+        _cash_recorded = {k: v for k, v in _cash.items() if v}
+    except Exception:  # noqa: BLE001 坏 portfolio.md：init 照样回 JSON
+        _cash_recorded = {}
+    _cash_text = (
+        "已录现金 " + "、".join(f"{k} {v:,.2f}" for k, v in _cash_recorded.items())
+        if _cash_recorded else "现金没录上（portfolio 里现金为空）——先跑 `run.sh doctor`，"
+        "报 portfolio_schema 就按它的命令转换；否则问用户有多少现金，用 `deposit` 记"
+    )
+    # 已持有仓位的唯一补录 / 更正方式：不扣现金（普通 buy 会从现金里扣）
+    _backfill = (
+        "用户用系统前就持有的仓位，逐只用 `buy ... --existing-position`"
+        "（MCP: buy existing_position=true）补录——不扣现金；别用普通 `buy`，它会从现金里扣。"
+    )
+    _fix = (
+        "某只数量/成本不对：`run.sh delete_holding --symbol X --force` 后用 "
+        "`buy ... --existing-position` 按正确数字重录（都不动现金）"
+    )
 
     # 4) 第一次 init 后跑 doctor 让 Claude 知道还差什么
     # LLM_API_KEY 或 DEEPSEEK_API_KEY 都算"配齐了"
@@ -343,10 +350,13 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     # ---------- next_step 话术组装 ----------
     # 优先级（从高到低）：
-    #   1. holdings_description 给了但 key 缺失（v1 fallback）→ 强制降级话术（必说）
-    #   2. LLM 解析成功 → 让用户确认解析结果
-    #   3. completed_full → 正常 onboarding 完成话术
-    #   4. completed_partial（无 holdings_description 场景）→ 告知凭据不完整
+    #   1. v2 写入被拒/失败 → 说没写入，只补 status 里缺的（不重复加已有的）
+    #   2. holdings_description 给了但 key 缺失 → 强制降级话术（必说；现金按实际落库说）
+    #   3. 有 key 但 LLM 解析失败 → 说没写入 + --existing-position 补录
+    #   4. LLM 解析成功并写入 → 让用户确认解析结果
+    #   5. completed_full → 正常 onboarding 完成话术
+    #   6. completed_partial（无 holdings_description 场景）→ 告知凭据不完整
+    # 补录已持有仓位一律走 `buy --existing-position`（不扣现金），不再教 deposit+buy
     _holdings_desc_given_no_key = (
         bool(holdings_text)
         and not env_data.get("LLM_API_KEY", "").strip()
@@ -355,23 +365,33 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     if _v2_write_error:
         next_step_text = (
-            "**持仓没有写入**——portfolio.md 保持原样（原因见 holdings_parse_note）。告诉用户这一点，"
-            "别把 `parsed_holdings_for_user_review` 当成已记录的持仓。要补录用户用系统前就持有的仓位："
-            "每个先 `deposit` units×price（同币种）再 `buy`，这样他报的现金不会被扣。"
+            "**这次解析的持仓没有写入**——portfolio.md 保持原样（原因见 holdings_parse_note）。"
+            "告诉用户这一点，别把 `parsed_holdings_for_user_review` 当成已记录的持仓。"
+            "先跑 `run.sh status` 看已经记了哪些：**status 里已有的 symbol 不要再加**（再 buy 会重复计数）；"
+            "只把 status 里没有的，" + _backfill + _fix + "。"
         )
     elif _holdings_desc_given_no_key:
         # 强制话术：告知用户持仓仅记了现金，引导去注册 DeepSeek key
         next_step_text = (
-            "你的持仓我暂时按基础模式记录了——只录了现金，没识别你说的具体股票。"
+            f"你的持仓我暂时按基础模式记录了——{'只录了现金' if _cash_recorded else '还没录任何东西'}，"
+            "没识别你说的具体股票。"
             "想让我自动识别 (510300 → 沪深300ETF 那种)，需要一个免费 DeepSeek API key，"
-            "30 秒去 platform.deepseek.com 注册。要不要现在搞定？"
+            f"30 秒去 platform.deepseek.com 注册。要不要现在搞定？（agent：{_cash_text}；"
+            f"不配 key 的话，{_backfill}）"
+        )
+    elif _parse_failed:
+        # 有 key 但 LLM 解析失败：持仓没写，别落到 completed_full 指去 adding-assets 的普通 buy
+        next_step_text = (
+            f"**持仓解析失败，没有写入**（见 holdings_parse_note），{_cash_text}。告诉用户这一点。"
+            "补持仓二选一：稍后重跑 `run.sh init --force`（portfolio 仍是 init 兜底时才会写入）；"
+            "或现在" + _backfill
         )
     elif _holdings_written:
         # LLM 解析成功路径：先让用户确认解析内容
         next_step_text = (
             "**先让用户确认 LLM 解析的持仓**（读 `parsed_holdings_for_user_review` "
-            "字段给他听）。确认有错的话用 `POST /api/holdings/{symbol}` 修正或重跑 "
-            "`run.sh init --force`。确认无误后，调 `run.sh status` 验证持仓显示正确。"
+            "字段给他听）。" + _fix + "；别重跑 `init --force`（持仓已存在，会被拒绝）。"
+            "确认无误后，调 `run.sh status` 验证持仓显示正确。"
         )
     elif final_checks_status == "completed_full":
         # 完整 onboarding 完成
@@ -407,6 +427,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             holdings_v2 if holdings_v2 else None
         ),
         "user_review_required": _holdings_written,
+        "cash_recorded": _cash_recorded,
         "next_step": next_step_text,
     })
 
@@ -452,7 +473,7 @@ def _interactive_prompt() -> Dict[str, Any]:
             "用一句话描述当前所有持仓 + 现金。例：\n"
             "  '510300 沪深300ETF 3000 股 4.2 元，工行积存金 50 克 750 均价，"
             "余额宝 5 万，AUD 现金 800'\n"
-            "留空就跳过；之后补已持有的仓位：先 `deposit` 数量×价格，再 `buy`（不扣你报的现金）。",
+            "留空就跳过；之后补已持有的仓位用 `buy ... --existing-position`（不扣现金）。",
             file=sys.stderr,
         )
         desc = ask("持仓描述（留空跳过）", "")
@@ -466,7 +487,7 @@ def _interactive_prompt() -> Dict[str, Any]:
     else:
         print(
             "\n--- 持仓字段（手动模式 —— 没给 DeepSeek key 没法解析自然语言）---\n"
-            "持仓只问现金；已持有的仓位之后补：先 `deposit` 数量×价格，再 `buy`（不扣你报的现金）。",
+            "持仓只问现金；已持有的仓位之后用 `buy ... --existing-position` 补（不扣现金）。",
             file=sys.stderr,
         )
         profile["current_assets"]["cash_cny"] = float(ask("CNY 现金", "0"))

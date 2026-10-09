@@ -100,17 +100,23 @@ def test_force_reinit_with_key_records_holdings_unless_traded(tmp_path, fake_llm
     if traded:  # 有流水（buy/sell/deposit 都会记）= 真实数据，--force 也不能覆盖
         store.append_history({"action": "deposit", "currency": "CNY", "amount": 1})
 
+    before = (tmp_path / "memory" / "portfolio.md").read_bytes()
     out = _run_init(tmp_path, {"profile": profile, "env": {"LLM_API_KEY": "sk-fake", "LLM_BASE_URL": fake_llm}},
                     "--force")
     assert out.returncode == 0, out.stderr
     result = _json(out)
     pm = PortfolioManager(MemoryStore(tmp_path / "memory"))
     assert pm.cash_amount("CNY") == 50000.0
+    # 覆盖（fresh）和拒绝两条路都先留原文件备份
+    assert before in [b.read_bytes() for b in (tmp_path / "memory").glob("portfolio.md.bak.*")]
     if traded:
         assert list(pm.holdings) == []
         assert "v2 write failed" in result["holdings_parse_note"]
         assert result["user_review_required"] is False
-        assert "没有写入" in result["next_step"]
+        # 不能叫 agent 把解析出的仓位全补一遍（status 里已有的会重复计数），也不能再教 deposit+buy
+        nxt = result["next_step"]
+        assert "没有写入" in nxt and "不要再加" in nxt and "--existing-position" in nxt
+        assert "deposit" not in nxt
     else:
         assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]
         assert result["user_review_required"] is True
@@ -130,7 +136,7 @@ _NOKEY = {"profile": {"name": "T", "holdings_description": "510300 3000股 4.2�
 
 def test_backfill_existing_position_cli_keeps_cash_and_marks_history(tmp_path):
     # 用系统前就持有的仓位不是现金买入：--existing-position 不扣现金，history 可区分
-    assert _run_init(tmp_path, _NOKEY).returncode == 0
+    assert "--existing-position" in _json(_run_init(tmp_path, _NOKEY))["next_step"]
     env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
     out = subprocess.run(
         [sys.executable, "-c", "from openinvest.cli import main; main()", "buy", "--symbol", "510300.SS",
@@ -158,3 +164,36 @@ def test_backfill_existing_position_mcp(tmp_path, monkeypatch):
     m.buy(symbol="510300.SS", units=1, price=4.2)  # 默认仍是现金买入
     assert PortfolioManager(store).cash_amount("CNY") == 50000.0 - 4.2
 
+
+def test_parse_failed_and_no_cash_next_steps(tmp_path):
+    (tmp_path / "dead").mkdir()
+    (tmp_path / "nocash").mkdir()
+    # 有 key 但 LLM 挂了：不能落到 completed_full（指去 adding-assets 的普通 buy）
+    dead = {"profile": _NOKEY["profile"], "env": {"LLM_API_KEY": "sk-fake", "LLM_BASE_URL": "http://127.0.0.1:9",
+                                                   "EMAIL_SENDER": "a@example.com", "EMAIL_PASSWORD": "x"}}
+    r = _json(_run_init(tmp_path / "dead", dead))
+    assert "LLM parse failed" in r["holdings_parse_note"]
+    assert "--existing-position" in r["next_step"] and "adding-assets" not in r["next_step"]
+    assert r["cash_recorded"] == {"CNY": 50000.0}
+    # 没给 current_assets：不能说"只录了现金"
+    r = _json(_run_init(tmp_path / "nocash", {"profile": {"name": "B", "holdings_description": "510300 3000股"},
+                                              "env": {"DEEPSEEK_API_KEY": ""}}))
+    assert r["cash_recorded"] == {} and "只录了现金" not in r["next_step"]
+
+
+def test_doctor_flags_v1_portfolio_with_working_command(tmp_path):
+    # #191 修复前的 init 留下 v1 扁平 portfolio.md：status 现金恒 0，doctor 要给出能直接跑的转换命令
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    (mem / "user.md").write_text("---\nname: user\ntype: user\ndisplay_name: T\n---\n", encoding="utf-8")
+    (mem / "strategy.md").write_text("---\nname: strategy\ntype: strategy\n---\n", encoding="utf-8")
+    (mem / "portfolio.md").write_text("---\nname: portfolio\ntype: state\ncash_cny: 50000\naud_cash: 0\n---\n",
+                                      encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
+    out = subprocess.run([sys.executable, "-c", "from openinvest.cli import main; main()", "doctor"],
+                         capture_output=True, text=True, env=dict(env, INVEST_HOME=str(tmp_path)))
+    check = next(c for c in _json(out)["checks"] if c["name"] == "portfolio_schema")
+    assert check["status"] == "needs_migration"
+    cmd = check["hint"].split("`")[1]
+    assert subprocess.run(["bash", "-c", cmd], capture_output=True, env=env).returncode == 0
+    assert PortfolioManager(MemoryStore(mem)).cash_amount("CNY") == 50000.0

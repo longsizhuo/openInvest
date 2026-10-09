@@ -348,6 +348,20 @@ def build_what_if_view(
 
 # ---------- doctor ----------
 
+# `init --from-stdin` 的 payload 形状——单一可信源：doctor 的 needs_setup hint 和
+# cmd_init 拒收扁平 payload 时回的 expected_shape 都用它（以前两处各写一份，doctor 那份漂成了扁平）
+INIT_PAYLOAD_SHAPE: Dict[str, Any] = {
+    "profile": {
+        "name": "<display name>",
+        "risk_tolerance": "Conservative|Balanced|Aggressive",
+        "holdings_description": "<用户原话描述持仓，有 LLM key 时后端解析>",
+        "current_assets": {"cash_cny": 0, "aud_cash": 0},
+        "investment_strategy": {"max_single_invest_cny": 10000},
+    },
+    "env": {"LLM_API_KEY": "<optional>", "EMAIL_SENDER": "<optional>", "EMAIL_PASSWORD": "<optional>"},
+}
+
+
 def build_doctor_view(root: Path) -> Dict[str, Any]:
     """健康自检：onboarding 是否完成？所有外部依赖可达？
 
@@ -358,7 +372,9 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
     Args:
         root: 项目根（CLI 传 scripts.skill.ROOT——测试会 patch 它；web_api 传自己的 repo root）
     """
+    import json
     import os
+    import shlex
 
     checks: List[Dict[str, Any]] = []
 
@@ -378,13 +394,36 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         ),
         "hint": (
             None if memory_ok else
-            "向用户问以下信息后调 `run.sh init --from-stdin`（详细流程见 "
-            "skills/invest/references/onboarding.md）：display_name, risk_tolerance "
-            "(Conservative/Balanced/Aggressive), "
-            "holdings_description（自由描述持仓，例如 '510300 沪深300ETF "
-            "3000 股 4.2 元，余额宝 5 万 CNY'），DEEPSEEK_API_KEY（可选，"
-            "Coordinator 路径不需要）。target_assets 留空也行，onboarding "
-            "完用户可以通过 GUI 或 references/adding-assets.md 加任意 yfinance symbol。"
+            "向用户问名字 / 风险偏好 / 持仓（一句话原话）/ 现金 / LLM key（可选，Coordinator "
+            "路径不需要）后调 `run.sh init --from-stdin`（详细流程见 "
+            "skills/invest/references/onboarding.md）。stdin 必须是这个嵌套 JSON（扁平的会被拒）："
+            + json.dumps(INIT_PAYLOAD_SHAPE, ensure_ascii=False)
+            + "。用户说的现金一定填进 profile.current_assets（没 LLM key 或解析失败时只有它落库）。"
+            "target_assets 留空也行；用户用系统前就持有的仓位之后用 `buy --existing-position` 补（不扣现金）。"
+        ),
+    })
+
+    # v1 扁平 portfolio.md（#191 修复前的 init 写的 cash_cny/aud_cash）：PortfolioManager 只读
+    # v2 cash{}，status 现金恒为 0。init --force 不会转换它（migrate 有 run-once 闸），给确切转换命令。
+    try:
+        portfolio_v1 = portfolio_doc is not None and int(portfolio_doc.get("schema_version") or 1) < 2
+    except (TypeError, ValueError):
+        portfolio_v1 = False
+    migrate_cmd = (
+        f"INVEST_HOME={shlex.quote(str(store.root.parent))} "
+        f"{shlex.quote(sys.executable)} -m openinvest.migrate_portfolio_to_holdings"
+    )
+    checks.append({
+        "name": "portfolio_schema",
+        "status": "needs_migration" if portfolio_v1 else "ok",
+        "detail": (
+            "memory/portfolio.md 是 v1 旧格式（扁平 cash_cny/aud_cash）——status 读不到现金，显示 0"
+            if portfolio_v1 else "v2（或尚未 onboarding）"
+        ),
+        "hint": (
+            f"跑 `{migrate_cmd}` 转成 v2（幂等，先自动备份 portfolio.md.bak.<时间戳>）；"
+            "别为这个重跑 init（--force 也不会转换它）。"
+            if portfolio_v1 else None
         ),
     })
 
@@ -514,6 +553,8 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
             "用户已就绪。Claude Code 用户直接调 status / prepare_committee；"
             "其他 agent（Cursor/Cline/Codex）走 run_committee（需 DEEPSEEK_API_KEY）"
             if overall == "ready" else
+            f"portfolio.md 是 v1 旧格式：先跑 `{migrate_cmd}`，再看其他 status≠ok 的项"
+            if portfolio_v1 else
             "调 run.sh init 完成 onboarding，缺什么字段看 checks 里 status='missing' 的项"
         ),
         "checks": checks,
