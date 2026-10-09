@@ -46,7 +46,7 @@ documents:
 | 客户端机器 | M5 Pro，macOS |
 | 原生客户端 | Codex CLI 0.162.0（截图可见） |
 | 服务端机器 | M1 Pro，macOS |
-| 服务启动命令 | `INVEST_HOME=<TEST_DATA_DIR> INVEST_MCP_HOST=0.0.0.0 INVEST_API_TOKEN=<token> uv run openinvest-mcp --http` |
+| 服务启动命令 | 报告原记录为 `uv run openinvest-mcp --http`；（维护者注：按 main 默认只监听 127.0.0.1，要复现文中的 `0.0.0.0:8766` 需另设 `INVEST_MCP_HOST=0.0.0.0 INVEST_API_TOKEN=<token>`，测试数据目录用 `INVEST_HOME` 指定） |
 | 传输 | Streamable HTTP，`/mcp` |
 | 网络 | 两台机器通过 Tailscale 地址连接 |
 | 服务监听 | `0.0.0.0:8766`，启用应用级 Bearer token |
@@ -194,7 +194,7 @@ holdings: []
 
 ### 4.5 真实委员会测试的前置配置
 
-测试目录最初没有 `LLM_API_KEY` 或 `DEEPSEEK_API_KEY`。测试者通过隐藏输入将 DeepSeek Key 保存到测试目录 `.env`，随后重启服务加载配置。完整密钥未出现在任何测试记录中。
+测试目录最初没有 `LLM_API_KEY` 或 `DEEPSEEK_API_KEY`。测试者通过隐藏输入将 DeepSeek Key 保存到测试目录 `.env`，随后重启服务加载配置。未要求测试者在记录中提供完整密钥。
 
 第一次委员会尝试因 `GC=F` 未配置在 `strategy.target_assets` 中失败。随后通过原生 MCP 配置：
 
