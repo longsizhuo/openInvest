@@ -10,6 +10,8 @@ EXPECTED_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "record_execution", "ingest_event",
     "buy", "sell", "deposit", "withdraw", "run_committee",
+    # 补录用系统前就持有的仓位（不扣现金）：独立工具，老 server 上 Unknown tool 而不是静默扣现金
+    "record_existing_position",
     # strategy 写操作（issue #179：读写对等）
     "set_allocations", "track_asset", "untrack_asset",
     # 新闻源管理（用户级额外源，顾问模式放行——只动本实例 rss_feeds.yml）
@@ -32,7 +34,8 @@ READONLY_TOOLS = {
     "decisions", "explain_decision", "news_sources",
 }
 # destructive 桶：动钱 4 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
-MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "untrack_asset", "remove_news_source"}
+MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position",
+               "untrack_asset", "remove_news_source"}
 
 
 def test_tool_annotations():
@@ -107,6 +110,7 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
         "status": {}, "history": {}, "strategy": {}, "discipline": {}, "decisions": {},
         "what_if": {"symbol": "GC=F"},
         "buy": {"symbol": "GC=F", "units": 1, "price": 1},
+        "record_existing_position": {"symbol": "GC=F", "units": 1, "price": 1},
         "sell": {"symbol": "GC=F", "units": 1, "price": 1},
         "deposit": {"currency": "CNY", "amount": 1},
         "withdraw": {"currency": "CNY", "amount": 1},

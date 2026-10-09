@@ -155,14 +155,18 @@ def test_backfill_existing_position_cli_keeps_cash_and_marks_history(tmp_path):
 
 def test_backfill_existing_position_mcp(tmp_path, monkeypatch):
     assert _run_init(tmp_path, _NOKEY).returncode == 0
+    import asyncio
     import openinvest.connectors.mcp_server as m
     store = MemoryStore(tmp_path / "memory")
     monkeypatch.setattr(m, "_pm", lambda: PortfolioManager(store))
-    out = m.buy(symbol="510300.SS", units=3000, price=4.2, kind="etf", existing_position=True)
+    out = m.record_existing_position(symbol="510300.SS", units=3000, price=4.2, kind="etf")
     assert out["funding_source"] == "external_funding", out
     assert PortfolioManager(store).cash_amount("CNY") == 50000.0
     assert store.read_history()[-1]["source"] == "mcp:existing_position"
-    m.buy(symbol="510300.SS", units=1, price=4.2)  # 默认仍是现金买入
+    # buy 不再有这个开关（老 server 会静默丢参数扣现金——所以补录是独立工具）
+    tools = {t.name: t for t in asyncio.run(m.mcp.list_tools())}
+    assert "existing_position" not in tools["buy"].inputSchema["properties"]
+    m.buy(symbol="510300.SS", units=1, price=4.2)  # buy 是现金买入
     assert PortfolioManager(store).cash_amount("CNY") == 50000.0 - 4.2
 
 
@@ -205,7 +209,7 @@ def test_v1_portfolio_writes_refused_until_doctor_command_converts(tmp_path, mon
     assert out.returncode == 1 and "v1" in out.stdout + out.stderr
     import openinvest.connectors.mcp_server as m
     monkeypatch.setattr(m, "_pm", lambda: PortfolioManager(MemoryStore(mem)))
-    assert m.buy(symbol="510300.SS", units=3000, price=4.2, kind="etf", existing_position=True)["status"] == "error"
+    assert m.record_existing_position(symbol="510300.SS", units=3000, price=4.2, kind="etf")["status"] == "error"
     assert m.deposit(amount=1, currency="CNY")["status"] == "error"
     assert (mem / "portfolio.md").read_bytes() == v1_bytes
 

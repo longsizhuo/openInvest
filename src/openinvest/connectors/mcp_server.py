@@ -9,7 +9,7 @@
 
 写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在高频能力（现 21 个）（80+ REST 端点全暴露会撑爆 agent context），
+工具刻意克制在高频能力（现 22 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -453,10 +453,6 @@ def buy(
     currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
-    existing_position: Annotated[bool, Field(description=(
-        "True = record a position the user already held before using openInvest "
-        "(onboarding backfill): ledger cash is NOT deducted. Default False = a new "
-        "purchase paid from ledger cash."))] = False,
 ) -> Dict[str, Any]:
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
@@ -464,9 +460,8 @@ def buy(
     openInvest never places real orders.
 
     Confirm symbol, units, and price with the user before calling; this
-    moves ledger cash — unless `existing_position=True`, which records a
-    position held before onboarding without touching cash (history is
-    marked `funding_source: external_funding`, `source: mcp:existing_position`).
+    moves ledger cash. A position the user already held before using
+    openInvest is not a purchase: record it with `record_existing_position`.
 
     Args:
         symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
@@ -475,8 +470,45 @@ def buy(
         currency: Currency of `price` (default "CNY").
         kind: Asset kind tag, e.g. "equity", "etf", "commodity".
         unit_label: Human display label for units (default "股", i.e. shares).
-        existing_position: True for a position already held before onboarding
-            (cash unchanged); False (default) for a new purchase.
+
+    Returns:
+        Updated position summary, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
+                         kind=kind, unit_label=unit_label, source="mcp")
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+# 独立工具而不是 buy 的参数：老 server 会静默丢掉不认识的参数 → buy(existing_position=true)
+# 在老版本上照样扣现金。独立工具在老 server 上直接报 Unknown tool，宁可失败也不扣错钱。
+@mcp.tool(annotations=_MONEY)
+def record_existing_position(
+    symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
+    units: Annotated[float, Field(description="Quantity held; must be > 0.", gt=0)],
+    price: Annotated[float, Field(description="Average cost per unit, in `currency`.", gt=0)],
+    currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
+    kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
+    unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
+) -> Dict[str, Any]:
+    """Record a position the user already held before using openInvest
+    (onboarding backfill) WITHOUT touching ledger cash. History is marked
+    `funding_source: external_funding`, `source: mcp:existing_position`.
+
+    Only for positions that `status` does not list yet — calling it for a
+    symbol already there adds the units again (double count). A new purchase
+    paid from ledger cash is `buy`. Does not add the symbol to the tracked
+    list; use `track_asset` for committee coverage.
+
+    Args:
+        symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
+        units: Quantity held; must be > 0.
+        price: Average cost per unit, in `currency`.
+        currency: Currency of `price` (default "CNY").
+        kind: Asset kind tag, e.g. "equity", "etf", "commodity".
+        unit_label: Human display label for units (default "股", i.e. shares).
 
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
@@ -485,8 +517,7 @@ def buy(
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
                          kind=kind, unit_label=unit_label,
-                         source="mcp:existing_position" if existing_position else "mcp",
-                         source_type="external_funding" if existing_position else "cash_deduct")
+                         source="mcp:existing_position", source_type="external_funding")
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -852,7 +883,7 @@ def _serve_http() -> None:
 
     - 绑定：INVEST_MCP_HOST（默认 127.0.0.1，生产由 Caddy/CF 反代）/ INVEST_MCP_PORT（默认 8766）
     - 非 loopback 绑定且未设 INVEST_API_TOKEN → 拒绝启动（信任边界不裸奔）
-    - stateless + json_response：21 个工具全无状态；纯 JSON 响应不给 CF 边缘留 SSE 长流
+    - stateless + json_response：22 个工具全无状态；纯 JSON 响应不给 CF 边缘留 SSE 长流
     - /health 探活豁免鉴权（对齐 web_api 的 /api/health 语义）
     """
     import os

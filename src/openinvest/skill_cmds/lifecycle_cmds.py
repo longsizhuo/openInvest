@@ -360,7 +360,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 已持有仓位的唯一补录 / 更正方式：不扣现金（普通 buy 会从现金里扣）
     _backfill = (
         "用户用系统前就持有的仓位，逐只用 `buy ... --existing-position`"
-        "（MCP: buy existing_position=true）补录——不扣现金；别用普通 `buy`，它会从现金里扣。"
+        "（MCP: `record_existing_position` 工具）补录——不扣现金；别用普通 `buy`，它会从现金里扣。"
     )
     _fix = (
         "某只数量/成本不对：`run.sh delete_holding --symbol X --force` 后用 "

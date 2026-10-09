@@ -203,7 +203,7 @@ def _h_buy(args: argparse.Namespace) -> None:
             "status": "error",
             "error": "--existing-position 暂不支持远端模式（INVEST_API_BASE 已设置）",
             "hint": "在 hub 机器上跑 `run.sh buy ... --existing-position`，"
-                    "或用 remote MCP 的 buy(existing_position=true)。",
+                    "或用 remote MCP 的 `record_existing_position` 工具。",
         })
     _print_response_or_die(_request("POST", "/api/skill/buy", json_body={
         "symbol": args.symbol, "units": float(args.units), "price": float(args.price),

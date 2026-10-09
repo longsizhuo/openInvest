@@ -35,10 +35,13 @@ nested under `profile` (and optional `env`), e.g.
 Without an LLM key only `current_assets` cash is recorded. A payload without the top-level
 `"profile"` object is rejected with `status: "error"` and the expected shape.
 
-Positions the user already held before onboarding are recorded with
+Positions the user already held before onboarding, and that `uvx openinvest status` does not
+list yet, are recorded with
 `uvx openinvest buy --symbol S --units N --price P [-c CCY] --existing-position`
-(MCP: `buy` with `existing_position: true`). This does not deduct cash; a plain `buy`
-is a new purchase paid from the recorded cash.
+(MCP: the `record_existing_position` tool). This does not deduct cash; a plain `buy`
+is a new purchase paid from the recorded cash. Never re-add a symbol `status` already lists
+(it would be counted twice). An MCP server older than that tool answers
+`Unknown tool: record_existing_position` — use the CLI form or upgrade; do not fall back to `buy`.
 
 Verify health:
 
