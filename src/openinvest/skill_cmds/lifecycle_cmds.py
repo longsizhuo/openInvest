@@ -305,6 +305,20 @@ def cmd_init(args: argparse.Namespace) -> None:
                 "只录了 current_assets 现金。配 key 后跑 init --force 重做（还没补录任何仓位时才会写入）。"
             )
 
+    # 没有解析结果的 --force（无 key / 解析失败）：组合还是没动过的 init 兜底时，把这次
+    # current_assets 的现金写进去——migrate 有 run-once 闸不会重跑，否则用户更正的现金不落库。
+    if not holdings_v2 and getattr(args, "force", False) and _portfolio_fresh:
+        _ca = profile.get("current_assets") or {}
+        _force_cash: Dict[str, float] = {}
+        for _ccy, _key in (("CNY", "cash_cny"), ("AUD", "aud_cash")):
+            try:
+                if float(_ca.get(_key) or 0):
+                    _force_cash[_ccy] = float(_ca[_key])
+            except (TypeError, ValueError):
+                pass
+        if _force_cash:
+            holdings_v2 = {"cash": _force_cash, "holdings": []}
+
     # 解析只看 holdings_description；用户单独报的现金在 current_assets。覆盖写会整个替换 cash，
     # 所以解析没给（或给 0）的币种用 current_assets 补，否则报了的现金被清空（#191 同症状）。
     # --force 重跑时 migrate 被 run-once 闸跳过，这里也是新 current_assets 唯一落库处。

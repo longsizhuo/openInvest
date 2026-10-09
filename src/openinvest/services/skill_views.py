@@ -375,7 +375,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
     import json
     import os
 
-    from openinvest.core.portfolio_manager import v1_migrate_command
+    from openinvest.core.portfolio_manager import is_v1_portfolio, v1_migrate_command
 
     checks: List[Dict[str, Any]] = []
 
@@ -406,10 +406,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
 
     # v1 扁平 portfolio.md（#191 修复前的 init 写的 cash_cny/aud_cash）：PortfolioManager 只读
     # v2 cash{}，status 现金恒为 0。init --force 不会转换它（migrate 有 run-once 闸），给确切转换命令。
-    try:
-        portfolio_v1 = portfolio_doc is not None and int(portfolio_doc.get("schema_version") or 1) < 2
-    except (TypeError, ValueError):
-        portfolio_v1 = False
+    portfolio_v1 = portfolio_doc is not None and is_v1_portfolio(getattr(portfolio_doc, "metadata", portfolio_doc))
     migrate_cmd = v1_migrate_command(store)
     checks.append({
         "name": "portfolio_schema",

@@ -607,6 +607,20 @@ _V1_KEYS = ("cash_cny", "aud_cash", "ndq_shares", "ndq_avg_cost_aud_per_share",
             "gold_grams", "gold_avg_cost_cny_per_gram")
 
 
+def is_v1_portfolio(meta) -> bool:
+    """v1 扁平格式 = 带 v1 字段、且没有 v2 的 cash{}。
+
+    schema_version 缺省不算证据：QUICK_START 的手写 v2 模板就不写它——只看它会把
+    合法 v2 文件判成 v1，转换脚本再把它的 cash 清空。doctor、写入拒绝、转换脚本共用这一个判据。
+    """
+    try:
+        if int(meta.get("schema_version") or 1) >= 2:
+            return False
+    except (TypeError, ValueError):
+        pass
+    return any(k in meta for k in _V1_KEYS) and not isinstance(meta.get("cash"), dict)
+
+
 def v1_migrate_command(store: MemoryStore) -> str:
     """把 v1 扁平 portfolio.md 转成 v2 的确切命令（doctor 的 portfolio_schema 提示与写入拒绝共用）"""
     import shlex
@@ -625,11 +639,7 @@ def _ensure_v2_inplace(p, store: MemoryStore) -> None:
     永久抹掉，还让 doctor 的 portfolio_schema 检查和转换脚本都以为已是 v2。
     转换走 openinvest.migrate_portfolio_to_holdings（先备份）。
     """
-    try:
-        v1 = int(p.get("schema_version") or 1) < 2
-    except (TypeError, ValueError):
-        v1 = True
-    if v1 and any(k in p.metadata for k in _V1_KEYS):
+    if is_v1_portfolio(p.metadata):
         raise ValueError(
             "portfolio.md 还是 v1 旧格式（现金在 cash_cny/aud_cash，status 显示 0）；"
             "直接写会丢掉这些字段，已拒绝，文件未改动。先跑 "

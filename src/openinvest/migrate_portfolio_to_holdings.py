@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import is_v1_portfolio
 from openinvest.core.schemas import validate_portfolio
 
 
@@ -101,6 +102,12 @@ def migrate(store: Optional[MemoryStore] = None, force: bool = False) -> Dict[st
                 "reason": f"already v{version}",
                 "backup": str(bak_path),
             }
+
+        # 没写 schema_version 的手写 v2（有 cash{}、无 v1 字段）：只补版本号，绝不覆盖 cash/holdings
+        if not is_v1_portfolio(tx.metadata) and isinstance(tx.get("cash"), dict):
+            tx["schema_version"] = 2
+            return {"status": "noop", "reason": "already v2 shape; stamped schema_version=2",
+                    "backup": str(bak_path)}
 
         # 警示：如果检测到 holdings 字段已存在但 version 还是 1，可能是手工改过半，需要 --force
         if "holdings" in tx.metadata and not force:

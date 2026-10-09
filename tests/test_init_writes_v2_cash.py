@@ -234,3 +234,39 @@ def test_parse_without_cash_keeps_current_assets_cash(tmp_path, fake_llm, monkey
     assert r["user_review_required"] is True and r["cash_recorded"] == {"CNY": 50000.0}
     pm = PortfolioManager(MemoryStore(tmp_path / "force" / "memory"))
     assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]
+
+
+def test_handwritten_v2_without_schema_version_is_not_v1(tmp_path):
+    # QUICK_START §3.1 的手写 v2 模板不写 schema_version：doctor 不能判成 v1，
+    # 它给的转换命令（以及写入）也绝不能把 cash 清掉。
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    (mem / "user.md").write_text("---\nname: user\ntype: user\ndisplay_name: T\n---\n", encoding="utf-8")
+    (mem / "strategy.md").write_text("---\nname: strategy\ntype: strategy\n---\n", encoding="utf-8")
+    (mem / "portfolio.md").write_text(
+        "---\nname: portfolio\ntype: state\ncash:\n  CNY: 30000.0\nholdings: []\n---\n", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
+    env_home = dict(env, INVEST_HOME=str(tmp_path))
+
+    def cli(*argv):
+        return subprocess.run([sys.executable, "-c", "from openinvest.cli import main; main()", *argv],
+                              capture_output=True, text=True, env=env_home)
+
+    check = next(c for c in _json(cli("doctor"))["checks"] if c["name"] == "portfolio_schema")
+    assert check["status"] == "ok"
+    conv = subprocess.run([sys.executable, "-m", "openinvest.migrate_portfolio_to_holdings"],
+                          capture_output=True, text=True, env=env_home)
+    assert conv.returncode == 0
+    assert cli("deposit", "--amount", "100", "--currency", "CNY").returncode == 0
+    pm = PortfolioManager(MemoryStore(mem))
+    assert pm.cash_amount("CNY") == 30100.0
+
+
+def test_force_without_key_applies_corrected_cash(tmp_path):
+    # 无 key 重跑 --force 改了现金：组合还没动过时新现金要落库（migrate 有 run-once 闸不会重写）
+    base = {"profile": {"name": "T", "current_assets": {"cash_cny": 50000}}, "env": {}}
+    assert _run_init(tmp_path, base).returncode == 0
+    fixed = {"profile": {"name": "T", "current_assets": {"cash_cny": 60000}}, "env": {}}
+    out = _run_init(tmp_path, fixed, "--force")
+    assert out.returncode == 0, out.stderr
+    assert PortfolioManager(MemoryStore(tmp_path / "memory")).cash_amount("CNY") == 60000.0
