@@ -6,11 +6,16 @@ yfinance symbol. Three ways to add one, ordered by preference:
 ## Method 1: CLI `buy` (preferred, when the user actually holds it)
 
 ```bash
-~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind stock
+# a position the user held BEFORE using openInvest (onboarding backfill): cash is not touched
+~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity --existing-position
+# a new purchase made now: paid from ledger cash (refuses if that cash is short)
+~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity
 ```
 
-MCP users call the `buy` tool directly with the same parameter names. Weighted average cost is
-computed automatically, and the symbol is automatically added to tracking.
+MCP users call the `buy` tool directly with the same parameter names (`existing_position: true`
+for the first case). Weighted average cost is computed automatically, and the symbol is
+automatically added to tracking. Ask which case it is: recording an already-held position as a
+plain `buy` shrinks the cash the user reported by its cost.
 
 **"I just want to watch it, not hold it"** scenario (native entry point since issue #179):
 ```bash
