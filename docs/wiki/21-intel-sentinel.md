@@ -42,8 +42,8 @@ documents:
 > severity ≥ `event.min_severity` + stance ≠ neutral + 命中持仓/关注 → 报警；其中命中 target_assets 的才触发委员会重跑（只在持仓的标的委员会跑不了，只报警）。
 > 频控两门共享：同 symbol `event.committee_cooldown_hours`（默认 12h）内不重跑，任意
 > 滚动 24h 内 ≤ `event.committee_daily_cap`（默认 4，按 symbol 计）。此前 `ingest_event`
-> 只入库不触发，哨兵喂进来的持仓风险事件从没触发过委员会。顾问模式实例只入库，
-> 永不触发、不报警。冷却期内新事件 severity 严格高于开冷却那条时越级放行（仍受上限，
+> 只入库不触发，哨兵喂进来的持仓风险事件从没触发过委员会。顾问模式实例禁用
+> `ingest_event`，哨兵要指向完整模式的实例。冷却期内新事件 severity 严格高于开冷却那条时越级放行（仍受上限，
 > `event.committee_escalation_bypass` 默认开）；额度紧时高 severity 先占。
 >
 > **部署注意**：哨兵走的是宿主 agent 自己 spawn 的 stdio `openinvest-mcp` 子进程，
