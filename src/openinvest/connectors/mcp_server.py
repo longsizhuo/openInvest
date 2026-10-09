@@ -24,8 +24,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+from functools import partial, wraps
+from inspect import iscoroutinefunction
 from typing import Annotated, Any, Dict, List, Optional
 
+import anyio
 from pydantic import Field
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -49,6 +52,27 @@ mcp = FastMCP(
         "Never place real orders: this runtime is decision support only; the human executes."
     ),
 )
+
+
+def _tool(**options):
+    """Keep blocking service/market IO off the MCP event loop.
+
+    FastMCP's synchronous tool dispatch runs inline. Register an async adapter
+    while leaving the original callable and its schema available to Python
+    callers. Ledger writes still use the service layer's transaction locks.
+    """
+    def register(fn):
+        if iscoroutinefunction(fn):
+            mcp.tool(**options)(fn)
+        else:
+            @wraps(fn)
+            async def threaded(**kwargs):
+                return await anyio.to_thread.run_sync(partial(fn, **kwargs))
+
+            mcp.tool(**options)(threaded)
+        return fn
+
+    return register
 
 
 def _pm():
@@ -85,7 +109,7 @@ def _check_advisory():
 
 # ---------- 只读 ----------
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def status() -> Dict[str, Any]:
     """Get a full snapshot of the user's portfolio: cash balances per currency,
     every holding with units / average cost / live price, and unrealized P&L
@@ -105,7 +129,7 @@ def status() -> Dict[str, Any]:
     return build_status_view()
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def strategy() -> Dict[str, Any]:
     """Get the user's investment strategy: target stock/cash allocation, the
     list of tracked assets (per-asset investment cap, purchase channel, fee
@@ -125,7 +149,7 @@ def strategy() -> Dict[str, Any]:
     return build_strategy_view()
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def history(
     n: Annotated[int, Field(description="Maximum number of recent trades to return.")] = 10,
 ) -> Dict[str, Any]:
@@ -146,7 +170,7 @@ def history(
     return build_history_view(n)
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def live_prices() -> Dict[str, Any]:
     """Fetch a one-shot market backdrop: spot gold (USD/oz and CNY/gram),
     USDCNY and AUDCNY FX rates, the NDQ.AX ETF price, the VIX volatility
@@ -177,7 +201,7 @@ def live_prices() -> Dict[str, Any]:
     }
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def what_if(
     symbol: Annotated[str, Field(description="yfinance ticker held or tracked by the user, e.g. 'NDQ.AX', 'GC=F', '510300.SS'.")],
     pct: Annotated[Optional[float], Field(description="Hypothetical percent change, e.g. -10 for a 10% drop. Provide exactly one of pct or price.")] = None,
@@ -205,7 +229,7 @@ def what_if(
     return build_what_if_view(symbol=symbol, pct=pct, price=price)
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def discipline() -> Dict[str, Any]:
     """Get the committee's discipline ledger: how often it chose inaction
     (HOLD ratio), how many impulsive user trades its rules intercepted, and
@@ -225,7 +249,7 @@ def discipline() -> Dict[str, Any]:
     return {"summary": s, "markdown": render_discipline_md(s)}
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def decisions(
     days: Annotated[int, Field(description="Look-back window in days.", ge=1)] = 90,
     symbol: Annotated[Optional[str], Field(description="Only this ticker (case-insensitive), e.g. 'GC=F'.")] = None,
@@ -259,7 +283,7 @@ def decisions(
     return decisions_view(days=days, symbol=symbol, verdict=verdict, limit=limit)
 
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def explain_decision(
     decision_id: Annotated[str, Field(description="\"<date>/<symbol>\", e.g. \"2026-07-03/GC=F\" — exactly as returned by the decisions tool.")],
 ) -> Dict[str, Any]:
@@ -318,7 +342,7 @@ def explain_decision(
 
 # ---------- 决策账本写 ----------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def record_execution(
     decision_id: Annotated[str, Field(description="\"<date>/<symbol>\" from the decisions tool output.")],
     executed: Annotated[bool, Field(description="True if the user acted on the verdict, False if they declined.")],
@@ -350,7 +374,7 @@ def record_execution(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def ingest_event(
     title: Annotated[str, Field(description="Headline of the news item.")],
     url: Annotated[str, Field(description="Canonical source URL (also the dedup key).")],
@@ -392,7 +416,7 @@ def ingest_event(
 
 # ---------- 新闻源管理（用户级额外源，INVEST_HOME/rss_feeds.yml） ----------
 
-@mcp.tool(annotations=_RO)
+@_tool(annotations=_RO)
 def news_sources() -> Dict[str, Any]:
     """List the news feed sources the crawler pulls from: the built-in default
     feeds plus user-added extra feeds. Extra feeds can be added/removed with
@@ -407,7 +431,7 @@ def news_sources() -> Dict[str, Any]:
             "max_extra": MAX_EXTRA_FEEDS}
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 async def add_news_source(
     name: Annotated[str, Field(description="Short slug for the feed, [a-z0-9_] (e.g. 'wsj_markets').")],
     url: Annotated[str, Field(description="RSS/Atom feed URL (a real feed, not a webpage).")],
@@ -430,7 +454,7 @@ async def add_news_source(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=_MONEY)
+@_tool(annotations=_MONEY)
 def remove_news_source(
     key: Annotated[str, Field(description="Feed name or URL to remove (extra feeds only; defaults can't be removed).")],
 ) -> Dict[str, Any]:
@@ -445,7 +469,7 @@ def remove_news_source(
 
 # ---------- 持仓写（与 CLI / REST 共享 PortfolioManager，fcntl 锁保证一致） ----------
 
-@mcp.tool(annotations=_MONEY)
+@_tool(annotations=_MONEY)
 def buy(
     symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
     units: Annotated[float, Field(description="Quantity bought; must be > 0.", gt=0)],
@@ -528,7 +552,7 @@ def record_existing_position(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=_MONEY)
+@_tool(annotations=_MONEY)
 def sell(
     symbol: Annotated[str, Field(description="yfinance ticker of an existing holding.")],
     units: Annotated[float, Field(description="Quantity sold; must be > 0.", gt=0)],
@@ -559,7 +583,7 @@ def sell(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=_MONEY)
+@_tool(annotations=_MONEY)
 def deposit(
     currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
     amount: Annotated[float, Field(description="Amount to add; must be > 0.", gt=0)],
@@ -581,7 +605,7 @@ def deposit(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=_MONEY)
+@_tool(annotations=_MONEY)
 def withdraw(
     currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
     amount: Annotated[float, Field(description="Amount to remove; must be > 0.", gt=0)],
@@ -611,7 +635,7 @@ def withdraw(
 _STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 
 
-@mcp.tool(annotations=_STRAT_W)
+@_tool(annotations=_STRAT_W)
 def set_allocations(
     target_allocation_stock: Annotated[float, Field(description="Stock weight in [0, 1], e.g. 0.7. Must sum to ~1.0 with cash.", ge=0, le=1)],
     target_allocation_cash: Annotated[float, Field(description="Cash weight in [0, 1], e.g. 0.3. Must sum to ~1.0 with stock.", ge=0, le=1)],
@@ -637,7 +661,7 @@ def set_allocations(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=_STRAT_W)
+@_tool(annotations=_STRAT_W)
 def track_asset(
     symbol: Annotated[str, Field(description="yfinance ticker to track, e.g. 'AAPL', '0700.HK', 'BTC-USD'.")],
     max_single_invest_cny: Annotated[Optional[float], Field(description="Per-decision investment cap in CNY. Required when creating a new entry; optional on update.")] = None,
@@ -680,7 +704,7 @@ def track_asset(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True))
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True))
 def untrack_asset(
     symbol: Annotated[str, Field(description="yfinance ticker currently in the tracked list.")],
 ) -> Dict[str, Any]:
@@ -706,7 +730,7 @@ def untrack_asset(
 
 _COMMITTEE_LOCK = asyncio.Lock()
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 async def run_committee(
     symbol: Annotated[str, Field(description="Any yfinance ticker (US / HK / A-share / ETF / crypto / commodities), e.g. 'AAPL', 'GC=F', '510300.SS'.")],
     force: Annotated[bool, Field(description="Re-run even if a verdict already exists for today.")] = False,
@@ -753,21 +777,33 @@ async def run_committee(
                     "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),
                                                             with_raw=False)}
 
-    import anyio
-
     from openinvest.core.committee_runner import run_committee_session
 
     step = 0
 
+    async def _report_phase(progress: int, message: str) -> None:
+        if ctx is None:
+            return
+        meta = ctx.request_context.meta
+        if meta is None or meta.progressToken is None:
+            return
+        # FastMCP Context.report_progress in SDK 1.28 omits related_request_id.
+        # Without it HTTP routes notifications to the standalone GET stream,
+        # which stateless sessions do not share with the tools/call POST.
+        await ctx.session.send_progress_notification(
+            progress_token=meta.progressToken, progress=progress, message=message,
+            related_request_id=ctx.request_id,
+        )
+
     def _on_phase(ev: Dict[str, Any]) -> None:
         # 委员会在 worker 线程里回调；进度通知回事件循环发。client 没给 progressToken
-        # （或 HTTP json_response 模式没有流）时 report_progress 本身就是 no-op
+        # 时不发送；HTTP 使用当前请求的 SSE 流传递进度。
         nonlocal step
         if ctx is None:
             return
         step += 1
         try:
-            anyio.from_thread.run(ctx.report_progress, step, None, str(ev.get("phase", "")))
+            anyio.from_thread.run(_report_phase, step, str(ev.get("phase", "")))
         except Exception:  # noqa: BLE001  进度只是提示，发不出去不影响委员会
             pass
 
@@ -859,8 +895,8 @@ def _configure_http_settings(host: str, port: int) -> None:
        无鉴权本机服务"，而浏览器发起的重绑请求带不上 Authorization 头（先吃
        _BearerAuthMiddleware 的 401）。文档推荐形态 = 绑 loopback + Caddy 反代，
        下游 Host 是公网域名——此档若开校验会把全部合法流量 421（review 真机踩过）
-    3) 无 token（_serve_http 守卫保证此时必为 loopback 绑定）→ 保留 SDK 构造时的
-       loopback 自动白名单——无鉴权本机服务正是 rebinding 防护该管的形态
+    3) 无 token（_serve_http 守卫保证此时必为 loopback 绑定）→ 显式恢复 SDK 的
+       loopback 白名单——无鉴权本机服务正是 rebinding 防护该管的形态
     """
     import os
 
@@ -869,7 +905,9 @@ def _configure_http_settings(host: str, port: int) -> None:
     mcp.settings.host = host
     mcp.settings.port = port
     mcp.settings.stateless_http = True
-    mcp.settings.json_response = True
+    # SSE sends headers immediately, progress notifications and SDK heartbeat
+    # comments while slow tools run; JSON waits silently for the final result.
+    mcp.settings.json_response = False
 
     token = os.getenv("INVEST_API_TOKEN", "").strip()
     allowed = os.getenv("INVEST_MCP_ALLOWED_HOSTS", "").strip()
@@ -882,6 +920,14 @@ def _configure_http_settings(host: str, port: int) -> None:
         mcp.settings.transport_security = TransportSecuritySettings(
             enable_dns_rebinding_protection=False,
         )
+    else:
+        # Rebuild explicitly: previous token/allowlist settings must not leak
+        # into an unauthenticated app when this singleton is reconfigured.
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+            allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        )
 
 
 def _serve_http() -> None:
@@ -889,7 +935,7 @@ def _serve_http() -> None:
 
     - 绑定：INVEST_MCP_HOST（默认 127.0.0.1，生产由 Caddy/CF 反代）/ INVEST_MCP_PORT（默认 8766）
     - 非 loopback 绑定且未设 INVEST_API_TOKEN → 拒绝启动（信任边界不裸奔）
-    - stateless + json_response：22 个工具全无状态；纯 JSON 响应不给 CF 边缘留 SSE 长流
+    - stateless + SSE：22 个工具全无状态；请求内推送进度与心跳，避免慢工具在代理读超时前一直静默
     - /health 探活豁免鉴权（对齐 web_api 的 /api/health 语义）
     """
     import os

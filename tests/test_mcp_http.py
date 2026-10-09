@@ -9,13 +9,15 @@ streamable_http_app 的 lifespan 挂着 session_manager.run()，裸 ASGITranspor
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from starlette.testclient import TestClient
 
 from openinvest.connectors.mcp_server import _BearerAuthMiddleware, mcp
 from tests.test_mcp_server import EXPECTED_TOOLS
 
-# MCP streamable-http 协议要求的 Accept 头（stateless + json_response 下响应是纯 JSON）
+# MCP streamable-http 协议要求的 Accept 头（stateless + SSE 响应）
 _HDRS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
 _INIT = {
@@ -33,7 +35,8 @@ def make_app(monkeypatch):
     transport_security 在 app 构建时快照。"""
     from openinvest.connectors.mcp_server import _configure_http_settings
 
-    built = []
+    monkeypatch.setattr(mcp, "settings", mcp.settings.model_copy(deep=True))
+    monkeypatch.setattr(mcp, "_session_manager", None)
 
     def _make(token=None, allowed_hosts=None):
         if token is None:
@@ -48,7 +51,6 @@ def make_app(monkeypatch):
         _configure_http_settings("127.0.0.1", 8766)
         app = mcp.streamable_http_app()
         app.add_middleware(_BearerAuthMiddleware)
-        built.append(app)
         return app
 
     yield _make
@@ -110,7 +112,9 @@ def test_tools_list_matches_stdio_snapshot(make_app):
         assert r.status_code == 200, r.text
         r = _post_mcp(c, _LIST, headers=auth)
         assert r.status_code == 200, r.text
-        tools = {t["name"] for t in r.json()["result"]["tools"]}
+        messages = [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: {")]
+        result = next(message["result"] for message in messages if message.get("id") == _LIST["id"])
+        tools = {t["name"] for t in result["tools"]}
         assert tools == EXPECTED_TOOLS
 
 
@@ -150,3 +154,19 @@ def test_allowed_hosts_whitelist_mode(make_app):
         r = _post_mcp(c, _INIT, headers=auth)
         assert r.status_code >= 400 and r.status_code != 401, \
             f"名单外 Host 应被 Host 校验拒（非 401 鉴权拒），实际 {r.status_code}"
+
+
+def test_reconfigure_without_token_restores_loopback_protection(make_app):
+    make_app(token="tok")
+    app = make_app()
+    with _client(app, base_url="http://evil.example.com") as c:
+        assert _post_mcp(c, _INIT).status_code == 421
+    app = make_app()
+    with _client(app) as c:
+        assert _post_mcp(c, _INIT).status_code == 200
+
+
+def test_access_only_proxy_requires_explicit_host_allowlist(make_app):
+    app = make_app(allowed_hosts="invest.example.com")
+    with _client(app, base_url="http://invest.example.com") as c:
+        assert _post_mcp(c, _INIT).status_code == 200

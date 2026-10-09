@@ -397,7 +397,26 @@ hub 的 Caddy 加一条路由（后端 Host 校验：token 模式默认关闭—
 
 ```caddy
 handle /mcp {
-    reverse_proxy 127.0.0.1:8766
+    reverse_proxy 127.0.0.1:8766 {
+        flush_interval -1
+    }
+}
+```
+
+如果只使用 Cloudflare Access、没有设置 `INVEST_API_TOKEN`，同时设置
+`INVEST_MCP_ALLOWED_HOSTS=invest.your-domain.com`；否则保留的 loopback Host
+白名单会拒绝反代传来的公网域名（421）。Access Service Token 和应用 Bearer
+token 是两层独立鉴权，组合使用时客户端必须同时发送上述三项 header。
+
+nginx 等反代需要关闭响应缓冲，让 SSE 进度和心跳及时到达客户端：
+
+```nginx
+location = /mcp {
+    proxy_pass http://127.0.0.1:8766;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_buffering off;
+    proxy_read_timeout 300s;
 }
 ```
 
@@ -414,8 +433,15 @@ INVEST_MCP_ALLOWED_HOSTS=invest.your-domain.com
 **与 REST 转发的关系**：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，
 仍支持但不再演进——它还覆盖 remote MCP 没有的 Coordinator 协议
 （prepare/save_committee）与 doctor/event_check；日常读写/Direct 委员会请优先
-remote MCP。已知限制：`run_committee` 直连是同步调用，未命中当天缓存时可能撞
-CF ~100s 边缘超时（缓存命中秒回；重活建议仍由 hub 侧 cron/REST 轮询路径跑）。
+remote MCP。HTTP 使用 stateless SSE：`run_committee` 在同一请求中返回最终结果，
+期间发送 SDK 心跳，并在客户端提供 progress token 时推送阶段进度。同步工具的
+阻塞 IO 在线程池执行，慢查询不会占住事件循环、阻塞其他客户端或心跳。
+
+已知限制：心跳不能延长客户端设置的总调用期限，也不能保证所有代理配置都允许
+长请求；仍需按真实部署验证 Cloudflare/Access 链路。Cloudflare 的实际限额以
+[官方 524 文档](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-524/)
+为准。stateless 模式不提供断线续传；调用中断后应先查状态/当日委员会缓存，
+不要自动重放买卖、入金等非幂等写操作。长任务也可继续由 hub 侧 cron/REST 轮询路径跑。
 自动部署（invest-deploy.sh）的 restart 行记得加 `invest-mcp.service`。
 
 ---
