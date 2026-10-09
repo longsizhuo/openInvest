@@ -45,6 +45,7 @@ def test_zombie_dead_pid_reclaimed(tmp_path):
     p = mp.Process(target=os.getpid)
     p.start()
     p.join()
+    assert p.exitcode == 0
     lock.write_text(str(p.pid))
     assert try_acquire_consolidation_lock(tmp_path) is not None, "死 PID 应可重新认领"
     assert lock.read_text().strip() == str(os.getpid())

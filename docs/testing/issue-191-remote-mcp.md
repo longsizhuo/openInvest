@@ -13,8 +13,8 @@ documents:
 
 > **维护者注**：本记录的基线是 `b45409c`（openinvest 0.39.0）**加上贡献者未提交的本地修改**。
 > 下文的修复方案以及大部分实测结果（SSE 模式、130 秒模拟委员会、自动化测试数字）
-> 都针对这个本地分支，**相关代码未合入 main**。main 上的 Remote MCP 仍是
-> `json_response=True` 的纯 JSON 响应模式。
+> 都针对这个本地分支，**相关代码未合入 main**。记录时 main 上的 Remote MCP 仍是
+> `json_response=True` 的纯 JSON 响应模式；该 SSE/线程池方案后经 #325 的移植 PR 合入。
 
 日期：2026-10-09。基线：`b45409c` + 本地未提交修改，openinvest 0.39.0。
 对应 [issue #191](https://github.com/longsizhuo/openInvest/issues/191) 及维护者要求的
@@ -30,7 +30,7 @@ documents:
 - 基础远端测试直接启动本地修改后（未合入 main）的 `openinvest-mcp --http`；`status` / `strategy` 走真实业务服务，行情依赖未 mock。
 - 长耗时测试只替换委员会 service 为受控的 130 秒模拟任务，验证传输、心跳、进度与并发；这不是一次真实 LLM 委员会分析。
 - **未经过 Cloudflare / Access，不是公网 HTTPS 测试，也未验证断线中的任务恢复。**
-- 本机另用 nginx 1.31.6 做 JSON 模式（即当前 main 的 `json_response=True`）与本地分支 SSE 模式的对照。
+- 本机另用 nginx 1.31.6 做 JSON 模式（记录时 main 的 `json_response=True`，#325 移植合入后已改为 SSE）与本地分支 SSE 模式的对照。
 
 ## 实测结果
 

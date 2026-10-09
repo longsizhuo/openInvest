@@ -29,6 +29,13 @@ def test_tool_set_is_closed():
         assert t.description and t.inputSchema.get("type") == "object", t.name
 
 
+def test_every_tool_dispatches_off_the_event_loop():
+    """同步工具必须经 _tool 注册（线程池执行）；直接 @mcp.tool 的同步函数在事件循环里跑，
+    慢 IO 会卡住其他 HTTP 客户端、/health 和 SSE 心跳。"""
+    from openinvest.connectors.mcp_server import mcp
+    assert [t.name for t in mcp._tool_manager.list_tools() if not t.is_async] == []
+
+
 READONLY_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "news_sources",

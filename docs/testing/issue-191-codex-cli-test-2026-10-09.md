@@ -228,7 +228,7 @@ run_committee(symbol="GC=F", force=true, max_rounds=1)
 
 - 三次均未报告超时或断连。
 - 三次均未观察到 MCP 进度通知。没有采集客户端是否发送 `progressToken` 的证据，不能据此断定服务端进度功能失效。
-  维护者补充：main 的 HTTP 传输是 `json_response=True` 的纯 JSON 响应，没有可推送通知的流，该模式下进度通知**从不发送**；若服务端运行的是 main 代码，未观察到进度属预期行为。服务端是否运行了同批记录中的本地 SSE 修改，见第 3 节环境表“服务端代码精确版本”一项（未采集）。
+  维护者补充：记录时（#325 移植合入前）main 的 HTTP 传输是 `json_response=True` 的纯 JSON 响应，没有可推送通知的流，该模式下进度通知**从不发送**；若服务端运行的是 main 代码，未观察到进度属预期行为。服务端是否运行了同批记录中的本地 SSE 修改，见第 3 节环境表“服务端代码精确版本”一项（未采集）。
 - 第二次虽然 `isError=false`，但业务分析失败；不能作为委员会成功证据。返回内容包含后端内部 `retry_exhausted`，与宿主未自动重试并不矛盾。
 - 第三次确认真实分析成功且未命中缓存，但只持续约 21 秒。
 - 两次后续尝试之间的余额 / 凭据调整细节未提供，报告不推断具体充值或换 Key 操作。
@@ -272,7 +272,7 @@ run_committee(symbol="GC=F", force=true, max_rounds=1)
 | 严格并发请求 | 未确认 | 缺少时间重叠证据 |
 | 长时间空闲后重用 | 未验证 | 未执行明确的空闲等待测试 |
 | 调用中断线 / 恢复 | 未验证 | 不以正常重连替代 |
-| 原生客户端进度通知 | 未确认 | 未观察到，未核对 progressToken；main 的 HTTP（json_response）模式本就不发进度 |
+| 原生客户端进度通知 | 未确认 | 未观察到，未核对 progressToken；记录时 main 的 HTTP（json_response）模式本就不发进度（#325 移植合入后改为 SSE） |
 | 共享后台进程模式 | 未通过 | initialize 发送失败，根因未定位 |
 | 反向代理 / Host 白名单 | 本轮未覆盖 | 本轮为直接连接 |
 | Cloudflare 长调用、Access + Bearer | 未覆盖 | 本轮没有 Cloudflare |
