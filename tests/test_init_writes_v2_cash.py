@@ -64,17 +64,18 @@ def test_init_rejects_flat_payload(tmp_path):
 
 _PARSED = {"cash": {"CNY": 50000}, "holdings": [
     {"symbol": "510300.SS", "kind": "etf", "units": 3000, "avg_cost": 4.2, "cost_currency": "CNY"}]}
+_LLM_REPLY = {"value": _PARSED}  # 测试可 monkeypatch.setitem 换回复
 
 
 @pytest.fixture
 def fake_llm():
-    """本地 OpenAI 兼容端点，固定返回 _PARSED。"""
+    """本地 OpenAI 兼容端点，返回 _LLM_REPLY["value"]（默认 _PARSED）。"""
     class H(BaseHTTPRequestHandler):
         def do_POST(self):
             self.rfile.read(int(self.headers.get("Content-Length", 0)))
             body = json.dumps({"id": "x", "object": "chat.completion", "created": 0, "model": "m",
                                "choices": [{"index": 0, "finish_reason": "stop", "message": {
-                                   "role": "assistant", "content": json.dumps(_PARSED)}}]}).encode()
+                                   "role": "assistant", "content": json.dumps(_LLM_REPLY["value"])}}]}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -218,3 +219,18 @@ def test_v1_portfolio_writes_refused_until_doctor_command_converts(tmp_path, mon
     assert pm.cash_amount("CNY") == 50000.0
     assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]
 
+
+def test_parse_without_cash_keeps_current_assets_cash(tmp_path, fake_llm, monkeypatch):
+    # 持仓描述里没提现金（doctor hint 把现金单独问、填 current_assets）：解析结果 cash={} 不能把现金清空
+    monkeypatch.setitem(_LLM_REPLY, "value", {"cash": {}, "holdings": _PARSED["holdings"]})
+    key_env = {"LLM_API_KEY": "sk-fake", "LLM_BASE_URL": fake_llm}
+    (tmp_path / "fresh").mkdir()
+    (tmp_path / "force").mkdir()
+    r = _json(_run_init(tmp_path / "fresh", {"profile": _NOKEY["profile"], "env": key_env}))
+    assert r["user_review_required"] is True and r["cash_recorded"] == {"CNY": 50000.0}
+    # no-key → 配 key 后 init --force（no-key 话术推荐的路径）：已录现金不能被抹掉
+    assert _json(_run_init(tmp_path / "force", _NOKEY))["cash_recorded"] == {"CNY": 50000.0}
+    r = _json(_run_init(tmp_path / "force", {"profile": _NOKEY["profile"], "env": key_env}, "--force"))
+    assert r["user_review_required"] is True and r["cash_recorded"] == {"CNY": 50000.0}
+    pm = PortfolioManager(MemoryStore(tmp_path / "force" / "memory"))
+    assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]

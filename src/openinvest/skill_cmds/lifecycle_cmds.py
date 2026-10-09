@@ -305,6 +305,20 @@ def cmd_init(args: argparse.Namespace) -> None:
                 "只录了 current_assets 现金。配 key 后跑 init --force 重做（还没补录任何仓位时才会写入）。"
             )
 
+    # 解析只看 holdings_description；用户单独报的现金在 current_assets。覆盖写会整个替换 cash，
+    # 所以解析没给（或给 0）的币种用 current_assets 补，否则报了的现金被清空（#191 同症状）。
+    # --force 重跑时 migrate 被 run-once 闸跳过，这里也是新 current_assets 唯一落库处。
+    if holdings_v2:
+        _ca = profile.get("current_assets") or {}
+        _merged_cash = dict(holdings_v2.get("cash") or {})
+        for _ccy, _key in (("CNY", "cash_cny"), ("AUD", "aud_cash")):
+            try:
+                if not float(_merged_cash.get(_ccy) or 0) and float(_ca.get(_key) or 0):
+                    _merged_cash[_ccy] = float(_ca[_key])
+            except (TypeError, ValueError):
+                pass  # 非数字（"5万"）不猜，照解析结果写
+        holdings_v2 = {**holdings_v2, "cash": _merged_cash}
+
     if holdings_v2 and (holdings_v2.get("cash") or holdings_v2.get("holdings")):
         try:
             _write_v2_portfolio(
@@ -390,7 +404,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         # LLM 解析成功路径：先让用户确认解析内容
         next_step_text = (
             "**先让用户确认 LLM 解析的持仓**（读 `parsed_holdings_for_user_review` "
-            "字段给他听）。" + _fix + "；别重跑 `init --force`（持仓已存在，会被拒绝）。"
+            f"字段给他听，连同{_cash_text}）。" + _fix + "；别重跑 `init --force`（持仓已存在，会被拒绝）。"
             "确认无误后，调 `run.sh status` 验证持仓显示正确。"
         )
     elif final_checks_status == "completed_full":
