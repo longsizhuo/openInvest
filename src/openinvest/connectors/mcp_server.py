@@ -453,6 +453,9 @@ def buy(
     currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
+    existing_position: Annotated[bool, Field(description=(
+        "Not supported on buy. For a position held before using openInvest call "
+        "`record_existing_position`; passing true here returns an error instead of deducting cash."))] = False,
 ) -> Dict[str, Any]:
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
@@ -475,6 +478,9 @@ def buy(
         Updated position summary, or {"status": "error", "error": ...}.
     """
     _check_advisory()
+    # 显式接住这个名字：FastMCP 会静默丢掉未声明参数，照 CLI --existing-position 类推的调用会被当普通买入扣现金
+    if existing_position:
+        return {"status": "error", "error": "buy 不登记已有持仓（会扣现金）；请改用 record_existing_position。"}
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
                          kind=kind, unit_label=unit_label, source="mcp")

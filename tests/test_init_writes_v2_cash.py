@@ -163,9 +163,11 @@ def test_backfill_existing_position_mcp(tmp_path, monkeypatch):
     assert out["funding_source"] == "external_funding", out
     assert PortfolioManager(store).cash_amount("CNY") == 50000.0
     assert store.read_history()[-1]["source"] == "mcp:existing_position"
-    # buy 不再有这个开关（老 server 会静默丢参数扣现金——所以补录是独立工具）
-    tools = {t.name: t for t in asyncio.run(m.mcp.list_tools())}
-    assert "existing_position" not in tools["buy"].inputSchema["properties"]
+    # 照 CLI --existing-position 类推调 MCP buy：显式报错、不扣现金（补录走独立工具）
+    res = asyncio.run(m.mcp.call_tool("buy", {"symbol": "510300.SS", "units": 1, "price": 4.2,
+                                               "existing_position": True}))
+    assert "record_existing_position" in json.dumps(res, ensure_ascii=False, default=str)
+    assert PortfolioManager(store).cash_amount("CNY") == 50000.0
     m.buy(symbol="510300.SS", units=1, price=4.2)  # buy 是现金买入
     assert PortfolioManager(store).cash_amount("CNY") == 50000.0 - 4.2
 
@@ -302,3 +304,11 @@ def test_force_on_real_portfolio_without_write_reports_unchanged(tmp_path, fake_
     assert "只录了" not in r["holdings_parse_note"] + r["next_step"]
     assert r["cash_recorded"] == {} and r["user_review_required"] is False
     assert "先跑 `run.sh status`" in r["next_step"] and "绝不要再加" in r["next_step"]
+
+
+def test_init_non_dict_cash_reports_instead_of_crashing(tmp_path):
+    payload = {"profile": {"name": "T", "current_assets": {"cash_cny": 1000},
+                           "holdings_v2": {"cash": [{"CNY": 5}], "holdings": []}}, "env": {}}
+    out = _run_init(tmp_path, payload)
+    assert out.returncode == 0, out.stderr
+    assert "v2 write failed" in _json(out).get("holdings_parse_note", "")

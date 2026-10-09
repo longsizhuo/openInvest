@@ -322,7 +322,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 解析只看 holdings_description；用户单独报的现金在 current_assets。覆盖写会整个替换 cash，
     # 所以解析没给（或给 0）的币种用 current_assets 补，否则报了的现金被清空（#191 同症状）。
     # --force 重跑时 migrate 被 run-once 闸跳过，这里也是新 current_assets 唯一落库处。
-    if holdings_v2:
+    # cash 不是 dict（列表/数字/字符串）就不合并，交给下面 try 里的写入校验报 v2 write failed
+    if holdings_v2 and isinstance(holdings_v2.get("cash") or {}, dict):
         _ca = profile.get("current_assets") or {}
         _merged_cash = dict(holdings_v2.get("cash") or {})
         for _ccy, _key in (("CNY", "cash_cny"), ("AUD", "aud_cash")):
@@ -356,10 +357,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 不能再说"只录了现金"+ 全量补录——status 里已有的会被重复计数。
     _kept = _portfolio_existed and not _portfolio_fresh and not _v2_written
     if _kept and not _v2_write_error:
-        holdings_parse_note = (
+        _why = holdings_parse_note if _parse_failed else (
+            "没有 LLM key，没解析持仓描述" if _holdings_desc_given_no_key else "没有可写入的持仓")
+        holdings_parse_note = (   # 保留原始报错（key 失效 / 连不上），agent 才能告诉用户原因
             "existing portfolio left unchanged: 已有 portfolio.md 没动——这次既没写 current_assets 现金，"
-            "也没写持仓（" + ("LLM 解析出错" if _parse_failed else "没有 LLM key，没解析持仓描述"
-                            if _holdings_desc_given_no_key else "没有可写入的持仓") + "）"
+            f"也没写持仓（{_why}）"
         )
     elif _kept:
         holdings_parse_note = "existing portfolio left unchanged; " + holdings_parse_note
