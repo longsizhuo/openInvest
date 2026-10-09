@@ -13,14 +13,12 @@ Try again in a few minutes, or check whether `db/market_data.db` is being update
 
 ## `prepare_committee X` returns `{"error": "asset X not in strategy.target_assets"}`
 
-`prepare_committee` only works on assets in `strategy.target_assets`. If the user wants to
-analyze an untracked symbol:
-
-1. First add it to `target_assets` via CLI `run.sh buy --existing-position` (a real position the user
-   already holds — this does not deduct cash; a plain `buy` would), `run.sh track_asset` (track only), or
-   `POST /api/strategy/asset` — see `references/adding-assets.md`
-2. Or add it as a tracking-only holding via `POST /api/holdings` (`is_tracking_only: true`) —
-   same effect, without touching strategy
+`prepare_committee` only works on assets in `strategy.target_assets`. To analyze an untracked
+symbol, add it with `run.sh track_asset --symbol X --max-single-invest-cny N` (MCP `track_asset`)
+— see `references/adding-assets.md`. A holding row does not do this: neither `buy` nor a
+tracking-only `POST /api/holdings` touches `target_assets`. If the user holds X but `run.sh status`
+doesn't list it, also record it with `buy ... --existing-position` (no cash deducted); if `status`
+already lists it, don't — that would count it twice.
 
 The committee can analyze an asset whether or not it's held, but it needs the `target_assets`
 config (cap / fee / channel info).

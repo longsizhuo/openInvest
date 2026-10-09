@@ -3,28 +3,32 @@
 The default onboarding configures only two assets (NDQ.AX + GC=F). The v2 schema supports any
 yfinance symbol. Three ways to add one, ordered by preference:
 
-## Method 1: CLI `buy` (preferred, when the user actually holds it)
+## Method 1: `track_asset` (+ record the position if the ledger doesn't have it yet)
 
 ```bash
-# a position the user held BEFORE using openInvest (onboarding backfill): cash is not touched
+# analyze it: adds the symbol to strategy.target_assets (what the committee / DCA cover)
+~/.claude/skills/invest/scripts/run.sh track_asset --symbol AAPL --max-single-invest-cny 8000
+```
+
+Recording a position is separate — `buy` never touches `target_assets`; it only puts the position
+into `status` / P&L. First run `run.sh status`: a symbol it already lists is in the ledger, so
+**don't record it again** (that counts it twice). Otherwise:
+
+```bash
+# held BEFORE using openInvest, not yet listed by `status`: cash is not touched
 ~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity --existing-position
 # a new purchase made now: paid from ledger cash (refuses if that cash is short)
 ~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity
 ```
 
-MCP users call the `buy` tool directly with the same parameter names (`existing_position: true`
-for the first case). Weighted average cost is computed automatically, and the symbol is
-automatically added to tracking. Ask which case it is: recording an already-held position as a
-plain `buy` shrinks the cash the user reported by its cost.
+MCP users: `track_asset`; `record_existing_position` for the first case (an MCP server older than
+that tool answers `Unknown tool` — don't fall back to `buy`, it deducts cash); `buy` for the second.
+Weighted average cost is computed automatically. Ask which case it is: recording an already-held
+position as a plain `buy` shrinks the cash the user reported by its cost.
 
-**"I just want to watch it, not hold it"** scenario (native entry point since issue #179):
-```bash
-~/.claude/skills/invest/scripts/run.sh track_asset --symbol AAPL --max-single-invest-cny 8000
-```
-MCP users call the `track_asset` tool directly (idempotent upsert: re-tracking doesn't error,
-it only updates the fields you pass). It adds the symbol to the strategy's tracking list — which
-determines the coverage of the committee/DCA; `untrack_asset` removes it, and `set_allocations`
-changes the stock/cash target allocation.
+**"I just want to watch it, not hold it"**: `track_asset` alone (native entry point since issue #179).
+It is an idempotent upsert: re-tracking doesn't error, it only updates the fields you pass.
+`untrack_asset` removes a symbol, and `set_allocations` changes the stock/cash target allocation.
 Only if you still need "a zero-unit row shown in the holdings table" for display purposes should
 you use `POST /api/holdings` with `is_tracking_only: true` — or skip persistence entirely and
 just analyze (Method 3).
@@ -95,11 +99,12 @@ first before passing it to the API.
 yfinance and must NOT get a `.SS` / `.SZ` suffix. Use `FUND:<6-digit code>` with `--kind fund`:
 
 ```bash
-# 用户在用 openInvest 之前就已持有的基金：加 --existing-position 补录，不扣现金
+# 用户在用 openInvest 之前就已持有、且 `run.sh status` 里还没有的基金：加 --existing-position 补录，不扣现金
 ~/.claude/skills/invest/scripts/run.sh buy --symbol FUND:123456 --units 5000 --price 2.0 -c CNY --kind fund --unit-label 份 --existing-position
 ```
 
-(Drop `--existing-position` only for a new purchase paid from the recorded cash.)
+(Skip it if `status` already lists the fund. Drop `--existing-position` only for a new purchase
+paid from the recorded cash.)
 
 They are valued at the latest confirmed unit NAV from Eastmoney (not the intraday estimate), so
 `status` / P&L / the committee's portfolio summary all include them. Running the committee *on* a

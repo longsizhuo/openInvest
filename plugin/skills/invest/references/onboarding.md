@@ -46,12 +46,15 @@ automatically calls DeepSeek to parse it into the v2 schema.
 
 **Fallback paths**:
 - If the user **did not provide a DeepSeek key** (Q5 left blank): parsing can't run, and cmd_init
-  falls back to `current_assets`, writing only `cash_cny` and `aud_cash` into the portfolio. Such
-  users add their positions later, one per call, with
+  falls back to `current_assets`, writing only `cash_cny` and `aud_cash` into the portfolio. On a
+  fresh install such users add their positions later, one per call, with
   `run.sh buy --symbol S --units N --price P [-c CCY] [--kind K] --existing-position`
-  (MCP: `buy` with `existing_position: true`). That records a position held **before** using the
+  (MCP: the `record_existing_position` tool). That records a position held **before** using the
   system without touching cash. A plain `buy` is a new purchase paid from ledger cash, so it would
-  shrink the cash the user reported. **Tell the user this.**
+  shrink the cash the user reported. **Tell the user this.** Only add symbols that `run.sh status`
+  does not list yet — re-adding a listed one counts it twice.
+  An MCP server older than this tool answers `Unknown tool: record_existing_position`: do **not**
+  fall back to `buy` (it deducts cash) — use the CLI form or upgrade the server.
 - If the user **truly holds nothing**: they can enter `"什么都没有，CNY 现金 0"` (nothing at all,
   CNY cash 0) — as long as the pipeline goes through, that's fine.
 
@@ -91,6 +94,9 @@ When `holdings_description` parses, it **overwrites** portfolio.md (v2 schema wi
 
 In the JSON that `init` returns, check `holdings_parse_note`:
 - `"parsed via LLM; portfolio.md overwritten with v2 schema"` → success
+- `"existing portfolio left unchanged"` (checked first — it wins over the other values) → the
+  portfolio already had holdings or trades, so this run wrote **nothing**: neither the
+  `current_assets` cash nor any holding. Run `run.sh status` first; see the table below
 - `"LLM parse failed (...); fell back to v1 fields"` → DeepSeek errored; only the `current_assets`
   cash was recorded. Tell the user; rerun `init --force` later, or add the holdings with
   `buy --existing-position` (see above)
@@ -99,8 +105,8 @@ In the JSON that `init` returns, check `holdings_parse_note`:
   `buy --existing-position` (see above)
 - `"v2 write failed"` → the parsed holdings were **not** saved (portfolio.md unchanged); see below
 
-`cash_recorded` in the same JSON is the cash actually in the portfolio now. If it is `{}`, do
-not tell the user their cash was recorded.
+`cash_recorded` in the same JSON is the cash this run wrote. If it is `{}`, do not tell the user
+their cash was recorded.
 
 After `status: "ok"`, **immediately** run `run.sh doctor` again to confirm `status: "ready"`,
 then go back and carry out the user's original request.
@@ -174,8 +180,9 @@ skip `holdings_description` and pass `holdings_v2` directly:
 start over. (It does not touch `.env` — that file is merge-written.) It rewrites portfolio.md only
 while that is still the cash-only result of a previous init (no holdings, no trades recorded),
 and backs up the old file to `portfolio.md.bak.<timestamp>` first. Once holdings or any
-buy/sell/deposit exist, the portfolio is kept and `holdings_parse_note` says `"v2 write failed"`.
-So `--force` is not the way to correct a holding — see "Common pitfalls".
+buy/sell/deposit exist, the portfolio is kept exactly as it is — the new `current_assets` cash is
+not written either — and `holdings_parse_note` starts with `"existing portfolio left unchanged"`.
+So `--force` is not the way to correct a holding or the cash — see "Common pitfalls".
 
 ## Mandatory phrasing after a degraded parse
 
@@ -184,9 +191,9 @@ may not skip it, and you may not bury it in `next_step` and wait for the user to
 
 | `holdings_parse_note` value (contains these keywords) | What the agent must say to the user (verbatim script — do not alter the key points) |
 |---|---|
-| `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), you need a free DeepSeek API key — 30 seconds to register at platform.deepseek.com. Want to set that up now?" If `cash_recorded` is `{}`, replace "only the cash was captured" with "nothing was captured yet" and ask how much cash they have. Without a key, add the positions with `buy --existing-position` |
-| `"LLM parse failed"` | "Something went wrong while parsing your holdings (a temporary DeepSeek outage or a network timeout), so only the cash portion was recorded. You can wait a bit and rerun `run.sh init --force`, or I can add the positions you already hold one by one now — that doesn't touch your cash." (then `buy --existing-position` per position) |
-| `"v2 write failed"` | "I understood your holdings, but I didn't save them this time — your portfolio already has data, so I left it unchanged." Then run `run.sh status`. Positions already listed there must **not** be added again (another buy would count them twice). Only for positions missing from `status`: "I can add the ones that are missing — that doesn't touch your cash." (then `buy --existing-position` per missing position). Do **not** read `parsed_holdings_for_user_review` back as if it were recorded |
+| `"existing portfolio left unchanged"` or `"v2 write failed"` (**check first** — when present, ignore the rows below) | "I didn't change anything this time — your portfolio already has data, so I left it as it was (neither the cash nor the holdings were updated)." Then run `run.sh status`. Positions already listed there must **not** be added again (another buy would count them twice). Only for positions missing from `status`: "I can add the ones that are missing — that doesn't touch your cash." (then `buy --existing-position` per missing position). Do **not** read `parsed_holdings_for_user_review` back as if it were recorded |
+| `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), you need a free DeepSeek API key — 30 seconds to register at platform.deepseek.com. Want to set that up now?" If `cash_recorded` is `{}`, replace "only the cash was captured" with "nothing was captured yet" and ask how much cash they have. Without a key, on a fresh install: add the positions with `buy --existing-position`, but only those `run.sh status` doesn't already list |
+| `"LLM parse failed"` | "Something went wrong while parsing your holdings (a temporary DeepSeek outage or a network timeout), so only the cash portion was recorded. You can wait a bit and rerun `run.sh init --force`, or I can add the positions you already hold one by one now — that doesn't touch your cash." (fresh install: run `run.sh status` first, then `buy --existing-position` per position it doesn't list) |
 | `"parsed via LLM"` with `user_review_required: true` | Read out each holding in `parsed_holdings_for_user_review` for the user to confirm, e.g.: "My understanding is you hold: 3000 units of A at 4.2 yuan, and 50 grams of gold B at 750 avg cost. Is that right?" |
 | `"no holdings_description provided"` | Nothing extra needed (the user didn't describe any holdings in the first place) |
 
