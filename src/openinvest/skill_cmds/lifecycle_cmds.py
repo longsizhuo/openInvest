@@ -60,7 +60,9 @@ from openinvest.services.holdings_import import (  # noqa: E402
 )
 
 
-def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) -> None:
+def _write_v2_portfolio(
+    cash: Dict[str, float], holdings: List[Dict[str, Any]], *, fresh: bool = False,
+) -> None:
     """把 LLM 解析出的 v2 schema 直接覆盖写 memory/portfolio.md。
 
     在 migrate_profile.py 跑完之后调用 —— migrate 写的是 v1 兜底 portfolio.md，
@@ -71,11 +73,14 @@ def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) 
       1. 如果已有 portfolio.md 含真实持仓（cash 任一币种 > 0 或 holdings 非空），
          **拒绝覆盖**并抛 RuntimeError，让调用方明确传 force=True
       2. 任何成功覆盖前都先备份到 portfolio.md.bak.<timestamp>，事故可恢复
+
+    fresh=True：portfolio.md 不是要保护的真实数据（init 前不存在，或 --force 时仍是 init 兜底），
+    由 cmd_init 判定，见 _untouched_init_fallback。
     """
     store = MemoryStore()
     # Safety guard：检查现有 portfolio.md 是否已含真实数据
     existing = store.read("portfolio")
-    if existing is not None:
+    if existing is not None and not fresh:
         existing_cash = existing.get("cash") or {}
         existing_holdings = existing.get("holdings") or []
         has_real_data = (
@@ -147,6 +152,29 @@ def _write_v2_portfolio(cash: Dict[str, float], holdings: List[Dict[str, Any]]) 
     store.write("portfolio", "state", portfolio_data, "\n".join(body_lines) + "\n")
 
 
+def _untouched_init_fallback() -> bool:
+    """portfolio.md 仍是上次 init 写的纯现金兜底：无 holdings 且 portfolio_history 无记录
+    （buy/sell/deposit 和 Web API 写入都会记流水）。读不出来按"有真实数据"处理。"""
+    store = MemoryStore()
+    try:
+        return not (store.read("portfolio") or {}).get("holdings") and not store.read_history()
+    except Exception:  # noqa: BLE001 坏文件 → 保护，不覆盖
+        return False
+
+
+# cmd_init 拒收错 shape 时回给 agent 的样例（与下方 docstring 同步）
+_INIT_PAYLOAD_SHAPE: Dict[str, Any] = {
+    "profile": {
+        "name": "<display name>",
+        "risk_tolerance": "Conservative|Balanced|Aggressive",
+        "holdings_description": "<用户原话描述持仓，有 LLM key 时后端解析>",
+        "current_assets": {"cash_cny": 0, "aud_cash": 0},
+        "investment_strategy": {"max_single_invest_cny": 10000},
+    },
+    "env": {"LLM_API_KEY": "<optional>", "EMAIL_SENDER": "<optional>", "EMAIL_PASSWORD": "<optional>"},
+}
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """交互式 / 半交互式 onboarding 入口。
 
@@ -163,8 +191,7 @@ def cmd_init(args: argparse.Namespace) -> None:
       "profile": {
         "name": "<display_name>", "risk_tolerance": "Conservative|Balanced|Aggressive",
         "holdings_description": "<自然语言持仓描述，让后端 LLM 解析>",
-        "current_assets": {"cash_cny": 0, "aud_cash": 0, "ndq_shares": 0,
-                           "gold_grams": 0, "gold_avg_cost_cny_per_gram": 0},
+        "current_assets": {"cash_cny": 0, "aud_cash": 0},   # 无 LLM key 时唯一落库的现金
         "investment_strategy": {
           "target_allocation_stock": 0.7, "target_allocation_cash": 0.3,
           "max_single_invest_cny": 10000
@@ -189,7 +216,16 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         payload = _interactive_prompt()
 
-    profile = payload.get("profile", {}) or {}
+    # 扁平 payload（没包 profile）以前会被静默吃掉：name→Anonymous、现金 0、key 丢，还回 ok（#191）
+    if not isinstance(payload, dict) or not isinstance(payload.get("profile"), dict):
+        _print_json({
+            "status": "error",
+            "error": "payload 必须是 {\"profile\": {...}, \"env\": {...}}；顶层缺 \"profile\" 对象",
+            "got_top_level_keys": sorted(payload) if isinstance(payload, dict) else type(payload).__name__,
+            "expected_shape": _INIT_PAYLOAD_SHAPE,
+        })
+        sys.exit(1)
+    profile = payload["profile"]
     env_data = payload.get("env", {}) or {}
 
     # 1) 写 user_profile.json
@@ -227,6 +263,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     import io
     from types import SimpleNamespace
     _out, _err, _rc = io.StringIO(), io.StringIO(), 0
+    # 可覆盖 portfolio.md：init 前不存在（只看路径——坏 YAML 不能把 init 炸成无 JSON），
+    # 或 --force 重跑（配 key / LLM 失败后重做）且仍是上次 init 的兜底。有交易流水的照旧拒绝覆盖。
+    _portfolio_fresh = not MemoryStore().path_of("portfolio").exists() or (
+        args.force and _untouched_init_fallback()
+    )
     # 新装用户没有 v1 user_profile.json，migrate 必然 no-op——跳过。
     # 升级路径保留：2026-05 前老 clone 带该文件的仍会走迁移。
     if (ROOT / "user_profile.json").exists():
@@ -247,6 +288,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     holdings_v2: Dict[str, Any] = profile.get("holdings_v2") or {}  # 结构化直传
     holdings_text = str(profile.get("holdings_description") or "").strip()
     holdings_parse_note: str = ""
+    _v2_write_error = ""
 
     if not holdings_v2 and holdings_text:
         # 优先 LLM_API_KEY（通用），兼容 DEEPSEEK_API_KEY（fork 用户老 env）
@@ -281,10 +323,14 @@ def cmd_init(args: argparse.Namespace) -> None:
             _write_v2_portfolio(
                 holdings_v2.get("cash", {}) or {},
                 holdings_v2.get("holdings", []) or [],
+                fresh=_portfolio_fresh,
             )
             holdings_parse_note = (holdings_parse_note or "v2 written") + "; portfolio.md overwritten with v2 schema"
         except Exception as exc:  # noqa: BLE001 不阻塞
+            _v2_write_error = str(exc)
             holdings_parse_note += f"; v2 write failed: {exc!s}"
+    # 写失败时 parsed holdings 只是预览，不能让 agent 当成已入账读给用户确认
+    _holdings_written = bool(holdings_v2.get("holdings")) and not _v2_write_error
 
     # 4) 第一次 init 后跑 doctor 让 Claude 知道还差什么
     # LLM_API_KEY 或 DEEPSEEK_API_KEY 都算"配齐了"
@@ -307,14 +353,20 @@ def cmd_init(args: argparse.Namespace) -> None:
         and not env_data.get("DEEPSEEK_API_KEY", "").strip()
     )
 
-    if _holdings_desc_given_no_key:
+    if _v2_write_error:
+        next_step_text = (
+            "**持仓没有写入**——portfolio.md 保持原样（原因见 holdings_parse_note）。告诉用户这一点，"
+            "别把 `parsed_holdings_for_user_review` 当成已记录的持仓。要补录用户用系统前就持有的仓位："
+            "每个先 `deposit` units×price（同币种）再 `buy`，这样他报的现金不会被扣。"
+        )
+    elif _holdings_desc_given_no_key:
         # 强制话术：告知用户持仓仅记了现金，引导去注册 DeepSeek key
         next_step_text = (
             "你的持仓我暂时按基础模式记录了——只录了现金，没识别你说的具体股票。"
             "想让我自动识别 (510300 → 沪深300ETF 那种)，需要一个免费 DeepSeek API key，"
             "30 秒去 platform.deepseek.com 注册。要不要现在搞定？"
         )
-    elif holdings_v2 and holdings_v2.get("holdings"):
+    elif _holdings_written:
         # LLM 解析成功路径：先让用户确认解析内容
         next_step_text = (
             "**先让用户确认 LLM 解析的持仓**（读 `parsed_holdings_for_user_review` "
@@ -354,7 +406,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             # LLM symbol 映射错（比如把宁德时代猜成 300750.SZ 但用户实际买的是 3750.HK）
             holdings_v2 if holdings_v2 else None
         ),
-        "user_review_required": bool(holdings_v2 and holdings_v2.get("holdings")),
+        "user_review_required": _holdings_written,
         "next_step": next_step_text,
     })
 
@@ -400,7 +452,7 @@ def _interactive_prompt() -> Dict[str, Any]:
             "用一句话描述当前所有持仓 + 现金。例：\n"
             "  '510300 沪深300ETF 3000 股 4.2 元，工行积存金 50 克 750 均价，"
             "余额宝 5 万，AUD 现金 800'\n"
-            "留空就跳过，之后用 `buy` 子命令补。",
+            "留空就跳过；之后补已持有的仓位：先 `deposit` 数量×价格，再 `buy`（不扣你报的现金）。",
             file=sys.stderr,
         )
         desc = ask("持仓描述（留空跳过）", "")
@@ -414,7 +466,7 @@ def _interactive_prompt() -> Dict[str, Any]:
     else:
         print(
             "\n--- 持仓字段（手动模式 —— 没给 DeepSeek key 没法解析自然语言）---\n"
-            "持仓只问现金；新加 yfinance symbol 之后用 `buy` 子命令补。",
+            "持仓只问现金；已持有的仓位之后补：先 `deposit` 数量×价格，再 `buy`（不扣你报的现金）。",
             file=sys.stderr,
         )
         profile["current_assets"]["cash_cny"] = float(ask("CNY 现金", "0"))
