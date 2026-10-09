@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.4](https://github.com/longsizhuo/openInvest/compare/v0.39.3...v0.39.4) (2026-10-09)
+
+
+### Bug Fixes
+
+* **deps:** pin mcp below 2 so fresh installs don't crash on import ([#326](https://github.com/longsizhuo/openInvest/issues/326)) ([7acc3a9](https://github.com/longsizhuo/openInvest/commit/7acc3a99c17c97133ba8c1731c25042e6ee39477))
+
 ## [0.39.3](https://github.com/longsizhuo/openInvest/compare/v0.39.2...v0.39.3) (2026-10-09)
 
 
