@@ -250,9 +250,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     _out, _err, _rc = io.StringIO(), io.StringIO(), 0
     # 可覆盖 portfolio.md：init 前不存在（只看路径——坏 YAML 不能把 init 炸成无 JSON），
     # 或 --force 重跑（配 key / LLM 失败后重做）且仍是上次 init 的兜底。有交易流水的照旧拒绝覆盖。
-    _portfolio_fresh = not MemoryStore().path_of("portfolio").exists() or (
-        args.force and _untouched_init_fallback()
-    )
+    _portfolio_existed = MemoryStore().path_of("portfolio").exists()
+    _portfolio_fresh = not _portfolio_existed or (args.force and _untouched_init_fallback())
     # 新装用户没有 v1 user_profile.json，migrate 必然 no-op——跳过。
     # 升级路径保留：2026-05 前老 clone 带该文件的仍会走迁移。
     if (ROOT / "user_profile.json").exists():
@@ -274,6 +273,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     holdings_text = str(profile.get("holdings_description") or "").strip()
     holdings_parse_note: str = ""
     _v2_write_error = ""
+    _v2_written = False
     _parse_failed = False
 
     if not holdings_v2 and holdings_text:
@@ -340,21 +340,41 @@ def cmd_init(args: argparse.Namespace) -> None:
                 holdings_v2.get("holdings", []) or [],
                 fresh=_portfolio_fresh,
             )
+            _v2_written = True
             holdings_parse_note = (holdings_parse_note or "v2 written") + "; portfolio.md overwritten with v2 schema"
         except Exception as exc:  # noqa: BLE001 不阻塞
             _v2_write_error = str(exc)
             holdings_parse_note += f"; v2 write failed: {exc!s}"
     # 写失败时 parsed holdings 只是预览，不能让 agent 当成已入账读给用户确认
     _holdings_written = bool(holdings_v2.get("holdings")) and not _v2_write_error
-    # 话术只说实际落库的现金（payload 没给 current_assets 时现金是空的，不能说"录了现金"）
+    _holdings_desc_given_no_key = (
+        bool(holdings_text)
+        and not env_data.get("LLM_API_KEY", "").strip()
+        and not env_data.get("DEEPSEEK_API_KEY", "").strip()
+    )
+    # init 前已有真实组合（有持仓/流水，或不是 init 写的）且这次没写入：现金和持仓都没动。
+    # 不能再说"只录了现金"+ 全量补录——status 里已有的会被重复计数。
+    _kept = _portfolio_existed and not _portfolio_fresh and not _v2_written
+    if _kept and not _v2_write_error:
+        holdings_parse_note = (
+            "existing portfolio left unchanged: 已有 portfolio.md 没动——这次既没写 current_assets 现金，"
+            "也没写持仓（" + ("LLM 解析出错" if _parse_failed else "没有 LLM key，没解析持仓描述"
+                            if _holdings_desc_given_no_key else "没有可写入的持仓") + "）"
+        )
+    elif _kept:
+        holdings_parse_note = "existing portfolio left unchanged; " + holdings_parse_note
+    # 话术只说这次实际写进去的现金（payload 没给 current_assets 时现金是空的；组合原样保留时这次没写现金）
+    _wrote = _v2_written or (not _portfolio_existed and MemoryStore().path_of("portfolio").exists())
     try:
-        _cash = (MemoryStore().read("portfolio") or {}).get("cash") or {}
+        _cash = ((MemoryStore().read("portfolio") or {}).get("cash") or {}) if _wrote else {}
         _cash_recorded = {k: v for k, v in _cash.items() if v}
     except Exception:  # noqa: BLE001 坏 portfolio.md：init 照样回 JSON
         _cash_recorded = {}
     _cash_text = (
         "已录现金 " + "、".join(f"{k} {v:,.2f}" for k, v in _cash_recorded.items())
-        if _cash_recorded else "现金没录上（portfolio 里现金为空）——先跑 `run.sh doctor`，"
+        if _cash_recorded else
+        "这次没写现金（portfolio.md 原样保留，现金以 `run.sh status` 为准）" if _portfolio_existed and not _wrote
+        else "现金没录上（portfolio 里现金为空）——先跑 `run.sh doctor`，"
         "报 portfolio_schema 就按它的命令转换；否则问用户有多少现金，用 `deposit` 记"
     )
     # 已持有仓位的唯一补录 / 更正方式：不扣现金（普通 buy 会从现金里扣）
@@ -378,24 +398,19 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     # ---------- next_step 话术组装 ----------
     # 优先级（从高到低）：
-    #   1. v2 写入被拒/失败 → 说没写入，只补 status 里缺的（不重复加已有的）
+    #   1. v2 写入被拒/失败，或已有组合这次没写入 → 说没写入，只补 status 里缺的（不重复加已有的）
     #   2. holdings_description 给了但 key 缺失 → 强制降级话术（必说；现金按实际落库说）
     #   3. 有 key 但 LLM 解析失败 → 说没写入 + --existing-position 补录
     #   4. LLM 解析成功并写入 → 让用户确认解析结果
     #   5. completed_full → 正常 onboarding 完成话术
     #   6. completed_partial（无 holdings_description 场景）→ 告知凭据不完整
     # 补录已持有仓位一律走 `buy --existing-position`（不扣现金），不再教 deposit+buy
-    _holdings_desc_given_no_key = (
-        bool(holdings_text)
-        and not env_data.get("LLM_API_KEY", "").strip()
-        and not env_data.get("DEEPSEEK_API_KEY", "").strip()
-    )
-
-    if _v2_write_error:
+    if _v2_write_error or _kept:
         next_step_text = (
-            "**这次解析的持仓没有写入**——portfolio.md 保持原样（原因见 holdings_parse_note）。"
-            "告诉用户这一点，别把 `parsed_holdings_for_user_review` 当成已记录的持仓。"
-            "先跑 `run.sh status` 看已经记了哪些：**status 里已有的 symbol 不要再加**（再 buy 会重复计数）；"
+            ("**这次没有写入任何东西**——已有的 portfolio.md 保持原样，current_assets 现金和持仓都没写"
+             if _kept else "**这次解析的持仓没有写入**——portfolio.md 保持原样")
+            + "（原因见 holdings_parse_note）。告诉用户这一点，别把 `parsed_holdings_for_user_review` 当成已记录的持仓。"
+            "先跑 `run.sh status` 看已经记了哪些：**status 里已有的 symbol 绝不要再加**（再 buy 会重复计数）；"
             "只把 status 里没有的，" + _backfill + _fix + "。"
         )
     elif _holdings_desc_given_no_key:

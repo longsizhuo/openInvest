@@ -274,3 +274,31 @@ def test_force_without_key_applies_corrected_cash(tmp_path):
     out = _run_init(tmp_path, fixed, "--force")
     assert out.returncode == 0, out.stderr
     assert PortfolioManager(MemoryStore(tmp_path / "memory")).cash_amount("CNY") == 60000.0
+
+
+@pytest.mark.parametrize("case", ["parsed", "backfilled", "deposited"])
+def test_force_on_real_portfolio_without_write_reports_unchanged(tmp_path, fake_llm, case):
+    # 组合已有持仓/流水时，无 key（或没东西可写）的 --force 什么都不写。以前话术说"只录了现金"
+    # 并让 agent 把描述里的仓位全部 --existing-position 补录 → status 里已有的被重复计数。
+    key_env = {"LLM_API_KEY": "sk-fake", "LLM_BASE_URL": fake_llm}
+    assert _run_init(tmp_path, {"profile": _NOKEY["profile"],
+                                "env": key_env if case == "parsed" else {}}).returncode == 0
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
+    extra = {"backfilled": ["buy", "--symbol", "510300.SS", "--units", "3000", "--price", "4.2",
+                            "--kind", "etf", "--existing-position"],
+             "deposited": ["deposit", "--amount", "100", "--currency", "CNY"]}.get(case)
+    if extra:
+        assert subprocess.run([sys.executable, "-c", "from openinvest.cli import main; main()", *extra],
+                              capture_output=True, env=dict(env, INVEST_HOME=str(tmp_path))).returncode == 0
+    before = (tmp_path / "memory" / "portfolio.md").read_bytes()
+    # 改过的现金；deposited 不带持仓描述（"没有可写入的持仓"那条路）
+    profile = {"name": "T", "current_assets": {"cash_cny": 60000}}
+    if case != "deposited":
+        profile["holdings_description"] = _NOKEY["profile"]["holdings_description"]
+    r = _json(_run_init(tmp_path, {"profile": profile, "env": {}}, "--force"))
+    assert (tmp_path / "memory" / "portfolio.md").read_bytes() == before
+    assert r["holdings_parse_note"].startswith("existing portfolio left unchanged")
+    assert "既没写 current_assets 现金" in r["holdings_parse_note"]
+    assert "只录了" not in r["holdings_parse_note"] + r["next_step"]
+    assert r["cash_recorded"] == {} and r["user_review_required"] is False
+    assert "先跑 `run.sh status`" in r["next_step"] and "绝不要再加" in r["next_step"]
