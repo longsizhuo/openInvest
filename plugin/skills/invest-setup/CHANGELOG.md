@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.4.0...invest-setup-skill-v0.5.0) (2026-10-09)
+
+
+### Features
+
+* **onboarding:** new installs record the cash they enter; record_existing_position for pre-held positions ([#320](https://github.com/longsizhuo/openInvest/issues/320)) ([a5e54ba](https://github.com/longsizhuo/openInvest/commit/a5e54ba9d26aa4b208b715e9614bacf79d7de954))
+
 ## [0.4.0](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.3.1...invest-setup-skill-v0.4.0) (2026-07-16)
 
 
