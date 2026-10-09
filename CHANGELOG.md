@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/longsizhuo/openInvest/compare/v0.40.0...v0.40.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **mcp:** stream progress and offload blocking tool calls (port of [#325](https://github.com/longsizhuo/openInvest/issues/325)) ([#332](https://github.com/longsizhuo/openInvest/issues/332)) ([3ec76c3](https://github.com/longsizhuo/openInvest/commit/3ec76c3d8b1643b767c7bde9ebf3aefc225951c3))
+
 ## [0.40.0](https://github.com/longsizhuo/openInvest/compare/v0.39.4...v0.40.0) (2026-10-09)
 
 
