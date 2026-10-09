@@ -373,3 +373,33 @@ def test_add_news_source_tool_does_not_block_event_loop(home, monkeypatch):
         task.cancel()
         return len(ticks) - before
     assert asyncio.run(_main()) >= 5
+
+
+def test_concurrent_add_remove_tools_lose_no_updates(home, monkeypatch):
+    """add/remove_news_source 都在 worker 线程并发跑（一轮里 agent 并行发多个调用）：
+    rss_feeds.yml 的读-改-写必须串行——否则删掉的源复活、加的源丢失、共享 tmp 名撞车报错。"""
+    import anyio
+
+    from openinvest.connectors import mcp_server
+    from openinvest.services.news_sources import rss_feed as rf
+    monkeypatch.setattr(rf, "fetch_rss", lambda *a, **k: [object()])  # probe 通过
+
+    n = 12
+    (home / "rss_feeds.yml").write_text(yaml.safe_dump(
+        {"feeds": [{"name": f"old{i}", "url": f"https://example.com/old{i}"} for i in range(n)]}))
+
+    results = []
+
+    async def _call(tool, args):
+        results.append(await mcp_server.mcp.call_tool(tool, args))
+
+    async def _main():
+        async with anyio.create_task_group() as tg:
+            for i in range(n):
+                tg.start_soon(_call, "remove_news_source", {"key": f"old{i}"})
+                tg.start_soon(_call, "add_news_source", {"name": f"new{i}", "url": f"https://example.com/new{i}"})
+    anyio.run(_main)
+
+    assert len(results) == 2 * n
+    assert all(structured["result"]["status"] == "ok" for _content, structured in results), results
+    assert sorted(f["name"] for f in rf.load_extra_feeds()) == sorted(f"new{i}" for i in range(n))

@@ -26,6 +26,7 @@ import requests.adapters
 import urllib3
 import yaml
 
+from openinvest.core.memory_store import _atomic_write_text, _file_lock
 from openinvest.services.news_sources import RawNewsItem
 
 log = logging.getLogger(__name__)
@@ -300,11 +301,14 @@ def load_feeds() -> List[Dict[str, str]]:
 
 
 def _write_extra_feeds(feeds: List[Dict[str, str]]) -> None:
-    p = _extra_yml()
-    tmp = p.with_suffix(".yml.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        yaml.safe_dump({"feeds": feeds}, f, allow_unicode=True, sort_keys=False)
-    tmp.replace(p)
+    """调用方须持 _feeds_lock()：读-改-写整段串行，否则并发 add/remove 互相覆盖。"""
+    _atomic_write_text(_extra_yml(),
+                       yaml.safe_dump({"feeds": feeds}, allow_unicode=True, sort_keys=False))
+
+
+def _feeds_lock():
+    # fcntl 排它锁，跨线程（MCP 工具在 worker 线程并发跑）+ 跨进程（CLI 与 MCP 同 INVEST_HOME）
+    return _file_lock(_extra_yml())
 
 
 def add_extra_feed(name: str, url: str) -> Dict[str, object]:
@@ -321,15 +325,21 @@ def add_extra_feed(name: str, url: str) -> Dict[str, object]:
     if not name:
         raise ValueError("name 不能为空（规整后仅剩 [a-z0-9_]）")
 
-    extras = load_extra_feeds()
-    for f in load_default_feeds() + extras:
-        if f.get("url") == url:
-            return {"feed": f, "probe_items": None, "already_exists": True}
-    if any(f.get("name") == name for f in load_default_feeds() + extras):
-        raise ValueError(f"源名 {name!r} 已被占用，换一个 name")
-    if len(extras) >= MAX_EXTRA_FEEDS:
-        raise ValueError(f"额外源已达上限 {MAX_EXTRA_FEEDS} 个，先 remove 再 add")
+    def _existing_or_check(extras):
+        for f in load_default_feeds() + extras:
+            if f.get("url") == url:
+                return {"feed": f, "probe_items": None, "already_exists": True}
+        if any(f.get("name") == name for f in load_default_feeds() + extras):
+            raise ValueError(f"源名 {name!r} 已被占用，换一个 name")
+        if len(extras) >= MAX_EXTRA_FEEDS:
+            raise ValueError(f"额外源已达上限 {MAX_EXTRA_FEEDS} 个，先 remove 再 add")
+        return None
 
+    hit = _existing_or_check(load_extra_feeds())
+    if hit:
+        return hit
+
+    # probe 是网络 IO，不持锁（最长 ~十几秒，别卡住其他 add/remove）
     _check_url(url)
     probe = fetch_rss(name, url, max_items=3)
     if not probe:
@@ -337,18 +347,25 @@ def add_extra_feed(name: str, url: str) -> Dict[str, object]:
                          "（不是 feed 或暂时抓不到；额外源直连、不经 HTTP(S)_PROXY）")
 
     feed = {"name": name, "url": url}
-    _write_extra_feeds(extras + [feed])
+    with _feeds_lock():
+        # probe 期间清单可能被别的调用改过：锁内重读、重校验（重复/占名/上限）再写
+        extras = load_extra_feeds()
+        hit = _existing_or_check(extras)
+        if hit:
+            return hit
+        _write_extra_feeds(extras + [feed])
     return {"feed": feed, "probe_items": len(probe), "already_exists": False}
 
 
 def remove_extra_feed(key: str) -> bool:
     """按 name 或 url 删一个额外源（只动用户级清单，默认源不可删）。"""
     key = (key or "").strip()
-    extras = load_extra_feeds()
-    kept = [f for f in extras if f.get("name") != key and f.get("url") != key]
-    if len(kept) == len(extras):
-        return False
-    _write_extra_feeds(kept)
+    with _feeds_lock():
+        extras = load_extra_feeds()
+        kept = [f for f in extras if f.get("name") != key and f.get("url") != key]
+        if len(kept) == len(extras):
+            return False
+        _write_extra_feeds(kept)
     return True
 
 
