@@ -47,9 +47,15 @@ def build_status_view() -> Dict[str, Any]:
     gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
     gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
 
-    ndq_price = _safe_close("NDQ.AX")
-    audcny = _safe_close("AUDCNY=X")
-    snap = get_gold_snapshot(offset_pct=0.0)
+    # ndq / gold / AUD 段只在用户真持有时才拉数和输出——没持有的用户不该看到这几个历史
+    # 硬编码的 NDQ.AX / 黄金 / AUDCNY 段（也不该把这几个 symbol 回填进他的行情库）。
+    # 持有时保留原有专用定价分支（GC=F 按 CNY/克，不能走 get_quote 的 USD/oz）。
+    aud_relevant = ndq_h is not None or "AUD" in pm.cash or any(
+        str(h.get("cost_currency") or "").upper() == "AUD" for h in pm.holdings
+    )
+    ndq_price = _safe_close("NDQ.AX") if ndq_h else 0.0
+    audcny = _safe_close("AUDCNY=X") if aud_relevant else 0.0
+    snap = get_gold_snapshot(offset_pct=0.0) if gold_h else None
     gold_now = snap.spot_cny_per_gram if snap else 0.0
 
     # 2026-05-19 (A6 修复): total_assets_cny 之前写死 cash + aud*fx + ndq*price*fx +
@@ -114,32 +120,34 @@ def build_status_view() -> Dict[str, Any]:
         },
         "cash": {
             "cny": round(cash_cny, 2),
-            "aud": round(aud_cash, 2),
-            "aud_in_cny": round(aud_cash * audcny, 2),
+            **({
+                "aud": round(aud_cash, 2),
+                "aud_in_cny": round(aud_cash * audcny, 2),
+            } if aud_relevant else {}),
             # v2 通用：列出所有币种（其他 agent 想读非 CNY/AUD 时方便）
             "all_currencies": pm.cash,
         },
-        "ndq": {
+        **({"ndq": {
             "shares": ndq_shares,
             "price_aud": round(ndq_price, 2),
             "value_cny": round(ndq_shares * ndq_price * audcny, 2),
-        },
-        "gold": {
+        }} if ndq_h else {}),
+        **({"gold": {
             "grams": gold_grams,
             "avg_cost_cny_per_gram": gold_avg,
             "now_cny_per_gram": round(gold_now, 2),
             "value_cny": round(gold_now * gold_grams, 2),
             "pnl_cny": round((gold_now - gold_avg) * gold_grams, 2) if gold_avg else 0,
             "pnl_pct": round(((gold_now / gold_avg) - 1) * 100, 2) if gold_avg > 0 else 0,
-        },
+        }} if gold_h else {}),
         # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
         "all_holdings": holding_views,
         "total_assets_cny": total_cny,
-        "fx": {"audcny": round(audcny, 4)},
+        "fx": {"audcny": round(audcny, 4)} if aud_relevant else {},
         "live_prices": {
             "gold_usd_per_oz": snap.gold_usd_per_oz if snap else None,
             "usdcny": snap.usdcny_rate if snap else None,
-        },
+        } if gold_h else {},
     }
 
 
