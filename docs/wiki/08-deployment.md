@@ -380,7 +380,7 @@ hub，读写都走 HTTP——**锁仍是 hub 单机 fcntl，零分布式复杂�
 
 hub 常驻 `openinvest-mcp --http`（streamable-HTTP，绑 127.0.0.1:8766，
 `systemd/invest-mcp.service`），spoke 机器的 **agent 直连 MCP**，不再经
-CLI→REST 转发。18 个工具（读/写/委员会 Direct）全量可用，鉴权复用同一
+CLI→REST 转发。21 个工具（读/写/委员会 Direct）全量可用，鉴权复用同一
 `INVEST_API_TOKEN`（bearer，`/health` 豁免）：
 
 ```bash
@@ -399,6 +399,16 @@ hub 的 Caddy 加一条路由（后端 Host 校验：token 模式默认关闭—
 handle /mcp {
     reverse_proxy 127.0.0.1:8766
 }
+```
+
+**只靠 CF Access、不设 `INVEST_API_TOKEN`（Access-only）时必须设
+`INVEST_MCP_ALLOWED_HOSTS`**：无 token 时后端保留 MCP SDK 默认的 loopback Host
+白名单（`127.0.0.1` / `localhost` / `[::1]`），反代转发来的公网域名 Host 会直接
+被回 **421 Invalid Host header**。在 hub 的 `.env` 写上对外域名（逗号分隔，
+条目支持 `host:*` 通配端口）：
+
+```bash
+INVEST_MCP_ALLOWED_HOSTS=invest.your-domain.com
 ```
 
 **与 REST 转发的关系**：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，

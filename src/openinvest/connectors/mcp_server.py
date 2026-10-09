@@ -9,7 +9,7 @@
 
 写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在高频能力（现 18 个）（80+ REST 端点全暴露会撑爆 agent context），
+工具刻意克制在高频能力（现 21 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -842,7 +842,7 @@ def _serve_http() -> None:
 
     - 绑定：INVEST_MCP_HOST（默认 127.0.0.1，生产由 Caddy/CF 反代）/ INVEST_MCP_PORT（默认 8766）
     - 非 loopback 绑定且未设 INVEST_API_TOKEN → 拒绝启动（信任边界不裸奔）
-    - stateless + json_response：18 个工具全无状态；纯 JSON 响应不给 CF 边缘留 SSE 长流
+    - stateless + json_response：21 个工具全无状态；纯 JSON 响应不给 CF 边缘留 SSE 长流
     - /health 探活豁免鉴权（对齐 web_api 的 /api/health 语义）
     """
     import os

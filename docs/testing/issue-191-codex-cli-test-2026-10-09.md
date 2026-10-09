@@ -1,3 +1,14 @@
+---
+type: report
+title: Issue #191 跨机器原生 MCP 客户端（Codex CLI）实测报告
+tags: [mcp, remote-mcp, codex-cli, testing, issue-191]
+intent: 社区贡献者用原生 MCP 客户端跨机器实测 Remote MCP 的记录
+documents:
+  endpoints: []
+  config_keys: []
+  symbols: []
+---
+
 # Issue #191：跨机器原生 MCP 实测报告
 
 测试日期：2026-10-09（调用时间统一使用 UTC）
@@ -20,11 +31,11 @@
 
 ## 2. 证据范围
 
-本报告依据本次聊天中的工具输出、用户粘贴的终端日志和原生 Codex CLI 调用结果整理。
+本报告依据本轮测试中的工具输出、测试者粘贴的终端日志和原生 Codex CLI 调用结果整理。
 
 - **直接执行验证**：本机配置及日志检查、远端健康检查、Python MCP SDK 基础调用。
-- **用户提供的原生客户端证据**：M5 Pro CLI 截图、工具调用记录、时间和返回字段；这些耗时按用户粘贴结果记录，未另行从服务端访问日志独立复算。
-- **历史记录**：已有 [Remote MCP 测试与修复记录](issue-191-remote-mcp.md) 中的自动化测试、nginx 和 130 秒模拟任务，不是本次聊天重新执行的测试，单独说明，避免混用。
+- **测试者提供的原生客户端证据**：M5 Pro CLI 截图、工具调用记录、时间和返回字段；这些耗时按测试者粘贴结果记录，未另行从服务端访问日志独立复算。
+- **同批记录**：同一批提交的 [Remote MCP 测试记录（基于未合入的本地修改）](issue-191-remote-mcp.md) 中的自动化测试、nginx 和 130 秒模拟任务，不是本轮重新执行的测试，单独说明，避免混用。
 
 未在本报告保存 API Key、MCP Bearer token、截图背景中的 Secret 或完整账户分析内容。
 
@@ -35,7 +46,7 @@
 | 客户端机器 | M5 Pro，macOS |
 | 原生客户端 | Codex CLI 0.162.0（截图可见） |
 | 服务端机器 | M1 Pro，macOS |
-| 服务启动命令 | `uv run openinvest-mcp --http` |
+| 服务启动命令 | `INVEST_HOME=<TEST_DATA_DIR> INVEST_MCP_HOST=0.0.0.0 INVEST_API_TOKEN=<token> uv run openinvest-mcp --http` |
 | 传输 | Streamable HTTP，`/mcp` |
 | 网络 | 两台机器通过 Tailscale 地址连接 |
 | 服务监听 | `0.0.0.0:8766`，启用应用级 Bearer token |
@@ -85,7 +96,7 @@ Environment variable INVEST_API_TOKEN for MCP server 'openinvest' is not set
 - 服务工作目录为 M1 Pro 上的项目仓库目录。
 - 服务进程环境未发现 `INVEST_HOME`，仓库 `.env` 未配置此项。
 - 仓库 `memory` 下上述三个文件均缺失。
-- 用户确认从未运行过初始化。
+- 测试者确认从未运行过初始化。
 
 随后在独立测试目录执行 `openinvest init --from-stdin`，提供虚拟 CNY 20,000、空持仓及测试策略。返回：
 
@@ -183,7 +194,7 @@ holdings: []
 
 ### 4.5 真实委员会测试的前置配置
 
-测试目录最初没有 `LLM_API_KEY` 或 `DEEPSEEK_API_KEY`。用户通过隐藏输入将 DeepSeek Key 保存到测试目录 `.env`，随后重启服务加载配置。未在聊天中要求用户发送完整密钥。
+测试目录最初没有 `LLM_API_KEY` 或 `DEEPSEEK_API_KEY`。测试者通过隐藏输入将 DeepSeek Key 保存到测试目录 `.env`，随后重启服务加载配置。完整密钥未出现在任何测试记录中。
 
 第一次委员会尝试因 `GC=F` 未配置在 `strategy.target_assets` 中失败。随后通过原生 MCP 配置：
 
@@ -195,11 +206,11 @@ track_asset(
 )
 ```
 
-原生 `strategy` 确认跟踪项存在。用户粘贴的记录显示该项被幂等更新；没有重复添加。该操作修改测试策略，不执行买入，也不改变现金或持仓。
+原生 `strategy` 确认跟踪项存在。测试者粘贴的记录显示该项被幂等更新；没有重复添加。该操作修改测试策略，不执行买入，也不改变现金或持仓。
 
 ### 4.6 三次真实委员会调用记录
 
-每次均为用户明确发起的独立测试，参数相同：
+每次均为测试者明确发起的独立测试，参数相同：
 
 ```text
 run_committee(symbol="GC=F", force=true, max_rounds=1)
@@ -217,6 +228,7 @@ run_committee(symbol="GC=F", force=true, max_rounds=1)
 
 - 三次均未报告超时或断连。
 - 三次均未观察到 MCP 进度通知。没有采集客户端是否发送 `progressToken` 的证据，不能据此断定服务端进度功能失效。
+  维护者补充：main 的 HTTP 传输是 `json_response=True` 的纯 JSON 响应，没有可推送通知的流，该模式下进度通知**从不发送**；若服务端运行的是 main 代码，未观察到进度属预期行为。服务端是否运行了同批记录中的本地 SSE 修改，见第 3 节环境表“服务端代码精确版本”一项（未采集）。
 - 第二次虽然 `isError=false`，但业务分析失败；不能作为委员会成功证据。返回内容包含后端内部 `retry_exhausted`，与宿主未自动重试并不矛盾。
 - 第三次确认真实分析成功且未命中缓存，但只持续约 21 秒。
 - 两次后续尝试之间的余额 / 凭据调整细节未提供，报告不推断具体充值或换 Key 操作。
@@ -235,7 +247,7 @@ run_committee(symbol="GC=F", force=true, max_rounds=1)
 
 ### 4.8 两个独立客户端
 
-用户分别提供两个 CLI 的原生只读调用结果：
+测试者分别提供两个 CLI 的原生只读调用结果：
 
 | 客户端 | status | strategy | 超时 |
 |---|---:|---:|---|
@@ -260,22 +272,23 @@ run_committee(symbol="GC=F", force=true, max_rounds=1)
 | 严格并发请求 | 未确认 | 缺少时间重叠证据 |
 | 长时间空闲后重用 | 未验证 | 未执行明确的空闲等待测试 |
 | 调用中断线 / 恢复 | 未验证 | 不以正常重连替代 |
-| 原生客户端进度通知 | 未确认 | 未观察到，未核对 progressToken |
+| 原生客户端进度通知 | 未确认 | 未观察到，未核对 progressToken；main 的 HTTP（json_response）模式本就不发进度 |
 | 共享后台进程模式 | 未通过 | initialize 发送失败，根因未定位 |
 | 反向代理 / Host 白名单 | 本轮未覆盖 | 本轮为直接连接 |
 | Cloudflare 长调用、Access + Bearer | 未覆盖 | 本轮没有 Cloudflare |
 | 全新 Linux systemd / Docker 部署 | 未覆盖 | 本轮为 macOS 手动启动 |
 
-## 6. 与已有 130 秒测试记录的关系
+## 6. 与同批 Remote MCP 测试记录的关系
 
-此前仓库中的 [测试记录](issue-191-remote-mcp.md) 记载过 nginx 反代下约 130 秒的模拟委员会任务、进度及第二客户端查询，以及自动化测试结果。
+同一批提交的 [Remote MCP 测试记录（基于未合入的本地修改）](issue-191-remote-mcp.md) 记载了 nginx 反代下约 130 秒的模拟委员会任务、进度及第二客户端查询，以及自动化测试结果。
 
-这些历史结果可以补充说明传输层的测试覆盖，但：
+这些结果可以补充说明传输层的测试覆盖，但：
 
-- 本次聊天没有重新执行这些测试。
+- 本轮没有重新执行这些测试。
+- 那批结果（SSE 进度、130 秒任务、自动化测试）针对的是未合入 main 的本地分支，不代表 main 行为。
 - 130 秒任务替换了委员会业务服务，不是一次真实 LLM 分析。
-- 历史记录同样明确未经过 Cloudflare / Access。
-- 历史自动化测试数量不能作为本次聊天重新跑过测试套件的证明。
+- 该记录同样明确未经过 Cloudflare / Access。
+- 该记录的自动化测试数量不能作为本轮重新跑过测试套件的证明。
 
 ## 7. 尚待补测与建议
 
@@ -286,16 +299,4 @@ run_committee(symbol="GC=F", force=true, max_rounds=1)
 5. **初始化数据格式问题**：将 `current_assets` 初始化后产生旧 schema、查询现金为 0 的行为单独记录为缺陷；本次仅使用现有迁移工具处理测试数据，没有在本轮修复初始化实现。
 6. **版本复现信息**：提交报告时补充 M1 Pro 的 commit、工作区差异及依赖版本，明确是否运行修改后的代码。
 
-## 8. 可用于 Issue 评论的简版摘要
-
-> 已在另一台物理机器完成一轮真实客户端测试：M5 Pro 上的 Codex CLI 0.162.0，通过 Tailscale 直连 M1 Pro 的 `openinvest-mcp --http`，端口 8766，启用应用 Bearer token。本轮没有反向代理、HTTPS 或 Cloudflare Access。
->
-> Codex 默认共享后台进程模式在 initialize 阶段出现请求发送失败；同一端点用 curl / 官方 Python MCP SDK 可连接。增加 NO_PROXY 后默认模式仍失败，随后使用 `--no-daemon` 成功连接并发现 21 个工具。尚未定位共享进程模式的底层原因。
->
-> 原生 `status`、`strategy` 均成功；测试账户现金 CNY 20,000、空持仓、跟踪 GC=F 均核对正确。测试中发现旧字段初始化后现金显示 0，执行仓库提供的 v1→v2 持仓迁移后恢复正确。
->
-> 真实 `run_committee(symbol="GC=F", force=true, max_rounds=1)` 最终成功：`isError=false`、`cached=false`，20.923 秒返回裁决，无超时或断连。此前另两次尝试分别因策略缺少 GC=F 和 LLM 余额不足失败，均未发生传输超时。未观察到进度通知，未核对客户端是否请求进度。
->
-> 正常退出后重新连接及查询通过；两个独立客户端分别查询也通过，但没有时间重叠证据，暂不声称严格并发验证。超过一分钟的真实调用、Cloudflare 路径及调用中断线恢复仍未覆盖。
-
-本报告仅记录测试结果，不代表 Issue #191 的全部场景已验收，也不建议仅据此移除 BETA 标记。未自动发布 Issue 评论。
+本报告仅记录测试结果，不代表 Issue #191 的全部场景已验收，也不建议仅据此移除 BETA 标记。
