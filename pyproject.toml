@@ -37,7 +37,7 @@ dependencies = [
     "optuna>=4.0",   # 阶段 4 RL：Bayesian Optimization 搜参
     "feedparser>=6.0.10",  # 事件层 RSS 源（Reuters/BBC/FT/财新 免费 feed）
     "sqlite-vec>=0.1.6",   # 事件层向量精排（SQLite 扩展，不需要独立向量库）
-    "mcp>=1.28.1",
+    "mcp>=1.28.1,<2",  # 2.x 把 FastMCP 改名为 MCPServer 等破坏性变更，迁移前锁在 1.x
     "akshare>=1.18.64",
     "nh3>=0.3.7",  # 邮件 / /view 渲染期 HTML 白名单（ammonia 绑定，见 services/notifier.md_to_safe_html）
 ]

@@ -1106,7 +1106,7 @@ wheels = [
 
 [[package]]
 name = "openinvest"
-version = "0.37.1"
+version = "0.39.3"
 source = { editable = "." }
 dependencies = [
     { name = "akshare" },
@@ -1152,7 +1152,7 @@ requires-dist = [
     { name = "feedparser", specifier = ">=6.0.10" },
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "markdown", specifier = ">=3.11" },
-    { name = "mcp", specifier = ">=1.28.1" },
+    { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "nh3", specifier = ">=0.3.7" },
     { name = "openai", specifier = ">=1.45" },
     { name = "optuna", specifier = ">=4.0" },
