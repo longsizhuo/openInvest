@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/longsizhuo/openInvest/compare/v0.39.4...v0.40.0) (2026-10-09)
+
+
+### Features
+
+* **onboarding:** new installs record the cash they enter; record_existing_position for pre-held positions ([#320](https://github.com/longsizhuo/openInvest/issues/320)) ([a5e54ba](https://github.com/longsizhuo/openInvest/commit/a5e54ba9d26aa4b208b715e9614bacf79d7de954))
+
 ## [0.39.4](https://github.com/longsizhuo/openInvest/compare/v0.39.3...v0.39.4) (2026-10-09)
 
 
