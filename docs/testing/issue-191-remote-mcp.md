@@ -1,6 +1,6 @@
 ---
 type: report
-title: Issue #191 Remote MCP 测试记录（含未合入的本地修复方案）
+title: "Issue #191 Remote MCP 测试记录（含未合入的本地修复方案）"
 tags: [mcp, remote-mcp, streamable-http, testing, issue-191]
 intent: 社区贡献者的 Remote MCP 跨机器实测与本地修复方案记录
 documents:

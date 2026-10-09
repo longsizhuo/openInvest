@@ -1,6 +1,6 @@
 ---
 type: report
-title: Issue #191 跨机器原生 MCP 客户端（Codex CLI）实测报告
+title: "Issue #191 跨机器原生 MCP 客户端（Codex CLI）实测报告"
 tags: [mcp, remote-mcp, codex-cli, testing, issue-191]
 intent: 社区贡献者用原生 MCP 客户端跨机器实测 Remote MCP 的记录
 documents:
