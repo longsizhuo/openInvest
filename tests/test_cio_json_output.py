@@ -57,6 +57,17 @@ def test_fields_garbage_degrades_not_crash():
     assert r["alloc_cny"] == 0
 
 
+def test_fields_verdict_restricted_to_enum():
+    # JSON verdict 与 regex 路径同口径：只认 5 个合法值，其余 → UNCLEAR（不再原样进邮件标题/正文）
+    base = {"confidence": 0.7, "suggested_alloc_cny": 5000}
+    for v in ("STRONG_BUY", "BUY|ACCUMULATE|HOLD|TRIM|SELL", "买入"):
+        assert parse_cio_memo("(json)", fields={**base, "verdict": v})["verdict"] == "UNCLEAR"
+    # 带空白的合法值归一后照常进 sanity/防御层（旧实现 'BUY ' 绕过快崩防御降级）
+    r = parse_cio_memo("(json)", fields={**base, "verdict": " buy "}, defense_flag_on=True)
+    assert r["verdict"] == "ACCUMULATE"
+    assert r["_defense_downgrade"] == "buy_to_accumulate"
+
+
 def test_supports_json_output_default_and_override():
     old = os.environ.pop("INVEST_FORCE_JSON_OUTPUT", None)
     try:
