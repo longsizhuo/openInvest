@@ -19,7 +19,9 @@ metadata:
 - User explicitly says "set up invest" / "initialize invest" / "帮我初始化 invest"
 - The `invest` skill's `doctor` returns `status: "needs_setup"` (memory / user_profile missing)
 - User wants a full reconfiguration (explicitly says "reset" / "重新配置"; requires `--force`)
-- v1 → v2 schema migration (the user's portfolio.md is in the old format)
+- v1 → v2 schema migration: `doctor`'s `portfolio_schema` check says `needs_migration` (an
+  install made by an older version; `status` shows cash 0). Run the exact command in that
+  check's `hint` — it backs up portfolio.md and converts it. Do **not** rerun `init` for this
 
 ## When NOT to Use
 
@@ -154,7 +156,8 @@ echo '{
 ```
 
 - `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q4 — this is what
-  gets recorded when there is no LLM key (or the parse fails).
+  gets recorded when there is no LLM key (or the parse fails). Positions are never paid out of
+  it: without a key they are added later with `buy --existing-position`.
 - `wealth_context`: optional, from step 3; omit it if the user didn't mention any.
 - `env`: every key is optional; `LLM_API_KEY` / `LLM_BASE_URL` work in place of `DEEPSEEK_*`.
 
@@ -180,7 +183,8 @@ After it finishes:
 
 ## Error handling
 
-- **DeepSeek parse timeout**: report the error to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded. Holdings can be added afterwards with the `invest` skill's `buy`, but `buy` pays for the position out of ledger cash (and refuses if that cash is short) — for positions the user **already held**, first `deposit` units × price in that currency, then `buy`, so the cash they reported stays unchanged
+- **DeepSeek parse timeout / no key**: report it to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded (`cash_recorded` in the init JSON shows what actually landed). Add the positions the user **already held** afterwards, one per call, with `run.sh buy --symbol S --units N --price P [-c CCY] --existing-position` (MCP: `buy` with `existing_position: true`) — that does not touch cash. A plain `buy` is a new purchase paid from ledger cash
+- **`"v2 write failed"`**: nothing parsed was saved (the portfolio already had data). Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
 - **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 4
 - **schema validation fail**: usually a wrong field type — check the error field in the `init` response
 - **user_profile.json already exists**: refuse to overwrite; have the user add `--force` to confirm explicitly
