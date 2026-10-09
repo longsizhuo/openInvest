@@ -259,16 +259,17 @@ def test_event_watch_survives_trigger_failure(env, monkeypatch):
     assert EventStore().get_event(claim_to_event_id("msft-x")) is not None
 
 
-def test_advisory_mcp_ingest_never_triggers_or_alerts(env, monkeypatch):
-    """顾问实例的 ingest_event 对群聊陌生人放行：入库照做，绝不触发委员会/报警、不读持仓。"""
+def test_advisory_ingest_service_never_triggers_or_alerts(env, monkeypatch):
+    """顾问实例走 service 层入库（CLI / 爬虫路径；MCP ingest_event 在顾问模式已直接拒绝）：
+    入库照做，绝不触发委员会/报警、不读持仓。"""
     trigger, alert, _ = env
     monkeypatch.setenv("INVEST_ADVISORY_MODE", "1")
     watched = MagicMock(return_value=list(WATCHED))  # 不 raise：异常会被 ingest 的兜底吞掉，测不出闸
     monkeypatch.setattr(event_trigger, "_watched_symbols", watched)
-    from openinvest.connectors import mcp_server as m
+    from openinvest.services.event_ingest import ingest_events
     monkeypatch.setattr("openinvest.services.event_normalizer.normalize",
-                        lambda items, **kw: [_ne("stranger-fed", ["AAPL"], item=items[0])])
-    out = m.ingest_event(title="t", url="https://x.co/adv")
+                        lambda items, **kw: [_ne("advisory-fed", ["AAPL"], item=items[0])])
+    out = ingest_events([{"title": "t", "url": "https://x.co/adv"}], ingested_by="cli")
     assert out["status"] == "ok" and out["ingested"] == 1
     assert out["committee_task_id"] is None
     trigger.assert_not_called()
