@@ -285,13 +285,11 @@ class PortfolioManager:
         commit-on-success：with 块内抛异常 → 整个写不会落盘（已改的 metadata 丢弃）。
         """
         with self.store.transaction("portfolio") as p:
-            # 进 with 前自动 v1→v2 fallback（让调用方直接拿到 cash + holdings）
-            _ensure_v2_inplace(p)
+            # v1 文件直接拒绝（commit 会 pop 掉 v1 字段 = 现金永久丢失）
+            _ensure_v2_inplace(p, self.store)
             yield p
             # commit 前：清理 v1 旧字段 + 标记 schema_version=2 + 校验 + 渲染 body
-            for k in ("cash_cny", "aud_cash", "ndq_shares",
-                      "ndq_avg_cost_aud_per_share",
-                      "gold_grams", "gold_avg_cost_cny_per_gram"):
+            for k in _V1_KEYS:
                 p.metadata.pop(k, None)
             p["schema_version"] = 2
             try:
@@ -605,15 +603,38 @@ def _now_iso_local() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def _ensure_v2_inplace(p) -> None:
-    """transaction 入口处确保 cash / holdings 字段已就位（v2 only）
+_V1_KEYS = ("cash_cny", "aud_cash", "ndq_shares", "ndq_avg_cost_aud_per_share",
+            "gold_grams", "gold_avg_cost_cny_per_gram")
 
-    v1 fallback 已于 2026-05-10 正式退场。
-    调用方需确保 portfolio.md 已通过 scripts/migrate_portfolio_to_holdings.py 迁移。
-    此函数保留为空实现是为了兼容 with_portfolio_tx 的调用位置，后续可彻底删除。
+
+def v1_migrate_command(store: MemoryStore) -> str:
+    """把 v1 扁平 portfolio.md 转成 v2 的确切命令（doctor 的 portfolio_schema 提示与写入拒绝共用）"""
+    import shlex
+    import sys
+    return (
+        f"INVEST_HOME={shlex.quote(str(store.root.parent))} "
+        f"{shlex.quote(sys.executable)} -m openinvest.migrate_portfolio_to_holdings"
+    )
+
+
+def _ensure_v2_inplace(p, store: MemoryStore) -> None:
+    """transaction 入口：v1 扁平 portfolio.md（#191 修复前的 init 写的）拒绝写入。
+
+    with_portfolio_tx commit 时 pop 掉 v1 字段并盖 schema_version=2——在 v1 文件上任何
+    写（deposit / buy --existing-position 不查现金所以会成功）都会把 cash_cny/aud_cash
+    永久抹掉，还让 doctor 的 portfolio_schema 检查和转换脚本都以为已是 v2。
+    转换走 openinvest.migrate_portfolio_to_holdings（先备份）。
     """
-    # v2 数据直接读取，无需任何转换
-    pass
+    try:
+        v1 = int(p.get("schema_version") or 1) < 2
+    except (TypeError, ValueError):
+        v1 = True
+    if v1 and any(k in p.metadata for k in _V1_KEYS):
+        raise ValueError(
+            "portfolio.md 还是 v1 旧格式（现金在 cash_cny/aud_cash，status 显示 0）；"
+            "直接写会丢掉这些字段，已拒绝，文件未改动。先跑 "
+            f"`{v1_migrate_command(store)}` 转成 v2（先自动备份），再重试。"
+        )
 
 
 def _guess_kind_from_symbol(symbol: str) -> str:

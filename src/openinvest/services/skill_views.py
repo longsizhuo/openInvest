@@ -374,7 +374,8 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
     """
     import json
     import os
-    import shlex
+
+    from openinvest.core.portfolio_manager import v1_migrate_command
 
     checks: List[Dict[str, Any]] = []
 
@@ -409,10 +410,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         portfolio_v1 = portfolio_doc is not None and int(portfolio_doc.get("schema_version") or 1) < 2
     except (TypeError, ValueError):
         portfolio_v1 = False
-    migrate_cmd = (
-        f"INVEST_HOME={shlex.quote(str(store.root.parent))} "
-        f"{shlex.quote(sys.executable)} -m openinvest.migrate_portfolio_to_holdings"
-    )
+    migrate_cmd = v1_migrate_command(store)
     checks.append({
         "name": "portfolio_schema",
         "status": "needs_migration" if portfolio_v1 else "ok",

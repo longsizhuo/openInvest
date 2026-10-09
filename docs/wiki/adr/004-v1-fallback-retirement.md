@@ -64,6 +64,7 @@ openInvest 在 2026-05-06 的 B7 重构中把 `portfolio.md` 从"扁平字段"�
 | 2026-05-10 | 生产数据确认 v2，v1 fallback 正式删除（本 ADR） |
 | 2026-05-10 | `tests/test_web_api.py` 的 `_seed_memory` fixture 升级为 v2 格式 |
 | 2026-05-10 | 新增 `tests/test_portfolio_manager.py`，502 行的 PM 代码终于有独立测试 |
+| 2026-10 | #191：新装 init 直到 0.39 还在写 v1 文件，空壳 `_ensure_v2_inplace()` 让写入（`deposit`、不查现金的 `buy --existing-position`）在 commit 时 pop 掉 `cash_cny` 并盖 v2 → 现金永久丢失。改为**拒写 v1 文件**（ValueError，文件不动，信息里带转换命令；`doctor` 的 `portfolio_schema` 给同一条命令） |
 
 ## 受影响用户
 
@@ -76,7 +77,7 @@ openInvest 在 2026-05-06 的 B7 重构中把 `portfolio.md` 从"扁平字段"�
 cp memory/portfolio.md memory/portfolio.md.bak
 
 # 2. 跑迁移脚本（幂等，可多次执行）
-python -m scripts.migrate_portfolio_to_holdings
+python -m openinvest.migrate_portfolio_to_holdings   # 随 wheel 发布；老路径 scripts.* 仍是 shim
 
 # 3. 验证结果
 python -m scripts.skill doctor
@@ -91,5 +92,5 @@ python -m scripts.skill doctor
 
 ## 后续
 
-- `_ensure_v2_inplace()` 函数目前留为空 `pass`，下一次清理 sprint 中彻底删除函数和调用位置
+- ~~`_ensure_v2_inplace()` 函数目前留为空 `pass`，下一次清理 sprint 中彻底删除函数和调用位置~~ 2026-10 起它是 v1 写入守卫，不能删（见时间线）
 - `with_portfolio_tx()` 退出时的 v1 字段清除逻辑可在确认无遗留用户后一并删除

@@ -181,19 +181,40 @@ def test_parse_failed_and_no_cash_next_steps(tmp_path):
     assert r["cash_recorded"] == {} and "只录了现金" not in r["next_step"]
 
 
-def test_doctor_flags_v1_portfolio_with_working_command(tmp_path):
-    # #191 修复前的 init 留下 v1 扁平 portfolio.md：status 现金恒 0，doctor 要给出能直接跑的转换命令
+def test_v1_portfolio_writes_refused_until_doctor_command_converts(tmp_path, monkeypatch):
+    # #191 修复前的 init 留下 v1 扁平 portfolio.md：status 现金恒 0。
+    # 写入（buy --existing-position 不查现金会成功）以前会在 commit 时 pop 掉 cash_cny 并盖 v2 → 现金永久丢失。
     mem = tmp_path / "memory"
     mem.mkdir()
     (mem / "user.md").write_text("---\nname: user\ntype: user\ndisplay_name: T\n---\n", encoding="utf-8")
     (mem / "strategy.md").write_text("---\nname: strategy\ntype: strategy\n---\n", encoding="utf-8")
     (mem / "portfolio.md").write_text("---\nname: portfolio\ntype: state\ncash_cny: 50000\naud_cash: 0\n---\n",
                                       encoding="utf-8")
+    v1_bytes = (mem / "portfolio.md").read_bytes()
     env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
-    out = subprocess.run([sys.executable, "-c", "from openinvest.cli import main; main()", "doctor"],
-                         capture_output=True, text=True, env=dict(env, INVEST_HOME=str(tmp_path)))
-    check = next(c for c in _json(out)["checks"] if c["name"] == "portfolio_schema")
+    env_home = dict(env, INVEST_HOME=str(tmp_path))
+
+    def cli(*argv):
+        return subprocess.run([sys.executable, "-c", "from openinvest.cli import main; main()", *argv],
+                              capture_output=True, text=True, env=env_home)
+
+    buy = ("buy", "--symbol", "510300.SS", "--units", "3000", "--price", "4.2", "--kind", "etf",
+           "--existing-position")
+    out = cli(*buy)
+    assert out.returncode == 1 and "v1" in out.stdout + out.stderr
+    import openinvest.connectors.mcp_server as m
+    monkeypatch.setattr(m, "_pm", lambda: PortfolioManager(MemoryStore(mem)))
+    assert m.buy(symbol="510300.SS", units=3000, price=4.2, kind="etf", existing_position=True)["status"] == "error"
+    assert m.deposit(amount=1, currency="CNY")["status"] == "error"
+    assert (mem / "portfolio.md").read_bytes() == v1_bytes
+
+    check = next(c for c in _json(cli("doctor"))["checks"] if c["name"] == "portfolio_schema")
     assert check["status"] == "needs_migration"
     cmd = check["hint"].split("`")[1]
+    assert cmd in out.stdout + out.stderr  # 拒绝信息给的就是 doctor 那条命令（MCP-only agent 看不到 doctor）
     assert subprocess.run(["bash", "-c", cmd], capture_output=True, env=env).returncode == 0
-    assert PortfolioManager(MemoryStore(mem)).cash_amount("CNY") == 50000.0
+    assert cli(*buy).returncode == 0
+    pm = PortfolioManager(MemoryStore(mem))
+    assert pm.cash_amount("CNY") == 50000.0
+    assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]
+
