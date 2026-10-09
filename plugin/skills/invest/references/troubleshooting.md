@@ -16,7 +16,8 @@ Try again in a few minutes, or check whether `db/market_data.db` is being update
 `prepare_committee` only works on assets in `strategy.target_assets`. If the user wants to
 analyze an untracked symbol:
 
-1. First add it to `target_assets` via CLI `run.sh buy` (when there's a real position) or
+1. First add it to `target_assets` via CLI `run.sh buy --existing-position` (a real position the user
+   already holds — this does not deduct cash; a plain `buy` would), `run.sh track_asset` (track only), or
    `POST /api/strategy/asset` — see `references/adding-assets.md`
 2. Or add it as a tracking-only holding via `POST /api/holdings` (`is_tracking_only: true`) —
    same effect, without touching strategy

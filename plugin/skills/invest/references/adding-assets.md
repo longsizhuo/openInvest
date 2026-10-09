@@ -95,8 +95,11 @@ first before passing it to the API.
 yfinance and must NOT get a `.SS` / `.SZ` suffix. Use `FUND:<6-digit code>` with `--kind fund`:
 
 ```bash
-~/.claude/skills/invest/scripts/run.sh buy --symbol FUND:123456 --units 5000 --price 2.0 -c CNY --kind fund --unit-label 份
+# 用户在用 openInvest 之前就已持有的基金：加 --existing-position 补录，不扣现金
+~/.claude/skills/invest/scripts/run.sh buy --symbol FUND:123456 --units 5000 --price 2.0 -c CNY --kind fund --unit-label 份 --existing-position
 ```
+
+(Drop `--existing-position` only for a new purchase paid from the recorded cash.)
 
 They are valued at the latest confirmed unit NAV from Eastmoney (not the intraday estimate), so
 `status` / P&L / the committee's portfolio summary all include them. Running the committee *on* a
