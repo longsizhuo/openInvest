@@ -13,8 +13,8 @@ documents:
 
 > **维护者注**：本记录的基线是 `b45409c`（openinvest 0.39.0）**加上贡献者未提交的本地修改**。
 > 下文的修复方案以及大部分实测结果（SSE 模式、130 秒模拟委员会、自动化测试数字）
-> 都针对这个本地分支，**相关代码未合入 main**。main 上的 Remote MCP 仍是
-> `json_response=True` 的纯 JSON 响应模式。
+> 都针对这个本地分支，**相关代码未合入 main**。记录时 main 上的 Remote MCP 仍是
+> `json_response=True` 的纯 JSON 响应模式；该 SSE/线程池方案后经 #325 的移植 PR 合入。
 
 日期：2026-10-09。基线：`b45409c` + 本地未提交修改，openinvest 0.39.0。
 对应 [issue #191](https://github.com/longsizhuo/openInvest/issues/191) 及维护者要求的

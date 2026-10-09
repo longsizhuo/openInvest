@@ -514,7 +514,7 @@ def buy(
 
 # 独立工具而不是 buy 的参数：老 server 会静默丢掉不认识的参数 → buy(existing_position=true)
 # 在老版本上照样扣现金。独立工具在老 server 上直接报 Unknown tool，宁可失败也不扣错钱。
-@mcp.tool(annotations=_MONEY)
+@_tool(annotations=_MONEY)
 def record_existing_position(
     symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
     units: Annotated[float, Field(description="Quantity held; must be > 0.", gt=0)],

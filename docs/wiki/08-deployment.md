@@ -403,11 +403,6 @@ handle /mcp {
 }
 ```
 
-如果只使用 Cloudflare Access、没有设置 `INVEST_API_TOKEN`，同时设置
-`INVEST_MCP_ALLOWED_HOSTS=invest.your-domain.com`；否则保留的 loopback Host
-白名单会拒绝反代传来的公网域名（421）。Access Service Token 和应用 Bearer
-token 是两层独立鉴权，组合使用时客户端必须同时发送上述三项 header。
-
 nginx 等反代需要关闭响应缓冲，让 SSE 进度和心跳及时到达客户端：
 
 ```nginx
@@ -429,6 +424,9 @@ location = /mcp {
 ```bash
 INVEST_MCP_ALLOWED_HOSTS=invest.your-domain.com
 ```
+
+Access Service Token 和应用 Bearer token 是两层独立鉴权，组合使用时客户端必须
+同时发送上文的三项 header。
 
 **与 REST 转发的关系**：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，
 仍支持但不再演进——它还覆盖 remote MCP 没有的 Coordinator 协议

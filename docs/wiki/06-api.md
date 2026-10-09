@@ -450,15 +450,17 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
   - **stdio（默认）**：MCP client 按 session spawn 子进程，无端口无 daemon
   - **streamable-HTTP（`openinvest-mcp --http`，2026-07，BETA）**：remote MCP，hub 常驻
     127.0.0.1:8766（`INVEST_MCP_HOST/PORT`），spoke agent 直连 `/mcp`；鉴权复用
-    `INVEST_API_TOKEN`（bearer，`/health` 豁免），stateless + json_response。
+    `INVEST_API_TOKEN`（bearer，`/health` 豁免），stateless + SSE（请求内推进度与心跳）。
     能力差集注记：Coordinator 协议（prepare/save_committee）与 doctor/event_check
     仍只在 REST/CLI（Decision 5/6 刻意不进 MCP），详见 wiki 08 §9
   写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
-- **18 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
+- **22 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
   strategy / history / live_prices / what_if / discipline / decisions /
-  explain_decision / record_execution / ingest_event / buy / sell / deposit /
-  withdraw / set_allocations / track_asset / untrack_asset /
-  run_committee（Direct 路径，当天已跑读缓存）
+  explain_decision / record_execution / ingest_event / buy /
+  record_existing_position / sell / deposit / withdraw / set_allocations /
+  track_asset / untrack_asset / news_sources / add_news_source /
+  remove_news_source / run_committee（Direct 路径，当天已跑读缓存）。
+  同步工具经线程池执行，慢 IO 不占事件循环
 - 刻意不把 81 个 REST 端点全暴露（撑爆 agent context）；Coordinator 委员会
   workflow 也不在这里——那是 Skill 的职责（issue #133 Decision 5/6）
 
