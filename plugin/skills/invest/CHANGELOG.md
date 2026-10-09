@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.22.0...invest-skill-v0.22.1) (2026-10-09)
+
+
+### Docs
+
+* **skill:** use FUND:&lt;code&gt; for Chinese off-exchange mutual funds ([1770975](https://github.com/longsizhuo/openInvest/commit/1770975054089f0a6a0a488d464e5dba11492c06))
+
 ## [0.22.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.21.2...invest-skill-v0.22.0) (2026-10-08)
 
 
