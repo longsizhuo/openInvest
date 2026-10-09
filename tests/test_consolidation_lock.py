@@ -40,8 +40,9 @@ def test_zombie_dead_pid_reclaimed(tmp_path):
     """持有者 PID 已死 → 视为僵尸，可重新认领。"""
     lock = _lock_file(tmp_path)
     lock.parent.mkdir(parents=True, exist_ok=True)
-    # 起一个立即退出的子进程拿它的已死 PID（比猜一个未用 PID 更可靠）
-    p = mp.Process(target=lambda: None)
+    # 起一个立即退出的子进程拿它的已死 PID（比猜一个未用 PID 更可靠）。
+    # target 必须可 pickle：spawn（macOS 默认）/ forkserver（Linux 3.14+ 默认）下 lambda 会炸
+    p = mp.Process(target=os.getpid)
     p.start()
     p.join()
     lock.write_text(str(p.pid))
