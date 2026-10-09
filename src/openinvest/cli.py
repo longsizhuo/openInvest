@@ -202,6 +202,9 @@ def main() -> None:
     p.add_argument("--kind", choices=["equity", "etf", "metal", "crypto", "bond", "fund", "other"],
                    default="equity", help="资产类型，默认 equity")
     p.add_argument("--unit-label", default="股", help="单位（股/克/oz/coin），默认 '股'")
+    p.add_argument("--existing-position", action="store_true",
+                   help="补录用系统前就持有的仓位：不扣现金（funding_source=external_funding，"
+                        "history source 带 ':existing_position'）")
     p.set_defaults(func=cmd_buy)
 
     p = sub.add_parser("sell", help="减仓（units 减，cost_avg 不变，按 holding 的 cost_currency 还现金）")

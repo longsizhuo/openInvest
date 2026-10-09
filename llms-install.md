@@ -35,6 +35,11 @@ nested under `profile` (and optional `env`), e.g.
 Without an LLM key only `current_assets` cash is recorded. A payload without the top-level
 `"profile"` object is rejected with `status: "error"` and the expected shape.
 
+Positions the user already held before onboarding are recorded with
+`uvx openinvest buy --symbol S --units N --price P [-c CCY] --existing-position`
+(MCP: `buy` with `existing_position: true`). This does not deduct cash; a plain `buy`
+is a new purchase paid from the recorded cash.
+
 Verify health:
 
 ```bash

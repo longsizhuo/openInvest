@@ -122,3 +122,39 @@ def test_init_survives_malformed_existing_portfolio(tmp_path):
     out = _run_init(tmp_path, {"profile": {"name": "T"}, "env": {}})
     assert out.returncode == 0, out.stderr
     assert _json(out)["status"] == "ok"
+
+
+_NOKEY = {"profile": {"name": "T", "holdings_description": "510300 3000股 4.2元，现金5万",
+                      "current_assets": {"cash_cny": 50000}}, "env": {}}
+
+
+def test_backfill_existing_position_cli_keeps_cash_and_marks_history(tmp_path):
+    # 用系统前就持有的仓位不是现金买入：--existing-position 不扣现金，history 可区分
+    assert _run_init(tmp_path, _NOKEY).returncode == 0
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
+    out = subprocess.run(
+        [sys.executable, "-c", "from openinvest.cli import main; main()", "buy", "--symbol", "510300.SS",
+         "--units", "3000", "--price", "4.2", "--kind", "etf", "--existing-position"],
+        capture_output=True, text=True, env=dict(env, INVEST_HOME=str(tmp_path)))
+    assert out.returncode == 0, out.stdout + out.stderr
+    store = MemoryStore(tmp_path / "memory")
+    pm = PortfolioManager(store)
+    assert pm.cash_amount("CNY") == 50000.0
+    assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]
+    last = store.read_history()[-1]
+    assert (last["action"], last["source"], last["funding_source"]) == (
+        "buy", "skill_cli:existing_position", "external_funding")
+
+
+def test_backfill_existing_position_mcp(tmp_path, monkeypatch):
+    assert _run_init(tmp_path, _NOKEY).returncode == 0
+    import openinvest.connectors.mcp_server as m
+    store = MemoryStore(tmp_path / "memory")
+    monkeypatch.setattr(m, "_pm", lambda: PortfolioManager(store))
+    out = m.buy(symbol="510300.SS", units=3000, price=4.2, kind="etf", existing_position=True)
+    assert out["funding_source"] == "external_funding", out
+    assert PortfolioManager(store).cash_amount("CNY") == 50000.0
+    assert store.read_history()[-1]["source"] == "mcp:existing_position"
+    m.buy(symbol="510300.SS", units=1, price=4.2)  # 默认仍是现金买入
+    assert PortfolioManager(store).cash_amount("CNY") == 50000.0 - 4.2
+

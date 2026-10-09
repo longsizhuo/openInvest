@@ -453,6 +453,10 @@ def buy(
     currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
+    existing_position: Annotated[bool, Field(description=(
+        "True = record a position the user already held before using openInvest "
+        "(onboarding backfill): ledger cash is NOT deducted. Default False = a new "
+        "purchase paid from ledger cash."))] = False,
 ) -> Dict[str, Any]:
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
@@ -460,7 +464,9 @@ def buy(
     openInvest never places real orders.
 
     Confirm symbol, units, and price with the user before calling; this
-    moves ledger cash.
+    moves ledger cash — unless `existing_position=True`, which records a
+    position held before onboarding without touching cash (history is
+    marked `funding_source: external_funding`, `source: mcp:existing_position`).
 
     Args:
         symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
@@ -469,6 +475,8 @@ def buy(
         currency: Currency of `price` (default "CNY").
         kind: Asset kind tag, e.g. "equity", "etf", "commodity".
         unit_label: Human display label for units (default "股", i.e. shares).
+        existing_position: True for a position already held before onboarding
+            (cash unchanged); False (default) for a new purchase.
 
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
@@ -476,7 +484,9 @@ def buy(
     _check_advisory()
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
-                         kind=kind, unit_label=unit_label, source="mcp")
+                         kind=kind, unit_label=unit_label,
+                         source="mcp:existing_position" if existing_position else "mcp",
+                         source_type="external_funding" if existing_position else "cash_deduct")
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 

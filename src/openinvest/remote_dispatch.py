@@ -197,6 +197,14 @@ def _h_withdraw(args: argparse.Namespace) -> None:
 
 
 def _h_buy(args: argparse.Namespace) -> None:
+    if getattr(args, "existing_position", False):
+        # /api/skill/buy 没有这个字段——静默转发会在 hub 上扣现金，宁可拒绝
+        _die({
+            "status": "error",
+            "error": "--existing-position 暂不支持远端模式（INVEST_API_BASE 已设置）",
+            "hint": "在 hub 机器上跑 `run.sh buy ... --existing-position`，"
+                    "或用 remote MCP 的 buy(existing_position=true)。",
+        })
     _print_response_or_die(_request("POST", "/api/skill/buy", json_body={
         "symbol": args.symbol, "units": float(args.units), "price": float(args.price),
         "currency": args.currency, "kind": args.kind, "unit_label": args.unit_label,

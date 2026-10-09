@@ -117,6 +117,17 @@ def test_buy_maps_400_to_cli_error(recorder, capfd):
     assert out["status"] == "error" and "units / price" in out["error"]
 
 
+def test_buy_existing_position_refused_not_forwarded(recorder, capfd):
+    # /api/skill/buy 不认这个字段：转发出去 hub 会扣现金，必须本地拒绝、一个请求都不发
+    with pytest.raises(SystemExit) as exc:
+        rd.maybe_dispatch_remote(Namespace(
+            cmd="buy", symbol="X", units=1, price=1, currency="CNY", kind="etf",
+            unit_label="股", existing_position=True,
+        ))
+    assert exc.value.code == 1 and recorder["calls"] == []
+    assert "existing-position" in _out_json(capfd)["error"]
+
+
 def test_deposit_routes_and_prints_cli_shape(recorder, capfd):
     payload = {"status": "ok", "currency": "CNY", "amount_deposited": 100.0,
                "new_balance": 1100.0, "cny_total": 1100.0}

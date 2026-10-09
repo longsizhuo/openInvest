@@ -538,6 +538,9 @@ INVEST_API_TOKEN=...                             # hub 开了才需要
 客户端**没有** `memory/`、不需要 DeepSeek key / Gmail 凭据。`init` 在远端
 模式下被禁用；`run_committee` 在 hub 上跑（CLI 自动轮询）；`live_prices` /
 `correlate` 仍本地跑。写操作落 hub 账本，history 记 `source: skill_remote`。
+`buy --existing-position`（补录已持有仓位、不扣现金）不走 REST 转发——`/api/skill/buy`
+没有这个字段，客户端直接报错而不是让 hub 扣现金；去 hub 上跑，或用 remote MCP 的
+`buy(existing_position=true)`。
 
 ### 推荐：Cloudflare Tunnel + Access Service Token（hub 不开公网端口）
 
