@@ -312,3 +312,37 @@ def test_init_non_dict_cash_reports_instead_of_crashing(tmp_path):
     out = _run_init(tmp_path, payload)
     assert out.returncode == 0, out.stderr
     assert "v2 write failed" in _json(out).get("holdings_parse_note", "")
+
+
+def test_force_reonboarding_updates_profile_only(tmp_path):
+    # init --force 重新 onboarding：名字/风险偏好要真写进 user.md（以前 migrate 有 run-once 闸，
+    # 改了也回 ok 但 user.md 不变），策略/跟踪/持仓/流水一律不动，也不能叫 agent 去跑会清空持仓的
+    # `migrate_profile --force`。
+    first = {"profile": {"name": "Alice", "risk_tolerance": "Conservative", "current_assets": {"cash_cny": 50000},
+                         "investment_strategy": {"target_allocation_stock": 0.5, "target_allocation_cash": 0.5,
+                                                 "max_single_invest_cny": 5000}}, "env": {}}
+    assert _run_init(tmp_path, first).returncode == 0
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
+    for argv in (["track_asset", "--symbol", "AAPL", "--max-single-invest-cny", "3000"],
+                 ["buy", "--symbol", "AAPL", "--units", "10", "--price", "150", "--kind", "equity",
+                  "--existing-position"]):
+        out = subprocess.run([sys.executable, "-c", "from openinvest.cli import main; main()", *argv],
+                             capture_output=True, text=True, env=dict(env, INVEST_HOME=str(tmp_path)))
+        assert out.returncode == 0, out.stdout + out.stderr
+    mem = tmp_path / "memory"
+    kept = {n: (mem / n).read_bytes() for n in ("strategy.md", "portfolio.md", "portfolio_history.jsonl")}
+
+    again = {"profile": {**first["profile"], "name": "Alice2", "risk_tolerance": "Aggressive",
+                         "investment_strategy": {"target_allocation_stock": 0.8, "target_allocation_cash": 0.2,
+                                                 "max_single_invest_cny": 20000}}, "env": {}}
+    r = _json(_run_init(tmp_path, again, "--force"))
+    assert "migrate_profile --force" not in r["migrate_stderr"] + r["next_step"]
+    user = MemoryStore(mem).read("user")
+    assert (user.metadata["display_name"], user.metadata["risk_tolerance"]) == ("Alice2", "Aggressive")
+    assert "**姓名**: Alice2\n- **风险偏好**: Aggressive\n" in user.body
+    assert {n: (mem / n).read_bytes() for n in kept} == kept
+
+    before = (mem / "user.md").read_bytes()
+    r = _json(_run_init(tmp_path, {"profile": {"name": "X", "risk_tolerance": "high"}, "env": {}}, "--force"))
+    assert (mem / "user.md").read_bytes() == before
+    assert "user.md unchanged" in r["profile_note"]
