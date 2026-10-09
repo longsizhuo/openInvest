@@ -123,7 +123,7 @@ superseded_by: []
 | `PUT /api/holdings/{symbol}` | HTTP PUT | SET | 覆盖 | ✅ |
 | `DELETE /api/holdings/{symbol}` | HTTP DELETE | remove | 第二次 → 404 | ✅ |
 | napcat `/deposit /withdraw /gold*` | QQ 私聊 | 累加 | 单 WS 连接内事件串行处理、无重放 | ✅（直接用户动作）|
-| `deposit_cash / withdraw_cash / buy / sell / delete_holding` | CLI / `/api/skill/*` / `/api/deposit` 等 | 累加 | 无去重键 | ⚠ 见下"未决" |
+| `deposit_cash / withdraw_cash / buy / sell / delete_holding` | CLI / MCP（含 `record_existing_position`）/ `/api/skill/*` / `/api/deposit` 等 | 累加 | 无去重键 | ⚠ 见下"未决" |
 | `db.trades_db.record_trade` | `/api/trades/record` 重试 | INSERT | 无去重键 | ⚠ agent 重试产生重复 *planned* 行，但每行各执行一次（apply 端幂等已守）|
 
 ## 未决（systemic，需用户拍板，不在本 PR 范围）

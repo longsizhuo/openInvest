@@ -117,8 +117,8 @@ def main(force: bool = False):
 
     # --- 3. portfolio.md  当前持仓 ---
     # B7: 不再硬编码 NDQ.AX 持仓行——让 body 只列实际有数据的字段，
-    # fork 用户填 0 就不在 body 里出现"NDQ.AX 持仓 0 股"误导（下一步会被
-    # migrate_portfolio_to_holdings.py 转成 v2 cash dict + holdings list）。
+    # fork 用户填 0 就不在 body 里出现"NDQ.AX 持仓 0 股"误导（写完立刻由
+    # migrate_portfolio_to_holdings 转成 v2 cash dict + holdings list）。
     assets = profile.get("current_assets", {})
     portfolio_data = {
         "cash_cny": assets.get("cash_cny", 0.0),
@@ -138,6 +138,9 @@ def main(force: bool = False):
     body_lines.append("通过 GUI / NapCat 命令调整，不要手动编辑 frontmatter。")
     portfolio_body = "\n".join(body_lines) + "\n"
     store.write("portfolio", "state", portfolio_data, portfolio_body)
+    # PortfolioManager 只读 v2 cash{}（ADR-004）——同一步转成 v2，否则新装用户 status 现金=0（#191）
+    from openinvest.migrate_portfolio_to_holdings import migrate as _to_v2
+    _to_v2(store)
     print(f"✓ memory/portfolio.md 已写入")
 
     # --- 4. portfolio_history.jsonl ---

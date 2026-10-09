@@ -380,7 +380,7 @@ hub，读写都走 HTTP——**锁仍是 hub 单机 fcntl，零分布式复杂�
 
 hub 常驻 `openinvest-mcp --http`（streamable-HTTP，绑 127.0.0.1:8766，
 `systemd/invest-mcp.service`），spoke 机器的 **agent 直连 MCP**，不再经
-CLI→REST 转发。21 个工具（读/写/委员会 Direct）全量可用，鉴权复用同一
+CLI→REST 转发。22 个工具（读/写/委员会 Direct）全量可用，鉴权复用同一
 `INVEST_API_TOKEN`（bearer，`/health` 豁免）：
 
 ```bash
@@ -450,7 +450,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
 | `status` / `strategy` / `history` / `discipline` / `decisions` | ✅ | ❌ 不可用 |
-| `buy` / `sell` | ✅ 记账 | ❌ 不可用 |
+| `buy` / `sell` / `record_existing_position` | ✅ 记账 | ❌ 不可用 |
 | `deposit` / `withdraw` | ✅ 记账 | ❌ 不可用 |
 | `set_allocations` | ✅ | ❌ 不可用 |
 | `track_asset` / `untrack_asset` | ✅ | ❌ 不可用 |
@@ -538,6 +538,9 @@ INVEST_API_TOKEN=...                             # hub 开了才需要
 客户端**没有** `memory/`、不需要 DeepSeek key / Gmail 凭据。`init` 在远端
 模式下被禁用；`run_committee` 在 hub 上跑（CLI 自动轮询）；`live_prices` /
 `correlate` 仍本地跑。写操作落 hub 账本，history 记 `source: skill_remote`。
+`buy --existing-position`（补录已持有仓位、不扣现金）不走 REST 转发——`/api/skill/buy`
+没有这个字段，客户端直接报错而不是让 hub 扣现金；去 hub 上跑，或用 remote MCP 的
+`record_existing_position` 工具（hub 版本没有这个工具时回 `Unknown tool`，不会扣现金）。
 
 ### 推荐：Cloudflare Tunnel + Access Service Token（hub 不开公网端口）
 

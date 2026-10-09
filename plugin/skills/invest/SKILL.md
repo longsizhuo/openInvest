@@ -96,6 +96,15 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
                                                         for legacy usage)
    "should I buy/sell X / analyze X / 该不该买卖X"    → committee protocol ↓
    "track AAPL / I want to watch TSLA / 跟踪苹果"     → see references/adding-assets.md
+   "I already held 3000 X before using this /
+    补录我原来就有的持仓"                              → run.sh status first — never re-add a
+                                                        symbol it lists (double count); else
+                                                        run.sh buy ... --existing-position
+                                                        (MCP tool: record_existing_position;
+                                                        `Unknown tool` = old server, do NOT
+                                                        fall back to buy) — records it WITHOUT
+                                                        deducting cash; a plain `buy` is a new
+                                                        purchase paid from ledger cash
 
 3. Run the committee per your path:
    - Coordinator → read references/committee-protocol.md (spawn 4 subagents)
@@ -204,6 +213,7 @@ same shape as local**, decision tree applies as usual):
 | `run_committee` | Runs on the **hub** (DeepSeek key is on the hub); the CLI polls automatically until done; same-day cache uses the hub's date semantics |
 | `prepare/save_committee` | Via hub RPC — the Coordinator protocol (spawn 4 subagents) is **completely unchanged** |
 | `buy/sell/deposit/...` write ops | Land in the hub ledger (history `source: skill_remote`) |
+| `buy --existing-position` | **Refused** (the REST endpoint can't carry it, and forwarding would deduct hub cash) — run it on the hub, or use the remote MCP tool `record_existing_position` |
 | `event_check` | Forwards the hub's manual scan; `--live` / `--recall` disabled (hub cron already covers them) |
 
 **Discipline**: in remote mode this machine has no `memory/`, so "reading/writing memory

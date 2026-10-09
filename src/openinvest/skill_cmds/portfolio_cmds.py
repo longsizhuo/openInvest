@@ -82,15 +82,21 @@ def cmd_buy(args: argparse.Namespace) -> None:
         skill buy --symbol 510300.SS --units 1000 --price 4.2 --currency CNY --kind etf
         skill buy --symbol AAPL --units 10 --price 175.5 --currency USD --kind equity
         skill buy --symbol GC=F --units 5 --price 700 --currency CNY --kind metal --unit-label 克
+        skill buy --symbol 510300.SS --units 3000 --price 4.2 --kind etf --existing-position
+
+    --existing-position：用户用系统前就持有的仓位（onboarding 补录）不是一笔现金买入——
+    走已有的 external_funding（不扣现金），history source 标 ':existing_position' 以便区分。
 
     写逻辑在 core/portfolio_manager.py:PortfolioManager.buy（与 /api/skill/buy 共享）
     """
     pm = _resolve_pm()
+    existing = bool(getattr(args, "existing_position", False))
     try:
         out = pm.buy(
             args.symbol, float(args.units), float(args.price),
             currency=args.currency, kind=args.kind, unit_label=args.unit_label,
-            source="skill_cli",
+            source="skill_cli:existing_position" if existing else "skill_cli",
+            source_type="external_funding" if existing else "cash_deduct",
         )
     except ValueError as e:
         _print_json({"status": "error", "error": str(e)})

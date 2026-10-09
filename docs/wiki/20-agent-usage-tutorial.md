@@ -48,6 +48,13 @@ claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 收入、当前持仓、可选 DEEPSEEK_API_KEY）写入配置。持仓多的话直接甩券商截图，
 agent 自己 OCR 后走 `import`。
 
+没配 key（持仓只录了现金）或解析失败时，**用系统前就持有的仓位**逐只补录：
+`buy --existing-position`（MCP：独立工具 `record_existing_position`）——不扣现金，
+history 记 `funding_source: external_funding`、`source: skill_cli:existing_position`
+（MCP 是 `mcp:existing_position`）。普通 `buy` 是新买入，会从现金里扣。先跑 `status`，
+它已列出的 symbol 不要再补（会重复计数）。老版本 MCP server 没有这个工具，会回
+`Unknown tool: record_existing_position`——别退回用 `buy`（会扣现金），改用 CLI 或升级。
+
 ## 3. 日常使用（自然语言即可，agent 自己选工具）
 
 | 你说 | agent 调 |
@@ -59,6 +66,7 @@ agent 自己 OCR 后走 `import`。
 | "为什么今天是 HOLD" | `explain_decision`（完整 4 角色辩论 transcript + CIO memo） |
 | "委员会都拦了我什么" | `discipline` |
 | "刚买了 500 股" | `buy` / `record_trade` |
+| "这 3000 股我早就有了" | `status` 里没有才补：`buy --existing-position`（MCP `record_existing_position`，不扣现金） |
 
 ## 4. 决策闭环（Decision Accounting）
 

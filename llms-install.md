@@ -23,7 +23,25 @@ INVEST_HOME=~/openInvest uvx openinvest init
 ```
 
 Agents can pipe answers instead: `uvx openinvest init --from-stdin` with a JSON object
-`{"name", "risk_tolerance", "monthly_income_cny", "monthly_expenses_cny", "current_assets": {"cash_cny"}}`.
+nested under `profile` (and optional `env`), e.g.
+
+```json
+{"profile": {"name": "...", "risk_tolerance": "Balanced",
+             "holdings_description": "<user's own words>",
+             "current_assets": {"cash_cny": 0, "aud_cash": 0}},
+ "env": {"LLM_API_KEY": ""}}
+```
+
+Without an LLM key only `current_assets` cash is recorded. A payload without the top-level
+`"profile"` object is rejected with `status: "error"` and the expected shape.
+
+Positions the user already held before onboarding, and that `uvx openinvest status` does not
+list yet, are recorded with
+`uvx openinvest buy --symbol S --units N --price P [-c CCY] --existing-position`
+(MCP: the `record_existing_position` tool). This does not deduct cash; a plain `buy`
+is a new purchase paid from the recorded cash. Never re-add a symbol `status` already lists
+(it would be counted twice). An MCP server older than that tool answers
+`Unknown tool: record_existing_position` — use the CLI form or upgrade; do not fall back to `buy`.
 
 Verify health:
 

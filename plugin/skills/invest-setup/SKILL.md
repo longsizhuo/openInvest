@@ -19,7 +19,9 @@ metadata:
 - User explicitly says "set up invest" / "initialize invest" / "帮我初始化 invest"
 - The `invest` skill's `doctor` returns `status: "needs_setup"` (memory / user_profile missing)
 - User wants a full reconfiguration (explicitly says "reset" / "重新配置"; requires `--force`)
-- v1 → v2 schema migration (the user's portfolio.md is in the old format)
+- v1 → v2 schema migration: `doctor`'s `portfolio_schema` check says `needs_migration` (an
+  install made by an older version; `status` shows cash 0). Run the exact command in that
+  check's `hint` — it backs up portfolio.md and converts it. Do **not** rerun `init` for this
 
 ## When NOT to Use
 
@@ -95,8 +97,9 @@ Returns `status: "needs_setup"` → go to step 2.
 > "Nothing at all, just 10k CNY"
 
 When the backend `cmd_init` sees a `holdings_description` field it calls DeepSeek to
-parse it into the v2 schema. **Without a DeepSeek key it falls back to v1 fields**
-(only cash_cny / aud_cash get written into the portfolio) —
+parse it into the v2 schema. **Without a DeepSeek key it falls back to
+`profile.current_assets`** (only `cash_cny` / `aud_cash` get written into the portfolio) —
+so always copy the cash amounts the user mentioned into `current_assets` too, and
 **tell the user about this**.
 
 Boundary rules to tell the user (not enforced):
@@ -128,27 +131,44 @@ claim 7 (WealthContextOfficer) for details.
 
 ### 4. Assemble the payload + run init
 
+The payload **must** be nested as `{"profile": {...}, "env": {...}}` — a flat object
+(no top-level `"profile"`) is rejected with `status: "error"` and an `expected_shape` field.
+Fill it with the user's real answers (the numbers below are placeholders):
+
 ```bash
 echo '{
-  "display_name": "...",
-  "risk_tolerance": "Balanced",
-  "monthly_income_cny": 30000,
-  "monthly_expense_cny": 15000,
-  "exchange_buffer_cny": 10000,
-  "holdings_description": "<the user's exact words from Q4>",
-  "wealth_context": { ... },   # optional
-  "deepseek_api_key": "...",   # optional
-  "gmail_app_password": "..."  # optional
+  "profile": {
+    "name": "<Q1>",
+    "risk_tolerance": "<Q2: Conservative | Balanced | Aggressive>",
+    "monthly_income_cny": 0,
+    "monthly_expenses_cny": 0,
+    "exchange_buffer_cny": 0,
+    "holdings_description": "<the user's exact words from Q4>",
+    "current_assets": {"cash_cny": 0, "aud_cash": 0},
+    "wealth_context": {}
+  },
+  "env": {
+    "DEEPSEEK_API_KEY": "<Q5 key, or empty string>",
+    "EMAIL_SENDER": "<Gmail address, or empty string>",
+    "EMAIL_PASSWORD": "<Q5 Gmail App Password, or empty string>"
+  }
 }' | ~/.claude/skills/invest-setup/scripts/run.sh init --from-stdin
 ```
+
+- `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q4 — this is what
+  gets recorded when there is no LLM key (or the parse fails) on a fresh install. Positions are
+  never paid out of it: without a key they are added later with `buy --existing-position`.
+- `wealth_context`: optional, from step 3; omit it if the user didn't mention any.
+- `env`: every key is optional; `LLM_API_KEY` / `LLM_BASE_URL` work in place of `DEEPSEEK_*`.
 
 Returns JSON:
 ```json
 {
   "status": "ok",
+  "completion": "completed_full | completed_partial",
   "holdings_parse_note": "...",  // natural-language parse result, **show it to the user**
-  "memory_root": "/path/...",
-  "next_step": "run status via the invest skill to view holdings"
+  "parsed_holdings_for_user_review": { ... },  // present when the LLM parsed holdings
+  "next_step": "..."
 }
 ```
 
@@ -163,7 +183,9 @@ After it finishes:
 
 ## Error handling
 
-- **DeepSeek parse timeout**: report the error to the user and have them re-enter using v1 fields (aud / cny / ndq_units / gold_grams)
+- **`"existing portfolio left unchanged"` / `"v2 write failed"`** (check first; it wins over the item below): the portfolio already had holdings or trades, so this run wrote **nothing** — neither the `current_assets` cash nor any holding. Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
+- **DeepSeek parse timeout / no key** on a fresh install: report it to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded (`cash_recorded` in the init JSON shows what this run wrote). Add the positions the user **already held** afterwards, one per call, with `run.sh buy --symbol S --units N --price P [-c CCY] --existing-position` (MCP: the `record_existing_position` tool; an older MCP server answers `Unknown tool` — don't fall back to `buy`) — that does not touch cash. Run `status` first and skip any symbol it already lists. A plain `buy` is a new purchase paid from ledger cash
+- **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 4
 - **schema validation fail**: usually a wrong field type — check the error field in the `init` response
 - **user_profile.json already exists**: refuse to overwrite; have the user add `--force` to confirm explicitly
 

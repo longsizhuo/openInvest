@@ -33,3 +33,12 @@ def _isolate_invest_env(monkeypatch):
     reset_config()
     yield
     reset_config()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_memory_root(tmp_path, monkeypatch):
+    """MemoryStore() 默认目录指到每个测试自己的 tmp（2026-05-10 事故类：测试调 cmd_init 时
+    只 patch 了 ROOT，MemoryStore() 仍落在 clone 的 memory/，把 fixture 写进真实 portfolio.md）。
+    需要特定目录的测试照常在 test body 里 patch MEMORY_ROOT（晚于本 fixture，不冲突）。"""
+    import openinvest.core.memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "_memory_root")

@@ -49,6 +49,9 @@ RSI/MA120/MA250/regime 全 N/A、`REGIME=unknown`（510500.SS / SPY 复现）。
    - `cash_deduct`（默认）：扣 portfolio cash，现有行为不变；
    - `external_funding`：外部新钱建仓，**portfolio cash 不动**。`history` 记 `funding_source` 审计字段。
    - 由此明确 **portfolio cash 语义 = 抄底子弹池**：只被手动抄底 / 委员会加仓动用，不被日定投消耗。
+   - 2026-10 复用：onboarding 补录"用系统前就持有的仓位"同样不是现金买入，CLI
+     `buy --existing-position` / MCP `record_existing_position` 走 `external_funding`，
+     history `source` 带 `:existing_position` 后缀（与日定投的 `dca_daily` 区分）。
 
 2. **`DCAConfig` + `jobs/dca_daily`**：
    - 配置 `dca.auto_dca_enabled` / `auto_dca_amount_cny` / `auto_dca_symbols`，dataclass 默认**禁用**（安全模式）；

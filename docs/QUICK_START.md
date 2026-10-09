@@ -313,7 +313,8 @@ CLI 每次进程启动重读 `.env`，一般即时生效；常驻的 `openinvest
 ### 5. CommSec preview 拿到 0 条但邮箱里明明有
 
 CommSec 邮件扫描窗口有限（最近 180 天）。更早的成交用 `uvx openinvest buy` /
-`record_execution` 手动补账。
+`record_execution` 手动补账。onboarding 前就持有的仓位（录入的现金里已经不含它的成本）加
+`--existing-position`，不再扣现金。
 
 ### 6. 想从演示数据回到干净状态
 
