@@ -176,8 +176,14 @@ skip `holdings_description` and pass `holdings_v2` directly:
 
 ## Re-onboarding
 
-`run.sh init --force` overwrites the existing `user_profile.json`. Use it when the user wants to
-start over. (It does not touch `.env` — that file is merge-written.) It rewrites portfolio.md only
+`run.sh init --force` overwrites the existing `user_profile.json` and updates the **name and
+risk tolerance** in `memory/user.md` (other user.md fields are kept). `profile_note` says what
+happened: `"user.md updated: ..."`, or `"user.md unchanged: ..."` when the value was rejected (risk
+tolerance must be `Conservative` / `Balanced` / `Aggressive`) — tell the user either way. It does
+**not** change strategy.md: allocations go through `set_allocations`, caps and tracked assets through
+`track_asset` / `untrack_asset`. (It does not touch `.env` either — that file is merge-written.)
+Never run `python -m openinvest.migrate_profile --force` on an existing install: it replaces the
+portfolio with the old `current_assets` cash and empties the tracked assets. It rewrites portfolio.md only
 while that is still the cash-only result of a previous init (no holdings, no trades recorded),
 and backs up the old file to `portfolio.md.bak.<timestamp>` first. Once holdings or any
 buy/sell/deposit exist, the portfolio is kept exactly as it is — the new `current_assets` cash is
@@ -191,7 +197,7 @@ may not skip it, and you may not bury it in `next_step` and wait for the user to
 
 | `holdings_parse_note` value (contains these keywords) | What the agent must say to the user (verbatim script — do not alter the key points) |
 |---|---|
-| `"existing portfolio left unchanged"` or `"v2 write failed"` (**check first** — when present, ignore the rows below) | "I didn't change anything this time — your portfolio already has data, so I left it as it was (neither the cash nor the holdings were updated)." Then run `run.sh status`. Positions already listed there must **not** be added again (another buy would count them twice). Only for positions missing from `status`: "I can add the ones that are missing — that doesn't touch your cash." (then `buy --existing-position` per missing position). Do **not** read `parsed_holdings_for_user_review` back as if it were recorded |
+| `"existing portfolio left unchanged"` or `"v2 write failed"` (**check first** — when present, ignore the rows below) | "I didn't change your portfolio this time — it already has data, so I left it as it was (neither the cash nor the holdings were updated)." Then run `run.sh status`. Positions already listed there must **not** be added again (another buy would count them twice). Only for positions missing from `status`: "I can add the ones that are missing — that doesn't touch your cash." (then `buy --existing-position` per missing position). Do **not** read `parsed_holdings_for_user_review` back as if it were recorded |
 | `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), you need a free DeepSeek API key — 30 seconds to register at platform.deepseek.com. Want to set that up now?" If `cash_recorded` is `{}`, replace "only the cash was captured" with "nothing was captured yet" and ask how much cash they have. Without a key, on a fresh install: add the positions with `buy --existing-position`, but only those `run.sh status` doesn't already list |
 | `"LLM parse failed"` | "Something went wrong while parsing your holdings (a temporary DeepSeek outage or a network timeout), so only the cash portion was recorded. You can wait a bit and rerun `run.sh init --force`, or I can add the positions you already hold one by one now — that doesn't touch your cash." (fresh install: run `run.sh status` first, then `buy --existing-position` per position it doesn't list) |
 | `"parsed via LLM"` with `user_review_required: true` | Read out each holding in `parsed_holdings_for_user_review` for the user to confirm, e.g.: "My understanding is you hold: 3000 units of A at 4.2 yuan, and 50 grams of gold B at 750 avg cost. Is that right?" |
