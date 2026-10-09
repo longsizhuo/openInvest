@@ -95,8 +95,9 @@ Returns `status: "needs_setup"` → go to step 2.
 > "Nothing at all, just 10k CNY"
 
 When the backend `cmd_init` sees a `holdings_description` field it calls DeepSeek to
-parse it into the v2 schema. **Without a DeepSeek key it falls back to v1 fields**
-(only cash_cny / aud_cash get written into the portfolio) —
+parse it into the v2 schema. **Without a DeepSeek key it falls back to
+`profile.current_assets`** (only `cash_cny` / `aud_cash` get written into the portfolio) —
+so always copy the cash amounts the user mentioned into `current_assets` too, and
 **tell the user about this**.
 
 Boundary rules to tell the user (not enforced):
@@ -128,27 +129,43 @@ claim 7 (WealthContextOfficer) for details.
 
 ### 4. Assemble the payload + run init
 
+The payload **must** be nested as `{"profile": {...}, "env": {...}}` — a flat object
+(no top-level `"profile"`) is rejected with `status: "error"` and an `expected_shape` field.
+Fill it with the user's real answers (the numbers below are placeholders):
+
 ```bash
 echo '{
-  "display_name": "...",
-  "risk_tolerance": "Balanced",
-  "monthly_income_cny": 30000,
-  "monthly_expense_cny": 15000,
-  "exchange_buffer_cny": 10000,
-  "holdings_description": "<the user's exact words from Q4>",
-  "wealth_context": { ... },   # optional
-  "deepseek_api_key": "...",   # optional
-  "gmail_app_password": "..."  # optional
+  "profile": {
+    "name": "<Q1>",
+    "risk_tolerance": "<Q2: Conservative | Balanced | Aggressive>",
+    "monthly_income_cny": 0,
+    "monthly_expenses_cny": 0,
+    "exchange_buffer_cny": 0,
+    "holdings_description": "<the user's exact words from Q4>",
+    "current_assets": {"cash_cny": 0, "aud_cash": 0},
+    "wealth_context": {}
+  },
+  "env": {
+    "DEEPSEEK_API_KEY": "<Q5 key, or empty string>",
+    "EMAIL_SENDER": "<Gmail address, or empty string>",
+    "EMAIL_PASSWORD": "<Q5 Gmail App Password, or empty string>"
+  }
 }' | ~/.claude/skills/invest-setup/scripts/run.sh init --from-stdin
 ```
+
+- `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q4 — this is what
+  gets recorded when there is no LLM key (or the parse fails).
+- `wealth_context`: optional, from step 3; omit it if the user didn't mention any.
+- `env`: every key is optional; `LLM_API_KEY` / `LLM_BASE_URL` work in place of `DEEPSEEK_*`.
 
 Returns JSON:
 ```json
 {
   "status": "ok",
+  "completion": "completed_full | completed_partial",
   "holdings_parse_note": "...",  // natural-language parse result, **show it to the user**
-  "memory_root": "/path/...",
-  "next_step": "run status via the invest skill to view holdings"
+  "parsed_holdings_for_user_review": { ... },  // present when the LLM parsed holdings
+  "next_step": "..."
 }
 ```
 
@@ -163,7 +180,8 @@ After it finishes:
 
 ## Error handling
 
-- **DeepSeek parse timeout**: report the error to the user and have them re-enter using v1 fields (aud / cny / ndq_units / gold_grams)
+- **DeepSeek parse timeout**: report the error to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded. Holdings can be added afterwards with the `invest` skill's `buy`, but `buy` pays for the position out of ledger cash (and refuses if that cash is short) — for positions the user **already held**, first `deposit` units × price in that currency, then `buy`, so the cash they reported stays unchanged
+- **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 4
 - **schema validation fail**: usually a wrong field type — check the error field in the `init` response
 - **user_profile.json already exists**: refuse to overwrite; have the user add `--force` to confirm explicitly
 
