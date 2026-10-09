@@ -156,8 +156,8 @@ echo '{
 ```
 
 - `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q4 — this is what
-  gets recorded when there is no LLM key (or the parse fails). Positions are never paid out of
-  it: without a key they are added later with `buy --existing-position`.
+  gets recorded when there is no LLM key (or the parse fails) on a fresh install. Positions are
+  never paid out of it: without a key they are added later with `buy --existing-position`.
 - `wealth_context`: optional, from step 3; omit it if the user didn't mention any.
 - `env`: every key is optional; `LLM_API_KEY` / `LLM_BASE_URL` work in place of `DEEPSEEK_*`.
 
@@ -183,8 +183,8 @@ After it finishes:
 
 ## Error handling
 
-- **DeepSeek parse timeout / no key**: report it to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded (`cash_recorded` in the init JSON shows what actually landed). Add the positions the user **already held** afterwards, one per call, with `run.sh buy --symbol S --units N --price P [-c CCY] --existing-position` (MCP: `buy` with `existing_position: true`) — that does not touch cash. A plain `buy` is a new purchase paid from ledger cash
-- **`"v2 write failed"`**: nothing parsed was saved (the portfolio already had data). Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
+- **`"existing portfolio left unchanged"` / `"v2 write failed"`** (check first; it wins over the item below): the portfolio already had holdings or trades, so this run wrote **nothing** — neither the `current_assets` cash nor any holding. Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
+- **DeepSeek parse timeout / no key** on a fresh install: report it to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded (`cash_recorded` in the init JSON shows what this run wrote). Add the positions the user **already held** afterwards, one per call, with `run.sh buy --symbol S --units N --price P [-c CCY] --existing-position` (MCP: the `record_existing_position` tool; an older MCP server answers `Unknown tool` — don't fall back to `buy`) — that does not touch cash. Run `status` first and skip any symbol it already lists. A plain `buy` is a new purchase paid from ledger cash
 - **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 4
 - **schema validation fail**: usually a wrong field type — check the error field in the `init` response
 - **user_profile.json already exists**: refuse to overwrite; have the user add `--force` to confirm explicitly
