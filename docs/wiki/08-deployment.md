@@ -434,6 +434,7 @@ Access Service Token 和应用 Bearer token 是两层独立鉴权，组合使用
 remote MCP。HTTP 使用 stateless SSE：`run_committee` 在同一请求中返回最终结果，
 期间发送 SDK 心跳，并在客户端提供 progress token 时推送阶段进度。同步工具的
 阻塞 IO 在线程池执行，慢查询不会占住事件循环、阻塞其他客户端或心跳。
+自写脚本直连 `/mcp` 时，POST 的 `Accept` 头必须同时列出 `application/json` 和 `text/event-stream`，只写 `application/json` 会得到 406（官方 SDK、Claude Code、Codex 都已这样发）。
 
 已知限制：心跳不能延长客户端设置的总调用期限，也不能保证所有代理配置都允许
 长请求；仍需按真实部署验证 Cloudflare/Access 链路。Cloudflare 的实际限额以
