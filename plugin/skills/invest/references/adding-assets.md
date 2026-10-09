@@ -1,7 +1,7 @@
 # Adding a new asset (read when the user wants to track AAPL / TSLA / 005827 etc.)
 
-The default onboarding configures only two assets (NDQ.AX + GC=F). The v2 schema supports any
-yfinance symbol. Three ways to add one, ordered by preference:
+Onboarding only records the cash and holdings the user lists; there are no default assets. The
+v2 schema supports any yfinance symbol. Three ways to add one, ordered by preference:
 
 ## Method 1: `track_asset` (+ record the position if the ledger doesn't have it yet)
 
