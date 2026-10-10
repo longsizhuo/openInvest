@@ -164,3 +164,66 @@ def test_benchmark_fund_series_uses_shared_fetcher(monkeypatch):
     }
     monkeypatch.setattr(benchmarks, "fetch_fund_nav_history", lambda code: None)
     assert benchmarks._fetch_eastmoney_fund("123456", "2026-01-01", "2026-12-31") == {}
+
+
+def _pingzhong(trend):
+    return _Response(text=f"var Data_netWorthTrend = {json.dumps(trend)};var x = 1;")
+
+
+def _ms(day):
+    return int(datetime(2026, 1, day, tzinfo=CN_TZ).timestamp() * 1000)
+
+
+def test_fetch_fund_nav_history_adjusted_removes_dividend_gap(monkeypatch):
+    """分红日单位净值从 2.0 掉到 1.8（除息），真实日收益 +1%：前复权后不能是 -10% 的假暴跌，
+    最新一天必须等于真实单位净值。"""
+    trend = [
+        {"x": _ms(5), "y": 1.0, "equityReturn": 0, "unitMoney": ""},
+        {"x": _ms(6), "y": 2.0, "equityReturn": 100, "unitMoney": ""},
+        {"x": _ms(7), "y": 1.8, "equityReturn": 1.0, "unitMoney": "分红：每10份派现金2.2000元"},
+        {"x": _ms(8), "y": 1.89, "equityReturn": 5.0, "unitMoney": ""},
+    ]
+    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _pingzhong(trend))
+    raw = emf.fetch_fund_nav_history("FUND:123456")
+    assert [v for _, v in raw] == [1.0, 2.0, 1.8, 1.89]          # 默认口径不变
+
+    adj = emf.fetch_fund_nav_history("FUND:123456", adjusted=True)
+    assert [d for d, _ in adj] == [d for d, _ in raw]
+    v = [x for _, x in adj]
+    assert v[-1] == 1.89
+    assert v[3] / v[2] == pytest.approx(1.05)                     # 平日用净值比
+    assert v[2] / v[1] == pytest.approx(1.01)                     # 分红日用 equityReturn
+    assert v[1] / v[0] == pytest.approx(2.0)
+
+
+def test_get_history_data_fund_uses_eastmoney_not_yfinance(monkeypatch, tmp_path):
+    """FUND: 不走 yfinance：东方财富前复权净值入库；TTL 内不重拉；拉取失败用库里已有的并标 stale。"""
+    from openinvest.db import market_store
+    import openinvest.utils.exchange_fee as ef
+
+    monkeypatch.setattr(market_store, "DB_PATH", str(tmp_path / "market.db"))
+    monkeypatch.setattr(ef, "_STORE", market_store.MarketStore())
+    monkeypatch.setattr(ef, "_FUND_REFRESHED", {})
+    monkeypatch.setattr(ef.yf, "Ticker", lambda s: pytest.fail("yfinance must not be called"))
+    calls = {"n": 0}
+
+    def fake_history(symbol, adjusted=False):
+        calls["n"] += 1
+        assert adjusted is True
+        return [("2026-01-05", 1.0), ("2026-01-06", 1.1), ("2026-01-07", 1.2)]
+
+    monkeypatch.setattr(ef, "fetch_fund_nav_history", fake_history)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(ef.time, "monotonic", lambda: clock["t"])
+
+    df = ef.get_history_data("fund:123456", "max")
+    assert list(df["Close"]) == [1.0, 1.1, 1.2]
+    assert df.attrs["yf_fetch_failed"] is False
+    ef.get_history_data("FUND:123456", "max")
+    assert calls["n"] == 1                                        # TTL 内命中库
+
+    clock["t"] += ef._FUND_REFRESH_TTL
+    monkeypatch.setattr(ef, "fetch_fund_nav_history", lambda s, adjusted=False: None)
+    df = ef.get_history_data("FUND:123456", "max", as_of_date="2026-01-06")
+    assert list(df["Close"]) == [1.0, 1.1]                        # 回测截断照常生效（含当日）
+    assert df.attrs["yf_fetch_failed"] is True

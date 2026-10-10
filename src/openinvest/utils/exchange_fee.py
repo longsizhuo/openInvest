@@ -1,4 +1,5 @@
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from openinvest.db.market_store import MarketStore
+from openinvest.utils.eastmoney_fund import fetch_fund_nav_history
 
 # 纯计算核已迁 calc 层（ADR-026）——导回保持历史导出面；本文件只剩 IO shell。
 # monkeypatch 计算逻辑请钉 openinvest.calc.{transaction_costs,timeframe_analysis}。
@@ -68,6 +70,10 @@ _ALL_ROWS = 100000
 # symbol → 今天已为「今天这根缺 H/L」补刷过的日期。每进程每 symbol 每天最多补一次：
 # yfinance 本就给不出 H/L 的 bar（FX 周末、盘中半成型）不会每次调用都重拉。
 _OHLCV_GAP_TRIED: dict[str, str] = {}
+# 场外基金 symbol → 上次成功拉东方财富净值历史的 monotonic 时刻。净值一天只更新一次，
+# 每次全量（几百 KB）覆盖写库：常驻进程（MCP / scheduler）30 分钟内不重拉。
+_FUND_REFRESHED: dict[str, float] = {}
+_FUND_REFRESH_TTL = 30 * 60
 
 
 def _nan_to_none(v):
@@ -91,7 +97,8 @@ def get_history_data(
     """拉行情历史数据。
 
     Args:
-        symbol: yfinance ticker（如 NDQ.AX / GC=F / AAPL）
+        symbol: yfinance ticker（如 NDQ.AX / GC=F / AAPL）；场外公募基金用
+            ``FUND:<六位代码>``，走东方财富前复权净值（见 _get_fund_history）
         period: yfinance period（1d/5d/1mo/3mo/6mo/1y/2y/5y/10y/ytd/max），**真截断**：
             d=最近 N 根 bar，mo/y=相对最后一根 bar（as_of_date 时为截断后的最后一根）
             的日历回看。2026-10 前此参数被忽略、一律返回 ~730 行（≈3 年）→ "1mo MoM"
@@ -105,6 +112,8 @@ def get_history_data(
             backtest 调 decision_date=2024-05-01 时若不过滤，LLM 会"看到未来"。
     """
     symbol = symbol.upper()
+    if symbol.startswith("FUND:"):
+        return _get_fund_history(symbol, period, as_of_date)
 
     # 1. 从数据库获取**全历史**（get_history_df 默认 tail(730) 在 cutoff 之前截，
     #    as_of 回测日窗口会被锚死在最近 730 行；period 截断统一放到最后）
@@ -219,6 +228,33 @@ def get_history_data(
         return out
 
     return pd.DataFrame()
+
+
+def _get_fund_history(symbol: str, period: str, as_of_date: Optional[str]) -> pd.DataFrame:
+    """场外基金（``FUND:<六位代码>``）：yfinance 没有，改拉东方财富前复权净值。
+
+    全量覆盖写库而不是增量：前复权口径下每次分红都会改写全部历史值。只有收盘价，
+    没有 H/L/Volume——ATR 走 |ΔClose| 退化口径，RVOL 为空。回测（as_of_date）同样
+    拉全量：入库后由 _apply_cutoff 截断，不会穿越。拉取失败就用库里已有的，
+    attrs 标 yf_fetch_failed（与 yfinance 路径同一契约）。
+    """
+    now = time.monotonic()
+    last = _FUND_REFRESHED.get(symbol)
+    refresh_failed = False
+    if last is None or now - last >= _FUND_REFRESH_TTL:
+        history = fetch_fund_nav_history(symbol, adjusted=True)
+        if history:
+            for date_str, nav in history:
+                _STORE.save_generic_price(symbol, date_str, nav, source="eastmoney_fund")
+            _FUND_REFRESHED[symbol] = now
+        else:
+            refresh_failed = True
+    df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
+    if df_db.empty:
+        return pd.DataFrame()
+    out = _apply_period(_apply_cutoff(df_db, as_of_date), period)
+    out.attrs["yf_fetch_failed"] = refresh_failed
+    return out
 
 
 # ==========================================

@@ -130,9 +130,14 @@ def _fetch_latest_nav(code: str, timeout: float) -> Optional[FundNavSnapshot]:
 
 
 def fetch_fund_nav_history(
-    symbol: str, *, timeout: float = 10.0,
+    symbol: str, *, timeout: float = 10.0, adjusted: bool = False,
 ) -> Optional[List[Tuple[str, float]]]:
-    """成立以来全部单位净值 ``[(YYYY-MM-DD, nav), ...]``（日期升序）；失败返回 ``None``。"""
+    """成立以来全部单位净值 ``[(YYYY-MM-DD, nav), ...]``（日期升序）；失败返回 ``None``。
+
+    ``adjusted=True`` 返回前复权净值：最新一天等于真实单位净值，更早的值按日收益率
+    往前回推（同 yfinance auto_adjust）。分红日单位净值会掉一截（实测一只主动权益
+    基金历次分红单日 -2.7%~-11.6%），拿未复权序列算 ATR/回撤就是假暴跌。
+    """
     code = extract_fund_code(symbol)
     if not code:
         return None
@@ -156,6 +161,7 @@ def fetch_fund_nav_history(
     if not isinstance(items, list):
         return None
     out: List[Tuple[str, float]] = []
+    ratios: List[float] = []   # ratios[i] = 第 i 天相对前一天的复权收益比
     for item in items:
         try:
             ts_ms = int(item["x"])
@@ -165,5 +171,21 @@ def fetch_fund_nav_history(
         if not math.isfinite(nav) or nav <= 0:
             continue
         nav_date = datetime.fromtimestamp(ts_ms / 1000, tz=_CN_TZ).strftime("%Y-%m-%d")
+        ratio = nav / out[-1][1] if out else 1.0
+        if out and item.get("unitMoney"):
+            # 分红/拆分日：净值比含除息缺口，改用官方日增长率 equityReturn（已含分红）；
+            # 平日用净值比——equityReturn 只保留 2~4 位小数，逐日连乘会漂
+            try:
+                er = 1 + float(item.get("equityReturn")) / 100
+                if math.isfinite(er) and er > 0:
+                    ratio = er
+            except (TypeError, ValueError):
+                pass  # 缺日增长率 → 这一天不复权
         out.append((nav_date, nav))
-    return out
+        ratios.append(ratio)
+    if not adjusted or not out:
+        return out
+    adj = [out[-1][1]]
+    for ratio in reversed(ratios[1:]):
+        adj.append(adj[-1] / ratio)
+    return [(d, a) for (d, _), a in zip(out, reversed(adj))]
