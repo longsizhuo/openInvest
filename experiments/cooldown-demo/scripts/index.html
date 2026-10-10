@@ -3,186 +3,197 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>三思：投资冷静期</title>
+<title>多空对照</title>
 <style>
-  :root {
-    --paper: #F3F5F4;
-    --ink: #1E2A2F;
-    --muted: #5E6E72;
-    --tianqing: #3F7A86;
-    --fall: #2C8A57;
-    --rule: #D5DCDA;
-    --serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
-    --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  }
+  :root { --ink:#2C2C2A; --sub:#5F5E5A; --mute:#888780; --rule:#E5E3DC; --grid:#ECEAE4; --hot:#A32D2D; --hotbg:#FCEBEB; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font: 17px/1.75 var(--sans);
-    font-variant-numeric: tabular-nums;
-  }
-  main { max-width: 38rem; margin: 0 auto; padding: 3.5rem 1rem 4rem; }
-  h1 {
-    font: 600 4.5rem/1 var(--serif); letter-spacing: .3em; margin: 0 0 1.25rem;
-  }
-  .lede { margin: 0 0 2.25rem; color: var(--muted); }
-  label { display: block; font-size: .9rem; color: var(--muted); margin-bottom: .35rem; }
-  .row { display: flex; gap: .75rem; }
-  input {
-    flex: 1; min-width: 0; font: 1.5rem/1.2 var(--sans); letter-spacing: .12em;
-    padding: .55rem .7rem; border: 1px solid var(--rule); border-radius: 6px;
-    background: #fff; color: var(--ink);
-  }
-  button {
-    font: 600 1rem/1 var(--sans); padding: .95rem 1.4rem; border: 0; border-radius: 6px;
-    background: var(--tianqing); color: #fff; cursor: pointer;
-  }
-  button:disabled { opacity: .5; cursor: default; }
-  input:focus-visible, button:focus-visible { outline: 3px solid var(--tianqing); outline-offset: 2px; }
-  .hint { font-size: .9rem; color: var(--muted); margin: .75rem 0 0; }
-  .error { color: #A33A2B; margin: 1rem 0 0; }
-
-  #fund { margin-top: 3rem; }
-  .fund-name { font: 600 1.35rem/1.4 var(--serif); margin: 0; }
-  .fund-meta { color: var(--muted); font-size: .95rem; margin: .2rem 0 1.25rem; }
-  svg { display: block; width: 100%; height: auto; }
-  .fall { color: var(--fall); font-weight: 600; }
-  .fact { margin: .75rem 0 0; }
-
-  #status { margin: 2rem 0 0; color: var(--muted); display: flex; gap: .6rem; align-items: center; }
-  .breath { width: .7rem; height: .7rem; border-radius: 50%; background: var(--tianqing); animation: breath 4s ease-in-out infinite; }
-  @keyframes breath { 0%, 100% { transform: scale(.6); opacity: .45; } 50% { transform: scale(1.1); opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { .breath { animation: none; } }
-
-  #summary h3 { font: 600 1.15rem/1.5 var(--serif); margin: 2.25rem 0 .5rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
-  #summary ul { margin: 0; padding-left: 1.2rem; }
-  #summary li { margin: .45rem 0; }
-  #summary .disclaimer { margin-top: 2.5rem; font-size: .9rem; color: var(--muted); }
-  footer { margin-top: 4rem; font-size: .85rem; color: var(--muted); }
+  body { margin: 0; background: #fff; color: var(--ink); font: 14px/1.6 "PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif; font-variant-numeric: tabular-nums; }
+  main { max-width: 760px; margin: 0 auto; padding: 22px 16px 40px; }
+  a { color: inherit; }
+  .brand { font-size: 12px; color: var(--sub); display: flex; justify-content: space-between; }
+  .brand a { text-decoration: none; }
+  form { display: flex; gap: 8px; margin: 18px 0 0; }
+  input { flex: 1; min-width: 0; font: 18px/1.2 inherit; letter-spacing: .1em; padding: 9px 10px; border: 1px solid #D3D1C7; border-radius: 6px; }
+  button { font: 600 15px/1 inherit; padding: 0 16px; border: 0; border-radius: 6px; background: var(--ink); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .hint, .err { font-size: 12px; margin: 6px 0 0; color: var(--mute); }
+  .err { color: var(--hot); }
+  h1 { font-size: 20px; font-weight: 600; margin: 22px 0 2px; }
+  .meta { font-size: 12px; color: var(--sub); }
+  .hl { font-size: 22px; font-weight: 600; margin: 16px 0 8px; min-height: 1.4em; }
+  .hl.wait { font-size: 15px; font-weight: 400; color: var(--sub); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips span { font-size: 13px; font-weight: 600; color: var(--hot); background: var(--hotbg); border-radius: 4px; padding: 3px 8px; }
+  .lg { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; margin: 18px 0 4px; }
+  .pl { font-size: 12px; color: var(--sub); margin: 10px 0 2px; }
+  svg { display: block; width: 100%; }
+  .sh { font-size: 14px; font-weight: 600; margin: 26px 0 2px; padding-bottom: 6px; border-bottom: 1px solid var(--mute); }
+  .vs { display: grid; grid-template-columns: 1fr 1fr; }
+  .vh { font-size: 12px; color: var(--sub); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); }
+  .vs .r { padding-left: 12px; border-left: 2px solid var(--ink); }
+  .vc { font-size: 15px; padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule); line-height: 1.35; }
+  .vc span { display: block; font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .vc span.hot { color: var(--hot); font-weight: 600; }
+  .vc small { font-size: 11px; color: var(--mute); font-weight: 400; margin-right: 6px; }
+  .hd { display: flex; align-items: center; gap: 10px; font-size: 13px; margin: 10px 0; }
+  .hd > span { width: 36px; color: var(--sub); }
+  .hd b { width: 64px; text-align: right; font-weight: 600; }
+  .hd.g b, .hd.g > span { color: #B4B2A9; font-weight: 400; }
+  .rb { position: relative; flex: 1; height: 14px; }
+  .rb i { position: absolute; display: block; }
+  .ax { position: relative; height: 16px; font-size: 11px; color: var(--mute); margin: 0 74px 0 46px; }
+  .ax span { position: absolute; transform: translateX(-50%); }
+  .foot { font-size: 11px; line-height: 1.7; color: var(--mute); margin-top: 22px; }
+  .wait-dot { display: inline-block; width: .5em; height: .5em; border-radius: 50%; background: var(--sub); margin-right: .5em; animation: b 2s ease-in-out infinite; }
+  @keyframes b { 50% { opacity: .2; } }
+  @media (prefers-reduced-motion: reduce) { .wait-dot { animation: none; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>三思</h1>
-  <p class="lede">想买入或卖出一只基金？先让宏观、量化、风险三位 AI 分析师替你吵一架。它们只摆理由，不替你拍板。</p>
-
+  <div class="brand"><span>多空对照</span><a href="https://openinvest.involutionhell.com" target="_blank" rel="noopener">openInvest</a></div>
   <form id="ask">
-    <label for="code">基金代码（支付宝基金详情页里的 6 位数字）</label>
-    <div class="row">
-      <input id="code" inputmode="numeric" autocomplete="off" maxlength="6" pattern="\d{6}" placeholder="例如 110011" required>
-      <button id="go" type="submit">开始辩论</button>
-    </div>
+    <input id="code" inputmode="numeric" autocomplete="off" maxlength="6" pattern="\d{6}" placeholder="6 位基金代码，例如 110011" aria-label="基金代码" required>
+    <button id="go" type="submit">复核</button>
   </form>
-  <p class="hint">一次辩论通常要 1–2 分钟。每人每天可以问 3 次。</p>
-  <p id="error" class="error" role="alert" hidden></p>
+  <p class="hint" id="hint">每人每天 3 次。约 20 秒。</p>
+  <p class="err" id="err" role="alert" hidden></p>
 
-  <section id="fund" hidden aria-labelledby="fund-name">
-    <p id="fund-name" class="fund-name"></p>
-    <p id="fund-meta" class="fund-meta"></p>
-    <svg id="chart" viewBox="0 0 600 180" role="img"></svg>
-    <p class="fact" id="fact"></p>
+  <section id="rep" hidden>
+    <h1 id="name"></h1>
+    <div class="meta" id="meta"></div>
+    <div class="hl wait" id="hl" aria-live="polite"></div>
+    <div class="chips" id="chips"></div>
+
+    <div class="lg" id="lg"></div>
+    <svg id="m" role="img" aria-label="近两年净值、均线与最大回撤区间"></svg>
+    <div class="pl">日涨跌幅</div><svg id="r" aria-hidden="true"></svg>
+    <div class="pl" id="rsi-l"></div><svg id="s" aria-hidden="true"></svg>
+
+    <div id="vs-wrap" hidden>
+      <div class="sh">正反对照</div>
+      <div class="vs" id="vs"></div>
+    </div>
+
+    <div id="dist-wrap" hidden>
+      <div class="sh">历史上同类情形之后</div>
+      <div id="dist"></div>
+      <div class="ax" id="ax"></div>
+    </div>
   </section>
 
-  <p id="status" aria-live="polite" hidden><span class="breath" aria-hidden="true"></span><span id="status-text"></span></p>
-  <section id="summary" aria-live="polite"></section>
-
-  <footer>数据来自东方财富公开净值。辩论由 openInvest 多角色委员会生成，不构成投资建议。</footer>
+  <p class="foot">不含买卖建议。灰条为历史 10%–90% 区间，竖线为中位，红线为当前价。数据：东方财富、公开行情。方法见《LLM 多智能体投资系统的架构选择与校准优先评估》。openInvest 开源项目：<a href="https://openinvest.involutionhell.com" target="_blank" rel="noopener">openinvest.involutionhell.com</a></p>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
-let timer = null;
+const T = { nav: "#2C2C2A", ma20: "#BA7517", ma60: "#D4537E", ma120: "#378ADD", ma250: "#7F77DD", up: "#E24B4A", down: "#1D9E75", grid: "#ECEAE4", axis: "#888780", band: "#F1EFE8", rsi: "#534AB7" };
+let timer = null, lastFacts = null;
 
-function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function size(svg, h) { const w = Math.max(240, Math.round(svg.clientWidth)); svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.setAttribute("height", h); return w; }
 
-function drawChart(f) {
-  const s = f.series, W = 600, H = 180, pad = 8;
-  const vals = s.map((p) => p[1]);
-  const lo = Math.min(...vals), hi = Math.max(...vals);
-  const x = (i) => pad + (i / (s.length - 1)) * (W - 2 * pad);
-  const y = (v) => pad + (1 - (v - lo) / (hi - lo || 1)) * (H - 2 * pad);
-  const near = (d) => s.reduce((best, p, i) => (Math.abs(new Date(p[0]) - new Date(d)) < Math.abs(new Date(s[best][0]) - new Date(d)) ? i : best), 0);
-  const a = near(f.peak), b = near(f.trough);
-  const line = s.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
-  const dip = s.slice(a, b + 1).map((p, k) => `L${x(a + k).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
-  $("chart").innerHTML =
-    `<path d="M${x(a)},${y(s[a][1])}${dip}L${x(b)},${y(s[a][1])}Z" fill="#2C8A57" opacity=".14"/>` +
-    `<path d="${line}" fill="none" stroke="#1E2A2F" stroke-width="1.6" stroke-linejoin="round"/>` +
-    `<circle cx="${x(b)}" cy="${y(s[b][1])}" r="4" fill="#2C8A57"/>`;
-  $("chart").setAttribute("aria-label", `近两年净值走势，${f.peak} 到 ${f.trough} 最深跌了 ${f.max_drawdown_2y}%`);
+// 图里只有程序算的数字和日期，不放任何模型文本，所以用 innerHTML 拼 SVG 是安全的
+function drawChart(D) {
+  const n = D.c.length, R = 40, K = ["c", "ma20", "ma60", "ma120", "ma250"], COL = { c: T.nav, ma20: T.ma20, ma60: T.ma60, ma120: T.ma120, ma250: T.ma250 };
+  const last = n - 1, lg = $("lg"); lg.textContent = "";
+  [["", D.d[last], "#5F5E5A"], ["净值 ", D.c[last], T.nav], ["MA20 ", D.ma20[last], T.ma20], ["MA60 ", D.ma60[last], T.ma60], ["MA120 ", D.ma120[last], T.ma120], ["MA250 ", D.ma250[last], T.ma250]]
+    .forEach(([k, v, c]) => { if (v == null) return; const s = el("span", null, k + (typeof v === "number" ? v.toFixed(3) : v)); s.style.color = c; lg.append(s); });
+  let W = size($("m"), 200); const PW = W - R, X = (i) => i * PW / (n - 1);
+  const all = K.flatMap((k) => D[k]).filter((v) => v != null), lo = Math.min(...all), hi = Math.max(...all), Y = (v) => 8 + (hi - v) / (hi - lo || 1) * 184;
+  const path = (k) => D[k].map((v, i) => v == null ? "" : `${i && D[k][i - 1] != null ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const i0 = D.d.findIndex((d) => d >= D.peak), i1 = D.d.findIndex((d) => d >= D.trough);
+  let m = `<rect x="${X(i0)}" y="0" width="${X(i1) - X(i0)}" height="200" fill="#E24B4A" opacity=".07"/>`;
+  for (let t = 0; t <= 3; t++) { const v = lo + (hi - lo) * t / 3; m += `<line x1="0" x2="${PW}" y1="${Y(v)}" y2="${Y(v)}" stroke="${T.grid}"/><text x="${PW + 6}" y="${Y(v) + 4}" fill="${T.axis}" font-size="11">${v.toFixed(2)}</text>`; }
+  m += `<text x="${(X(i0) + X(i1)) / 2}" y="14" text-anchor="middle" fill="#A32D2D" font-size="11">最大回撤 ${D.mdd}%</text>`;
+  ["ma250", "ma120", "ma60", "ma20"].forEach((k) => m += `<path d="${path(k)}" fill="none" stroke="${COL[k]}" stroke-width="1"/>`);
+  m += `<path d="${path("c")}" fill="none" stroke="${T.nav}" stroke-width="1.5"/>`;
+  $("m").innerHTML = m;
+  W = size($("r"), 48); const amax = Math.max(...D.ret.map(Math.abs)) || 1, bw = Math.max(1, PW / n * .65);
+  let r = `<line x1="0" x2="${PW}" y1="24" y2="24" stroke="${T.grid}"/>`;
+  D.ret.forEach((v, i) => { const h = Math.abs(v) / amax * 22; r += `<rect x="${(X(i) - bw / 2).toFixed(1)}" y="${(v >= 0 ? 24 - h : 24).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(.6, h).toFixed(1)}" fill="${v >= 0 ? T.up : T.down}"/>`; });
+  r += `<text x="${PW + 6}" y="10" fill="${T.axis}" font-size="11">+${amax.toFixed(1)}%</text>`;
+  $("r").innerHTML = r;
+  W = size($("s"), 70); const YS = (v) => 2 + (100 - v) / 100 * 50;
+  let s = `<rect x="0" y="${YS(70)}" width="${PW}" height="${YS(30) - YS(70)}" fill="${T.band}"/>`;
+  [70, 30].forEach((v) => s += `<text x="${PW + 6}" y="${YS(v) + 4}" fill="${T.axis}" font-size="11">${v}</text>`);
+  s += `<path d="${D.rsi.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${YS(v).toFixed(1)}`).join("")}" fill="none" stroke="${T.rsi}" stroke-width="1.2"/>`;
+  [0, Math.floor(n / 2), last].forEach((i, j) => s += `<text x="${X(i)}" y="68" text-anchor="${["start", "middle", "end"][j]}" fill="${T.axis}" font-size="11">${D.d[i]}</text>`);
+  $("s").innerHTML = s;
+  $("rsi-l").textContent = `RSI(14)　${D.rsi[last].toFixed(1)}`;
 }
 
-function showFund(f) {
-  $("fund-name").textContent = f.name;
-  $("fund-meta").textContent = `单位净值 ${f.nav}（${f.nav_date}）`;
-  drawChart(f);
-  const fact = $("fact");
-  fact.textContent = "";
-  fact.append("近两年它最深跌过 ");
-  const dd = document.createElement("span"); dd.className = "fall"; dd.textContent = `${f.max_drawdown_2y}%`;
-  fact.append(dd, `（${f.peak} 到 ${f.trough}），现在离近两年高点 ${f.from_high_2y}%。买之前想一想：再跌这么多，你拿得住吗？`);
-  $("fund").hidden = false;
+function drawDist(rows) {
+  const box = $("dist"); box.textContent = ""; $("ax").textContent = "";
+  if (!rows.length) { $("dist-wrap").hidden = true; return; }
+  const L = Math.min(-5, ...rows.map((r) => r.p10)) - 2, H = Math.max(5, ...rows.map((r) => r.p90)) + 2;
+  const x = (v) => (v - L) / (H - L) * 100;
+  rows.forEach((r) => {
+    const row = el("div", "hd" + (r.low ? " g" : "")); row.append(el("span", null, r.w));
+    const bar = el("div", "rb");
+    const rng = el("i"); Object.assign(rng.style, { top: "3px", height: "8px", borderRadius: "2px", left: x(r.p10) + "%", width: (x(r.p90) - x(r.p10)) + "%", background: r.low ? "#E5E3DC" : "#D3D1C7" });
+    const zero = el("i"); Object.assign(zero.style, { top: "-2px", width: "1px", height: "18px", left: x(0) + "%", background: "#E24B4A" });
+    const med = el("i"); Object.assign(med.style, { top: "0", width: "2px", height: "14px", left: x(r.med) + "%", background: r.low ? "#B4B2A9" : "#2C2C2A" });
+    bar.append(rng, zero, med); row.append(bar, el("b", null, r.low ? "样本少" : `${r.below}% 更低`));
+    box.append(row);
+  });
+  [[L, `${Math.round(L)}%`], [0, "0"], [H, `+${Math.round(H)}%`]].forEach(([v, t]) => { const s = el("span", null, t); s.style.left = x(v) + "%"; $("ax").append(s); });
+  $("dist-wrap").hidden = false;
 }
 
-// 纪要按行渲染成纯文本节点：不解析 Markdown/HTML，服务端闸查的就是用户看到的字
-function showSummary(text) {
-  const box = $("summary");
-  box.textContent = "";
-  let list = null, afterRule = false;
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line === "---") { afterRule = true; list = null; continue; }
-    if (line.startsWith("## ")) {
-      const h = document.createElement("h3"); h.textContent = line.slice(3); box.append(h); list = null;
-    } else if (line.startsWith("- ") && !afterRule) {
-      if (!list) { list = document.createElement("ul"); box.append(list); }
-      const li = document.createElement("li"); li.textContent = line.slice(2); list.append(li);
-    } else {
-      const p = document.createElement("p"); p.textContent = line;
-      if (afterRule) p.className = "disclaimer";
-      box.append(p); list = null;
-    }
+function showFacts(f) {
+  lastFacts = f;
+  $("name").textContent = f.name;
+  $("meta").textContent = `${f.code}　净值 ${f.nav}　${f.nav_date}`;
+  const hl = $("hl"); hl.className = "hl wait"; hl.textContent = ""; hl.append(el("span", "wait-dot"), "宏观、量化、风险三个角色正在交叉质询");
+  const chips = $("chips"); chips.textContent = ""; f.chips.forEach((c) => chips.append(el("span", null, c)));
+  $("vs-wrap").hidden = true; $("rep").hidden = false;
+  drawChart(f.chart); drawDist(f.dist);
+}
+
+// 模型文本一律走 textContent，不进 innerHTML
+function showResult(res) {
+  const hl = $("hl"); hl.className = "hl"; hl.textContent = res.headline;
+  const vs = $("vs"); vs.textContent = "";
+  vs.append(el("div", "vh", "支持"), el("div", "vh r", "反对"));
+  const rows = Math.max(res.pros.length, res.cons.length);
+  for (let i = 0; i < rows; i++) {
+    [[res.pros[i], "vc"], [res.cons[i], "vc r"]].forEach(([it, cls]) => {
+      const c = el("div", cls);
+      if (it) {
+        c.append(it.claim);
+        const ev = el("span", it.hot ? "hot" : null); ev.append(el("small", null, it.role), it.evidence || "");
+        c.append(ev);
+      }
+      vs.append(c);
+    });
   }
+  $("vs-wrap").hidden = false;
 }
 
-async function poll(jobId, started) {
-  const r = await fetch(`/api/debate/${jobId}`);
-  const j = await r.json();
-  if (!r.ok) { showError(j.detail || "查询失败，稍后再试"); return finish(); }
-  const sec = Math.round((Date.now() - started) / 1000);
-  $("status-text").textContent = j.status === "queued"
-    ? `前面还有人在问，排队中（已等 ${sec} 秒）`
-    : `三位分析师正在辩论，已经 ${sec} 秒`;
-  if (j.status !== "done") { timer = setTimeout(() => poll(jobId, started), 3000); return; }
-  if (j.result.debate_summary) showSummary(j.result.debate_summary);
-  else showError(j.result.error || "这次辩论没跑成，稍后再试");
+function showError(msg) { $("err").textContent = msg; $("err").hidden = false; }
+function finish() { $("go").disabled = false; }
+
+async function poll(id) {
+  const r = await fetch(`/api/debate/${id}`); const j = await r.json();
+  if (!r.ok) { showError(j.detail || "查询失败，稍后再试"); $("hl").textContent = ""; return finish(); }
+  if (j.status !== "done") { timer = setTimeout(() => poll(id), 2500); return; }
+  if (j.result.headline) showResult(j.result); else { $("hl").className = "hl wait"; $("hl").textContent = j.result.error || "这次辩论没跑成，稍后再试"; }
   finish();
 }
 
-function finish() { $("status").hidden = true; $("go").disabled = false; }
-
 $("ask").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  clearTimeout(timer);
-  $("error").hidden = true; $("summary").textContent = ""; $("fund").hidden = true;
-  $("go").disabled = true;
-  $("status-text").textContent = "正在查这只基金";
-  $("status").hidden = false;
+  e.preventDefault(); clearTimeout(timer);
+  $("err").hidden = true; $("go").disabled = true;
   try {
-    const r = await fetch("/api/debate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: $("code").value.trim() }),
-    });
+    const r = await fetch("/api/debate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: $("code").value.trim() }) });
     const j = await r.json();
     if (!r.ok) { showError(j.detail || "提交失败，稍后再试"); return finish(); }
-    showFund(j.facts);
-    poll(j.job_id, Date.now());
-  } catch {
-    showError("连不上服务，检查网络后再试");
-    finish();
-  }
+    showFacts(j.facts); poll(j.job_id);
+  } catch { showError("连不上服务，检查网络后再试"); finish(); }
 });
+window.addEventListener("resize", () => { if (lastFacts) drawChart(lastFacts.chart); });
 </script>
 </body>
 </html>

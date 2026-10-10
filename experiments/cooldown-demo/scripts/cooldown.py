@@ -2,8 +2,8 @@
 
 生产代码零改动：这里调 run_committee_session 跑完整委员会（CIO 照跑，裁决在进程内
 丢弃），再让书记员把 Macro / Quant / Risk 的辩论整理成正反理由，过逐字闸才返回。
-对外出口只有 debate_summary() 的返回值——公开演示的服务只能暴露它，不能暴露
-openinvest 的 MCP / web_api（那些出口都带裁决）。
+对外出口只有 debate_summary() 的返回值 {symbol, headline, pros, cons}——公开演示的服务
+只能暴露它，不能暴露 openinvest 的 MCP / web_api（那些出口都带裁决）。
 
 用法（必须顾问模式 + 独立 INVEST_HOME，否则 CIO 裁决会落进真实账本）：
     INVEST_HOME=~/openinvest-demo INVEST_ADVISORY_MODE=1 \
@@ -16,14 +16,13 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, Iterable, List
 
 from openinvest.core.committee.agent_io import AGENT_UNAVAILABLE_MARKER, _ask, _create_agent
 from openinvest.core.committee.debate import _format_debate_history
 from openinvest.utils.advisory import is_advisory_mode
 
 SCRIBE_PROMPT = Path(__file__).with_name("scribe.md").read_text(encoding="utf-8")
-DISCLAIMER = "\n\n---\n以上是多个 AI 角色辩论的整理，不构成投资建议。要不要做、做多少，由你自己决定。"
 
 # 逐字闸：书记员 prompt 是第一道，这里是第二道。命中任意一条 = 纪要里有结论性表述。
 VERDICT_LANGUAGE = re.compile(
@@ -91,30 +90,96 @@ def find_verdict_language(text: str) -> List[str]:
     return sorted(hits)
 
 
-def summarize(symbol: str, display_name: str, brief: str,
+ROLES = ("宏观", "量化", "风险")
+HEADLINE_MAX, CLAIM_MAX, SIDE_MAX = 16, 10, 3
+
+
+def check_scribe(obj: Any, metrics: Iterable[str]) -> List[str]:
+    """书记员 JSON 的结构 + 内容检查；空列表 = 放行。数字只能由系统填，文字里一个阿拉伯数字都不许有。"""
+    if not isinstance(obj, dict):
+        return ["不是 JSON 对象"]
+    allowed = set(metrics) | {"none"}
+    problems: List[str] = []
+    headline = obj.get("headline")
+    if not isinstance(headline, str) or not headline.strip():
+        problems.append("缺 headline")
+        headline = ""
+    elif len(headline.strip()) > HEADLINE_MAX:
+        problems.append(f"headline 超过 {HEADLINE_MAX} 字")
+    texts = [headline]
+    total = 0
+    for side in ("pros", "cons"):
+        items = obj.get(side)
+        if not isinstance(items, list) or len(items) > SIDE_MAX:
+            problems.append(f"{side} 必须是 0~{SIDE_MAX} 条的列表")
+            continue
+        for it in items:
+            if not isinstance(it, dict) or it.get("role") not in ROLES:
+                problems.append(f"{side} 里有条目的 role 不合法")
+                continue
+            claim = it.get("claim")
+            if not isinstance(claim, str) or not claim.strip() or len(claim.strip()) > CLAIM_MAX:
+                problems.append(f"{side} 的 claim 必须是 1~{CLAIM_MAX} 字")
+                continue
+            if it.get("metric") not in allowed:
+                problems.append(f"metric {it.get('metric')!r} 不在可引用指标里")
+            texts.append(claim)
+            total += 1
+    if total == 0:
+        problems.append("pros 和 cons 至少要有一条")
+    joined = "\n".join(texts)
+    if re.search(r"\d", normalize(joined)):
+        problems.append("文字里出现了数字")
+    problems += find_verdict_language(joined)
+    return problems
+
+
+def _clean(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """只留白名单字段，去掉首尾空白。"""
+    side = lambda k: [{"role": it["role"], "claim": it["claim"].strip(), "metric": it["metric"]}
+                      for it in obj.get(k) or []]
+    return {"headline": obj["headline"].strip(), "pros": side("pros"), "cons": side("cons")}
+
+
+def summarize(symbol: str, display_name: str, brief: str, metrics: Dict[str, str],
               ask: Callable[[str, str], str] | None = None) -> Dict[str, Any]:
-    """书记员整理辩论。命中闸 → 带着命中片段重写一次；还命中或 LLM 不可用 → 整份拦下
-    （fail closed，不做局部删改——删掉半句的纪要比没有更误导）。"""
+    """书记员把辩论压成 {headline, pros, cons}。
+
+    metrics：可引用指标 {键: 当前值文本}，给书记员挑依据用；数值由调用方按键回填，书记员不写数字。
+    检查不过 → 带着问题重写一次；还不过或 LLM 不可用 → 整份拦下（fail closed）。
+    """
+    from openinvest.utils.llm import supports_json_output
+
     system = SCRIBE_PROMPT.replace("{{asset_name}}", display_name).replace("{{asset_symbol}}", symbol)
+    catalog = "\n".join(f"- {k}: {v}" for k, v in metrics.items()) or "（无）"
     ask = ask or (lambda sys_prompt, ctx: _ask(_create_agent(
         sys_prompt, search_enabled=False, temperature=0.2, role="scribe", asset=symbol,
-        round_label="scribe"), ctx))
-    hits: List[str] = []
+        round_label="scribe",
+        response_format={"type": "json_object"} if supports_json_output() else None), ctx))
+    problems: List[str] = []
     for _ in (1, 2):
-        ctx = brief
-        if hits:
-            ctx += ("\n\n=== 上一版被服务端拦下 ===\n出现了禁止的表述：" + "、".join(hits)
-                    + "。重写：只保留理由，不要任何结论、金额、仓位、价格目标、概率数字，"
-                    + "不要 HTML 或特殊控制字符。")
-        summary = ask(system, ctx)
-        hits = find_verdict_language(summary)
-        if not hits and AGENT_UNAVAILABLE_MARKER not in summary:
-            return {"symbol": symbol, "debate_summary": summary.strip() + DISCLAIMER}
-    return {"status": "error", "error": "辩论纪要未通过无裁决检查，已拦截"}
+        ctx = f"{brief}\n\n=== 可引用指标（键: 当前值）===\n{catalog}"
+        if problems:
+            ctx += ("\n\n=== 上一版被服务端拦下 ===\n" + "；".join(problems)
+                    + "。按规则重写，只输出 JSON。")
+        raw = ask(system, ctx)
+        if AGENT_UNAVAILABLE_MARKER in raw:
+            problems = ["LLM 不可用"]
+            continue
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            problems = ["不是合法 JSON"]
+            continue
+        problems = check_scribe(obj, metrics)
+        if not problems:
+            return {"symbol": symbol, **_clean(obj)}
+    return {"status": "error", "error": "辩论整理未通过检查，已拦截"}
 
 
-def debate_summary(symbol: str, max_debate_rounds: int = 1) -> Dict[str, Any]:
-    """跑一次委员会，只返回书记员纪要。返回值是白名单构造的，不含 verdict / 金额 / 置信度。"""
+def debate_summary(symbol: str, metrics: Dict[str, str] | None = None,
+                   max_debate_rounds: int = 1) -> Dict[str, Any]:
+    """跑一次委员会，只返回书记员骨架 {symbol, headline, pros, cons}。不含 verdict / 金额 / 置信度。"""
     if not is_advisory_mode():
         raise RuntimeError(
             "冷静期演示只在 INVEST_ADVISORY_MODE=1 + 独立 INVEST_HOME 下跑"
@@ -135,7 +200,7 @@ def debate_summary(symbol: str, max_debate_rounds: int = 1) -> Dict[str, Any]:
     if len(quant) > 1:
         brief += "\n\n=== 完整辩论历史（含所有 cross-challenge 轮）===\n" + _format_debate_history(quant, risk)
     name = report.asset.get("display_name") or symbol
-    return summarize(symbol, name, brief)
+    return summarize(symbol, name, brief, metrics or {})
 
 
 if __name__ == "__main__":

@@ -58,33 +58,73 @@ def test_gate_passes_plain_analysis(text):
     assert cooldown.find_verdict_language(text) == []
 
 
+import json
+
+METRICS = {"price_pct": "两年价格分位 4%", "tnx": "10Y 美债 5.24%，两年分位 99%"}
+GOOD = {"headline": "价格在低位，趋势仍向下",
+        "pros": [{"role": "量化", "claim": "两年低位", "metric": "price_pct"}],
+        "cons": [{"role": "宏观", "claim": "利率两年最高", "metric": "tnx"}]}
+
+
 def _asker(replies):
     seen = []
 
     def ask(system, ctx):
         seen.append(ctx)
-        return replies.pop(0)
+        r = replies.pop(0)
+        return r if isinstance(r, str) else json.dumps(r, ensure_ascii=False)
     return ask, seen
 
 
+def _with(**kw):
+    return {**GOOD, **kw}
+
+
+@pytest.mark.parametrize("bad,why", [
+    (_with(headline="建议分批买入"), "建议分批买"),
+    (_with(headline="价格分位只有百分之四，处在低位但趋势仍然向下"), "headline 超过"),
+    (_with(headline="分位 4% 的低位"), "数字"),
+    (_with(pros=[{"role": "量化", "claim": "MA20 偏弱", "metric": "price_pct"}]), "数字"),
+    (_with(pros=[{"role": "CIO", "claim": "两年低位", "metric": "price_pct"}]), "role"),
+    (_with(pros=[{"role": "量化", "claim": "两年低位", "metric": "alpha"}]), "metric"),
+    (_with(pros=[], cons=[]), "至少"),
+    ("not json", None),
+])
+def test_check_rejects(bad, why):
+    obj = bad if isinstance(bad, dict) else None
+    problems = cooldown.check_scribe(obj, METRICS) if obj else ["x"]
+    assert problems
+    if why:
+        assert any(why in p for p in problems), problems
+
+
+def test_check_passes_good():
+    assert cooldown.check_scribe(GOOD, METRICS) == []
+
+
 def test_rewrites_once_then_passes():
-    ask, seen = _asker(["- 建议分批买入", "## 支持的理由\n- 价格分位 3%，RSI 40（低位）"])
-    out = cooldown.summarize("X", "示例", "brief", ask=ask)
-    assert set(out) == {"symbol", "debate_summary"}
-    assert "价格分位 3%，RSI 40（低位）" in out["debate_summary"]   # 原文返回，中文标点不被改成半角
-    assert "不构成投资建议" in out["debate_summary"]
-    assert "建议分批买" in seen[1]                          # 命中片段喂回去重写
+    ask, seen = _asker([_with(headline="建议分批买入"), GOOD])
+    out = cooldown.summarize("X", "示例", "brief", METRICS, ask=ask)
+    assert out == {"symbol": "X", **GOOD}
+    assert "两年价格分位 4%" in seen[0]                       # 可引用指标给到了书记员
+    assert "建议分批买" in seen[1]                            # 问题喂回去重写
 
 
-def test_fails_closed_after_second_hit():
-    ask, _ = _asker(["- 建议买入", "- 首笔 ¥2,700"])
-    assert "拦截" in cooldown.summarize("X", "示例", "brief", ask=ask)["error"]
+def test_fails_closed_after_second_failure():
+    ask, _ = _asker(["not json", _with(headline="首笔 ¥2,700")])
+    assert "拦截" in cooldown.summarize("X", "示例", "brief", METRICS, ask=ask)["error"]
 
 
 def test_unavailable_llm_is_blocked():
     m = cooldown.AGENT_UNAVAILABLE_MARKER
     ask, _ = _asker([f"{m} reason=x", f"{m} reason=x"])
-    assert "error" in cooldown.summarize("X", "示例", "brief", ask=ask)
+    assert "error" in cooldown.summarize("X", "示例", "brief", METRICS, ask=ask)
+
+
+def test_extra_fields_are_dropped():
+    ask, _ = _asker([{**GOOD, "verdict": "ACCUMULATE", "alloc": 2700}])
+    out = cooldown.summarize("X", "示例", "brief", METRICS, ask=ask)
+    assert set(out) == {"symbol", "headline", "pros", "cons"}
 
 
 def test_refuses_outside_advisory_mode(monkeypatch):
@@ -95,7 +135,7 @@ def test_refuses_outside_advisory_mode(monkeypatch):
 
 def test_output_is_whitelisted_and_scribe_never_sees_cio(monkeypatch):
     """委员会结果里挂着 verdict / CIO memo / path_reference（概率、买回点原文），
-    出口只能有书记员纪要，书记员的输入里也不能有 CIO 的东西。"""
+    出口只能有书记员骨架，书记员的输入里也不能有 CIO 的东西。"""
     monkeypatch.setenv("INVEST_ADVISORY_MODE", "1")
     report = SimpleNamespace(
         asset={"symbol": "GC=F", "display_name": "黄金"},
@@ -111,7 +151,7 @@ def test_output_is_whitelisted_and_scribe_never_sees_cio(monkeypatch):
                         }}})
     seen = []
     monkeypatch.setattr(cooldown, "_create_agent", lambda sys_prompt, **kw: sys_prompt)
-    monkeypatch.setattr(cooldown, "_ask", lambda agent, ctx: seen.append(ctx) or "## 反对的理由\n- 利率上行")
-    out = cooldown.debate_summary("GC=F")
-    assert set(out) == {"symbol", "debate_summary"}
+    monkeypatch.setattr(cooldown, "_ask", lambda agent, ctx: seen.append(ctx) or json.dumps(GOOD, ensure_ascii=False))
+    out = cooldown.debate_summary("GC=F", METRICS)
+    assert set(out) == {"symbol", "headline", "pros", "cons"}
     assert "ACCUMULATE" not in seen[0] and "2,700" not in seen[0]
