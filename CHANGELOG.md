@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.4](https://github.com/longsizhuo/openInvest/compare/v0.40.3...v0.40.4) (2026-10-10)
+
+
+### Bug Fixes
+
+* **onboarding:** init --force updates name and risk tolerance in user.md ([#338](https://github.com/longsizhuo/openInvest/issues/338)) ([81a5bdf](https://github.com/longsizhuo/openInvest/commit/81a5bdfb1aa4d6ac9c97e6890d5c936ddf470158))
+
 ## [0.40.3](https://github.com/longsizhuo/openInvest/compare/v0.40.2...v0.40.3) (2026-10-10)
 
 
