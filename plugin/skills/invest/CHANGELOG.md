@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.23.1...invest-skill-v0.24.0) (2026-10-10)
+
+
+### Features
+
+* **committee:** run the committee on Chinese off-exchange funds (FUND:&lt;code&gt;) ([#349](https://github.com/longsizhuo/openInvest/issues/349)) ([a8b85d1](https://github.com/longsizhuo/openInvest/commit/a8b85d18d35ccb40c49710a0afc149a011c03d2a))
+
 ## [0.23.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.23.0...invest-skill-v0.23.1) (2026-10-10)
 
 
