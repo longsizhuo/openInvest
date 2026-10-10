@@ -1,5 +1,5 @@
 [Unit]
-Description=Invest MCP (streamable-HTTP) — remote MCP，spoke agent 直连 hub 的 18 工具面
+Description=Invest MCP (streamable-HTTP) — remote MCP，spoke agent 直连 hub 的 MCP 工具面
 After=network-online.target
 Wants=network-online.target
 

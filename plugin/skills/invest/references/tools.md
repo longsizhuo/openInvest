@@ -3,7 +3,7 @@
 > This file is the **tool documentation** — SKILL.md only covers workflow (issue #133 Decision 6:
 > Tool Usage is delegated to MCP schema auto-discovery; the Skill shrinks to the orchestration protocol).
 >
-> - **MCP users** (Claude Code plugin / codex mcp): the 18 tools come with auto-discovered schemas,
+> - **MCP users** (Claude Code plugin / codex mcp): the tools come with auto-discovered schemas,
 >   so you usually don't need this file; only consult this table for the long-tail endpoints MCP
 >   doesn't cover (trades/config/events/...)
 > - **CLI/REST agents** (Gemini / Cursor / scripts): this file is the complete reference
@@ -59,7 +59,7 @@ so the user can verify the preview, then `--commit` for the non-destructive writ
 **Prefer CLI subcommands / MCP tools**; only curl the endpoints below (default :8765) for
 long-tail operations not covered by CLI/MCP. The Web API is marked deprecated (the GUI is
 retired; the remaining endpoints serve remote hub mode, and no new endpoints will be added).
-For remote scenarios, prefer the hub's remote MCP (`openinvest-mcp --http`, 18 tools direct);
+For remote scenarios, prefer the hub's remote MCP (`openinvest-mcp --http`, all tools direct);
 REST forwarding only backfills the long tail MCP doesn't cover.
 If the hub sets `INVEST_API_TOKEN`, every `/api/*` call (except `/api/health`) must carry
 `-H "Authorization: Bearer $INVEST_API_TOKEN"` — loopback included; otherwise it returns 401.

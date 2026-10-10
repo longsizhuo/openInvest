@@ -154,7 +154,7 @@ skills/invest/SKILL.md             agent 触发指引（写"agent 怎么用"，�
 src/openinvest/cli.py              CLI 入口（console script `openinvest`；旧 scripts/skill.py 是兼容 shim）
 src/openinvest/skill_cmds/         skill 各 cmd 实现子包（_helpers/analysis/committee/portfolio/lifecycle/config）
 src/openinvest/connectors/web_api/ FastAPI 端点包（**deprecated**，只服务 remote hub 模式）；不再新增端点
-src/openinvest/connectors/mcp_server.py  MCP adapter（18 工具；stdio 默认 / `--http` remote streamable-HTTP，console script `openinvest-mcp`）
+src/openinvest/connectors/mcp_server.py  MCP adapter（工具集以 `tests/test_mcp_server.py` 快照为准；stdio 默认 / `--http` remote streamable-HTTP，console script `openinvest-mcp`）
 src/openinvest/core/portfolio_manager.py 持仓 façade，with_portfolio_tx fcntl 锁
 src/openinvest/calc/               计算层 T0（纯计算，域中立；禁 IO，机器强制见 ADR-026；旧路径留 façade）
 src/openinvest/core/committee/     委员会编排（包：agent_io/cio_parse/views/loaders/debate/persist + __init__ façade）

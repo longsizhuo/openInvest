@@ -183,7 +183,7 @@ machine but has no key, tell the user to run `run.sh init` to configure it first
 ## Remote mode (hub-and-spoke, multiple devices sharing one dataset)
 
 > **Recommended new path (2026-07, BETA — not yet field-tested by the author in a real multi-device setup)**: when the hub runs `openinvest-mcp --http` (remote MCP),
-> spokes register the HTTP MCP directly — all 18 tools fully available, no CLI forwarding:
+> spokes register the HTTP MCP directly — all tools fully available, no CLI forwarding:
 > `claude mcp add --transport http openinvest https://<hub>/mcp --header "Authorization: Bearer $INVEST_API_TOKEN"`
 > The CLI→REST forwarding below is still supported (maintenance mode); the Coordinator protocol (prepare/save) and
 > doctor/event_check still go through it. For deployment see backend wiki 08 §9.
@@ -225,8 +225,9 @@ add `Authorization: Bearer $INVEST_API_TOKEN` when curling.
 
 **MCP users** (auto-registered once the plugin is installed; same for Claude Code / Codex): status / strategy /
 history / live_prices / what_if / discipline / decisions / explain_decision /
-record_execution / ingest_event / buy / sell / deposit / withdraw / set_allocations / track_asset / untrack_asset / run_committee — 18 tools total,
-schemas auto-discovered; call them directly, no table lookup needed.
+record_execution / ingest_event / buy / record_existing_position / sell / deposit / withdraw /
+set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
+run_committee — schemas auto-discovered; call them directly, no table lookup needed.
 
 **CLI/REST agents**, or long-tail operations MCP does not cover (trades intent flow /
 config whitelist / events / holdings import / gold-specific endpoints) → read

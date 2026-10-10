@@ -454,7 +454,7 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
     能力差集注记：Coordinator 协议（prepare/save_committee）与 doctor/event_check
     仍只在 REST/CLI（Decision 5/6 刻意不进 MCP），详见 wiki 08 §9
   写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
-- **22 个工具**（封闭集合，快照测试 `tests/test_mcp_server.py` 守）：status /
+- **工具集**（封闭集合，以快照测试 `tests/test_mcp_server.py` 为准）：status /
   strategy / history / live_prices / what_if / discipline / decisions /
   explain_decision / record_execution / ingest_event / buy /
   record_existing_position / sell / deposit / withdraw / set_allocations /

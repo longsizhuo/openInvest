@@ -380,7 +380,7 @@ hub，读写都走 HTTP——**锁仍是 hub 单机 fcntl，零分布式复杂�
 
 hub 常驻 `openinvest-mcp --http`（streamable-HTTP，绑 127.0.0.1:8766，
 `systemd/invest-mcp.service`），spoke 机器的 **agent 直连 MCP**，不再经
-CLI→REST 转发。22 个工具（读/写/委员会 Direct）全量可用，鉴权复用同一
+CLI→REST 转发。全部工具（读/写/委员会 Direct）均可用，鉴权复用同一
 `INVEST_API_TOKEN`（bearer，`/health` 豁免）：
 
 ```bash

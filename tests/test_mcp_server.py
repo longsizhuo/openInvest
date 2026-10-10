@@ -29,6 +29,16 @@ def test_tool_set_is_closed():
         assert t.description and t.inputSchema.get("type") == "object", t.name
 
 
+def test_invest_skill_lists_every_tool():
+    """invest skill 给 agent 的 MCP 工具清单必须与快照一致——曾漏 4 个还写着 "18 tools total"。"""
+    import re
+    from pathlib import Path
+    skill = (Path(__file__).resolve().parents[1] / "plugin/skills/invest/SKILL.md").read_text()
+    section = skill.split("**MCP users**", 1)[1].split("**CLI/REST agents**", 1)[0]
+    listed = set(re.findall(r"[a-z_]+", section))
+    assert EXPECTED_TOOLS - listed == set()
+
+
 def test_every_tool_dispatches_off_the_event_loop():
     """同步工具必须经 _tool 注册（线程池执行）；直接 @mcp.tool 的同步函数在事件循环里跑，
     慢 IO 会卡住其他 HTTP 客户端、/health 和 SSE 心跳。"""
