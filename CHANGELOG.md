@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.40.2](https://github.com/longsizhuo/openInvest/compare/v0.40.1...v0.40.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **committee:** restrict CIO JSON verdict to the five-value enum ([#337](https://github.com/longsizhuo/openInvest/issues/337)) ([f66ba12](https://github.com/longsizhuo/openInvest/commit/f66ba120cf5b935d5cc119650eaae798ab4327e0))
+* **mcp:** disable ingest_event in advisory mode ([#339](https://github.com/longsizhuo/openInvest/issues/339)) ([0d52d1e](https://github.com/longsizhuo/openInvest/commit/0d52d1e762b436bdbe4c96772eb5d490e7c97da4))
+* **status:** only fetch and show ndq/gold/AUD sections when the user holds them ([#335](https://github.com/longsizhuo/openInvest/issues/335)) ([1b98c17](https://github.com/longsizhuo/openInvest/commit/1b98c17897a82fd017ddc51aecb84e4ff6e8b186))
+
+
+### Docs
+
+* **mcp:** stop hard-coding the MCP tool count; list every tool in the invest skill ([#336](https://github.com/longsizhuo/openInvest/issues/336)) ([3017df5](https://github.com/longsizhuo/openInvest/commit/3017df5c136e97cb1dc077b65546d3ae9817630a))
+
 ## [0.40.1](https://github.com/longsizhuo/openInvest/compare/v0.40.0...v0.40.1) (2026-10-09)
 
 
