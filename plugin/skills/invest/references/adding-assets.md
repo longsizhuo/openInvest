@@ -107,8 +107,11 @@ yfinance and must NOT get a `.SS` / `.SZ` suffix. Use `FUND:<6-digit code>` with
 paid from the recorded cash.)
 
 They are valued at the latest confirmed unit NAV from Eastmoney (not the intraday estimate), so
-`status` / P&L / the committee's portfolio summary all include them. Running the committee *on* a
-fund itself is not supported yet (no price history wired in). If the user only knows the holding
+`status` / P&L / the committee's portfolio summary all include them. The committee can also run *on*
+a fund: `track_asset --symbol FUND:123456 --display-name <fund name> --max-single-invest-cny <cap>`, then
+`run_committee FUND:123456`. Always pass the fund's name as `--display-name` — the analysts only see
+the symbol otherwise. Its price history is Eastmoney's dividend-adjusted NAV (closing values only, so
+there is no volume/RVOL signal). If the user only knows the holding
 amount and holding P&L (持有金额 / 持有收益), use `import_holdings` — it derives units and average
 cost from the latest NAV.
 
