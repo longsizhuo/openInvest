@@ -30,6 +30,23 @@ INVEST_HOME=~/openinvest-demo INVEST_ADVISORY_MODE=1 \
 **公开服务只能暴露 `debate_summary()`**，不能直接暴露 openinvest 的 MCP / web_api
 （`run_committee` / `explain_decision` 等出口都带裁决）。
 
+## 演示站
+
+`scripts/server.py`（FastAPI）+ `scripts/index.html`：输入 6 位基金代码 → 先查基金并给出纯计算的事实
+（近两年净值小图、最深跌幅、离高点多远，不调 LLM）→ 后台跑一次委员会 → 页面轮询拿书记员纪要。
+
+```bash
+INVEST_HOME=~/openinvest-demo INVEST_ADVISORY_MODE=1 \
+    uv run uvicorn --app-dir experiments/cooldown-demo/scripts server:app --host 127.0.0.1 --port 8769
+```
+
+- 只绑 127.0.0.1，公网经反代进来。限频按 `CF-Connecting-IP`（经 Cloudflare 时可信）。
+- 每人每天 `COOLDOWN_PER_IP_DAILY`（默认 3）次，全站每天 `COOLDOWN_GLOBAL_DAILY`（默认 100）次。
+  一次委员会约 ¥0.01（deepseek-v4-flash），封顶约 ¥1/天。查不到的代码不计次、不调 LLM。
+- 同一时刻只跑一个委员会，其余排队。任务和计数在进程内存，重启清零。
+- 页面按行把纪要渲染成纯文本节点（标题 / 列表 / 段落），不解析 Markdown 或 HTML。
+- 一次辩论实测约 20 秒（1 轮 cross-challenge）。
+
 ## 测试
 
 不在 CI 里（CI 只跑 `tests/`），改代码前后手动跑：
@@ -39,7 +56,8 @@ uv run pytest experiments/cooldown-demo/scripts/ -q
 ```
 
 闸的正例（含 13 种绕过写法）、反例（正常分析句不误伤）、重写一次、二次命中拦下、LLM
-不可用拦下、非顾问模式拒绝、出口白名单 + 书记员看不到 CIO。
+不可用拦下、非顾问模式拒绝、出口白名单 + 书记员看不到 CIO；演示站的代码校验、查不到不计次、
+每人/全站限额、失败不外泄内部报错。
 
 ## 实测（2026-10）
 

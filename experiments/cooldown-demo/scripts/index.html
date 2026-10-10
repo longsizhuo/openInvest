@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三思：投资冷静期</title>
+<style>
+  :root {
+    --paper: #F3F5F4;
+    --ink: #1E2A2F;
+    --muted: #5E6E72;
+    --tianqing: #3F7A86;
+    --fall: #2C8A57;
+    --rule: #D5DCDA;
+    --serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+    --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 17px/1.75 var(--sans);
+    font-variant-numeric: tabular-nums;
+  }
+  main { max-width: 38rem; margin: 0 auto; padding: 3.5rem 1rem 4rem; }
+  h1 {
+    font: 600 4.5rem/1 var(--serif); letter-spacing: .3em; margin: 0 0 1.25rem;
+  }
+  .lede { margin: 0 0 2.25rem; color: var(--muted); }
+  label { display: block; font-size: .9rem; color: var(--muted); margin-bottom: .35rem; }
+  .row { display: flex; gap: .75rem; }
+  input {
+    flex: 1; min-width: 0; font: 1.5rem/1.2 var(--sans); letter-spacing: .12em;
+    padding: .55rem .7rem; border: 1px solid var(--rule); border-radius: 6px;
+    background: #fff; color: var(--ink);
+  }
+  button {
+    font: 600 1rem/1 var(--sans); padding: .95rem 1.4rem; border: 0; border-radius: 6px;
+    background: var(--tianqing); color: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--tianqing); outline-offset: 2px; }
+  .hint { font-size: .9rem; color: var(--muted); margin: .75rem 0 0; }
+  .error { color: #A33A2B; margin: 1rem 0 0; }
+
+  #fund { margin-top: 3rem; }
+  .fund-name { font: 600 1.35rem/1.4 var(--serif); margin: 0; }
+  .fund-meta { color: var(--muted); font-size: .95rem; margin: .2rem 0 1.25rem; }
+  svg { display: block; width: 100%; height: auto; }
+  .fall { color: var(--fall); font-weight: 600; }
+  .fact { margin: .75rem 0 0; }
+
+  #status { margin: 2rem 0 0; color: var(--muted); display: flex; gap: .6rem; align-items: center; }
+  .breath { width: .7rem; height: .7rem; border-radius: 50%; background: var(--tianqing); animation: breath 4s ease-in-out infinite; }
+  @keyframes breath { 0%, 100% { transform: scale(.6); opacity: .45; } 50% { transform: scale(1.1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .breath { animation: none; } }
+
+  #summary h3 { font: 600 1.15rem/1.5 var(--serif); margin: 2.25rem 0 .5rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+  #summary ul { margin: 0; padding-left: 1.2rem; }
+  #summary li { margin: .45rem 0; }
+  #summary .disclaimer { margin-top: 2.5rem; font-size: .9rem; color: var(--muted); }
+  footer { margin-top: 4rem; font-size: .85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>三思</h1>
+  <p class="lede">想买入或卖出一只基金？先让宏观、量化、风险三位 AI 分析师替你吵一架。它们只摆理由，不替你拍板。</p>
+
+  <form id="ask">
+    <label for="code">基金代码（支付宝基金详情页里的 6 位数字）</label>
+    <div class="row">
+      <input id="code" inputmode="numeric" autocomplete="off" maxlength="6" pattern="\d{6}" placeholder="例如 110011" required>
+      <button id="go" type="submit">开始辩论</button>
+    </div>
+  </form>
+  <p class="hint">一次辩论通常要 1–2 分钟。每人每天可以问 3 次。</p>
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <section id="fund" hidden aria-labelledby="fund-name">
+    <p id="fund-name" class="fund-name"></p>
+    <p id="fund-meta" class="fund-meta"></p>
+    <svg id="chart" viewBox="0 0 600 180" role="img"></svg>
+    <p class="fact" id="fact"></p>
+  </section>
+
+  <p id="status" aria-live="polite" hidden><span class="breath" aria-hidden="true"></span><span id="status-text"></span></p>
+  <section id="summary" aria-live="polite"></section>
+
+  <footer>数据来自东方财富公开净值。辩论由 openInvest 多角色委员会生成，不构成投资建议。</footer>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let timer = null;
+
+function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
+
+function drawChart(f) {
+  const s = f.series, W = 600, H = 180, pad = 8;
+  const vals = s.map((p) => p[1]);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const x = (i) => pad + (i / (s.length - 1)) * (W - 2 * pad);
+  const y = (v) => pad + (1 - (v - lo) / (hi - lo || 1)) * (H - 2 * pad);
+  const near = (d) => s.reduce((best, p, i) => (Math.abs(new Date(p[0]) - new Date(d)) < Math.abs(new Date(s[best][0]) - new Date(d)) ? i : best), 0);
+  const a = near(f.peak), b = near(f.trough);
+  const line = s.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  const dip = s.slice(a, b + 1).map((p, k) => `L${x(a + k).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  $("chart").innerHTML =
+    `<path d="M${x(a)},${y(s[a][1])}${dip}L${x(b)},${y(s[a][1])}Z" fill="#2C8A57" opacity=".14"/>` +
+    `<path d="${line}" fill="none" stroke="#1E2A2F" stroke-width="1.6" stroke-linejoin="round"/>` +
+    `<circle cx="${x(b)}" cy="${y(s[b][1])}" r="4" fill="#2C8A57"/>`;
+  $("chart").setAttribute("aria-label", `近两年净值走势，${f.peak} 到 ${f.trough} 最深跌了 ${f.max_drawdown_2y}%`);
+}
+
+function showFund(f) {
+  $("fund-name").textContent = f.name;
+  $("fund-meta").textContent = `单位净值 ${f.nav}（${f.nav_date}）`;
+  drawChart(f);
+  const fact = $("fact");
+  fact.textContent = "";
+  fact.append("近两年它最深跌过 ");
+  const dd = document.createElement("span"); dd.className = "fall"; dd.textContent = `${f.max_drawdown_2y}%`;
+  fact.append(dd, `（${f.peak} 到 ${f.trough}），现在离近两年高点 ${f.from_high_2y}%。买之前想一想：再跌这么多，你拿得住吗？`);
+  $("fund").hidden = false;
+}
+
+// 纪要按行渲染成纯文本节点：不解析 Markdown/HTML，服务端闸查的就是用户看到的字
+function showSummary(text) {
+  const box = $("summary");
+  box.textContent = "";
+  let list = null, afterRule = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line === "---") { afterRule = true; list = null; continue; }
+    if (line.startsWith("## ")) {
+      const h = document.createElement("h3"); h.textContent = line.slice(3); box.append(h); list = null;
+    } else if (line.startsWith("- ") && !afterRule) {
+      if (!list) { list = document.createElement("ul"); box.append(list); }
+      const li = document.createElement("li"); li.textContent = line.slice(2); list.append(li);
+    } else {
+      const p = document.createElement("p"); p.textContent = line;
+      if (afterRule) p.className = "disclaimer";
+      box.append(p); list = null;
+    }
+  }
+}
+
+async function poll(jobId, started) {
+  const r = await fetch(`/api/debate/${jobId}`);
+  const j = await r.json();
+  if (!r.ok) { showError(j.detail || "查询失败，稍后再试"); return finish(); }
+  const sec = Math.round((Date.now() - started) / 1000);
+  $("status-text").textContent = j.status === "queued"
+    ? `前面还有人在问，排队中（已等 ${sec} 秒）`
+    : `三位分析师正在辩论，已经 ${sec} 秒`;
+  if (j.status !== "done") { timer = setTimeout(() => poll(jobId, started), 3000); return; }
+  if (j.result.debate_summary) showSummary(j.result.debate_summary);
+  else showError(j.result.error || "这次辩论没跑成，稍后再试");
+  finish();
+}
+
+function finish() { $("status").hidden = true; $("go").disabled = false; }
+
+$("ask").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearTimeout(timer);
+  $("error").hidden = true; $("summary").textContent = ""; $("fund").hidden = true;
+  $("go").disabled = true;
+  $("status-text").textContent = "正在查这只基金";
+  $("status").hidden = false;
+  try {
+    const r = await fetch("/api/debate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: $("code").value.trim() }),
+    });
+    const j = await r.json();
+    if (!r.ok) { showError(j.detail || "提交失败，稍后再试"); return finish(); }
+    showFund(j.facts);
+    poll(j.job_id, Date.now());
+  } catch {
+    showError("连不上服务，检查网络后再试");
+    finish();
+  }
+});
+</script>
+</body>
+</html>
