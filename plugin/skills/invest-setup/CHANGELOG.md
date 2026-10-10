@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.5.0...invest-setup-skill-v0.5.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **onboarding:** init --force updates name and risk tolerance in user.md ([#338](https://github.com/longsizhuo/openInvest/issues/338)) ([81a5bdf](https://github.com/longsizhuo/openInvest/commit/81a5bdfb1aa4d6ac9c97e6890d5c936ddf470158))
+
 ## [0.5.0](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.4.0...invest-setup-skill-v0.5.0) (2026-10-09)
 
 
