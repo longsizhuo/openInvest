@@ -144,16 +144,34 @@ def normalize_summary(text: str) -> str:
     return unicodedata.normalize("NFKC", text or "").translate(_TRAD_TO_SIMP)
 
 
+# 西里尔/希腊字母里长得像拉丁字母的（ВUY、НОLD），渲染视图里折回拉丁
+_CONFUSABLES = str.maketrans(dict(pair for pair in (
+    "АA ВB ЕE КK МM НH ОO РP СC ТT ХX УY аa еe оo рp сc уy хx ѕs іi јj "
+    "ΑA ΒB ΕE ΗH ΙI ΚK ΜM ΝN ΟO ΡP ΤT ΥY ΧX οo νv"
+).split()))
+
+
+def _rendered_view(t: str) -> str:
+    """模拟 Markdown 渲染后人读到的字串：链接只留文字，去掉组合附加符、同形字折回拉丁，
+    再删空白和所有 Markdown 语法符（强调/代码/转义/链接括号/标题/引用/表格/列表）。
+    只用来查，不返回——删得狠只会多拦（多一次重写），不会漏拦。"""
+    t = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", t)     # 行内链接 / 图片
+    t = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", t)       # 引用式链接
+    t = "".join(c for c in t if unicodedata.category(c) not in ("Mn", "Me"))
+    return re.sub(r"[\s\\*_~`\[\]()!#>|+\-]+", "", t.translate(_CONFUSABLES))
+
+
 def find_verdict_language(text: str) -> List[str]:
     """纪要里命中闸的片段（去重排序）；空列表 = 放行。
 
-    查两个视图：规范形本身，以及去掉空白 / Markdown 强调符 / 链接语法后的"渲染视图"
-    （防 `建*议*买入`、`建 议 买 入`、`[建](x)议买入`）。可疑标记直接算命中。
-    ponytail: 同形异码字（西里尔字母冒充拉丁字母）不处理——要防就加 confusables 表
+    查两个视图：规范形本身（就是返回给用户的那一份），以及 _rendered_view 模拟的
+    渲染结果（防 `建*议*买入`、`建\\议`、`[建][1]议`、`|建|议买入|`、`建̸议`、`ВUY`）。
+    HTML 标签/实体、格式控制字符直接算命中。
+    ponytail: 关键词闸的上限是同义改写；要更稳就加 LLM 二审，或让前端按纯文本渲染
     """
     t = normalize_summary(text)
-    rendered = re.sub(r"[\s*_~`]+", "", re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t))
-    hits = {m.group(0) for view in (t, rendered) for m in _VERDICT_LANGUAGE.finditer(view)}
+    hits = {m.group(0) for view in (t, _rendered_view(t))
+            for m in _VERDICT_LANGUAGE.finditer(view)}
     if _SUSPICIOUS_MARKUP.search(t) or any(unicodedata.category(c) == "Cf" for c in t):
         hits.add("<可疑标记>")
     return sorted(hits)

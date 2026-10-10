@@ -39,6 +39,11 @@ from openinvest.core.committee import debate
     "B\u200bUY",                       # 零宽字符
     "建<!-- -->议买入",                 # HTML 注释
     "&#24314;议买入",                   # HTML 实体
+    "建\\议买入",                      # Markdown 转义
+    "[建][1]议买入\n\n[1]: https://x.co",  # 引用式链接
+    "| 建 | 议买入 |",                    # 表格
+    "建\u0338议买入",                    # 组合附加符
+    "\u0412UY",                         # 西里尔 В 冒充 B
 ])
 def test_gate_blocks_conclusions(text):
     assert debate.find_verdict_language(text)
