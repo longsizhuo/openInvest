@@ -6,6 +6,7 @@ openInvest 的交易所资产继续走 yfinance；中国场外公募基金使用
 两个取数函数：
 - ``fetch_fund_nav``：最新已确认单位净值（不是盘中估值），组合估值与 P&L 用。
   走 f10 历史净值接口第一页（响应约 400B），进程内 TTL 缓存，只缓存成功结果。
+  lsjz（api.fund.eastmoney.com）本机实测间歇超时，失败时退到 pingzhongdata 的最后一个点。
 - ``fetch_fund_nav_history``：成立以来全部单位净值（pingzhongdata，几百 KB），
   ``core/benchmarks`` 的基金基准与后续历史序列需求共用。
 
@@ -96,7 +97,7 @@ def fetch_fund_nav(symbol: str, *, timeout: float = 8.0) -> Optional[FundNavSnap
         hit = _nav_cache.get(code)
     if hit is not None and now - hit[0] < _NAV_TTL_SECONDS:
         return hit[1]
-    snap = _fetch_latest_nav(code, timeout)
+    snap = _fetch_latest_nav(code, timeout) or _latest_nav_from_history(code, timeout)
     if snap is not None:
         with _nav_cache_lock:
             _nav_cache[code] = (now, snap)
@@ -127,6 +128,16 @@ def _fetch_latest_nav(code: str, timeout: float) -> Optional[FundNavSnapshot]:
     except (requests.RequestException, TypeError, ValueError) as exc:
         log.warning("东方财富基金净值获取失败 %s: %s", code, exc)
         return None
+
+
+def _latest_nav_from_history(code: str, timeout: float) -> Optional[FundNavSnapshot]:
+    """lsjz 兜底：pingzhongdata（另一个域名）的最后一个点，stale 规则同 lsjz。"""
+    history = fetch_fund_nav_history(code, timeout=timeout)
+    if not history:
+        return None
+    nav_date, nav = history[-1]
+    _, is_stale = _parse_nav_date(nav_date)
+    return FundNavSnapshot(code=code, nav=nav, nav_date=nav_date, is_stale=is_stale)
 
 
 def fetch_fund_nav_history(

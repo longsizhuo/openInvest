@@ -83,21 +83,60 @@ def test_fetch_fund_nav_marks_old_nav_stale(monkeypatch):
     assert emf.fetch_fund_nav("FUND:123456").is_stale is False
 
 
+def _pingzhong_text(points):
+    """points: [(YYYY-MM-DD, nav)] → pingzhongdata JS（x = 北京时间零点毫秒）。"""
+    trend = [
+        {"x": int(datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=CN_TZ).timestamp() * 1000),
+         "y": nav, "equityReturn": 0, "unitMoney": ""}
+        for d, nav in points
+    ]
+    return f"var Data_netWorthTrend = {json.dumps(trend)};"
+
+
+def _by_host(lsjz, pingzhong, calls):
+    """按 URL 分流的假 requests.get；lsjz / pingzhong 是 Exception 实例或 _Response。"""
+    def fake_get(url, **kw):
+        calls.append(url)
+        r = lsjz if url == emf._LSJZ_URL else pingzhong
+        if isinstance(r, Exception):
+            raise r
+        return r
+    return fake_get
+
+
 def test_failed_fetch_is_not_cached(monkeypatch):
-    """一次网络失败不能让该基金在常驻进程（MCP / scheduler）里一直缺价。"""
-    calls = {"n": 0}
-
-    def flaky_get(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise requests.ConnectionError("transient")
-        return _Response(_lsjz())
-
-    monkeypatch.setattr(emf.requests, "get", flaky_get)
+    """两个源都失败 → None 且不缓存：一次网络抖动不能让该基金在常驻进程（MCP / scheduler）里一直缺价。"""
+    calls = []
+    monkeypatch.setattr(emf.requests, "get", _by_host(
+        requests.ConnectionError("transient"), requests.Timeout("slow"), calls))
     assert emf.fetch_fund_nav("FUND:123456") is None
+    assert calls == [emf._LSJZ_URL, emf._PINGZHONG_URL.format(code="123456")]
+
+    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _Response(_lsjz()))
     snap = emf.fetch_fund_nav("FUND:123456")
     assert snap is not None and snap.nav == 2.0
-    assert calls["n"] == 2
+
+
+def test_lsjz_timeout_falls_back_to_pingzhongdata_last_point(monkeypatch):
+    """2026-10-10 复现：lsjz 间歇超时 → 用 pingzhongdata 最后一个点（净值 + 日期），成功结果照常缓存。"""
+    today = datetime.now(CN_TZ).strftime("%Y-%m-%d")
+    calls = []
+    monkeypatch.setattr(emf.requests, "get", _by_host(
+        requests.ReadTimeout("read timeout=8"),
+        _Response(text=_pingzhong_text([("2026-01-05", 1.5), (today, 1.7321)])),
+        calls))
+    snap = emf.fetch_fund_nav("FUND:123456")
+    assert snap == emf.FundNavSnapshot(code="123456", nav=1.7321, nav_date=today, is_stale=False)
+    assert emf.fetch_fund_nav("123456.OF") == snap          # 命中缓存，不再打网络
+    assert len(calls) == 2
+
+
+def test_fallback_applies_same_stale_rule(monkeypatch):
+    old = (datetime.now(CN_TZ) - timedelta(days=emf._STALE_DAYS + 1)).strftime("%Y-%m-%d")
+    monkeypatch.setattr(emf.requests, "get", _by_host(
+        requests.ConnectionError("down"), _Response(text=_pingzhong_text([(old, 1.2)])), []))
+    snap = emf.fetch_fund_nav("FUND:123456")
+    assert snap.nav_date == old and snap.is_stale is True
 
 
 def test_successful_fetch_cached_until_ttl(monkeypatch):

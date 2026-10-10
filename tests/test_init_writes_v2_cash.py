@@ -226,6 +226,25 @@ def test_v1_portfolio_writes_refused_until_doctor_command_converts(tmp_path, mon
     assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("510300.SS", 3000.0)]
 
 
+def test_init_names_fund_it_could_not_convert(tmp_path, fake_llm, monkeypatch):
+    """2026-10-10 复现：两个净值源都挂时 init 仍写入 0 份基金，但 note / next_step 必须点名，不能只说 parsed via LLM。"""
+    monkeypatch.setitem(_LLM_REPLY, "value", {"cash": {}, "holdings": [
+        {"symbol": "FUND:123456", "kind": "fund", "units": 0, "avg_cost": 0,
+         "market_value": 10000, "pnl": 500, "display_name": "Demo Fund"}]})
+    # 死代理让 eastmoney 两个 https 源秒失败（不碰真实网络）；本地假 LLM 走 NO_PROXY
+    for var in ("HTTPS_PROXY", "https_proxy"):   # urllib 小写优先，两个都钉
+        monkeypatch.setenv(var, "http://127.0.0.1:9")
+    out = _run_init(tmp_path, {"profile": {"name": "T", "holdings_description": "123456 持有金额 1 万，收益 500"},
+                               "env": {"LLM_API_KEY": "sk-fake", "LLM_BASE_URL": fake_llm}})
+    assert out.returncode == 0, out.stderr
+    r = _json(out)
+    assert "fund not converted: FUND:123456" in r["holdings_parse_note"]
+    assert r["next_step"].startswith("**1 只场外基金没换算成份额")
+    assert r["parsed_holdings_for_user_review"]["warnings"]
+    pm = PortfolioManager(MemoryStore(tmp_path / "memory"))
+    assert [(h["symbol"], h["units"]) for h in pm.holdings] == [("FUND:123456", 0.0)]
+
+
 def test_parse_without_cash_keeps_current_assets_cash(tmp_path, fake_llm, monkeypatch):
     # 持仓描述里没提现金（doctor hint 把现金单独问、填 current_assets）：解析结果 cash={} 不能把现金清空
     monkeypatch.setitem(_LLM_REPLY, "value", {"cash": {}, "holdings": _PARSED["holdings"]})

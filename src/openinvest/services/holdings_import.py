@@ -137,8 +137,9 @@ def _first_number(h: Dict[str, Any], *keys: str) -> float:
 def enrich_fund_holdings(parsed: Dict[str, Any]) -> Dict[str, Any]:
     """规范化场外基金 symbol，并由“持有金额 + P&L + 最新净值”反推份额/均价。
 
-    只改变 ``kind=fund`` 的条目。净值源失败时保留 0 份，调用方预览可以明确看到
-    未能转换，绝不编造份额。
+    只改变 ``kind=fund`` 的条目。净值源失败时保留 0 份，绝不编造份额；每只没换算成的
+    基金在 ``warnings`` 里点名（init / import / POST /api/holdings/import 都原样带出），
+    agent 才会告诉用户，而不是默默入账一只市值 0 的基金。
     """
     from openinvest.utils.eastmoney_fund import (
         canonical_fund_symbol,
@@ -147,6 +148,7 @@ def enrich_fund_holdings(parsed: Dict[str, Any]) -> Dict[str, Any]:
 
     out = dict(parsed)
     enriched: List[Dict[str, Any]] = []
+    warnings: List[str] = []
     for raw in parsed.get("holdings") or []:
         h = dict(raw)
         kind = _KIND_MAP.get(str(h.get("kind") or "").lower(), str(h.get("kind") or "").lower())
@@ -177,8 +179,19 @@ def enrich_fund_holdings(parsed: Dict[str, Any]) -> Dict[str, Any]:
                 h["nav_date_at_import"] = snap.nav_date
                 h["market_value_at_import"] = round(market_value, 2)
                 h["pnl_at_import"] = round(pnl, 2)
+            else:
+                sym = h["symbol"]
+                warnings.append(
+                    f"fund not converted: {sym}（{h.get('display_name') or sym}）持有金额 "
+                    f"{market_value:,.2f} CNY 没换算成份额——最新净值取不到（lsjz 和 pingzhongdata 都失败），"
+                    "units=0，入账后市值显示 0。告诉用户；问基金 App 里的持有份额和成本价，"
+                    f"已入账的先 `run.sh delete_holding --symbol {sym} --force`，再 `run.sh buy --symbol {sym} "
+                    "--kind fund --unit-label 份 --units <份额> --price <成本价> --existing-position` 重录（都不动现金）"
+                )
         enriched.append(h)
     out["holdings"] = enriched
+    if warnings:
+        out["warnings"] = warnings
     return out
 
 

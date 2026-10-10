@@ -376,6 +376,10 @@ def cmd_init(args: argparse.Namespace) -> None:
             holdings_parse_note += f"; v2 write failed: {exc!s}"
     # 写失败时 parsed holdings 只是预览，不能让 agent 当成已入账读给用户确认
     _holdings_written = bool(holdings_v2.get("holdings")) and not _v2_write_error
+    # 场外基金净值源全挂 → 0 份入账；点名写进 note，否则 agent 只看到 "parsed via LLM"
+    _fund_warnings = list(holdings_v2.get("warnings") or []) if _holdings_written else []
+    if _fund_warnings:
+        holdings_parse_note += "; " + "; ".join(_fund_warnings)
     _holdings_desc_given_no_key = (
         bool(holdings_text)
         and not env_data.get("LLM_API_KEY", "").strip()
@@ -466,6 +470,12 @@ def cmd_init(args: argparse.Namespace) -> None:
             f"字段给他听，连同{_cash_text}）。" + _fix + "；别重跑 `init --force`（持仓已存在，会被拒绝）。"
             "确认无误后，调 `run.sh status` 验证持仓显示正确。"
         )
+        if _fund_warnings:
+            next_step_text = (
+                f"**{len(_fund_warnings)} 只场外基金没换算成份额，按 0 份入账、市值显示 0**"
+                "（holdings_parse_note 里 `fund not converted` 逐只点名 + 补救命令）。先告诉用户这一点。"
+                + next_step_text
+            )
     elif final_checks_status == "completed_full":
         # 完整 onboarding 完成
         next_step_text = (

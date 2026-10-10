@@ -113,7 +113,9 @@ a fund: `track_asset --symbol FUND:123456 --display-name <fund name> --max-singl
 the symbol otherwise. Its price history is Eastmoney's dividend-adjusted NAV (closing values only, so
 there is no volume/RVOL signal). If the user only knows the holding
 amount and holding P&L (持有金额 / 持有收益), use `import_holdings` — it derives units and average
-cost from the latest NAV.
+cost from the latest NAV. If no NAV source answers, the fund stays at 0 units and the output names
+it (`fund not converted` in `parsed.warnings` / init's `holdings_parse_note`): tell the user and ask
+for the units held and cost price from their fund app — never estimate them.
 
 ## What yfinance does NOT support
 
