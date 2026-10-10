@@ -267,6 +267,44 @@ class TestOnboardingSmoke:
         # cash.cny 应有值（seed 写了 CNY: 20000.0）
         assert result["cash"].get("cny") == pytest.approx(20000.0)
 
+    def test_step6_fork_status_has_no_hardcoded_sections(self, tmp_path):
+        """6. fork 用户（CNY 现金 + A 股 ETF，无 NDQ/黄金/AUD）的 status 不出现历史硬编码的
+        ndq / gold / AUD 段，也不去拉 NDQ.AX / AUDCNY=X / 黄金快照。"""
+        from openinvest.core.memory_store import MemoryStore
+        from openinvest.utils.quotes import QuoteSnapshot
+        import openinvest.core.memory_store as ms_module
+        import pandas as pd
+
+        fake_root = tmp_path / "invest_home"
+        fake_root.mkdir()
+        _seed_minimal_memory(fake_root)
+        MemoryStore(fake_root / "memory").write("portfolio", "state", {
+            "schema_version": 2,
+            "cash": {"CNY": 20000.0},
+            "holdings": [{"symbol": "510300.SS", "kind": "etf", "units": 1000.0,
+                          "avg_cost": 4.0, "cost_currency": "CNY"}],
+        }, "# portfolio")
+
+        hist = MagicMock(return_value=pd.DataFrame({"Close": [55.0]}))
+        gold = MagicMock(return_value=None)
+        quote = QuoteSnapshot(symbol="510300.SS", price=4.5, currency="CNY", unit="股",
+                              last_updated="2026-10-09")
+        with patch.object(ms_module, "MEMORY_ROOT", fake_root / "memory"), \
+             patch("openinvest.utils.exchange_fee.get_history_data", hist), \
+             patch("openinvest.utils.gold_price.get_gold_snapshot", gold), \
+             patch("openinvest.utils.quotes.get_quote", return_value=quote):
+            from openinvest.services.skill_views import build_status_view
+            result = build_status_view()
+
+        assert "ndq" not in result and "gold" not in result
+        assert set(result["cash"]) == {"cny", "all_currencies"}
+        assert result["fx"] == {} and result["live_prices"] == {}
+        assert [h["symbol"] for h in result["all_holdings"]] == ["510300.SS"]
+        assert result["all_holdings"][0]["market_value"] == pytest.approx(4500.0)
+        fetched = {c.args[0] for c in hist.call_args_list}
+        assert not fetched & {"NDQ.AX", "AUDCNY=X"}, fetched
+        gold.assert_not_called()
+
 
 # ============ 辅助：onboarding 数据完整性 ============
 
