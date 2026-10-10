@@ -393,6 +393,15 @@ def test_sanity5_reentry_at_or_above_current_forces_hold():
     assert r["_sanity5_reason"] == "reentry_not_below_current"
 
 
+def test_sanity5_block_keeps_pre_rule_alloc_for_ledger():
+    """被否的 TRIM 金额要进反事实账本和日报。曾写到没人读的 _original_alloc_sanity5，
+    _intervention_record 读 _original_alloc 拿到 _force_hold 后的 0 → delta_exposure 恒为 0。"""
+    from openinvest.core.runner.intervention import _intervention_record
+    r = parse_cio_memo(_trim_reentry_text("1050"), current_price=1000.0)
+    rec = _intervention_record("X", "range_bound", 1000.0, r, False)
+    assert rec["original_alloc"] == -5000 and rec["delta_exposure_cny"] == -5000
+
+
 def test_sanity5_reentry_missing_forces_hold():
     """TRIM 但没给 REENTRY_PRICE → 降级 HOLD"""
     r = parse_cio_memo(_trim_reentry_text(None), current_price=1000.0)

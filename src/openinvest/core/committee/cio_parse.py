@@ -284,7 +284,7 @@ def parse_cio_memo(
         rp = out.get("reentry_price")
         if rp is None or rp >= current_price:
             out["_original_verdict"] = "TRIM"
-            out["_original_alloc_sanity5"] = out.get("alloc_cny")
+            out.setdefault("_original_alloc", out.get("alloc_cny"))
             out["_sanity5_reason"] = (
                 "reentry_missing" if rp is None else "reentry_not_below_current"
             )
