@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.40.3](https://github.com/longsizhuo/openInvest/compare/v0.40.2...v0.40.3) (2026-10-10)
+
+
+### Bug Fixes
+
+* **committee:** keep the blocked TRIM amount when Sanity 5 forces HOLD ([#343](https://github.com/longsizhuo/openInvest/issues/343)) ([c888c4f](https://github.com/longsizhuo/openInvest/commit/c888c4fe452af9710f62fe852bc66aa014949b24))
+* **pnl:** stop writing the outperform feed into README ([#342](https://github.com/longsizhuo/openInvest/issues/342)) ([16d09d3](https://github.com/longsizhuo/openInvest/commit/16d09d3f94bf52afa9652acc697b30611d1cf00b))
+
 ## [0.40.2](https://github.com/longsizhuo/openInvest/compare/v0.40.1...v0.40.2) (2026-10-10)
 
 
