@@ -108,8 +108,19 @@ def _check_advisory():
         )
 
 
+# 无裁决模式白名单：逐个确认过返回值里没有委员会裁决的工具。白名单外的工具必须调
+# _check_no_verdict()（机器强制，见 tests/test_no_verdict_mode.py），新增工具漏分类 CI 红。
+# run_committee 在白名单里是因为它自己在模式下换成只出 debate_summary 的白名单出口。
+NO_VERDICT_ALLOWED_TOOLS = frozenset({
+    "run_committee", "live_prices", "news_sources", "add_news_source", "remove_news_source",
+    "status", "strategy", "history", "what_if", "record_execution",
+    "buy", "sell", "record_existing_position", "deposit", "withdraw",
+    "set_allocations", "track_asset", "untrack_asset",
+})
+
+
 def _check_no_verdict():
-    """INVEST_NO_VERDICT_MODE 下关掉会吐出委员会裁决/原始辩论记录的工具。"""
+    """INVEST_NO_VERDICT_MODE 下关掉会吐出委员会裁决（或触发假定有裁决的后台委员会）的工具。"""
     if is_no_verdict_mode():
         raise RuntimeError(
             "INVEST_NO_VERDICT_MODE=1: this tool returns committee verdicts and is disabled. "
@@ -253,6 +264,7 @@ def discipline() -> Dict[str, Any]:
         Object with `summary` (structured stats) and `markdown` (the same
         ledger pre-rendered for direct display to the user).
     """
+    _check_no_verdict()
     _check_advisory()
     from openinvest.services.discipline import discipline_summary, render_discipline_md
     s = discipline_summary()
@@ -420,6 +432,7 @@ def ingest_event(
         ≥ mid, non-neutral) triggered a rate-limited committee re-run. This
         tool is disabled in advisory mode.
     """
+    _check_no_verdict()
     _check_advisory()
     from openinvest.services.event_ingest import ingest_events
     return ingest_events([{"title": title, "url": url, "snippet": snippet,

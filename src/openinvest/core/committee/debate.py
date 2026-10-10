@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -127,9 +128,35 @@ _NO_VERDICT_DISCLAIMER = (
 )
 
 
+# 闸查的串必须就是用户看到的串（parser differential）：纪要按 Markdown 渲染，
+# `建*议*买入` 渲染出来是"建议买入"，零宽字符 / 全角字母 / HTML 实体 / 繁体同理。
+# 新闻源在顾问模式下群友可加，经 Macro 进书记员上下文，是现实的注入入口。
+_TRAD_TO_SIMP = str.maketrans(
+    "議應該當慮適買賣倉減損場離觀贖購車筆標價點勝撐萬塊錢機會約為達僅線",
+    "议应该当虑适买卖仓减损场离观赎购车笔标价点胜撑万块钱机会约为达仅线",
+)
+# 纪要里没有任何正当理由出现 HTML 标签/注释、HTML 实体、格式控制字符（零宽/双向覆盖/软连字符）
+_SUSPICIOUS_MARKUP = re.compile(r"<\s*/?\s*[A-Za-z!][^>]*>|&(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z]+);")
+
+
+def normalize_summary(text: str) -> str:
+    """闸和出口共用的规范形：NFKC（全角→半角）+ 繁→简（闸关键词涉及的字）。"""
+    return unicodedata.normalize("NFKC", text or "").translate(_TRAD_TO_SIMP)
+
+
 def find_verdict_language(text: str) -> List[str]:
-    """纪要里命中闸的片段（去重排序）；空列表 = 放行。"""
-    return sorted({m.group(0) for m in _VERDICT_LANGUAGE.finditer(text or "")})
+    """纪要里命中闸的片段（去重排序）；空列表 = 放行。
+
+    查两个视图：规范形本身，以及去掉空白 / Markdown 强调符 / 链接语法后的"渲染视图"
+    （防 `建*议*买入`、`建 议 买 入`、`[建](x)议买入`）。可疑标记直接算命中。
+    ponytail: 同形异码字（西里尔字母冒充拉丁字母）不处理——要防就加 confusables 表
+    """
+    t = normalize_summary(text)
+    rendered = re.sub(r"[\s*_~`]+", "", re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t))
+    hits = {m.group(0) for view in (t, rendered) for m in _VERDICT_LANGUAGE.finditer(view)}
+    if _SUSPICIOUS_MARKUP.search(t) or any(unicodedata.category(c) == "Cf" for c in t):
+        hits.add("<可疑标记>")
+    return sorted(hits)
 
 
 def _scribe_summary(
@@ -152,13 +179,14 @@ def _scribe_summary(
             ask += (
                 "\n\n=== 上一版被服务端拦下 ===\n出现了禁止的表述："
                 + "、".join(hits)
-                + "。重写：只保留理由，不要任何结论、金额、仓位、价格目标、概率数字。"
+                + "。重写：只保留理由，不要任何结论、金额、仓位、价格目标、概率数字，"
+                + "不要 HTML 或特殊控制字符。"
             )
         agent = _create_agent(
             build_scribe_prompt(asset), search_enabled=False, temperature=0.2,
             role="scribe", asset=sym, round_label=f"scribe_{attempt}",
         )
-        summary = _ask(agent, ask)
+        summary = normalize_summary(_ask(agent, ask))   # 出口用的就是闸查过的这一份
         hits = find_verdict_language(summary)
         if not hits and AGENT_UNAVAILABLE_MARKER not in summary:
             emit("scribe_done", asset=sym)

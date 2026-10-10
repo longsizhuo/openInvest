@@ -30,6 +30,15 @@ from openinvest.core.committee import debate
     "可以考虑逢低加仓",
     "投入 2000 元",
     "You should buy now",
+    # 绕过手法：闸查的必须是渲染后用户看到的东西
+    "建*议*买入",                       # Markdown 强调拆词
+    "建 议 买 入",
+    "[建](https://x.co)议买入",
+    "建議買入",                         # 繁体
+    "ＢＵＹ",                           # 全角
+    "B\u200bUY",                       # 零宽字符
+    "建<!-- -->议买入",                 # HTML 注释
+    "&#24314;议买入",                   # HTML 实体
 ])
 def test_gate_blocks_conclusions(text):
     assert debate.find_verdict_language(text)
@@ -129,14 +138,41 @@ def test_mcp_run_committee_returns_only_summary(monkeypatch):
     assert out == {"status": "error", "error": "辩论纪要未通过无裁决检查，已拦截"}
 
 
+def test_summary_returned_is_the_normalized_text_the_gate_checked(monkeypatch):
+    _fake_llm(monkeypatch, ["## 支持的理由\n- 價格分位 ３%", "unused"])
+    out = _run()
+    assert "价格分位 3%" in out["debate_summary"]
+
+
+def test_no_verdict_gate_is_closed_set():
+    """白名单机器强制（同顾问模式）：白名单外的工具源码里必须调 _check_no_verdict()，
+    白名单里的不能调。新增工具没分类，这条直接红。"""
+    import inspect
+
+    from openinvest.connectors import mcp_server as m
+
+    tools = {t.name for t in asyncio.run(m.mcp.list_tools())}
+    assert m.NO_VERDICT_ALLOWED_TOOLS <= tools
+    for name in tools:
+        guarded = "_check_no_verdict()" in inspect.getsource(getattr(m, name))
+        assert guarded is (name not in m.NO_VERDICT_ALLOWED_TOOLS), name
+
+
 def test_mcp_verdict_tools_disabled(monkeypatch):
     monkeypatch.setenv("INVEST_NO_VERDICT_MODE", "1")
     from openinvest.connectors import mcp_server as m
 
-    with pytest.raises(RuntimeError, match="INVEST_NO_VERDICT_MODE"):
-        m.explain_decision("2026-01-01/GC=F")
-    with pytest.raises(RuntimeError, match="INVEST_NO_VERDICT_MODE"):
-        m.decisions()
+    calls = {
+        "explain_decision": {"decision_id": "2026-01-01/GC=F"},
+        "decisions": {},
+        "discipline": {},
+        "ingest_event": {"title": "t", "url": "https://x.co/a"},
+    }
+    tools = {t.name for t in asyncio.run(m.mcp.list_tools())}
+    assert set(calls) == tools - m.NO_VERDICT_ALLOWED_TOOLS
+    for name, kwargs in calls.items():
+        with pytest.raises(RuntimeError, match="INVEST_NO_VERDICT_MODE"):
+            getattr(m, name)(**kwargs)
 
 
 def test_web_api_refuses_to_start():

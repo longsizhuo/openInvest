@@ -606,10 +606,13 @@ INVEST_API_TOKEN=...                             # hub 开了才需要
   只整理“支持的理由 / 反对的理由 / 分歧最大的地方”，末尾固定附免责声明；
 - 服务端逐字闸（`core/committee/debate.py:find_verdict_language`）：纪要里出现裁决词、
   “建议买/卖/加仓……”、金额、仓位、目标价/支撑阻力、概率数字 → 带着命中片段重写一次，
-  再命中就整份拦下返回错误（fail closed，不做局部删改）；
+  再命中就整份拦下返回错误（fail closed，不做局部删改）。闸查的就是返回给用户的那一份：
+  先做 NFKC + 繁→简，再额外查一遍去掉空白 / Markdown 强调符 / 链接语法后的渲染视图；
+  出现 HTML 标签、实体或零宽等格式控制字符直接算命中（新闻源可被群友添加，是现实的注入入口）；
 - 出口白名单：MCP `run_committee` 和 CLI `run_committee` 只返回 `debate_summary`，
   不读当天缓存（缓存是带 verdict 的 transcript），不落盘；
-- `explain_decision` / `decisions` 直接拒绝；
+- MCP 工具按白名单 `NO_VERDICT_ALLOWED_TOOLS`：`explain_decision` / `decisions` / `discipline` /
+  `ingest_event`（会在后台触发假定有裁决的委员会）拒绝；白名单外新增工具漏加闸 CI 直接红；
 - **web_api 拒绝启动**：它的委员会/历史/SSE 端点处处带 verdict 和角色发言预览，没有逐个加闸。
   无裁决部署只起 `openinvest-mcp`。
 
