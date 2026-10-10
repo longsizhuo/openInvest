@@ -37,9 +37,6 @@ It provides a verifiable investment committee, evidence-based reasoning, long-ho
   <sub>📌 <b>Note</b>: The current chart shows the author's live production portfolio. After self-hosting, the system will automatically render your own equity curve based on the holdings defined in your `memory/` directory.</sub>
 </div>
 
-<!-- OUTPERFORM_FEED_START -->
-<!-- OUTPERFORM_FEED_END -->
-
 *   **Benchmark Portfolio**: The system introduces 8 standard control benchmarks across 4 quadrants (AI advisors / Mutual funds / Wealth management / Broad market index). For details on the comparison methodology and data cleaning logic, see [docs/wiki/README.md](docs/wiki/README.md).
 
 ---
