@@ -20,9 +20,9 @@ price_sentinel 冷却先例）：
 报警沿用 send_event_alert 现行策略（默认静默，INVEST_EVENT_ALERT=1 恢复；非 HOLD
 verdict 通知在委员会跑完后由 web 路径发）。
 
-顾问模式（INVEST_ADVISORY_MODE）一律不触发、不报警：顾问实例的 ingest_event 对
-群聊陌生人放行，不能让陌生人驱动 LLM 花费 / 推送（且 _trigger_committee 默认打
-本机 8765 = 生产 hub）。
+顾问模式（INVEST_ADVISORY_MODE）一律不触发、不报警：MCP 的 ingest_event 在顾问模式已拒绝，
+这道守卫兜底 CLI / 额外源定时抓取在顾问 INVEST_HOME 下的入库——不能让群聊驱动 LLM 花费 /
+推送（且 _trigger_committee 默认打本机 8765 = 生产 hub）。
 """
 from __future__ import annotations
 
