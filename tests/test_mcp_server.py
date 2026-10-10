@@ -135,6 +135,7 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
         "track_asset": {"symbol": "GC=F"},
         "untrack_asset": {"symbol": "GC=F"},
         "record_execution": {"decision_id": "2026-01-01/GC=F", "executed": True},
+        "ingest_event": {"title": "t", "url": "https://x.co/a"},
     }
     assert set(calls) == EXPECTED_TOOLS - m.ADVISORY_ALLOWED_TOOLS
     for name, kwargs in calls.items():

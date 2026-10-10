@@ -89,8 +89,9 @@ def _pm():
 # - what_if 是"对当前真实持仓做假设推演"，本质就是读持仓，泄露仓位和浮盈；
 # - record_execution 写真实决策账本，顾问模式下群友既拿不到真实 decision_id
 #   （decisions/history 已拒绝），放行也没有合法用途，只有被用来污染账本的风险。
+# ingest_event 不放行：入库的事件会被之后的顾问分析召回进 prompt。
 ADVISORY_ALLOWED_TOOLS = frozenset({
-    "run_committee", "explain_decision", "live_prices", "ingest_event",
+    "run_committee", "explain_decision", "live_prices",
     # 新闻源管理放行：只读写本实例自己 INVEST_HOME 的 rss_feeds.yml，不碰持仓/
     # 账本；顾问部署本就要求独立 INVEST_HOME（见 docs/wiki/08），群聊加的源只
     # 影响顾问实例自己的抓取。滥用护栏在 service 层（probe 校验 + MAX_EXTRA_FEEDS）。
@@ -405,9 +406,10 @@ def ingest_event(
     Returns:
         Ingestion result with the normalized event id(s), dedup status, and
         `committee_task_id` — set when a new holding-relevant event (severity
-        ≥ mid, non-neutral) triggered a rate-limited committee re-run; never
-        set in advisory mode.
+        ≥ mid, non-neutral) triggered a rate-limited committee re-run. This
+        tool is disabled in advisory mode.
     """
+    _check_advisory()
     from openinvest.services.event_ingest import ingest_events
     return ingest_events([{"title": title, "url": url, "snippet": snippet,
                            "source": source, "published_at": published_at}],

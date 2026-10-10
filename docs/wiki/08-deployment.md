@@ -460,7 +460,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 ### 顾问模式行为变化
 
 顾问模式白名单只放行委员会分析必需的工具 + 新闻源管理（只动本实例自己的
-`INVEST_HOME/rss_feeds.yml`），其余一律拒绝（`mcp_server.py`
+`INVEST_HOME/rss_feeds.yml`），其余一律拒绝（包括事件入库 `ingest_event`）（`mcp_server.py`
 的 `ADVISORY_ALLOWED_TOOLS`；改动需求见
 [test_mcp_server.py::test_advisory_mode_gate_is_closed_set](../../tests/test_mcp_server.py)
 的机器强制契约，白名单外新增工具漏加闸会直接 CI 红）：
@@ -470,7 +470,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `run_committee` | ✅ 任意标的 | ✅ 任意标的 |
 | `explain_decision` | ✅ | ✅ |
 | `live_prices` | ✅ | ✅ |
-| `ingest_event` | ✅ 入库 + 命中持仓时按频控触发委员会 | ✅ 只入库，永不触发委员会/报警（防群聊陌生人驱动 LLM 花费/推送） |
+| `ingest_event` | ✅ 入库 + 命中持仓时按频控触发委员会 | ❌ 不可用（入库内容会被后续顾问分析召回） |
 | `news_sources` / `add_news_source` / `remove_news_source` | ✅ | ✅ 管理本实例自己的额外源清单（仅公网 http(s) 地址、直连不走 `HTTPS_PROXY` + probe 校验 + 上限 30，群聊自助喂源用） |
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
@@ -492,6 +492,9 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 下）跑出来的，那份历史 transcript 本身就含真实 `portfolio_summary`。顾问模式没有
 （也无法）事后过滤已落盘的历史文件。真正的隔离需要下面这条部署建议里的独立
 `INVEST_HOME`。
+
+另外，如果你给顾问实例的 `INVEST_HOME` 配了定时抓取，群聊里加的额外新闻源内容会
+进入之后的顾问分析；所以顾问实例永远不要和你自己的真实实例共用 `INVEST_HOME`。
 
 ### 部署建议
 

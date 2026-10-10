@@ -259,7 +259,7 @@ grading / dedup / RAG recall, and resending the same item never double-books.
 A new item that grades severity ≥ mid, non-neutral, and hits a holding/target automatically
 re-runs the committee for that symbol (rate-limited and shared with the crawler: 12h per-symbol
 cooldown that a strictly higher-severity item can bypass, ≤4 per rolling 24h; the result's
-`committee_task_id` says whether one fired) — so feed material news only. In advisory mode ingestion never triggers anything.
+`committee_task_id` says whether one fired) — so feed material news only. Ingestion is disabled in advisory mode.
 A-share / regional-market news especially: that is the crawler's blind spot and you are
 the only source. If the host has a quotes/news skill installed (e.g. Longbridge), its
 news is worth feeding too — the ledger cares about the information, not where it came from.
