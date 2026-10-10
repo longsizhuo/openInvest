@@ -1,7 +1,8 @@
 """冷静期演示站：一个页面 + 两个接口，只暴露 cooldown.debate_summary()。
 
-不暴露 openinvest 的 MCP / web_api（那些出口都带裁决）。只绑 127.0.0.1，公网经反代进来：
-限频按 CF-Connecting-IP（经 Cloudflare 时可信；直连时是 socket 地址）。
+不暴露 openinvest 的 MCP / web_api（那些出口都带裁决）。只绑 127.0.0.1，公网经反代进来。
+限频认 X-Client-IP：反代必须用自己算出的客户端地址**覆盖**这个头（Caddy：
+`header_up X-Client-IP {client_ip}`，经 Cloudflare 时配 trusted_proxies），客户端自带的会被覆盖，伪造不了。
 
     INVEST_HOME=~/openinvest-demo INVEST_ADVISORY_MODE=1 \
         uv run uvicorn --app-dir experiments/cooldown-demo/scripts server:app --port 8769
@@ -27,33 +28,41 @@ import cooldown
 # 一次委员会约 ¥0.01（deepseek-v4-flash，2026-10 实测），全站 100 次/天 ≈ ¥1/天封顶
 PER_IP_DAILY = int(os.getenv("COOLDOWN_PER_IP_DAILY", "3"))
 GLOBAL_DAILY = int(os.getenv("COOLDOWN_GLOBAL_DAILY", "100"))
+# 查基金（下载东方财富净值）另算一份更宽的额度，在下载之前扣——查不到的代码也算
+LOOKUP_PER_IP_DAILY = int(os.getenv("COOLDOWN_LOOKUP_PER_IP_DAILY", "30"))
+LOOKUP_GLOBAL_DAILY = int(os.getenv("COOLDOWN_LOOKUP_GLOBAL_DAILY", "2000"))
+GENERIC_ERROR = "这次辩论没跑成，稍后再试"
 
 _committee_lock = threading.Lock()   # 同一时刻只跑一个委员会，其余排队（同 MCP 的 _COMMITTEE_LOCK）
 _state_lock = threading.Lock()
 # ponytail: 任务和计数都在进程内存，重启清零；要跨重启保留再落 sqlite
 _jobs: Dict[str, Dict[str, Any]] = {}
-_used: Counter = Counter()
+_used: Counter = Counter()          # 辩论次数：ip / "*"
+_lookups: Counter = Counter()       # 查基金次数：ip / "*"
+_facts_cache: Dict[str, Any] = {}   # code → 当天的 fund_facts 结果（含 None），跨日清空
 _day = {"d": date.today()}
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
 def _client_ip(request: Request) -> str:
-    return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    return request.headers.get("x-client-ip") or (request.client.host if request.client else "?")
 
 
-def _take_quota(ip: str) -> str | None:
-    """计一次；超限返回原因。按自然日清零。"""
+def _take(counter: Counter, ip: str, per_ip: int, total: int, what: str) -> str | None:
+    """计一次；超限返回原因。按自然日清零（所有计数和缓存一起清）。"""
     with _state_lock:
         if _day["d"] != date.today():
             _used.clear()
+            _lookups.clear()
+            _facts_cache.clear()
             _day["d"] = date.today()
-        if _used["*"] >= GLOBAL_DAILY:
-            return "今天的演示名额用完了，明天再来"
-        if _used[ip] >= PER_IP_DAILY:
-            return f"每人每天最多 {PER_IP_DAILY} 次，明天再来"
-        _used["*"] += 1
-        _used[ip] += 1
+        if counter["*"] >= total:
+            return f"今天的{what}名额用完了，明天再来"
+        if counter[ip] >= per_ip:
+            return f"每人每天最多{what} {per_ip} 次，明天再来"
+        counter["*"] += 1
+        counter[ip] += 1
         return None
 
 
@@ -97,10 +106,15 @@ def _run(job_id: str, code: str) -> None:
         _jobs[job_id]["status"] = "running"
         try:
             res = cooldown.debate_summary(f"FUND:{code}")
-        except Exception as e:  # noqa: BLE001  任何失败都只回一句话，不把栈/内部文本带出去
-            print(f"[cooldown] {job_id} failed: {type(e).__name__}: {e}")
-            res = {"status": "error", "error": "这次辩论没跑成，稍后再试"}
-    _jobs[job_id].update(status="done", result=res)
+        except Exception as e:  # noqa: BLE001
+            res = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+    # 出口白名单：只放行纪要；其余一律通用一句话——后端报错可能带内部 URL / 路径，只进服务端日志
+    if res.get("debate_summary"):
+        out = {"symbol": res["symbol"], "debate_summary": res["debate_summary"]}
+    else:
+        print(f"[cooldown] {job_id} {code} failed: {res.get('error')}")
+        out = {"status": "error", "error": GENERIC_ERROR}
+    _jobs[job_id].update(status="done", result=out)
 
 
 class DebateIn(BaseModel):
@@ -117,10 +131,16 @@ def start(body: DebateIn, request: Request) -> Dict[str, Any]:
     code = body.code.strip()
     if not re.fullmatch(r"\d{6}", code):
         raise HTTPException(400, "请输入 6 位基金代码")
-    facts = fund_facts(code)          # 先确认基金存在，再计次、再花 LLM
+    ip = _client_ip(request)
+    if code not in _facts_cache:      # 同一只基金当天只下载一次
+        reason = _take(_lookups, ip, LOOKUP_PER_IP_DAILY, LOOKUP_GLOBAL_DAILY, "查询")
+        if reason:
+            raise HTTPException(429, reason)
+        _facts_cache[code] = fund_facts(code)
+    facts = _facts_cache[code]        # 先确认基金存在，再扣辩论次数、再花 LLM
     if facts is None:
         raise HTTPException(404, "没找到这只基金，确认一下代码")
-    reason = _take_quota(_client_ip(request))
+    reason = _take(_used, ip, PER_IP_DAILY, GLOBAL_DAILY, "辩论")
     if reason:
         raise HTTPException(429, reason)
     job_id = uuid.uuid4().hex
@@ -136,5 +156,5 @@ def poll(job_id: str) -> Dict[str, Any]:
         raise HTTPException(404, "任务不存在（服务可能重启过）")
     out = {"status": job["status"], "facts": job["facts"]}
     if job["status"] == "done":
-        out["result"] = job["result"]   # 白名单：cooldown 只会给 {symbol, debate_summary} 或 {status, error}
+        out["result"] = job["result"]   # _run 里按白名单构造过
     return out

@@ -40,9 +40,14 @@ INVEST_HOME=~/openinvest-demo INVEST_ADVISORY_MODE=1 \
     uv run uvicorn --app-dir experiments/cooldown-demo/scripts server:app --host 127.0.0.1 --port 8769
 ```
 
-- 只绑 127.0.0.1，公网经反代进来。限频按 `CF-Connecting-IP`（经 Cloudflare 时可信）。
-- 每人每天 `COOLDOWN_PER_IP_DAILY`（默认 3）次，全站每天 `COOLDOWN_GLOBAL_DAILY`（默认 100）次。
-  一次委员会约 ¥0.01（deepseek-v4-flash），封顶约 ¥1/天。查不到的代码不计次、不调 LLM。
+- 只绑 127.0.0.1，公网经反代进来。限频认 `X-Client-IP`，反代必须用自己算的客户端地址**覆盖**它
+  （Caddy：`header_up X-Client-IP {client_ip}`；经 Cloudflare 时配 `trusted_proxies` 为 CF 网段），
+  客户端自带的同名头会被覆盖，伪造不了。
+- 辩论：每人每天 `COOLDOWN_PER_IP_DAILY`（默认 3）次，全站每天 `COOLDOWN_GLOBAL_DAILY`（默认 100）次。
+  一次委员会约 ¥0.01（deepseek-v4-flash），封顶约 ¥1/天。查不到的代码不扣辩论次数、不调 LLM。
+- 查基金（下载东方财富净值）另有额度：每人 30 次 / 全站 2000 次每天，在下载**之前**扣，查不到的也算；
+  同一只基金当天只下载一次。
+- 出错时页面只看到一句通用提示，后端报错只进服务端日志。
 - 同一时刻只跑一个委员会，其余排队。任务和计数在进程内存，重启清零。
 - 页面按行把纪要渲染成纯文本节点（标题 / 列表 / 段落），不解析 Markdown 或 HTML。
 - 一次辩论实测约 20 秒（1 轮 cross-challenge）。
@@ -57,7 +62,7 @@ uv run pytest experiments/cooldown-demo/scripts/ -q
 
 闸的正例（含 13 种绕过写法）、反例（正常分析句不误伤）、重写一次、二次命中拦下、LLM
 不可用拦下、非顾问模式拒绝、出口白名单 + 书记员看不到 CIO；演示站的代码校验、查不到不计次、
-每人/全站限额、失败不外泄内部报错。
+查基金额度在下载前扣且有缓存、每人/全站辩论限额、两种失败（抛异常 / 返回带后端报错）都不外泄。
 
 ## 实测（2026-10）
 
