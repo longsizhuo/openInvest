@@ -341,6 +341,7 @@ def test_force_reonboarding_updates_profile_only(tmp_path):
     assert (user.metadata["display_name"], user.metadata["risk_tolerance"]) == ("Alice2", "Aggressive")
     assert "**姓名**: Alice2\n- **风险偏好**: Aggressive\n" in user.body
     assert {n: (mem / n).read_bytes() for n in kept} == kept
+    assert "strategy.md unchanged" in r["profile_note"]  # payload 带策略但没落库：要明说，别让 agent 报成已应用
 
     before = (mem / "user.md").read_bytes()
     r = _json(_run_init(tmp_path, {"profile": {"name": "X", "risk_tolerance": "high"}, "env": {}}, "--force"))

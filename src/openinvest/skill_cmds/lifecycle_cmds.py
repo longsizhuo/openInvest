@@ -289,6 +289,10 @@ def cmd_init(args: argparse.Namespace) -> None:
             profile_note = "user.md updated: " + ", ".join(f"{k}={v}" for k, v in _upd.items())
         except Exception as exc:  # noqa: BLE001 非法值 / 坏文件：原样保留
             profile_note = f"user.md unchanged: {type(exc).__name__}: {str(exc)[:300]}"
+    # 重配时 payload 里的策略不落 strategy.md（有意：不动跟踪列表/上限），要明说，免得 agent 报成"已应用"
+    if args.force and _memory_existed and profile.get("investment_strategy"):
+        profile_note = ((profile_note + "; ") if profile_note else "") + (
+            "strategy.md unchanged — allocations: set_allocations; caps/tracking: track_asset")
 
     # 3b) v2 持仓覆盖：如果 profile 带了 holdings_description（自然语言）或
     # holdings_v2（结构化），优先用它们生成完整 v2 portfolio.md。这一步在
