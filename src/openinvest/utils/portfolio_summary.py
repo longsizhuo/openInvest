@@ -82,10 +82,11 @@ def portfolio_summary_text(
     # 用 utils.fx.to_base 而非硬编码 if ccy=="AUD"，支持任意币种 (EUR/JPY/HKD 等)。
     from openinvest.utils.fx import to_base
     from openinvest.core.config import load_config
-    # 集中度 lens 关闭(ADR-020：单资产/刻意集中策略)→ 单一源在此 gate,不渲染集中度。
-    # 这是 cron / session / Direct 三路径共用的 helper,在此关一处即全关;下游
-    # _extract_concentration_from_summary 取不到 → cio_parse 覆写 no-op，Risk 也拿不到数字。
-    _show_conc = bool(load_config().verdict.concentration_lens_enabled)
+    # 集中度始终渲染真值（cron / session / Direct / Coordinator 共用此 helper）。lens 关（ADR-020
+    # 默认）只改用途不改可见性：2026-10-10 插件实测，lens 关时不给数字 → Risk 自算出 1.7%
+    # （真值 16.7%）写进压力测试、CIO 照抄——藏数字 = 逼 LLM 自己算（同上 2026-05-19）。
+    # "不能当减仓理由"由 Risk/CIO prompt 软抑制 + cio_parse Sanity 4 硬 force-HOLD 守。
+    _lens_on = bool(load_config().verdict.concentration_lens_enabled)
     holding_values_cny: Dict[str, float] = {}
     for h in real_holdings:
         sym = str(h.get("symbol", ""))
@@ -132,21 +133,20 @@ def portfolio_summary_text(
             f"现价 {ccy_symbol}{cur:.2f}, "
             f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})"
         )
-        # 集中度 = 该 asset CNY 市值 / total_assets_cny —— 仅 lens 开启时渲染（ADR-020）
-        if _show_conc:
-            value_cny = holding_values_cny.get(sym, 0.0)
-            if total_ok:
-                conc_pct = value_cny / total_assets_cny * 100
-                line += (
-                    f", **集中度 {conc_pct:.1f}%** "
-                    f"(CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})"
-                )
-            else:
-                # total 不可用（NaN/缺）：绝不伪造 0.0%，输出可见降级标记促人工复核
-                line += (
-                    f", **集中度 暂不可计算**（总资产不可用，请勿据此做集中度判断；"
-                    f"CNY 市值 ¥{value_cny:,.0f}）"
-                )
+        # 集中度 = 该 asset CNY 市值 / total_assets_cny
+        value_cny = holding_values_cny.get(sym)
+        if total_ok and value_cny is not None:
+            conc_pct = value_cny / total_assets_cny * 100
+            line += (
+                f", **集中度 {conc_pct:.1f}%** "
+                f"(CNY 市值 ¥{value_cny:,.0f} / 总资产 ¥{total_assets_cny:,.0f})"
+            )
+            if not _lens_on:
+                line += "（集中度 lens 已关：仅作背景/压力测试，不构成减仓理由）"
+        else:
+            # total 或该腿汇率不可用：绝不伪造 0.0%，输出可见降级标记促人工复核
+            mv = f"；CNY 市值 ¥{value_cny:,.0f}" if value_cny is not None else ""
+            line += f"，**集中度 暂不可计算**（总资产或汇率不可用，请勿估算占比{mv}）"
         lines.append(line)
 
     return "\n".join(lines) + "\n"

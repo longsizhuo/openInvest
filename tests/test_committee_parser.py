@@ -292,6 +292,7 @@ def test_cio_prompt_concentration_directive_on_when_lens_disabled():
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "集中度 lens 已被用户关闭" in prompt
+    assert "只能照抄" in prompt  # 2026-10-10：占比只引原值，不自算（防 CIO 照搬 Risk 编的 1.7%）
 
 
 def test_risk_officer_prompt_concentration_directive_both_rounds():
@@ -301,8 +302,13 @@ def test_risk_officer_prompt_concentration_directive_both_rounds():
     set_config_override({"verdict": {"concentration_lens_enabled": True}})
     assert "集中度 lens 已关闭" not in build_risk_officer_prompt(asset)
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
-    assert "集中度 lens 已关闭" in build_risk_officer_prompt(asset, round_label="opening")
-    assert "集中度 lens 已关闭" in build_risk_officer_prompt(asset, round_label="rebuttal")
+    for round_label in ("opening", "rebuttal"):
+        prompt = build_risk_officer_prompt(asset, round_label=round_label)
+        assert "集中度 lens 已关闭" in prompt
+        # 2026-10-10：lens 关 ≠ 藏数字。要求照抄 summary 真值、禁止自算，且不得据此升级/减仓
+        assert "照抄" in prompt and "不得以集中度" in prompt and "压低加仓上限" in prompt
+        assert "不要输出 CONCENTRATION_PCT" not in prompt
+        assert "PWM 25-35%" in prompt.split("**🚫 集中度 lens")[1].split("\n")[0]  # 超配标准一并作废
 
 
 def test_committee_prompts_follow_english_mode_and_keep_parser_markers():

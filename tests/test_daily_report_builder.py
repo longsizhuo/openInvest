@@ -232,20 +232,64 @@ class TestPortfolioSummaryText:
         # 缺价腿那一行不应出现伪造 0.0% 集中度
         assert "集中度 0.0%" not in text
 
-    def test_concentration_hidden_when_lens_off(self, tmp_path):
-        """集中度 lens 关闭(默认,ADR-020)时 portfolio_summary 完全不渲染集中度。
-        这是 cron/session/Direct 共用的单一源 helper,关一处即三路径全关。"""
-        holdings = [
-            {"symbol": "GOLD", "kind": "commodity", "units": 1.0, "unit_label": "克",
-             "avg_cost": 100.0, "cost_currency": "CNY", "display_name": "黄金"},
-        ]
-        pm = _make_pm(tmp_path, cash={"CNY": 100.0}, holdings=holdings)
-        # 默认 config = lens OFF（#93/ADR-020），不显式 override
-        text = portfolio_summary_text(
-            pm, total_assets_cny=234.0, current_prices={"GOLD": 134.0},
+    def test_concentration_rendered_as_context_when_lens_off(self, tmp_path):
+        """lens 关（默认，ADR-020）仍渲染系统算好的真实集中度，只标"仅作背景"。
+
+        2026-10-10 插件实测回归（虚构用户：¥50,000 现金 + ¥10,000 基金 = 16.7%）：lens 关时
+        summary 不给数字 → Risk 自算出"占总资产 1.7%"写进 WORST_CASE、CIO 照抄"小仓位"。
+        藏数字 = 逼 LLM 自己算（同 2026-05-19 连错 6 天）。lens 只管"能不能当减仓理由"
+        （Risk/CIO prompt + Sanity 4），不管可见性；真值进 summary 后 SENTINEL 覆写也能生效。
+        """
+        from openinvest.core.committee.cio_parse import (
+            _extract_concentration_from_summary,
+            _override_concentration_in_risk_output,
         )
-        assert "集中度" not in text, "lens OFF 时集中度不应出现在 portfolio_summary"
-        assert "黄金" in text and "浮盈" in text  # 其余持仓信息仍在
+        holdings = [
+            {"symbol": "FUND01", "kind": "fund", "units": 10000.0, "unit_label": "份",
+             "avg_cost": 1.0, "cost_currency": "CNY", "display_name": "某基金"},
+        ]
+        pm = _make_pm(tmp_path, cash={"CNY": 50000.0}, holdings=holdings)
+        # 默认 config = lens OFF，不显式 override
+        text = portfolio_summary_text(
+            pm, total_assets_cny=60000.0, current_prices={"FUND01": 1.0},
+        )
+        assert "**集中度 16.7%**" in text
+        assert "CNY 市值 ¥10,000 / 总资产 ¥60,000" in text
+        assert "不构成减仓理由" in text  # lens 关的用途标注
+        # 下游 SENTINEL 链路接通：抽得到真值 → Risk 编的占比被改回
+        assert _extract_concentration_from_summary(text, "FUND01") == 16.7
+        fixed = _override_concentration_in_risk_output("CONCENTRATION_PCT: 1.7%\n", 16.7)
+        assert fixed.startswith("CONCENTRATION_PCT: 16.7%")
+
+    def test_concentration_lens_on_has_no_context_only_label(self, tmp_path):
+        """lens 开 → 集中度照旧渲染，不带"不构成减仓理由"标注（opt-in 用户行为不变）"""
+        from openinvest.core.config import set_config_override
+        set_config_override({"verdict": {"concentration_lens_enabled": True}})
+        holdings = [
+            {"symbol": "FUND01", "kind": "fund", "units": 10000.0, "unit_label": "份",
+             "avg_cost": 1.0, "cost_currency": "CNY", "display_name": "某基金"},
+        ]
+        pm = _make_pm(tmp_path, cash={"CNY": 50000.0}, holdings=holdings)
+        text = portfolio_summary_text(
+            pm, total_assets_cny=60000.0, current_prices={"FUND01": 1.0},
+        )
+        assert "**集中度 16.7%** (CNY 市值 ¥10,000 / 总资产 ¥60,000)" in text
+        assert "不构成减仓理由" not in text
+
+    def test_concentration_not_zeroed_when_fx_unavailable(self, tmp_path, monkeypatch):
+        """该持仓拉不到汇率（to_base=None）→ 不得渲染伪造的"集中度 0.0%"，标暂不可计算。"""
+        import openinvest.utils.fx as fx
+        monkeypatch.setattr(fx, "to_base", lambda *a, **k: None)
+        holdings = [
+            {"symbol": "AAPL", "kind": "equity", "units": 10.0, "unit_label": "股",
+             "avg_cost": 150.0, "cost_currency": "USD", "display_name": "Apple"},
+        ]
+        pm = _make_pm(tmp_path, cash={"CNY": 50000.0}, holdings=holdings)
+        text = portfolio_summary_text(
+            pm, total_assets_cny=50000.0, current_prices={"AAPL": 200.0},
+        )
+        assert "集中度 0.0%" not in text
+        assert "暂不可计算" in text
 
 
 # ============ 任务 3d：assemble_full_report ============

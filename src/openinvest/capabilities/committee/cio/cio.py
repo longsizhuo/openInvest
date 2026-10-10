@@ -93,10 +93,12 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
             "**🚫 集中度 lens 已被用户关闭（单资产 / 刻意集中策略）**：忽略上方所有基于 "
             "CONCENTRATION_PCT 的超配规则——`<20% / 20-40% / >40%` 分档与 `>60% 限仓` 均不适用，"
             "**不得以集中度 / 超配为由输出 TRIM**（也不得换标签成 bearish 但实由超配驱动）。"
+            "持仓占比只作背景：如需提及，只能照抄用户持仓上下文（portfolio_summary）里的「集中度 X%」原值，不得自算。"
             "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。",
             "**🚫 The concentration lens has been disabled by the user (single-asset / deliberately concentrated strategy)**: ignore all "
             "CONCENTRATION_PCT-based overweight rules above -- the `<20% / 20-40% / >40%` tiers and the `>60% cap` no longer apply. "
             "**Do not output TRIM on grounds of concentration / overweight** (and do not relabel it as bearish while it is actually driven by concentration). "
+            "Position share is background only: if you mention it, quote the \"集中度 X%\" value from the user portfolio context (portfolio_summary) verbatim; never compute it yourself. "
             "Still evaluate volatility / drawdown / stop-loss / macro / valuation risk normally.",
         )
 
