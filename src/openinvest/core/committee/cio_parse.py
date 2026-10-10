@@ -110,9 +110,17 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
 
 def _fields_to_out(out: Dict[str, Any], fields: Dict[str, Any]) -> None:
     """从结构化 JSON fields（DeepSeek JSON Output）填 out 基础字段，与 regex 路径同口径
-    （verdict 大写 / confidence float / alloc int / dominant_view&trim_reason 限定集）。
+    （verdict&dominant_view&trim_reason 限定集 / confidence float / alloc int）。
     类型异常一律退化到与"regex 没匹配"等价的默认值，不抛。"""
-    out["verdict"] = str(fields.get("verdict") or "UNCLEAR").upper()
+    # 与 VERDICT_RE 同口径：非 5 个合法值 → UNCLEAR。否则 'STRONG_BUY' / 回显模板
+    # 'BUY|ACCUMULATE|...' 之类原样绕过下方 sanity/快崩防御，直进邮件标题和正文。
+    v = str(fields.get("verdict") or "").strip().upper()
+    if v in ("BUY", "ACCUMULATE", "HOLD", "TRIM", "SELL"):
+        out["verdict"] = v
+    else:
+        out["verdict"] = "UNCLEAR"
+        if v:
+            log.warning("parse_cio_memo: JSON verdict 非法值 %r → UNCLEAR", fields.get("verdict"))
     try:
         out["confidence"] = float(fields.get("confidence") or 0.0)
     except (TypeError, ValueError):
