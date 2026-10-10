@@ -23,7 +23,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from openinvest.capabilities.committee.cio import build_cio_prompt
 from openinvest.capabilities.committee.quant import build_quant_prompt
 from openinvest.capabilities.committee.risk_officer import build_risk_officer_prompt
-from openinvest.core.committee.agent_io import _ask, _create_agent, _parallel_ask
+from openinvest.capabilities.committee.scribe import build_scribe_prompt
+from openinvest.core.committee.agent_io import (
+    AGENT_UNAVAILABLE_MARKER,
+    _ask,
+    _create_agent,
+    _parallel_ask,
+)
 from openinvest.core.committee.cio_parse import (
     _extract_concentration_from_summary,
     _override_concentration_in_risk_output,
@@ -31,6 +37,7 @@ from openinvest.core.committee.cio_parse import (
     regime_label_from_text,
 )
 from openinvest.core.committee.persist import _persist
+from openinvest.utils.advisory import is_no_verdict_mode
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +102,71 @@ class CommitteeReport:
 
 
 
+
+
+# 无裁决模式的服务端逐字闸（未经许可不得向公众提供金融领域的确定性结论）。
+# 书记员 prompt 是第一道，这里是第二道：命中任意一条 = 纪要里有结论性表述。
+# ponytail: 关键词黑名单，挡得住 LLM 常见的结论句式，挡不住刻意改写；要更稳就加 LLM 二审
+_VERDICT_LANGUAGE = re.compile(
+    "|".join([
+        # 裁决枚举；中文紧挨英文时 \b 不成立（汉字也是 \w），所以只看两侧是不是 ASCII 字母
+        r"(?<![A-Za-z])(?:STRONG[_ ]?BUY|BUY|SELL|HOLD|ACCUMULATE|TRIM)(?![A-Za-z])",
+        r"(?:建议|应该|应当|可以考虑|可考虑|不妨|适合|值得)[^。；，,\n]{0,6}?"
+        r"(?:买|卖|加仓|减仓|建仓|清仓|持有|止损|止盈|抄底|观望|入场|离场|配置|定投|赎回|申购|上车)",
+        r"仓位|首笔|目标价|止损[价位线点]|止盈[价位线点]|买回[价点]|[买卖]点|入场点|胜率",
+        r"(?:支撑|阻力)\s*(?:位|价|线)?\s*[¥￥]?\d|\d\s*(?:附近|一线|的)?\s*(?:支撑|阻力)",
+        r"[¥￥]\s*\d|\d[\d,]*(?:\.\d+)?\s*(?:万?元|块钱)",
+        r"\d+(?:\.\d+)?\s*%\s*的?(?:概率|可能性|机会)|概率\s*(?:约|为|是|有|高达|只有|仅)?\s*\d",
+        r"(?<![A-Za-z])(?:should|recommend(?:ed|s)?|consider)\s+"
+        r"(?:buy|sell|add|trim|hold|buying|selling|adding|trimming|holding)(?![A-Za-z])",
+    ]),
+    re.IGNORECASE,
+)
+_NO_VERDICT_DISCLAIMER = (
+    "\n\n---\n以上是多个 AI 角色辩论的整理，不构成投资建议。要不要做、做多少，由你自己决定。"
+)
+
+
+def find_verdict_language(text: str) -> List[str]:
+    """纪要里命中闸的片段（去重排序）；空列表 = 放行。"""
+    return sorted({m.group(0) for m in _VERDICT_LANGUAGE.finditer(text or "")})
+
+
+def _scribe_summary(
+    asset: Dict[str, Any],
+    brief: str,
+    debate_meta: Dict[str, Any],
+    emit: Callable[..., None],
+) -> Dict[str, Any]:
+    """无裁决模式：书记员替代 CIO，只整理正反理由。
+
+    命中闸 → 带着命中片段重写一次；还命中或 LLM 不可用 → 整份拦下返回 error（fail closed，
+    不做局部删改——删掉半句的纪要比没有更误导）。不落盘：transcript 里有各角色的建议原话。
+    """
+    sym = asset["symbol"]
+    emit("scribe_start", asset=sym)
+    summary, hits = "", []
+    for attempt in (1, 2):
+        ask = brief
+        if hits:
+            ask += (
+                "\n\n=== 上一版被服务端拦下 ===\n出现了禁止的表述："
+                + "、".join(hits)
+                + "。重写：只保留理由，不要任何结论、金额、仓位、价格目标、概率数字。"
+            )
+        agent = _create_agent(
+            build_scribe_prompt(asset), search_enabled=False, temperature=0.2,
+            role="scribe", asset=sym, round_label=f"scribe_{attempt}",
+        )
+        summary = _ask(agent, ask)
+        hits = find_verdict_language(summary)
+        if not hits and AGENT_UNAVAILABLE_MARKER not in summary:
+            emit("scribe_done", asset=sym)
+            return {"asset": sym, "debate_summary": summary.strip() + _NO_VERDICT_DISCLAIMER,
+                    "debate": debate_meta}
+        log.warning(f"[no-verdict] {sym} 书记员第 {attempt} 版未放行: hits={hits}")
+    emit("scribe_blocked", asset=sym)
+    return {"asset": sym, "error": "辩论纪要未通过无裁决检查，已拦截", "debate": debate_meta}
 
 
 def run_committee(
@@ -279,6 +351,17 @@ def run_committee(
     if len(risk_history) > 1:
         report.risk_adjusted = risk_history[-1]
 
+    if is_no_verdict_mode():
+        brief = report.to_cio_brief()
+        if len(quant_history) > 1:
+            brief += (
+                "\n\n=== 完整辩论历史（含所有 cross-challenge 轮）===\n"
+                + _format_debate_history(quant_history, risk_history)
+            )
+        return _scribe_summary(asset, brief, {
+            "max_rounds": max_debate_rounds, "final_round": final_round, "converged": converged,
+        }, emit)
+
     # ===== CIO 综合所有 =====
     emit("cio_start", asset=sym)
     # P3 A/B: INVEST_CIO_THINKING=1 给终裁 CIO 开思考模式（分析师仍 fast path）。
@@ -369,6 +452,7 @@ def run_committee(
 
 __all__ = [
     "CommitteeReport",
+    "find_verdict_language",
     "_extract_signal_strength",
     "_SIGNAL_RE",
     "_STRENGTH_RE",

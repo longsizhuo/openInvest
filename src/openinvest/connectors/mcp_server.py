@@ -33,7 +33,7 @@ from pydantic import Field
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from openinvest.utils.advisory import is_advisory_mode
+from openinvest.utils.advisory import is_advisory_mode, is_no_verdict_mode
 from openinvest.utils.symbols import safe_symbol
 
 # client（Claude Code 等）靠这些 hint 决定要不要弹确认：
@@ -105,6 +105,15 @@ def _check_advisory():
         raise RuntimeError(
             "INVEST_ADVISORY_MODE=1: this tool is disabled in advisory mode. "
             f"Only these tools are available: {', '.join(sorted(ADVISORY_ALLOWED_TOOLS))}."
+        )
+
+
+def _check_no_verdict():
+    """INVEST_NO_VERDICT_MODE 下关掉会吐出委员会裁决/原始辩论记录的工具。"""
+    if is_no_verdict_mode():
+        raise RuntimeError(
+            "INVEST_NO_VERDICT_MODE=1: this tool returns committee verdicts and is disabled. "
+            "run_committee returns only `debate_summary` in this mode."
         )
 
 
@@ -279,6 +288,7 @@ def decisions(
         (newest first; each entry has decision_id, verdict, confidence,
         intervention, executed flag, matched trades, and outcome).
     """
+    _check_no_verdict()
     _check_advisory()
     from openinvest.core.decision_ledger import decisions_view
     return decisions_view(days=days, symbol=symbol, verdict=verdict, limit=limit)
@@ -306,6 +316,7 @@ def explain_decision(
         `transcript_markdown` (render this to the user), and `path_snapshot`
         (may be null).
     """
+    _check_no_verdict()
     import json
     from openinvest.core.decision_ledger import parse_committee_file
     from openinvest.core.memory_store import MemoryStore
@@ -748,7 +759,9 @@ async def run_committee(
     a cache miss. If the symbol was already analyzed today, the cached
     verdict is returned instantly unless `force` is set. Sends MCP progress
     notifications per debate phase when the client asks for them. Decision
-    support only — the human always executes.
+    support only — the human always executes. In no-verdict deployments
+    (INVEST_NO_VERDICT_MODE=1) it returns only `debate_summary`: the
+    arguments for and against, with no verdict, amount or confidence.
 
     Args:
         symbol: Any yfinance ticker (US / HK / A-share / ETF / crypto /
@@ -768,7 +781,9 @@ async def run_committee(
     from openinvest.jobs.verdict_review import load_confidence_lookup
     from datetime import datetime
 
-    if not force:
+    no_verdict = is_no_verdict_mode()
+    # 无裁决模式不读当天缓存：缓存是带 verdict 的 transcript
+    if not force and not no_verdict:
         today = datetime.now().strftime("%Y-%m-%d")
         safe = safe_symbol(symbol)
         cached = MemoryStore().root / ".committee" / today / f"{safe}.md"
@@ -816,6 +831,12 @@ async def run_committee(
         out = await anyio.to_thread.run_sync(lambda: run_committee_session(
             symbols=[symbol], max_debate_rounds=max_rounds, progress_callback=_on_phase))
     res = (out.get("asset_committees") or {}).get(symbol) or {}
+    if no_verdict:
+        # 白名单出口：res 里还挂着 path_reference（买回点/路径概率原文）等，只放行书记员纪要
+        if isinstance(res, dict) and res.get("debate_summary"):
+            return {"symbol": symbol, "debate_summary": res["debate_summary"]}
+        err = res.get("error") if isinstance(res, dict) else None
+        return {"status": "error", "error": err or "committee failed"}
     v = res.get("verdict") if isinstance(res, dict) else None
     return {
         "cached": False,

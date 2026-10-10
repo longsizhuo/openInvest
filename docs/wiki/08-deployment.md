@@ -595,6 +595,33 @@ INVEST_API_TOKEN=...                             # hub 开了才需要
 
 ---
 
+## 11. 无裁决模式（INVEST_NO_VERDICT_MODE）
+
+> **适用场景**：对公众开放的演示实例。委员会只给正反理由，不给买卖结论——未经许可
+> 向公众提供金融领域的确定性结论有合规风险，很多平台规则也明令禁止。
+
+`INVEST_NO_VERDICT_MODE=1` 时（一般和顾问模式一起开，用独立 `INVEST_HOME`）：
+
+- Macro / Quant / Risk 照常辩论，**CIO 换成书记员**（`capabilities/committee/scribe`），
+  只整理“支持的理由 / 反对的理由 / 分歧最大的地方”，末尾固定附免责声明；
+- 服务端逐字闸（`core/committee/debate.py:find_verdict_language`）：纪要里出现裁决词、
+  “建议买/卖/加仓……”、金额、仓位、目标价/支撑阻力、概率数字 → 带着命中片段重写一次，
+  再命中就整份拦下返回错误（fail closed，不做局部删改）；
+- 出口白名单：MCP `run_committee` 和 CLI `run_committee` 只返回 `debate_summary`，
+  不读当天缓存（缓存是带 verdict 的 transcript），不落盘；
+- `explain_decision` / `decisions` 直接拒绝；
+- **web_api 拒绝启动**：它的委员会/历史/SSE 端点处处带 verdict 和角色发言预览，没有逐个加闸。
+  无裁决部署只起 `openinvest-mcp`。
+
+```bash
+INVEST_HOME=~/openinvest-demo INVEST_ADVISORY_MODE=1 INVEST_NO_VERDICT_MODE=1 \
+    uvx openinvest mcp --http --port 8768
+```
+
+不覆盖的：Coordinator 路径（`prepare_committee` + 宿主 agent 自己 spawn 的 CIO）和
+daily_report 定时任务，它们不是公开出口，演示实例也不该跑。书记员 prompt 和逐字闸目前
+只覆盖中文。
+
 ## 下一步
 
 → [09-troubleshooting.md](09-troubleshooting.md) — 部署后跑挂了去哪查

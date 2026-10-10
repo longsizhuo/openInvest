@@ -12,3 +12,12 @@ import os
 
 def is_advisory_mode() -> bool:
     return os.environ.get("INVEST_ADVISORY_MODE", "").strip().lower() in ("1", "true")
+
+
+def is_no_verdict_mode() -> bool:
+    """无裁决模式（INVEST_NO_VERDICT_MODE）：委员会只出正反理由，不出 verdict/金额/置信度。
+
+    给公开演示实例用（未经许可不得向公众提供金融领域的确定性结论）。
+    CIO 换成书记员（capabilities/committee/scribe），对外出口只放行辩论纪要。
+    """
+    return os.environ.get("INVEST_NO_VERDICT_MODE", "").strip().lower() in ("1", "true")

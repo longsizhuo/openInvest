@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from openinvest.utils.advisory import is_no_verdict_mode
+
 load_dotenv()
 
 DEV_CORS = os.getenv("INVEST_WEB_DEV_CORS", "0") == "1"
@@ -27,6 +29,13 @@ log = logging.getLogger("web_api")
 
 
 # ============ FastAPI 应用 ============
+
+if is_no_verdict_mode():
+    # 委员会/历史/SSE 端点处处带 verdict 和角色发言预览，没有逐个加闸——无裁决部署只起 MCP
+    raise RuntimeError(
+        "INVEST_NO_VERDICT_MODE=1 不支持 web_api（端点会返回委员会裁决）。"
+        "无裁决部署只起 openinvest-mcp。"
+    )
 
 app = FastAPI(
     title="invest Web API",

@@ -120,7 +120,10 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     # 输出的 transcript_path 字段就是空字符串（Fresh Claude 端到端测试发现）
     safe_sym = safe_symbol(args.symbol)
     transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
-    if transcript_path.exists() and not args.force:
+    from openinvest.utils.advisory import is_no_verdict_mode
+    no_verdict = is_no_verdict_mode()
+    # 无裁决模式不读当天缓存：缓存是带 verdict 的 transcript
+    if transcript_path.exists() and not args.force and not no_verdict:
         from openinvest.capabilities.committee.i18n import bilingual
         from openinvest.core.decision_ledger import parse_committee_file
         from openinvest.jobs.review_calc import confidence_display
@@ -158,6 +161,12 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
             "hint": "session 内单资产失败，检查行情数据 / DEEPSEEK_API_KEY",
         })
         sys.exit(1)
+
+    if no_verdict:
+        # 白名单出口，同 MCP run_committee：只放行书记员纪要
+        _print_json({"status": "ok", "asset": target,
+                     "debate_summary": asset_result.get("debate_summary", "")})
+        return
 
     verdict = asset_result.get("verdict", {})
     report = asset_result.get("report")
