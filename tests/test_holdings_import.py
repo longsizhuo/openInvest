@@ -80,6 +80,7 @@ def test_fund_enrichment_derives_units_and_avg_cost(monkeypatch):
     assert h["units"] == pytest.approx(5000.0)
     assert h["avg_cost"] == pytest.approx(2.2)      # (10000 + 1000) / 5000
     assert h["nav_date_at_import"] == "2026-01-05"
+    assert "warnings" not in parsed
 
     normalized = _normalize_holding(h)
     assert normalized["symbol"] == "FUND:123456"
@@ -87,13 +88,30 @@ def test_fund_enrichment_derives_units_and_avg_cost(monkeypatch):
     assert normalized["kind"] == "fund"
 
 
-def test_fund_enrichment_keeps_zero_units_when_nav_unavailable(monkeypatch):
-    monkeypatch.setattr("openinvest.utils.eastmoney_fund.fetch_fund_nav", lambda symbol: None)
-    parsed = enrich_fund_holdings({"cash": {}, "holdings": [{
-        "symbol": "FUND:123456", "kind": "fund", "units": 0, "avg_cost": 0,
-        "market_value": 10000.0, "pnl": -1000.0,
-    }]})
-    assert parsed["holdings"][0]["units"] == 0
+def test_fund_enrichment_keeps_zero_units_and_warns_when_nav_unavailable(monkeypatch):
+    """两个净值源都挂（真实 requests 层失败，走 fetch_fund_nav 兜底链）→ 不编份额，但必须点名告警。"""
+    import requests
+
+    from openinvest.utils import eastmoney_fund as emf
+
+    emf.clear_nav_cache()
+    urls = []
+
+    def down(url, **kw):
+        urls.append(url)
+        raise requests.Timeout("read timeout")
+
+    monkeypatch.setattr(emf.requests, "get", down)
+    parsed = enrich_fund_holdings({"cash": {}, "holdings": [
+        {"symbol": "123456", "kind": "fund", "units": 0, "avg_cost": 0,
+         "market_value": 10000.0, "pnl": -1000.0, "display_name": "Demo Fund"},
+        {"symbol": "510300.SS", "kind": "etf", "units": 100, "avg_cost": 4.2},
+    ]})
+    assert parsed["holdings"][0]["units"] == 0 and parsed["holdings"][0]["avg_cost"] == 0
+    assert len(urls) == 2                                   # lsjz + pingzhongdata 都试过
+    [w] = parsed["warnings"]                                # 只点名没换算成的那只
+    assert w.startswith("fund not converted: FUND:123456")
+    assert "Demo Fund" in w and "10,000.00" in w and "--existing-position" in w
 
 
 def test_commit_non_destructive():
