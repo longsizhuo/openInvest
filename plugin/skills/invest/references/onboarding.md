@@ -94,6 +94,9 @@ When `holdings_description` parses, it **overwrites** portfolio.md (v2 schema wi
 
 In the JSON that `init` returns, check `holdings_parse_note`:
 - `"parsed via LLM; portfolio.md overwritten with v2 schema"` → success
+- also contains `"fund not converted: FUND:<code>"` → written, but that off-exchange fund could not
+  be converted from amount to units (no NAV source answered) and sits at 0 units / 0 market value;
+  see the table below
 - `"existing portfolio left unchanged"` (checked first — it wins over the other values) → the
   portfolio already had holdings or trades, so this run wrote **nothing**: neither the
   `current_assets` cash nor any holding. Run `run.sh status` first; see the table below
@@ -200,6 +203,7 @@ may not skip it, and you may not bury it in `next_step` and wait for the user to
 | `"existing portfolio left unchanged"` or `"v2 write failed"` (**check first** — when present, ignore the rows below) | "I didn't change your portfolio this time — it already has data, so I left it as it was (neither the cash nor the holdings were updated)." Then run `run.sh status`. Positions already listed there must **not** be added again (another buy would count them twice). Only for positions missing from `status`: "I can add the ones that are missing — that doesn't touch your cash." (then `buy --existing-position` per missing position). Do **not** read `parsed_holdings_for_user_review` back as if it were recorded |
 | `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), you need a free DeepSeek API key — 30 seconds to register at platform.deepseek.com. Want to set that up now?" If `cash_recorded` is `{}`, replace "only the cash was captured" with "nothing was captured yet" and ask how much cash they have. Without a key, on a fresh install: add the positions with `buy --existing-position`, but only those `run.sh status` doesn't already list |
 | `"LLM parse failed"` | "Something went wrong while parsing your holdings (a temporary DeepSeek outage or a network timeout), so only the cash portion was recorded. You can wait a bit and rerun `run.sh init --force`, or I can add the positions you already hold one by one now — that doesn't touch your cash." (fresh install: run `run.sh status` first, then `buy --existing-position` per position it doesn't list) |
+| `"fund not converted"` (in addition to the row below — say this first) | Per named fund: "I recorded <fund>, but couldn't convert your holding amount into fund units — the NAV source didn't respond — so it shows 0 units and 0 market value for now. What units held and cost price does your fund app show?" Then fix it with the commands in that note entry (`delete_holding --symbol FUND:<code> --force`, then `buy --kind fund --unit-label 份 --existing-position`; neither moves cash). Never estimate the units yourself |
 | `"parsed via LLM"` with `user_review_required: true` | Read out each holding in `parsed_holdings_for_user_review` for the user to confirm, e.g.: "My understanding is you hold: 3000 units of A at 4.2 yuan, and 50 grams of gold B at 750 avg cost. Is that right?" |
 | `"no holdings_description provided"` | Nothing extra needed (the user didn't describe any holdings in the first place) |
 

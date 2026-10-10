@@ -110,7 +110,9 @@ They are valued at the latest confirmed unit NAV from Eastmoney (not the intrada
 `status` / P&L / the committee's portfolio summary all include them. Running the committee *on* a
 fund itself is not supported yet (no price history wired in). If the user only knows the holding
 amount and holding P&L (持有金额 / 持有收益), use `import_holdings` — it derives units and average
-cost from the latest NAV.
+cost from the latest NAV. If no NAV source answers, the fund stays at 0 units and the output names
+it (`fund not converted` in `parsed.warnings` / init's `holdings_parse_note`): tell the user and ask
+for the units held and cost price from their fund app — never estimate them.
 
 ## What yfinance does NOT support
 
