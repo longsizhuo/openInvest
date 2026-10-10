@@ -50,7 +50,7 @@ LLM_MODEL=glm-4-flash
 
 | Config Key | 类型（默认值） | 行为 |
 |---|---|---|
-| `verdict.concentration_lens_enabled` | `bool` (`true`) | **持仓集中度过滤器**。开启时对过度集中的资产触发告警 / TRIM；关闭后集中度不再触发 TRIM 警告（波动率与估值风控仍生效）。见 [ADR-019](adr/019-remove-solvency-concentration-override.md) |
+| `verdict.concentration_lens_enabled` | `bool` (`false`) | **持仓集中度过滤器**。开启时对过度集中的资产触发告警 / TRIM；关闭（默认）后集中度不再触发 TRIM（波动率与估值风控仍生效），真实集中度数字仍渲染给委员会作背景 / 压力测试。见 [ADR-019](adr/019-remove-solvency-concentration-override.md)、[ADR-020](adr/020-concentration-lens-default-off.md) |
 | `verdict.risk_profile` | `str` (`"steady"`) | 风险偏好：`steady`（稳健）/ `aggressive`（下行阶段允许更大规模买入）。 |
 | `verdict.gold_defense_dca_enabled` | `bool` (`true`) | 黄金防御机制。高波动骤增阶段把单次大额加仓拆分为多期 DCA。 |
 | `dca.auto_dca_enabled` | `bool` (`false`) | 全自动定投决策总开关。每个交易日记一笔；仅适用北京 15:30 前收盘的市场（A 股 / 亚太），休市日不记，见 [ADR-018](adr/018-dca-dip-reserve.md) |

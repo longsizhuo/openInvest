@@ -31,7 +31,8 @@ role: risk
   误喊 TRIM。**service layer 已加 SENTINEL 代码覆写防御**——你输出 70 也会被强制
   改回 33.6。但仍要求你输出就对，否则 audit trail 会留下"LLM 编 70 → 系统覆写
   33.6"的脏纪录，未来 review 时会被 flag 成"模型不可信"。
-- 如果 portfolio_summary 没给该字段（罕见），写 `N/A` 而不是猜。
+- 如果 portfolio_summary 没给该字段或写「暂不可计算」（罕见），CONCENTRATION_PCT 与
+  WORST_CASE_LOSS_PCT_AT_-20 都写 `N/A` 而不是猜。
 
 **输出要求**：
 - 必须中文回复
