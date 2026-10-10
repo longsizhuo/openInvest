@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.23.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.22.1...invest-skill-v0.23.0) (2026-10-10)
+
+
+### Features
+
+* **onboarding:** new installs record the cash they enter; record_existing_position for pre-held positions ([#320](https://github.com/longsizhuo/openInvest/issues/320)) ([a5e54ba](https://github.com/longsizhuo/openInvest/commit/a5e54ba9d26aa4b208b715e9614bacf79d7de954))
+
+
+### Bug Fixes
+
+* **mcp:** disable ingest_event in advisory mode ([#339](https://github.com/longsizhuo/openInvest/issues/339)) ([0d52d1e](https://github.com/longsizhuo/openInvest/commit/0d52d1e762b436bdbe4c96772eb5d490e7c97da4))
+* **status:** only fetch and show ndq/gold/AUD sections when the user holds them ([#335](https://github.com/longsizhuo/openInvest/issues/335)) ([1b98c17](https://github.com/longsizhuo/openInvest/commit/1b98c17897a82fd017ddc51aecb84e4ff6e8b186))
+
+
+### Docs
+
+* **mcp:** stop hard-coding the MCP tool count; list every tool in the invest skill ([#336](https://github.com/longsizhuo/openInvest/issues/336)) ([3017df5](https://github.com/longsizhuo/openInvest/commit/3017df5c136e97cb1dc077b65546d3ae9817630a))
+
 ## [0.22.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.22.0...invest-skill-v0.22.1) (2026-10-09)
 
 
