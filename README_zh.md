@@ -37,9 +37,6 @@ OpenInvest 是一个面向现代 AI Agent 的自托管投资决策引擎。
   <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，系统将依据您在 `memory/` 中定义的专属账户持仓自动渲染对应的净值曲线。</sub>
 </div>
 
-<!-- OUTPERFORM_FEED_START -->
-<!-- OUTPERFORM_FEED_END -->
-
 *   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/README.md](docs/wiki/README.md)。
 
 ---

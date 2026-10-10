@@ -306,7 +306,7 @@ def _outperform_events(
 ) -> List[Dict[str, Any]]:
     """对比所有基准的当前累计涨幅 → 每个基准一条"跑赢 / 跑输"方向事件
 
-    事件落盘到 docs/outperform_events.jsonl，README feed / web API 引用。
+    事件落盘到 docs/outperform_events.jsonl，web API 引用。
 
     返回 List[{"benchmark", "user_pct", "bench_pct", "diff_pct", "is_outperform",
               "label", "ts"}]，跑赢跑输都记，按 |diff_pct| 倒序。

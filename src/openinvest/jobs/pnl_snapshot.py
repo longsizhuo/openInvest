@@ -31,12 +31,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
@@ -446,11 +445,10 @@ def _push_status(push: Dict[str, Any]) -> str:
 
 
 def _persist_outperform(events: List[Dict[str, Any]]) -> None:
-    """事件落盘 → docs/outperform_events.jsonl（append-only）+ 同步刷 README marker
+    """事件落盘 → docs/outperform_events.jsonl（append-only），供 /api/outperform_events 读。
 
-    README hero 区有 `<!-- OUTPERFORM_FEED_START --> ... <!-- OUTPERFORM_FEED_END -->`
-    两个 marker，本函数会把最近 3 条事件渲染成 markdown bullet 写进中间。这样
-    pnl-data force-push 时 GitHub README 自动展示最新跑赢瞬间——PM-Growth 增长杠杆。
+    ponytail: 曾经同步刷 README 的 OUTPERFORM_FEED marker，但两种 push 模式都不提交 README，
+    feed 从没上过 GitHub，只会弄脏生产 checkout、卡住 invest-deploy（2026-10-10 删除）。
     """
     if not events:
         return
@@ -459,129 +457,6 @@ def _persist_outperform(events: List[Dict[str, Any]]) -> None:
     with out_path.open("a", encoding="utf-8") as f:
         for ev in events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
-    # 同步刷 README marker 区域
-    try:
-        _update_readme_outperform_feed(out_path)
-    except Exception as e:  # noqa: BLE001  README 刷新失败不阻断主流程
-        log.warning(f"README outperform feed 刷新失败（不影响 jsonl 落盘）: {e}")
-
-
-_CANONICAL_OWNER = "longsizhuo"
-
-
-def _outperform_feed_attribution() -> Tuple[str, str, str]:
-    """据 git remote 推断 README outperform feed 的署名 + 链接 + 分支。
-
-    fork / 自托管用户的 README 不该挂"作者账户"+ 指向作者仓库的链接——数据是
-    他们自己的，归属也该是他们自己的。从 remote.origin.url 解析 owner/repo：
-      - owner == 作者     → ("作者账户", 作者仓 tree 链接, 分支)  原行为不变
-      - 其它 owner        → ("本账户", 该 fork 自己的 tree 链接, 分支)
-      - 解析不到 remote   → ("本账户", "", 分支)  纯文字，不外链任何人
-    """
-    owner = repo = ""
-    try:
-        remote = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
-            cwd=str(ROOT), capture_output=True, text=True, check=False,
-        ).stdout.strip()
-        # host 前必须是 行首 / @ / /（挡掉 my-github.com 这类子串误匹配）；
-        # 尾部容忍 .git 和 trailing /（否则 https://…/openInvest/ 会漏判）
-        m = re.search(r"(?:^|[@/])github\.com[:/]+([^/]+?)/([^/]+?)(?:\.git)?/?$", remote)
-        if m:
-            owner, repo = m.group(1), m.group(2)
-    except Exception:  # noqa: BLE001  推断失败退化成无链接，不阻断 README 刷新
-        pass
-
-    branch = os.getenv("INVEST_PNL_PUSH_BRANCH", "pnl-data").strip() or "pnl-data"
-    label = "作者账户" if owner.lower() == _CANONICAL_OWNER else "本账户"
-    link = f"https://github.com/{owner}/{repo}/tree/{branch}" if owner and repo else ""
-    return label, link, branch
-
-
-def _update_readme_outperform_feed(jsonl_path: Path, top_n: int = 3) -> None:
-    """读 outperform_events.jsonl 最新 N 条，渲染 markdown 写进 README marker 之间。
-
-    README marker：
-      <!-- OUTPERFORM_FEED_START -->
-      （内容由本函数自动生成）
-      <!-- OUTPERFORM_FEED_END -->
-    """
-    readme = SVG_PATH.parent.parent / "README.md"
-    if not readme.exists():
-        return
-    if not jsonl_path.exists():
-        return
-
-    # 取最后 N 条事件
-    lines = jsonl_path.read_text(encoding="utf-8").splitlines()
-    recent: List[Dict[str, Any]] = []
-    for line in lines[-200:]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            recent.append(json.loads(line))
-        except Exception:
-            continue
-    if not recent:
-        return
-    recent.sort(key=lambda e: e.get("ts", ""), reverse=True)
-    # 同基准只保留最新一条（避免列表全是"跑赢余额宝"5 次）
-    seen_bench: set = set()
-    deduped: List[Dict[str, Any]] = []
-    for ev in recent:
-        bench = ev.get("benchmark", "")
-        if bench in seen_bench:
-            continue
-        seen_bench.add(bench)
-        deduped.append(ev)
-        if len(deduped) >= top_n:
-            break
-
-    # 金融视角红线：固定免责 + 展示 winning + losing 两类事件，避免 survivorship 偏差
-    # 署名/链接按 git remote 推断——fork / 自托管用户的 README 不该挂"作者账户"+作者仓链接
-    feed_label, feed_link, feed_branch = _outperform_feed_attribution()
-    refresh = (f"由 [{feed_branch} 分支]({feed_link}) 每 2h 自动刷新"
-               if feed_link else "每 2h 自动刷新")
-    rendered = [
-        f"> 📈 **{feed_label}实盘事件**（最近 vs 基准，{refresh}）：",
-        ">",
-    ]
-    for ev in deduped:
-        ts = str(ev.get("ts", ""))[:10]
-        label = ev.get("label", "")
-        # win/loss 用不同 emoji 区分，避免视觉只看到"赢"
-        marker = "🟢" if ev.get("is_outperform") else "🔴"
-        rendered.append(f"> - {marker} `{ts}` {label}")
-    rendered.append(">")
-    if feed_label == "作者账户":
-        rendered.append(
-            "> *以上为作者本人账户历史事件，仅供工具效果参考，**不构成投资建议**，"
-            "过去表现不预示未来收益。fork 用户的部署会看到自己的事件。*",
-        )
-    else:
-        rendered.append(
-            "> *以上为本部署账户历史事件，仅供工具效果参考，**不构成投资建议**，"
-            "过去表现不预示未来收益。*",
-        )
-
-    new_block = "\n".join(rendered)
-    text = readme.read_text(encoding="utf-8")
-    start_marker = "<!-- OUTPERFORM_FEED_START"
-    end_marker = "<!-- OUTPERFORM_FEED_END -->"
-    s_idx = text.find(start_marker)
-    e_idx = text.find(end_marker)
-    if s_idx == -1 or e_idx == -1 or e_idx < s_idx:
-        # marker 不存在则跳过（fork 用户可能删了 hero 区）
-        return
-    # 找到 START 行结尾
-    s_line_end = text.find("\n", s_idx)
-    if s_line_end == -1:
-        return
-    before = text[: s_line_end + 1]
-    after = text[e_idx:]
-    new_text = before + new_block + "\n" + after
-    readme.write_text(new_text, encoding="utf-8")
 
 
 def run() -> Dict[str, Any]:
