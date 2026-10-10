@@ -18,7 +18,7 @@ metadata:
 
 - User explicitly says "set up invest" / "initialize invest" / "帮我初始化 invest"
 - The `invest` skill's `doctor` returns `status: "needs_setup"` (memory / user_profile missing)
-- User wants a full reconfiguration (explicitly says "reset" / "重新配置"; requires `--force`)
+- User wants to reconfigure (explicitly says "reset" / "重新配置"; requires `--force`): on an existing install `--force` only updates name and risk tolerance in user.md — holdings, tracking, strategy and history stay as they are; change allocations with `set_allocations`, caps and tracking with `track_asset` / `untrack_asset`
 - v1 → v2 schema migration: `doctor`'s `portfolio_schema` check says `needs_migration` (an
   install made by an older version; `status` shows cash 0). Run the exact command in that
   check's `hint` — it backs up portfolio.md and converts it. Do **not** rerun `init` for this
@@ -183,7 +183,7 @@ After it finishes:
 
 ## Error handling
 
-- **`"existing portfolio left unchanged"` / `"v2 write failed"`** (check first; it wins over the item below): the portfolio already had holdings or trades, so this run wrote **nothing** — neither the `current_assets` cash nor any holding. Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
+- **`"existing portfolio left unchanged"` / `"v2 write failed"`** (check first; it wins over the item below): the portfolio already had holdings or trades, so this run wrote no cash and no holding (with `--force`, name and risk tolerance may still have been updated — see `profile_note`). Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
 - **DeepSeek parse timeout / no key** on a fresh install: report it to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded (`cash_recorded` in the init JSON shows what this run wrote). Add the positions the user **already held** afterwards, one per call, with `run.sh buy --symbol S --units N --price P [-c CCY] --existing-position` (MCP: the `record_existing_position` tool; an older MCP server answers `Unknown tool` — don't fall back to `buy`) — that does not touch cash. Run `status` first and skip any symbol it already lists. A plain `buy` is a new purchase paid from ledger cash
 - **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 4
 - **schema validation fail**: usually a wrong field type — check the error field in the `init` response

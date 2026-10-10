@@ -252,9 +252,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 或 --force 重跑（配 key / LLM 失败后重做）且仍是上次 init 的兜底。有交易流水的照旧拒绝覆盖。
     _portfolio_existed = MemoryStore().path_of("portfolio").exists()
     _portfolio_fresh = not _portfolio_existed or (args.force and _untouched_init_fallback())
-    # 新装用户没有 v1 user_profile.json，migrate 必然 no-op——跳过。
-    # 升级路径保留：2026-05 前老 clone 带该文件的仍会走迁移。
-    if (ROOT / "user_profile.json").exists():
+    # migrate 只在 user/strategy/portfolio.md 都还没有时跑（新装 / 老 clone 升级）。已有任一个它必然
+    # 拒绝，拒绝信息还教 agent 跑 `migrate_profile --force`——那会清空持仓和 target_assets（#172 同症状）。
+    _memory_existed = any(MemoryStore().path_of(n).exists() for n in ("user", "strategy", "portfolio"))
+    if (ROOT / "user_profile.json").exists() and not _memory_existed:
         try:
             from contextlib import redirect_stderr, redirect_stdout
             from openinvest.migrate_profile import main as _migrate_main
@@ -265,6 +266,33 @@ def cmd_init(args: argparse.Namespace) -> None:
             _rc = 1
     result = SimpleNamespace(stdout=_out.getvalue(), stderr=_err.getvalue(),
                              returncode=_rc)
+
+    # 3a) --force 重新 onboarding：只把名字/风险偏好合并进已有 user.md（委员会读 risk_tolerance）。
+    # strategy/portfolio/流水不动——分配/上限/跟踪走 set_allocations / track_asset。
+    profile_note = ""
+    _upd = {k: str(profile[src]).strip()
+            for src, k in (("name", "display_name"), ("risk_tolerance", "risk_tolerance"))
+            if str(profile.get(src) or "").strip()}
+    if args.force and _memory_existed and _upd and MemoryStore().path_of("user").exists():
+        try:
+            import re
+            from openinvest.core.schemas import validate_user
+            with MemoryStore().transaction("user") as _u:  # 校验抛错 → 不提交
+                validate_user({**_u.metadata, **_upd})
+                _u.update(**_upd)
+                _body = _u.body
+                for _label, _k in (("姓名", "display_name"), ("风险偏好", "risk_tolerance")):
+                    if _k in _upd:
+                        _body = re.sub(rf"(\*\*{_label}\*\*: ).*", lambda m, v=_upd[_k]: m.group(1) + v,
+                                       _body, count=1)
+                _u.set_body(_body)
+            profile_note = "user.md updated: " + ", ".join(f"{k}={v}" for k, v in _upd.items())
+        except Exception as exc:  # noqa: BLE001 非法值 / 坏文件：原样保留
+            profile_note = f"user.md unchanged: {type(exc).__name__}: {str(exc)[:300]}"
+    # 重配时 payload 里的策略不落 strategy.md（有意：不动跟踪列表/上限），要明说，免得 agent 报成"已应用"
+    if args.force and _memory_existed and profile.get("investment_strategy"):
+        profile_note = ((profile_note + "; ") if profile_note else "") + (
+            "strategy.md unchanged — allocations: set_allocations; caps/tracking: track_asset")
 
     # 3b) v2 持仓覆盖：如果 profile 带了 holdings_description（自然语言）或
     # holdings_v2（结构化），优先用它们生成完整 v2 portfolio.md。这一步在
@@ -409,7 +437,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 补录已持有仓位一律走 `buy --existing-position`（不扣现金），不再教 deposit+buy
     if _v2_write_error or _kept:
         next_step_text = (
-            ("**这次没有写入任何东西**——已有的 portfolio.md 保持原样，current_assets 现金和持仓都没写"
+            ("**组合这次没有写入任何东西**——已有的 portfolio.md 保持原样，current_assets 现金和持仓都没写"
              if _kept else "**这次解析的持仓没有写入**——portfolio.md 保持原样")
             + "（原因见 holdings_parse_note）。告诉用户这一点，别把 `parsed_holdings_for_user_review` 当成已记录的持仓。"
             "先跑 `run.sh status` 看已经记了哪些：**status 里已有的 symbol 绝不要再加**（再 buy 会重复计数）；"
@@ -454,6 +482,10 @@ def cmd_init(args: argparse.Namespace) -> None:
             "想让服务器后台每天自动跑，那时候再去 platform.deepseek.com 注册 key 填 .env。"
         )
 
+    if profile_note.startswith("user.md unchanged"):
+        next_step_text = (f"**名字/风险偏好没有更新**（{profile_note}）。告诉用户这一点；风险偏好只能是 "
+                          "Conservative / Balanced / Aggressive。" + next_step_text)
+
     _print_json({
         "status": "ok",
         "completion": final_checks_status,
@@ -473,6 +505,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         ),
         "user_review_required": _holdings_written,
         "cash_recorded": _cash_recorded,
+        "profile_note": profile_note,
         "next_step": next_step_text,
     })
 
