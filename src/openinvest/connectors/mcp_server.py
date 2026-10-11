@@ -666,7 +666,7 @@ def set_allocations(
 @_tool(annotations=_STRAT_W)
 def track_asset(
     symbol: Annotated[str, Field(description="yfinance ticker to track, e.g. 'AAPL', '0700.HK', 'BTC-USD'.")],
-    max_single_invest_cny: Annotated[Optional[float], Field(description="Per-decision investment cap in CNY. Required when creating a new entry; optional on update.")] = None,
+    max_single_invest_cny: Annotated[Optional[float], Field(description="Per-decision investment cap in CNY. On a new entry, defaults to the strategy-level max_single_invest_cny; optional on update.")] = None,
     display_name: Annotated[Optional[str], Field(description="Human-friendly name shown in reports.")] = None,
     channel: Annotated[Optional[str], Field(description="Where the user actually buys it (broker/app name).")] = None,
     price_offset_pct: Annotated[Optional[float], Field(description="Systematic offset between quote and actual fill price, in percent (e.g. bank gold spread).")] = None,
@@ -681,8 +681,9 @@ def track_asset(
 
     Args:
         symbol: yfinance ticker to track (e.g. "AAPL", "0700.HK", "BTC-USD").
-        max_single_invest_cny: Per-decision investment cap in CNY. Required
-            when creating a new entry; optional on update.
+        max_single_invest_cny: Per-decision investment cap in CNY. On a new
+            entry it defaults to the strategy-level max_single_invest_cny;
+            optional on update.
         display_name: Human-friendly name shown in reports.
         channel: Where the user actually buys it (broker/app name).
         price_offset_pct: Systematic offset between the quote and the user's

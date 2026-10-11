@@ -44,7 +44,7 @@ def cmd_track_asset(args: argparse.Namespace) -> None:
     """跟踪标的（新建或更新，幂等）。示例:
         skill track_asset --symbol AAPL --max-single-invest-cny 8000
         skill track_asset --symbol GC=F --sell-fee-pct 0.0038   # 只改一个字段
-    新建时 schema 要求 max_single_invest_cny 必填。
+    新建时不带 --max-single-invest-cny 则沿用策略的单次入场上限。
     """
     from openinvest.services import strategy_write as svc
 

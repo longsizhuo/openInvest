@@ -72,6 +72,25 @@ def test_upsert_track_semantics(store):
     assert out["status"] == "ok"
 
 
+def test_upsert_new_symbol_defaults_cap_from_strategy(store):
+    """2026-10-11：CLI `track_asset` 不带 --max-single-invest-cny 时直接甩 pydantic 原文。
+    新建没给单笔上限 → 沿用策略顶层的单次入场上限，并在消息里写明。"""
+    meta = dict(store.read("strategy").metadata, max_single_invest_cny=9000)
+    store.write("strategy", "strategy", meta, "# body")
+    out = svc.upsert_target_asset("AAPL", {"display_name": "Apple"}, store=store)
+    aapl = next(a for a in store.read("strategy").metadata["target_assets"] if a["symbol"] == "AAPL")
+    assert aapl["max_single_invest_cny"] == 9000 and aapl["display_name"] == "Apple"
+    assert "沿用策略的单次入场上限 ¥9,000" in out["message"]
+
+
+def test_upsert_new_symbol_without_any_cap_gives_readable_error(store):
+    before = store.read("strategy").metadata["target_assets"]
+    with pytest.raises(ValueError, match="--max-single-invest-cny") as e:
+        svc.upsert_target_asset("AAPL", {}, store=store)
+    assert "validation" not in str(e.value)  # 不是 pydantic 原文
+    assert store.read("strategy").metadata["target_assets"] == before
+
+
 def test_remove_and_last_asset_guard(store):
     svc.remove_target_asset("GC=F", store=store)
     assert _symbols(store) == ["NDQ.AX"]

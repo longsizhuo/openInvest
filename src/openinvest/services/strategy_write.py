@@ -139,7 +139,7 @@ def upsert_target_asset(
     store: Optional[MemoryStore] = None,
 ) -> Dict[str, Any]:
     """track 语义（agent 友好的幂等入口）：symbol 已存在 → 只更新传入字段；
-    不存在 → 新建（此时 schema 要求 max_single_invest_cny 必填）。
+    不存在 → 新建（schema 要求 max_single_invest_cny；没传则沿用策略顶层的单次入场上限）。
 
     与 REST 的 POST(409)/PUT(404) 分离语义并存：REST 面保持原契约不动，
     CLI/MCP 的 "track AAPL" 重复调用不该报错。
@@ -157,8 +157,20 @@ def upsert_target_asset(
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
         target = next((a for a in existing if a.get("symbol") == symbol), None)
         if target is None:
-            existing.append({"symbol": symbol, **fields})
             msg = f"已新增资产 {symbol}"
+            if "max_single_invest_cny" not in fields:
+                # 新建必须有单笔上限（schema 必填）。没传就沿用策略顶层的单次入场上限——
+                # agent 走 MCP 时本来就是这么手动补的；顶层也没有则给可读报错，
+                # 不把 pydantic 原文甩给 CLI 用户（2026-10-11 实测）
+                default_cap = tx.get("max_single_invest_cny")
+                if default_cap is None:
+                    raise ValueError(
+                        f"新建跟踪 {symbol} 需要单笔上限：CLI 加 --max-single-invest-cny <CNY>，"
+                        "MCP 传 max_single_invest_cny（策略里也没有顶层单次入场上限可沿用）"
+                    )
+                fields["max_single_invest_cny"] = default_cap
+                msg += f"（单笔上限沿用策略的单次入场上限 ¥{float(default_cap):,.0f}）"
+            existing.append({"symbol": symbol, **fields})
         elif fields:
             target.update(fields)
             msg = f"{symbol} 已更新: {list(fields.keys())}"

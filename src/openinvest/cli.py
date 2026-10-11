@@ -226,7 +226,7 @@ def main() -> None:
 
     p = sub.add_parser(
         "track_asset",
-        help="跟踪标的（upsert 幂等：不存在新建 / 已存在只更新传入字段）。新建须带 --max-single-invest-cny",
+        help="跟踪标的（upsert 幂等：不存在新建 / 已存在只更新传入字段）。新建不带 --max-single-invest-cny 时沿用策略的单次入场上限",
     )
     p.add_argument("--symbol", required=True, help="yfinance symbol（如 AAPL / GC=F / 510300.SS）")
     p.add_argument("--display-name", default=None, help="人类可读名")
