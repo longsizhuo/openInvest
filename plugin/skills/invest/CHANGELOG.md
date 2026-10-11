@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.24.0...invest-skill-v0.24.1) (2026-10-11)
+
+
+### Docs
+
+* **skill:** tell the user when an imported fund could not be converted to units ([6c148f0](https://github.com/longsizhuo/openInvest/commit/6c148f043caddc1a88e102d0b8c3c73a55ddee71))
+
 ## [0.24.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.23.1...invest-skill-v0.24.0) (2026-10-10)
 
 
