@@ -80,7 +80,7 @@ def test_upsert_new_symbol_defaults_cap_from_strategy(store):
     out = svc.upsert_target_asset("AAPL", {"display_name": "Apple"}, store=store)
     aapl = next(a for a in store.read("strategy").metadata["target_assets"] if a["symbol"] == "AAPL")
     assert aapl["max_single_invest_cny"] == 9000 and aapl["display_name"] == "Apple"
-    assert "沿用策略的单次入场上限 ¥9,000" in out["message"]
+    assert "沿用策略的单次入场上限 9,000 CNY" in out["message"]
 
 
 def test_upsert_new_symbol_without_any_cap_gives_readable_error(store):

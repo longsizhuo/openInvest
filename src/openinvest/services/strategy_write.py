@@ -169,7 +169,7 @@ def upsert_target_asset(
                         "MCP 传 max_single_invest_cny（策略里也没有顶层单次入场上限可沿用）"
                     )
                 fields["max_single_invest_cny"] = default_cap
-                msg += f"（单笔上限沿用策略的单次入场上限 ¥{float(default_cap):,.0f}）"
+                msg += f"（单笔上限沿用策略的单次入场上限 {float(default_cap):,.0f} CNY）"
             existing.append({"symbol": symbol, **fields})
         elif fields:
             target.update(fields)
