@@ -134,20 +134,17 @@ $("ask").addEventListener("submit", async (e) => {
     cur = j.job_id; showFacts(j.facts, true); poll(cur);
   } catch {}
 })();
-// 安装方式、命令和说明照抄官网 openinvest-site（src/data/site.ts 的 INSTALL_TABS + src/i18n.tsx 的中文 install 说明），
-// 那边改了这里同步。复制整个标签的全部命令，和官网一致
+// 安装方式、命令和说明照抄官网 openinvest-site（src/data/site.ts 的 INSTALL_TABS + src/i18n.tsx 的中文 install 说明，
+// 对齐 openinvest-site#5），那边改了这里同步。复制整个标签的全部命令，和官网一致
 const INSTALL = [
   { label: "Claude Code", cmds: ["/plugin marketplace add longsizhuo/openInvest", "/plugin install invest@openinvest"],
     note: "自动注册 MCP server（含全部工具）+ 委员会 skills。安装后对 Claude 说“帮我初始化 invest”。Coordinator 路径不需要 API key。" },
   { label: "Codex", cmds: ["codex plugin marketplace add longsizhuo/openInvest", "codex plugin add invest@openinvest"],
-    note: "Codex 读同一份 SKILL.md。要 MCP 工具再跑：codex mcp add openinvest -- bash ~/openInvest/skills/invest/scripts/run.sh mcp" },
+    note: "Codex 读同一份 SKILL.md。要 MCP 工具再跑：codex mcp add openinvest --env INVEST_HOME=$HOME/openInvest -- uvx openinvest-mcp" },
   { label: "Hermes", cmds: ["hermes plugins install longsizhuo/openInvest --enable"],
     note: "安装 plugin（skills 以 openinvest:invest 加载）。MCP 工具需在 ~/.hermes/config.yaml 加：mcp_servers.openinvest → command: uvx, args: [openinvest, mcp]。" },
-  { label: "OpenClaw", cmds: ["# ~/.openclaw/openclaw.json (JSON5) — declare under mcp.servers:",
-    'openinvest: { command: "uvx", args: ["openinvest", "mcp"], env: { INVEST_HOME: "~/openInvest" } }',
-    "# Older builds without an MCP client — one command installs the skills:",
-    "uvx openinvest install-skills --dest <workspace>/skills"],
-    note: "在 ~/.openclaw/openclaw.json 的 mcp.servers 里声明即可接入全部 MCP 工具。旧版无 MCP client 时，一条命令装齐三个 skill：uvx openinvest install-skills（skills 经 uvx 驱动后端）。" },
+  { label: "OpenClaw", cmds: ["openclaw plugins install clawhub:openinvest"],
+    note: "装 ClawHub 上的 bundle：skills 和 MCP server 一起注册。不支持 bundle 的旧版：在 ~/.openclaw/openclaw.json 的 mcp.servers 里声明 MCP server，skills 用 uvx openinvest install-skills 一条命令装齐。" },
   { label: "GitHub", cmds: ["git clone https://github.com/longsizhuo/openInvest.git ~/openInvest && cd ~/openInvest && bash skills/install.sh"],
     note: "手动安装。后端在首次运行时自举（uv sync）。" },
 ];
