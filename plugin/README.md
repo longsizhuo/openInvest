@@ -45,8 +45,8 @@ mcp_servers:
     trust: untrusted
 ```
 
-Then in chat say **"set up invest" / 帮我初始化 invest** — a 5-question
-onboarding (name, risk tolerance, income, current holdings) writes your config.
+Then in chat say **"set up invest" / 帮我初始化 invest** — a short
+onboarding (name, risk tolerance, current holdings) writes your config.
 API keys never go through the chat: add `LLM_API_KEY` (and optional `EMAIL_*`)
 to `~/openInvest/.env` yourself; the Coordinator path needs no key at all. After that just ask things like *"show my portfolio"*,
 *"how's my P&L"*, *"should I buy AAPL"*, or *"run committee on gold"*.

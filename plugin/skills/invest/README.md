@@ -4,7 +4,7 @@ The **daily-usage agent skill** for openInvest. View portfolio / run the committ
 positions / "btw" correlation analysis.
 
 > **First-time installation** goes through the other skill: [`../invest-setup/`](../invest-setup/) —
-> when `doctor` returns `needs_setup`, the agent automatically loads it and runs the 5-question
+> when `doctor` returns `needs_setup`, the agent automatically loads it and runs the 3-question
 > onboarding; only after that does this skill take over.
 
 ## Directory layout
@@ -19,7 +19,7 @@ skills/invest/
 │   ├── two-paths.md              ← Coordinator vs Direct differences
 │   ├── adding-assets.md          ← adding a new tracked symbol
 │   ├── troubleshooting.md        ← read when doctor is all green but things still fail
-│   └── onboarding.md             ← detailed 5-question flow (also referenced by the invest-setup skill)
+│   └── onboarding.md             ← detailed onboarding flow (also referenced by the invest-setup skill)
 └── README.md         ← you are here
 ```
 

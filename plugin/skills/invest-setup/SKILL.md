@@ -1,7 +1,7 @@
 ---
 name: invest-setup
 version: 0.5.3 # x-release-please-version
-description: First-time openInvest installation and onboarding. **ONLY use when** user explicitly says "set up invest" / "init invest" / "帮我初始化 invest", OR when `invest` skill's `doctor` returns `status="needs_setup"`. **NOT for daily usage** — once onboarding is done, the `invest` skill takes over (portfolio viewing, committee analysis, buy/sell tracking). Wraps `run.sh init --from-stdin` with the canonical 5-question flow.
+description: First-time openInvest installation and onboarding. **ONLY use when** user explicitly says "set up invest" / "init invest" / "帮我初始化 invest", OR when `invest` skill's `doctor` returns `status="needs_setup"`. **NOT for daily usage** — once onboarding is done, the `invest` skill takes over (portfolio viewing, committee analysis, buy/sell tracking). Wraps `run.sh init --from-stdin` with the canonical 3-question flow.
 platforms: [linux, macos]
 metadata:
   hermes:
@@ -55,8 +55,8 @@ machines / 多台电脑共用持仓" / "connect to my existing deployment".
    - Does the hub have auth enabled (an `INVEST_API_TOKEN`, or a Cloudflare Access
      service token)? Ask only yes/no — **never ask for the token itself in chat**.
 2. Write the address into `$INVEST_HOME/.env`; if auth is on, have the user add the token
-   line to the same file with their own editor (**no** DeepSeek key / Gmail / 5-question
-   flow — those all live on the hub):
+   line to the same file with their own editor (**no** DeepSeek key / Gmail / onboarding
+   questions — those all live on the hub):
    ```env
    INVEST_API_BASE=https://invest.example.com
    # the user adds this one themselves, if the hub has auth
@@ -84,17 +84,16 @@ onboarded — just use the `invest` skill".
 
 Returns `status: "needs_setup"` → go to step 2.
 
-### 2. Ask the user 5 questions (use `AskUserQuestion` on the Coordinator path, your conversational tool on the Direct path)
+### 2. Ask the user 3 questions, plus 1 optional (use `AskUserQuestion` on the Coordinator path, your conversational tool on the Direct path)
 
 | # | Ask | Notes |
 |---|------|------|
 | Q1 | What should we call you? | display name; `Anonymous` if they'd rather not say |
 | Q2 | Risk tolerance? | `Conservative` / `Balanced` / `Aggressive` |
-| Q3 | Monthly income / monthly expenses / FX working buffer (CNY)? | three numbers; all can be 0 to skip |
-| Q4 | **What do you currently hold?** (free-form description) | natural language, see below |
-| Q5 | Do you want unattended daily runs or emailed reports? | **Optional. Never ask for keys in chat** — the user adds `LLM_API_KEY` / `EMAIL_*` to `$INVEST_HOME/.env` themselves (see below). Not needed on the Coordinator path |
+| Q3 | **What do you currently hold?** (free-form description) | natural language, see below |
+| Q4 | Do you want unattended daily runs or emailed reports? | **Optional. Never ask for keys in chat** — the user adds `LLM_API_KEY` / `EMAIL_*` to `$INVEST_HOME/.env` themselves (see below). Not needed on the Coordinator path |
 
-#### Q4 natural language (key change 2026-05)
+#### Q3 natural language (key change 2026-05)
 
 **Do not ask field by field**. Let the user describe their holdings in one sentence:
 
@@ -114,35 +113,14 @@ Boundary rules to tell the user (not enforced):
 - For crypto, just say the coin (`BTC` / `ETH`)
 - Yu'ebao / Zhaozhaobao / money-market funds → the parser routes them into cash, not holdings
 
-### 3. wealth_context (optional but recommended)
-
-If the user reveals "this account is pocket money" / "I have an emergency reserve" /
-"family backup" → ask one more question:
-
-> Do you have an emergency fund / family backup outside this portfolio? Roughly how
-> much? (Family funds **cannot** be used for investing — they only serve to prevent
-> the "low cash = high risk" misjudgment.)
-
-Record it into wealth_context:
-```yaml
-wealth_context:
-  emergency_buffer_cny: 200000  # or whatever number the user gives
-  family_backup_available: true
-  account_purpose: "pocket-money account"  # the user's own words
-  lifestyle_notes: "..."
-```
-
-See [docs/wiki/12-verification.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/12-verification.md)
-claim 7 (WealthContextOfficer) for details.
-
-### 4. Assemble the payload + run init
+### 3. Assemble the payload + run init
 
 **Keys never go through the chat or this payload.** An API key or password typed into the chat,
 or put into a command you run, lands in the transcript and the model provider's logs. If the user
 wants the Direct path or emailed reports, tell them to add `LLM_API_KEY=...` (optional
 `LLM_BASE_URL`, `EMAIL_SENDER`, `EMAIL_PASSWORD`) to `$INVEST_HOME/.env` with their own editor —
 `run.sh doctor` prints the path — or to run `run.sh init` in their own terminal. `init` reads the key
-from `.env`, so if they add it first, Q4 is parsed right away.
+from `.env`, so if they add it first, Q3 is parsed right away.
 
 The payload **must** be nested as `{"profile": {...}}` — a flat object
 (no top-level `"profile"`) is rejected with `status: "error"` and an `expected_shape` field.
@@ -153,20 +131,15 @@ echo '{
   "profile": {
     "name": "<Q1>",
     "risk_tolerance": "<Q2: Conservative | Balanced | Aggressive>",
-    "monthly_income_cny": 0,
-    "monthly_expenses_cny": 0,
-    "exchange_buffer_cny": 0,
-    "holdings_description": "<the user's exact words from Q4>",
-    "current_assets": {"cash_cny": 0, "aud_cash": 0},
-    "wealth_context": {}
+    "holdings_description": "<the user's exact words from Q3>",
+    "current_assets": {"cash_cny": 0, "aud_cash": 0}
   }
 }' | <skill-dir>/scripts/run.sh init --from-stdin
 ```
 
-- `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q4 — this is what
+- `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q3 — this is what
   gets recorded when there is no LLM key (or the parse fails) on a fresh install. Positions are
   never paid out of it: without a key they are added later with `buy --existing-position`.
-- `wealth_context`: optional, from step 3; omit it if the user didn't mention any.
 
 Returns JSON:
 ```json
@@ -179,7 +152,7 @@ Returns JSON:
 }
 ```
 
-### 5. Confirm + hand over
+### 4. Confirm + hand over
 
 After it finishes:
 1. Render `holdings_parse_note` to the user (so they can confirm the parse is correct)
@@ -192,7 +165,7 @@ After it finishes:
 
 - **`"existing portfolio left unchanged"` / `"v2 write failed"`** (check first; it wins over the item below): the portfolio already had holdings or trades, so this run wrote no cash and no holding (with `--force`, name and risk tolerance may still have been updated — see `profile_note`). Run `status` first; add only the positions missing there, with `--existing-position`. Never re-add a symbol that `status` already lists
 - **DeepSeek parse timeout / no key** on a fresh install: report it to the user; the cash in `current_assets` (`cash_cny` / `aud_cash`) is still recorded (`cash_recorded` in the init JSON shows what this run wrote). Add the positions the user **already held** afterwards, one per call, with `run.sh buy --symbol S --units N --price P [-c CCY] --existing-position` (MCP: the `record_existing_position` tool; an older MCP server answers `Unknown tool` — don't fall back to `buy`) — that does not touch cash. Run `status` first and skip any symbol it already lists. A plain `buy` is a new purchase paid from ledger cash
-- **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 4
+- **`status: "error"` with `expected_shape`**: the payload wasn't nested under `"profile"` — rebuild it as shown in step 3
 - **schema validation fail**: usually a wrong field type — check the error field in the `init` response
 - **user_profile.json already exists**: refuse to overwrite; have the user add `--force` to confirm explicitly
 

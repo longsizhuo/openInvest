@@ -8,12 +8,12 @@ user_profile.json yourself" — that is a skill failure mode. Both paths feed st
 `status` shows cash 0. Run the exact command in that check's `hint` — do not rerun `init`.)
 
 - **Coordinator path (Claude Code)**: you (Claude) use `AskUserQuestion` to ask
-  the 5 questions below, assemble the JSON, and pipe it to `run.sh init --from-stdin`.
+  the questions below, assemble the JSON, and pipe it to `run.sh init --from-stdin`.
 - **Direct path (any agent)**: the same `init --from-stdin` works — assemble the
   answers into JSON and feed it in; asking the questions relies on your own
   conversation tooling.
 
-## The 5 questions (ask these by default; do NOT ask "which yfinance symbols do you track")
+## The questions (ask these by default; do NOT ask "which yfinance symbols do you track")
 
 Ask in Mandarin (if the user uses another language, follow the user):
 
@@ -21,11 +21,10 @@ Ask in Mandarin (if the user uses another language, follow the user):
 |---|------|------|
 | Q1 | What should I call you? | display name; use `Anonymous` if the user declines |
 | Q2 | Risk appetite? | pick one of `Conservative` / `Balanced` / `Aggressive` |
-| Q3 | Monthly income / monthly expenses / FX working buffer (CNY)? | Three numbers. **All can be 0 to skip** (doesn't affect committee runs; only affects the Risk Officer's dry_powder calculation) |
-| Q4 | **What do you currently hold?** (free-form description) | See "Q4 natural language" below — do NOT ask field by field |
-| Q5 | Do you want unattended daily runs or emailed reports? | **Optional, and never collect keys in chat.** The Coordinator path (chatting with your agent) needs no keys. If they want daily runs / email, give them the "Q5 details" steps: they add the keys to `$INVEST_HOME/.env` themselves (before `init` if Q4 should be parsed now) |
+| Q3 | **What do you currently hold?** (free-form description) | See "Q3 natural language" below — do NOT ask field by field |
+| Q4 | Do you want unattended daily runs or emailed reports? | **Optional, and never collect keys in chat.** The Coordinator path (chatting with your agent) needs no keys. If they want daily runs / email, give them the "Q4 details" steps: they add the keys to `$INVEST_HOME/.env` themselves (before `init` if Q3 should be parsed now) |
 
-### Q4 natural language (core change, 2026-05)
+### Q3 natural language (core change, 2026-05)
 
 **Stop hard-coding "NDQ.AX share count / gold grams / aud_cash / cash_cny"**. Let the user
 describe freely. When the backend `cmd_init` sees a `holdings_description` field, it
@@ -67,12 +66,9 @@ echo '{
   "profile": {
     "name": "<Q1>",
     "risk_tolerance": "<Q2>",
-    "monthly_income_cny": <Q3a>,
-    "monthly_expenses_cny": <Q3b>,
-    "exchange_buffer_cny": <Q3c>,
     "last_run_date": "<today YYYY-MM-DD>",
-    "holdings_description": "<Q4 user's answer, pasted here verbatim>",
-    "current_assets": {"cash_cny": <CNY cash from Q4>, "aud_cash": <AUD cash from Q4>},
+    "holdings_description": "<Q3 user's answer, pasted here verbatim>",
+    "current_assets": {"cash_cny": <CNY cash from Q3>, "aud_cash": <AUD cash from Q3>},
     "investment_strategy": {
       "target_allocation_stock": 0.7,
       "target_allocation_cash": 0.3,
@@ -82,7 +78,7 @@ echo '{
 }' | <skill-dir>/scripts/run.sh init --from-stdin
 ```
 
-Always copy the cash the user mentioned in Q4 into `current_assets.cash_cny` / `aud_cash` (0 only
+Always copy the cash the user mentioned in Q3 into `current_assets.cash_cny` / `aud_cash` (0 only
 if they really have none): without a key, or when the parse fails, that is the only cash recorded.
 When `holdings_description` parses, it **overwrites** portfolio.md (v2 schema with the full holdings list).
 
@@ -108,7 +104,7 @@ say so, rather than reporting the cash as recorded.
 After `status: "ok"`, **immediately** run `run.sh doctor` again to confirm `status: "ready"`,
 then go back and carry out the user's original request.
 
-## Q5 details: keys go in `.env`, never in the chat
+## Q4 details: keys go in `.env`, never in the chat
 
 **Never ask the user to paste an API key or password into the chat, and never put one into a
 command you run** — it would land in the transcript and in the model provider's logs. Tell the user
@@ -124,7 +120,7 @@ EMAIL_SENDER=you@gmail.com
 EMAIL_PASSWORD=abcd efgh ijkl mnop
 ```
 
-`init` reads the key from `.env`, so if they add it before you run `init`, Q4 gets parsed right away.
+`init` reads the key from `.env`, so if they add it before you run `init`, Q3 gets parsed right away.
 
 **Both are optional.** If chatting inside Claude Code is enough for the user, **skipping both is
 perfectly fine** — tell the user: "Just say 'show my portfolio' or 'should I add to X', and
@@ -156,7 +152,7 @@ Where to get it (**give the user this full link**):
 2. Then go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) to generate the 16-character password
 3. **It is NOT the login password** — it's a 16-character random string with spaces, e.g. `abcd efgh ijkl mnop`
 
-### Guidance after the user skips Q5 (**critical**)
+### Guidance after the user skips Q4 (**critical**)
 
 Once `init` is done, tell the user:
 > You can now simply say "show my portfolio" or "should I add to X", and I'll run the 4-role AI
