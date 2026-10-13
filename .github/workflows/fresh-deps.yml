@@ -1,0 +1,38 @@
+name: Fresh dependency resolve
+
+# uvx 用户首次运行按 pyproject 的上下界现场解析依赖，拿到的常比 uv.lock 新（2026-10 实测：
+# 锁里 FastAPI 0.136、新装拿到 0.143，一条测试在新版下失效而 CI 一直是绿的）。
+# 每周按上下界解析一次"当前允许的最新版本"跑全套测试，提前暴露锁文件 CI 测不到的漂移。
+on:
+  schedule:
+    - cron: "17 2 * * 1"   # 每周一 UTC 02:17
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          version: "latest"
+
+      - name: Resolve within pyproject bounds (what a fresh uvx install gets)
+        run: |
+          uv python install 3.13
+          uv pip compile pyproject.toml --python 3.13 -o fresh.txt
+          uv venv --python 3.13 .venv-fresh
+          VIRTUAL_ENV=.venv-fresh uv pip install -r fresh.txt pytest
+          VIRTUAL_ENV=.venv-fresh uv pip install --no-deps -e .
+          diff <(uv export --frozen --no-dev --no-hashes --no-emit-project | grep '==' | sort) <(grep '==' fresh.txt | sort) || true
+
+      - name: Run pytest
+        run: .venv-fresh/bin/python -m pytest tests/ -q --tb=short
+        env:
+          DEEPSEEK_API_KEY: test-fake-key
+          INVEST_LLM_BASE_DELAY: "0.01"
