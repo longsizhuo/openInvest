@@ -216,3 +216,30 @@ def test_no_downgrade_when_key_provided(tmp_path, monkeypatch):
     assert "只录了现金，没识别你说的具体股票" not in next_step, (
         f"有 key 时不应触发降级话术。\nnext_step: {next_step!r}"
     )
+
+
+def test_key_already_in_env_file_is_used_without_payload_env(tmp_path, monkeypatch):
+    """密钥不经对话：用户自己写进 $INVEST_HOME/.env，agent 的 payload 不带 env——
+    init 仍要用 .env 里的 key 解析 Q4，而不是按"缺 key"降级只录现金。"""
+    import openinvest.skill_cmds.lifecycle_cmds as skill_mod
+
+    seen = {}
+
+    def fake_llm_parse(text, api_key, base_url):
+        seen.update(api_key=api_key, base_url=base_url)
+        return {"cash": {"CNY": 5000}, "holdings": []}
+
+    monkeypatch.setattr(skill_mod, "_parse_holdings_with_llm", fake_llm_parse)
+    # 用户手写 .env 常带引号和注释
+    (tmp_path / ".env").write_text(
+        '# my keys\nLLM_API_KEY="sk-user-wrote-this"\nLLM_BASE_URL=https://example.invalid/v1\n', encoding="utf-8")
+    payload = {"profile": {
+        "name": "TestUser", "risk_tolerance": "Balanced",
+        "holdings_description": "CNY 现金 5000", "current_assets": {"cash_cny": 5000},
+    }}
+
+    result = _run_cmd_init_with_payload(tmp_path, payload, monkeypatch)
+
+    assert seen == {"api_key": "sk-user-wrote-this", "base_url": "https://example.invalid/v1"}
+    assert "缺失" not in result.get("holdings_parse_note", "")
+    assert "LLM_API_KEY=sk-user-wrote-this" in (tmp_path / ".env").read_text(encoding="utf-8")

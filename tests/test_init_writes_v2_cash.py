@@ -304,6 +304,11 @@ def test_force_on_real_portfolio_without_write_reports_unchanged(tmp_path, fake_
     key_env = {"LLM_API_KEY": "sk-fake", "LLM_BASE_URL": fake_llm}
     assert _run_init(tmp_path, {"profile": _NOKEY["profile"],
                                 "env": key_env if case == "parsed" else {}}).returncode == 0
+    if case == "parsed":
+        # 下面的 --force 测的是无 key：去掉第一次写进 .env 的 key（.env 里有 key 时 init 会直接用）
+        envf = tmp_path / ".env"
+        envf.write_text("".join(ln for ln in envf.read_text(encoding="utf-8").splitlines(True)
+                                if not ln.startswith("LLM_")), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("INVEST_", "LLM_", "DEEPSEEK_"))}
     extra = {"backfilled": ["buy", "--symbol", "510300.SS", "--units", "3000", "--price", "4.2",
                             "--kind", "etf", "--existing-position"],

@@ -442,8 +442,8 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         "detail": str(env_path) if env_path.exists() else f"{env_path} 不存在",
         "hint": (
             None if env_path.exists() else
-            "调 `run.sh init` 时把 deepseek_api_key / email_sender / email_password "
-            "写在 stdin JSON 里，或者直接 cp .env.example .env 后用户自己填"
+            f"让用户自己在 {env_path} 写 LLM_API_KEY= / EMAIL_SENDER= / EMAIL_PASSWORD="
+            "（都可选；不要在对话里收集密钥），或在自己的终端里跑 `run.sh init`"
         ),
     })
     checks.append({
@@ -456,8 +456,8 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         "hint": (
             None if has_deepseek else
             "向用户引导：去 https://platform.deepseek.com 注册 → API keys 页面创建 "
-            "→ 把 sk-xxxx 通过 init 的 stdin 传入。失败时仍可用 Claude skill 模式"
-            "（不需要 DeepSeek key），但 cron 模式无法跑。"
+            f"→ 用户自己把 LLM_API_KEY=sk-xxxx 写进 {env_path}（不要在对话里收集）。"
+            "没有 key 仍可用 Coordinator 路径，但无人值守的 cron 跑不了。"
         ),
     })
     checks.append({
@@ -472,7 +472,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
             None if (has_email_sender and has_email_pass) else
             "Gmail 必须用 App Password（不是登录密码），需先开 2FA 然后去 "
             "https://myaccount.google.com/apppasswords 生成 16 位 App Password。"
-            "未配置时 daily_report 仍能跑完，只是不发邮件。"
+            f"用户自己写进 {env_path}（不要在对话里收集）；未配置时 daily_report 仍能跑完，只是不发邮件。"
         ),
     })
 
