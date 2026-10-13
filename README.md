@@ -116,7 +116,7 @@ codex plugin marketplace add longsizhuo/openInvest
 codex plugin add invest@openinvest
 
 # Hermes Agent
-hermes plugins install longsizhuo/openInvest --enable
+hermes plugins install longsizhuo/openInvest/plugin --enable
 
 # OpenClaw
 openclaw plugins install clawhub:openinvest
