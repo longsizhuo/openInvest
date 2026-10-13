@@ -28,9 +28,27 @@ the server once after the backend bootstraps:
 codex mcp add openinvest --env INVEST_HOME=$HOME/openInvest -- uvx openinvest-mcp
 ```
 
+**Hermes Agent:**
+```
+hermes plugins install longsizhuo/openInvest/plugin --enable
+```
+For the MCP tools, add this to `~/.hermes/config.yaml`. It runs the plugin's own
+`run.sh`, which pins the backend to the version this plugin release was built with
+(the plugin is installed in `$HERMES_HOME/plugins/openinvest`; replace `YOU`, and
+adjust the path if `HERMES_HOME` is not `~/.hermes`). `trust: untrusted` makes Hermes ask before the tools that write
+to your local ledger.
+```yaml
+mcp_servers:
+  openinvest:
+    command: bash
+    args: ["/home/YOU/.hermes/plugins/openinvest/skills/invest/scripts/run.sh", "mcp"]
+    trust: untrusted
+```
+
 Then in chat say **"set up invest" / 帮我初始化 invest** — a 5-question
-onboarding (name, risk tolerance, income, current holdings, optional API key)
-writes your config. After that just ask things like *"show my portfolio"*,
+onboarding (name, risk tolerance, income, current holdings) writes your config.
+API keys never go through the chat: add `LLM_API_KEY` (and optional `EMAIL_*`)
+to `~/openInvest/.env` yourself; the Coordinator path needs no key at all. After that just ask things like *"show my portfolio"*,
 *"how's my P&L"*, *"should I buy AAPL"*, or *"run committee on gold"*.
 
 ## What actually gets installed

@@ -100,15 +100,16 @@ agent → record_execution("2026-07-02/AAPL", rejected, reason="现金留给房�
 
 ### Hermes Agent（Nous Research）
 
-MCP 声明式接入（`~/.hermes/config.yaml`）：
+MCP 声明式接入（`~/.hermes/config.yaml`）。指向插件自带的 `run.sh`：它把后端钉在这次插件发版对应的
+版本，插件更新后跟着更新；`trust: untrusted` 让 Hermes 在写账本的工具前先问用户。Hermes 不经 shell
+启动进程，路径里的 `~` 不会展开，要写绝对路径（插件装在 `$HERMES_HOME/plugins/openinvest`）：
 
 ```yaml
 mcp_servers:
   openinvest:
-    command: uvx
-    args: ["openinvest", "mcp"]
-    env:
-      INVEST_HOME: ~/openInvest
+    command: bash
+    args: ["/home/YOU/.hermes/plugins/openinvest/skills/invest/scripts/run.sh", "mcp"]
+    trust: untrusted
 ```
 
 Hermes 自动发现全部 MCP 工具并与内置工具并列注册。skills 一条命令装：
