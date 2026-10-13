@@ -16,21 +16,23 @@ classifiers = [
 ]
 
 requires-python = ">=3.13"
+# 上界规则：锁定版本的下一个大版本（0.x 的包为 <1）。uvx 首次运行会现解析依赖，没有上界时
+# 一个大版本发布（pandas 3、apscheduler 4……）就会装进用户机器。放开上界要单独 PR 并跑全套测试
 dependencies = [
-    "ddgs>=9.10.0",
-    "yfinance>=0.2.66",
-    "python-dotenv>=1.0.1",
+    "ddgs>=9.10.0,<10",
+    "yfinance>=0.2.66,<1",
+    "python-dotenv>=1.0.1,<2",
     "pandas-stubs~=2.3.3",
-    "markdown>=3.11",  # 3.11 起兼容 CPython 3.13.16+ 的 html.parser
-    "requests>=2.32.5",
-    "urllib3>=2.2",  # rss_feed 用 HTTPResponse.read1(decode_content=) 读 feed（2.2 起才有）
-    "beautifulsoup4>=4.14.3",
-    "lxml>=6.0.2",
-    "pandas>=2.3.3",
-    "python-frontmatter>=1.1.0",
-    "apscheduler>=3.11.2",
-    "websockets>=15.0.1",
-    "fastapi>=0.115",
+    "markdown>=3.11,<4",  # 3.11 起兼容 CPython 3.13.16+ 的 html.parser
+    "requests>=2.32.5,<3",
+    "urllib3>=2.2,<3",  # rss_feed 用 HTTPResponse.read1(decode_content=) 读 feed（2.2 起才有）
+    "beautifulsoup4>=4.14.3,<5",
+    "lxml>=6.0.2,<7",
+    "pandas>=2.3.3,<3",
+    "python-frontmatter>=1.1.0,<2",
+    "apscheduler>=3.11.2,<4",
+    "websockets>=15.0.1,<16",
+    "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32",
     "croniter>=6.2.2",
     "openai>=1.45",  # SDKAgent 直接走 OpenAI 兼容客户端（MiMo/DeepSeek/千问…，按 LLM_MODEL）

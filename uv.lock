@@ -1106,7 +1106,7 @@ wheels = [
 
 [[package]]
 name = "openinvest"
-version = "0.39.3"
+version = "0.41.4"
 source = { editable = "." }
 dependencies = [
     { name = "akshare" },
@@ -1144,28 +1144,28 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "akshare", specifier = ">=1.18.64" },
-    { name = "apscheduler", specifier = ">=3.11.2" },
-    { name = "beautifulsoup4", specifier = ">=4.14.3" },
+    { name = "apscheduler", specifier = ">=3.11.2,<4" },
+    { name = "beautifulsoup4", specifier = ">=4.14.3,<5" },
     { name = "croniter", specifier = ">=6.2.2" },
-    { name = "ddgs", specifier = ">=9.10.0" },
-    { name = "fastapi", specifier = ">=0.115" },
+    { name = "ddgs", specifier = ">=9.10.0,<10" },
+    { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "feedparser", specifier = ">=6.0.10" },
-    { name = "lxml", specifier = ">=6.0.2" },
-    { name = "markdown", specifier = ">=3.11" },
+    { name = "lxml", specifier = ">=6.0.2,<7" },
+    { name = "markdown", specifier = ">=3.11,<4" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "nh3", specifier = ">=0.3.7" },
     { name = "openai", specifier = ">=1.45" },
     { name = "optuna", specifier = ">=4.0" },
-    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pandas", specifier = ">=2.3.3,<3" },
     { name = "pandas-stubs", specifier = "~=2.3.3" },
-    { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "python-frontmatter", specifier = ">=1.1.0" },
-    { name = "requests", specifier = ">=2.32.5" },
+    { name = "python-dotenv", specifier = ">=1.0.1,<2" },
+    { name = "python-frontmatter", specifier = ">=1.1.0,<2" },
+    { name = "requests", specifier = ">=2.32.5,<3" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },
-    { name = "urllib3", specifier = ">=2.2" },
+    { name = "urllib3", specifier = ">=2.2,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-    { name = "websockets", specifier = ">=15.0.1" },
-    { name = "yfinance", specifier = ">=0.2.66" },
+    { name = "websockets", specifier = ">=15.0.1,<16" },
+    { name = "yfinance", specifier = ">=0.2.66,<1" },
 ]
 
 [package.metadata.requires-dev]
