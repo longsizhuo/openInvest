@@ -210,7 +210,8 @@ not, something failed during the call — run `run.sh doctor` and see which item
 hint is red.
 
 ### Q: The code seems older than the demo site
-A: Run `run.sh update` (pulls the latest release from PyPI). openInvest is still
+A: Update the plugin through the agent's plugin manager (the backend version is pinned in
+`run.sh` and moves with each plugin release; for a git-clone install, `git pull`). openInvest is still
 iterating quickly.
 
 ## References

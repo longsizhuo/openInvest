@@ -33,7 +33,7 @@ documents:
 | **invest skill** | agent 怎么编排委员会（Coordinator 协议、决策纪律） |
 | **invest-setup skill** | 首次 5 问 onboarding |
 
-后端从 PyPI 分发（[`openinvest`](https://pypi.org/project/openinvest/)）：首次调用时 `uvx` 自动拉包（只需要 `uv`），数据放 `~/openInvest`（memory/ db/ .env）。更新跑 `run.sh update`。
+后端从 PyPI 分发（[`openinvest`](https://pypi.org/project/openinvest/)）：首次调用时 `uvx` 自动拉包（只需要 `uv`），数据放 `~/openInvest`（memory/ db/ .env）。后端版本固定在 `run.sh` 里、随插件发版更新，更新插件即更新后端。
 **首次 MCP 连接可能超时**（在等 PyPI 下载）——重试一次即可，之后 uvx 走缓存秒连。
 
 不用 plugin 也可以只挂 MCP：

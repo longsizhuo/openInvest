@@ -5,11 +5,11 @@
 # git clone / uv sync / 自愈更新——那 180 行 bash 全部退役：
 #   - 后端代码：uvx 按需拉 openinvest 包（缓存于 uv cache，首跑需网络）
 #   - 数据目录：$INVEST_HOME（默认 ~/openInvest），只放 memory/ db/ .env static/
-#   - 更新：`run.sh update`（= uvx --refresh，显式更新，不再启动时静默 git pull）
+#   - 更新：后端版本固定在下方 SPEC，随插件发版更新；`run.sh update`（= uvx --refresh）只重下这个固定版本，用于修坏掉的缓存
 #   - GUI dist 拉取 / 远端模式提示等业务逻辑收进 openinvest-web（Python）
 #
 # 老用户（~/openInvest 是 git clone）零迁移：clone 目录直接当数据目录用。
-# 想 pin 版本：export OPENINVEST_SPEC='openinvest==0.16.0'
+# 后端版本默认固定为下方 SPEC（随发版由 release-please 更新）；换版本：export OPENINVEST_SPEC='openinvest==X.Y.Z'
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SRC_ROOT="$REPO_ROOT/src"
 export INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
-SPEC="${OPENINVEST_SPEC:-openinvest}"
+SPEC="${OPENINVEST_SPEC:-openinvest==0.41.2}"  # x-release-please-version
 DEV_MODE="${OPENINVEST_DEV_MODE:-0}"
 
 if ! command -v uvx >/dev/null 2>&1; then

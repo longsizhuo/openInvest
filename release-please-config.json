@@ -54,7 +54,16 @@
       "release-type": "python",
       "package-name": "invest",
       "include-component-in-tag": false,
-      "extra-files": [],
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "plugin/skills/invest/scripts/run.sh"
+        },
+        {
+          "type": "generic",
+          "path": "plugin/skills/invest-backup/scripts/run.sh"
+        }
+      ],
       "exclude-paths": [
         "plugin",
         "skills"

@@ -13,7 +13,7 @@ positions / "btw" correlation analysis.
 skills/invest/
 ├── SKILL.md          ← agent trigger guide (decision tree / subcommands / Web API endpoints)
 ├── scripts/
-│   └── run.sh        ← subcommand dispatcher (internally pulls the backend from PyPI via `uvx openinvest`; update = `run.sh update`)
+│   └── run.sh        ← subcommand dispatcher (internally pulls the backend from PyPI via `uvx`, version pinned in this file)
 ├── references/
 │   ├── committee-protocol.md     ← detailed Coordinator-path stages
 │   ├── two-paths.md              ← Coordinator vs Direct differences
@@ -35,7 +35,7 @@ bash skills/install.sh        # installs both invest + invest-setup
 `install.sh` installs into `~/.claude/skills/invest/` and `~/.claude/skills/invest-setup/`,
 whose contents are symlinks pointing back at the source directory — updates to `SKILL.md` /
 `scripts/` take effect immediately, no reinstall needed. The backend itself is distributed via
-PyPI; update it with `run.sh update`.
+PyPI at the version pinned in `run.sh`; `git pull` in the clone moves that pin.
 
 ## Workflow when changing the protocol
 

@@ -41,8 +41,9 @@ The plugin ships the **agent skill layer** (`invest` + `invest-setup`) plus an
 `sell`, `run_committee`, …). The backend ships on **PyPI**
 ([`openinvest`](https://pypi.org/project/openinvest/)): on first call `run.sh`
 fetches it via `uvx` (cached by uv, no clone, no venv juggling) and keeps your
-data in `~/openInvest` (portfolio, ledgers, `.env`). Update anytime with
-`run.sh update`. Nothing is installed system-wide.
+data in `~/openInvest` (portfolio, ledgers, `.env`). The backend version is pinned in
+`run.sh` and moves with each plugin release, so updating the plugin updates the backend.
+Nothing is installed system-wide.
 
 > **First-run note**: the very first call downloads the package from PyPI
 > (a few seconds); if the first MCP connect times out, just retry once — after

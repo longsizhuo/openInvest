@@ -12,7 +12,7 @@ metadata:
 
 **First-time fork users**: run the `invest-setup` skill first to initialize. The main flow lives in this skill (the AI agent uses the CLI/MCP to view the portfolio / run the committee / replay decision history).
 The Web GUI has been retired (2026-07) — every capability is exposed via CLI subcommands / MCP tools.
-The backend is distributed from PyPI (pulled on demand via uvx); to update, just run `run.sh update`.
+The backend is distributed from PyPI (pulled on demand via uvx) at the version pinned in `run.sh`, which moves with each plugin release: updating the plugin updates the backend. `run.sh update` re-downloads the pinned version if the uv cache breaks.
 
 openInvest multi-asset AI investment committee. **This skill is not Claude-exclusive** — any agent that can run shell commands can use it; see "Choosing a path" below.
 

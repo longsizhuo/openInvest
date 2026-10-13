@@ -25,7 +25,7 @@ bash skills/install.sh
 - `~/.claude/skills/invest-setup/`
 
 skill 是 symlink，源目录里的 SKILL.md / scripts/ 更新即生效，不需要重装。
-后端从 PyPI 分发（`run.sh` 内部走 `uvx openinvest`），更新跑 `run.sh update`。
+后端从 PyPI 分发（`run.sh` 内部走 `uvx`，版本固定在 `run.sh` 里），在 clone 目录 `git pull` 即随之更新。
 
 ## 设计原则：每个 skill 单一工作场景
 
