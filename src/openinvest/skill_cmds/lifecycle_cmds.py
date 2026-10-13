@@ -169,7 +169,7 @@ def cmd_init(args: argparse.Namespace) -> None:
        $ echo '{"profile": {...}, "env": {...}}' | run.sh init --from-stdin
 
     2. CLI 模式：用户直接跑，走标准的 input()
-       $ run.sh init                        # 交互式问 5 个问题
+       $ run.sh init                        # 交互式问答（用户自己的终端）
 
     JSON schema（仅作字段格式示意，agent 必须用**用户实际值**填，不要照抄数字）：
     {
