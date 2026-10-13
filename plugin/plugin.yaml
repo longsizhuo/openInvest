@@ -2,7 +2,7 @@
 # Install: hermes plugins install longsizhuo/openInvest/plugin --enable
 # Registers the skills under ./skills. The MCP tools are a separate Hermes surface (config.yaml), see description.
 name: openinvest
-version: "0.24.2" # x-release-please-version
+version: "0.24.3" # x-release-please-version
 description: Self-hosted AI investment committee — registers the invest, invest-setup and invest-backup skills. For the MCP tools, add the mcp_servers entry printed after install (runs this plugin's pinned run.sh).
 author: longsizhuo
 # The backend runs in its own uvx environment; keep Hermes from merging the repo's pyproject

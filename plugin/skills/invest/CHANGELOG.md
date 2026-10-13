@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.3](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.24.2...invest-skill-v0.24.3) (2026-10-13)
+
+
+### Bug Fixes
+
+* **skill:** keys never go through the chat; skill-relative run.sh paths ([accc7d9](https://github.com/longsizhuo/openInvest/commit/accc7d9155388debce51be810a0e581455dfa28c))
+* **skill:** onboarding asks 3 questions; drop answers nothing reads ([a0a03dc](https://github.com/longsizhuo/openInvest/commit/a0a03dc4d62a59c99a5c57c47ba3bc494f5c8e7b))
+
 ## [0.24.2](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.24.1...invest-skill-v0.24.2) (2026-10-13)
 
 
