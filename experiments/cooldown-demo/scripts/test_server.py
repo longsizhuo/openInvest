@@ -24,6 +24,7 @@ def client(monkeypatch):
     monkeypatch.setattr(server, "_used", server.Counter())
     monkeypatch.setattr(server, "_lookups", server.Counter())
     monkeypatch.setattr(server, "_facts_cache", {})
+    monkeypatch.setattr(server, "_sample", {"d": None, "job": None, "tries": 0})
     monkeypatch.setattr(server, "fund_facts", lambda code: None if code.startswith("9") else FACTS)
     monkeypatch.setattr(server.cooldown, "debate_summary", lambda sym, metrics: SCRIBE)
     return TestClient(server.app)
@@ -106,3 +107,28 @@ def test_metrics_hot_rules():
     hot = {k for k, v in m.items() if v["hot"]}
     assert hot == {"ret_1y", "scale", "stock", "drawdown", "from_high", "tnx"}
     assert m["scale"]["text"] == "规模一年 -47%"
+
+
+def test_sample_runs_once_a_day_without_quota_and_retries_failures_bounded(client, monkeypatch):
+    """首页示例：同一天反复打开拿同一个任务、不扣任何人的额度；失败当天最多重跑 SAMPLE_TRIES 次。"""
+    runs = []
+    monkeypatch.setattr(server.cooldown, "debate_summary", lambda sym, m: runs.append(sym) or SCRIBE)
+    a = client.get("/api/sample").json()
+    assert a["facts"]["code"] == "110011" and "metrics" not in a["facts"]
+    assert _wait(client, a["job_id"])["result"]["headline"] == SCRIBE["headline"]
+    assert client.get("/api/sample").json()["job_id"] == a["job_id"]
+    assert runs == ["FUND:110011"] and server._used["*"] == 0 and server._lookups["*"] == 0
+
+    monkeypatch.setattr(server, "_sample", {"d": None, "job": None, "tries": 0})
+    monkeypatch.setattr(server.cooldown, "debate_summary", lambda sym, m: {"status": "error", "error": "boom"})
+    ids = set()
+    for _ in range(server.SAMPLE_TRIES + 2):
+        j = client.get("/api/sample").json()
+        _wait(client, j["job_id"])
+        ids.add(j["job_id"])
+    assert len(ids) == server.SAMPLE_TRIES
+
+
+def test_sample_unavailable_when_fund_lookup_fails(client, monkeypatch):
+    monkeypatch.setattr(server, "fund_facts", lambda code: (_ for _ in ()).throw(RuntimeError("down")))
+    assert client.get("/api/sample").status_code == 503

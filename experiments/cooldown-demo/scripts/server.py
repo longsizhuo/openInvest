@@ -16,8 +16,10 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from collections import Counter
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,6 +39,9 @@ GLOBAL_DAILY = int(os.getenv("COOLDOWN_GLOBAL_DAILY", "100"))
 LOOKUP_PER_IP_DAILY = int(os.getenv("COOLDOWN_LOOKUP_PER_IP_DAILY", "30"))
 LOOKUP_GLOBAL_DAILY = int(os.getenv("COOLDOWN_LOOKUP_GLOBAL_DAILY", "2000"))
 GENERIC_ERROR = "这次辩论没跑成，稍后再试"
+# 首页默认展示这只基金当天的报告：每天一次委员会，失败当天最多再试 2 次，不占访客额度
+SAMPLE_CODE = os.getenv("COOLDOWN_SAMPLE_CODE", "110011")
+SAMPLE_TRIES = 3
 
 _committee_lock = threading.Lock()   # 同一时刻只跑一个委员会，其余排队（同 MCP 的 _COMMITTEE_LOCK）
 _state_lock = threading.Lock()
@@ -46,8 +51,24 @@ _used: Counter = Counter()          # 辩论次数：ip / "*"
 _lookups: Counter = Counter()       # 查基金次数：ip / "*"
 _facts_cache: Dict[str, Any] = {}   # code → 当天的 fund_facts 结果（含 None），跨日清空
 _day = {"d": date.today()}
+_sample_lock = threading.Lock()
+_sample: Dict[str, Any] = {"d": None, "job": None, "tries": 0}
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+def _warm() -> None:
+    """服务起来后、以及每天过零点后，先把示例跑好，第一个访客不用等。"""
+    while True:
+        _sample_job()
+        time.sleep(600)
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    threading.Thread(target=_warm, daemon=True).start()
+    yield
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan)
 # 比赛表单只收 QMuse 托管的链接：qmuse-app/ 的同一页面挂在 qmuse 域名下跨域调这里。
 # 不带凭证，限额照样按 X-Client-IP 算，放开跨域不多给任何东西
 app.add_middleware(
@@ -284,6 +305,37 @@ def start(body: DebateIn, request: Request) -> Dict[str, Any]:
     _jobs[job_id] = {"status": "queued", "facts": facts}
     threading.Thread(target=_run, args=(job_id, code), daemon=True).start()
     return {"job_id": job_id, "facts": _public(facts)}
+
+
+def _sample_job() -> str | None:
+    """SAMPLE_CODE 当天的任务 id；还没有、或上一次失败且没试满就新开一个。"""
+    with _sample_lock:
+        if _sample["d"] != date.today():
+            _sample.update(d=date.today(), job=None, tries=0)
+        job = _jobs.get(_sample["job"] or "")
+        failed = job is not None and job["status"] == "done" and not job["result"].get("headline")
+        if (job is None or failed) and _sample["tries"] < SAMPLE_TRIES:
+            _sample["tries"] += 1
+            try:
+                facts = fund_facts(SAMPLE_CODE)
+            except Exception as e:  # noqa: BLE001  拿不到就保持空白首页
+                print(f"[cooldown] sample {SAMPLE_CODE} facts failed: {type(e).__name__}: {e}")
+                facts = None
+            if facts is not None:
+                job_id = uuid.uuid4().hex
+                _jobs[job_id] = {"status": "queued", "facts": facts}
+                threading.Thread(target=_run, args=(job_id, SAMPLE_CODE), daemon=True).start()
+                _sample["job"] = job_id
+        return _sample["job"]
+
+
+@app.get("/api/sample")
+def sample() -> Dict[str, Any]:
+    """首页默认展示的报告，和 /api/debate 同形状，轮询走同一个接口。"""
+    job_id = _sample_job()
+    if job_id is None:
+        raise HTTPException(503, "示例暂不可用")
+    return {"job_id": job_id, "facts": _public(_jobs[job_id]["facts"])}
 
 
 @app.get("/api/debate/{job_id}")

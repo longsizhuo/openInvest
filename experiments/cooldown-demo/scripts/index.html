@@ -106,7 +106,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const T = { nav: "#2C2C2A", ma20: "#BA7517", ma60: "#D4537E", ma120: "#378ADD", ma250: "#7F77DD", up: "#E24B4A", down: "#1D9E75", grid: "#ECEAE4", axis: "#888780", band: "#F1EFE8", rsi: "#534AB7" };
-let timer = null, lastFacts = null, tick = null;
+let timer = null, lastFacts = null, tick = null, cur = null;   // cur：当前在轮询的任务，旧任务的回包丢掉
 const EXPECT = 30;   // 秒；一次委员会实测 20–40 秒
 
 // 等待态：计时 + 进度条 + 正反对照骨架，让人知道下面还有内容。进度条按经验时长走到 90% 停住，不假装精确
@@ -176,10 +176,10 @@ function drawDist(rows) {
   $("dist-wrap").hidden = false;
 }
 
-function showFacts(f) {
+function showFacts(f, sample) {
   lastFacts = f;
   $("name").textContent = f.name;
-  $("meta").textContent = `${f.code}　净值 ${f.nav}　${f.nav_date}`;
+  $("meta").textContent = `${f.code}　净值 ${f.nav}　${f.nav_date}` + (sample ? "　今日示例，输入代码可换一只" : "");
   const chips = $("chips"); chips.textContent = ""; f.chips.forEach((c) => chips.append(el("span", null, c)));
   $("rep").hidden = false; startWait();
   drawChart(f.chart); drawDist(f.dist);
@@ -210,7 +210,9 @@ function showError(msg) { $("err").textContent = msg; $("err").hidden = false; }
 function finish() { $("go").disabled = false; }
 
 async function poll(id) {
+  if (id !== cur) return;
   const r = await fetch(`/api/debate/${id}`); const j = await r.json();
+  if (id !== cur) return;
   if (!r.ok) { stopWait(); $("vs-wrap").hidden = true; showError(j.detail || "查询失败，稍后再试"); $("hl").textContent = ""; return finish(); }
   if (j.status !== "done") { $("wt").dataset.state = j.status; timer = setTimeout(() => poll(id), 2500); return; }
   if (j.result.headline) showResult(j.result); else { stopWait(); $("vs-wrap").hidden = true; $("hl").className = "hl wait"; $("hl").textContent = j.result.error || "这次辩论没跑成，稍后再试"; }
@@ -218,15 +220,23 @@ async function poll(id) {
 }
 
 $("ask").addEventListener("submit", async (e) => {
-  e.preventDefault(); clearTimeout(timer);
+  e.preventDefault(); clearTimeout(timer); cur = null;
   $("err").hidden = true; $("go").disabled = true;
   try {
     const r = await fetch("/api/debate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: $("code").value.trim() }) });
     const j = await r.json();
     if (!r.ok) { showError(j.detail || "提交失败，稍后再试"); return finish(); }
-    showFacts(j.facts); poll(j.job_id);
+    cur = j.job_id; showFacts(j.facts); poll(cur);
   } catch { showError("连不上服务，检查网络后再试"); finish(); }
 });
+// 一进来就有内容：默认展示今天的示例报告（服务端每天跑一次，不占访客额度）。拿不到就保持只有输入框
+(async () => {
+  try {
+    const r = await fetch("/api/sample"); if (!r.ok || cur) return;
+    const j = await r.json(); if (cur) return;
+    cur = j.job_id; showFacts(j.facts, true); poll(cur);
+  } catch {}
+})();
 window.addEventListener("resize", () => { if (lastFacts) drawChart(lastFacts.chart); });
 </script>
 </body>
