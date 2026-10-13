@@ -113,6 +113,7 @@ Add the lightweight skill from your agent's plugin registry. The host agent will
 
 # Codex
 codex plugin marketplace add longsizhuo/openInvest
+codex plugin add invest@openinvest
 
 # Hermes Agent
 hermes plugins install longsizhuo/openInvest --enable

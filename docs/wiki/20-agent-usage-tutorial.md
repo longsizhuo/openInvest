@@ -93,7 +93,7 @@ agent → record_execution("2026-07-02/AAPL", rejected, reason="现金留给房�
 > 接入原则见 [#133](https://github.com/longsizhuo/openInvest/issues/133)：openInvest
 > 是 agent 的投资 runtime，MCP 是第一接口；对话/记忆/通知渠道由宿主 agent 自己负责。
 
-- **Codex**：`codex plugin marketplace add longsizhuo/openInvest`（同一套 skill）
+- **Codex**：`codex plugin marketplace add longsizhuo/openInvest` 后 `codex plugin add invest@openinvest`（同一套 skill；MCP 工具再跑 `codex mcp add openinvest --env INVEST_HOME=$HOME/openInvest -- uvx openinvest-mcp`，见 [plugin/README](../../plugin/README.md)）
 - **Gemini / Cursor / 任意脚本**：CLI Direct 路径——`run.sh run_committee SYM` 一键
   拿 verdict（需 DEEPSEEK_API_KEY）；全部子命令见 [SKILL.md](../../skills/invest/SKILL.md)
 - **任意 MCP client**：stdio server 是标准 MCP，不挑 client
