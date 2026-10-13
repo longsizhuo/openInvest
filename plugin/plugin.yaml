@@ -1,0 +1,6 @@
+# Hermes Agent plugin manifest. Install: hermes plugins install longsizhuo/openInvest/plugin --enable
+# Registers the skills under ./skills. The MCP tools are a separate Hermes surface (config.yaml), see description.
+name: openinvest
+version: "0.24.1" # x-release-please-version
+description: Self-hosted AI investment committee — registers the invest + invest-setup skills. For the MCP tools add mcp_servers.openinvest (command uvx, args [openinvest, mcp]) to ~/.hermes/config.yaml.
+author: longsizhuo

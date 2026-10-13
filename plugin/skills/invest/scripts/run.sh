@@ -23,9 +23,9 @@ SPEC="${OPENINVEST_SPEC:-openinvest}"
 DEV_MODE="${OPENINVEST_DEV_MODE:-0}"
 
 if ! command -v uvx >/dev/null 2>&1; then
-    echo "❌ uv 未安装。装一下：curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    echo "❌ uv 未安装。安装方法：https://docs.astral.sh/uv/getting-started/installation/" >&2
     # mcp 模式 stdout 是 JSON-RPC 通道，错误 JSON 只在非 mcp 时输出
-    [ "${1:-}" != "mcp" ] && echo '{"status":"error","error":"uv 未安装","hint":"运行 `curl -LsSf https://astral.sh/uv/install.sh | sh` 后重试"}'
+    [ "${1:-}" != "mcp" ] && echo '{"status":"error","error":"uv 未安装","hint":"按 https://docs.astral.sh/uv/getting-started/installation/ 安装 uv 后重试"}'
     exit 1
 fi
 

@@ -108,8 +108,8 @@ In the JSON that `init` returns, check `holdings_parse_note`:
   `buy --existing-position` (see above)
 - `"v2 write failed"` → the parsed holdings were **not** saved (portfolio.md unchanged); see below
 
-`cash_recorded` in the same JSON is the cash this run wrote. If it is `{}`, do not tell the user
-their cash was recorded.
+`cash_recorded` in the same JSON is the cash this run wrote. If it is `{}`, this run recorded no cash:
+say so, rather than reporting the cash as recorded.
 
 After `status: "ok"`, **immediately** run `run.sh doctor` again to confirm `status: "ready"`,
 then go back and carry out the user's original request.

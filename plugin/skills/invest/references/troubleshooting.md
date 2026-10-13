@@ -68,15 +68,9 @@ one and present it to the user. Only rerun if the user explicitly wants the Clau
 
 ## `.env` has a DeepSeek key but `daily_report` still returns 401
 
-The key is most likely mistyped or revoked. Test it directly:
-
-```bash
-curl -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
-  https://api.deepseek.com/v1/models
-```
-
-200 = key valid, 401 = key invalid. Have the user reissue one at
-https://platform.deepseek.com/api_keys.
+The key is most likely mistyped or revoked. Have the user check it on
+https://platform.deepseek.com/api_keys (the key list shows whether it is still active) and
+reissue one if needed, then put the new key in `.env`.
 
 ## Deeper failures
 

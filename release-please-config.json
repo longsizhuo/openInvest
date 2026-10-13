@@ -84,6 +84,10 @@
           "type": "json",
           "path": "/plugin/.codex-plugin/plugin.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "/plugin/plugin.yaml"
         }
       ]
     },

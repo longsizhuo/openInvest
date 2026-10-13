@@ -73,9 +73,7 @@ Usually unnecessary — Claude Code reads skills from `~/.claude/skills/<name>/`
 
 ## Uninstall
 
-```bash
-rm -rf ~/.claude/skills/invest ~/.claude/skills/invest-setup
-```
+Delete the two folders `~/.claude/skills/invest` and `~/.claude/skills/invest-setup`.
 
 The repository itself is unaffected.
 
