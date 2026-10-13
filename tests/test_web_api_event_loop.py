@@ -29,11 +29,23 @@ ASYNC_OK = {
 }
 
 
+def _api_routes(routes):
+    """展开 app.routes 里的 APIRoute。新版 FastAPI（0.14x）把每个 include_router 包成
+    _IncludedRouter，路由在它的 original_router.routes 里；老版直接平铺在 app.routes。"""
+    for r in routes:
+        if isinstance(r, APIRoute):
+            yield r
+        elif hasattr(r, "original_router"):
+            yield from _api_routes(r.original_router.routes)
+
+
 def test_only_whitelisted_endpoints_are_async():
+    routes = list(_api_routes(web_api.app.routes))
+    assert len(routes) > 20, f"只找到 {len(routes)} 个 APIRoute，路由展开方式可能又变了"
     async_eps = {
         f"{r.endpoint.__module__.rsplit('.', 1)[-1]}.{r.endpoint.__name__}"
-        for r in web_api.app.routes
-        if isinstance(r, APIRoute) and inspect.iscoroutinefunction(r.endpoint)
+        for r in routes
+        if inspect.iscoroutinefunction(r.endpoint)
     }
     assert async_eps == set(ASYNC_OK), (
         f"不该是 async 的端点: {sorted(async_eps - set(ASYNC_OK))}"
