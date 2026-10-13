@@ -31,7 +31,6 @@ dependencies = [
     "pandas>=2.3.3,<3",
     "python-frontmatter>=1.1.0,<2",
     "apscheduler>=3.11.2,<4",
-    "websockets>=15.0.1,<16",
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
     "croniter>=6.2.2,<7",

@@ -1106,7 +1106,7 @@ wheels = [
 
 [[package]]
 name = "openinvest"
-version = "0.41.5"
+version = "0.41.6"
 source = { editable = "." }
 dependencies = [
     { name = "akshare" },
@@ -1130,7 +1130,6 @@ dependencies = [
     { name = "sqlite-vec" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "websockets" },
     { name = "yfinance" },
 ]
 
@@ -1164,7 +1163,6 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1.6,<1" },
     { name = "urllib3", specifier = ">=2.2,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32,<1" },
-    { name = "websockets", specifier = ">=15.0.1,<16" },
     { name = "yfinance", specifier = ">=0.2.66,<1" },
 ]
 
