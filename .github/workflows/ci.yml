@@ -27,6 +27,10 @@ jobs:
       - name: Set up Python 3.13
         run: uv python install 3.13
 
+      - name: uv.lock 与 pyproject 一致
+        # --frozen 不校验这个：改了依赖忘跑 uv lock、发版升了版本号锁没跟上，都会静默通过
+        run: uv lock --check
+
       - name: Install deps
         run: uv sync --frozen
 
