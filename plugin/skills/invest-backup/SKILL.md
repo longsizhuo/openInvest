@@ -10,6 +10,10 @@ metadata:
 
 # Invest Backup Skill
 
+> `<skill-dir>` is this skill's own directory — the folder that holds this SKILL.md (Claude Code
+> shows it as the skill's base directory; Hermes / Codex / OpenClaw install it inside the plugin).
+> `run.sh` below always means `<skill-dir>/scripts/run.sh`.
+
 ## Why this skill exists
 
 openInvest's real data (holdings/strategy/user profile/committee records under `memory/`, trade ledger/job history under `db/`) is **entirely `.gitignore`d** — deliberately (privacy: it contains real assets/salary/trades), but the price is that git can't help at all. There was an incident on 2026-07-08: a one-off migration script named `migrate_profile.py` (with no safety guard whatsoever) was run directly once, overwriting `user.md` / `strategy.md` / `portfolio.md` with hard-coded demo defaults; `daily_report` then exited early every day because `target_assets` had become empty, emails stopped entirely from that point on, and the user had no idea until they noticed the missing emails and traced it back.
@@ -22,9 +26,9 @@ openInvest's real data (holdings/strategy/user profile/committee records under `
 ## Usage
 
 ```bash
-plugin/skills/invest-backup/scripts/run.sh backup [output_dir]   # defaults to $INVEST_ROOT/.backups/
-plugin/skills/invest-backup/scripts/run.sh restore <zip_path> [--force]
-plugin/skills/invest-backup/scripts/run.sh list
+<skill-dir>/scripts/run.sh backup [output_dir]   # defaults to $INVEST_ROOT/.backups/
+<skill-dir>/scripts/run.sh restore <zip_path> [--force]
+<skill-dir>/scripts/run.sh list
 ```
 
 - **backup**: packs `memory/`, `db/*.sqlite`, `db/*.db`, `.env`, `user_profile.json*` into a single UTC-timestamped zip. The data directory is resolved via `openinvest.paths.INVEST_ROOT` (same precedence order as the rest of the backend: `INVEST_HOME` env → repo-marker detection → cwd) instead of re-guessing paths in shell.

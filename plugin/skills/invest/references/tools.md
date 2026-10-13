@@ -69,8 +69,6 @@ Call these when the user says "record a trade" (记一笔交易) / "I plan to bu
 
 | Endpoint | Use for | Example body |
 |------|------|-----------|
-| `GET /api/user` | **Read before any portfolio analysis** — get wealth_context (family backup / account purpose / emergency fund), which determines how to interpret concentration + low cash | — |
-| `PUT /api/user/wealth_context` | The user updates family backup / account purpose / **monthly contribution (open-ended pool)** etc. (the user dictates, the agent fills it in) | `{emergency_buffer_cny?, family_backup_available?, account_purpose?, lifestyle_notes?, monthly_contribution_cny?}` |
 | `POST /api/trades/record` | **Record an intended trade** (no real payment connection; internal ledger only) | `{symbol, direction: "BUY"\|"SELL", units, price?, intended_date?, note?}` |
 | `GET /api/trades?limit=N` | View the last N intended / executed trades | — |
 | `PATCH /api/trades/{id}/status` | **Mark as executed** (status: "executed") → auto-syncs portfolio.md (updates holdings + deducts cash) | `{status: "executed"}` |

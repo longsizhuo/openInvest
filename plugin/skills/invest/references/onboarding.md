@@ -23,7 +23,7 @@ Ask in Mandarin (if the user uses another language, follow the user):
 | Q2 | Risk appetite? | pick one of `Conservative` / `Balanced` / `Aggressive` |
 | Q3 | Monthly income / monthly expenses / FX working buffer (CNY)? | Three numbers. **All can be 0 to skip** (doesn't affect committee runs; only affects the Risk Officer's dry_powder calculation) |
 | Q4 | **What do you currently hold?** (free-form description) | See "Q4 natural language" below — do NOT ask field by field |
-| Q5 | DeepSeek API key & Gmail App Password? | **Optional**. The Coordinator path (chatting inside Claude Code) runs without any keys; they're only needed if you want the server to run automatically every day in the background / send emails. See "Q5 details" below |
+| Q5 | Do you want unattended daily runs or emailed reports? | **Optional, and never collect keys in chat.** The Coordinator path (chatting with your agent) needs no keys. If they want daily runs / email, give them the "Q5 details" steps: they add the keys to `$INVEST_HOME/.env` themselves (before `init` if Q4 should be parsed now) |
 
 ### Q4 natural language (core change, 2026-05)
 
@@ -45,7 +45,7 @@ automatically calls DeepSeek to parse it into the v2 schema.
 - Omitting the avg cost / channel is fine; the backend fills defaults for whatever's missing
 
 **Fallback paths**:
-- If the user **did not provide a DeepSeek key** (Q5 left blank): parsing can't run, and cmd_init
+- If **no LLM key is in `$INVEST_HOME/.env`** when `init` runs: parsing can't run, and cmd_init
   falls back to `current_assets`, writing only `cash_cny` and `aud_cash` into the portfolio. On a
   fresh install such users add their positions later, one per call, with
   `run.sh buy --symbol S --units N --price P [-c CCY] [--kind K] --existing-position`
@@ -78,14 +78,8 @@ echo '{
       "target_allocation_cash": 0.3,
       "max_single_invest_cny": 10000
     }
-  },
-  "env": {
-    "DEEPSEEK_API_KEY": "<Q5a or empty string>",
-    "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
-    "EMAIL_SENDER": "<Q5b or empty string>",
-    "EMAIL_PASSWORD": "<Q5c or empty string>"
   }
-}' | ~/.claude/skills/invest/scripts/run.sh init --from-stdin
+}' | <skill-dir>/scripts/run.sh init --from-stdin
 ```
 
 Always copy the cash the user mentioned in Q4 into `current_assets.cash_cny` / `aud_cash` (0 only
@@ -103,9 +97,9 @@ In the JSON that `init` returns, check `holdings_parse_note`:
 - `"LLM parse failed (...); fell back to v1 fields"` → DeepSeek errored; only the `current_assets`
   cash was recorded. Tell the user; rerun `init --force` later, or add the holdings with
   `buy --existing-position` (see above)
-- `"DEEPSEEK_API_KEY 缺失"` (key missing) → no key given in Q5; only the `current_assets` cash was
-  recorded. Either have the user provide one and rerun `init --force`, or add the holdings with
-  `buy --existing-position` (see above)
+- `"DEEPSEEK_API_KEY 缺失"` (key missing) → no LLM key in `.env`; only the `current_assets` cash was
+  recorded. Either the user adds a key to `.env` themselves and you rerun `init --force`, or add the
+  holdings with `buy --existing-position` (see above)
 - `"v2 write failed"` → the parsed holdings were **not** saved (portfolio.md unchanged); see below
 
 `cash_recorded` in the same JSON is the cash this run wrote. If it is `{}`, this run recorded no cash:
@@ -114,7 +108,23 @@ say so, rather than reporting the cash as recorded.
 After `status: "ok"`, **immediately** run `run.sh doctor` again to confirm `status: "ready"`,
 then go back and carry out the user's original request.
 
-## Q5 details: how to get the DeepSeek key & Gmail App Password
+## Q5 details: keys go in `.env`, never in the chat
+
+**Never ask the user to paste an API key or password into the chat, and never put one into a
+command you run** — it would land in the transcript and in the model provider's logs. Tell the user
+to add the lines they need to `$INVEST_HOME/.env` (default `~/openInvest/.env`; `run.sh doctor`
+prints the data directory) with their own editor, or to run `run.sh init` in their own terminal,
+which asks for them there:
+
+```
+LLM_API_KEY=sk-...
+# optional, default https://api.deepseek.com
+LLM_BASE_URL=https://api.deepseek.com
+EMAIL_SENDER=you@gmail.com
+EMAIL_PASSWORD=abcd efgh ijkl mnop
+```
+
+`init` reads the key from `.env`, so if they add it before you run `init`, Q4 gets parsed right away.
 
 **Both are optional.** If chatting inside Claude Code is enough for the user, **skipping both is
 perfectly fine** — tell the user: "Just say 'show my portfolio' or 'should I add to X', and
@@ -201,7 +211,7 @@ may not skip it, and you may not bury it in `next_step` and wait for the user to
 | `holdings_parse_note` value (contains these keywords) | What the agent must say to the user (verbatim script — do not alter the key points) |
 |---|---|
 | `"existing portfolio left unchanged"` or `"v2 write failed"` (**check first** — when present, ignore the rows below) | "I didn't change your portfolio this time — it already has data, so I left it as it was (neither the cash nor the holdings were updated)." Then run `run.sh status`. Positions already listed there must **not** be added again (another buy would count them twice). Only for positions missing from `status`: "I can add the ones that are missing — that doesn't touch your cash." (then `buy --existing-position` per missing position). Do **not** read `parsed_holdings_for_user_review` back as if it were recorded |
-| `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), you need a free DeepSeek API key — 30 seconds to register at platform.deepseek.com. Want to set that up now?" If `cash_recorded` is `{}`, replace "only the cash was captured" with "nothing was captured yet" and ask how much cash they have. Without a key, on a fresh install: add the positions with `buy --existing-position`, but only those `run.sh status` doesn't already list |
+| `"DEEPSEEK_API_KEY 缺失"` (key missing) | "For now I've recorded your holdings in basic mode — only the cash was captured; the specific stocks you mentioned weren't recognized. If you want automatic recognition (the kind that maps 510300 → CSI 300 ETF), add an LLM API key to `~/openInvest/.env` yourself (a DeepSeek key takes 30 seconds at platform.deepseek.com; please don't paste it here) and tell me when it's there — I'll rerun the setup." If `cash_recorded` is `{}`, replace "only the cash was captured" with "nothing was captured yet" and ask how much cash they have. Without a key, on a fresh install: add the positions with `buy --existing-position`, but only those `run.sh status` doesn't already list |
 | `"LLM parse failed"` | "Something went wrong while parsing your holdings (a temporary DeepSeek outage or a network timeout), so only the cash portion was recorded. You can wait a bit and rerun `run.sh init --force`, or I can add the positions you already hold one by one now — that doesn't touch your cash." (fresh install: run `run.sh status` first, then `buy --existing-position` per position it doesn't list) |
 | `"fund not converted"` (in addition to the row below — say this first) | Per named fund: "I recorded <fund>, but couldn't convert your holding amount into fund units — the NAV source didn't respond — so it shows 0 units and 0 market value for now. What units held and cost price does your fund app show?" Then fix it with the commands in that note entry (`delete_holding --symbol FUND:<code> --force`, then `buy --kind fund --unit-label 份 --existing-position`; neither moves cash). Never estimate the units yourself |
 | `"parsed via LLM"` with `user_review_required: true` | Read out each holding in `parsed_holdings_for_user_review` for the user to confirm, e.g.: "My understanding is you hold: 3000 units of A at 4.2 yuan, and 50 grams of gold B at 750 avg cost. Is that right?" |
@@ -218,10 +228,11 @@ may not skip it, and you may not bury it in `next_step` and wait for the user to
 
 ## Common pitfalls
 
-- **Gmail App Password isn't 16 characters** → the user most likely gave their login password.
-  Point them to https://myaccount.google.com/apppasswords.
-- **DeepSeek key doesn't start with `sk-`** → they probably pasted the page title by mistake.
-  Ask the user to re-copy the key.
+- **Email sending fails with an authentication error** → `EMAIL_PASSWORD` is most likely the
+  Gmail login password instead of the 16-character App Password. Point them to
+  https://myaccount.google.com/apppasswords (they fix `.env` themselves).
+- **The LLM key is rejected (401)** → the line in `.env` is mistyped or the key was revoked; a
+  DeepSeek key starts with `sk-`. They re-copy it into `.env` themselves.
 - **The LLM parsed the wrong symbol / units / cost** (e.g. mapping "宁德时代" (CATL) to
   `300750.SZ` when the user actually bought the HK-listed `3750.HK`) → check with `run.sh status`,
   then `run.sh delete_holding --symbol <wrong> --force` and re-record it with

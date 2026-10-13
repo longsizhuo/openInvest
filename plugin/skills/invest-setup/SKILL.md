@@ -10,6 +10,10 @@ metadata:
 
 # Invest Setup Skill
 
+> `<skill-dir>` is this skill's own directory — the folder that holds this SKILL.md (Claude Code
+> shows it as the skill's base directory; Hermes / Codex / OpenClaw install it inside the plugin).
+> `run.sh` below always means `<skill-dir>/scripts/run.sh`.
+
 **Single responsibility**: turn an empty openInvest deployment into a working one.
 **Triggers only on the user's first-time setup** — run once, then step aside (the
 `invest` skill takes over all day-to-day interaction).
@@ -48,13 +52,15 @@ machines / 多台电脑共用持仓" / "connect to my existing deployment".
 
 1. Ask two questions:
    - Hub address? (e.g. `https://invest.example.com` or `http://10.0.0.6:8765`)
-   - Does the hub have auth enabled? A token (`INVEST_API_TOKEN`) or a Cloudflare
-     Access service token (`CF_ACCESS_CLIENT_ID/SECRET`)? Skip if not enabled.
-2. Write the answers into `$INVEST_HOME/.env` (only these two or three lines are
-   needed; **no** DeepSeek key / Gmail / 5-question flow — those all live on the hub):
+   - Does the hub have auth enabled (an `INVEST_API_TOKEN`, or a Cloudflare Access
+     service token)? Ask only yes/no — **never ask for the token itself in chat**.
+2. Write the address into `$INVEST_HOME/.env`; if auth is on, have the user add the token
+   line to the same file with their own editor (**no** DeepSeek key / Gmail / 5-question
+   flow — those all live on the hub):
    ```env
    INVEST_API_BASE=https://invest.example.com
-   INVEST_API_TOKEN=...        # optional
+   # the user adds this one themselves, if the hub has auth
+   INVEST_API_TOKEN=...
    ```
 3. Verify: run `run.sh doctor` → it should return `status: "ready"` plus a `remote`
    section (api_base / auth method). If it can't connect, the error JSON's hint
@@ -70,7 +76,7 @@ error); no `memory/` is created on this machine — all data stays on the hub.
 ### 1. Run `doctor` first to confirm setup is really needed
 
 ```bash
-~/.claude/skills/invest-setup/scripts/run.sh doctor
+<skill-dir>/scripts/run.sh doctor
 ```
 
 Returns `status: "ready"` → **exit immediately** and tell the user "you're already
@@ -86,7 +92,7 @@ Returns `status: "needs_setup"` → go to step 2.
 | Q2 | Risk tolerance? | `Conservative` / `Balanced` / `Aggressive` |
 | Q3 | Monthly income / monthly expenses / FX working buffer (CNY)? | three numbers; all can be 0 to skip |
 | Q4 | **What do you currently hold?** (free-form description) | natural language, see below |
-| Q5 | DeepSeek API key & Gmail App Password? | **Optional**. Not needed on the Coordinator path |
+| Q5 | Do you want unattended daily runs or emailed reports? | **Optional. Never ask for keys in chat** — the user adds `LLM_API_KEY` / `EMAIL_*` to `$INVEST_HOME/.env` themselves (see below). Not needed on the Coordinator path |
 
 #### Q4 natural language (key change 2026-05)
 
@@ -96,8 +102,8 @@ Returns `status: "needs_setup"` → go to step 2.
 > "AAPL 100 shares at 150 USD cost, 0.3 BTC, 50k CNY cash"
 > "Nothing at all, just 10k CNY"
 
-When the backend `cmd_init` sees a `holdings_description` field it calls DeepSeek to
-parse it into the v2 schema. **Without a DeepSeek key it falls back to
+When the backend `cmd_init` sees a `holdings_description` field it calls the LLM to
+parse it into the v2 schema, using the key in `$INVEST_HOME/.env`. **Without a key there it falls back to
 `profile.current_assets`** (only `cash_cny` / `aud_cash` get written into the portfolio) —
 so always copy the cash amounts the user mentioned into `current_assets` too, and
 **tell the user about this**.
@@ -131,7 +137,14 @@ claim 7 (WealthContextOfficer) for details.
 
 ### 4. Assemble the payload + run init
 
-The payload **must** be nested as `{"profile": {...}, "env": {...}}` — a flat object
+**Keys never go through the chat or this payload.** An API key or password typed into the chat,
+or put into a command you run, lands in the transcript and the model provider's logs. If the user
+wants the Direct path or emailed reports, tell them to add `LLM_API_KEY=...` (optional
+`LLM_BASE_URL`, `EMAIL_SENDER`, `EMAIL_PASSWORD`) to `$INVEST_HOME/.env` with their own editor —
+`run.sh doctor` prints the path — or to run `run.sh init` in their own terminal. `init` reads the key
+from `.env`, so if they add it first, Q4 is parsed right away.
+
+The payload **must** be nested as `{"profile": {...}}` — a flat object
 (no top-level `"profile"`) is rejected with `status: "error"` and an `expected_shape` field.
 Fill it with the user's real answers (the numbers below are placeholders):
 
@@ -146,20 +159,14 @@ echo '{
     "holdings_description": "<the user's exact words from Q4>",
     "current_assets": {"cash_cny": 0, "aud_cash": 0},
     "wealth_context": {}
-  },
-  "env": {
-    "DEEPSEEK_API_KEY": "<Q5 key, or empty string>",
-    "EMAIL_SENDER": "<Gmail address, or empty string>",
-    "EMAIL_PASSWORD": "<Q5 Gmail App Password, or empty string>"
   }
-}' | ~/.claude/skills/invest-setup/scripts/run.sh init --from-stdin
+}' | <skill-dir>/scripts/run.sh init --from-stdin
 ```
 
 - `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q4 — this is what
   gets recorded when there is no LLM key (or the parse fails) on a fresh install. Positions are
   never paid out of it: without a key they are added later with `buy --existing-position`.
 - `wealth_context`: optional, from step 3; omit it if the user didn't mention any.
-- `env`: every key is optional; `LLM_API_KEY` / `LLM_BASE_URL` work in place of `DEEPSEEK_*`.
 
 Returns JSON:
 ```json

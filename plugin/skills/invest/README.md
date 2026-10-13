@@ -44,7 +44,7 @@ cd $INVEST_HOME
 # 1. Edit SKILL.md / scripts/run.sh / references/*.md
 vim skills/invest/SKILL.md
 # 2. Test (the symlink is already live; no reinstall needed)
-~/.claude/skills/invest/scripts/run.sh status
+<skill-dir>/scripts/run.sh status
 # 3. commit + push
 git add skills/invest/ && git commit -m "..." && git push
 # 4. Other devices pick it up immediately after git pull (symlinks unchanged)

@@ -7,7 +7,7 @@ v2 schema supports any yfinance symbol. Three ways to add one, ordered by prefer
 
 ```bash
 # analyze it: adds the symbol to strategy.target_assets (what the committee / DCA cover)
-~/.claude/skills/invest/scripts/run.sh track_asset --symbol AAPL --max-single-invest-cny 8000
+<skill-dir>/scripts/run.sh track_asset --symbol AAPL --max-single-invest-cny 8000
 ```
 
 Recording a position is separate — `buy` never touches `target_assets`; it only puts the position
@@ -16,9 +16,9 @@ into `status` / P&L. First run `run.sh status`: a symbol it already lists is in 
 
 ```bash
 # held BEFORE using openInvest, not yet listed by `status`: cash is not touched
-~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity --existing-position
+<skill-dir>/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity --existing-position
 # a new purchase made now: paid from ledger cash (refuses if that cash is short)
-~/.claude/skills/invest/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity
+<skill-dir>/scripts/run.sh buy --symbol AAPL --units 100 --price 150 -c USD --kind equity
 ```
 
 MCP users: `track_asset`; `record_existing_position` for the first case (an MCP server older than
@@ -63,7 +63,7 @@ If the user says **"should I buy TSLA" (该不该买 TSLA)** but doesn't want TS
 portfolio yet, analyze it directly:
 
 ```bash
-~/.claude/skills/invest/scripts/run.sh prepare_committee TSLA
+<skill-dir>/scripts/run.sh prepare_committee TSLA
 ```
 
 The committee can analyze any yfinance symbol, whether or not it's in holdings. The output lands
@@ -100,7 +100,7 @@ yfinance and must NOT get a `.SS` / `.SZ` suffix. Use `FUND:<6-digit code>` with
 
 ```bash
 # 用户在用 openInvest 之前就已持有、且 `run.sh status` 里还没有的基金：加 --existing-position 补录，不扣现金
-~/.claude/skills/invest/scripts/run.sh buy --symbol FUND:123456 --units 5000 --price 2.0 -c CNY --kind fund --unit-label 份 --existing-position
+<skill-dir>/scripts/run.sh buy --symbol FUND:123456 --units 5000 --price 2.0 -c CNY --kind fund --unit-label 份 --existing-position
 ```
 
 (Skip it if `status` already lists the fund. Drop `--existing-position` only for a new purchase
@@ -134,5 +134,5 @@ that doc.
 
 ## Confirming the addition
 
-Afterwards, have the user run (or run it for them) `~/.claude/skills/invest/scripts/run.sh status`
+Afterwards, have the user run (or run it for them) `<skill-dir>/scripts/run.sh status`
 and check whether the new symbol appears in `all_holdings`.

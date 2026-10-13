@@ -10,6 +10,10 @@ metadata:
 
 # Invest Skill
 
+> `<skill-dir>` is this skill's own directory — the folder that holds this SKILL.md (Claude Code
+> shows it as the skill's base directory; Hermes / Codex / OpenClaw install it inside the plugin).
+> `run.sh` below always means `<skill-dir>/scripts/run.sh`.
+
 **First-time fork users**: run the `invest-setup` skill first to initialize. The main flow lives in this skill (the AI agent uses the CLI/MCP to view the portfolio / run the committee / replay decision history).
 The Web GUI has been retired (2026-07) — every capability is exposed via CLI subcommands / MCP tools.
 The backend is distributed from PyPI (pulled on demand via uvx) at the version pinned in `run.sh`, which moves with each plugin release: updating the plugin updates the backend. `run.sh update` re-downloads the pinned version if the uv cache breaks.
@@ -84,9 +88,8 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
 
    "show portfolio / how much do I have / 看持仓"     → run.sh status
    "assess the situation / risk / concentration
-    / 分析战况"                                       → run.sh status + **`curl /api/user`** for
-                                                        wealth_context (**must-read**, avoids
-                                                        misjudgment by legacy PWM logic)
+    / 分析战况"                                       → run.sh status (see Constraints before
+                                                        calling anything "overweight")
    "what is my strategy / 我的策略是什么"             → run.sh strategy
    "recent trades / transaction log / 最近交易"       → run.sh history
    "where is the market / VIX now / 现在大盘"         → run.sh live_prices
@@ -143,7 +146,7 @@ never reaches the transcript → `save_committee`'s deterministic defense downgr
 
 ```bash
 # One command does it all
-~/.claude/skills/invest/scripts/run.sh run_committee NDQ.AX
+<skill-dir>/scripts/run.sh run_committee NDQ.AX
 ```
 
 JSON output:
@@ -166,7 +169,7 @@ Options:
 ### Daily report (cron on the host-agent side)
 
 ```bash
-~/.claude/skills/invest/scripts/run.sh daily_report   # = uvx openinvest daily_report
+<skill-dir>/scripts/run.sh daily_report   # = uvx openinvest daily_report
 ```
 
 Runs the full daily-report pipeline (multi-asset committee + Gemini second opinion +
@@ -272,7 +275,7 @@ core duty (issue #133 Decision 2).
 **User asks "why HOLD today / why did it tell me to sell"** (Decision Review):
 1. `explain_decision <decision_id>` for the full 4-role debate transcript + CIO memo + path snapshot
    (+ `confidence_lookup`, the number to quote next to the verdict — see Constraints)
-2. Combine with `status` (current portfolio) + `GET /api/user` (wealth_context) if needed
+2. Combine with `status` (current portfolio) if needed
 3. Answer using evidence from the transcript — do not invent reasons yourself
 
 **User reacts to a recommendation with "I didn't buy / I bought / I disagree"** (Reflection):
@@ -298,16 +301,10 @@ a signal worth recording.
 
 ## Constraints (guard these, do not break them)
 
-- **Before analyzing portfolio / concentration / risk, always read `GET /api/user` for wealth_context** —
-  forget this and you repeat **the 2026-05-12 mistake**: the user had entered a large family
-  backup, the agent ran `status` without reading user, and per legacy PWM logic shouted
-  "60% concentration overweight → recommend TRIM". Wrong. The correct approach:
-  - No wealth_context filled in → judge liquidity by portfolio cash + use the 25-35% concentration alert band
-  - Filled in → use the WealthContextOfficer perspective:
-    * Concentration % is computed as `portfolio_value / (portfolio + emergency_buffer_cny)`, not portfolio alone
-    * `family_backup_available=true` → low portfolio cash is **not** a liquidity risk
-    * `account_purpose="零花钱账户"` (pocket-money account) → tolerate larger drawdowns; `"退休金"` (retirement fund) → lean toward trimming
-  - The cap on any add-on buy is **always** portfolio cash (**never touch the backup**) — this never changes
+- **Don't call the portfolio "overweight → TRIM" from `status` alone** (the 2026-05-12 mistake): the
+  portfolio is often only part of the user's money, and the committee's concentration lens is off by
+  default (ADR-020). Raise concentration only if the user asks about it. The cap on any add-on buy is
+  **always** portfolio cash — this never changes
 - **Do not run `daily_report` proactively in conversation** — unless the user explicitly says "run the deep analysis" / "run full report"
   or you are setting up the daily cron. That path burns DeepSeek tokens. In conversation, single-asset `run_committee` is enough.
 - **Never fabricate live prices.** Always go through `run.sh status` or `live_prices`. yfinance may return

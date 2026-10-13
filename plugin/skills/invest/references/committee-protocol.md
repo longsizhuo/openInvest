@@ -25,7 +25,7 @@ capability (Hermes's `delegate_task`, etc.):
   limited to single-turn conversation) → use the **Direct path** instead:
 
 ```bash
-~/.claude/skills/invest/scripts/run.sh run_committee <SYMBOL>
+<skill-dir>/scripts/run.sh run_committee <SYMBOL>
 ```
 
 One command gets you the verdict + CIO memo + transcript, but requires `DEEPSEEK_API_KEY`.
@@ -54,7 +54,7 @@ twice for the same answer.
 ## Stage 1: Get the brief
 
 ```bash
-~/.claude/skills/invest/scripts/run.sh prepare_committee <SYMBOL>
+<skill-dir>/scripts/run.sh prepare_committee <SYMBOL>
 ```
 
 Returns JSON containing all the fields you need:
@@ -174,7 +174,7 @@ write the full CIO memo in the `prompts.cio` format.
 ## Stage 6: Persist the transcript
 
 ```bash
-cat <<EOF | ~/.claude/skills/invest/scripts/run.sh save_committee <SYMBOL>
+cat <<EOF | <skill-dir>/scripts/run.sh save_committee <SYMBOL>
 === MACRO ===
 <macro worker output>
 
