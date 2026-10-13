@@ -47,12 +47,16 @@ def test_fetch_all_continues_on_per_source_failure(monkeypatch):
          patch("openinvest.services.news_sources.rss_feed.fetch_rss") as m_rss:
         m_yf.return_value = _stub_items("yf", 2)
         m_rss.return_value = _stub_items("rss", 1)
+        counts = {}
         out = fetch_all(
             queries=["x"], symbols=["A"],
             rss_feeds=[{"name": "r", "url": "https://feed"}],
+            source_counts=counts,
         )
     # ddgs 挂了不影响其他
     assert len(out) == 3
+    # 每源条数按 task label 记，挂掉的源记 0（job_watchdog 判单源断流的依据）
+    assert counts == {"ddgs": 0, "yfinance": 2, "rss:r": 1}
 
 
 def test_fetch_all_empty_inputs():

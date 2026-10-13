@@ -5,7 +5,7 @@
 - searxng_news.py  自托管 searxng 元搜索（聚合多引擎 news 类目，中文覆盖好、
                    无外部限流；SEARXNG_URL 未配置时静默关闭）
 - rss_feed.py      Reuters / BBC / FT / 财新 等 RSS（高质量主流财经）
-- yfinance_news.py yf.Ticker(sym).news（按 symbol 直接关联）
+- yfinance_news.py yf.Search(sym).news（按 relatedTickers 关联 symbol）
 - akshare_news.py  东财/新浪 7×24 中文快讯（watched 含 A 股时自动开）
 
 统一返回 RawNewsItem dataclass，给 event_normalizer 进 LLM 归一化。
@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
+
+# event_watch 写、job_watchdog 读的每源抓取健康（MemoryStore .state/ 文件名）
+SOURCE_HEALTH_STATE = "news_source_health"
 
 
 @dataclass
@@ -38,6 +41,13 @@ class RawNewsItem:
             self.fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _source_of(label: str) -> str:
+    """健康口径的"源"：搜索类按引擎算（ddgs / searxng / yfinance / akshare）——单个
+    query 或 symbol 抓 0 是内容问题（"NDQ.AX news" 本来就时有时无），整个引擎 0 才是
+    源坏了；RSS 每个 feed 是独立端点，按 feed 算。"""
+    return label if label.startswith("rss:") else label.split(":", 1)[0]
+
+
 def fetch_all(
     *,
     queries: Optional[List[str]] = None,
@@ -46,6 +56,7 @@ def fetch_all(
     max_per_source: int = 20,
     cn_wire: bool = False,
     timeout_sec: float = 30.0,
+    source_counts: Optional[Dict[str, int]] = None,
 ) -> List[RawNewsItem]:
     """并发拉所有源。任一源失败 log warning + 继续，不影响其他源。
 
@@ -57,6 +68,8 @@ def fetch_all(
                           watched 含 A 股 symbol 时自动开
         max_per_source:   每个源最多返回多少条
         timeout_sec:      单源超时
+        source_counts:    传入 dict 则填每源抓到的条数（失败/超时记 0），event_watch
+                          拿去记单源健康，给 job_watchdog 判断流
     """
     from openinvest.services.news_sources.ddgs_news import fetch_ddgs_news
     from openinvest.services.news_sources.rss_feed import fetch_rss
@@ -107,6 +120,8 @@ def fetch_all(
 
     if not tasks:
         return []
+    counts = {} if source_counts is None else source_counts
+    counts.update({_source_of(t["label"]): 0 for t in tasks})
 
     all_items: List[RawNewsItem] = []
     # ponytail: 故意不用 `with ThreadPoolExecutor(...)` —— 它退出时 shutdown(wait=True)
@@ -128,6 +143,7 @@ def fetch_all(
                 label = futures[fut]
                 try:
                     items = fut.result()
+                    counts[_source_of(label)] += len(items)
                     all_items.extend(items)
                     log.info(f"[news_sources] {label} → {len(items)} items")
                 except Exception as e:

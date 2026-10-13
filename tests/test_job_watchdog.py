@@ -289,3 +289,42 @@ def test_schedule_change_does_not_count_old_cron_misses_as_stale(db):
     # 新 cron 生效后 15:30、18:30 都没跑 → 照样报停摆
     late = find_problems(db, [job], _t("2026-10-08T22:00:00"), since)
     assert len(late) == 1 and ":stale:" in late[0]["key"]
+
+
+# ---------- (d) 单个新闻源断流 ----------
+
+def _h(last_run, last_ok):
+    return {"last_run": last_run, "last_ok": last_ok}
+
+
+def test_silent_source_alerts_only_for_sources_that_used_to_work():
+    latest = "2026-10-13T12:00:00+00:00"
+    health = {
+        "yfinance": _h(latest, "2026-09-30T14:30:00+00:00"),       # 断了 13 天 → 报
+        "rss:ft_markets": _h(latest, "2026-10-13T06:00:00+00:00"),      # 6h 前还有 → 不报
+        "akshare": _h(latest, None),                                    # 从没抓到过 → 没基线不报
+        "rss:yahoo_finance_headline": _h("2026-10-08T00:00:00+00:00",   # 已从配置移除 → 不报
+                                         "2026-09-24T12:30:00+00:00"),
+    }
+    found = job_watchdog.find_silent_sources(health)
+    assert [f["key"] for f in found] == ["news_source:yfinance:2026-09-30T14:30:00+00:00"]
+    assert "12.9 天" in found[0]["text"]
+    assert job_watchdog.find_silent_sources({}) == []
+
+
+def test_silent_source_measured_against_latest_run_not_now():
+    # event_watch 自己停了（归 stale 报）时，不能把每个源都算成断流
+    health = {"rss:ft_markets": _h("2026-10-01T12:00:00+00:00", "2026-10-01T11:30:00+00:00")}
+    assert job_watchdog.find_silent_sources(health) == []
+
+
+def test_run_alerts_silent_source_once_per_24h(wired):
+    db, sent = wired
+    _seed_event_watch_until(db, _t("2026-10-13T20:00:00"))
+    store = job_watchdog.MemoryStore()
+    store.state_set("news_source_health", {
+        "yfinance": _h("2026-10-13T12:00:00+00:00", "2026-10-12T10:00:00+00:00"),
+    })
+    job_watchdog.run(now=_t("2026-10-13T20:07:00"))
+    job_watchdog.run(now=_t("2026-10-13T21:07:00"))
+    assert len(sent) == 1 and "yfinance" in sent[0][0]["text"]

@@ -28,11 +28,12 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from openinvest.core.memory_store import MemoryStore
 from openinvest.db.event_store import EventStore
 from openinvest.services.embeddings import DEFAULT_DIM
 from openinvest.services.event_normalizer import NormalizedEvent, normalize
 from openinvest.services.event_trigger import trigger_for_new_events
-from openinvest.services.news_sources import fetch_all
+from openinvest.services.news_sources import SOURCE_HEALTH_STATE, fetch_all
 from openinvest.services.news_sources.rss_feed import load_feeds
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,28 @@ def _rss_prefilter(items: List["RawNewsItem"], watched: List[str]) -> List["RawN
     return kept
 
 
+def _record_source_health(counts: Dict[str, int], now: Optional[datetime] = None) -> None:
+    """每源最近一次抓取 / 最近一次抓到 >0 条的时间 → job_watchdog 判单源断流。
+
+    键是 fetch_all 的源口径（ddgs / searxng / yfinance / akshare / rss:<feed>）。
+    看抓取层不看入库层：入库层的 0 混着去重和预过滤（BBC 常连着几天全是旧闻），
+    抓取层的 0 才是源本身坏了（2026-10 yfinance 新闻接口 404 被吞成 []，断了 13 天没人知道）。
+    """
+    stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+
+    def _merge(cur):
+        cur = cur if isinstance(cur, dict) else {}
+        for label, n in counts.items():
+            last_ok = stamp if n else (cur.get(label) or {}).get("last_ok")
+            cur[label] = {"last_run": stamp, "last_ok": last_ok}
+        return cur, None
+
+    try:
+        MemoryStore().state_update(SOURCE_HEALTH_STATE, _merge)
+    except Exception as e:  # noqa: BLE001 —— 健康记录失败不能拖垮抓取主流程
+        log.warning(f"[event_watch] 源健康记录失败: {type(e).__name__}: {e}")
+
+
 def run(
     *,
     dry_run: bool = False,
@@ -149,7 +172,9 @@ def run(
 
     # A 股 symbol 自动激活中文快讯源（akshare）——海外用户零调用（#153）
     has_cn = any(sym.upper().endswith((".SS", ".SZ", ".BJ")) for sym in watched)
+    counts: Dict[str, int] = {}
     raw_items = fetch_all(
+        source_counts=counts,
         queries=ctx["queries"],
         symbols=watched,
         rss_feeds=rss_feeds,
@@ -157,6 +182,7 @@ def run(
         cn_wire=has_cn,
     )
     log.info(f"[event_watch] fetched {len(raw_items)} raw items")
+    _record_source_health(counts)
     if cfg.event.rss_prefilter_enabled:
         before = len(raw_items)
         raw_items = _rss_prefilter(raw_items, watched)

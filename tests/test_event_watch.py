@@ -263,3 +263,20 @@ def test_macro_standing_queries_present_even_with_no_holdings(monkeypatch):
     ctx = event_watch._load_user_context()
     for q in event_watch._MACRO_STANDING_QUERIES:
         assert q in ctx["queries"], q
+
+
+def test_record_source_health_keeps_last_ok_through_zero_runs(tmp_event_db):
+    from datetime import datetime, timezone
+
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.services.news_sources import SOURCE_HEALTH_STATE
+
+    event_watch._record_source_health({"yfinance": 20, "akshare": 0})
+    first = MemoryStore().state_get(SOURCE_HEALTH_STATE)
+    assert first["yfinance"]["last_ok"] == first["yfinance"]["last_run"]
+    assert first["akshare"]["last_ok"] is None
+
+    event_watch._record_source_health({"yfinance": 0}, now=datetime(2030, 1, 1, tzinfo=timezone.utc))
+    second = MemoryStore().state_get(SOURCE_HEALTH_STATE)
+    assert second["yfinance"] == {"last_run": "2030-01-01T00:00:00+00:00",
+                                       "last_ok": first["yfinance"]["last_ok"]}

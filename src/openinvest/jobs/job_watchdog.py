@@ -8,6 +8,8 @@
   (a) stale      最近一行已结束，且其启动之后 cron 应触发的连续 2 次都没启动（+15 分钟宽限）
   (b) hung       最近一行仍是 running，且已超 max(60 分钟, 3×该 job 历史中位耗时)
   (c) zero_fetch event_watch 最近 6 次成功运行 fetched 全为 0（新闻源全挂也是"成功"）
+  (d) silent_src 单个新闻源曾经抓到过、最近一轮仍在抓，但已连续 24h 抓到 0 条
+                （2026-10 yfinance 新闻接口 404 被吞成 []，其他源照常 → (c) 看不见，断了 13 天）
 
 命中走与其他 job 相同的告警通道（Discord DM best-effort + 邮件）。同一异常 24h 内最多
 报一次：state_claim 去重键 = 异常锚点（上次启动时间 / running 行 id / 零抓取连击起点）
@@ -29,6 +31,7 @@ from apscheduler.triggers.cron import CronTrigger
 from openinvest.core.memory_store import MemoryStore
 from openinvest.scheduler.cron import SCHEDULED_SINCE, crontab_trigger
 from openinvest.services.discord_notify import send_discord_alert
+from openinvest.services.news_sources import SOURCE_HEALTH_STATE
 from openinvest.services.notifier import render_markdown_email, send_email_html
 
 log = logging.getLogger(__name__)
@@ -36,6 +39,7 @@ log = logging.getLogger(__name__)
 GRACE = timedelta(minutes=15)
 HUNG_FLOOR = timedelta(minutes=60)
 ZERO_FETCH_RUNS = 6
+SOURCE_SILENT = timedelta(hours=24)
 _STATE = "job_watchdog_alerts"
 # runner 把 job 返回的 dict 以 str(result) 落进 output_excerpt（Python repr，不是 JSON）
 _FETCHED_RE = re.compile(r"""['"]fetched['"]:\s*(\d+)""")
@@ -132,6 +136,32 @@ def find_problems(
     return out
 
 
+def find_silent_sources(health: Dict[str, Dict[str, Optional[str]]]) -> List[Dict[str, Any]]:
+    """event_watch 记的每源抓取健康（label → {last_run, last_ok}）→ 断流列表。纯函数。
+
+    只看最近一轮还在抓的源（移除的 RSS feed、不再触发的 akshare 不报），且必须曾经抓到过
+    （只持港股/A 股的用户 yfinance 从来 0 条，没有基线，不猜）。空窗按"最近一轮"算而不是 now：
+    event_watch 自己停了归 stale 报，不该再把每个源都算成断流。
+    """
+    if not health:
+        return []
+    latest = max(v["last_run"] for v in health.values())
+    out: List[Dict[str, Any]] = []
+    for label, v in sorted(health.items()):
+        ok = v.get("last_ok")
+        if v["last_run"] != latest or not ok:
+            continue
+        gap = _ts(latest) - _ts(ok)
+        if gap > SOURCE_SILENT:
+            out.append({
+                "key": f"news_source:{label}:{ok}",
+                "since": _ts(ok) + SOURCE_SILENT,
+                "text": (f"新闻源 `{label}` 已连续 {gap.total_seconds() / 86400:.1f} 天抓到 0 条"
+                         f"（上次有数据 {ok}）——接口可能失效或改版；其他源正常时 event_watch 照样报 success。"),
+            })
+    return out
+
+
 def _send(findings: List[Dict[str, Any]]) -> None:
     subject = f"⚠️ openInvest 调度看门狗：{len(findings)} 项异常"
     md = (
@@ -170,10 +200,12 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
         findings = find_problems(conn, jobs, now, SCHEDULED_SINCE)
     finally:
         conn.close()
+    store = MemoryStore()
+    if any(name == "event_watch" for name, _, _ in jobs):
+        findings += find_silent_sources(store.state_get(SOURCE_HEALTH_STATE) or {})
     for f in findings:
         log.warning(f"[job_watchdog] {f['text']}")
 
-    store = MemoryStore()
     fresh: List[Tuple[str, Dict[str, Any]]] = []
     for f in findings:
         claim = f"{f['key']}#{int((now - f['since']).total_seconds() // 86400)}"
