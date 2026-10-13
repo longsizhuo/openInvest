@@ -14,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-SPEC="${OPENINVEST_SPEC:-openinvest==0.41.2}"  # x-release-please-version
+SPEC="${OPENINVEST_SPEC:-openinvest==0.41.3}"  # x-release-please-version
 
 # python 执行器：git clone 形态优先 REPO_ROOT 的 venv（uv run）；plugin 安装形态
 # （ClawHub bundle / Claude marketplace 拷贝）REPO_ROOT 是无 pyproject 的 plugin
