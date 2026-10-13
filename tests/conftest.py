@@ -10,6 +10,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+# 真实对外发送的凭证（Discord DM 经 ChatBot 转发、Gmail SMTP）。load_dotenv() 会从开发机 .env
+# 灌进来（worktree 里还会向上找到主 checkout 的 .env），漏 patch 一个出口就真发——2026-10-13
+# 本地全量 pytest 把 test_committee_verdict_email 的 5 条 fixture verdict 推进了真实 Discord DM。
+# 每个测试前清掉，出口函数拿不到凭证就直接返回；要测出口本身的测试照常 monkeypatch.setenv。
+OUTBOUND_KEYS = ("CHATBOT_ALERT_URL", "CHATBOT_INTERNAL_KEY", "EMAIL_SENDER", "EMAIL_PASSWORD", "DIGEST_EMAIL_TO")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_invest_env(monkeypatch):
     """测试与开发者本地 .env 隔离（修"配置渗进测试"这一类 bug）。
@@ -28,7 +35,7 @@ def _isolate_invest_env(monkeypatch):
     成为真正的 per-test config 隔离闸（不再只隔离 env 一半）。
     """
     from openinvest.core.config import reset_config
-    for key in [k for k in os.environ if k.startswith("INVEST_")]:
+    for key in [k for k in os.environ if k.startswith("INVEST_")] + list(OUTBOUND_KEYS):
         monkeypatch.delenv(key, raising=False)
     reset_config()
     yield
