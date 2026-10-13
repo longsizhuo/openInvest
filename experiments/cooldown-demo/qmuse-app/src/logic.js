@@ -134,6 +134,12 @@ $("ask").addEventListener("submit", async (e) => {
     cur = j.job_id; showFacts(j.facts, true); poll(cur);
   } catch {}
 })();
+// 安装命令一键复制；剪贴板不可用时选中命令，让人自己复制
+document.querySelectorAll(".cp").forEach((b) => b.addEventListener("click", async () => {
+  const code = b.previousElementSibling;
+  try { await navigator.clipboard.writeText(code.textContent); b.textContent = "已复制"; setTimeout(() => { b.textContent = "复制"; }, 1500); }
+  catch { getSelection().selectAllChildren(code); }
+}));
 window.addEventListener("resize", () => { if (lastFacts) drawChart(lastFacts.chart); });
 
 }

@@ -62,6 +62,13 @@
     #rep > * { grid-column: 1; }
     #rep > #chart-box { grid-column: 2; grid-row: 1 / -1; }
   }
+  .ins { margin-top: 34px; max-width: 760px; }
+  .ins p { margin: 8px 0 4px; color: var(--sub); }
+  .cmd { margin-top: 12px; }
+  .cmd > span { font-size: 12px; color: var(--sub); }
+  .cl { display: flex; gap: 6px; margin-top: 4px; }
+  .cl code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #F6F5F1; border-radius: 4px; padding: 6px 9px; }
+  .cl button { flex: none; min-width: 5em; font-size: 12px; font-weight: 400; padding: 0 10px; background: #fff; color: var(--ink); border: 1px solid #D3D1C7; }
   @media (prefers-reduced-motion: reduce) { .sk { animation: none; } .wt .bar i { transition: none; } }
 </style>
 </head>
@@ -72,7 +79,7 @@
     <input id="code" inputmode="numeric" autocomplete="off" maxlength="6" pattern="\d{6}" placeholder="6 位基金代码，例如 110011" aria-label="基金代码" required>
     <button id="go" type="submit">复核</button>
   </form>
-  <p class="hint" id="hint">每人每天 3 次。约 30 秒。</p>
+  <p class="hint" id="hint">网页为试用版：每人每天 3 次，约 30 秒。</p>
   <p class="err" id="err" role="alert" hidden></p>
 
   <section id="rep" hidden>
@@ -99,6 +106,15 @@
       <div id="dist"></div>
       <div class="ax" id="ax"></div>
     </div>
+  </section>
+
+  <section class="ins" aria-labelledby="ins-h">
+    <div class="sh" id="ins-h">安装到您的 Agent</div>
+    <p>这个网页是试用版。安装到您的个人 Agent 上会更理解您，还可以输入您的持仓等；持仓和决策记录只保存在您自己的电脑上。开源（MIT），完整说明见 <a href="https://github.com/longsizhuo/openInvest#quick-start" target="_blank" rel="noopener">GitHub</a>。</p>
+    <div class="cmd"><span>Claude Code</span><div class="cl"><code>/plugin marketplace add longsizhuo/openInvest</code><button type="button" class="cp">复制</button></div><div class="cl"><code>/plugin install invest@openinvest</code><button type="button" class="cp">复制</button></div></div>
+    <div class="cmd"><span>Codex</span><div class="cl"><code>codex plugin marketplace add longsizhuo/openInvest</code><button type="button" class="cp">复制</button></div></div>
+    <div class="cmd"><span>Hermes</span><div class="cl"><code>hermes plugins install longsizhuo/openInvest --enable</code><button type="button" class="cp">复制</button></div></div>
+    <div class="cmd"><span>OpenClaw</span><div class="cl"><code>openclaw plugins install clawhub:openinvest</code><button type="button" class="cp">复制</button></div></div>
   </section>
 
   <p class="foot">不含买卖建议。灰条为历史 10%–90% 区间，竖线为中位，红线为当前价。数据：东方财富、公开行情。方法见《LLM 多智能体投资系统的架构选择与校准优先评估》。openInvest 开源项目：<a href="https://openinvest.involutionhell.com" target="_blank" rel="noopener">openinvest.involutionhell.com</a></p>
@@ -237,6 +253,12 @@ $("ask").addEventListener("submit", async (e) => {
     cur = j.job_id; showFacts(j.facts, true); poll(cur);
   } catch {}
 })();
+// 安装命令一键复制；剪贴板不可用时选中命令，让人自己复制
+document.querySelectorAll(".cp").forEach((b) => b.addEventListener("click", async () => {
+  const code = b.previousElementSibling;
+  try { await navigator.clipboard.writeText(code.textContent); b.textContent = "已复制"; setTimeout(() => { b.textContent = "复制"; }, 1500); }
+  catch { getSelection().selectAllChildren(code); }
+}));
 window.addEventListener("resize", () => { if (lastFacts) drawChart(lastFacts.chart); });
 </script>
 </body>

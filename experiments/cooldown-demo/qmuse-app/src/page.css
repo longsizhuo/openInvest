@@ -55,4 +55,11 @@
     #rep > * { grid-column: 1; }
     #rep > #chart-box { grid-column: 2; grid-row: 1 / -1; }
   }
+  .ins { margin-top: 34px; max-width: 760px; }
+  .ins p { margin: 8px 0 4px; color: var(--sub); }
+  .cmd { margin-top: 12px; }
+  .cmd > span { font-size: 12px; color: var(--sub); }
+  .cl { display: flex; gap: 6px; margin-top: 4px; }
+  .cl code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #F6F5F1; border-radius: 4px; padding: 6px 9px; }
+  .cl button { flex: none; min-width: 5em; font-size: 12px; font-weight: 400; padding: 0 10px; background: #fff; color: var(--ink); border: 1px solid #D3D1C7; }
   @media (prefers-reduced-motion: reduce) { .sk { animation: none; } .wt .bar i { transition: none; } }
