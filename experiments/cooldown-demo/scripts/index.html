@@ -265,7 +265,7 @@ const INSTALL = [
     note: "自动注册 MCP server（含全部工具）+ 委员会 skills。安装后对 Claude 说“帮我初始化 invest”。Coordinator 路径不需要 API key。" },
   { label: "Codex", cmds: ["codex plugin marketplace add longsizhuo/openInvest", "codex plugin add invest@openinvest"],
     note: "Codex 读同一份 SKILL.md。要 MCP 工具再跑：codex mcp add openinvest --env INVEST_HOME=$HOME/openInvest -- uvx openinvest-mcp" },
-  { label: "Hermes", cmds: ["hermes plugins install longsizhuo/openInvest --enable"],
+  { label: "Hermes", cmds: ["hermes plugins install longsizhuo/openInvest/plugin --enable"],
     note: "安装 plugin（skills 以 openinvest:invest 加载）。MCP 工具需在 ~/.hermes/config.yaml 加：mcp_servers.openinvest → command: uvx, args: [openinvest, mcp]。" },
   { label: "OpenClaw", cmds: ["openclaw plugins install clawhub:openinvest"],
     note: "装 ClawHub 上的 bundle：skills 和 MCP server 一起注册。不支持 bundle 的旧版：在 ~/.openclaw/openclaw.json 的 mcp.servers 里声明 MCP server，skills 用 uvx openinvest install-skills 一条命令装齐。" },
