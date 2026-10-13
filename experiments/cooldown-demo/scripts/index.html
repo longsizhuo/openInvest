@@ -63,12 +63,16 @@
     #rep > #chart-box { grid-column: 2; grid-row: 1 / -1; }
   }
   .ins { margin-top: 34px; max-width: 760px; }
-  .ins p { margin: 8px 0 4px; color: var(--sub); }
-  .cmd { margin-top: 12px; }
-  .cmd > span { font-size: 12px; color: var(--sub); }
-  .cl { display: flex; gap: 6px; margin-top: 4px; }
-  .cl code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #F6F5F1; border-radius: 4px; padding: 6px 9px; }
-  .cl button { flex: none; min-width: 5em; font-size: 12px; font-weight: 400; padding: 0 10px; background: #fff; color: var(--ink); border: 1px solid #D3D1C7; }
+  .ins > p { margin: 8px 0 12px; color: var(--sub); }
+  .it { border: 1px solid #D3D1C7; border-top: 2px solid var(--ink); border-radius: 6px; overflow: hidden; }
+  .it-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; border-bottom: 1px solid var(--rule); }
+  .it-bar button { font: 500 13px/1 inherit; padding: 7px 11px; border-radius: 4px; background: none; color: var(--sub); }
+  .it-bar button[aria-selected="true"] { background: var(--ink); color: #fff; }
+  .it-bar .cp { margin-left: auto; font-size: 12px; padding: 5px 10px; border: 1px solid #D3D1C7; color: var(--ink); }
+  .it-cmd { overflow-x: auto; padding: 12px 14px; background: #F6F5F1; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .it-cmd div { white-space: pre; }
+  .it-cmd div::before { content: "$ "; color: var(--mute); }
+  .it-note { margin: 0; padding: 9px 14px; font-size: 12px; color: var(--sub); }
   @media (prefers-reduced-motion: reduce) { .sk { animation: none; } .wt .bar i { transition: none; } }
 </style>
 </head>
@@ -111,10 +115,11 @@
   <section class="ins" aria-labelledby="ins-h">
     <div class="sh" id="ins-h">安装到您的 Agent</div>
     <p>这个网页是试用版。安装到您的个人 Agent 上会更理解您，还可以输入您的持仓等；持仓和决策记录只保存在您自己的电脑上。开源（MIT），完整说明见 <a href="https://github.com/longsizhuo/openInvest#quick-start" target="_blank" rel="noopener">GitHub</a>。</p>
-    <div class="cmd"><span>Claude Code</span><div class="cl"><code>/plugin marketplace add longsizhuo/openInvest</code><button type="button" class="cp">复制</button></div><div class="cl"><code>/plugin install invest@openinvest</code><button type="button" class="cp">复制</button></div></div>
-    <div class="cmd"><span>Codex</span><div class="cl"><code>codex plugin marketplace add longsizhuo/openInvest</code><button type="button" class="cp">复制</button></div></div>
-    <div class="cmd"><span>Hermes</span><div class="cl"><code>hermes plugins install longsizhuo/openInvest --enable</code><button type="button" class="cp">复制</button></div></div>
-    <div class="cmd"><span>OpenClaw</span><div class="cl"><code>openclaw plugins install clawhub:openinvest</code><button type="button" class="cp">复制</button></div></div>
+    <div class="it">
+      <div class="it-bar" id="it-bar" role="tablist" aria-label="安装方式"></div>
+      <div class="it-cmd" id="it-cmd"></div>
+      <p class="it-note" id="it-note"></p>
+    </div>
   </section>
 
   <p class="foot">不含买卖建议。灰条为历史 10%–90% 区间，竖线为中位，红线为当前价。数据：东方财富、公开行情。方法见《LLM 多智能体投资系统的架构选择与校准优先评估》。openInvest 开源项目：<a href="https://openinvest.involutionhell.com" target="_blank" rel="noopener">openinvest.involutionhell.com</a></p>
@@ -253,12 +258,39 @@ $("ask").addEventListener("submit", async (e) => {
     cur = j.job_id; showFacts(j.facts, true); poll(cur);
   } catch {}
 })();
-// 安装命令一键复制；剪贴板不可用时选中命令，让人自己复制
-document.querySelectorAll(".cp").forEach((b) => b.addEventListener("click", async () => {
-  const code = b.previousElementSibling;
-  try { await navigator.clipboard.writeText(code.textContent); b.textContent = "已复制"; setTimeout(() => { b.textContent = "复制"; }, 1500); }
-  catch { getSelection().selectAllChildren(code); }
-}));
+// 安装方式、命令和说明照抄官网 openinvest-site（src/data/site.ts 的 INSTALL_TABS + src/i18n.tsx 的中文 install 说明），
+// 那边改了这里同步。复制整个标签的全部命令，和官网一致
+const INSTALL = [
+  { label: "Claude Code", cmds: ["/plugin marketplace add longsizhuo/openInvest", "/plugin install invest@openinvest"],
+    note: "自动注册 MCP server（含全部工具）+ 委员会 skills。安装后对 Claude 说“帮我初始化 invest”。Coordinator 路径不需要 API key。" },
+  { label: "Codex", cmds: ["codex plugin marketplace add longsizhuo/openInvest", "codex plugin add invest@openinvest"],
+    note: "Codex 读同一份 SKILL.md。要 MCP 工具再跑：codex mcp add openinvest -- bash ~/openInvest/skills/invest/scripts/run.sh mcp" },
+  { label: "Hermes", cmds: ["hermes plugins install longsizhuo/openInvest --enable"],
+    note: "安装 plugin（skills 以 openinvest:invest 加载）。MCP 工具需在 ~/.hermes/config.yaml 加：mcp_servers.openinvest → command: uvx, args: [openinvest, mcp]。" },
+  { label: "OpenClaw", cmds: ["# ~/.openclaw/openclaw.json (JSON5) — declare under mcp.servers:",
+    'openinvest: { command: "uvx", args: ["openinvest", "mcp"], env: { INVEST_HOME: "~/openInvest" } }',
+    "# Older builds without an MCP client — one command installs the skills:",
+    "uvx openinvest install-skills --dest <workspace>/skills"],
+    note: "在 ~/.openclaw/openclaw.json 的 mcp.servers 里声明即可接入全部 MCP 工具。旧版无 MCP client 时，一条命令装齐三个 skill：uvx openinvest install-skills（skills 经 uvx 驱动后端）。" },
+  { label: "GitHub", cmds: ["git clone https://github.com/longsizhuo/openInvest.git ~/openInvest && cd ~/openInvest && bash skills/install.sh"],
+    note: "手动安装。后端在首次运行时自举（uv sync）。" },
+];
+function drawInstall(on) {
+  const bar = $("it-bar"); bar.textContent = "";
+  INSTALL.forEach((x, i) => {
+    const b = el("button", null, x.label); b.type = "button"; b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(i === on));
+    b.addEventListener("click", () => drawInstall(i)); bar.append(b);
+  });
+  const cp = el("button", "cp", "复制"); cp.type = "button"; cp.setAttribute("aria-label", "复制安装命令");
+  cp.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(INSTALL[on].cmds.join("\n")); cp.textContent = "已复制"; setTimeout(() => { cp.textContent = "复制"; }, 1600); }
+    catch { getSelection().selectAllChildren($("it-cmd")); }   // 剪贴板被拦就选中命令，让人自己复制
+  });
+  bar.append(cp);
+  const cmd = $("it-cmd"); cmd.textContent = ""; INSTALL[on].cmds.forEach((c) => cmd.append(el("div", null, c)));
+  $("it-note").textContent = INSTALL[on].note;
+}
+drawInstall(0);
 window.addEventListener("resize", () => { if (lastFacts) drawChart(lastFacts.chart); });
 </script>
 </body>
