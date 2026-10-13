@@ -122,6 +122,8 @@ skill 是显式加载制，不进自动索引）。注意 `hermes skills install
 安全扫描拦截（金融写操作 skill 必触发 dangerous verdict）——走 plugin 路线。
 plugin 路线要装 `plugin/` 子目录：Hermes 0.21 起安装也会扫描整棵目录，从仓库根装会扫到
 docs/tests 并判 dangerous 直接拦下（2026-10-13 在 0.21.7 实测），`plugin/` 子目录扫描结果为 safe。
+以前从仓库根装过的：0.21 起 `hermes plugins update` 不再接管旧安装（报 no owned Git checkout），
+重装一次即可：`hermes plugins install longsizhuo/openInvest/plugin --enable --force`。
 
 **信息联动**：若装有 [Longbridge](https://github.com/longbridge/skills) 等行情/新闻
 skill，看到与持仓相关的新闻时用 `ingest_event` 喂进事件账本——券商级信息源
