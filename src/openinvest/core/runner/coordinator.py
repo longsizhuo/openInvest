@@ -112,7 +112,7 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     # 通用化逻辑（动态遍历所有 holdings，多币种 to_base 折算）。
     # import 路径保持 jobs.daily_report_builder（re-export）——契约测试 patch 的是它
     from openinvest.jobs.daily_report_builder import portfolio_summary_text
-    from openinvest.utils.fx import total_portfolio_value_cny
+    from openinvest.utils.fx import total_portfolio_value_cny, unvalued
     from openinvest.utils.quotes import get_quote, is_eastmoney_fund
 
     gold_now = snap.spot_cny_per_gram if snap else 0.0
@@ -134,7 +134,8 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
 
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
     # insights / 确定性事实块以模块全局名调用 shared loaders（单一可信源 + 可被契约测试 monkeypatch）
-    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices)
+    portfolio_summary = portfolio_summary_text(pm, total_cny, current_prices,
+                                               excluded=unvalued(_value_status))
     insights = load_prior_insights(target, pm)
 
     # 2026-06-11 漂移修复（coordinator 防御链对齐）: direct 路径在 service layer

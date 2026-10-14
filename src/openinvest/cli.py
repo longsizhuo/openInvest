@@ -198,7 +198,8 @@ def main() -> None:
     p.add_argument("--symbol", required=True, help="yfinance symbol（如 510300.SS / AAPL / BTC-USD）")
     p.add_argument("--units", type=float, required=True, help="买入数量")
     p.add_argument("--price", type=float, required=True, help="单价（与 currency 同币种）")
-    p.add_argument("--currency", "-c", default="CNY", help="计价币种，默认 CNY")
+    p.add_argument("--currency", "-c", default=None,
+                   help="计价币种；不填 = 已有持仓沿用其币种、新建仓 CNY；与已有持仓币种不一致会报错")
     p.add_argument("--kind", choices=["equity", "etf", "metal", "crypto", "bond", "fund", "other"],
                    default="equity", help="资产类型，默认 equity")
     p.add_argument("--unit-label", default="股", help="单位（股/克/oz/coin），默认 '股'")

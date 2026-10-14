@@ -1109,7 +1109,7 @@ def skill_client(client, monkeypatch):
     )
     monkeypatch.setattr(ef, "get_history_data", lambda symbol, period="5d": fake_df)
     monkeypatch.setattr(gp, "get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
-    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda pm, prices, base="CNY": (100000.0, "ok"))
+    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda pm, prices, base="CNY": (100000.0, {}))
     return client
 
 
@@ -1260,7 +1260,7 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
     # coordinator 改用 build_reentry_reference（取回结构化 profile，与 session 路径对齐）
     monkeypatch.setattr(rp, "build_reentry_reference", lambda *a, **k: ("REENTRY_SENTINEL", None))
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
-    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, "ok"))
+    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, {}))
 
     r = skill_client.post("/api/committee/prepare", json={"symbol": "NDQ.AX"})
     assert r.status_code == 200

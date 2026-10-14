@@ -72,8 +72,8 @@ CONFIDENCE: 0.0-1.0
 DOMINANT_VIEW: quant | macro | risk
 SUGGESTED_ALLOC_CNY: <具体金额, 如果是 SELL/TRIM 用负数表示减仓>
 TRIM_REASON: <VERDICT=TRIM 时必填：concentration | stop_loss | bearish；非 TRIM 时写 N/A>
-REENTRY_PRICE: <VERDICT=TRIM 时必填：买回目标价，纯数字（CNY），**必须低于现价**；非 TRIM 写 N/A>
-REENTRY_CONDITION: <VERDICT=TRIM 时必填：买回触发条件，如 "价格跌至 ¥950 且 RSI<40 或 VIX 回落 <18"；非 TRIM 写 N/A>
+REENTRY_PRICE: <VERDICT=TRIM 时必填：买回目标价，纯数字，**用资产的报价币种**（与"路径参考"里的现价同币种同单位，不要换算成人民币），**必须低于现价**；非 TRIM 写 N/A>
+REENTRY_CONDITION: <VERDICT=TRIM 时必填：买回触发条件，如 "价格跌至 950 且 RSI<40 或 VIX 回落 <18"（价格同样用报价币种）；非 TRIM 写 N/A>
 EXPECTED_PATH: <VERDICT=TRIM 时必填：一句话卖出后预期路径，引用"卖出后路径参考"里的概率数字；非 TRIM 写 N/A>
 
 EXECUTION_PLAN:
@@ -106,6 +106,7 @@ TRIM（减仓）只在"预期能在更低价位买回"时才成立——否则�
 所以你每次出 VERDICT=TRIM，**必须**同时给出 REENTRY_PRICE / REENTRY_CONDITION / EXPECTED_PATH：
 
 - **REENTRY_PRICE 必须严格低于现价**。给不出一个低于现价的合理买回点 = 这个 TRIM 不成立，请改 HOLD。
+  买回价和现价用同一个报价币种比（如 .AX 是澳元、0700.HK 是港币、GC=F 是美元/盎司）——换算成人民币或换成别的单位（如 ¥/克）写，系统拿它和现价比就失真了。
 - 参考输入里的"卖出后路径 / 买回点参考"（regime 历史 forward 路径分布，30/60/90 多窗 + 路径形状）：
   - 若历史显示该 regime 下"跌破现价概率"很低 / 悲观分位仍为正 → 卖出后大概率买不回更低 → **别 TRIM，给 HOLD**
   - 若有明显低于现价的悲观分位 → 可把 REENTRY_PRICE 设在该价位附近，EXPECTED_PATH 引用其概率

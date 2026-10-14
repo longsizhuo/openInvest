@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 # （保留旧 import path 的向后兼容）
 from openinvest.utils.portfolio_summary import portfolio_summary_text  # noqa: F401
 from openinvest.jobs.review_calc import confidence_display
+from openinvest.calc.regime_probability import quote_currency_prefix
 
 # ============ 常量（可被 daily_report.py 的 env 读取覆盖后传入，无默认值依赖） ============
 
@@ -384,7 +385,7 @@ def assemble_full_report(
         # TRIM 路径化：展示买回点 + 预期路径（让用户能判断"卖出是赚是亏"）
         if v.get("verdict") == "TRIM":
             rp = v.get("reentry_price")
-            rp_txt = f"¥{rp:,.2f}" if rp is not None else "未给出"
+            rp_txt = f"{quote_currency_prefix(sym)}{rp:,.2f}" if rp is not None else "未给出"
             cond = _t(v.get("reentry_condition") or "未给出")
             path = _t(v.get("expected_path") or "未给出")
             lines.append(

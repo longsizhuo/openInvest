@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Sequence
 
 if TYPE_CHECKING:
     from openinvest.core.portfolio_manager import PortfolioManager
@@ -30,6 +30,7 @@ def portfolio_summary_text(
     pm: "PortfolioManager",
     total_assets_cny: float,
     current_prices: Dict[str, float],
+    excluded: Sequence[str] = (),
 ) -> str:
     """详细的用户上下文，给 Risk Officer 压力测试用（含当前市价 + 浮盈 + 集中度）
 
@@ -40,6 +41,7 @@ def portfolio_summary_text(
         pm: PortfolioManager 实例（只读，不触发任何写）
         total_assets_cny: 已经计算好的总资产（CNY 折算）
         current_prices: {symbol: 当前价} dict（per asset 币种）
+        excluded: 没计入总资产的条目（fx.unvalued：缺汇率 / 缺价），总资产旁明说
 
     Returns:
         多行字符串，结尾带 \\n
@@ -57,6 +59,8 @@ def portfolio_summary_text(
         and total_assets_cny > 0
     )
     total_str = f"¥{total_assets_cny:,.0f}" if total_ok else "¥不可用"
+    if excluded:
+        total_str += f"（未计入 {'、'.join(excluded)}：拉不到汇率或价格，实际总资产更高）"
 
     # 现金部分（多币种通用）
     lines = [

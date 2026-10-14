@@ -35,7 +35,7 @@ def build_status_view() -> Dict[str, Any]:
     """v2 通用化：从 cash dict + holdings list 读，对外保持原 JSON 结构兼容老 agent"""
     from openinvest.utils.gold_price import get_gold_snapshot
     from openinvest.core.portfolio_manager import PortfolioManager
-    from openinvest.utils.fx import total_portfolio_value_cny
+    from openinvest.utils.fx import get_fx_rate, total_portfolio_value_cny, unvalued
     from openinvest.utils.quotes import get_quote
     pm = PortfolioManager()
 
@@ -54,7 +54,7 @@ def build_status_view() -> Dict[str, Any]:
         str(h.get("cost_currency") or "").upper() == "AUD" for h in pm.holdings
     )
     ndq_price = _safe_close("NDQ.AX") if ndq_h else 0.0
-    audcny = _safe_close("AUDCNY=X") if aud_relevant else 0.0
+    audcny = (get_fx_rate("AUD", "CNY") or 0.0) if aud_relevant else 0.0
     snap = get_gold_snapshot(offset_pct=0.0) if gold_h else None
     gold_now = snap.spot_cny_per_gram if snap else 0.0
 
@@ -122,7 +122,7 @@ def build_status_view() -> Dict[str, Any]:
             "cny": round(cash_cny, 2),
             **({
                 "aud": round(aud_cash, 2),
-                "aud_in_cny": round(aud_cash * audcny, 2),
+                "aud_in_cny": round(aud_cash * audcny, 2) if audcny else None,
             } if aud_relevant else {}),
             # v2 通用：列出所有币种（其他 agent 想读非 CNY/AUD 时方便）
             "all_currencies": pm.cash,
@@ -130,7 +130,7 @@ def build_status_view() -> Dict[str, Any]:
         **({"ndq": {
             "shares": ndq_shares,
             "price_aud": round(ndq_price, 2),
-            "value_cny": round(ndq_shares * ndq_price * audcny, 2),
+            "value_cny": round(ndq_shares * ndq_price * audcny, 2) if audcny and ndq_price else None,
         }} if ndq_h else {}),
         **({"gold": {
             "grams": gold_grams,
@@ -143,6 +143,8 @@ def build_status_view() -> Dict[str, Any]:
         # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
         "all_holdings": holding_views,
         "total_assets_cny": total_cny,
+        # 拉不到汇率 / 价格、没算进 total 的条目——有就列出来，别让总资产悄悄偏小
+        **({"total_assets_excludes": unvalued(_value_status)} if unvalued(_value_status) else {}),
         "fx": {"audcny": round(audcny, 4)} if aud_relevant else {},
         "live_prices": {
             "gold_usd_per_oz": snap.gold_usd_per_oz if snap else None,
@@ -232,9 +234,12 @@ def build_what_if_view(
             "hint": "memory 还没初始化。先跑 `run.sh init` 完成 onboarding。",
         }
 
+    from openinvest.utils.fx import get_fx_rate, to_base
+
     snap = get_gold_snapshot(offset_pct=0.0)
-    cur_gold = snap.spot_cny_per_gram if snap else 1000.0
-    cur_audcny = _safe_close("AUDCNY=X") or 4.9
+    # 拉不到就是拉不到：0 价 / None 汇率在下面按"未计入"处理，不再用 ¥1000/克、4.9 这种编的数
+    cur_gold = snap.spot_cny_per_gram if snap else 0.0
+    cur_audcny = get_fx_rate("AUD", "CNY")
 
     # 通用价格 dict：每个 holding 的当前价 + 情景价
     cur_prices: Dict[str, float] = {}
@@ -296,32 +301,43 @@ def build_what_if_view(
 
     new_audcny = audcny if audcny else cur_audcny
 
-    cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-
-    def _value_in_cny(holding: Dict[str, Any], h_price: float, fx: float) -> float:
+    def _value_in_cny(holding: Dict[str, Any], h_price: float, fx: Optional[float]) -> Optional[float]:
         """折算 holding 当前情景下 CNY 市值。
 
         2026-05-19 (A5 修复)：之前 if ccy == "AUD" 用 fx，其他币种当 1:1 → USD/EUR
         持仓 what_if 少乘 ~7 倍 / ~7.7 倍。改成 utils.fx.to_base 折算所有币种。
         AUD 特殊：caller 传入的 fx 是情景汇率（用户可指定 --audcny 模拟），优先
         用这个覆盖；其他币种走实时汇率（情景模拟暂不支持多 FX 联动调）。
+        价 ≤0（拉取失败的 0.0 哨兵）或汇率拉不到 → None，由调用方列进"未计入"，
+        不再按 1:1 把外币金额当人民币加进总额。
         """
-        from openinvest.utils.fx import to_base
         units = float(holding.get("units", 0) or 0)
-        ccy = str(holding.get("cost_currency", "CNY"))
+        ccy = str(holding.get("cost_currency", "CNY")).upper()
+        if not h_price or h_price <= 0:
+            return None
         local_value = units * h_price
-        if ccy == "CNY":
-            return local_value
         if ccy == "AUD":
-            return local_value * fx   # 情景汇率覆盖
+            return local_value * fx if fx else None   # 情景汇率覆盖
         # live valuation: as_of_date intentionally not threaded (no historical caller).
         # For backtest/historical use, thread as_of_date like utils.fx.to_base (see PR#53 fix(fx)).
-        converted = to_base(ccy, local_value, "CNY")
-        return converted if converted is not None else local_value  # 拉不到汇率退化
+        return to_base(ccy, local_value, "CNY")
 
-    cur_total = cash_cny + aud_cash * cur_audcny
-    new_total = cash_cny + aud_cash * new_audcny
+    excluded: List[str] = []
+    cur_total = new_total = 0.0
+    for ccy, amt in pm.cash.items():
+        amt = float(amt or 0)
+        if not amt:
+            continue
+        ccy = str(ccy).upper()
+        cur_c = amt * cur_audcny if ccy == "AUD" and cur_audcny else (
+            None if ccy == "AUD" else to_base(ccy, amt, "CNY"))
+        new_c = amt * new_audcny if ccy == "AUD" and new_audcny else (
+            None if ccy == "AUD" else cur_c)
+        if cur_c is None or new_c is None:
+            excluded.append(f"{ccy} 现金")
+            continue
+        cur_total += cur_c
+        new_total += new_c
     breakdown: Dict[str, Any] = {}
     for h in pm.holdings:
         if h.get("is_tracking_only"):
@@ -331,6 +347,10 @@ def build_what_if_view(
             continue
         cur_v = _value_in_cny(h, cur_prices.get(sym, 0.0), cur_audcny)
         new_v = _value_in_cny(h, new_prices.get(sym, 0.0), new_audcny)
+        if cur_v is None or new_v is None:
+            excluded.append(sym)
+            breakdown[sym] = {"units": float(h.get("units", 0) or 0), "unavailable": "拉不到价格或汇率"}
+            continue
         cur_total += cur_v
         new_total += new_v
         breakdown[sym] = {
@@ -349,8 +369,11 @@ def build_what_if_view(
         "scenario_total_cny": round(new_total, 2),
         "delta_cny": round(delta, 2),
         "delta_pct": round((delta / cur_total) * 100, 2) if cur_total else 0.0,
-        "fx": {"audcny_cur": round(cur_audcny, 4), "audcny_scenario": round(new_audcny, 4)},
+        "fx": {"audcny_cur": round(cur_audcny, 4) if cur_audcny else None,
+               "audcny_scenario": round(new_audcny, 4) if new_audcny else None},
         "breakdown": breakdown,
+        # 没算进两个总额的条目：有就明说，总额只代表其余部分
+        **({"excluded_from_total": excluded} if excluded else {}),
     }
 
 

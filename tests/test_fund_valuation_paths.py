@@ -39,7 +39,7 @@ def test_service_portfolio_summary_prices_fund_via_quote(monkeypatch):
     monkeypatch.setattr(quotes, "fetch_fund_nav", _fake_nav)
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda pm, prices, **kw: (0.0, {}))
     monkeypatch.setattr(ps, "portfolio_summary_text",
-                        lambda pm, total, prices: seen.update(prices) or "PS")
+                        lambda pm, total, prices, **kw: seen.update(prices) or "PS")
 
     pm = SimpleNamespace(holdings=[
         dict(FUND),
@@ -81,7 +81,7 @@ def test_daily_report_total_assets_includes_fund_holding(monkeypatch):
     monkeypatch.setattr(dr, "_load_asset_events", lambda *a, **k: {})
     monkeypatch.setattr(
         dr, "_portfolio_summary",
-        lambda pm_, total, prices: captured.update(total=total, prices=dict(prices)) or "PS",
+        lambda pm_, total, prices, **kw: captured.update(total=total, prices=dict(prices)) or "PS",
     )
     monkeypatch.setattr(dr, "get_macro_data", lambda: "MD")
     monkeypatch.setattr(dr, "_run_gemini_cli_review", lambda p: "G")

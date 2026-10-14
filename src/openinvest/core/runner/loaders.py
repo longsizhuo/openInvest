@@ -107,7 +107,7 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
     """
     try:
         from openinvest.utils.exchange_fee import get_history_data
-        from openinvest.utils.fx import total_portfolio_value_cny
+        from openinvest.utils.fx import total_portfolio_value_cny, unvalued
         from openinvest.utils.portfolio_summary import portfolio_summary_text
         from openinvest.utils.quotes import get_quote, is_eastmoney_fund
 
@@ -153,7 +153,7 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
                 )
 
         total_cny, _status = total_portfolio_value_cny(pm, current_prices, base="CNY")
-        return portfolio_summary_text(pm, total_cny, current_prices)
+        return portfolio_summary_text(pm, total_cny, current_prices, excluded=unvalued(_status))
     except Exception as e:  # noqa: BLE001
         # 兜底：拉价/折算彻底失败 → 用历史简化版，至少 Risk Officer 还有点上下文
         log.warning(

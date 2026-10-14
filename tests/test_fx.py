@@ -189,3 +189,36 @@ def test_cash_total_in_base_handles_missing_rate(monkeypatch):
     # 只算上 CNY (100) + USD (10*7=70) = 170；EUR 失败被跳过
     assert total == 170.0
     assert rates["EUR"] is None
+
+
+# ---------- 多币种第 0 步：直接对拉不到时试反向对 / 经 USD 交叉，都不行才 None ----------
+
+def _pairs(monkeypatch, table):
+    calls = []
+
+    def fake(s, p="5d", **kw):
+        calls.append(s)
+        return _fake_df(table[s]) if s in table else None
+    monkeypatch.setattr(fx, "get_history_data", fake)
+    return calls
+
+
+def test_fx_falls_back_to_inverse_pair(monkeypatch):
+    calls = _pairs(monkeypatch, {"CNYHKD=X": 1.25})
+    assert fx.get_fx_rate("HKD", "CNY") == pytest.approx(0.8)
+    assert calls[:2] == ["HKDCNY=X", "CNYHKD=X"]
+
+
+def test_fx_falls_back_to_usd_cross(monkeypatch):
+    _pairs(monkeypatch, {"XAFUSD=X": 0.0016, "USDCNY=X": 7.0})
+    assert fx.get_fx_rate("XAF", "CNY") == pytest.approx(0.0112)
+
+
+def test_fx_unavailable_and_nan_pairs_return_none(monkeypatch):
+    _pairs(monkeypatch, {"ZZZCNY=X": float("nan")})
+    assert fx.get_fx_rate("ZZZ", "CNY") is None
+
+
+def test_unvalued_lists_entries_left_out_of_total():
+    status = {"CNY": "ok", "AAPL": "missing_fx", "X": "missing_price", "T": "tracking_only"}
+    assert fx.unvalued(status) == ["AAPL", "X"]

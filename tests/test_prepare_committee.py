@@ -70,7 +70,7 @@ def _mock_world(monkeypatch):
     import openinvest.jobs.daily_report_builder as drb
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
     import openinvest.utils.fx as fx
-    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, "ok"))
+    monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, {}))
 
 
 def test_prepare_committee_emits_deterministic_blocks(_mock_world, capfd):

@@ -123,6 +123,15 @@ class TestPortfolioSummaryText:
         assert "20,000" in text
         assert "当前无实仓持仓" in text
 
+    def test_total_names_entries_left_out(self, tmp_path):
+        """拉不到汇率/价格的条目没进总资产时，总资产旁明说，不悄悄偏小"""
+        pm = _make_pm(tmp_path, cash={"CNY": 20000.0}, holdings=[])
+        text = portfolio_summary_text(pm, total_assets_cny=20000.0, current_prices={},
+                                      excluded=["AAPL"])
+        assert "总资产估算: ¥20,000（未计入 AAPL：拉不到汇率或价格，实际总资产更高）" in text
+        plain = portfolio_summary_text(pm, total_assets_cny=20000.0, current_prices={})
+        assert "总资产估算: ¥20,000\n" in plain   # 都算进去时文本不变
+
     def test_aud_cash_shown_when_positive(self, tmp_path):
         """AUD 余额 > 0 时显示"""
         pm = _make_pm(tmp_path, cash={"CNY": 10000.0, "AUD": 300.0}, holdings=[])
@@ -600,7 +609,8 @@ class TestAssembleFullReport:
             "reentry_condition": "跌至 ¥950 且 RSI<40", "expected_path": "30d 55% 跌破现价",
         })
         assert "减仓路径" in report
-        assert "¥950" in report
+        # 买回价按资产报价币种展示（GC=F 报美元/盎司），不再一律挂 ¥
+        assert "买回点 $950.00" in report
 
     def test_sanity5_downgrade_shows_rejected(self):
         """Sanity5 降级（买回点不低于现价）→ 展示减仓被否"""

@@ -471,7 +471,7 @@ class PortfolioManager:
         units: float,
         price: float,
         *,
-        currency: str = "CNY",
+        currency: Optional[str] = None,
         kind: str = "equity",
         unit_label: str = "股",
         source: str = "skill_cli",
@@ -487,6 +487,11 @@ class PortfolioManager:
         - "cash_deduct"（默认）：从 portfolio cash 扣对应币种金额（账本一致，现有行为）
         - "external_funding"：外部新钱（工资/银行卡，如自动定投）建仓，**portfolio cash 不动**。
           日定投的钱不来自子弹池现金，扣它会错误消耗抄底弹药（¥30k 子弹 10 个月归零）。
+
+        currency：price 的币种。加仓已有持仓时不传 = 沿用该持仓的计价币种；传了但和
+        持仓币种不一致直接报错——否则会扣错币种的现金，并把两种币种的价格平均进同一个
+        成本（2026-10 盘点：漏写币种给澳元持仓加仓，扣人民币、成本被人民币价拉偏）。
+        新建仓不传 = CNY。
         """
         if units <= 0 or price <= 0:
             raise ValueError("units / price 必须 > 0")
@@ -494,11 +499,17 @@ class PortfolioManager:
             raise ValueError(
                 f"非法 source_type {source_type!r}（只接受 cash_deduct / external_funding）"
             )
-        ccy = currency.upper()
-        cost_cny = units * price  # 简化：fork 用户若用非 CNY 自己换算后再传 price=CNY 价
+        cost_cny = units * price  # 金额单位 = ccy（字段名是历史遗留）
         with self.with_portfolio_tx() as p:
             holdings = list(p.get("holdings") or [])
             existing = next((h for h in holdings if h.get("symbol") == symbol), None)
+            held = str(existing.get("cost_currency") or "CNY").upper() if existing else None
+            ccy = (currency or held or "CNY").upper()
+            if held and ccy != held:
+                raise ValueError(
+                    f"{symbol} 持仓按 {held} 计价，这笔买入写的是 {ccy}；"
+                    f"请按 {held} 价格记账（currency 填 {held} 或不填）"
+                )
             if existing:
                 # 加权平均成本
                 old_units = float(existing.get("units", 0) or 0)

@@ -295,7 +295,7 @@ def parse_cio_memo(
             _force_hold(out, confidence_ceiling=out["confidence"])
             log.warning(
                 "parse_cio_memo: TRIM 但买回点%s → 强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）",
-                "缺失" if rp is None else f"¥{rp} ≥ 现价 ¥{current_price}",
+                "缺失" if rp is None else f"{rp} ≥ 现价 {current_price}（报价币种）",
             )
 
     # 独立快崩防御（Defense check）: VIX 哨兵（市场级）/ ATR 飙升（资产级）任一

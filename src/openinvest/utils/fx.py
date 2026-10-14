@@ -4,6 +4,8 @@
 20 分钟内存 cache 避免 cron 频繁触发时打挂 yfinance。
 
 约定：base 是目标币种（默认 CNY），quote 是源币种。
+拉不到直接对（QUOTEBASE=X）时依次试反向对（BASEQUOTE=X 取倒数）、经 USD 交叉——
+都不行才返回 None，调用方必须把它当"不可计算"，不能按 1:1 或直接剔掉不提。
   to_base("USD", 100, base="CNY") = 100 * USDCNY
   to_base("CNY", 100, base="CNY") = 100（恒等）
 """
@@ -12,7 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Optional
+from typing import List, Optional
 
 from openinvest.utils.exchange_fee import get_history_data
 
@@ -62,23 +64,38 @@ def get_fx_rate(
         if cached is not None:
             return cached
 
-    symbol = f"{quote}{base}=X"
-    try:
-        df = get_history_data(symbol, "5d", as_of_date=as_of_date)
-    except Exception as e:  # noqa: BLE001
-        log.warning(f"fx {symbol} 拉取失败: {e}")
-        return None
-    if df is None or df.empty:
-        return None
-
-    try:
-        rate = float(df["Close"].iloc[-1])
-    except Exception:  # noqa: BLE001
+    rate = _pair_close(f"{quote}{base}=X", as_of_date)
+    if rate is None:
+        inverse = _pair_close(f"{base}{quote}=X", as_of_date)
+        rate = 1.0 / inverse if inverse else None
+    if rate is None and "USD" not in (quote, base):
+        # ponytail: 拉取失败不做负缓存，源整体挂时一个币种最多多打 4 次请求
+        via_usd = get_fx_rate(quote, "USD", as_of_date), get_fx_rate("USD", base, as_of_date)
+        rate = via_usd[0] * via_usd[1] if all(via_usd) else None
+    if rate is None:
         return None
 
     if as_of_date is None:
         _cache_set(quote, base, rate)
     return rate
+
+
+def _pair_close(symbol: str, as_of_date: Optional[str]) -> Optional[float]:
+    """一个 yfinance 汇率对的最新收盘；拉不到 / NaN / 非正 → None"""
+    try:
+        df = get_history_data(symbol, "5d", as_of_date=as_of_date)
+        if df is None or df.empty:
+            return None
+        rate = float(df["Close"].iloc[-1])
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"fx {symbol} 拉取失败: {type(e).__name__}: {e}")
+        return None
+    return rate if math.isfinite(rate) and rate > 0 else None
+
+
+def unvalued(status: dict) -> List[str]:
+    """total_portfolio_value_cny 的 status → 没计入总资产的条目（缺汇率 / 缺价）"""
+    return sorted(k for k, v in status.items() if v in ("missing_fx", "missing_price"))
 
 
 def to_base(

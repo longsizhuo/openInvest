@@ -36,7 +36,7 @@ def _json_output_addendum() -> str:
   "dominant_view": "quant|macro|risk",
   "suggested_alloc_cny": 整数金额（SELL/TRIM 用负数表示减仓）,
   "trim_reason": "concentration|stop_loss|bearish"（非 TRIM 用 null）,
-  "reentry_price": 数字（非 TRIM 用 null，TRIM 必须低于现价）,
+  "reentry_price": 数字，资产报价币种、与现价同单位（非 TRIM 用 null，TRIM 必须低于现价）,
   "reentry_condition": 字符串（非 TRIM 用 null）,
   "expected_path": 字符串（非 TRIM 用 null）,
   "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
@@ -50,7 +50,7 @@ Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSO
   "dominant_view": "quant|macro|risk",
   "suggested_alloc_cny": integer amount (negative for SELL/TRIM to indicate a reduction),
   "trim_reason": "concentration|stop_loss|bearish" (null when not TRIM),
-  "reentry_price": number (null when not TRIM; must be below the current price for TRIM),
+  "reentry_price": number in the asset's quote currency, same unit as the current price (null when not TRIM; must be below the current price for TRIM),
   "reentry_condition": string (null when not TRIM),
   "expected_path": string (null when not TRIM),
   "memo": "your full investment-bank-grade analysis memo, multi-paragraph, matching the depth of the plain-text memo"

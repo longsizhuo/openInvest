@@ -672,3 +672,38 @@ class TestBuyFundingSource:
                 source_type="external_funding")
         pm2._reload()
         assert pm2.find_holding("NDQ.AX")["units"] == 10.0
+
+
+# ============ 多币种第 0 步：加仓已有持仓必须同币种 ============
+
+class TestBuyCurrencyMatchesHolding:
+    """漏写币种给澳元持仓加仓 → 以前默认 CNY：扣人民币现金 + 人民币价平均进澳元成本"""
+
+    def _pm(self, tmp_path):
+        s = _make_store(tmp_path)
+        _seed_docs(s, cash={"CNY": 10000.0, "AUD": 2000.0}, holdings=[{
+            "symbol": "NDQ.AX", "kind": "etf", "units": 10.0, "avg_cost": 50.0,
+            "unit_label": "股", "cost_currency": "AUD", "proxy_kind": "direct",
+        }])
+        return PortfolioManager(s)
+
+    def test_omitted_currency_uses_holding_currency(self, tmp_path):
+        pm2 = self._pm(tmp_path)
+        out = pm2.buy("NDQ.AX", units=10.0, price=60.0)
+        pm2._reload()
+        assert out["currency"] == "AUD"
+        assert pm2.cash_amount("AUD") == pytest.approx(1400.0)
+        assert pm2.cash_amount("CNY") == pytest.approx(10000.0)
+        assert pm2.find_holding("NDQ.AX")["avg_cost"] == pytest.approx(55.0)
+
+    def test_mismatched_currency_rejected_and_ledger_untouched(self, tmp_path):
+        pm2 = self._pm(tmp_path)
+        with pytest.raises(ValueError, match="AUD"):
+            pm2.buy("NDQ.AX", units=10.0, price=280.0, currency="CNY")
+        pm2._reload()
+        assert pm2.cash_amount("CNY") == pytest.approx(10000.0)
+        assert pm2.find_holding("NDQ.AX")["avg_cost"] == pytest.approx(50.0)
+
+    def test_new_position_defaults_to_cny(self, tmp_path):
+        pm2 = self._pm(tmp_path)
+        assert pm2.buy("510300.SS", units=100.0, price=4.0)["currency"] == "CNY"

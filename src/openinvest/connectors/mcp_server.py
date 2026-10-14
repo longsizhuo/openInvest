@@ -476,7 +476,9 @@ def buy(
     symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
     units: Annotated[float, Field(description="Quantity bought; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Execution price per unit, in `currency`.", gt=0)],
-    currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
+    currency: Annotated[Optional[str], Field(description=(
+        "Currency of `price`, e.g. 'CNY', 'USD', 'AUD'. Omit to use the existing position's "
+        "currency (CNY for a new position); a different currency than the position's is rejected."))] = None,
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
     existing_position: Annotated[bool, Field(description=(
@@ -496,7 +498,7 @@ def buy(
         symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
         units: Quantity bought; must be > 0.
         price: Execution price per unit, in `currency`.
-        currency: Currency of `price` (default "CNY").
+        currency: Currency of `price`; omitted = the existing position's currency (CNY if new).
         kind: Asset kind tag, e.g. "equity", "etf", "commodity".
         unit_label: Human display label for units (default "股", i.e. shares).
 
@@ -521,7 +523,9 @@ def record_existing_position(
     symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
     units: Annotated[float, Field(description="Quantity held; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Average cost per unit, in `currency`.", gt=0)],
-    currency: Annotated[str, Field(description="Currency of `price`, e.g. 'CNY', 'USD', 'AUD'.")] = "CNY",
+    currency: Annotated[Optional[str], Field(description=(
+        "Currency of `price`, e.g. 'CNY', 'USD', 'AUD'. Omit to use the existing position's "
+        "currency (CNY for a new position); a different currency than the position's is rejected."))] = None,
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
 ) -> Dict[str, Any]:
@@ -538,7 +542,7 @@ def record_existing_position(
         symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
         units: Quantity held; must be > 0.
         price: Average cost per unit, in `currency`.
-        currency: Currency of `price` (default "CNY").
+        currency: Currency of `price`; omitted = the existing position's currency (CNY if new).
         kind: Asset kind tag, e.g. "equity", "etf", "commodity".
         unit_label: Human display label for units (default "股", i.e. shares).
 
