@@ -132,6 +132,7 @@ def _fetch_frames(symbol: str) -> Optional[Dict[str, Any]]:
         last_bar_utc = intraday.index[-1].tz_convert("UTC").to_pydatetime()
 
         daily = t.history(period="3mo", interval="1d")
+        daily = daily.dropna(subset=["Close"]) if daily is not None and len(daily) else daily  # 同上，否则 ATR% 变 None、退回绝对阈值
         atr_pct = compute_metrics(daily).get("atr_pct") if daily is not None and len(daily) else None
         return {
             "closes": closes,
