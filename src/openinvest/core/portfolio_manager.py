@@ -88,6 +88,11 @@ class HoldingsView:
 
 # ============ PortfolioManager ============
 
+class MemoryNotInitialized(FileNotFoundError):
+    """数据目录还没 init（user/strategy/portfolio 缺）。仍是 FileNotFoundError，老的 except 照常接住；
+    CLI 据此输出结构化 JSON 而不是一段 traceback。"""
+
+
 class PortfolioManager:
     """持仓门面（v2 通用化）
 
@@ -105,7 +110,7 @@ class PortfolioManager:
         portfolio_doc = self.store.read("portfolio")
 
         if not (user_doc and strategy_doc and portfolio_doc):
-            raise FileNotFoundError(
+            raise MemoryNotInitialized(
                 "memory/user.md / strategy.md / portfolio.md 缺失。"
                 "首次使用请跑 `openinvest init` 初始化",
             )

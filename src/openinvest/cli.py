@@ -306,7 +306,14 @@ def main() -> None:
         if maybe_dispatch_remote(args):
             return
 
-    args.func(args)
+    from openinvest.core.portfolio_manager import MemoryNotInitialized
+    try:
+        args.func(args)
+    except MemoryNotInitialized as e:
+        # 没 init 的数据目录：给 agent 一句结构化原因，别让它看着 traceback 去重装依赖
+        _print_json({"status": "error", "error": str(e),
+                     "hint": "先跑 `run.sh doctor` 看缺什么，再用 invest-setup 初始化"})
+        sys.exit(1)
 
 
 if __name__ == "__main__":
