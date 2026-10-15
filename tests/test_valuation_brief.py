@@ -127,8 +127,9 @@ def test_pe_thresholds_come_from_config(monkeypatch):
         reset_config()
 
 
-def test_otc_fund_symbol_skips_yfinance(monkeypatch):
-    """场外基金 FUND:<代码> 不是 yfinance 代码：不发请求、直接返回 ''（原先每次 404 白等一轮）"""
+def test_otc_fund_symbol_skips_yfinance_but_keeps_price_quantile(monkeypatch):
+    """场外基金 FUND:<代码> 不是 yfinance 代码：不发请求（原先每次 404 白等一轮）。
+    404 时 yfinance 返回空 dict，原先照常输出价格分位行——这一行必须保留，委员会要引用它。"""
     import yfinance as yf
 
     def _boom(sym):
@@ -136,4 +137,5 @@ def test_otc_fund_symbol_skips_yfinance(monkeypatch):
     monkeypatch.setattr(yf, "Ticker", _boom)
     from openinvest.utils.valuation import build_valuation_brief
 
-    assert build_valuation_brief("FUND:110011", price_quantile_2y=0.4) == ""
+    out = build_valuation_brief("FUND:110011", price_quantile_2y=0.04)
+    assert out.startswith("PRICE_QUANTILE_2Y: 4%")

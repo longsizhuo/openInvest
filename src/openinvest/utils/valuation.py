@@ -50,15 +50,17 @@ def build_valuation_brief(
         多行文本；非权益类 / 取不到任何字段 / 异常 → "" （graceful loader 契约）。
     """
     # 场外基金（FUND:<代码>，东方财富净值）不是 yfinance 代码：去查只会 404、白等一次网络往返
-    # （演示站每次辩论都在日志里留一条 "Quote not found for symbol: FUND:…"），而且基金没有 PE。
-    if symbol.upper().startswith("FUND:"):
-        return ""
-    try:
-        import yfinance as yf
-        info = yf.Ticker(symbol).info or {}
-    except Exception as e:  # noqa: BLE001
-        log.warning(f"valuation: {symbol} .info 拉取失败 graceful '': {type(e).__name__}: {e}")
-        return ""
+    # （演示站每次辩论都在日志里留一条 "Quote not found for symbol: FUND:…"），基金也没有 PE。
+    # 404 时 yfinance 返回空 dict、不抛错，下面照常出"价格分位"行——所以这里给空 dict 而不是
+    # 直接 return ""：输出与原先逐字相同，只省掉那次请求。
+    info: dict = {}
+    if not symbol.upper().startswith("FUND:"):
+        try:
+            import yfinance as yf
+            info = yf.Ticker(symbol).info or {}
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"valuation: {symbol} .info 拉取失败 graceful '': {type(e).__name__}: {e}")
+            return ""
 
     from openinvest.capabilities.committee.i18n import bilingual
     quote_type = str(info.get("quoteType") or "").upper()
