@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.24.3...invest-skill-v0.25.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** add explain_decision subcommand for MCP parity ([#414](https://github.com/longsizhuo/openInvest/issues/414)) ([fea2c64](https://github.com/longsizhuo/openInvest/commit/fea2c64ad53ddc1270cfbd3f65d940a4185b66d2))
+
+
+### Bug Fixes
+
+* **committee:** load event brief in Coordinator prepare_committee_brief ([#404](https://github.com/longsizhuo/openInvest/issues/404)) ([e745ab5](https://github.com/longsizhuo/openInvest/commit/e745ab584f0a36a3dc7d10169f4d73f2fe713d13))
+* run.sh hints only on silent failures; JSON error for an uninitialized data dir ([#413](https://github.com/longsizhuo/openInvest/issues/413)) ([eb71140](https://github.com/longsizhuo/openInvest/commit/eb71140d0a2655f44d613dacd1fa75c6d446dd73))
+
 ## [0.24.3](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.24.2...invest-skill-v0.24.3) (2026-10-13)
 
 
