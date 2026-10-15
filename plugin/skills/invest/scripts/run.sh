@@ -29,6 +29,22 @@ if ! command -v uvx >/dev/null 2>&1; then
     exit 1
 fi
 
+# 跑后端；只有它一个字都没往 stdout 打就失败时才补一条结构化提示。
+# CLI 的业务错误（参数缺失、币种不符……）自己会打印 JSON 说清原因，再追加"检查网络 / uv sync"
+# 会把 agent 带去重装依赖、查网络（2026-10 #363 实测）。没输出 = 拉包失败或后端起不来。
+# tee 不影响 stdin（init --from-stdin 照常读）；pipefail 下 rc 取后端的退出码。
+run_with_hint() {
+    local hint="$1"; shift
+    local out rc=0
+    out="$(mktemp)"
+    "$@" | tee "$out" || rc=$?
+    if [ "$rc" -ne 0 ] && [ ! -s "$out" ]; then
+        echo "{\"status\":\"error\",\"error\":\"openinvest 执行失败 (exit $rc)\",\"hint\":\"$hint\"}"
+    fi
+    rm -f "$out"
+    return "$rc"
+}
+
 mkdir -p "$INVEST_HOME"
 DATA_DIR="$INVEST_HOME"
 cd "$DATA_DIR"
@@ -86,21 +102,12 @@ EOF
     if [ "$DEV_MODE" = "1" ]; then
       cd "$REPO_ROOT"
       export PYTHONPATH="$SRC_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-      rc=0
-      uv run python -m openinvest.cli "$@" || rc=$?
-      if [ "$rc" -ne 0 ]; then
-          echo "{\"status\":\"error\",\"error\":\"openinvest（本地源码模式）执行失败 (exit $rc)\",\"hint\":\"当前使用 OPENINVEST_DEV_MODE=1；先运行 uv sync，再重试。\"}"
-          exit "$rc"
-      fi
-      exit 0
+      run_with_hint "本地源码模式（OPENINVEST_DEV_MODE=1）没输出任何结果就退出了，原因见 stderr 的报错。常见：依赖没装（先运行 uv sync）。" \
+          uv run python -m openinvest.cli "$@"
+      exit $?
     fi
-    # 不 exec：uvx 拉包失败（首跑断网 / PyPI 故障）时给 agent 结构化错误
-    # （|| 形式对 set -e 安全；CLI 子命令自身的业务错误 JSON 由 Python 层输出）
-    rc=0
-    uvx --from "$SPEC" openinvest "$@" || rc=$?
-    if [ "$rc" -ne 0 ]; then
-        echo "{\"status\":\"error\",\"error\":\"openinvest 执行失败 (exit $rc)\",\"hint\":\"首次运行需网络从 PyPI 拉包；检查网络后重试，或跑 uvx openinvest doctor 看完整输出\"}"
-        exit "$rc"
-    fi
+    run_with_hint "后端没输出任何结果就退出了，原因见 stderr 的报错。常见：首次运行从 PyPI 拉包失败（检查网络后重试）。" \
+        uvx --from "$SPEC" openinvest "$@"
+    exit $?
     ;;
 esac
