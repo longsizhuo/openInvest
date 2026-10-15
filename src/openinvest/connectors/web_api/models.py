@@ -882,7 +882,9 @@ class SkillBuyRequest(BaseModel):
     symbol: str
     units: float
     price: float
-    currency: str = "CNY"
+    # 不传 / null = 已有持仓沿用其币种、新建仓 CNY（与 CLI / MCP 同一语义，PortfolioManager.buy 判定）。
+    # 远端 CLI 不写 --currency 时会显式转发 null：这里若是 str 会直接 422。
+    currency: Optional[str] = None
     kind: Literal["equity", "etf", "metal", "crypto", "bond", "fund", "other"] = "equity"
     unit_label: str = "股"
 

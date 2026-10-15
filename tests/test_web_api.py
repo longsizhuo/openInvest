@@ -1482,3 +1482,15 @@ def test_verdict_review_summary_splits_by_source(client, tmp_store):
     assert live["directional_n"] == 5 and live["directional_only_hit_rate"] is None
     assert bt["directional_only_hit_rate"] == 1.0
     assert ct["rates_suppressed_sub30"] and ct["by_window"]["7d"]["hit_rate"] is None
+
+
+@pytest.mark.parametrize("body_currency", [{"currency": None}, {}])
+def test_skill_buy_without_currency_uses_holding_currency(skill_client, tmp_store, body_currency):
+    """远端 CLI 不写 --currency 会转发 null：不能 422，且给澳元持仓加仓要扣澳元"""
+    r = skill_client.post("/api/skill/buy", json={
+        "symbol": "NDQ.AX", "units": 1, "price": 60.0, **body_currency,
+    })
+    assert r.status_code == 200 and r.json()["currency"] == "AUD"
+    pm = PortfolioManager(store=tmp_store)
+    assert pm.cash_amount("AUD") == pytest.approx(40.0)
+    assert pm.cash_amount("CNY") == pytest.approx(12345.67)
