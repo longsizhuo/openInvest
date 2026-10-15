@@ -37,6 +37,9 @@ run_with_hint() {
     local hint="$1"; shift
     local out rc=0
     out="$(mktemp)"
+    # 被 Ctrl-C / SIGTERM 打断也清掉。路径在这里就展开：EXIT 时 local 变量已出作用域，
+    # set -u 下引用它会让 trap 报错、把退出码改成 1
+    trap "rm -f '$out'" EXIT
     "$@" | tee "$out" || rc=$?
     if [ "$rc" -ne 0 ] && [ ! -s "$out" ]; then
         echo "{\"status\":\"error\",\"error\":\"openinvest 执行失败 (exit $rc)\",\"hint\":\"$hint\"}"
