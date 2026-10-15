@@ -70,6 +70,20 @@ from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 
 # ---------- main ----------
 
+class _JsonArgumentParser(argparse.ArgumentParser):
+    """参数错误（缺必填项 / 子命令打错）也给 agent 一行结构化 JSON。
+
+    argparse 默认只往 stderr 打 usage、stdout 为空——plugin run.sh 会把"没输出"当成
+    拉包失败去提示查网络 / uv sync（#413 评审）。子 parser 经 add_subparsers 自动沿用本类。
+    """
+
+    def error(self, message: str):  # type: ignore[override]
+        self.print_usage(sys.stderr)
+        _print_json({"status": "error", "error": f"{self.prog}: {message}",
+                     "hint": "参数不对：看上面的 usage，或查 skills/invest/references/tools.md"})
+        sys.exit(2)
+
+
 def main() -> None:
     # mcp 子命令最先分流：stdout 是 JSON-RPC 通道，不能进下面的重定向/argparse 输出
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
@@ -84,7 +98,7 @@ def main() -> None:
     # _print_json 用 sys.__stdout__ 写真正的 JSON。
     sys.stdout = sys.stderr
 
-    parser = argparse.ArgumentParser(prog="skill")
+    parser = _JsonArgumentParser(prog="skill")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status").set_defaults(func=cmd_status)
