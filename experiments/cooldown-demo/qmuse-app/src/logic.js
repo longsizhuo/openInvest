@@ -27,7 +27,7 @@ function size(svg, h) { const w = Math.max(240, Math.round(svg.clientWidth)); sv
 
 // 图里只有程序算的数字和日期，不放任何模型文本，所以用 innerHTML 拼 SVG 是安全的
 function drawChart(D) {
-  const n = D.c.length, R = 40, K = ["c", "ma20", "ma60", "ma120", "ma250"], COL = { c: T.nav, ma20: T.ma20, ma60: T.ma60, ma120: T.ma120, ma250: T.ma250 };
+  const n = D.c.length, R = 48, K = ["c", "ma20", "ma60", "ma120", "ma250"], COL = { c: T.nav, ma20: T.ma20, ma60: T.ma60, ma120: T.ma120, ma250: T.ma250 };
   const last = n - 1, lg = $("lg"); lg.textContent = "";
   [["", D.d[last], "#5F5E5A"], ["净值 ", D.c[last], T.nav], ["MA20 ", D.ma20[last], T.ma20], ["MA60 ", D.ma60[last], T.ma60], ["MA120 ", D.ma120[last], T.ma120], ["MA250 ", D.ma250[last], T.ma250]]
     .forEach(([k, v, c]) => { if (v == null) return; const s = el("span", null, k + (typeof v === "number" ? v.toFixed(3) : v)); s.style.color = c; lg.append(s); });
@@ -37,7 +37,9 @@ function drawChart(D) {
   const i0 = D.d.findIndex((d) => d >= D.peak), i1 = D.d.findIndex((d) => d >= D.trough);
   let m = `<rect x="${X(i0)}" y="0" width="${X(i1) - X(i0)}" height="200" fill="#E24B4A" opacity=".07"/>`;
   for (let t = 0; t <= 3; t++) { const v = lo + (hi - lo) * t / 3; m += `<line x1="0" x2="${PW}" y1="${Y(v)}" y2="${Y(v)}" stroke="${T.grid}"/><text x="${PW + 6}" y="${Y(v) + 4}" fill="${T.axis}" font-size="11">${v.toFixed(2)}</text>`; }
-  m += `<text x="${(X(i0) + X(i1)) / 2}" y="14" text-anchor="middle" fill="#A32D2D" font-size="11">最大回撤 ${D.mdd}%</text>`;
+  // 回撤区间靠右时标签改右对齐、不越过绘图区，免得压到右侧刻度（手机窄屏实测重叠）
+  const mx = (X(i0) + X(i1)) / 2, right = mx > PW - 60;
+  m += `<text x="${right ? PW - 4 : mx}" y="14" text-anchor="${right ? "end" : "middle"}" fill="#A32D2D" font-size="11">最大回撤 ${D.mdd}%</text>`;
   ["ma250", "ma120", "ma60", "ma20"].forEach((k) => m += `<path d="${path(k)}" fill="none" stroke="${COL[k]}" stroke-width="1"/>`);
   m += `<path d="${path("c")}" fill="none" stroke="${T.nav}" stroke-width="1.5"/>`;
   $("m").innerHTML = m;

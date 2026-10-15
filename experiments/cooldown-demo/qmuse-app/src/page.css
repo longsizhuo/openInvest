@@ -63,7 +63,7 @@
   .it-bar button[aria-selected="true"] { background: var(--ink); color: #fff; }
   .it-bar .cp { margin-left: auto; font-size: 12px; padding: 5px 10px; border: 1px solid #D3D1C7; color: var(--ink); }
   .it-cmd { overflow-x: auto; padding: 12px 14px; background: #F6F5F1; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .it-cmd div { white-space: pre; }
+  .it-cmd div { white-space: pre-wrap; overflow-wrap: anywhere; }   /* 手机窄屏折行，不截断；复制按钮仍复制原命令 */
   .it-cmd div::before { content: "$ "; color: var(--mute); }
   .it-note { margin: 0; padding: 9px 14px; font-size: 12px; color: var(--sub); }
   @media (prefers-reduced-motion: reduce) { .sk { animation: none; } .wt .bar i { transition: none; } }
