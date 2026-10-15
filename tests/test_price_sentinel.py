@@ -229,3 +229,22 @@ class TestRun:
         monkeypatch.setattr(EventStore, "upsert_event", real_upsert)
         out2 = ps.run(dry_run=False)
         assert "AAA" not in out2["symbols"]
+
+
+def test_fetch_frames_ignores_trailing_nan_bar(monkeypatch):
+    """5 分钟线末根 Close=NaN 时取最后一根有效价，不让涨跌幅变 NaN 静默漏报"""
+    import pandas as pd
+    import yfinance as yf
+
+    n = ps._WINDOW_BARS + 2
+    idx = pd.date_range("2026-10-15 01:30", periods=n + 1, freq="5min", tz="UTC")
+    intraday = pd.DataFrame({"Close": [100.0] * n + [float("nan")]}, index=idx)
+    intraday.iloc[n - 1, 0] = 103.0
+    daily = pd.DataFrame({"Close": [100.0] * 30, "High": [101.0] * 30, "Low": [99.0] * 30},
+                         index=pd.date_range("2026-08-01", periods=30, tz="UTC"))
+    monkeypatch.setattr(yf, "Ticker", lambda sym: SimpleNamespace(
+        history=lambda period, interval: intraday if interval == "5m" else daily))
+    frames = ps._fetch_frames("GC=F")
+    assert frames["price"] == 103.0
+    assert all(c == c for c in frames["closes"])  # 无 NaN
+    assert frames["last_bar_utc"] == idx[n - 1].to_pydatetime()

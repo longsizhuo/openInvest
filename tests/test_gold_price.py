@@ -150,3 +150,18 @@ def test_get_gold_snapshot_returns_none_when_all_fail():
         instance.get_latest_price.return_value = None
         result = get_gold_snapshot(offset_pct=0.0)
     assert result is None
+
+
+def test_get_gold_snapshot_skips_half_formed_nan_bar():
+    """末根 Close=NaN（收盘前半成型 bar）→ 取最后一根有效收盘，不把金价算成 NaN"""
+    idx = pd.date_range("2026-10-08", periods=3, tz="America/New_York")
+    frames = {
+        "GC=F": pd.DataFrame({"Close": [4500.0, 4510.0, float("nan")]}, index=idx),
+        "USDCNY=X": pd.DataFrame({"Close": [6.80, 6.81, float("nan")]}, index=idx),
+    }
+    with patch("openinvest.utils.gold_price.yf.Ticker") as MockTicker, \
+         patch("openinvest.db.market_store.MarketStore"):
+        MockTicker.side_effect = lambda sym: MagicMock(history=lambda **kw: frames[sym])
+        snap = get_gold_snapshot(offset_pct=0.0)
+    assert snap is not None and snap.is_stale is False
+    assert snap.gold_usd_per_oz == 4510.0 and snap.usdcny_rate == 6.81

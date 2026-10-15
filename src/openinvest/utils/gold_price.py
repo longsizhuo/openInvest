@@ -90,8 +90,10 @@ def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
     """
     try:
         # 5d 而不是 1d：缓存时顺手把前几根定稿（见 _cache_bars）；现价仍取最后一根
-        gold_df = yf.Ticker("GC=F").history(period="5d")
-        usdcny_df = yf.Ticker("USDCNY=X").history(period="5d")
+        # 收盘前半成型 bar 的 Close 是 NaN：直读 yfinance 不经 exchange_fee 的入库闸，
+        # 取 iloc[-1] 会把整个金价算成 NaN —— 先丢掉，现价取最后一根有效收盘
+        gold_df = yf.Ticker("GC=F").history(period="5d").dropna(subset=["Close"])
+        usdcny_df = yf.Ticker("USDCNY=X").history(period="5d").dropna(subset=["Close"])
         if gold_df.empty or usdcny_df.empty:
             print("⚠️ 黄金数据为空，尝试 DB 兜底")
             return _get_db_fallback_snapshot(offset_pct)

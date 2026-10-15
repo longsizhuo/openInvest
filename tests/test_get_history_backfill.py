@@ -80,3 +80,17 @@ def test_fetch_failure_flagged_in_attrs(recording_yf, monkeypatch):
     monkeypatch.setattr(ef._STORE, "get_history_df", lambda s, days=730: today.copy())
     assert ef.get_history_data("FRESH2.SS").attrs["yf_fetch_failed"] is False
     assert recording_yf.last_period is None  # 库已是今天，没拉取
+
+
+def test_half_formed_nan_bar_is_not_stored(monkeypatch):
+    """yfinance 末根 Close=NaN（收盘前半成型 bar）不落库 → 经 get_history_data 读价的
+    路径（loaders / quotes / fx）取 iloc[-1] 拿到的是上一根有效收盘，不是 NaN。
+    直读 yfinance 的 gold_price / price_sentinel 不经过这道闸，各自 dropna。"""
+    idx = pd.to_datetime(["2020-01-02", "2020-01-03"])
+    monkeypatch.setattr(ef.yf, "Ticker", lambda s: type("T", (), {
+        "history": lambda self, period=None, **kw: pd.DataFrame({"Close": [4.389, float("nan")]}, index=idx)})())
+    monkeypatch.setattr(ef._STORE, "get_history_df", lambda s, days=730: pd.DataFrame())
+    saved = []
+    monkeypatch.setattr(ef._STORE, "save_generic_price", lambda sym, d, close, **kw: saved.append((d, close)))
+    ef.get_history_data("NANBAR.SS")
+    assert saved == [("2020-01-02", 4.389)]

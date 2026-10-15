@@ -124,6 +124,8 @@ def _fetch_frames(symbol: str) -> Optional[Dict[str, Any]]:
 
         t = yf.Ticker(symbol)
         intraday = t.history(period="1d", interval="5m")
+        # 末根 Close=NaN（半成型 bar）会让涨跌幅变 NaN、比较全为 False → 这一轮静默不报
+        intraday = intraday.dropna(subset=["Close"]) if intraday is not None else None
         if intraday is None or len(intraday) < _WINDOW_BARS + 1:
             return None
         closes = [float(v) for v in intraday["Close"].tolist()]
