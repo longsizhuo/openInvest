@@ -49,6 +49,10 @@ def build_valuation_brief(
     Returns:
         多行文本；非权益类 / 取不到任何字段 / 异常 → "" （graceful loader 契约）。
     """
+    # 场外基金（FUND:<代码>，东方财富净值）不是 yfinance 代码：去查只会 404、白等一次网络往返
+    # （演示站每次辩论都在日志里留一条 "Quote not found for symbol: FUND:…"），而且基金没有 PE。
+    if symbol.upper().startswith("FUND:"):
+        return ""
     try:
         import yfinance as yf
         info = yf.Ticker(symbol).info or {}

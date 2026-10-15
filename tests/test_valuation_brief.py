@@ -125,3 +125,15 @@ def test_pe_thresholds_come_from_config(monkeypatch):
         assert ">40" in brief2  # brief 文案里的阈值数字跟着 config 走
     finally:
         reset_config()
+
+
+def test_otc_fund_symbol_skips_yfinance(monkeypatch):
+    """场外基金 FUND:<代码> 不是 yfinance 代码：不发请求、直接返回 ''（原先每次 404 白等一轮）"""
+    import yfinance as yf
+
+    def _boom(sym):
+        raise AssertionError(f"不该为 {sym} 调 yfinance")
+    monkeypatch.setattr(yf, "Ticker", _boom)
+    from openinvest.utils.valuation import build_valuation_brief
+
+    assert build_valuation_brief("FUND:110011", price_quantile_2y=0.4) == ""
