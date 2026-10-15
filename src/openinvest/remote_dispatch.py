@@ -205,10 +205,15 @@ def _h_buy(args: argparse.Namespace) -> None:
             "hint": "在 hub 机器上跑 `run.sh buy ... --existing-position`，"
                     "或用 remote MCP 的 `record_existing_position` 工具。",
         })
-    _print_response_or_die(_request("POST", "/api/skill/buy", json_body={
+    body = {
         "symbol": args.symbol, "units": float(args.units), "price": float(args.price),
-        "currency": args.currency, "kind": args.kind, "unit_label": args.unit_label,
-    }))
+        "kind": args.kind, "unit_label": args.unit_label,
+    }
+    # 不写 --currency 就不带这个键（不发 null）：新 hub 按持仓币种记；还没升级的 hub
+    # 回落到它自己的默认 CNY，至少不会因为 null 校验失败而 422
+    if args.currency:
+        body["currency"] = args.currency
+    _print_response_or_die(_request("POST", "/api/skill/buy", json_body=body))
 
 
 def _h_sell(args: argparse.Namespace) -> None:

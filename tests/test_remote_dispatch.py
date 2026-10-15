@@ -117,6 +117,15 @@ def test_buy_maps_400_to_cli_error(recorder, capfd):
     assert out["status"] == "error" and "units / price" in out["error"]
 
 
+def test_buy_without_currency_omits_the_key(recorder, capfd):
+    """不写 --currency 不发 currency 键：新 hub 沿用持仓币种，旧 hub 也不会因 null 而 422"""
+    recorder["routes"][f"POST {BASE}/api/skill/buy"] = FakeResponse(200, {"status": "ok"})
+    rd.maybe_dispatch_remote(Namespace(
+        cmd="buy", symbol="NDQ.AX", units=1, price=60, currency=None, kind="etf", unit_label="股",
+    ))
+    assert "currency" not in recorder["calls"][0]["json"]
+
+
 def test_buy_existing_position_refused_not_forwarded(recorder, capfd):
     # /api/skill/buy 不认这个字段：转发出去 hub 会扣现金，必须本地拒绝、一个请求都不发
     with pytest.raises(SystemExit) as exc:
