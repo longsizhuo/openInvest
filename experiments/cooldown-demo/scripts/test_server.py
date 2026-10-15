@@ -132,3 +132,12 @@ def test_sample_runs_once_a_day_without_quota_and_retries_failures_bounded(clien
 def test_sample_unavailable_when_fund_lookup_fails(client, monkeypatch):
     monkeypatch.setattr(server, "fund_facts", lambda code: (_ for _ in ()).throw(RuntimeError("down")))
     assert client.get("/api/sample").status_code == 503
+
+
+def test_home_redirects_to_registered_mirror_unless_disabled(client, monkeypatch):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "https://render.qmuse.pub/p/muse/7129971474537804"
+    monkeypatch.setattr(server, "HOME_REDIRECT", "")
+    page = client.get("/")
+    assert page.status_code == 200 and "<html" in page.text.lower()

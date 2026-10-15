@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
 import cooldown
@@ -35,6 +35,9 @@ import cooldown
 # 一次委员会约 ¥0.01（deepseek-v4-flash，2026-10 实测），全站 100 次/天 ≈ ¥1/天封顶
 PER_IP_DAILY = int(os.getenv("COOLDOWN_PER_IP_DAILY", "3"))
 GLOBAL_DAILY = int(os.getenv("COOLDOWN_GLOBAL_DAILY", "100"))
+# 首页跳到参赛登记的 QMuse 镜像：那个页面带支付宝访问统计，自有域名的访问大赛看不到。
+# 镜像的 /api/ 仍打到本服务。QMuse 挂了就设成空串回退为本站页面（302 不被浏览器长期缓存）。
+HOME_REDIRECT = os.getenv("COOLDOWN_HOME_REDIRECT", "https://render.qmuse.pub/p/muse/7129971474537804")
 # 查基金（下载东方财富净值）另算一份更宽的额度，在下载之前扣——查不到的代码也算
 LOOKUP_PER_IP_DAILY = int(os.getenv("COOLDOWN_LOOKUP_PER_IP_DAILY", "30"))
 LOOKUP_GLOBAL_DAILY = int(os.getenv("COOLDOWN_LOOKUP_GLOBAL_DAILY", "2000"))
@@ -279,8 +282,10 @@ def _public(facts: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in facts.items() if k != "metrics"}
 
 
-@app.get("/")
-def index() -> FileResponse:
+@app.get("/", response_model=None)
+def index() -> FileResponse | RedirectResponse:
+    if HOME_REDIRECT:
+        return RedirectResponse(HOME_REDIRECT, status_code=302)
     return FileResponse(Path(__file__).with_name("index.html"))
 
 
