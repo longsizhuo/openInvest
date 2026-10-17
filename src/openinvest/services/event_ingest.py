@@ -15,9 +15,14 @@ upsert（event_id 唯一键）。agent 重发同一条新闻不会重复入账�
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
+
+# 宿主 agent 自报身份（落 events.ingested_by，之后渲染进 Macro brief 头行）只放行这几类字符，
+# 其余替换成 _ 并截到 32：防止用身份串伪造 brief 头行（"] [risk/high] [GC=F"、换行）
+_AGENT_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent") -> Dict[str, Any]:
@@ -35,6 +40,8 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
         committee_task_id: 新事件过闸且未被冷却/日上限拦下时触发的委员会 task（否则 None）
         缺 LLM key → {status: "error", error, hint}（归一化必须 LLM，无降级路径）
     """
+    ingested_by = _AGENT_ID_SAFE_RE.sub("_", str(ingested_by or ""))[:32] or "host-agent"
+
     from openinvest.db.event_store import EventStore
     from openinvest.services.embeddings import DEFAULT_DIM
     from openinvest.services.event_normalizer import normalize

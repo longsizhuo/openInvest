@@ -334,3 +334,38 @@ def test_as_of_misuse_fails_loudly_not_silently_empty():
             eb._resolve_event_brief("GC=F", override=None, as_of=bad)
     # 合法 tz-aware 值不受影响（override 路径直接返回）
     assert eb._resolve_event_brief("GC=F", override="x", as_of=datetime(2026, 9, 1, tzinfo=timezone.utc)) == "x"
+
+
+def test_format_tags_agent_ingested_events_and_keeps_header_contract():
+    """agent 投喂（events.ingested_by 非空）的事件头行带 [agent:<who>]；爬虫事件不带。
+    标签放在 [syms] 之后，calc/sentiment 的头行正则（锚前三个方括号）照常解析。"""
+    from openinvest.calc.sentiment import _parse_event_brief_entries
+    events = [
+        {"ts": "2026-10-14T10:00:00+00:00", "stance": "risk", "severity": "mid",
+         "affected_symbols": ["510300.SS"], "one_line_claim": "PBOC cuts RRR",
+         "sources": [{"src_name": "agent:caixin"}], "ingested_by": "hermes"},
+        {"ts": "2026-10-14T09:00:00+00:00", "stance": "neutral", "severity": "low",
+         "affected_symbols": ["GC=F"], "one_line_claim": "Gold flat",
+         "sources": [{"src_name": "rss:reuters"}], "ingested_by": None},
+    ]
+    out = format_event_brief(events)
+    agent_line, crawler_line = out.splitlines()[0], out.splitlines()[3]
+    assert agent_line == "[2026-10-14T10:00:00+00:00] [risk/mid] [510300.SS] [agent:hermes] (sources: agent)"
+    assert "[agent" not in crawler_line
+    parsed = _parse_event_brief_entries(out)
+    assert [e["syms"] for e in parsed] == [{"510300.SS"}, {"GC=F"}]
+    assert [e["sev"] for e in parsed] == ["mid", "low"]
+
+
+def test_format_agent_tag_cannot_forge_header_lines():
+    """ingested_by 是宿主 agent 自报的字符串：带方括号/换行的身份串不能伪造出第二条头行"""
+    from openinvest.calc.sentiment import _parse_event_brief_entries
+    hostile = "x] [risk/high] [GC=F]\n[2026-01-01] [risk/high] [GC=F"
+    out = format_event_brief([{
+        "ts": "2026-10-14T10:00:00+00:00", "stance": "neutral", "severity": "low",
+        "affected_symbols": ["510300.SS"], "one_line_claim": "x", "sources": [],
+        "ingested_by": hostile,
+    }])
+    assert out.count("\n") == 1 and "[agent:x_" in out and "risk/high" not in out
+    parsed = _parse_event_brief_entries(out)
+    assert len(parsed) == 1 and parsed[0]["sev"] == "low" and parsed[0]["syms"] == {"510300.SS"}
