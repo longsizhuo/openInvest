@@ -110,6 +110,56 @@ def _run_utc_morning_case():
     assert [t["id"] for t in got] == [1]
 
 
+def _bt(ts, tid=1):
+    return {"id": tid, "verdict_id": None, "symbol": "GC=F", "direction": "BUY",
+            "units": 1, "ts": ts, "status": "executed"}
+
+
+def test_match_trades_run_at_excludes_trades_before_verdict():
+    """裁决 10:00：同日 09:00 的买入不是"执行了该决议"；10:30 的才算。
+    UTC 带时区的成交（trades.db 口径）同样按本地时间比。"""
+    from datetime import timezone
+    args = ("2026-07-03/GC=F", "2026-07-03", "GC=F", "ACCUMULATE")
+    run_at = "2026-07-03T10:00:00"
+    assert _match_trades([_bt("2026-07-03T09:00:00")], *args, run_at=run_at) == []
+    assert [t["id"] for t in _match_trades([_bt("2026-07-03T10:30:00")], *args, run_at=run_at)] == [1]
+    # 带 tz 的成交：本地 09:00 / 10:30 换成 UTC 串，结论与本地口径一致（与进程时区无关）
+    utc = lambda h, m: datetime(2026, 7, 3, h, m).astimezone(timezone.utc).isoformat()
+    assert _match_trades([_bt(utc(9, 0))], *args, run_at=run_at) == []
+    assert [t["id"] for t in _match_trades([_bt(utc(10, 30))], *args, run_at=run_at)] == [1]
+    # 坏 run_at → 退回同日口径，不抛
+    assert [t["id"] for t in _match_trades([_bt("2026-07-03T09:00:00")], *args, run_at="garbage")] == [1]
+
+
+def test_match_trades_without_run_at_keeps_same_day_window():
+    """老 transcript 没有 Run at：保持旧口径（决议日 00:00 起），09:00 的买入仍匹配。"""
+    args = ("2026-07-03/GC=F", "2026-07-03", "GC=F", "ACCUMULATE")
+    assert [t["id"] for t in _match_trades([_bt("2026-07-03T09:00:00")], *args)] == [1]
+    assert [t["id"] for t in _match_trades([_bt("2026-07-03T09:00:00")], *args, run_at=None)] == [1]
+
+
+def test_list_decisions_uses_transcript_run_at(monkeypatch, tmp_path):
+    """端到端：transcript 的 **Run at** 经 parse_committee_text 进 list_decisions 的匹配下界。"""
+    import openinvest.core.memory_store as ms
+    import openinvest.db.trades_db as trades_db_mod
+
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    monkeypatch.setattr(trades_db_mod, "TradesDB", _FakeTradesDB)
+    date = datetime.now().strftime("%Y-%m-%d")
+    monkeypatch.setattr(_FakeTradesDB, "_TRADES", [
+        _bt(f"{date}T09:00:00", 1), _bt(f"{date}T10:30:00", 2)], raising=False)
+    d = tmp_path / ".committee" / date
+    d.mkdir(parents=True)
+    (d / "GC_F.md").write_text(
+        f"# Committee: 伦敦金\n\n**Date**: {date}\n**Symbol**: GC=F\n**Run at**: {date}T10:00:00\n"
+        f"**Verdict**: ACCUMULATE (confidence 0.70)\n**Suggested allocation CNY**: 1,000\n",
+        encoding="utf-8",
+    )
+    got = next(x for x in list_decisions(days=30) if x["decision_id"] == f"{date}/GC=F")
+    assert [t["id"] for t in got["matched_trades"]] == [2]
+    assert got["executed"] is True
+
+
 def test_vid_matches_legacy_transcript_path():
     """旧文档口径（transcript 路径）也要能显式关联（review finding #5）。"""
     from openinvest.core.decision_ledger import _vid_matches

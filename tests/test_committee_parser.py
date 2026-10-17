@@ -505,6 +505,25 @@ def test_single_invest_cap_leaves_sell_side_alone():
     assert "_single_invest_cap" not in r
 
 
+def test_single_invest_cap_ignores_non_buy_verdicts():
+    """钳制只管入场（BUY/ACCUMULATE）：HOLD/TRIM/SELL 带正数金额不钳、不记干预、不加"钳制"句。"""
+    from openinvest.core.committee.cio_parse import single_invest_cap_note
+    for v in ("HOLD", "SELL"):
+        r = parse_cio_memo(f"VERDICT: {v}\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 25000",
+                           single_invest_cap=1000)
+        assert r["verdict"] == v and r["alloc_cny"] == 25000
+        assert "_single_invest_cap" not in r and single_invest_cap_note(r) == ""
+
+
+def test_single_invest_cap_note_says_per_order_not_daily():
+    """agent 曾把"单次上限"讲成"当日额度"——note 必须写明是每笔上限、可分多笔。"""
+    from openinvest.core.committee.cio_parse import single_invest_cap_note
+    r = parse_cio_memo("VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 4800",
+                       single_invest_cap=1000)
+    note = single_invest_cap_note(r)
+    assert "每笔建议金额上限" in note and "非当日额度" in note and "可分多笔" in note
+
+
 def test_single_invest_cap_runs_after_ceiling_and_keeps_true_original():
     """Sanity 2（±100k 天文数字钳）先、Sanity 6 后；_original_alloc 保住最初的 LLM 原值"""
     r = parse_cio_memo("VERDICT: BUY\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 999999",

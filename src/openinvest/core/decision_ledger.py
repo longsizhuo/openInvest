@@ -277,7 +277,8 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
             rv = next((r for r in reviews
                        if r.get("date") == date and r.get("asset") == symbol
                        and r.get("source") == "live"), None)
-            matched = _match_trades(trades, decision_id, date, symbol, parsed["verdict"])
+            matched = _match_trades(trades, decision_id, date, symbol, parsed["verdict"],
+                                    run_at=parsed.get("run_at"))
             decl = executions.get(decision_id)
 
             executed: Optional[bool] = None  # None = 未知（无声明也无匹配依据）

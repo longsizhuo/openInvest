@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from openinvest.calc.symbols import safe_symbol
 
@@ -66,10 +66,22 @@ def _vid_matches(vid: str, decision_id: str, date: str, symbol: str) -> bool:
     return tail == [date, _safe_stem(symbol)]
 
 
+def _local_naive(dt: datetime) -> datetime:
+    """trades.db 的 ts 是 UTC（带 tz）；决议日期 / Run at 是本地日历时间。统一转本地 naive 再比。"""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone()
+    return dt.replace(tzinfo=None)
+
+
 def _match_trades(
     trades: List[Dict[str, Any]], decision_id: str, date: str, symbol: str, verdict: str,
+    run_at: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """决议 ↔ 成交自动匹配：显式 verdict_id 优先；否则决议日起 7 天内同标的同向成交。"""
+    """决议 ↔ 成交自动匹配：显式 verdict_id 优先；否则决议后 7 天内同标的同向成交。
+
+    窗口下界：有 run_at（transcript 的 `**Run at**`，本地时间）→ 只算成交时间 ≥ run_at 的单
+    （裁决之前的同日买入不是"执行了该决议"）；无 run_at（老 transcript）→ 退回决议日 00:00。
+    """
     explicit = [t for t in trades
                 if t.get("verdict_id") and _vid_matches(t["verdict_id"], decision_id, date, symbol)]
     if explicit:
@@ -82,6 +94,13 @@ def _match_trades(
     except ValueError:
         return []
     d1 = d0 + timedelta(days=MATCH_WINDOW_DAYS)
+    if run_at:
+        try:
+            lo = _local_naive(datetime.fromisoformat(run_at))
+        except ValueError:
+            lo = d0  # run_at 坏值 → 退回同日口径
+    else:
+        lo = d0
     out = []
     for t in trades:
         if t.get("symbol") != symbol or t.get("direction") != want:
@@ -94,10 +113,8 @@ def _match_trades(
             continue
         # trades.db 的 ts 是 UTC；决议日期是本地日历日。先转本地再比，
         # 否则 UTC+8 用户决议日早上的成交会落在窗口外（差 8 小时）
-        if ts.tzinfo is not None:
-            ts = ts.astimezone()
-        ts = ts.replace(tzinfo=None)
-        if d0 <= ts <= d1:
+        ts = _local_naive(ts)
+        if lo <= ts <= d1:
             out.append(t)
     return out
 
