@@ -102,6 +102,11 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
                                                         (X is a yfinance symbol in the user's
                                                         portfolio; --gold-pct / --ndq-pct kept
                                                         for legacy usage)
+   "do I need to rebalance / what to buy or sell to
+    get back to my target allocation / 要不要再平衡"  → run.sh rebalance_plan [--mode hybrid|cash_only|
+                                                        sell_to_rebalance] [--band-pct 5] — a list
+                                                        only (BUY/SELL, whole lots, reason); the user
+                                                        places the orders; quote amounts from the JSON
    "should I buy/sell X / analyze X / 该不该买卖X"    → committee protocol ↓
    "track AAPL / I want to watch TSLA / 跟踪苹果"     → see references/adding-assets.md
    "I already held 3000 X before using this /
@@ -233,7 +238,7 @@ add `Authorization: Bearer $INVEST_API_TOKEN` when curling.
 ## Tool lookup (MCP first; long tail in references/tools.md)
 
 **MCP users** (auto-registered once the plugin is installed; same for Claude Code / Codex): status / strategy /
-history / live_prices / what_if / discipline / decisions / explain_decision /
+history / live_prices / what_if / rebalance_plan / discipline / decisions / explain_decision /
 record_execution / ingest_event / buy / record_existing_position / sell / deposit / withdraw /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
 run_committee — schemas auto-discovered; call them directly, no table lookup needed.
