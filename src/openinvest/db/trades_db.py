@@ -22,6 +22,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from openinvest.db.wal import checkpoint as _wal_checkpoint
 from openinvest.paths import INVEST_ROOT
 
 # trades.db 存放在 db/ 目录下，与 market_data.db 同级
@@ -62,6 +63,11 @@ class TradesDB:
 
         self._lock = threading.RLock()
         self._init_db()
+
+    def checkpoint(self) -> Dict[str, int]:
+        """把 WAL 里已提交的写刷进主库文件并截断（备份前调用，见 db/wal.py）。"""
+        with self._lock:
+            return _wal_checkpoint(self.conn)
 
     def _init_db(self) -> None:
         """建表 + 索引 + schema 迁移（全部幂等）"""

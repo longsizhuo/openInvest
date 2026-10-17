@@ -333,7 +333,17 @@ INVEST_HOME=~/openInvest uv run python -m scripts.snapshot restore --in ~/invest
 **和账本（`portfolio.md` + `trades.db`，落 `invest_ledger/`）**推到私有 repo
 `openinvest-research-archive`。这是当前唯一的机外副本——别误删那条 cron。
 
-### 每天本地冷备（可选，建议加）
+### 每天自动本地备份（内置 job `backup`，默认开）
+
+调度器每天 03:30（Asia/Shanghai）跑 `jobs/backup.py`：先对 `trades.db` / `insights.db` /
+`jobs.sqlite` 做 `checkpoint(TRUNCATE)`（把 WAL 里还没落盘的成交刷进主库——调度器长驻连接期间
+不会自己做），再把 `memory/`（排除 `*.lock` / `*.bak.*`）+ 这三个库打成
+`$INVEST_HOME/.backups/auto_<UTC时间戳>.zip`，只留最近 14 份 `auto_*`（手动备份不动）。
+不备 `market_data.db` / `events.db`（可重拉的缓存）与 `.env`。失败抛异常 → `job_watchdog` 告警。
+zip 内路径相对数据根目录，恢复用 `plugin/skills/invest-backup` 的 `run.sh restore <zip>`。
+这是机内冷备，不替代上面的每周异地备份。
+
+### 每天本地冷备（tar.gz，可选）
 
 ```bash
 # 每天 cron——直接复用 snapshot.py，一份 tar 含全部权威状态

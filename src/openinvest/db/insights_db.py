@@ -18,6 +18,7 @@ import sqlite3
 import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from openinvest.db.wal import checkpoint as _wal_checkpoint
 from openinvest.paths import INVEST_ROOT
 
 # 默认路径与 market_store.py 同目录
@@ -50,6 +51,11 @@ class InsightsDB:
 
         self._lock = threading.RLock()
         self._init_schema()
+
+    def checkpoint(self) -> Dict[str, int]:
+        """把 WAL 里已提交的写刷进主库文件并截断（备份前调用，见 db/wal.py）。"""
+        with self._lock:
+            return _wal_checkpoint(self.conn)
 
     def _init_schema(self) -> None:
         """初始化 schema（幂等）"""
