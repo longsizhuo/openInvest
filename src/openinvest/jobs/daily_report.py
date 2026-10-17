@@ -19,8 +19,6 @@ import subprocess
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from dotenv import load_dotenv
-
 log = logging.getLogger(__name__)
 
 # 三路径统一架构（2026-05-16）：daily_report 不再直接 import core.committee 原语,
@@ -48,8 +46,6 @@ from openinvest.utils.exchange_fee import (
 )
 from openinvest.utils.gold_price import format_gold_report, get_gold_snapshot
 from openinvest.utils.quotes import get_quote, is_eastmoney_fund
-
-load_dotenv()
 
 # 数据陈旧阈值与硬熔断通过 load_config() 动态加载以支持运行时配置，env/默认只作 bootstrap
 

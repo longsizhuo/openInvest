@@ -13,10 +13,11 @@ from urllib.parse import quote, urlsplit
 
 import markdown
 import nh3
-from dotenv import load_dotenv
 from markdown.extensions.tables import TableExtension
 
-load_dotenv()
+# .env 只在 openinvest.paths 单点加载（INVEST_ROOT/.env）。原先这里的裸 load_dotenv() 向上搜目录，
+# worktree 跑测试会读到主 checkout 的生产 .env——2026-10-13 真把 fixture verdict 发进了 Discord DM。
+import openinvest.paths  # noqa: F401
 
 
 class EmailDeliveryError(RuntimeError):

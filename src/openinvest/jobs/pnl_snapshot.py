@@ -39,8 +39,6 @@ from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
-from dotenv import load_dotenv
-
 from openinvest.core.benchmarks import (
     BENCHMARKS,
     BenchmarkSeries,
@@ -77,8 +75,6 @@ from openinvest.jobs.pnl_render import _outperform_events as _outperform_events_
 from openinvest.jobs.pnl_render import render_svg as _render_svg_pure
 from openinvest.utils.gold_price import get_gold_snapshot
 from openinvest.paths import INVEST_ROOT
-
-load_dotenv()
 
 ROOT = INVEST_ROOT
 HISTORY_PATH = ROOT / "memory" / ".state" / "pnl_history.jsonl"
