@@ -254,9 +254,14 @@ def test_history_as_trades_shapes_and_filters():
         {"ts": "2026-07-03T11:00:00+08:00", "action": "deposit", "symbol": "CNY", "units": 100},
         {"ts": "2026-07-03T12:00:00+08:00", "action": "buy", "symbol": "AAPL", "units": 1,
          "source": "mcp:existing_position", "funding_source": "external_funding"},
+        {"ts": "2026-07-03T13:00:00+08:00", "action": "buy", "symbol": "NDQ.AX", "units": 1,
+         "source": "dca_daily", "funding_source": "external_funding"},
+        {"ts": "2026-07-03T14:00:00+08:00", "action": "bought", "symbol": "NDQ.AX", "units": 3},
     ])
+    # dca_daily 自动定投被滤掉；CommSec 回灌（无 source）是真券商成交，保留
     assert [(t["symbol"], t["direction"], t["status"]) for t in got] == [
-        ("GC=F", "BUY", "executed"), ("BHP.AX", "SELL", "executed")]
+        ("GC=F", "BUY", "executed"), ("BHP.AX", "SELL", "executed"), ("NDQ.AX", "BUY", "executed")]
+    assert got[2]["id"] == "history:5"
     assert got[0]["id"] == "history:0" and got[0]["verdict_id"] is None
     assert got[1]["ts"] == "2026-07-03T10:00:01+08:00"  # ts_origin（本地时区）优先
 
@@ -306,3 +311,15 @@ def test_list_decisions_matches_agent_buy_from_portfolio_history(monkeypatch, tm
                                 source_type="external_funding")
     aapl = next(d for d in list_decisions(days=30) if d["decision_id"] == f"{date}/AAPL")
     assert aapl["executed"] is None and aapl["matched_trades"] == []
+
+    # 反向 2：自动定投（jobs/dca_daily.py 写 source="dca_daily"）不算执行决议——生产 90 天 66 笔
+    # 买入 64 笔是它，算进去采纳率直接虚高
+    (committee_dir / "NDQ_AX.md").write_text(
+        f"# Committee: NDQ\n\n**Date**: {date}\n**Symbol**: NDQ.AX\n"
+        f"**Verdict**: ACCUMULATE (confidence 0.70)\n**Suggested allocation CNY**: 1,000\n",
+        encoding="utf-8",
+    )
+    PortfolioManager(store).buy("NDQ.AX", 1, 60.0, currency="AUD", kind="etf", source="dca_daily",
+                                source_type="external_funding")
+    ndq = next(d for d in list_decisions(days=30) if d["decision_id"] == f"{date}/NDQ.AX")
+    assert ndq["executed"] is None and ndq["matched_trades"] == []

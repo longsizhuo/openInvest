@@ -23,19 +23,25 @@ MATCH_WINDOW_DAYS = 7
 # delete_holding 不是成交，不映射。
 _HISTORY_DIRECTION = {"buy": "BUY", "bought": "BUY", "sell": "SELL", "sold": "SELL"}
 
+# 不是"人看了决议后下的单"的自动写入源：定投 cron（jobs/dca_daily.py）按固定计划买，生产 90 天
+# 66 笔买入里 64 笔是它——若算作执行了同标的的 ACCUMULATE，采纳率会虚高。CommSec 邮件回灌
+# （source 为空 / commsec）是用户在券商真下的单，保留。
+_AUTO_SOURCES = frozenset({"dca_daily"})
+
 
 def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """memory/portfolio_history.jsonl 的成交记录 → 与 trades.db 行同形的 dict，喂给 _match_trades。
 
     MCP / CLI 的 buy/sell 只写 portfolio_history.jsonl、从不写 trades.db——不做这一步，
     "7 天内同标的同向成交自动匹配"只对 REST /api/trades/record 成立，agent 路径永远匹配不上。
-    补录已有持仓（source 带 ':existing_position'）不是执行决议，跳过。id 用 "history:<行号>"
-    与 trades.db 的整数 id 区分。
+    补录已有持仓（source 带 ':existing_position'）和自动定投等 _AUTO_SOURCES 不是"执行了决议"，
+    跳过。id 用 "history:<行号>" 与 trades.db 的整数 id 区分。
     """
     out: List[Dict[str, Any]] = []
     for i, r in enumerate(records):
         direction = _HISTORY_DIRECTION.get(str(r.get("action", "")).lower())
-        if not direction or ":existing_position" in str(r.get("source", "")):
+        source = str(r.get("source") or "")
+        if not direction or ":existing_position" in source or source in _AUTO_SOURCES:
             continue
         out.append({
             "id": f"history:{i}", "ts": r.get("ts_origin") or r.get("ts"), "verdict_id": None,
