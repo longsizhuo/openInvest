@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.26.0...invest-skill-v0.27.0) (2026-10-17)
+
+
+### Features
+
+* **portfolio:** real-account TWR/XIRR/drawdown/benchmark in status and daily report ([#433](https://github.com/longsizhuo/openInvest/issues/433)) ([74dac7b](https://github.com/longsizhuo/openInvest/commit/74dac7b1a1e50cbab66ae4e263180746eaa33480))
+
 ## [0.26.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.25.0...invest-skill-v0.26.0) (2026-10-16)
 
 
