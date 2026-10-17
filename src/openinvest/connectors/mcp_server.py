@@ -9,7 +9,7 @@
 
 写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在高频能力（现 22 个）（80+ REST 端点全暴露会撑爆 agent context），
+工具刻意克制在高频能力（现 23 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 from functools import partial, wraps
 from inspect import iscoroutinefunction
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 import anyio
 from pydantic import Field
@@ -238,6 +238,38 @@ def what_if(
     _check_advisory()
     from openinvest.services.skill_views import build_what_if_view
     return build_what_if_view(symbol=symbol, pct=pct, price=price)
+
+
+@_tool(annotations=_RO)
+def rebalance_plan(
+    mode: Annotated[Literal["cash_only", "sell_to_rebalance", "hybrid"], Field(description="cash_only: buy underweights with cash above the target cash ratio, never sell. hybrid (default): use that cash first, sell overweights only to cover the shortfall. sell_to_rebalance: sell every overweight back to target and buy underweights with the proceeds plus spare cash.")] = "hybrid",
+    band_pct: Annotated[float, Field(description="Drift band in percentage points (default 5): holdings within ±band of target are left alone.", ge=0, le=100)] = 5,
+) -> Dict[str, Any]:
+    """Compute a rebalance list against the target allocation in strategy.md:
+    what to BUY / SELL, how much, in whole lots, and why. Only produces the
+    list, places no order — the human executes. No LLM call.
+
+    Use when the user asks "do I need to rebalance", "how far am I from my
+    target allocation" or "what should I buy/sell to get back on target".
+    Per-asset targets come from `target_assets[].target_pct` in strategy.md;
+    assets without one split `target_allocation_stock` equally
+    (`target_source: "equal_split"`). Lot sizes: A-shares 100, convertible
+    bonds 10, off-exchange funds by amount, HK/others 1 (HK lot size is
+    unknown — see `lot_note`).
+
+    Args:
+        mode: "cash_only" | "sell_to_rebalance" | "hybrid" (default).
+        band_pct: Drift band in percentage points, default 5.
+
+    Returns:
+        `rows` (per target asset: current_pct / target_pct / drift_pct /
+        action BUY|SELL|NONE / amount in base currency / units / reason),
+        `totals` (cash_after, turnover, n_trades), `unmanaged` holdings,
+        `warnings`; or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    from openinvest.services.rebalance_plan import build_rebalance_plan
+    return build_rebalance_plan(mode=mode, band_pct=band_pct)
 
 
 @_tool(annotations=_RO)

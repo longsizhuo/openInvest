@@ -15,6 +15,7 @@
   strategy              target_assets + Dreaming insights
   history [-n N]        近期交易 + 近期辩论
   what_if [...]         P&L 情景模拟
+  rebalance_plan [...]  再平衡清单（目标配置 → 该买/卖多少，按整手，只出清单不下单）
   live_prices           ^VIX, ^TNX, USDCNY, AUDCNY, NDQ, GC=F 一次拉齐
   prepare_debate SYM    输出辩论 brief（含项目原生 bull/bear/judge prompt）
   save_debate SYM       把 stdin 上来的 transcript 落到 memory/.debate/
@@ -299,6 +300,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("untrack_asset", help="移除跟踪标的（schema 保证至少剩 1 个）")
     p.add_argument("--symbol", required=True)
     p.set_defaults(func=cmd_untrack_asset)
+
+    p = sub.add_parser(
+        "rebalance_plan",
+        help="再平衡清单：对照 strategy.md 的目标配置，算该买 / 卖多少（按整手；只出清单不下单，由你执行）",
+    )
+    p.add_argument("--mode", choices=["cash_only", "sell_to_rebalance", "hybrid"], default="hybrid",
+                   help="cash_only 只用多余现金买、从不卖；hybrid（默认）先用现金、不够才卖超配；"
+                        "sell_to_rebalance 超配一律卖回目标")
+    p.add_argument("--band-pct", dest="band_pct", type=float, default=5.0,
+                   help="漂移带（百分点，默认 5）：偏离目标不超过它就不动")
+    p.set_defaults(func=cmd_rebalance_plan)
 
     p = sub.add_parser(
         "import",

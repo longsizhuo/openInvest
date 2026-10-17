@@ -10,6 +10,8 @@ EXPECTED_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "record_execution", "ingest_event",
     "buy", "sell", "deposit", "withdraw", "run_committee",
+    # 再平衡清单：只出清单不下单（读持仓，顾问模式拒绝）
+    "rebalance_plan",
     # 补录用系统前就持有的仓位（不扣现金）：独立工具，老 server 上 Unknown tool 而不是静默扣现金
     "record_existing_position",
     # strategy 写操作（issue #179：读写对等）
@@ -48,7 +50,7 @@ def test_every_tool_dispatches_off_the_event_loop():
 
 READONLY_TOOLS = {
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
-    "decisions", "explain_decision", "news_sources",
+    "decisions", "explain_decision", "news_sources", "rebalance_plan",
 }
 # destructive 桶：动钱 4 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
 MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position",
@@ -126,6 +128,7 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
     calls = {
         "status": {}, "history": {}, "strategy": {}, "discipline": {}, "decisions": {},
         "what_if": {"symbol": "GC=F"},
+        "rebalance_plan": {},
         "buy": {"symbol": "GC=F", "units": 1, "price": 1},
         "record_existing_position": {"symbol": "GC=F", "units": 1, "price": 1},
         "sell": {"symbol": "GC=F", "units": 1, "price": 1},

@@ -6,6 +6,9 @@
                     "track AAPL" 重复调用幂等不报错）
 - untrack_asset     移除跟踪标的（schema 保证至少剩 1 个）
 
+另有只读的 rebalance_plan（目标配置 → 该买 / 卖多少的清单，只出清单不下单），
+实现在 services/rebalance_plan.py，归在这里因为它消费的就是 strategy.md。
+
 错误处理与 portfolio_cmds 同款：业务 ValueError → {"status":"error"} + exit 1。
 """
 from __future__ import annotations
@@ -19,6 +22,7 @@ __all__ = [
     "cmd_set_allocations",
     "cmd_track_asset",
     "cmd_untrack_asset",
+    "cmd_rebalance_plan",
 ]
 
 
@@ -65,3 +69,16 @@ def cmd_untrack_asset(args: argparse.Namespace) -> None:
     from openinvest.services import strategy_write as svc
 
     _run(svc.remove_target_asset, args.symbol)
+
+
+def cmd_rebalance_plan(args: argparse.Namespace) -> None:
+    """目标配置 → 该买 / 卖多少的清单（只出清单，不下单，由你执行）。示例:
+        skill rebalance_plan
+        skill rebalance_plan --mode cash_only --band-pct 3
+    """
+    from openinvest.services.rebalance_plan import build_rebalance_plan
+
+    out = build_rebalance_plan(mode=args.mode, band_pct=args.band_pct)
+    _print_json(out)
+    if out.get("status") == "error":
+        sys.exit(1)
