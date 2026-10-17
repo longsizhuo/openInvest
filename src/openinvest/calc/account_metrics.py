@@ -17,8 +17,8 @@
 - **最大回撤 / 年化波动**都在 TWR 链接指数 ``I_d = Π(1 + r_k)`` 上算——存取款不是
   回撤。波动 = ``stdev(ln(1 + r_d), ddof=1) × √252``：日期网格是持仓标的交易日的并集
   （非自然日），所以按 252 个交易日年化。
-- **vs 基准**：复用 ``calc.strategy_metrics.vs_benchmark``（同窗口总收益差 + 跑赢天数比例），
-  基准序列前值填充到同一网格；窗口 = 成立以来。
+- **vs 基准**：基准前值填充到账户网格、锚在首日收盘（与 opening_nav 同一时点），总收益差 +
+  跑赢天数比例（后者复用 ``calc.strategy_metrics.vs_benchmark``）；窗口 = 成立以来。
 """
 from __future__ import annotations
 
@@ -182,24 +182,28 @@ def _ffill_on(grid: List[str], series: Dict[str, float]) -> List[Tuple[str, floa
 
 
 def benchmark_block(
-    index: List[Tuple[str, float]], opening_date: str,
-    symbol: str, closes: Dict[str, float],
+    index: List[Tuple[str, float]], symbol: str, closes: Dict[str, float],
 ) -> Optional[Dict[str, Any]]:
-    """vs 基准（成立以来）：基准前值填充到账户网格 + 开盘锚点，再交给 ``vs_benchmark``。"""
+    """vs 基准（成立以来）。
+
+    账户的 opening_nav 按首日（``index[0]`` 的日期）收盘估值，所以基准也锚在**同一天的收盘**
+    （前值填充到账户网格），两边窗口严格相同；锚点之前没有基准数据 → None（IO 壳标原因）。
+    跑赢天数复用 ``vs_benchmark``（按日期对齐的逐日比较）；总收益差自己算——链接指数的起点
+    1.0 不在列表里，``vs_benchmark`` 的 alpha 会少算首日。
+    """
     if not index or not closes:
         return None
-    anchor = _iso(_parse(opening_date) - timedelta(days=1))
-    strat = [(anchor, 1.0)] + list(index)
-    bench = _ffill_on([anchor] + [d for d, _ in index], closes)
+    bench = _ffill_on([d for d, _ in index], closes)
     if len(bench) < 2:
         return None
-    vs = vs_benchmark(strat, bench)
+    strat_ret = round((index[-1][1] - 1.0) * 100, 4)
+    bench_ret = total_return_pct(bench)
     return {
         "symbol": symbol,
         "window": "since_inception",
-        "return_same_window": total_return_pct(bench),
-        "excess": vs["alpha_pct"],
-        "beat_days_pct": vs["beat_days_pct"],
+        "return_same_window": bench_ret,
+        "excess": round(strat_ret - bench_ret, 4),
+        "beat_days_pct": vs_benchmark(index, bench)["beat_days_pct"],
     }
 
 
@@ -222,7 +226,7 @@ def account_metrics(
         "xirr": account_xirr(rows, opening_nav),
         "max_drawdown": max_drawdown(index, opening_date),
         "volatility_annual": annual_volatility_pct(returns),
-        "benchmark": benchmark_block(index, opening_date, benchmark_symbol, benchmark_closes or {})
+        "benchmark": benchmark_block(index, benchmark_symbol, benchmark_closes or {})
         if benchmark_symbol else None,
     }
 

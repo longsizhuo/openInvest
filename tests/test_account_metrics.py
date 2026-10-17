@@ -98,11 +98,15 @@ def test_account_metrics_block_with_benchmark():
                         benchmark_symbol="000300.SS", benchmark_closes=closes)
     assert m["since"] == "2026-01-05" and m["as_of"] == "2026-01-09" and m["nav"] == 1440.0
     b = m["benchmark"]
-    assert b["symbol"] == "000300.SS" and b["return_same_window"] == pytest.approx(10.0)
-    assert b["excess"] == pytest.approx(m["twr_all"] - 10.0, abs=0.01)   # 各自 round(2)
+    # 锚在首日 01-05 收盘（与 opening_nav 同一时点）：110/102 − 1，不是 01-02 的 100 起算
+    assert b["symbol"] == "000300.SS" and b["return_same_window"] == pytest.approx(7.8431, abs=1e-3)
+    assert b["excess"] == pytest.approx(m["twr_all"] - 7.8431, abs=0.01)   # 各自 round
     assert m["xirr"] is None and m["max_drawdown"]["pct"] == -10.0
     # 没有基准 → None，其余字段照常
     assert account_metrics(ROWS, 1000.0, "2026-01-09")["benchmark"] is None
+    # 基准历史晚于首日 → None（IO 壳标 starts_after_inception）
+    assert account_metrics(ROWS, 1000.0, "2026-01-09", benchmark_symbol="X",
+                           benchmark_closes={"2026-01-08": 1.0, "2026-01-09": 1.1})["benchmark"] is None
 
 
 def test_external_flow_does_not_count_as_return():

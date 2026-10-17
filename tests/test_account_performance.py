@@ -123,13 +123,16 @@ def test_gold_ledger_symbol_maps_to_proxy_holding_and_fx_converts(tmp_path, monk
 
 
 def test_benchmark_from_price_path(tmp_path, monkeypatch):
+    """基准：get_history_data 只负责把库刷新（库缓存 + yfinance 增量），收盘从库读；锚在首日收盘。"""
     monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
         "AAA": dict(zip(DAYS, [10.0, 11.0, 11.0, 12.0, 12.0])),
+        "BENCH": {"2026-01-02": 100.0, "2026-01-09": 110.0},
     }))
     monkeypatch.setattr(ap, "_benchmark_symbol", lambda: "BENCH")
+    monkeypatch.setattr(ap, "_BENCH_REFRESHED", {})
     seen = []
     monkeypatch.setattr(ap, "get_history_data",
-                        lambda s, p="2y", **kw: (seen.append((s, p)), _df({"2026-01-02": 100.0, "2026-01-09": 110.0}))[1])
+                        lambda s, p="2y", **kw: (seen.append((s, p)), pd.DataFrame())[1])
     pm = _pm(tmp_path, cash={"CNY": 0.0},
              holdings=[{"symbol": "AAA", "units": 100.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
              history=[{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 100.0,
@@ -152,6 +155,118 @@ def test_insufficient_history(tmp_path, monkeypatch):
     pm2 = _pm(tmp_path / "b", cash={"CNY": 1.0}, holdings=[], history=[])
     assert ap.build_account_performance(pm2, today="2026-01-09") == {
         "status": "insufficient_history", "reason": "no_ledger", "base_currency": "CNY"}
+
+
+def test_sold_out_and_deleted_foreign_holding_keeps_its_currency(tmp_path, monkeypatch):
+    """CR 阻塞项：卖光 + delete_holding 的 AUD 持仓不在当前 holdings 里，计价币种要从流水推，
+    不能回落 CNY（否则持有期估值缩 4.7 倍 → 回撤 -78%、波动 1700%）。价格/汇率全程不变 → 回撤 0、波动 0。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
+        "NDQ.AX": dict(zip(DAYS, [10.0] * 5)),
+        "AUDCNY=X": dict(zip(DAYS, [4.7] * 5)),
+    }))
+    pm = _pm(tmp_path, cash={"AUD": 1000.0}, holdings=[], history=[
+        {"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "NDQ.AX", "units": 100.0,
+         "price": 10.0, "currency": "AUD", "funding_source": "cash_deduct"},
+        {"ts_origin": "2026-01-07T10:00:00", "action": "sell", "symbol": "NDQ.AX", "units": 100.0,
+         "price": 10.0, "currency": "AUD"},
+        {"ts_origin": "2026-01-08T10:00:00", "action": "delete_holding", "symbol": "NDQ.AX"},
+    ])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["status"] == "ok"
+    assert perf["opening_nav"] == 4700.0 and perf["nav"] == 4700.0
+    assert perf["max_drawdown"]["pct"] == 0.0 and perf["volatility_annual"] == 0.0
+    assert perf["twr_all"] == 0.0 and perf["data_quality"]["unvalued"] == []
+
+
+def test_deleted_gold_holding_still_valued_from_ledger_symbol(tmp_path, monkeypatch):
+    """黄金持仓已删：GOLD-CNY 流水不依赖当前持仓，仍按 GC=F/31.1035×USDCNY 估值。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
+        "GC=F": dict(zip(DAYS, [3110.35] * 5)), "USDCNY=X": dict(zip(DAYS, [7.0] * 5)),
+    }))
+    pm = _pm(tmp_path, cash={"CNY": 7000.0}, holdings=[], history=[
+        {"ts_origin": "2026-01-05T10:00:00", "action": "bought", "symbol": "GOLD-CNY", "units": 10.0,
+         "price_per_unit": 700.0, "total_amount": 7000.0, "currency": "CNY"},
+        {"ts_origin": "2026-01-08T10:00:00", "action": "sold", "symbol": "GOLD-CNY", "units": 10.0,
+         "price_per_unit": 700.0, "total_amount": 7000.0, "fee": 0.0, "net_amount": 7000.0, "currency": "CNY"},
+    ])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["opening_nav"] == 7000.0 and perf["nav"] == 7000.0 and perf["twr_all"] == 0.0
+    assert perf["data_quality"]["unvalued"] == [] and perf["data_quality"]["cost_fallback"] == []
+
+
+def test_manual_override_is_a_correction_flow_not_a_return(tmp_path, monkeypatch):
+    """账本之前就持有的份数经 manual_override 首次入账：当天按收盘记外部流入，TWR 不动。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({"AAA": dict(zip(DAYS, [10.0] * 5))}))
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 128.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=[
+                 {"ts_origin": "2026-01-05T10:00:00", "action": "deposit", "symbol": "CNY", "units": 1.0, "currency": "CNY"},
+                 {"ts_origin": "2026-01-05T11:00:00", "action": "withdraw", "symbol": "CNY", "units": -1.0, "currency": "CNY"},
+                 {"ts_origin": "2026-01-07T10:00:00", "action": "manual_override", "symbol": "AAA", "units": 128.0,
+                  "price_per_unit": 10.0, "currency": "CNY"},
+             ])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["data_quality"]["unreconciled"] == {"units": {}, "cash": {}}
+    assert perf["opening_nav"] == 0.0 and perf["nav"] == 1280.0
+    assert perf["twr_all"] == 0.0 and perf["max_drawdown"]["pct"] == 0.0
+
+
+def test_sell_without_net_amount_and_withdraw_sign_variants(tmp_path, monkeypatch):
+    """sell 不带 net_amount → 总额−fee 回现金；withdraw 来自 web_api（正数）与 PortfolioManager（负数）都是流出。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({"AAA": dict(zip(DAYS, [10.0] * 5))}))
+    pm = _pm(tmp_path, cash={"CNY": 790.0}, holdings=[], history=[
+        {"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 100.0,
+         "price": 10.0, "currency": "CNY", "funding_source": "cash_deduct"},
+        {"ts_origin": "2026-01-06T10:00:00", "action": "sold", "symbol": "AAA", "units": 100.0,
+         "price_per_unit": 10.0, "total_amount": 1000.0, "fee": 10.0, "currency": "CNY"},
+        {"ts_origin": "2026-01-07T10:00:00", "action": "withdraw", "symbol": "CNY", "units": 100.0, "currency": "CNY"},
+        {"ts_origin": "2026-01-08T10:00:00", "action": "withdraw", "symbol": "CNY", "units": -100.0, "currency": "CNY"},
+    ])
+    captured = {}
+    orig = ap.account_metrics
+    monkeypatch.setattr(ap, "account_metrics",
+                        lambda rows, o, t, **kw: (captured.update(rows=rows), orig(rows, o, t, **kw))[1])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    # 开盘现金 = 790 − (−1000 + 990 − 100 − 100) = 1000
+    assert perf["opening_nav"] == 1000.0 and perf["nav"] == 790.0
+    flows = {d: (i, o) for d, _, i, o in captured["rows"]}
+    assert flows["2026-01-07"] == (0.0, 100.0) and flows["2026-01-08"] == (0.0, 100.0)
+    assert perf["twr_all"] == pytest.approx(-1.0)   # 只有 10 元手续费是真实损失（1000 → 990）
+
+
+def test_benchmark_starting_after_inception_is_flagged(tmp_path, monkeypatch):
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
+        "AAA": dict(zip(DAYS, [10.0] * 5)), "BENCH": {"2026-01-08": 1.0, "2026-01-09": 1.1},
+    }))
+    monkeypatch.setattr(ap, "_benchmark_symbol", lambda: "BENCH")
+    monkeypatch.setattr(ap, "get_history_data", lambda s, p="2y", **kw: pd.DataFrame())
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 1.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=[{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 1.0,
+                       "price": 10.0, "currency": "CNY", "funding_source": "external_funding"}])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["benchmark"] is None
+    assert perf["data_quality"]["benchmark_unavailable"] == {"symbol": "BENCH", "reason": "starts_after_inception"}
+    assert "晚于账户成立日" in ap.render_performance_md(perf)
+
+
+def test_benchmark_refresh_at_most_once_per_day_per_process(tmp_path, monkeypatch):
+    """status 被高频调用时基准不该每次打 yfinance：同一天第二次只读库。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
+        "AAA": dict(zip(DAYS, [10.0] * 5)), "BENCH": dict(zip(DAYS, [1.0, 1.0, 1.0, 1.0, 1.1])),
+    }))
+    monkeypatch.setattr(ap, "_benchmark_symbol", lambda: "BENCH")
+    monkeypatch.setattr(ap, "_BENCH_REFRESHED", {})
+    calls = []
+    monkeypatch.setattr(ap, "get_history_data", lambda s, p="2y", **kw: (calls.append(s), pd.DataFrame())[1])
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 1.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=[{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 1.0,
+                       "price": 10.0, "currency": "CNY", "funding_source": "external_funding"}])
+    for _ in range(3):
+        perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert calls == ["BENCH"]
+    assert perf["benchmark"]["return_same_window"] == pytest.approx(10.0)
 
 
 def test_render_performance_md_lines():

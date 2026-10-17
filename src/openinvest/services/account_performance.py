@@ -33,7 +33,7 @@ from openinvest.calc.gold import GOLD_OZ_PER_GRAM
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.db.market_store import MarketStore
 from openinvest.utils.base_currency import base_currency
-from openinvest.utils.eastmoney_fund import canonical_fund_symbol
+from openinvest.utils.eastmoney_fund import canonical_fund_symbol, extract_fund_code
 from openinvest.utils.exchange_fee import get_history_data
 from openinvest.utils.fx import total_portfolio_value, unvalued
 from openinvest.utils.quotes import is_eastmoney_fund
@@ -43,6 +43,9 @@ log = logging.getLogger(__name__)
 # web_api /api/gold/* 记账用的符号；对应 proxy_kind=gold_cny_per_gram 的持仓（symbol 通常 GC=F）
 GOLD_LEDGER_SYMBOL = "GOLD-CNY"
 GOLD_PROXY_KIND = "gold_cny_per_gram"
+# 黄金流水在当前持仓里没有对应行（已卖光 + delete_holding）时的估值配置：不依赖持仓元数据
+_GOLD_LEDGER_HOLDING = {"symbol": GOLD_LEDGER_SYMBOL, "proxy_kind": GOLD_PROXY_KIND,
+                        "yfinance_proxy": "GC=F", "cost_currency": "CNY"}
 _ALL_ROWS = 100000
 _BUY_ACTIONS = {"buy", "bought", "dca_reconcile_backfill", "dca_reconcile_reverse", "gift"}
 _SELL_ACTIONS = {"sell", "sold"}
@@ -128,6 +131,9 @@ def _price_series(store: MarketStore, symbol: str, holding: Optional[Dict[str, A
     黄金代理 = GC=F USD/oz ÷ 31.1035 × USDCNY；场外基金读 FUND:<code>；其余直接按 symbol/proxy。"""
     h = holding or {}
     proxy = str(h.get("yfinance_proxy") or symbol)
+    if (not h or h.get("_from_ledger")) and extract_fund_code(symbol):
+        # 已删掉的场外基金持仓：元数据没了，按代码读 FUND:<code>
+        return _db_closes(store, canonical_fund_symbol(symbol))
     if str(h.get("proxy_kind") or "") == GOLD_PROXY_KIND:
         oz, usdcny = _db_closes(store, proxy), _db_closes(store, "USDCNY=X")
         if oz is None or usdcny is None:
@@ -188,9 +194,22 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     holdings = [dict(h) for h in pm.holdings if not h.get("is_tracking_only")]
     by_sym = {str(h.get("symbol")): h for h in holdings}
     alias = {GOLD_LEDGER_SYMBOL: s for s, h in by_sym.items() if str(h.get("proxy_kind") or "") == GOLD_PROXY_KIND}
-    events, skipped = _ledger_events(pm.store.read_history(), alias)
+    records = pm.store.read_history()
+    events, skipped = _ledger_events(records, alias)
     if not events:
         return {"status": "insufficient_history", "reason": "no_ledger", "base_currency": base}
+    # 账本里出现过、当前持仓已没有的 symbol（卖光 + delete_holding 是正常流程）：元数据从流水推——
+    # 计价币种取该 symbol 最近一条记录的 currency，黄金流水固定按 gold_cny_per_gram（不然 AUD 持仓会被
+    # 当人民币估值、黄金历史全部无法估值，回撤/波动算成天文数字——CR 阻塞项）
+    for r in sorted(records, key=lambda x: (x.get("trade_date") or x.get("ts_origin") or x.get("ts") or "")[:10]):
+        sym = alias.get(str(r.get("symbol") or ""), str(r.get("symbol") or ""))
+        if not sym or sym in by_sym or str(r.get("action") or "").lower() in ("deposit", "withdraw"):
+            continue
+        if sym == GOLD_LEDGER_SYMBOL:
+            by_sym[sym] = dict(_GOLD_LEDGER_HOLDING)
+        else:
+            by_sym[sym] = {"symbol": sym, "cost_currency": str(r.get("currency") or "CNY").upper(),
+                           "_from_ledger": True}
 
     # 开盘状态 = 当前 − Σ账本增量（账本早于系统上线的部分）
     delta_units: Dict[str, float] = defaultdict(float)
@@ -234,13 +253,12 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         return {"symbol": sym, "units": units[sym], "avg_cost": h.get("avg_cost", 0),
                 "cost_currency": "CNY" if gold else str(h.get("cost_currency") or "CNY").upper()}
 
-    def _market(day: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[float]], bool]:
-        """当日价格 / 汇率（≤ day 最后一个）；filled = 有持仓标的当天没有新收盘。"""
-        px, filled = {}, False
+    def _market(day: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[float]], Dict[str, bool]]:
+        """当日价格 / 汇率（≤ day 最后一个）+ 每个标的当天是否前值填充。"""
+        px, ff = {}, {}
         for sym, s in prices.items():
-            px[sym], ff = _at(s, day)
-            filled = filled or (ff and units[sym] > 0)
-        return px, {c: _at(s, day)[0] for c, s in fx.items()}, filled
+            px[sym], ff[sym] = _at(s, day)
+        return px, {c: _at(s, day)[0] for c, s in fx.items()}, ff
 
     def _value(px: Dict[str, Optional[float]], rates: Dict[str, Optional[float]]) -> Tuple[float, Dict[str, str]]:
         snap = SimpleNamespace(cash=dict(cash), holdings=[_holding_snapshot(s) for s in units])
@@ -255,7 +273,7 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     filled_days, unconverted_flows, cost_fallback, last_status = 0, 0, set(), {}
     for day in grid:
         inflow = outflow = 0.0
-        px, rates, _ = _market(day)
+        px, rates, ff = _market(day)   # 一天只取一次：修正事件取价与收盘估值共用
         for ev in by_day.get(day, ()):
             units[ev["symbol"]] += ev["units"]
             cash[ev["cash_ccy"]] += ev["cash"]
@@ -274,17 +292,21 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
                 inflow += v
             else:
                 outflow += -v
-        px, rates, filled = _market(day)
         nav, status = _value(px, rates)
-        filled_days += int(filled)
+        filled_days += int(any(ff[s] and units[s] > 0 for s in prices))
         cost_fallback |= {k for k, v in status.items() if v == "cost_fallback"}
         last_status = status
         rows.append((day, nav, round(inflow, 2), round(outflow, 2)))
 
     cfg_symbol = _benchmark_symbol()
-    bench = _benchmark_closes(cfg_symbol) if cfg_symbol else {}
+    bench = _benchmark_closes(store, cfg_symbol, today) if cfg_symbol else {}
     out = account_metrics(rows, opening_nav, today, benchmark_symbol=cfg_symbol if bench else "",
                           benchmark_closes=bench)
+    bench_missing = None
+    if cfg_symbol and not bench:
+        bench_missing = {"symbol": cfg_symbol, "reason": "no_data"}
+    elif cfg_symbol and out.get("benchmark") is None:
+        bench_missing = {"symbol": cfg_symbol, "reason": "starts_after_inception"}
     out["status"] = "ok"
     out["base_currency"] = base
     out["opening_nav"] = round(opening_nav, 2)
@@ -297,7 +319,7 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         "cost_fallback": sorted(cost_fallback),
         "unvalued": unvalued(last_status),
         "unreconciled": unreconciled,
-        **({"benchmark_unavailable": cfg_symbol} if cfg_symbol and not bench else {}),
+        **({"benchmark_unavailable": bench_missing} if bench_missing else {}),
     }
     return out
 
@@ -307,17 +329,22 @@ def _benchmark_symbol() -> str:
     return str(getattr(load_config().portfolio, "benchmark_symbol", "") or "").strip()
 
 
-def _benchmark_closes(symbol: str) -> Dict[str, float]:
-    """基准收盘 {date: close}：与持仓同一取数路径（库缓存 + 增量刷新），失败返回空。"""
-    try:
-        df = get_history_data(symbol, "max")
-    except Exception as e:  # noqa: BLE001
-        log.warning("account_performance: 基准 %s 拉取失败: %s", symbol, e)
-        return {}
-    if df is None or df.empty or "Close" not in df:
-        return {}
-    s = pd.to_numeric(df["Close"], errors="coerce").dropna()
-    return {ts.strftime("%Y-%m-%d"): float(v) for ts, v in s.items() if v > 0}
+# 基准 symbol → 本进程今天已经走过一次 get_history_data（库 + yfinance 增量）的日期。没人持有基准，
+# 其他路径不会替它刷新；但 status / MCP status 被 agent 高频调时也不该每次都打一次 yfinance
+# （库里缺当天 bar 的周末 / 收盘前每次都会请求）——每进程每天最多刷一次，其余只读库。
+_BENCH_REFRESHED: Dict[str, str] = {}
+
+
+def _benchmark_closes(store: MarketStore, symbol: str, today: str) -> Dict[str, float]:
+    """基准收盘 {date: close}：每进程每天最多经 get_history_data 刷一次，之后只读行情库；失败返回空。"""
+    if _BENCH_REFRESHED.get(symbol) != today:
+        try:
+            get_history_data(symbol, "max")
+            _BENCH_REFRESHED[symbol] = today
+        except Exception as e:  # noqa: BLE001
+            log.warning("account_performance: 基准 %s 刷新失败，用库里已有的: %s", symbol, e)
+    s = _db_closes(store, symbol)
+    return {} if s is None else {d: float(v) for d, v in s.items()}
 
 
 # ---------- 4. 渲染（日报 / 邮件） ----------
@@ -346,7 +373,9 @@ def render_performance_md(perf: Dict[str, Any]) -> str:
         lines.append(f"- vs 基准 {b['symbol']}（同窗口）：基准 {_pct(b.get('return_same_window'))}"
                      f"，超额 {_pct(b.get('excess'))}，跑赢天数 {b.get('beat_days_pct', 0):.0f}%")
     elif dq.get("benchmark_unavailable"):
-        lines.append(f"- vs 基准 {dq['benchmark_unavailable']}：行情不可用")
+        bu = dq["benchmark_unavailable"]
+        why = "基准历史晚于账户成立日" if bu.get("reason") == "starts_after_inception" else "行情不可用"
+        lines.append(f"- vs 基准 {bu.get('symbol')}：{why}")
     notes = []
     if dq.get("filled_days"):
         notes.append(f"{dq['filled_days']} 天缺价前值填充")
