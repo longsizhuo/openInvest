@@ -1228,6 +1228,8 @@ def test_doctor_endpoint(skill_client, monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     r = skill_client.get("/api/doctor")
+    # hub 版本要能在 doctor 里看到：远端 CLI 的幂等键重试提示让 agent 据此判断 hub 是否已支持
+    assert r.json().get("version"), r.json()
     assert r.status_code == 200
     b = r.json()
     assert b["status"] in {"ready", "needs_setup"}

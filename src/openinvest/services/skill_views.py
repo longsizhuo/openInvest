@@ -570,8 +570,11 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
     # - direct_ready：任意 agent 走 run_committee，需要 DeepSeek key 跑 4 角色
     # 旧 ready_for_subcommands 之前要求 has_deepseek，会让 Coordinator 用户被
     # 误判"还没就绪" → agent 反复引导去注册 DeepSeek，体验糟糕
+    from openinvest import __version__  # 远端 CLI 靠它判断 hub 是否支持幂等键（#432 评审第 3 条）
+
     return {
         "status": overall,
+        "version": __version__,
         "ready_for_subcommands": memory_ok,  # 等价于 coordinator_ready
         "coordinator_ready": memory_ok,
         "direct_ready": memory_ok and has_deepseek,

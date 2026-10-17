@@ -44,7 +44,9 @@ _MONEY = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHin
 _IDEM_FIELD = Field(description=(
     "Optional client-generated key (e.g. a UUID4). When retrying this SAME call after a "
     "timeout or an unknown result, reuse the same key: the ledger records it once and later "
-    "calls return {\"status\": \"duplicate\"} without touching cash or holdings."))
+    "calls return {\"status\": \"duplicate\"} without touching cash or holdings. Only the key "
+    "is compared, not the arguments — a different order (other symbol/units/price/amount) "
+    "needs a new key, or it is silently treated as the retry."))
 
 mcp = FastMCP(
     "openinvest",

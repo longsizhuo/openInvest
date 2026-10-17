@@ -672,7 +672,8 @@ class _DuplicateKey(Exception):
 def _duplicate(key: Optional[str]) -> Dict[str, Any]:
     return {
         "status": "duplicate", "idempotency_key": key,
-        "note": "同 idempotency_key 的这笔已入账过，本次未重复记账（ADR-016）",
+        "note": "同 idempotency_key 的这笔已入账过，本次未重复记账（ADR-016）。key 只用于重试"
+                "完全相同的请求；若这是另一笔（换了标的 / 数量 / 金额），请换一个新 key 重发。",
     }
 
 

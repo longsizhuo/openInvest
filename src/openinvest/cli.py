@@ -123,6 +123,7 @@ def _add_idempotency_key(p: argparse.ArgumentParser) -> None:
     """动钱子命令共用（ADR-016）：同 key 的第二笔返回 {"status": "duplicate"} 不入账。"""
     p.add_argument("--idempotency-key", default=None, metavar="KEY",
                    help="幂等键：超时 / 结果未知时重试同一笔请复用同一个 key，账本只记一次；"
+                        "只比对 key 不比对参数，另一笔（换标的/数量/金额）必须换新 key；"
                         "远端模式不传会自动生成 uuid4，出错时回显供重试")
 
 

@@ -160,6 +160,27 @@ def test_money_cmds_reuse_explicit_idempotency_key(recorder, capfd):
     assert _out_json(capfd)["status"] == "duplicate"
 
 
+@pytest.mark.parametrize("code", [500, 502, 503, 524])
+def test_5xx_echoes_idempotency_key_for_retry(recorder, capfd, code):
+    """hub 已提交事务后 append_history 抛 500、或 Tunnel 502/524 吞掉成功响应：hub 很可能已记账，
+    5xx 也要回显 key（#432 评审第 2 条），否则 agent 重试会生成新 uuid4 → 双记。"""
+    recorder["routes"][f"POST {BASE}/api/skill/deposit"] = FakeResponse(code, {"detail": "boom"})
+    with pytest.raises(SystemExit):
+        rd.maybe_dispatch_remote(Namespace(cmd="deposit", currency="CNY", amount=1,
+                                           idempotency_key="keep-me"))
+    out = _out_json(capfd)
+    assert out["idempotency_key"] == "keep-me"
+    assert "--idempotency-key keep-me" in out["hint"] and "hub 须为支持幂等键的版本" in out["hint"]
+
+
+def test_read_cmd_5xx_has_no_idempotency_key(recorder, capfd):
+    """只读命令没有 key，5xx 错误 JSON 里也不该凭空多出 idempotency_key 字段。"""
+    recorder["routes"][f"GET {BASE}/api/skill/status"] = FakeResponse(500, {"detail": "boom"})
+    with pytest.raises(SystemExit):
+        rd.maybe_dispatch_remote(Namespace(cmd="status"))
+    assert "idempotency_key" not in _out_json(capfd)
+
+
 def test_timeout_echoes_idempotency_key_for_retry(monkeypatch, remote_env, capfd):
     """超时 = 不知道 hub 记没记。error JSON 回显本次 key，agent 重试带同一个 key 即安全。"""
     def boom(*a, **k):
