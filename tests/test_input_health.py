@@ -47,6 +47,15 @@ def test_rewrite_tags_vocabulary_matches_intervention_rules():
     ) == ["defense_gold_dca_tranche"]
 
 
+def test_rewrite_tags_recognises_single_invest_cap_from_pr_430():
+    """PR #430 的 Sanity 6 只钳金额不改方向：_original_verdict == verdict、_original_alloc 变、
+    带 _single_invest_cap 标记——必须标成 single_invest_cap，不能误标 sanity2_alloc_clamp。"""
+    out = {"verdict": "ACCUMULATE", "alloc_cny": 10000, "_original_verdict": "ACCUMULATE",
+           "_original_alloc": 25000, "_single_invest_cap": 10000}
+    assert cio_parse.rewrite_tags(out) == ["single_invest_cap"]
+    assert cio_parse.forced_hold(out) is False
+
+
 def test_forced_hold_definition():
     assert cio_parse.forced_hold({"verdict": "HOLD", "_original_verdict": "TRIM"}) is True
     assert cio_parse.forced_hold({"verdict": "HOLD"}) is False                      # CIO 自己说 HOLD
@@ -275,3 +284,88 @@ def test_export_public_fixture_has_no_sensitive_keys(tmp_path):
     out = json.dumps(build_summary(jsonl))
     for kw in ('"symbol"', '"threshold"', '"verdict_id"', '"asset"', "NDQ", "GC=F"):
         assert kw not in out
+
+
+# ---- CR #431 建议 1/2/4：归档时机、并发撞车、同秒后缀 ----
+
+def test_persist_failure_before_write_keeps_previous_transcript(mem_root, monkeypatch):
+    """拼块途中（macro 快照拉行情）抛异常 → 当天 <sym>.md 必须原样还在，runs/ 不该出现。
+    旧行为是直接覆盖，出错时旧件还在；归档不能比旧行为更糟（缓存命中 / 复盘都靠这个文件）。"""
+    verdict = {"verdict": "HOLD", "confidence": 0.5, "dominant_view": "tie", "alloc_cny": 0}
+    persist._persist(_report(), verdict)
+    date_dir = next(p for p in (mem_root / ".committee").iterdir() if p.is_dir())
+    md = date_dir / "TEST_AX.md"
+    before = md.read_text(encoding="utf-8")
+
+    def boom(*a, **k):
+        raise RuntimeError("yfinance down")
+    monkeypatch.setattr(persist, "_capture_macro_context", boom)
+    with pytest.raises(RuntimeError):
+        persist._persist(_report(), {**verdict, "verdict": "ACCUMULATE"})
+    assert md.read_text(encoding="utf-8") == before
+    assert not (date_dir / persist.RUNS_SUBDIR).exists()
+
+
+def test_archive_tolerates_concurrent_rename(tmp_path, monkeypatch):
+    """两个进程同时跑同一标的：后到的 replace 撞 FileNotFoundError → 当没有旧件（返回 None），
+    不抛、不让四个角色的 LLM 调用白跑。"""
+    md = tmp_path / "X.md"
+    md.write_text("old", encoding="utf-8")
+
+    def gone(self, target):
+        raise FileNotFoundError(self)
+    monkeypatch.setattr(Path, "replace", gone)
+    assert persist._archive_previous_run(md) is None
+
+
+def test_archive_same_second_gets_numeric_suffix(tmp_path):
+    """同一秒连跑两次：第二份归档带 _2 后缀，绝不覆盖第一份。"""
+    import os
+    md = tmp_path / "X.md"
+    fixed = 1_800_000_000  # 固定 mtime → 同一个 HHMMSS
+    md.write_text("run1", encoding="utf-8"); os.utime(md, (fixed, fixed))
+    t1 = persist._archive_previous_run(md)
+    md.write_text("run2", encoding="utf-8"); os.utime(md, (fixed, fixed))
+    t2 = persist._archive_previous_run(md)
+    assert t1.name != t2.name and t2.name.endswith("_2.md")
+    assert t1.read_text(encoding="utf-8") == "run1" and t2.read_text(encoding="utf-8") == "run2"
+
+
+# ---- CR #431 建议 3：Coordinator 路径也带 Input Health + 归档 ----
+
+_COORD_RAW = """
+=== MACRO ===
+宏观中性
+
+=== QUANT_R1 ===
+SIGNAL: bullish
+STRENGTH: 6
+
+=== RISK_R1 ===
+[WORKER_UNAVAILABLE] reason=timeout
+
+=== CIO ===
+VERDICT: HOLD
+CONFIDENCE: 0.6
+DOMINANT_VIEW: risk
+SUGGESTED_ALLOC_CNY: 0
+"""
+
+
+def test_coordinator_save_writes_health_block_and_archives(mem_root, monkeypatch):
+    from openinvest.core.runner.coordinator import save_committee_transcript
+    r1 = save_committee_transcript("TESTSYM", _COORD_RAW, provider="hermes")
+    text = Path(r1["saved"]).read_text(encoding="utf-8")
+    assert "**Run at**:" in text and "## Input Health (deterministic)" in text
+    parsed = parse_committee_text(text)
+    h = parsed["input_health"]
+    assert h["entry"] == "coordinator" and h["provider"] == "hermes"
+    assert h["worker_unavailable"] == ["risk"]
+    # CIO 自己就说 HOLD，Sanity 3 只压了置信度/金额：有改写标记，但不算"被强制成 HOLD"
+    assert "sanity3_worker_unavailable" in h["rewritten"] and h["forced_hold"] is False
+    assert parsed["verdict"] == "HOLD"
+    # 同日重跑 → 归档
+    time.sleep(0.01)
+    save_committee_transcript("TESTSYM", _COORD_RAW)
+    runs = list((Path(r1["saved"]).parent / persist.RUNS_SUBDIR).glob("TESTSYM_*.md"))
+    assert len(runs) == 1

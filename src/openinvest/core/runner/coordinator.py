@@ -10,7 +10,10 @@ from typing import Any, Dict
 from openinvest.utils.base_currency import alloc_ceiling, base_currency
 from openinvest.utils.symbols import safe_symbol
 from openinvest.core.committee import (
+    CommitteeReport,
+    _archive_previous_run,
     atr_defense_from_text,  # save_committee_transcript 提 ATR 防御腿
+    build_input_health,
     parse_cio_memo,
     regime_label_from_text,
 )
@@ -316,20 +319,41 @@ def save_committee_transcript(
     verdict["alloc_currency"] = base_currency()
 
     store = MemoryStore()
-    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
     out_dir = store.root / ".committee" / today
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_sym = safe_symbol(symbol)
     path = out_dir / f"{safe_sym}.md"
 
+    # Input Health 块（与 Direct 路径 _persist 同一个 build_input_health）：Coordinator 没有
+    # session 层的行情/loader 事实，只记本层看得见的——worker 失败、规则改写、强制 HOLD、
+    # 哪个 host agent 跑的。不接这一支，复盘对 Claude Code 跑出的裁决只能退回 ≤0.4 启发式
+    # （CR #431 建议 3；CLAUDE.md 漂移表 2026-10-14 同类漏接）。
+    report_like = CommitteeReport(
+        asset={"symbol": symbol, "display_name": symbol},
+        macro_view=sections.get("MACRO", ""),
+        quant_view=sections.get("QUANT_R1") or sections.get("QUANT", ""),
+        risk_view=sections.get("RISK_R1") or sections.get("RISK", ""),
+        cio_memo=cio_text,
+    )
+    health = build_input_health(
+        report_like, verdict, None,
+        {"entry": "coordinator", "provider": provider, "has_df": bool(has_df)},
+    )
+
+    import json as _json
     lines = [
         f"# Committee: {symbol}",
         f"\n**Date**: {today}",
         f"**Symbol**: {symbol}",
         f"**Provider**: {provider} (skill mode)",
+        f"**Run at**: {now.isoformat(timespec='seconds')}",
         f"**Verdict**: {verdict['verdict']} (confidence {verdict['confidence']:.2f})",
         f"**Dominant view**: {verdict['dominant_view']}",
         f"**Suggested allocation {base_currency()}**: {verdict['alloc_cny']}",
+        "\n\n---\n\n## Input Health (deterministic)\n",
+        f"```json\n{_json.dumps(health, ensure_ascii=False, indent=2)}\n```",
         "\n\n---\n\n## Reports\n",
     ]
     for role in ["MACRO", "QUANT_R1", "RISK_R1",
@@ -339,6 +363,10 @@ def save_committee_transcript(
     if not sections:
         lines.append(f"\n### RAW (未分段)\n\n{raw}\n")
 
+    # 同日重跑：旧 transcript 归档到 <date>/runs/（与 _persist 同一入口），写盘前一行才挪
+    archived = _archive_previous_run(path)
+    if archived is not None:
+        log.info("save_committee: 同日重跑，旧 transcript 归档到 %s", archived)
     path.write_text("\n".join(lines), encoding="utf-8")
     record_intervention(symbol, regime or "", current_price, verdict, atr_defense_on)
     store.dream_event({
@@ -347,6 +375,7 @@ def save_committee_transcript(
         "verdict": verdict["verdict"],
         "confidence": verdict["confidence"],
         "provider": provider,
+        "input_health": health,
     })
     return {"saved": str(path), "verdict": verdict}
 

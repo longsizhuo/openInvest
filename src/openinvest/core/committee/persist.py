@@ -107,7 +107,12 @@ def _archive_previous_run(path: Any) -> Optional[Any]:
     while target.exists():  # 同秒重跑：加序号，绝不覆盖
         n += 1
         target = runs_dir / f"{path.stem}_{stamp}_{n}.md"
-    path.replace(target)
+    try:
+        path.replace(target)
+    except FileNotFoundError:
+        # 同标的并发跑（web 触发撞上 cron）：另一个进程已经把它挪走了。旧行为是直接覆盖，
+        # 这里也不能比旧行为更糟——当没有旧件，照常写新文件（CR #431 建议 2）。
+        return None
     return target
 
 
@@ -132,10 +137,6 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_sym = safe_symbol(report.asset.get("symbol", "asset"))
     path = out_dir / f"{safe_sym}.md"
-    if output_dir is None:
-        archived = _archive_previous_run(path)
-        if archived is not None:
-            log.info("persist: 同日重跑，旧 transcript 归档到 %s", archived)
 
     # backtest 时 macro_ctx 必须用 decision_date，不是当下 now()。否则
     # verdict_review 事后归因会用错时间窗口的 VIX 值算 macro_shock。
@@ -203,6 +204,13 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
             lines.append(f"\n### Round {round_no} — Quant\n{quant_hist[i]}")
             lines.append(f"\n### Round {round_no} — Risk\n{risk_hist[i]}")
 
+    # 归档放在一切都拼好之后、写盘前一行：中间任何一步（macro 快照拉行情、拼块）抛异常时，
+    # 当天的 <sym>.md 必须原样还在——mcp_server / committee_cmds 靠它判断"今天跑过没"
+    # （CR #431 建议 1）。backtest（output_dir 指定）反复重写是有意的，不归档。
+    if output_dir is None:
+        archived = _archive_previous_run(path)
+        if archived is not None:
+            log.info("persist: 同日重跑，旧 transcript 归档到 %s", archived)
     path.write_text("\n".join(lines), encoding="utf-8")
     store.dream_event({
         "phase": "committee_finished",
@@ -221,6 +229,7 @@ __all__ = [
     "_persist",
     "_capture_macro_context",
     "build_input_health",
+    "_archive_previous_run",
     "RUNS_SUBDIR",
     "safe_symbol",
 ]

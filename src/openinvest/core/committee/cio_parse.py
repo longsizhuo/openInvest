@@ -401,6 +401,8 @@ def rewrite_tags(out: Dict[str, Any]) -> List[str]:
         tags.append(str(out["_risk_profile_applied"]))
     if orig_v == "BUY" and "_original_confidence" in out and not tags:
         tags.append("sanity1_buy_overdrive")
+    if "_single_invest_cap" in out:   # Sanity 6（PR #430）：买侧金额钳到用户单次入场上限
+        tags.append("single_invest_cap")
     if "_original_alloc" in out and not tags:
         tags.append("sanity2_alloc_clamp")
     if "_original_confidence_cap" in out:

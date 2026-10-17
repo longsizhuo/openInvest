@@ -366,7 +366,9 @@ def run_committee(
         "converged": converged,
         "quant_history": quant_history,
         "risk_history": risk_history,
-        # Input Health 块用：哪个模型、CIO 走没走 JSON 输出（文本回退 = 多一次重问）
+        # Input Health 块用：哪个模型、CIO 走没走 JSON 输出（文本回退 = 多一次重问）。
+        # model 取的是写盘时刻的全局配置；_create_agent 目前没有按调用覆盖模型的入口，
+        # 真加了要改成从 agent 实例读（CR #431 建议 5）。
         "model": get_llm_config_safe()[2],
         "cio_json_mode": bool(_want_json and cio_fields is not None),
     }
