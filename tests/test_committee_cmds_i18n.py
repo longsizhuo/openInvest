@@ -11,6 +11,10 @@ def test_cmd_run_committee_english_next_step(monkeypatch, capfd, tmp_path):
 
     reset_config()
     set_config_override({"language": {"invest_lang": "en"}})
+    # Direct 路径的 LLM key 闸：此前本测试没设 key 却能过，是因为某模块的裸 load_dotenv()
+    # 把开发机生产 .env 的 DEEPSEEK_API_KEY 灌进了测试进程（CI 靠 workflow 的 env）。
+    # 裸 load_dotenv 已全部删除（tests/test_no_bare_dotenv.py 守），这里显式给假 key。
+    monkeypatch.setenv("LLM_API_KEY", "test-key-not-real")
 
     monkeypatch.setattr(cc, "ROOT", tmp_path)
 
