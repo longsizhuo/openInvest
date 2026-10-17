@@ -32,4 +32,4 @@
 
 - `db/jobs.sqlite` — 现已不再存 APScheduler jobstore（YAML 是唯一事实来源，启动时全量重建），只剩下面的 run log
 - `db/jobs.sqlite` 内的 `job_runs` 表 — 每次执行的 run log（开跑即写 `running` 行，收尾 UPDATE；job_watchdog 巡检用）
-- `.backups/auto_<UTC时间戳>.zip` — `backup` job 的产物（memory/ + trades.db / insights.db / jobs.sqlite，留最近 14 份）
+- `.backups/auto_<UTC时间戳>.zip` — `backup` job 的产物（memory/ + trades.db / insights.db / jobs.sqlite，留最近 14 份；平日不含 `memory/.backtest*`，周日带上并加 `_full` 后缀）

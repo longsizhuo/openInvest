@@ -6,8 +6,15 @@
 `auto_*`（手动备份 openinvest-backup-* / manual_* 不动）：
 
   - memory/ 整个目录（含 .committee / .dreams / .state；排除 *.lock、*.bak.*、
-    原子写残留 *.tmp.*）
+    原子写残留 *.tmp.*）。周中不含 memory/.backtest* 目录，周日带上（见下）
   - db/trades.db（账本）、db/insights.db、db/jobs.sqlite（job_runs 历史）
+
+**为什么 .backtest* 只在周日带**：它占整份备份的约 89%（2026-10 实测：全量 271MB，不含
+.backtest* 22MB），每天一份 ×14 不值；但里面混着 2026-07-24 起的前瞻纸面舰队（
+verdict_review.FLEET_START），那部分重跑不出来，不能不备。折中：Asia/Shanghai 的周日那次
+（03:30 触发时是周日凌晨）带上 .backtest*，文件名加 `_full` 后缀
+`auto_<stamp>_full.zip`，与平日 zip 共用同一个 14 份轮转（14 天里自然留 2 份带舰队的）。
+文件名里的 stamp 仍是 UTC，所以周日凌晨 03:30 的 full 文件名日期是周六。
 
 **为什么先 checkpoint**：WAL 库的新成交先落 `trades.db-wal`，主库文件要等 checkpoint 才更新。
 `TradesDB` 只在打开连接时 checkpoint（db/trades_db.py #104），调度器长驻持有连接期间不会再做——
@@ -30,6 +37,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from openinvest.db.wal import checkpoint_file
 from openinvest.paths import INVEST_ROOT
@@ -39,6 +47,9 @@ log = logging.getLogger(__name__)
 KEEP_AUTO = 14
 DB_FILES = ("db/trades.db", "db/insights.db", "db/jobs.sqlite")
 EXCLUDE_GLOBS = ("*.lock", "*.bak.*", "*.tmp.*")
+BACKTEST_PREFIX = ".backtest"  # memory/.backtest、.backtest_cl_v1、.backtest_archive_* …
+FULL_BACKUP_WEEKDAY = 6  # 周一=0 … 周日=6，按 Asia/Shanghai 的日历日
+SH = ZoneInfo("Asia/Shanghai")
 
 
 def checkpoint_dbs(root: Optional[Path] = None) -> Dict[str, Any]:
@@ -56,9 +67,16 @@ def checkpoint_dbs(root: Optional[Path] = None) -> Dict[str, Any]:
     return out
 
 
-def _files_to_back_up(root: Path) -> Iterator[Tuple[Path, str]]:
-    """(磁盘路径, zip 内路径)。zip 内路径相对 root，与 invest-backup `restore`（unzip 回 root）同构。"""
-    for d, _dirs, names in os.walk(root / "memory"):
+def _files_to_back_up(root: Path, include_backtest: bool = False) -> Iterator[Tuple[Path, str]]:
+    """(磁盘路径, zip 内路径)。zip 内路径相对 root，与 invest-backup `restore`（unzip 回 root）同构。
+
+    include_backtest=False 时跳过 memory/ 顶层的 .backtest* 目录/文件（整棵不下钻）。
+    """
+    mem = root / "memory"
+    for d, dirs, names in os.walk(mem):
+        if not include_backtest and Path(d) == mem:
+            dirs[:] = [x for x in dirs if not x.startswith(BACKTEST_PREFIX)]
+            names = [x for x in names if not x.startswith(BACKTEST_PREFIX)]
         for n in names:
             if not any(fnmatch.fnmatch(n, g) for g in EXCLUDE_GLOBS):
                 p = Path(d) / n
@@ -81,16 +99,24 @@ def _prune(out_dir: Path, keep: int) -> List[str]:
 
 
 def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
-        now: Optional[datetime] = None) -> Dict[str, Any]:
-    """checkpoint → 打包 → 轮转。root/now 仅测试注入；调度器裸调 run()。"""
+        now: Optional[datetime] = None,
+        include_backtest: Optional[bool] = None) -> Dict[str, Any]:
+    """checkpoint → 打包 → 轮转。调度器裸调 run()；root/now/include_backtest 仅测试注入。
+
+    include_backtest=None（默认）= 按 Asia/Shanghai 的星期决定：周日带 .backtest*（文件名加
+    `_full`），其余天不带。now 需带时区（默认 UTC 当前时刻）。
+    """
     root = Path(root) if root is not None else INVEST_ROOT
+    now = now or datetime.now(timezone.utc)
+    if include_backtest is None:
+        include_backtest = now.astimezone(SH).weekday() == FULL_BACKUP_WEEKDAY
     ckpt = checkpoint_dbs(root)
     errors = {rel: r["error"] for rel, r in ckpt.items() if r and "error" in r}
     for rel, r in ckpt.items():
         if r and r.get("busy"):
             log.warning("[backup] %s checkpoint 被读事务挡住（busy），-wal 将随包带上", rel)
 
-    files = list(_files_to_back_up(root))
+    files = list(_files_to_back_up(root, include_backtest))
     if not files:
         return {"status": "skipped", "reason": "memory/ 与 db/ 下没有可备份的文件"}
 
@@ -98,8 +124,8 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
     out_dir.mkdir(exist_ok=True)
     for stale in out_dir.glob("auto_*.zip.tmp"):  # 上次崩在写一半留下的
         stale.unlink(missing_ok=True)
-    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M")
-    dest = out_dir / f"auto_{stamp}.zip"
+    stamp = now.astimezone(timezone.utc).strftime("%Y%m%d_%H%M")
+    dest = out_dir / f"auto_{stamp}{'_full' if include_backtest else ''}.zip"
     tmp = dest.with_name(dest.name + ".tmp")  # 写完再 rename：半截 zip 不会被当成一份备份
     n = 0
     # ponytail: checkpoint→读文件之间是毫秒窗口，trades.db 只有几十 KB；写入量大了改用
@@ -120,6 +146,7 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
     result = {
         "status": "ok",
         "path": str(dest),
+        "include_backtest": include_backtest,
         "size_bytes": dest.stat().st_size,
         "files": n,
         "checkpoint": ckpt,

@@ -5,6 +5,7 @@
   （对照：直接拷主库文件会丢——证明测试真的卡住了 checkpoint）
 - 轮转：只留最近 14 份 auto_*，手动备份（openinvest-backup-* / manual_*）不动
 - memory/ 打包排除 *.lock、*.bak.*、原子写残留 *.tmp.*；zip 内路径相对数据根（兼容 run.sh restore）
+- .backtest*（占整份备份 ~89%）平日不带、Asia/Shanghai 周日带并加 _full 后缀，共用 14 份轮转
 - 失败要抛：checkpoint 报错照样写出 zip 再抛（watchdog 告警）；无物可备 → skipped 不产空 zip
 - backup.yml 被 runner 发现、entry 可解析
 全部 hermetic：tmp 数据根，不联网不外发。
@@ -100,8 +101,8 @@ def test_retention_keeps_latest_14_auto_only(tmp_path):
     (root / "memory" / "portfolio.md").write_text("x")
     out = root / ".backups"
     out.mkdir()
-    for d in range(1, 21):  # 20 份旧 auto_（2026-09-01..20）
-        (out / f"auto_202609{d:02d}_1930.zip").write_bytes(b"old")
+    for d in range(1, 21):  # 20 份旧 auto_（2026-09-01..20），每 7 天一份 _full（周日整份）
+        (out / f"auto_202609{d:02d}_1930{'_full' if d % 7 == 0 else ''}.zip").write_bytes(b"old")
     (out / "manual_20260101_0000.zip").write_bytes(b"keep")
     (out / "openinvest-backup-20260708-162054-UTC.zip").write_bytes(b"keep")
 
@@ -112,6 +113,8 @@ def test_retention_keeps_latest_14_auto_only(tmp_path):
     assert autos[-1] == "auto_20261018_1930.zip"  # 新的在
     assert autos[0] == "auto_20260908_1930.zip"   # 保留 13 份旧 + 1 份新
     assert len(res["pruned"]) == 7
+    assert (out / "auto_20260914_1930_full.zip").exists()  # _full 同受轮转：14 天窗口内留 2 份（14、20 号）
+    assert not (out / "auto_20260907_1930_full.zip").exists()
     assert (out / "manual_20260101_0000.zip").exists()
     assert (out / "openinvest-backup-20260708-162054-UTC.zip").exists()
 
@@ -139,6 +142,53 @@ def test_excludes_lock_bak_tmp_and_keeps_hidden_dirs(tmp_path):
         "db/insights.db",
     }
     assert res["files"] == 4
+
+
+def _seed_memory_with_backtest(root: Path) -> None:
+    mem = root / "memory"
+    for rel in ("portfolio.md", ".committee/2026-10-17/GC=F.md",
+                ".backtest/2026-10-01/GC=F.md",            # 含 2026-07-24 起的前瞻舰队
+                ".backtest_cl_v1/2026-06-01/GC=F.md", ".backtest_archive_old/x.md", ".backtest.log"):
+        f = mem / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("x")
+
+
+# (aware 时刻, 是否应为周日整份)。上海 = UTC+8，03:30 触发 = 前一天 19:30 UTC
+@pytest.mark.parametrize("now_utc, full", [
+    (datetime(2026, 10, 13, 19, 30, tzinfo=timezone.utc), False),  # 上海周三 03:30
+    (datetime(2026, 10, 17, 19, 30, tzinfo=timezone.utc), True),   # 上海周日 03:30（UTC 还是周六）
+    (datetime(2026, 10, 17, 17, 0, tzinfo=timezone.utc), True),    # 上海周日 01:00（UTC 周六）
+    (datetime(2026, 10, 18, 17, 0, tzinfo=timezone.utc), False),   # 上海周一 01:00（UTC 周日）→ 按上海算不是整份
+])
+def test_backtest_only_in_shanghai_sunday_full_backup(tmp_path, now_utc, full):
+    root = tmp_path / "home"
+    _seed_memory_with_backtest(root)
+
+    res = backup.run(root=root, now=now_utc)  # include_backtest 不传 → 按星期决定
+
+    stamp = now_utc.strftime("%Y%m%d_%H%M")
+    assert res["include_backtest"] is full
+    assert res["path"].endswith(f"auto_{stamp}_full.zip" if full else f"auto_{stamp}.zip")
+    with zipfile.ZipFile(res["path"]) as zf:
+        names = set(zf.namelist())
+    assert {"memory/portfolio.md", "memory/.committee/2026-10-17/GC=F.md"} <= names  # 其余照常
+    backtest = {n for n in names if n.startswith("memory/.backtest")}
+    if full:
+        assert backtest == {"memory/.backtest/2026-10-01/GC=F.md", "memory/.backtest_cl_v1/2026-06-01/GC=F.md",
+                            "memory/.backtest_archive_old/x.md", "memory/.backtest.log"}
+    else:
+        assert backtest == set()
+
+
+def test_include_backtest_explicit_override(tmp_path):
+    root = tmp_path / "home"
+    _seed_memory_with_backtest(root)
+    wed = datetime(2026, 10, 13, 19, 30, tzinfo=timezone.utc)
+    res = backup.run(root=root, now=wed, include_backtest=True)
+    assert res["path"].endswith("_full.zip")
+    with zipfile.ZipFile(res["path"]) as zf:
+        assert "memory/.backtest/2026-10-01/GC=F.md" in zf.namelist()
 
 
 def test_checkpoint_error_still_writes_zip_then_raises(tmp_path):
