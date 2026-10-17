@@ -150,11 +150,27 @@ def test_insufficient_history(tmp_path, monkeypatch):
              holdings=[{"symbol": "AAA", "units": 1.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
              history=[{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 1.0,
                        "price": 10.0, "currency": "CNY", "funding_source": "external_funding"}])
-    assert ap.build_account_performance(pm, today="2026-01-09")["status"] == "insufficient_history"
+    got = ap.build_account_performance(pm, today="2026-01-09")
+    assert got["status"] == "insufficient_history"
+    assert "不足 2 个交易日" in got["message"]   # 人话提示，不只机器可读 reason
     # 没有账本
     pm2 = _pm(tmp_path / "b", cash={"CNY": 1.0}, holdings=[], history=[])
     assert ap.build_account_performance(pm2, today="2026-01-09") == {
-        "status": "insufficient_history", "reason": "no_ledger", "base_currency": "CNY"}
+        "status": "insufficient_history", "reason": "no_ledger", "base_currency": "CNY",
+        "message": ap._INSUFFICIENT_MSG}
+
+
+def test_xirr_null_carries_note(tmp_path, monkeypatch):
+    """历史不足 30 天 XIRR 返回 null——带 xirr_note 说明原因，agent 不会当故障。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
+        "AAA": dict(zip(DAYS, [10.0, 11.0, 11.0, 12.0, 12.0]))}))
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 100.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=[{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 100.0,
+                       "price": 10.0, "currency": "CNY", "funding_source": "external_funding"}])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["status"] == "ok" and perf["xirr"] is None
+    assert perf["xirr_note"] == "历史不足 30 天不报"
 
 
 def test_sold_out_and_deleted_foreign_holding_keeps_its_currency(tmp_path, monkeypatch):

@@ -40,6 +40,7 @@ def test_parse_committee_file(tmp_path):
         "alloc_currency": "CNY",
         "input_health": {},   # 老存档无 Input Health 块 → {}（不猜）
         "run_at": None,
+        "cio_memo": None,     # MD 样本无 CIO Memo 节
     }
     assert parse_committee_file(tmp_path / "missing.md") is None
 

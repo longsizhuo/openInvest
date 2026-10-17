@@ -83,19 +83,6 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     """
     import os
 
-    # LLM_API_KEY（通用）或 DEEPSEEK_API_KEY（向后兼容）都接受
-    if not (os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY")):
-        _print_json({
-            "status": "error",
-            "error": "LLM_API_KEY / DEEPSEEK_API_KEY 未设。Direct 路径必须有 LLM key。",
-            "hint": (
-                "走 Coordinator 路径（在 Claude Code 里用 prepare_committee + spawn"
-                " subagent）不需要 key。或在 .env 里加 LLM_API_KEY（推荐）或"
-                " DEEPSEEK_API_KEY 后重试。"
-            ),
-        })
-        sys.exit(1)
-
     from openinvest.core.committee_runner import run_committee_session
     from openinvest.core.portfolio_manager import PortfolioManager
 
@@ -139,6 +126,20 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
                                   if parsed else None),
         })
         return
+
+    # LLM key 闸放在同日 cache 之后：命中缓存只读 transcript，不调 LLM，没 key 也该能读
+    # LLM_API_KEY（通用）或 DEEPSEEK_API_KEY（向后兼容）都接受
+    if not (os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY")):
+        _print_json({
+            "status": "error",
+            "error": "LLM_API_KEY / DEEPSEEK_API_KEY 未设。Direct 路径必须有 LLM key。",
+            "hint": (
+                "走 Coordinator 路径（在 Claude Code 里用 prepare_committee + spawn"
+                " subagent）不需要 key。或在 .env 里加 LLM_API_KEY（推荐）或"
+                " DEEPSEEK_API_KEY 后重试。"
+            ),
+        })
+        sys.exit(1)
 
     # 三路径统一架构：所有 prep（macro/wealth/event_brief/regime/portfolio_summary/
     # prior_insights）全部委托给 run_committee_session 一处实现，跟 Web/Cron 对齐。

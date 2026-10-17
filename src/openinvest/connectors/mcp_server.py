@@ -774,7 +774,9 @@ async def run_committee(
             return {"cached": True, "decision_id": f"{today}/{symbol}",
                     **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny", "alloc_currency")},
                     "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),
-                                                            with_raw=False)}
+                                                            with_raw=False),
+                    # 与 CLI 同款：缓存命中也带 memo 与 Input Health，agent 不必再 explain_decision
+                    "cio_memo": parsed["cio_memo"], "input_health": parsed["input_health"]}
 
     from openinvest.core.committee_runner import run_committee_session
 
