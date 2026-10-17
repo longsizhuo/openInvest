@@ -27,6 +27,7 @@ ROOT = INVEST_ROOT
 
 __all__ = [
     "cmd_status",
+    "cmd_performance",
     "cmd_strategy",
     "cmd_history",
     "cmd_what_if",
@@ -51,6 +52,15 @@ def cmd_status(_: argparse.Namespace) -> None:
     """
     from openinvest.services.skill_views import build_status_view
     _print_json(build_status_view())
+
+
+# ---------- performance ----------
+
+def cmd_performance(_: argparse.Namespace) -> None:
+    """真实账户业绩（status["performance"] 同一块，单独拿更省 token）：
+    TWR 30d/YTD/成立以来、XIRR、最大回撤、年化波动、vs 基准、数据质量。"""
+    from openinvest.services.account_performance import build_account_performance
+    _print_json(build_account_performance())
 
 
 # ---------- strategy ----------

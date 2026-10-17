@@ -136,6 +136,16 @@ def cash_total_in_base(
     return round(total, 2), rates
 
 
+def _conv(ccy: str, amount: float, base: str, as_of_date: Optional[str],
+          rate_override: Optional[dict]) -> Optional[float]:
+    """total_portfolio_value 的折算腿：给了 rate_override 就只查表（同币种恒 1），否则走 to_base。"""
+    if rate_override is None:
+        return to_base(ccy, amount, base, as_of_date=as_of_date)
+    ccy, base = ccy.upper().strip(), base.upper().strip()
+    rate = 1.0 if ccy == base else rate_override.get(ccy)
+    return amount * rate if rate is not None else None
+
+
 def total_portfolio_value(
     pm,  # PortfolioManager（避免循环 import 不写类型）
     current_prices: dict,
@@ -143,6 +153,7 @@ def total_portfolio_value(
     *,
     as_of_date: Optional[str] = None,
     exclude: tuple = (),
+    rate_override: Optional[dict] = None,
 ) -> tuple[float, dict]:
     """通用化总资产估算：所有 cash 多币种 + 所有 holdings × current_prices × FX 折算到 base
 
@@ -161,6 +172,9 @@ def total_portfolio_value(
         as_of_date: backtest / paper trading 用，按当天 close 拉 FX；None=实盘
         exclude: 不计入的 holding symbol（日报的行情过期熔断：这些资产本轮整个跳过），
             status 记 "excluded"
+        rate_override: {币种: 对 base 汇率} 覆盖实时/按日汇率（账户业绩日度 NAV 重放：
+            一次读行情库的汇率序列再逐日估值，不能每天每币种都走 get_history_data）。
+            给了 dict 就只用它：缺的币种按 "missing_fx"，不再回落网络
 
     Returns:
         (total_in_base, status_dict)
@@ -180,7 +194,7 @@ def total_portfolio_value(
         if not amt:
             status[ccy] = "ok"   # 0 余额视为 ok（不算 fx 漂移）
             continue
-        converted = to_base(ccy, float(amt), base, as_of_date=as_of_date)
+        converted = _conv(ccy, float(amt), base, as_of_date, rate_override)
         # NaN 等同 None：绝不 total += NaN（NaN 会污染整个总资产 → round(NaN)=NaN）
         if converted is None or not math.isfinite(converted):
             status[ccy] = "missing_fx"
@@ -225,7 +239,7 @@ def total_portfolio_value(
             status[sym] = "missing_price"
             continue
         local_value = units * float(price)
-        value_in_base = to_base(ccy, local_value, base, as_of_date=as_of_date)
+        value_in_base = _conv(ccy, local_value, base, as_of_date, rate_override)
         # 绝不 total += NaN：NaN 价/汇率单独标 status 排除，total 永远 finite
         if value_in_base is None or not math.isfinite(value_in_base):
             status[sym] = "missing_fx" if math.isfinite(local_value) else "missing_price"

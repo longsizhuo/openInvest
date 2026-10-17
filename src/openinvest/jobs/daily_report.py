@@ -590,6 +590,16 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         log.warning(f"纪律台账渲染失败 graceful: {e}")
         discipline_md = ""
 
+    # 账户业绩（TWR/XIRR/回撤/vs 基准，账本重放 + 行情库；零 LLM；失败不阻断报告）
+    try:
+        from openinvest.services.account_performance import (
+            build_account_performance, render_performance_md,
+        )
+        performance_md = render_performance_md(build_account_performance(pm))
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"账户业绩渲染失败 graceful: {e}")
+        performance_md = ""
+
     # D17：委员会 / Gemini / 翻译官都已跑完才读——只进邮件，不进任何 LLM 输入
     asset_events = _load_asset_events(target_assets)
 
@@ -605,6 +615,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         final_decision_gemini=final_decision_gemini,
         plain_summaries=plain_summaries,
         discipline_md=discipline_md,
+        performance_md=performance_md,
         # send_email=False 只会是宿主 agent cron（cmd_daily_report）调用——
         # 报告投递去 Discord/Weixin/QQ 等聊天平台，走无 HTML 的 chat 变体。
         render_target="email" if send_email else "chat",

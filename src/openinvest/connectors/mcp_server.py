@@ -121,8 +121,11 @@ def status() -> Dict[str, Any]:
 
     Returns:
         Object with `cash` (currency → amount), `holdings` (list of positions
-        with symbol, units, avg_cost, live price, market value, pnl_pct), and
-        portfolio-level totals.
+        with symbol, units, avg_cost, live price, market value, pnl_pct),
+        portfolio-level totals, and `performance` (real-account TWR 30d / YTD /
+        since inception, XIRR, max drawdown with peak/trough dates, annualised
+        volatility, return vs the configured benchmark, and data_quality; or
+        {"status": "insufficient_history"} until the ledger spans 2 trading days).
     """
     _check_advisory()
     from openinvest.services.skill_views import build_status_view

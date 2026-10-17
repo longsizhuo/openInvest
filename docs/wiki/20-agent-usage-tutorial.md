@@ -60,6 +60,7 @@ history 记 `funding_source: external_funding`、`source: skill_cli:existing_pos
 | 你说 | agent 调 |
 |---|---|
 | "看看我的持仓 / 涨了多少" | `status` |
+| "我的收益率 / 回撤 / 跑赢大盘没" | `performance`（TWR 30d/YTD/成立以来 + XIRR + 最大回撤 + vs 基准；`status.performance` 同一块） |
 | "黄金现在什么价" | `live_prices` |
 | "纳指跌 10% 我亏多少" | `what_if` |
 | "该不该买 AAPL / 跑个委员会" | Coordinator（Claude Code，免 API key）或 `run_committee`（Direct，需 DEEPSEEK_API_KEY） |

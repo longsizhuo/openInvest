@@ -1117,6 +1117,7 @@ def skill_client(client, monkeypatch):
 _CLI_STATUS_KEYS = {
     "user", "cash", "ndq", "gold", "all_holdings",
     "total_assets_cny", "fx", "live_prices",
+    "performance",   # 真实账户业绩块（TWR/XIRR/回撤/vs 基准），CLI / MCP / REST 同一视图
 }
 
 

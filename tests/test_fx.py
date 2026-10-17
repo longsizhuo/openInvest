@@ -266,3 +266,16 @@ def test_duplicate_symbol_rows_status_follows_last_row(monkeypatch):
             {"symbol": "A", "units": 1, "avg_cost": 2.0, "cost_currency": "CNY"}]
     _, status = fx.total_portfolio_value(_CashPM({}, rows), {"A": 3.0}, "CNY")
     assert status["A"] == "ok"
+
+
+def test_total_portfolio_value_rate_override_skips_network(monkeypatch):
+    """账户业绩日度重放：给了 rate_override 就只查表，不碰 get_fx_rate；缺的币种标 missing_fx。"""
+    from types import SimpleNamespace
+    monkeypatch.setattr(fx, "get_fx_rate", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
+    pm = SimpleNamespace(
+        cash={"CNY": 100.0, "AUD": 10.0, "JPY": 5.0},
+        holdings=[{"symbol": "NDQ.AX", "units": 2.0, "avg_cost": 50.0, "cost_currency": "AUD"}],
+    )
+    total, status = fx.total_portfolio_value(pm, {"NDQ.AX": 60.0}, "CNY", rate_override={"AUD": 4.5})
+    assert total == pytest.approx(100 + 10 * 4.5 + 2 * 60 * 4.5)
+    assert status == {"CNY": "ok", "AUD": "ok", "JPY": "missing_fx", "NDQ.AX": "ok"}

@@ -114,6 +114,8 @@ jobs:
           uv run python -c "from openinvest.scheduler.cron import crontab_trigger, crontab_dow_to_names"
           uv run python -c "from openinvest.core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from openinvest.utils.fx import get_fx_rate, cash_total_in_base"
+          uv run python -c "from openinvest.calc.account_metrics import account_metrics, xirr, twr_windows"
+          uv run python -c "from openinvest.services.account_performance import build_account_performance, render_performance_md"
           uv run python -c "from openinvest.utils.eastmoney_fund import fetch_fund_nav, fetch_fund_nav_history, canonical_fund_symbol"
           uv run python -c "from openinvest.utils.advisory import is_advisory_mode"
           uv run python -c "from openinvest.utils.market_metrics import TRADING_DAYS_2Y, _calc_price_quantile"

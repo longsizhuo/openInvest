@@ -10,7 +10,8 @@
 - 所有子命令都输出 JSON 或 markdown，给 Claude 读
 
 子命令：
-  status                持仓 + 实时价 + 浮盈
+  status                持仓 + 实时价 + 浮盈（含 performance 业绩块）
+  performance           真实账户业绩：TWR / XIRR / 最大回撤 / 年化波动 / vs 基准
   strategy              target_assets + Dreaming insights
   history [-n N]        近期交易 + 近期辩论
   what_if [...]         P&L 情景模拟
@@ -125,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status").set_defaults(func=cmd_status)
+    sub.add_parser("performance",
+        help="真实账户业绩：TWR 30d/YTD/成立以来 + XIRR + 最大回撤 + 年化波动 + vs 基准（status 里同一块）"
+    ).set_defaults(func=cmd_performance)
     sub.add_parser("strategy").set_defaults(func=cmd_strategy)
     sub.add_parser("live_prices").set_defaults(func=cmd_live_prices)
     sub.add_parser("discipline", help="委员会纪律台账(不作为率+拦冲动+反事实损益)").set_defaults(func=cmd_discipline)

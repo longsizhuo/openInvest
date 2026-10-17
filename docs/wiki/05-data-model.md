@@ -317,6 +317,27 @@ memory/
 
 详见 [memory_layout.md](../memory_layout.md)。
 
+### 6.1 `portfolio_history.jsonl` 怎么被账户业绩重放
+
+`status.performance` / `openinvest performance` / 日报"账户业绩"段（`services/account_performance.py`
+→ 纯计算 `calc/account_metrics.py`）把流水重放成日度 NAV 序列，再算 TWR / XIRR / 最大回撤 / 波动 / vs 基准：
+
+| 流水 `action` | 持仓 | 现金 | 外部现金流（进 TWR 分母、XIRR） |
+|---|---|---|---|
+| `buy` / `bought`（`funding_source` 缺省 = 子弹池现金）| +units | −成本 | 无（内部转换）|
+| `buy` / `dca_reconcile_*` 带 `funding_source=external_funding`、`gift` | ±units | 不动 | ±成本（外部新钱）|
+| `sell` / `sold` | −units | +`net_amount`（或 总额−fee）| 无 |
+| `deposit` / `withdraw` | — | ±金额 | ±金额 |
+| `manual_override` / `delete_holding` | 置为绝对值 | 不动 | 增量 × 当日收盘（持仓修正不是收益）|
+
+- **锚定当前状态**：流水早于系统上线的持仓/现金没有记录，所以开盘状态 = `portfolio.md` 当前值 − Σ流水增量，
+  序列末日 NAV 恒等于 status 总资产；差额列在 `data_quality.unreconciled`（补录请用 `buy --existing-position`）。
+- 黄金流水符号 `GOLD-CNY` 映射到 `proxy_kind=gold_cny_per_gram` 的持仓，克价 = `GC=F`/31.1035 × `USDCNY=X`。
+- 估值只读行情库 `db/market_data.db`（不联网），复用 `utils.fx.total_portfolio_value(rate_override=当日汇率)`；
+  网格 = 持仓标的交易日并集，缺价日前值填充并计入 `data_quality.filled_days`。
+- 公式：TWR 日度链接 `r_d = (End_d + Out_d − Start_d − In_d) / (Start_d + In_d)`；XIRR 二分法、年 = 365.25 天、
+  历史 < 30 天不报；回撤 / 波动（`stdev(ln(1+r)) × √252`）在链接指数上算；基准来自 `portfolio.benchmark_symbol`。
+
 ---
 
 ## 7. 历史压测 + 硬化日志

@@ -83,6 +83,14 @@ def build_status_view() -> Dict[str, Any]:
                 }
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
 
+    # 账户业绩（TWR / XIRR / 回撤 / vs 基准）：账本重放 + 行情库估值，与 openinvest performance 同一函数。
+    # 失败不阻断 status（持仓/现金是硬需求，业绩是附加块）。
+    try:
+        from openinvest.services.account_performance import build_account_performance
+        performance = build_account_performance(pm)
+    except Exception as e:  # noqa: BLE001
+        performance = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+
     holding_views: List[Dict[str, Any]] = []
     for h in pm.holdings:
         view = {k: h[k] for k in (
@@ -143,6 +151,9 @@ def build_status_view() -> Dict[str, Any]:
         # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
         "all_holdings": holding_views,
         "total_assets_cny": total_cny,
+        # 真实账户业绩：twr_30d / twr_ytd / twr_all / xirr / max_drawdown / volatility_annual /
+        # benchmark / data_quality（基准币种）；历史不足 → {"status": "insufficient_history"}
+        "performance": performance,
         # 拉不到汇率 / 价格、没算进 total 的条目——有就列出来，别让总资产悄悄偏小
         **({"total_assets_excludes": unvalued(_value_status)} if unvalued(_value_status) else {}),
         "fx": {"audcny": round(audcny, 4)} if aud_relevant else {},

@@ -318,6 +318,7 @@ def assemble_full_report(
     plain_summaries: Optional[Dict[str, str]] = None,
     discipline_md: str = "",
     *,
+    performance_md: str = "",
     render_target: str = "email",
     asset_events: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     confidence_lookup: Optional[Dict[str, Any]] = None,
@@ -349,6 +350,8 @@ def assemble_full_report(
             只展示，不进任何 LLM 输入。
         confidence_lookup: verdict_review 刷新的同类决议查表（entry 层读好传入）；
             裁决旁显示它而不是 CIO 自报的 confidence（D10 P1）。None → "样本不足（n=0）"。
+        performance_md: 真实账户业绩段（services.account_performance.render_performance_md，
+            entry 层算好传入）：TWR / XIRR / 最大回撤 / vs 基准各一行。空 → 不出 section。
 
     Returns:
         完整 markdown 报告字符串
@@ -511,6 +514,11 @@ def assemble_full_report(
     discipline_section = (
         f"\n{discipline_md}\n\n---\n" if discipline_md.strip() else ""
     )
+    # 账户业绩（TWR/XIRR/回撤/vs 基准）：新维度必须进邮件，不能只进 prompt（用户规则）。
+    performance_section = (
+        f"\n## 账户业绩（真实账户，按基准币种）\n{performance_md}\n\n---\n"
+        if performance_md.strip() else ""
+    )
 
     # chat 变体置顶速览（见 build_tldr_block 动机）；email 不加——邮件本来就
     # 一次性看全文，标题+目录结构已经够用，不需要重复摘要。
@@ -537,7 +545,7 @@ def assemble_full_report(
 {asset_section}
 
 ---
-{discipline_section}
+{performance_section}{discipline_section}
 ## {n+2}. 摩擦成本 (CNY → AUD 换汇)
 ```
 {friction_report}

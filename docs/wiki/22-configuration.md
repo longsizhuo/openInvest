@@ -50,6 +50,7 @@ LLM_MODEL=glm-4-flash
 
 | Config Key | 类型（默认值） | 行为 |
 |---|---|---|
+| `portfolio.benchmark_symbol` | `str` (`"510300.SS"`) | 账户业绩（`status.performance` / `openinvest performance` / 日报"账户业绩"段）对比的基准 yfinance symbol。默认沪深 300 ETF（指数 `000300.SS` 在 Yahoo 只回 1 根 bar）；持有跟踪它的 ETF 时自相关，换一个不持有的市场（`^GSPC` / `VAS.AX`）；空串 = 不比。env：`INVEST_PORTFOLIO_BENCHMARK_SYMBOL` |
 | `verdict.concentration_lens_enabled` | `bool` (`false`) | **持仓集中度过滤器**。开启时对过度集中的资产触发告警 / TRIM；关闭（默认）后委员会看不到持仓占比，集中度不再触发 TRIM（波动率与估值风控仍生效，压力测试改用绝对损失金额）。见 [ADR-019](adr/019-remove-solvency-concentration-override.md)、[ADR-020](adr/020-concentration-lens-default-off.md) |
 | `verdict.risk_profile` | `str` (`"steady"`) | 风险偏好：`steady`（稳健）/ `aggressive`（下行阶段允许更大规模买入）。 |
 | `verdict.gold_defense_dca_enabled` | `bool` (`true`) | 黄金防御机制。高波动骤增阶段把单次大额加仓拆分为多期 DCA。 |

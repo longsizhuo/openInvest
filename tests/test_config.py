@@ -135,6 +135,7 @@ class TestLoadConfigDefaults:
         cfg = load_config()
         assert isinstance(cfg, TunableConfig)
         assert cfg.language.invest_lang == "zh"
+        assert cfg.portfolio.benchmark_symbol == "510300.SS"
         assert cfg.regime.trend_spread_atr_ratio == 3.6
         assert cfg.regime.crash_atr_spike_ratio_min == 2.0
         assert cfg.verdict.buy_confidence_overdrive == 0.95

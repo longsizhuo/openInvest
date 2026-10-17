@@ -6,6 +6,10 @@ portfolio:
   # 基准币种（ISO 三字母）：总资产、可投子弹、委员会金额字段按它算；金额阈值按人民币标定、运行时换算。
   # env: INVEST_PORTFOLIO_BASE_CURRENCY=AUD
   base_currency: CNY
+  # 账户业绩（TWR/XIRR/回撤）对比的基准 yfinance symbol。默认沪深 300 ETF（指数 000300.SS 在 Yahoo 只回 1 根 bar）；
+  # 持有跟踪它的 ETF 时自相关，换一个不持有的市场。空串 = 不比。
+  # env: INVEST_PORTFOLIO_BENCHMARK_SYMBOL=^GSPC
+  benchmark_symbol: 510300.SS
 
 regime:
   # #113 尺度无关阈值：任意资产零配置自动适配，per_asset 表已删

@@ -792,3 +792,22 @@ def test_daily_report_value_warnings_cover_each_status():
                          "FUND:1": "cost_fallback", "Y": "excluded", "Z": "tracking_only"})
     assert len(w) == 3
     assert "SGD 折算 CNY 失败" in w[0] and "X 实时价不可用且无成本价" in w[1] and "按成本价计入" in w[2]
+
+
+def test_assemble_renders_performance_section_in_both_variants():
+    """账户业绩段：entry 算好 markdown 传入，email / chat 两个变体都要带（新维度只进 prompt 不进邮件 = 看不见）。"""
+    perf_md = "- TWR（时间加权）：30 天 -2.27% ｜ 今年 -7.81% ｜ 自 2026-03-27 -7.81%\n- XIRR（年化金额加权）：-13.43%"
+    for target in ("email", "chat"):
+        report = assemble_full_report(
+            today="2026-10-17", macro_view="", gold_snapshot_text="", friction_report="",
+            target_assets=[], asset_committees={}, skipped_assets=set(), total_assets_cny=0.0,
+            final_decision_gemini="", performance_md=perf_md, render_target=target,
+        )
+        assert "## 账户业绩" in report and "XIRR（年化金额加权）：-13.43%" in report
+    # 空 → 不出空壳 section
+    report = assemble_full_report(
+        today="2026-10-17", macro_view="", gold_snapshot_text="", friction_report="",
+        target_assets=[], asset_committees={}, skipped_assets=set(), total_assets_cny=0.0,
+        final_decision_gemini="",
+    )
+    assert "账户业绩" not in report

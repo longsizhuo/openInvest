@@ -19,6 +19,11 @@ class PortfolioConfig:
     """基准币种：总资产 / 可投子弹 / 委员会金额字段与阈值都按它算（2026-10 第 1 步）。
     阈值仍按人民币标定、运行时换算（utils/base_currency）。ISO 三字母码；改它=迁移，历史记录不跟着变。"""
     base_currency: str = "CNY"
+    # 账户业绩 vs 基准的标的（yfinance symbol）：status performance.benchmark / 日报"账户业绩"段。
+    # 默认沪深 300 ETF（510300.SS）：指数本身 000300.SS 在 Yahoo 只回 1 根 bar（2026-10 实测，
+    # core/benchmarks 折线图缓存同样只有 1 个点），ETF 全历史可用。持有跟踪它的 ETF 时自相关，
+    # 换一个"不持有的市场"（^GSPC / VAS.AX …）。空串 = 不比。
+    benchmark_symbol: str = "510300.SS"
 
 
 @dataclass(frozen=True)
