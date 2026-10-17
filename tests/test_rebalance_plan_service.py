@@ -23,8 +23,11 @@ from openinvest.services import rebalance_plan as rp
 from openinvest.utils import fx
 from openinvest.utils.quotes import QuoteSnapshot
 
-PRICES = {"510300.SS": 4.0, "AAPL": 100.0, "0700.HK": 100.0, "FUND:110020": 2.0}
+PRICES = {"510300.SS": 4.0, "AAPL": 100.0, "0700.HK": 100.0, "FUND:110020": 2.0,
+          "BTC-USD": 60_000.0, "GC=F": 3_000.0, "XYZ": 10.0}
 CNY_PER = {"CNY": 1.0, "USD": 7.0, "HKD": 0.9}
+# 这些标的的真实行情源自带币种（基金 / 黄金代理报 CNY），不等于按后缀猜出来的币种
+QUOTE_CCY = {"FUND:110020": "CNY", "XYZ": "CNY"}
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +36,7 @@ def _offline(monkeypatch):
 
     def fake_quote(h):
         p = prices.get(h["symbol"])
-        ccy = "CNY" if h["symbol"].startswith("FUND:") else h["cost_currency"]    # 与真实 eastmoney 行情一致
+        ccy = QUOTE_CCY.get(h["symbol"], h["cost_currency"])
         return None if p is None else QuoteSnapshot(h["symbol"], p, ccy, "share", "2026-10-16")
 
     def fake_rate(quote, base="CNY", as_of_date=None):
@@ -47,7 +50,7 @@ def _offline(monkeypatch):
     return prices
 
 
-def _pm(tmp_path, *, target_pct=True, holdings=None, assets=None):
+def _pm(tmp_path, *, target_pct=True, holdings=None, assets=None, cash=None):
     def asset(sym, pct, **kw):
         return {"symbol": sym, "max_single_invest_cny": 10_000, **({"target_pct": pct} if target_pct else {}), **kw}
 
@@ -59,7 +62,7 @@ def _pm(tmp_path, *, target_pct=True, holdings=None, assets=None):
             asset("510300.SS", 0.30, display_name="沪深300ETF"), asset("AAPL", 0.20), asset("FUND:110020", 0.20)],
     }, "")
     store.write("portfolio", "state", {
-        "schema_version": 2, "cash": {"CNY": 53_000.0, "USD": 1_000.0},
+        "schema_version": 2, "cash": cash if cash is not None else {"CNY": 53_000.0, "USD": 1_000.0},
         "holdings": holdings if holdings is not None else [
             {"symbol": "510300.SS", "kind": "etf", "units": 5_000.0, "avg_cost": 4.0, "cost_currency": "CNY"},
             {"symbol": "AAPL", "kind": "equity", "units": 50.0, "avg_cost": 90.0, "cost_currency": "USD"},
@@ -152,6 +155,67 @@ def test_base_currency_is_respected(tmp_path, monkeypatch):
     # 占比 / 数量与 CNY 口径一致，金额按 AUD 折算
     assert (r["AAPL"]["drift_pct"], r["AAPL"]["units"], r["510300.SS"]["units"]) == (8.23, 14, 4_300)
     assert r["510300.SS"]["amount"] == pytest.approx(17_200 / 4.7, abs=0.01)
+
+
+# ---- 目标标的还没持仓 / 追踪仓 / 现金口径 / 手数提示 ----
+
+def test_unheld_crypto_and_metal_targets_buy_by_amount_not_whole_units(tmp_path):
+    """回归（评审 #447）：没持仓的目标标的 kind 曾一律当 equity → BTC-USD / GC=F 按 1 整枚 / 1 盎司取整，
+    一份「不足一手」的假原因，什么都买不了。现在 kind 按 symbol 猜（crypto / metal）→ 按金额。"""
+    assert rp._pseudo_holding("BTC-USD")["kind"] == "crypto" and rp._pseudo_holding("GC=F")["kind"] == "metal"
+    assert rp._pseudo_holding("FUND:110020")["kind"] == "fund"
+    assets = [{"symbol": "510300.SS", "target_pct": 0.40}, {"symbol": "BTC-USD", "target_pct": 0.20},
+              {"symbol": "GC=F", "target_pct": 0.10}]
+    holdings = [{"symbol": "510300.SS", "kind": "etf", "units": 5_000.0, "avg_cost": 4.0, "cost_currency": "CNY"}]
+    plan = rp.build_rebalance_plan("cash_only", 5, pm=_pm(tmp_path, assets=assets, holdings=holdings,
+                                                         cash={"CNY": 60_000.0}))
+    r = _rows(plan)
+    # 总资产 80k；BTC 每枚 60,000 USD × 7 = 420,000 CNY，缺口 16,000 → 0.0381 枚；黄金每盎司 21,000，缺口 8,000
+    assert (r["BTC-USD"]["action"], r["BTC-USD"]["amount"], r["BTC-USD"]["lot_size"]) == ("BUY", 16_000.0, None)
+    assert r["BTC-USD"]["units"] == pytest.approx(16_000 / 420_000, abs=1e-4)
+    assert (r["GC=F"]["action"], r["GC=F"]["amount"], r["GC=F"]["lot_size"]) == ("BUY", 8_000.0, None)
+    assert "不足一手" not in r["BTC-USD"]["reason"] + r["GC=F"]["reason"]
+    assert (r["510300.SS"]["action"], r["510300.SS"]["units"]) == ("BUY", 3_000)
+
+
+def test_unheld_target_takes_currency_from_the_quote_not_the_suffix_guess(tmp_path):
+    """XYZ 没后缀 → 猜 USD；但行情源报 CNY（基金 / 黄金代理就是这样）→ 以行情为准，不能多乘 7。"""
+    assert rp._pseudo_holding("XYZ")["cost_currency"] == "USD"
+    plan = rp.build_rebalance_plan("hybrid", 5, pm=_pm(tmp_path, assets=[{"symbol": "XYZ", "target_pct": 0.30}],
+                                                      holdings=[], cash={"CNY": 60_000.0}))
+    x = _rows(plan)["XYZ"]
+    assert x["currency"] == "CNY" and (x["action"], x["amount"], x["units"]) == ("BUY", 18_000.0, 1_800)
+
+
+def test_tracking_only_target_is_valued_at_zero_and_stays_out_of_total(tmp_path):
+    holdings = [{"symbol": "510300.SS", "kind": "etf", "units": 5_000.0, "avg_cost": 4.0, "cost_currency": "CNY"},
+                {"symbol": "AAPL", "kind": "equity", "units": 50.0, "avg_cost": 90.0, "cost_currency": "USD",
+                 "is_tracking_only": True}]
+    assets = [{"symbol": "510300.SS", "target_pct": 0.30}, {"symbol": "AAPL", "target_pct": 0.20}]
+    plan = rp.build_rebalance_plan("hybrid", 5, pm=_pm(tmp_path, assets=assets, holdings=holdings,
+                                                      cash={"CNY": 60_000.0}))
+    assert plan["total_value"] == 80_000.0              # 追踪仓那 50 股（35,000）不计入
+    aapl = _rows(plan)["AAPL"]
+    assert aapl["current_pct"] == 0.0 and aapl["action"] == "BUY" and aapl["currency"] == "USD"
+
+
+def test_negative_cash_keeps_cash_and_total_on_the_same_basis(tmp_path):
+    """净负现金（融资）：现金腿不能被截到 0，否则 cash_before + 持仓 ≠ total。"""
+    holdings = [{"symbol": "510300.SS", "kind": "etf", "units": 5_000.0, "avg_cost": 4.0, "cost_currency": "CNY"}]
+    plan = rp.build_rebalance_plan("hybrid", 5, pm=_pm(tmp_path, assets=[{"symbol": "510300.SS", "target_pct": 0.3}],
+                                                      holdings=holdings, cash={"CNY": -5_000.0}))
+    assert plan["total_value"] == 15_000.0 and plan["totals"]["cash_before"] == -5_000.0
+    assert plan["totals"]["cash_before"] + 20_000.0 == plan["total_value"]
+
+
+def test_uncertain_lot_note_travels_with_the_reason_of_a_trade(tmp_path):
+    """港股每手股数未知：agent 常只转述 reason，所以提示要写进有买卖的行的 reason，不能只放 lot_note。"""
+    assets = [{"symbol": "0700.HK", "target_pct": 0.20}, {"symbol": "510300.SS", "target_pct": 0.30}]
+    plan = rp.build_rebalance_plan("hybrid", 5, pm=_pm(tmp_path, assets=assets))
+    r = _rows(plan)
+    assert r["0700.HK"]["action"] == "BUY" and "手数未知" in r["0700.HK"]["reason"] and r["0700.HK"]["lot_note"]
+    assert r["510300.SS"]["action"] == "BUY" and "lot_note" not in r["510300.SS"]
+    assert [u["symbol"] for u in plan["unmanaged"]] == ["AAPL"]       # AAPL 持仓不在这份 target_assets 里
 
 
 def test_errors_are_structured_not_raised(tmp_path):

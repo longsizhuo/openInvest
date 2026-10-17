@@ -4,7 +4,7 @@
 - 持仓 / 现金 / 策略：PortfolioManager
 - 现价：utils.quotes.get_quote（黄金 / 场外基金 / yfinance 同一入口）
 - 总资产：utils.fx.total_portfolio_value_cny（全仓唯一实现，占比分母与 status 同口径）
-- 现金折算：utils.fx.dry_powder；基准币种：utils.base_currency
+- 现金折算：utils.fx.cash_total_in_base（与总资产的现金腿同口径，净负现金不截断）；基准币种：utils.base_currency
 
 口径：
 - 参与再平衡的是 strategy.target_assets 里的标的；持仓里有但不在 target_assets 的，
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.calc.rebalance import MODES, infer_lot_size, plan_rebalance
 from openinvest.calc.regime_probability import quote_currency_iso
-from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.core.portfolio_manager import PortfolioManager, _guess_kind_from_symbol
 from openinvest.utils import fx
 from openinvest.utils.base_currency import base_currency
 from openinvest.utils.quotes import get_quote, is_eastmoney_fund
@@ -32,7 +32,8 @@ def _pseudo_holding(symbol: str) -> Dict[str, Any]:
     """target_assets 里有、持仓里没有的标的：造一个 0 持仓壳子，让它也能取价、被建议买入。"""
     return {
         "symbol": symbol, "units": 0.0,
-        "kind": "fund" if symbol.upper().startswith("FUND:") else "equity",
+        # kind 决定整手：加密 / 贵金属按金额，写死 equity 会让 BTC-USD、GC=F 按 1 整枚 / 1 盎司取整而永远买不了
+        "kind": "fund" if symbol.upper().startswith("FUND:") else _guess_kind_from_symbol(symbol),
         "cost_currency": quote_currency_iso(symbol) or "CNY",
     }
 
@@ -107,8 +108,10 @@ def build_rebalance_plan(
     for s in fx.unvalued(status):
         if s not in managed:   # 目标标的在下面统一报（未计入 + 剔除）
             warnings.append(f"{s} 拉不到价格或汇率，未计入总资产；占比以其余部分为准")
-    cash_value, cash_missing = fx.dry_powder(pm, base)
-    for c in cash_missing:
+    # 现金不用 dry_powder：它把净负现金截到 0，而 total 按原值计入分母，两边会对不上
+    cash_nonzero = {c: float(a) for c, a in pm.cash.items() if a}
+    cash_value, cash_rates = fx.cash_total_in_base(cash_nonzero, base)
+    for c in sorted(c for c, r in cash_rates.items() if r is None):
         warnings.append(f"{c} 现金拉不到汇率，未计入")
 
     positions: List[Dict[str, Any]] = []
@@ -144,6 +147,8 @@ def build_rebalance_plan(
                           target_cash_pct=cash_t, band_pct=band, mode=mode, currency=base)
     for r in plan["rows"]:
         r.update(meta[r["symbol"]])
+        if r["action"] != "NONE" and r.get("lot_note"):   # agent 常只转述 reason，手数不确定的提示要跟着走
+            r["reason"] += f"；{r['lot_note']}"
 
     unmanaged = []
     for s, h in held.items():
