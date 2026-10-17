@@ -72,7 +72,8 @@ raise SystemExit(0 if has_real else 1)
 " 2>/dev/null
 }
 
-# 备份前把 trades/insights/jobs 三个库的 WAL 刷进主库（与后端每日 backup job 同一个函数）。
+# 备份前把 db/ 下所有 SQLite 库的 WAL 刷进主库（与后端每日 backup job 同一个函数）——
+# 整个 db/ 连同各库的 -wal 都会进包，所以每个库都要刷，不只是账本三件套。
 # 失败不拦备份：钉住的旧版 PyPI 后端（SPEC）可能还没有 openinvest.jobs.backup；
 # 那时靠上面不再排除 *.db-wal 兜底，WAL 随包带上，数据不丢。输出走 stderr，不污染结果 JSON。
 checkpoint_dbs() {
