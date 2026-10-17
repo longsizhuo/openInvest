@@ -18,6 +18,32 @@ _VERDICT_DIRECTION = {"BUY": "BUY", "ACCUMULATE": "BUY", "SELL": "SELL", "TRIM":
 # 自动匹配窗口：决议日起 N 个日历天内的同向同标的成交算"执行了该决议"
 MATCH_WINDOW_DAYS = 7
 
+# portfolio_history.jsonl 的 action → trades.db 的 direction。PortfolioManager.buy/sell 写
+# buy/sell；record_external_trade（CommSec 邮件回灌）写 bought/sold。deposit/withdraw/
+# delete_holding 不是成交，不映射。
+_HISTORY_DIRECTION = {"buy": "BUY", "bought": "BUY", "sell": "SELL", "sold": "SELL"}
+
+
+def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """memory/portfolio_history.jsonl 的成交记录 → 与 trades.db 行同形的 dict，喂给 _match_trades。
+
+    MCP / CLI 的 buy/sell 只写 portfolio_history.jsonl、从不写 trades.db——不做这一步，
+    "7 天内同标的同向成交自动匹配"只对 REST /api/trades/record 成立，agent 路径永远匹配不上。
+    补录已有持仓（source 带 ':existing_position'）不是执行决议，跳过。id 用 "history:<行号>"
+    与 trades.db 的整数 id 区分。
+    """
+    out: List[Dict[str, Any]] = []
+    for i, r in enumerate(records):
+        direction = _HISTORY_DIRECTION.get(str(r.get("action", "")).lower())
+        if not direction or ":existing_position" in str(r.get("source", "")):
+            continue
+        out.append({
+            "id": f"history:{i}", "ts": r.get("ts_origin") or r.get("ts"), "verdict_id": None,
+            "symbol": r.get("symbol"), "direction": direction, "units": r.get("units"),
+            "price": r.get("price"), "status": "executed",
+        })
+    return out
+
 
 def _safe_stem(symbol: str) -> str:
     """symbol → 落盘文件名 stem（与 persist/coordinator 的 sanitize 同式）。"""

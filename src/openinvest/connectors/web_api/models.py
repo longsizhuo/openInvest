@@ -797,8 +797,8 @@ class DecisionIntervention(BaseModel):
 
 
 class DecisionMatchedTrade(BaseModel):
-    """自动匹配到的成交（源 trades.db）"""
-    id: int
+    """自动匹配到的成交（源 trades.db 的整数 id，或 portfolio_history.jsonl 的 "history:<行号>"）"""
+    id: Union[int, str]
     ts: str
     direction: str
     units: float
