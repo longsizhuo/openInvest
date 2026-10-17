@@ -89,7 +89,64 @@ def test_parse_committee_text_extracts_cio_memo():
     assert "这是 memo 里自带的分隔线" in got["cio_memo"] and "钳制" in got["cio_memo"]
     assert "macro text" not in got["cio_memo"] and "Input Health" not in got["cio_memo"]
     assert parse_committee_text(COORDINATOR_MD)["cio_memo"] == "cio line 1\ncio line 2"
+    # Coordinator 在 CIO 后面加了别的（含数字的）小节 → 照样在它前面截止，不吞
+    for heading in ("EVENT_BRIEF", "QUANT_R3"):
+        assert parse_committee_text(COORDINATOR_MD.replace("### QUANT\n", f"### {heading}\n"))[
+            "cio_memo"] == "cio line 1\ncio line 2"
     assert parse_committee_text("**Verdict**: HOLD (confidence 0.5)\n")["cio_memo"] is None
+
+
+@pytest.fixture
+def mem_root(tmp_path, monkeypatch):
+    """真写盘用：memory 根指向 tmp，行情空（macro 快照 / 现价都不触网）。"""
+    import pandas as pd
+
+    import openinvest.core.memory_store as ms
+    import openinvest.utils.exchange_fee as ef
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
+    monkeypatch.setattr(ef, "get_history_data", lambda *a, **kw: pd.DataFrame())
+    return tmp_path / "memory"
+
+
+# 含内部分隔线 / 空行 / 小标题 / 钳制句——贴近真实 CIO memo，且不能被分节正则截断
+_MEMO = ("VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 800\n\n"
+         "首笔 ¥800，分三批。\n\n---\n\n### 分批计划\n- 第一批\n- 第二批\n\n"
+         "⚠️ 金额已按单次上限 ¥1,000 钳制")
+
+
+def test_persist_roundtrip_cio_memo_verbatim(mem_root):
+    """真跑 _persist 再用 parse_committee_text 读回：cio_memo 逐字等于写入的 memo。
+    persist.py 改了分节标题 / 顺序，这里红，而不是 cached 路径悄悄返回 None 或截错。"""
+    from datetime import datetime
+
+    from openinvest.core.committee import persist
+    from openinvest.core.committee.debate import CommitteeReport
+    report = CommitteeReport(asset={"symbol": "TESTSYM", "display_name": "Test"},
+                             macro_view="MACRO risk_on", quant_view="QUANT bullish",
+                             risk_view="RISK ok", cio_memo=_MEMO)
+    verdict = {"verdict": "ACCUMULATE", "confidence": 0.7, "dominant_view": "quant", "alloc_cny": 800}
+    persist._persist(report, verdict, debate_meta={"max_rounds": 2, "final_round": 2, "converged": True})
+    md = mem_root / ".committee" / datetime.now().strftime("%Y-%m-%d") / "TESTSYM.md"
+    got = parse_committee_text(md.read_text(encoding="utf-8"))
+    assert got["cio_memo"] == _MEMO
+    assert got["verdict"] == "ACCUMULATE" and got["input_health"]["schema"] == 1   # 别的块没被吞
+
+
+def test_coordinator_roundtrip_cio_memo_verbatim(mem_root):
+    """同上，走 Coordinator 落盘（save_committee_transcript 的 `### CIO` 版式，后面还有 QUANT / RISK 小节）。"""
+    from pathlib import Path
+
+    from openinvest.core.runner.coordinator import save_committee_transcript
+    raw = ("=== MACRO ===\n宏观中性\n\n=== QUANT_R1 ===\nSIGNAL: bullish\nSTRENGTH: 6\n\n"
+           "=== RISK_R1 ===\nSIGNAL: concerned\nSTRENGTH: 5\n\n"
+           f"=== CIO ===\n{_MEMO}\n\n"
+           "=== QUANT ===\nSIGNAL: bullish\n\n=== RISK ===\nSIGNAL: concerned\n")
+    saved = save_committee_transcript("TESTSYM", raw, provider="hermes")["saved"]
+    text = Path(saved).read_text(encoding="utf-8")
+    assert "### QUANT\n" in text and "### RISK\n" in text      # CIO 后面确有别的小节
+    got = parse_committee_text(text)
+    assert got["cio_memo"] == _MEMO
+    assert "SIGNAL: bullish" not in got["cio_memo"]              # 没吞后面的小节
 
 
 def test_cli_cached_run_committee_works_without_llm_key(monkeypatch, capfd, tmp_path):

@@ -173,6 +173,20 @@ def test_xirr_null_carries_note(tmp_path, monkeypatch):
     assert perf["xirr_note"] == "历史不足 30 天不报"
 
 
+def test_xirr_null_note_when_span_ok_but_unsolvable(tmp_path, monkeypatch):
+    """跨度 ≥ 30 天但 XIRR 求不出根（年化 > 1000% 超出二分区间）→ null + 第二句 note，
+    不能再说"历史不足 30 天"（那是在撒谎）。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
+        "AAA": {"2026-01-05": 10.0, "2026-02-20": 100.0}}))   # 46 天涨 10 倍
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 100.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=[{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 100.0,
+                       "price": 10.0, "currency": "CNY", "funding_source": "external_funding"}])
+    perf = ap.build_account_performance(pm, today="2026-02-20")
+    assert perf["status"] == "ok" and perf["xirr"] is None
+    assert "无法求解" in perf["xirr_note"] and "历史不足" not in perf["xirr_note"]
+
+
 def test_sold_out_and_deleted_foreign_holding_keeps_its_currency(tmp_path, monkeypatch):
     """CR 阻塞项：卖光 + delete_holding 的 AUD 持仓不在当前 holdings 里，计价币种要从流水推，
     不能回落 CNY（否则持有期估值缩 4.7 倍 → 回撤 -78%、波动 1700%）。价格/汇率全程不变 → 回撤 0、波动 0。"""

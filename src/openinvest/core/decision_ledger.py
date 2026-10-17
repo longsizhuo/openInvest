@@ -71,9 +71,11 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
             pass
     run_m = re.search(r"\*\*Run at\*\*:\s*(\S+)", text)
     # CIO memo 正文：_persist 版 "## CIO Memo (Round 3)" 到下一个 "---\n\n## " 分节；
-    # Coordinator 版 "### CIO" 到下一个角色小节。取不到 → None（缓存命中时让 agent 不必再 explain_decision）
+    # Coordinator 版 "### CIO" 到下一个 "### ROLE" 小节（任意全大写角色名，不写死——
+    # 以后 CIO 后面加别的小节也不会被吞进 memo）。取不到 → None（缓存命中时让 agent 不必再 explain_decision）。
+    # 版式由 tests/test_run_committee_cached.py 的落盘回读测试守——改了分节标题那里会红。
     memo_m = (re.search(r"## CIO Memo[^\n]*\n(.*?)(?=\n---\s*\n\s*## |\Z)", text, re.DOTALL)
-              or re.search(r"\n### CIO\n(.*?)(?=\n### (?:MACRO|QUANT|RISK|RAW)|\Z)", text, re.DOTALL))
+              or re.search(r"\n### CIO\n(.*?)(?=\n### [A-Z][A-Z0-9_]*\n|\Z)", text, re.DOTALL))
     sym_m = re.search(r"\*\*Symbol\*\*:\s*(\S+)", text)
     # 标签带基准币种（"Suggested allocation CNY" / "… AUD"），老存档都是 CNY
     alloc_m = re.search(r"\*\*Suggested allocation ([A-Z]{3})\*\*:\s*(-?[\d,.]+)", text)
