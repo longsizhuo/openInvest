@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import logging
 import math
 import sys
 from pathlib import Path
@@ -20,67 +21,78 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
 
+log = logging.getLogger(__name__)
 
-def _safe_close(symbol: str) -> float:
+
+def _safe_close(symbol: str) -> Optional[float]:
+    """最新收盘价；拉不到 / 非有限 → None（不是 0.0 哨兵：live_prices 对外契约是 null）。
+
+    skill_cmds/_helpers.py 重导出本函数（#236：原先逐字复制两份）。
+    """
     from openinvest.utils.exchange_fee import get_history_data
-    df = get_history_data(symbol, "1d")
-    if df.empty:
-        df = get_history_data(symbol, "5d")
-    return float(df["Close"].iloc[-1]) if not df.empty else 0.0
+    try:
+        df = get_history_data(symbol, "1d")
+        if df.empty:
+            df = get_history_data(symbol, "5d")
+        if df.empty:
+            return None
+        v = float(df["Close"].iloc[-1])
+    except Exception as e:  # noqa: BLE001  单个行情源挂了只让这一个字段 null，不拖垮整个视图
+        log.warning("_safe_close(%s) 拉取失败: %s", symbol, e)
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _is_gold_gram(h: Dict[str, Any]) -> bool:
+    """黄金克价口径（CNY/克，get_quote 的 gold_cny_per_gram 反推）：按 proxy_kind 认，不按 symbol 名。
+
+    老行没写 proxy_kind 的 kind=metal 同口径（what_if 也这么认）。
+    """
+    pk = str(h.get("proxy_kind") or "")
+    return pk == "gold_cny_per_gram" or (str(h.get("kind") or "") == "metal" and not pk)
 
 
 # ---------- status ----------
 
 def build_status_view() -> Dict[str, Any]:
-    """v2 通用化：从 cash dict + holdings list 读，对外保持原 JSON 结构兼容老 agent"""
-    from openinvest.utils.gold_price import get_gold_snapshot
+    """v2 通用化：从 cash dict + holdings list 读，所有持仓同一条定价路径（utils.quotes.get_quote）。
+
+    不认 symbol 名：黄金克价口径按 proxy_kind / kind=metal 判断（_is_gold_gram），AUD 等外币段按
+    现金/持仓的币种出现与否判断。没持有的东西不拉数、不输出（也不把它的行情回填进行情库）。
+    """
     from openinvest.core.portfolio_manager import PortfolioManager
     from openinvest.utils.fx import get_fx_rate, total_portfolio_value_cny, unvalued
     from openinvest.utils.quotes import get_quote
     pm = PortfolioManager()
 
     cash_cny = pm.cash_amount("CNY")
-    aud_cash = pm.cash_amount("AUD")
-    ndq_h = pm.holdings.find("NDQ.AX")
-    gold_h = pm.holdings.find("GC=F")
-    ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
-    gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
-    gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
+    held = [h for h in pm.holdings if h.get("symbol") and not h.get("is_tracking_only")]
 
-    # ndq / gold / AUD 段只在用户真持有时才拉数和输出——没持有的用户不该看到这几个历史
-    # 硬编码的 NDQ.AX / 黄金 / AUDCNY 段（也不该把这几个 symbol 回填进他的行情库）。
-    # 持有时保留原有专用定价分支（GC=F 按 CNY/克，不能走 get_quote 的 USD/oz）。
-    aud_relevant = ndq_h is not None or "AUD" in pm.cash or any(
-        str(h.get("cost_currency") or "").upper() == "AUD" for h in pm.holdings
-    )
-    ndq_price = _safe_close("NDQ.AX") if ndq_h else 0.0
-    audcny = (get_fx_rate("AUD", "CNY") or 0.0) if aud_relevant else 0.0
-    snap = get_gold_snapshot(offset_pct=0.0) if gold_h else None
-    gold_now = snap.spot_cny_per_gram if snap else 0.0
+    # 外币段：现金或持仓用到的非 CNY 币种 → 汇率（拉不到就不出这个键，不编）
+    ccys = ({str(c).upper() for c in pm.cash} | {str(h.get("cost_currency") or "").upper() for h in held}) - {"", "CNY"}
+    fx_rates = {c: get_fx_rate(c, "CNY") for c in sorted(ccys)}
+    audcny = fx_rates.get("AUD") or 0.0
 
     # 2026-05-19 (A6 修复): total_assets_cny 之前写死 cash + aud*fx + ndq*price*fx +
     # gold*price，fork 用户的 AAPL/0700.HK/BTC-USD 全漏算。改走 utils.fx.total_portfolio_value_cny
     # 通用化遍历所有 holdings + 多币种 cash 折算到 CNY。
     current_prices: Dict[str, float] = {}
     quote_meta: Dict[str, Dict[str, Any]] = {}
-    for h in pm.holdings:
-        sym = str(h.get("symbol") or "")
-        if not sym or h.get("is_tracking_only"):
-            continue
-        if sym == "NDQ.AX":
-            current_prices[sym] = ndq_price
-        elif sym == "GC=F":
-            current_prices[sym] = gold_now
-        else:
-            quote = get_quote(h)
-            if quote is not None and math.isfinite(quote.price) and quote.price > 0:
-                current_prices[sym] = quote.price
-                quote_meta[sym] = {
-                    "last_updated": quote.last_updated,
-                    "is_stale": quote.is_stale,
-                    "source": (quote.extra or {}).get("source", "yfinance"),
-                    "extra": quote.extra or {},
-                }
+    gold_extra: Optional[Dict[str, Any]] = None   # 克价口径持仓的 quote.extra（金价 USD/oz、USDCNY）
+    for h in held:
+        sym = str(h["symbol"])
+        gram = _is_gold_gram(h)
+        quote = get_quote({**h, "proxy_kind": "gold_cny_per_gram"} if gram else h)
+        if quote is not None and math.isfinite(quote.price) and quote.price > 0:
+            current_prices[sym] = quote.price
+            quote_meta[sym] = {
+                "last_updated": quote.last_updated,
+                "is_stale": quote.is_stale,
+                "source": (quote.extra or {}).get("source", "yfinance"),
+                "extra": quote.extra or {},
+            }
+            if gram and gold_extra is None:
+                gold_extra = quote.extra or {}
     total_cny, _value_status = total_portfolio_value_cny(pm, current_prices, base="CNY")
 
     # 账户业绩（TWR / XIRR / 回撤 / vs 基准）：账本重放 + 行情库估值，与 openinvest performance 同一函数。
@@ -105,9 +117,13 @@ def build_status_view() -> Dict[str, Any]:
         if price is not None and math.isfinite(price) and price > 0:
             market_value = price * units
             pnl = (price - avg_cost) * units if avg_cost > 0 else None
+            ccy = str(h.get("cost_currency") or "CNY").upper()
+            rate = 1.0 if ccy == "CNY" else fx_rates.get(ccy)
             view.update({
                 "current_price": round(price, 6),
                 "market_value": round(market_value, 2),
+                # 折人民币市值：外币持仓一视同仁（取代以前只有 NDQ.AX 才有的 ndq.value_cny）；汇率拉不到 → null
+                "market_value_cny": round(market_value * rate, 2) if rate else None,
                 "pnl": round(pnl, 2) if pnl is not None else None,
                 "pnl_pct": round((price / avg_cost - 1) * 100, 2) if avg_cost > 0 else None,
                 **quote_meta.get(sym, {}),
@@ -116,10 +132,28 @@ def build_status_view() -> Dict[str, Any]:
             view.update({
                 "current_price": None,
                 "market_value": None,
+                "market_value_cny": None,
                 "pnl": None,
                 "pnl_pct": None,
             })
         holding_views.append(view)
+
+    # 克价口径持仓（黄金）汇总块——兼容老 agent 读 status["gold"]；多个克价持仓合并，逐仓明细看 all_holdings
+    gold_hs = [h for h in held if _is_gold_gram(h)]
+    gold_block: Dict[str, Any] = {}
+    if gold_hs:
+        grams = sum(float(h.get("units", 0) or 0) for h in gold_hs)
+        gold_avg = sum(float(h.get("units", 0) or 0) * float(h.get("avg_cost", 0) or 0) for h in gold_hs) / grams if grams else 0.0
+        gold_now = next((current_prices[str(h["symbol"])] for h in gold_hs if str(h["symbol"]) in current_prices), None)
+        gold_block = {
+            "grams": grams,
+            "avg_cost_cny_per_gram": round(gold_avg, 4),
+            # 金价拉不到就是 null，不再拿 0 当现价算出"亏光"的 pnl
+            "now_cny_per_gram": round(gold_now, 2) if gold_now else None,
+            "value_cny": round(gold_now * grams, 2) if gold_now else None,
+            "pnl_cny": round((gold_now - gold_avg) * grams, 2) if gold_now and gold_avg else None,
+            "pnl_pct": round(((gold_now / gold_avg) - 1) * 100, 2) if gold_now and gold_avg > 0 else None,
+        }
 
     return {
         "user": {
@@ -129,25 +163,13 @@ def build_status_view() -> Dict[str, Any]:
         "cash": {
             "cny": round(cash_cny, 2),
             **({
-                "aud": round(aud_cash, 2),
-                "aud_in_cny": round(aud_cash * audcny, 2) if audcny else None,
-            } if aud_relevant else {}),
+                "aud": round(pm.cash_amount("AUD"), 2),
+                "aud_in_cny": round(pm.cash_amount("AUD") * audcny, 2) if audcny else None,
+            } if "AUD" in ccys else {}),
             # v2 通用：列出所有币种（其他 agent 想读非 CNY/AUD 时方便）
             "all_currencies": pm.cash,
         },
-        **({"ndq": {
-            "shares": ndq_shares,
-            "price_aud": round(ndq_price, 2),
-            "value_cny": round(ndq_shares * ndq_price * audcny, 2) if audcny and ndq_price else None,
-        }} if ndq_h else {}),
-        **({"gold": {
-            "grams": gold_grams,
-            "avg_cost_cny_per_gram": gold_avg,
-            "now_cny_per_gram": round(gold_now, 2),
-            "value_cny": round(gold_now * gold_grams, 2),
-            "pnl_cny": round((gold_now - gold_avg) * gold_grams, 2) if gold_avg else 0,
-            "pnl_pct": round(((gold_now / gold_avg) - 1) * 100, 2) if gold_avg > 0 else 0,
-        }} if gold_h else {}),
+        **({"gold": gold_block} if gold_block else {}),
         # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
         "all_holdings": holding_views,
         "total_assets_cny": total_cny,
@@ -156,11 +178,11 @@ def build_status_view() -> Dict[str, Any]:
         "performance": performance,
         # 拉不到汇率 / 价格、没算进 total 的条目——有就列出来，别让总资产悄悄偏小
         **({"total_assets_excludes": unvalued(_value_status)} if unvalued(_value_status) else {}),
-        "fx": {"audcny": round(audcny, 4)} if aud_relevant else {},
+        "fx": {f"{c.lower()}cny": round(r, 4) for c, r in fx_rates.items() if r},
         "live_prices": {
-            "gold_usd_per_oz": snap.gold_usd_per_oz if snap else None,
-            "usdcny": snap.usdcny_rate if snap else None,
-        } if gold_h else {},
+            "gold_usd_per_oz": (gold_extra or {}).get("gold_usd_per_oz"),
+            "usdcny": (gold_extra or {}).get("usdcny_rate"),
+        } if gold_block else {},
     }
 
 
@@ -262,7 +284,7 @@ def build_what_if_view(
         if str(h.get("kind")) == "metal":
             cur_prices[sym] = cur_gold
         else:
-            cur_prices[sym] = _safe_close(sym)
+            cur_prices[sym] = _safe_close(sym) or 0.0   # 本函数内 0 = 拉不到 → 下游 _value_in_cny 记「未计入」
         new_prices[sym] = cur_prices[sym]
 
     # 应用 --symbol/--pct/--price 通用参数

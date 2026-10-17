@@ -6,7 +6,7 @@
 
 | 模块 | 职责 |
 |------|------|
-| `_helpers.py` | 共享工具：`_print_json`（直写真实 stdout 出 JSON）、`_safe_close`（拉单 symbol 收盘价）、`_now_iso_local`（本地 ISO 时戳，dead 副本随包保留） |
+| `_helpers.py` | 共享工具：`_print_json`（直写真实 stdout 出 JSON）、`_safe_close`（拉单 symbol 收盘价；重导出 `services/skill_views` 的唯一实现，拉不到 → None）、`_now_iso_local`（本地 ISO 时戳，dead 副本随包保留） |
 | `analysis_cmds.py` | 只读分析：`status` / `strategy` / `history` / `what_if` / `correlate` / `live_prices` / `event_check`。自有 ROOT 承接 test 对 `cmd_status` 的 no-op patch |
 | `committee_cmds.py` | 委员会：`prepare_committee`（Coordinator）/ `run_committee`（Direct）/ `save_committee`。自有 ROOT 拼 transcript_path |
 | `portfolio_cmds.py` | 写操作：`deposit` / `withdraw` / `buy` / `sell` / `delete_holding` + `_resolve_pm` |

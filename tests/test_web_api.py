@@ -1087,12 +1087,15 @@ def skill_client(client, monkeypatch):
     """skill-parity 端点用的 client。
 
     services/skill_views.py 的 builder 走**函数内延迟 import**（utils.exchange_fee /
-    utils.gold_price / utils.fx），所以要 patch 源模块属性，client fixture 只 patch
-    了 web_api 命名空间里的别名。
+    utils.gold_price / utils.fx / utils.quotes），所以要 patch 源模块属性，client fixture 只 patch
+    了 web_api 命名空间里的别名。status 的每个持仓都走 utils.quotes.get_quote（不再按 symbol 特判），
+    quotes / fx 模块各自 import 了 get_history_data / get_gold_snapshot 的引用，也要各 patch 一份，
+    否则测试会真去打 yfinance。
     """
     import openinvest.utils.exchange_fee as ef
     import openinvest.utils.fx as fx
     import openinvest.utils.gold_price as gp
+    import openinvest.utils.quotes as quotes
 
     @dataclass
     class FakeSnap:
@@ -1108,14 +1111,18 @@ def skill_client(client, monkeypatch):
         index=pd.date_range("2026-04-28", periods=5, freq="D"),
     )
     monkeypatch.setattr(ef, "get_history_data", lambda symbol, period="5d": fake_df)
+    monkeypatch.setattr(quotes, "get_history_data", lambda symbol, period="5d", **kw: fake_df)
+    monkeypatch.setattr(fx, "get_history_data", lambda symbol, period="5d", **kw: fake_df)
+    fx._RATE_CACHE.clear()
     monkeypatch.setattr(gp, "get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
+    monkeypatch.setattr(quotes, "get_gold_snapshot", lambda offset_pct=0.0: FakeSnap(offset_pct=offset_pct))
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda pm, prices, base="CNY": (100000.0, {}))
     return client
 
 
 # cmd_status 的输出 key 集——/api/skill/status 必须与 CLI 同形状（防 local/remote 漂移）
 _CLI_STATUS_KEYS = {
-    "user", "cash", "ndq", "gold", "all_holdings",
+    "user", "cash", "gold", "all_holdings",
     "total_assets_cny", "fx", "live_prices",
     "performance",   # 真实账户业绩块（TWR/XIRR/回撤/vs 基准），CLI / MCP / REST 同一视图
 }
@@ -1133,6 +1140,13 @@ def test_skill_status_matches_cli_shape(skill_client):
     assert b["total_assets_cny"] == 100000.0
     syms = [h["symbol"] for h in b["all_holdings"]]
     assert "NDQ.AX" in syms and "GC=F" in syms
+    # 克价口径按 proxy_kind 认（不按 symbol）：gold 汇总块 + live_prices 来自同一个 get_quote
+    assert b["gold"]["now_cny_per_gram"] == 1100.0
+    assert b["live_prices"] == {"gold_usd_per_oz": 2400.0, "usdcny": 7.2}
+    # NDQ.AX 不再有专属 ndq 块，和别的持仓一样只出现在 all_holdings
+    assert "ndq" not in b
+    ndq = next(h for h in b["all_holdings"] if h["symbol"] == "NDQ.AX")
+    assert ndq["current_price"] == 42.5 and ndq["market_value"] == pytest.approx(42.5 * ndq["units"], abs=0.01)
 
 
 def test_skill_strategy(skill_client):

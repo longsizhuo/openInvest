@@ -128,12 +128,15 @@ def status() -> Dict[str, Any]:
     between calls.
 
     Returns:
-        Object with `cash` (currency → amount), `holdings` (list of positions
-        with symbol, units, avg_cost, live price, market value, pnl_pct),
-        portfolio-level totals, and `performance` (real-account TWR 30d / YTD /
-        since inception, XIRR, max drawdown with peak/trough dates, annualised
-        volatility, return vs the configured benchmark, and data_quality; or
-        {"status": "insufficient_history"} until the ledger spans 2 trading days).
+        Object with `cash` (currency → amount), `all_holdings` (every position,
+        priced the same way whatever the symbol: units, avg_cost, live price,
+        market value, pnl_pct; null price fields when a quote is unavailable),
+        `total_assets_cny`, `fx` (rate to CNY per non-CNY currency in use), an
+        optional `gold` summary when a gold-per-gram holding exists, and
+        `performance` (real-account TWR 30d / YTD / since inception, XIRR, max
+        drawdown with peak/trough dates, annualised volatility, return vs the
+        configured benchmark, and data_quality; or {"status":
+        "insufficient_history"} until the ledger spans 2 trading days).
     """
     _check_advisory()
     from openinvest.services.skill_views import build_status_view
@@ -185,7 +188,9 @@ def history(
 def live_prices() -> Dict[str, Any]:
     """Fetch a one-shot market backdrop: spot gold (USD/oz and CNY/gram),
     USDCNY and AUDCNY FX rates, the NDQ.AX ETF price, the VIX volatility
-    index, and the 10-year US Treasury yield (TNX).
+    index, and the 10-year US Treasury yield (TNX). A fixed set of reference
+    instruments, independent of what the user holds (use `status` for the
+    user's own positions).
 
     Use for quick market context before analysis or when the user asks
     "how is the market / what's the gold price". Read-only; single batch,
