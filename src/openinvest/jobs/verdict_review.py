@@ -42,6 +42,8 @@ from openinvest.jobs.review_calc import (  # noqa: F401
     K_FLAT,
     UNCLEAR_DIRECTION,
     VerdictReview,
+    counterfactual_pnl,
+    roundtrip_cost_rate,
     _bucket_lines,
     _flat_band,
     build_confidence_lookup,
@@ -154,6 +156,33 @@ def _window_return(
     if df is None:
         return None
     return forward_return(symbol, decision_date, window_days, closes=df["Close"])
+
+
+# ---------- 反事实账本（Track A3）：组合基准同窗口收益 ----------
+
+def _benchmark_symbol() -> str:
+    """config portfolio.benchmark_symbol（#433 起 status/日报同一来源）；空串 = 不配基准。"""
+    try:
+        from openinvest.core.config import load_config
+        return str(getattr(load_config().portfolio, "benchmark_symbol", "") or "").strip()
+    except Exception as e:  # noqa: BLE001
+        log.warning("_benchmark_symbol 读 config 失败，按未配置: %s", e)
+        return ""
+
+
+def _benchmark_return(symbol: str, decision_date: str, window_days: int) -> Optional[float]:
+    """基准同窗口收益：同只读库 + 缓存、同 forward_return 口径；未配置/缺数据 → None。
+    不经 _window_return（它是标的收益的口径入口，测试常 spy 它），直接走 forward_return。"""
+    if not symbol:
+        return None
+    df = _closes(symbol)
+    if df is None:
+        return None
+    try:
+        return forward_return(symbol, decision_date, window_days, closes=df["Close"])
+    except Exception as e:  # noqa: BLE001  基准算不出不影响标的复盘
+        log.warning("_benchmark_return(%s,%s,%s) → None: %s", symbol, decision_date, window_days, e)
+        return None
 
 
 # ---------- 宏观突变检测 ----------
@@ -365,6 +394,9 @@ def review_one(
         expected_direction=EXPECTED_DIRECTION.get(parsed["verdict"], UNCLEAR_DIRECTION),
         macro_at_decision=parsed["macro_at_decision"],
         input_health=parsed.get("input_health") or {},
+        alloc_cny=float(parsed.get("alloc_cny") or 0.0),
+        benchmark_symbol=_benchmark_symbol(),
+        cost_rate=roundtrip_cost_rate(real_symbol),
         source="backtest" if "backtest" in str(committee_dir) else "live",
         # 决议日落在 LLM 训练窗口 → 记忆穿越，下游分桶/Dreaming 据此剔出业绩统计。
         # ISO 日期字典序比较等价于时间序，无需 parse。
@@ -384,6 +416,14 @@ def review_one(
             flat_th = _flat_band(atr, window) if atr is not None else 0.03
             if scorable:
                 rv.hits[f"{window}d"] = _is_hit(parsed["verdict"], ret, flat_th)
+            # 反事实：同窗口基准超额（所有行）+ 照做净损益（只有有金额的行）
+            bench = _benchmark_return(rv.benchmark_symbol, decision_date, window)
+            if bench is not None:
+                rv.benchmark_returns[f"{window}d"] = round(bench, 4)
+                rv.excess_returns[f"{window}d"] = round(ret - bench, 4)
+            pnl = counterfactual_pnl(rv.alloc_cny, ret, rv.cost_rate)
+            if pnl is not None:
+                rv.followed_pnl[f"{window}d"] = pnl
             # 原始市场方向（verdict 无关）：给 Dreaming 算 regime 基率
             rv.directions[f"{window}d"] = (
                 "up" if ret > flat_th else ("down" if ret < -flat_th else "flat")

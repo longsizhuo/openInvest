@@ -136,6 +136,8 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     dir_total = 0
     # 同桶"标签基率"（与命中同尺子）：bullish=P(涨>0) / bearish=P(跌<0) / hold=P(留在 band 内)
     label_counts = {b: [0, 0] for b in ("bullish", "bearish", "hold")}   # [true, n]
+    # 反事实（只出比率，不出金额）：同窗口基准超额均值 + 跑赢基准比例
+    excess: Dict[str, List[float]] = {b: [] for b in ("bullish", "bearish", "hold")}
 
     for row in rows:
         raw_dir = str(row.get("expected_direction") or "").lower().strip()
@@ -173,6 +175,9 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         by_dir[bucket]["total"] += 1
         if is_hit:
             by_dir[bucket]["hit"] += 1
+        ex = (row.get("excess_returns") or {}).get(HIT_HORIZON)
+        if isinstance(ex, (int, float)):
+            excess[bucket].append(float(ex))
 
         total_count += 1
         if is_hit:
@@ -193,6 +198,10 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "base_rate": base,
             "lift": round(rate - base, 4) if (rate is not None and base is not None) else None,
             "ci95": wilson_ci(h, t),
+            "excess_mean": round(sum(excess[bucket]) / len(excess[bucket]), 4) if excess[bucket] else None,
+            "beat_benchmark_rate": (round(sum(1 for e in excess[bucket] if e > 0) / len(excess[bucket]), 4)
+                                    if excess[bucket] else None),
+            "n_benchmark": len(excess[bucket]),
         }
     by_dir_out["unclear"] = {"hit": None, "total": unclear_total, "rate": None}
 
@@ -245,8 +254,8 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
         if int(c.get("total", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
             c["rate"] = None
             c["hit"] = None
-            # lift = rate − base 可一步还原 rate；CI 的中点也能反推——一并抹掉
-            for k in ("lift", "ci95"):
+            # lift = rate − base 可一步还原 rate；CI 的中点也能反推——一并抹掉；超额/跑赢比率同一纪律
+            for k in ("lift", "ci95", "excess_mean", "beat_benchmark_rate"):
                 if k in c:
                     c[k] = None
             n_suppressed += 1
