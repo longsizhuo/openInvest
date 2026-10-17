@@ -386,7 +386,9 @@ def parse_cio_memo(
     # intervention（rule=single_invest_cap）。放在所有改 verdict/alloc 的规则之后：若放在
     # Sanity 3/5/防御之前，后续规则把裁决打成 HOLD/0 时，"金额已钳制（方向不变）"那句和干预
     # 归因都会说错（PR #430 评审）。setdefault：Sanity 1/2 已记的更早原值不被覆盖。
-    if single_invest_cap and out["alloc_cny"] > single_invest_cap:
+    # verdict 守卫：HOLD/TRIM/SELL 带正数金额不是"入场"，不钳、不记干预、不加"钳制"句。
+    if (single_invest_cap and out["alloc_cny"] > single_invest_cap
+            and out["verdict"] in ("BUY", "ACCUMULATE")):
         out.setdefault("_original_verdict", out["verdict"])
         out.setdefault("_original_alloc", out["alloc_cny"])
         out["_single_invest_cap"] = int(single_invest_cap)
@@ -407,7 +409,8 @@ def single_invest_cap_note(verdict: Dict[str, Any]) -> str:
         return ""
     from openinvest.utils.base_currency import money
     orig = verdict.get("_original_alloc", cap)
-    return f"金额已按单次上限 {money(cap)} 钳制（CIO 原建议 {money(orig)}，裁决方向不变）"
+    return (f"金额已按单次上限 {money(cap)} 钳制（每笔建议金额上限，非当日额度，可分多笔；"
+            f"CIO 原建议 {money(orig)}，裁决方向不变）")
 
 
 def rewrite_tags(out: Dict[str, Any]) -> List[str]:

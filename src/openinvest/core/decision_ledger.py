@@ -70,6 +70,12 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
         except json.JSONDecodeError:
             pass
     run_m = re.search(r"\*\*Run at\*\*:\s*(\S+)", text)
+    # CIO memo 正文：_persist 版 "## CIO Memo (Round 3)" 到下一个 "---\n\n## " 分节；
+    # Coordinator 版 "### CIO" 到下一个 "### ROLE" 小节（任意全大写角色名，不写死——
+    # 以后 CIO 后面加别的小节也不会被吞进 memo）。取不到 → None（缓存命中时让 agent 不必再 explain_decision）。
+    # 版式由 tests/test_run_committee_cached.py 的落盘回读测试守——改了分节标题那里会红。
+    memo_m = (re.search(r"## CIO Memo[^\n]*\n(.*?)(?=\n---\s*\n\s*## |\Z)", text, re.DOTALL)
+              or re.search(r"\n### CIO\n(.*?)(?=\n### [A-Z][A-Z0-9_]*\n|\Z)", text, re.DOTALL))
     sym_m = re.search(r"\*\*Symbol\*\*:\s*(\S+)", text)
     # 标签带基准币种（"Suggested allocation CNY" / "… AUD"），老存档都是 CNY
     alloc_m = re.search(r"\*\*Suggested allocation ([A-Z]{3})\*\*:\s*(-?[\d,.]+)", text)
@@ -88,6 +94,7 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
         "alloc_currency": alloc_m.group(1) if alloc_m else None,
         "input_health": health,
         "run_at": run_m.group(1) if run_m else None,
+        "cio_memo": memo_m.group(1).strip() if memo_m else None,
     }
 
 
@@ -277,7 +284,8 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
             rv = next((r for r in reviews
                        if r.get("date") == date and r.get("asset") == symbol
                        and r.get("source") == "live"), None)
-            matched = _match_trades(trades, decision_id, date, symbol, parsed["verdict"])
+            matched = _match_trades(trades, decision_id, date, symbol, parsed["verdict"],
+                                    run_at=parsed.get("run_at"))
             decl = executions.get(decision_id)
 
             executed: Optional[bool] = None  # None = 未知（无声明也无匹配依据）
