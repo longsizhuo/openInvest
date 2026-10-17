@@ -1,17 +1,20 @@
 """PnL 快照 + SVG 折线图生成
 
-每小时跑一次。流程：
-1. 读 portfolio.md（cash + ndq + gold）
-2. 拉当前价（NDQ.AX / AUDCNY / 黄金现货 GC=F + USDCNY）
-3. 算各类资产的浮盈百分比（**只算 %，不存绝对金额到 git**）
-4. append 到 memory/.state/pnl_history.jsonl（git ignore）
-5. 渲染 docs/pnl_chart.svg（入 git，但只含百分比线段，无明文数字）
-6. （可选）自动 git commit + push 让 GitHub README 实时更新
+工作日交易时段每 2 小时跑一次。流程：
+1. 刷新持仓行情 / 汇率进行情库（account_performance 只读库）
+2. 复用 services.account_performance（账本重放 + 行情库估值，status / 日报同一份）取账户
+   时间加权收益链接指数 → 总权益曲线上的一个点（基准币种，成立日 = 100；剔除存取款，含现金）
+3. append 到 memory/.state/pnl_history.jsonl（git ignore）
+4. 渲染 docs/pnl_chart.svg（入 git，窗口首点归一化为 100，只含一条账户整体曲线 + 基准柱）
+5. （可选）自动 git commit + push 让 GitHub README 实时更新
+
+账户整体，不认任何 symbol：任何持仓组合（A 股 ETF / 场外基金 / 美股 / 黄金 / 加密 ...）都画同一条
+总权益曲线。以前硬编码只画 NDQ.AX + GC=F 两个标的，别人的持仓画出来是空的。
 
 隐私设计：
-- 原始 jsonl 含 cash 等绝对值 → gitignore，永不入库
-- SVG 只含百分比线段，且 axis 上不写任何数字 / 日期
-- 看图能看出涨跌趋势 + 哪个资产贡献多，但读不出"今天浮盈多少元 / 资产规模多大"
+- 原始 jsonl 只存指数（无 symbol / 数量 / 金额）→ gitignore，永不入库
+- SVG 只含一条相对曲线 + 基准柱，axis 上不写任何数字 / 日期 / symbol / 持仓数量 / 阈值
+- 看图能看出整体涨跌趋势，但读不出"持有什么 / 各持多少 / 资产规模多大"（CI 脱敏 grep 同款子串守着）
 
 自动 push（可选）：
 - 设 INVEST_PNL_AUTOPUSH=1 + GITHUB_TOKEN=ghp_xxx 启用
@@ -47,6 +50,10 @@ from openinvest.core.benchmarks import (
     refresh_benchmark,
 )
 from openinvest.core.memory_store import MemoryStore
+from openinvest.core.portfolio_manager import MemoryNotInitialized, PortfolioManager
+from openinvest.services.account_performance import build_account_performance
+from openinvest.utils.base_currency import base_currency
+from openinvest.utils.eastmoney_fund import canonical_fund_symbol
 from openinvest.utils.exchange_fee import get_history_data
 # 渲染/事件计算纯核已迁 jobs/pnl_render（ADR-026）——导回保持历史导出面；
 # 本文件只剩 IO shell + 三个同名薄包装（render_svg/_is_trading_window/
@@ -69,112 +76,68 @@ from openinvest.jobs.pnl_render import (  # noqa: F401
     _pct_label_pos,
     _project_y,
     _series_polyline,
+    _window_pct,
 )
 from openinvest.jobs.pnl_render import _is_trading_window as _is_trading_window_pure
 from openinvest.jobs.pnl_render import _outperform_events as _outperform_events_pure
 from openinvest.jobs.pnl_render import render_svg as _render_svg_pure
-from openinvest.utils.gold_price import get_gold_snapshot
 from openinvest.paths import INVEST_ROOT
 
 ROOT = INVEST_ROOT
 HISTORY_PATH = ROOT / "memory" / ".state" / "pnl_history.jsonl"
 SVG_PATH = ROOT / "docs" / "pnl_chart.svg"
 
-def _get_gold_offset_from_strategy(store: MemoryStore) -> float:
-    """从 strategy.md 的 target_assets[gold] 拿 price_offset_pct。
+class _Skip(Exception):
+    """这次不记快照（不编数）：run() 把 info 原样当 skipped 结果返回。"""
 
-    让 gold_now 与用户买入价同口径（浙商点差）。找不到时退回 0.0（spot 价）。
+    def __init__(self, **info: Any) -> None:
+        super().__init__(info)
+        self.info = info
+
+
+def _refresh_market(pm: PortfolioManager, base: str) -> None:
+    """把持仓行情 / 汇率追到最新。
+
+    account_performance 只读行情库、不联网；原先 _safe_close 顺手刷库的事要显式做。
+    单个标的拉失败只告警：那天缺价由 account_performance 前值填充并计入 data_quality。
     """
-    strategy = store.read("strategy")
-    if strategy is None:
-        return 0.0
-    for asset in strategy.get("target_assets", []) or []:
-        if asset.get("symbol") == "GC=F":
-            return float(asset.get("price_offset_pct", 0.0) or 0.0)
-    return 0.0
-
-
-def _safe_close(symbol: str) -> Optional[float]:
-    df = get_history_data(symbol, "1d")
-    if df.empty:
-        df = get_history_data(symbol, "5d")
-    if df.empty:
-        return None
-    return float(df["Close"].iloc[-1])
-
-
-class _FxUnavailable(Exception):
-    """有外币持仓却拉不到汇率：这次不记快照（不再编一个汇率）"""
+    from openinvest.utils.fx import get_fx_rate
+    from openinvest.utils.quotes import get_quote, is_eastmoney_fund
+    held = [h for h in pm.holdings if h.get("symbol") and not h.get("is_tracking_only")]
+    for h in held:
+        try:
+            get_quote(h)
+            if is_eastmoney_fund(h):   # get_quote 对场外基金不写库，净值历史单独刷
+                get_history_data(canonical_fund_symbol(str(h["symbol"])), "5d")
+        except Exception as e:  # noqa: BLE001
+            log.warning("pnl_snapshot 刷新行情失败: %s", e)
+    ccys = {str(c).upper() for c in pm.cash} | {str(h.get("cost_currency") or "").upper() for h in held}
+    for ccy in sorted(ccys - {base, ""}):
+        get_fx_rate(ccy, base)
 
 
 def _compute_snapshot(store: MemoryStore) -> Optional[Snapshot]:
-    """v2 通用化：读 holdings 数组而不是写死字段"""
-    portfolio = store.read("portfolio")
-    if portfolio is None:
+    """总权益曲线上的一个点 = 账户时间加权收益链接指数（成立日 = 100）。
+
+    复用 services.account_performance，不再自己按资产拼一份（以前硬编码 NDQ.AX + GC=F）。
+    用 TWR 而不是裸 NAV：裸 NAV 会把入金画成涨幅、出金画成亏损。
+    拉不到价 / 汇率的持仓会让总权益少一块、曲线假跌——这种点宁可不记（_Skip）。
+    """
+    try:
+        pm = PortfolioManager(store)
+    except MemoryNotInitialized:
         return None
-
-    # 优先读 v2 cash dict + holdings list；不存在时 fallback 到 v1 扁平字段
-    cash_dict = dict(portfolio.get("cash") or {})
-    holdings_list = list(portfolio.get("holdings") or [])
-
-    if cash_dict:
-        cash_cny = float(cash_dict.get("CNY", 0) or 0)
-        aud_cash = float(cash_dict.get("AUD", 0) or 0)
-    else:
-        cash_cny = float(portfolio.get("cash_cny", 0) or 0)
-        aud_cash = float(portfolio.get("aud_cash", 0) or 0)
-
-    if holdings_list:
-        ndq_h = next((h for h in holdings_list if h.get("symbol") == "NDQ.AX"), None)
-        gold_h = next((h for h in holdings_list if h.get("symbol") == "GC=F"), None)
-        ndq_shares = float(ndq_h.get("units", 0) or 0) if ndq_h else 0.0
-        ndq_avg = float(ndq_h.get("avg_cost", 0) or 0) if ndq_h else 0.0
-        gold_grams = float(gold_h.get("units", 0) or 0) if gold_h else 0.0
-        gold_avg = float(gold_h.get("avg_cost", 0) or 0) if gold_h else 0.0
-    else:
-        ndq_shares = float(portfolio.get("ndq_shares", 0) or 0)
-        ndq_avg = float(portfolio.get("ndq_avg_cost_aud_per_share", 0) or 0)
-        gold_grams = float(portfolio.get("gold_grams", 0) or 0)
-        gold_avg = float(portfolio.get("gold_avg_cost_cny_per_gram", 0) or 0)
-
-    # 拉不到就不编一个（原先兜底写死 4.7）：有澳元持仓却没汇率时这次不记快照
-    from openinvest.utils.fx import get_fx_rate
-    audcny = _safe_close("AUDCNY=X") or get_fx_rate("AUD", "CNY")
-    if not audcny and ndq_shares > 0:
-        raise _FxUnavailable("AUDCNY")
-    audcny = audcny or 0.0
-    ndq_price = _safe_close("NDQ.AX")
-    # 用 strategy.target_assets[gold].price_offset_pct 让 gold_now（"现在按浙商克价
-    # 算的估值价"）与用户实际买入价同口径，避免 spot vs bank 不一致导致系统性
-    # 偏低 1-1.5% 浮盈（audit financial C1）
-    gold_offset = _get_gold_offset_from_strategy(store)
-    snap = get_gold_snapshot(offset_pct=gold_offset)
-    gold_now = snap.bank_cny_per_gram if snap else None
-
-    # 各资产浮盈 %
-    ndq_pnl_pct = (
-        ((ndq_price / ndq_avg) - 1) * 100
-        if (ndq_price and ndq_avg > 0 and ndq_shares > 0) else None
-    )
-    gold_pnl_pct = (
-        ((gold_now / gold_avg) - 1) * 100
-        if (gold_now and gold_avg > 0 and gold_grams > 0) else None
-    )
-
-    # 总浮盈 % = (现市值 - 总成本) / 总成本，现金不算成本/收益
-    ndq_cost_cny = ndq_avg * ndq_shares * audcny if ndq_avg > 0 else 0
-    ndq_value_cny = (ndq_price or 0) * ndq_shares * audcny if ndq_price else ndq_cost_cny
-    gold_cost_cny = gold_avg * gold_grams if gold_avg > 0 else 0
-    gold_value_cny = (gold_now or 0) * gold_grams if gold_now else gold_cost_cny
-    total_cost = ndq_cost_cny + gold_cost_cny
-    total_value = ndq_value_cny + gold_value_cny
-    total_pnl_pct = ((total_value / total_cost) - 1) * 100 if total_cost > 0 else 0.0
-
+    base = base_currency()
+    _refresh_market(pm, base)
+    perf = build_account_performance(pm, base=base)
+    if perf.get("status") != "ok" or perf.get("twr_all") is None:
+        raise _Skip(reason="insufficient_history", detail=perf.get("reason"))
+    unvalued_n = len((perf.get("data_quality") or {}).get("unvalued") or [])
+    if unvalued_n:
+        raise _Skip(reason="unvalued_holdings", count=unvalued_n)
     return Snapshot(
         ts=datetime.now().astimezone().isoformat(timespec="seconds"),
-        total_pnl_pct=round(total_pnl_pct, 4),
-        ndq_pnl_pct=round(ndq_pnl_pct, 4) if ndq_pnl_pct is not None else None,
-        gold_pnl_pct=round(gold_pnl_pct, 4) if gold_pnl_pct is not None else None,
+        equity_idx=round(100 * (1 + float(perf["twr_all"]) / 100), 4),
     )
 
 
@@ -183,9 +146,9 @@ def _append_history(snap: Snapshot) -> None:
     with open(HISTORY_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps({
             "ts": snap.ts,
-            "total_pnl_pct": snap.total_pnl_pct,
-            "ndq_pnl_pct": snap.ndq_pnl_pct,
-            "gold_pnl_pct": snap.gold_pnl_pct,
+            "equity_idx": snap.equity_idx,
+            # GUI 系统页「总浮盈 %」读这个键：现为成立以来的账户 TWR %（= equity_idx − 100）
+            "total_pnl_pct": round(snap.equity_idx - 100, 4),
         }, ensure_ascii=False) + "\n")
 
 
@@ -202,7 +165,8 @@ def _read_history(window_days: int = WINDOW_DAYS) -> List[Dict[str, Any]]:
             try:
                 entry = json.loads(line)
                 ts = datetime.fromisoformat(entry["ts"])
-                if ts >= cutoff:
+                # 只取总权益曲线的点：旧版两资产口径的点（无 equity_idx）不混画，也不当窗口起点
+                if ts >= cutoff and entry.get("equity_idx"):
                     out.append(entry)
             except (json.JSONDecodeError, ValueError, KeyError):
                 continue
@@ -258,8 +222,6 @@ def _is_trading_window(now: Optional[datetime] = None) -> bool:
 
 def _outperform_events(snap: Snapshot) -> List[Dict[str, Any]]:
     """IO 包装：读 history + 拉基准序列，再委托 pnl_render 纯核。"""
-    if snap.total_pnl_pct is None:
-        return []
     history = _read_history(window_days=WINDOW_DAYS)
     if not history:
         return []
@@ -474,13 +436,14 @@ def run() -> Dict[str, Any]:
     store = MemoryStore()
     try:
         snap = _compute_snapshot(store)
-    except _FxUnavailable as e:
-        return {"status": "skipped", "reason": "missing_fx", "pair": str(e)}
+    except _Skip as e:
+        return {"status": "skipped", **e.info}
     if snap is None:
         return {"status": "skipped", "reason": "no_portfolio"}
 
     _append_history(snap)
     history = _read_history()
+    window_pct = _window_pct(history)
 
     # 渲染并原子写入 SVG
     SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -502,9 +465,7 @@ def run() -> Dict[str, Any]:
         "history_points": len(history),
         "svg_path": str(SVG_PATH),
         # **故意不在 return 里暴露百分比数字**，避免 scheduler 日志泄露
-        "trend": "up" if snap.total_pnl_pct > 0 else (
-            "down" if snap.total_pnl_pct < 0 else "flat"
-        ),
+        "trend": "up" if (window_pct or 0) > 0 else ("down" if (window_pct or 0) < 0 else "flat"),
         "outperform_count": len(events),
         # 不直接返回 events 内容（避免 logger 暴露具体涨幅），交由
         # /api/outperform_events 端点按需读取

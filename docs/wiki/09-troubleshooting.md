@@ -246,6 +246,7 @@ tail -20 ~/openInvest/memory/pnl_history.jsonl
 | 凌晨有数据点 | pnl_snapshot job 在工作时段外被触发 | `python -m scripts.clean_pnl_history --dry-run` 然后真删 |
 | 未来日期 | 时区配置错（UTC vs Asia/Shanghai）| `.env` `TZ=Asia/Shanghai` 同步 |
 | 某天垂直跳变 | 用户没记账，scheduler 仍在跑 | 用 `/api/cash/CNY/deposit|withdraw` 补记 |
+| 图一直是「数据采集中」 | job 返回 `skipped`：`insufficient_history`（账本不足 2 个估值日，看 `status` 的 `performance`）或 `unvalued_holdings`（有持仓拉不到价 / 汇率，这次不记点，免得曲线假跌）| 补记账本 / 修行情源后下一轮自动接上 |
 
 清理脚本：
 ```bash

@@ -32,9 +32,9 @@ It provides a verifiable investment committee, evidence-based reasoning, long-ho
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
   <sub>Data feed is automatically updated every 2 hours using `jobs/pnl_snapshot` and pushed to the <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data branch</a></sub>
   <br/>
-  <sub>Upper half: 30-day net asset value trend · Lower half: Net asset value comparison against 8 benchmark assets (transparent disclosure, <b>not an alpha claim</b>—the committee's proven value is discipline and transparency, not excess return, see <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>)</sub>
+  <sub>Upper half: 30-day total-equity curve (whole account, time-weighted so deposits/withdrawals don't count as returns, rebased to 100 at the window start) · Lower half: same-window return against 8 benchmark assets (transparent disclosure, <b>not an alpha claim</b>—the committee's proven value is discipline and transparency, not excess return, see <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>)</sub>
   <br/>
-  <sub>📌 <b>Note</b>: The current chart shows the author's live production portfolio. After self-hosting, the system will automatically render your own equity curve based on the holdings defined in your `memory/` directory.</sub>
+  <sub>📌 <b>Note</b>: The current chart shows the author's live production portfolio. After self-hosting, the same job draws your own total-equity curve from your own ledger (`memory/portfolio_history.jsonl`) — any holdings, no fixed assets, no symbols or quantities in the public SVG. It appears once the ledger spans 2 trading days.</sub>
 </div>
 
 *   **Benchmark Portfolio**: The system introduces 8 standard control benchmarks across 4 quadrants (AI advisors / Mutual funds / Wealth management / Broad market index). For details on the comparison methodology and data cleaning logic, see [docs/wiki/README.md](docs/wiki/README.md).

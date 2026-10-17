@@ -28,7 +28,7 @@ documents:
 
 ## 自动生成产物
 
-- **`pnl_chart.svg`** — `jobs/pnl_snapshot` 工作日每 2h 自动重渲染的 PnL 趋势图（vs 8 基准）；只含百分比，不暴露绝对金额
+- **`pnl_chart.svg`** — `jobs/pnl_snapshot` 工作日每 2h 自动重渲染的总权益曲线（账户整体、时间加权、窗口起点 = 100；vs 8 基准）；只含相对涨幅，不含 symbol / 持仓数量 / 绝对金额
 - **`verdict_accuracy.md`** — `jobs/verdict_review` 月度生成的委员会决策命中率报告（含真实金额，**git ignored**）
 
 ## 二方备注

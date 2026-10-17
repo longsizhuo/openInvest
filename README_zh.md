@@ -32,9 +32,9 @@ OpenInvest 是一个面向现代 AI Agent 的自托管投资决策引擎。
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
   <sub>数据流基于 `jobs/pnl_snapshot` 每 2 小时原子替换自动更新至 <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data 分支</a></sub>
   <br/>
-  <sub>上半图：30天净值趋势 · 下半图：相较于 8 类基准资产的净值对照（透明披露，<b>非 alpha 主张</b>——委员会的可证价值是纪律与透明，不是超额收益，见 <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>）</sub>
+  <sub>上半图：30 天总权益曲线（账户整体，时间加权——存取款不算收益；窗口起点归一化为 100） · 下半图：同窗口相较于 8 类基准资产的涨幅对照（透明披露，<b>非 alpha 主张</b>——委员会的可证价值是纪律与透明，不是超额收益，见 <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>）</sub>
   <br/>
-  <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，系统将依据您在 `memory/` 中定义的专属账户持仓自动渲染对应的净值曲线。</sub>
+  <sub>📌 <b>注</b>：当前图表呈现为作者生产环境账户。自托管部署后，同一个 job 会依据您自己的账本（`memory/portfolio_history.jsonl`）画出您自己的总权益曲线——任意持仓组合、不绑定固定标的，公开 SVG 里没有 symbol 和数量；账本跨满 2 个交易日后出现。</sub>
 </div>
 
 *   **基准对比组合 (Benchmarks)**：系统跨越 4 大象限（AI投顾 / 公募基金 / 储蓄理财 / 大盘指数）引入 8 条标准控制基准。严格的对比方法论与数据清洗逻辑参阅 [docs/wiki/README.md](docs/wiki/README.md)。

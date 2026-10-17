@@ -208,8 +208,8 @@ def test_auto_push_called_process_error_redacts_token(monkeypatch):
 def test_outperform_events_nonempty_on_happy_path(monkeypatch):
     """正常路径下 _outperform_events 必须真的产出事件，而不是被吞异常静默退化成空列表。"""
     history = [
-        {"ts": "2026-06-01T00:00:00Z", "total_pnl_pct": 1.0},
-        {"ts": "2026-07-01T00:00:00Z", "total_pnl_pct": 5.0},
+        {"ts": "2026-06-01T00:00:00Z", "equity_idx": 100.0},
+        {"ts": "2026-07-01T00:00:00Z", "equity_idx": 105.0},
     ]
     series = BenchmarkSeries(
         key="纳指", color="#000", group="index", dash="",
@@ -225,8 +225,7 @@ def test_outperform_events_nonempty_on_happy_path(monkeypatch):
     monkeypatch.setattr(pnl_snapshot, "_read_history", lambda window_days=None: history)
     monkeypatch.setattr(pnl_snapshot, "get_all_series", _fake_get_all_series)
 
-    snap = Snapshot(ts="2026-07-01T00:00:00Z", total_pnl_pct=5.0,
-                     ndq_pnl_pct=None, gold_pnl_pct=None)
+    snap = Snapshot(ts="2026-07-01T00:00:00Z", equity_idx=105.0)
     events = _outperform_events(snap)
 
     assert captured_args == [("2026-06-01",)]  # start_date 必须传，不能裸调
@@ -234,6 +233,7 @@ def test_outperform_events_nonempty_on_happy_path(monkeypatch):
     assert events[0]["benchmark"] == "纳指"  # BenchmarkSeries 只有 .key，没有 .label
     # #234-3：两侧口径不同，对外 label 只写方向 + 口径说明，不量化差值
     assert events[0]["label"] == "作者账户过去 2 个数据点 跑赢纳指（口径不同，只看方向）"
+    assert events[0]["user_pct"] == 5.0   # 窗口内总权益 100 → 105
     assert events[0]["diff_pct"] == 3.0  # 原始字段保留
 
 
@@ -385,14 +385,14 @@ def test_render_svg_no_holding_symbols(monkeypatch):
     monkeypatch.setattr(ps, "_ensure_benchmarks_fresh", lambda s, e: None)
 
     history = [
-        {"ts": f"2026-06-{d:02d}T10:00:00+00:00", "total_pnl_pct": 1.0 + d,
-         "ndq_pnl_pct": 0.5, "gold_pnl_pct": 2.0}
+        {"ts": f"2026-06-{d:02d}T10:00:00+00:00", "equity_idx": 100.0 + d}
         for d in range(1, 6)
     ]
     svg = render_svg(history)
-    for forbidden in ("NDQ", "GC=F", "GC_F", "Gold", "gold_cny"):
+    for forbidden in ("NDQ", "GC=F", "GC_F", "Gold", "gold_cny", "资产 A", "资产 B"):
         assert forbidden not in svg, f"公开 SVG 含违禁词 {forbidden!r}（红线 #1）"
     assert "口径：★ 实盘" in svg, "口径脚注缺失（issue #179 P1-A③）"
+    assert "<polyline" in svg and "总权益曲线" in svg
 
 
 # ---------- orphan 分支 worktree：真 git、本地 bare 远端、零网络（#232-5 回归） ----------
@@ -474,7 +474,7 @@ def test_run_status_surfaces_push_failure(monkeypatch, tmp_path):
     ps = pnl_snapshot
     monkeypatch.setattr(ps, "_is_trading_window", lambda: True)
     monkeypatch.setattr(ps, "MemoryStore", lambda: None)
-    monkeypatch.setattr(ps, "_compute_snapshot", lambda store: SimpleNamespace(ts="t", total_pnl_pct=1.0))
+    monkeypatch.setattr(ps, "_compute_snapshot", lambda store: SimpleNamespace(ts="t", equity_idx=101.0))
     monkeypatch.setattr(ps, "_append_history", lambda snap: None)
     monkeypatch.setattr(ps, "_read_history", lambda: [])
     monkeypatch.setattr(ps, "SVG_PATH", tmp_path / "docs" / "pnl_chart.svg")
@@ -522,13 +522,160 @@ def test_persist_outperform_never_touches_readme(monkeypatch, tmp_path):
     assert len((tmp_path / "docs" / "outperform_events.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
 
-def test_missing_aud_rate_skips_with_its_own_reason(monkeypatch):
-    """有澳元持仓却拉不到汇率：不编汇率、跳过，并说清是汇率问题（不是 no_portfolio）"""
+def test_unvalued_holding_skips_snapshot_with_its_own_reason(monkeypatch):
+    """有持仓拉不到价 / 汇率 → 总权益少一块、曲线假跌：这次不记点，并说清原因（不泄露 symbol）"""
     from openinvest.jobs import pnl_snapshot as ps
 
     def boom(store):
-        raise ps._FxUnavailable("AUDCNY")
+        raise ps._Skip(reason="unvalued_holdings", count=1)
     monkeypatch.setattr(ps, "_compute_snapshot", boom)
     monkeypatch.setattr(ps, "_is_trading_window", lambda *a, **k: True)
     out = ps.run()
-    assert out == {"status": "skipped", "reason": "missing_fx", "pair": "AUDCNY"}
+    assert out == {"status": "skipped", "reason": "unvalued_holdings", "count": 1}
+
+
+# ---------- 总权益曲线：不再硬编码 NDQ.AX + GC=F（评审路线 Sprint 2 · C4） ----------
+# 虚构持仓：A 股 ETF + 场外基金 + 美股（没有 NDQ / GC / AUD）。临时 memory + 假行情库 + mock 行情，不联网。
+
+import json  # noqa: E402
+
+import pandas as pd  # noqa: E402
+
+from openinvest.core.memory_store import MemoryStore  # noqa: E402
+from openinvest.services import account_performance as ap  # noqa: E402
+from openinvest.utils.quotes import QuoteSnapshot  # noqa: E402
+
+_DAYS = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"]
+# 与 CI「脱敏聚合输出」步同一组（ci.yml）：公开产物里不得出现的字段名 / 子串
+_CI_SENSITIVE = ['"symbol"', '"threshold"', '"verdict_id"', '"asset"', "NDQ", "GC=F"]
+# 虚构持仓自己的标识 / 数量 / 成本：同样不得出现
+_HOLDING_SECRETS = ["510300", "110020", "AAPL", "777.25", "1234.5", "31.375", "FUND:"]
+
+
+class _FakeMarket:
+    def __init__(self, table):
+        self.table = table
+
+    def get_history_df(self, symbol, days=730):
+        if symbol not in self.table:
+            return pd.DataFrame()
+        closes = self.table[symbol]
+        df = pd.DataFrame({"Close": list(closes.values())}, index=pd.to_datetime(list(closes.keys())))
+        df.index.name = "Date"
+        return df
+
+
+def _fork_world(monkeypatch, tmp_path, *, extra_holdings=(), ledger=True):
+    """虚构 fork 用户 + 假行情；返回可变价格表（测试里改它模拟盘中价格变化）。"""
+    table = {
+        "510300.SS": dict(zip(_DAYS, [4.0, 4.1, 4.2, 4.1, 4.3])),
+        "FUND:110020": dict(zip(_DAYS, [1.5, 1.5, 1.52, 1.53, 1.55])),
+        "AAPL": dict(zip(_DAYS, [200.0, 202.0, 201.0, 205.0, 210.0])),
+        "USDCNY=X": dict(zip(_DAYS, [7.1] * 5)),
+    }
+    holdings = [
+        {"symbol": "510300.SS", "kind": "etf", "units": 777.25, "avg_cost": 4.0, "cost_currency": "CNY"},
+        {"symbol": "FUND:110020", "kind": "fund", "units": 1234.5, "avg_cost": 1.5, "cost_currency": "CNY",
+         "proxy_kind": "eastmoney_fund"},
+        {"symbol": "AAPL", "kind": "equity", "units": 31.375, "avg_cost": 200.0, "cost_currency": "USD"},
+        *extra_holdings,
+    ]
+    store = MemoryStore()
+    store.write("user", "user", {"display_name": "Fork", "risk_tolerance": "Balanced"}, "")
+    store.write("strategy", "strategy", {"target_assets": []}, "")
+    store.write("portfolio", "state", {"schema_version": 2, "cash": {"CNY": 100.0}, "holdings": holdings}, "")
+    if ledger:
+        for sym, units, price, ccy in [("510300.SS", 777.25, 4.0, "CNY"), ("FUND:110020", 1234.5, 1.5, "CNY"),
+                                       ("AAPL", 31.375, 200.0, "USD")]:
+            store.append_history({"ts_origin": "2026-10-05T10:00:00", "action": "buy", "symbol": sym,
+                                  "units": units, "price": price, "currency": ccy,
+                                  "funding_source": "external_funding"})
+
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeMarket(table))
+    monkeypatch.setattr(ap, "_benchmark_symbol", lambda: "")
+    # _refresh_market 的联网出口：get_quote / get_history_data / get_fx_rate
+    monkeypatch.setattr("openinvest.utils.quotes.get_quote",
+                        lambda h: QuoteSnapshot(symbol=h["symbol"], price=1.0, currency="CNY", unit="u"))
+    monkeypatch.setattr(pnl_snapshot, "get_history_data", lambda s, p="5d", **kw: pd.DataFrame())
+    monkeypatch.setattr("openinvest.utils.fx.get_fx_rate", lambda q, b="CNY", as_of_date=None: 7.1)
+    # 渲染 / 事件的联网出口：基准缓存
+    monkeypatch.setattr(pnl_snapshot, "_ensure_benchmarks_fresh", lambda s, e: None)
+    monkeypatch.setattr(pnl_snapshot, "get_all_series", lambda start_date: [])
+    monkeypatch.setattr(pnl_snapshot, "_is_trading_window", lambda *a, **k: True)
+    monkeypatch.setattr(pnl_snapshot, "HISTORY_PATH", tmp_path / "state" / "pnl_history.jsonl")
+    monkeypatch.setattr(pnl_snapshot, "SVG_PATH", tmp_path / "docs" / "pnl_chart.svg")
+    return table
+
+
+def test_run_draws_total_equity_for_any_holdings_and_leaks_nothing(monkeypatch, tmp_path):
+    """没有 NDQ / GC 的持仓也能画出总权益曲线；公开 SVG / 事件 / 历史里没有 symbol、数量、成本。"""
+    table = _fork_world(monkeypatch, tmp_path)
+
+    results = []
+    for aapl_close in (210.0, 216.0, 205.0):   # 盘中价变化 → 三个不同的点
+        table["AAPL"]["2026-10-09"] = aapl_close
+        results.append(pnl_snapshot.run())
+    assert [r["status"] for r in results] == ["ok", "ok", "ok"]
+    assert [r["history_points"] for r in results] == [1, 2, 3]
+
+    svg = (tmp_path / "docs" / "pnl_chart.svg").read_text(encoding="utf-8")
+    assert "<polyline" in svg and "总权益曲线" in svg and "100" in svg
+
+    hist_lines = (tmp_path / "state" / "pnl_history.jsonl").read_text(encoding="utf-8").splitlines()
+    points = [json.loads(line) for line in hist_lines]
+    assert all(set(p) == {"ts", "equity_idx", "total_pnl_pct"} for p in points)
+    idx = [p["equity_idx"] for p in points]
+    assert len(set(idx)) == 3 and idx[1] > idx[0] > idx[2]   # 跟着 AAPL 收盘价走（先涨后跌）
+
+    public = [svg, *hist_lines]
+    events = tmp_path / "docs" / "outperform_events.jsonl"
+    if events.exists():
+        public.append(events.read_text(encoding="utf-8"))
+    for text in public:
+        for needle in _CI_SENSITIVE + _HOLDING_SECRETS:
+            assert needle not in text, f"公开产物含敏感子串 {needle!r}（红线 #1）"
+    # 同 CI：返回值（进 scheduler 日志）也不带百分比数字 / symbol
+    for r in results:
+        assert not any(n in str(r) for n in _HOLDING_SECRETS + ["NDQ", "GC=F"]), r
+
+
+def test_run_skips_when_a_holding_cannot_be_valued(monkeypatch, tmp_path):
+    """有持仓既没价也没成本价：总权益少一块、曲线会假跌——这次不记点（不泄露 symbol 到返回值）。"""
+    _fork_world(monkeypatch, tmp_path, extra_holdings=[
+        {"symbol": "ZZZ.XX", "kind": "equity", "units": 5.0, "avg_cost": 0.0, "cost_currency": "CNY"}])
+    out = pnl_snapshot.run()
+    assert out == {"status": "skipped", "reason": "unvalued_holdings", "count": 1}
+    assert not (tmp_path / "state" / "pnl_history.jsonl").exists()
+
+
+def test_run_skips_without_ledger_history(monkeypatch, tmp_path):
+    """没有账本 / 不足 2 个估值日：说清原因，不画空曲线也不崩。"""
+    _fork_world(monkeypatch, tmp_path, ledger=False)
+    out = pnl_snapshot.run()
+    assert out["status"] == "skipped" and out["reason"] == "insufficient_history"
+
+
+def test_read_history_ignores_legacy_two_asset_points(monkeypatch, tmp_path):
+    """旧版点（total_pnl_pct = 两个固定资产的成本收益率，无 equity_idx）口径不同：不混画、不当窗口起点。"""
+    path = tmp_path / "pnl_history.jsonl"
+    now = datetime.now().astimezone()
+    rows = [
+        {"ts": (now - timedelta(days=3)).isoformat(), "total_pnl_pct": 12.0, "ndq_pnl_pct": 9.0, "gold_pnl_pct": 3.0},
+        {"ts": (now - timedelta(days=2)).isoformat(), "equity_idx": 101.0, "total_pnl_pct": 1.0},
+        {"ts": (now - timedelta(days=1)).isoformat(), "equity_idx": 102.0, "total_pnl_pct": 2.0},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    monkeypatch.setattr(pnl_snapshot, "HISTORY_PATH", path)
+    assert [e["equity_idx"] for e in pnl_snapshot._read_history()] == [101.0, 102.0]
+
+
+def test_equity_curve_is_rebased_to_window_start():
+    from openinvest.jobs.pnl_render import _equity_rel, _window_pct
+    hist = [{"ts": "2026-10-01T10:00:00", "equity_idx": 102.0},
+            {"ts": "2026-10-02T10:00:00", "equity_idx": 104.04}]
+    rel = _equity_rel(hist)
+    assert rel[0]["rel_pct"] == 0.0 and rel[1]["rel_pct"] == pytest.approx(2.0)
+    assert _window_pct(hist) == pytest.approx(2.0)
+    assert _window_pct(hist[:1]) is None and _equity_rel([]) == []
+    # 不足 2 个点 → 占位图，不画孤零零一个点
+    assert "数据采集中" in pnl_snapshot._render_svg_pure(hist[:1], [])

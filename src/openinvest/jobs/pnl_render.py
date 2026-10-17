@@ -11,6 +11,7 @@ patch 渲染逻辑打本模块。
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,10 +34,29 @@ WINDOW_DAYS = 30
 
 @dataclass
 class Snapshot:
+    """一个时点的总权益指数（账户时间加权收益链接指数，成立日 = 100；剔除存取款，含现金）。"""
     ts: str
-    total_pnl_pct: float
-    ndq_pnl_pct: Optional[float]
-    gold_pnl_pct: Optional[float]
+    equity_idx: float
+
+
+def _equity_rel(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """总权益曲线 → 相对窗口首点的涨跌 %（首点 = 0，即归一化指数 100）。
+
+    只认带 equity_idx 的点：旧版只画两个固定资产的点（total_pnl_pct 是那两个资产的成本收益率）
+    口径不同，不能和新曲线混画。
+    """
+    pts = [(e["ts"], float(e["equity_idx"])) for e in history
+           if e.get("equity_idx") and math.isfinite(float(e["equity_idx"]))]
+    if not pts or pts[0][1] <= 0:
+        return []
+    base = pts[0][1]
+    return [{"ts": ts, "rel_pct": (v / base - 1) * 100} for ts, v in pts]
+
+
+def _window_pct(history: List[Dict[str, Any]]) -> Optional[float]:
+    """窗口内总权益的累计涨跌 %（首点 → 末点）；不足 2 个点 → None。"""
+    rel = _equity_rel(history)
+    return rel[-1]["rel_pct"] if len(rel) >= 2 else None
 
 
 
@@ -106,14 +126,15 @@ def render_svg(
     history: List[Dict[str, Any]],
     benchmark_series: List[BenchmarkSeries],
 ) -> str:
-    """上半部分：用户三线折线趋势 (Total / NDQ / Gold)
+    """上半部分：总权益曲线（账户整体，基准币种，窗口首点 = 100；不分资产、不出任何 symbol）
        下半部分：横向柱状图，11 个基准 + 用户实盘按累计涨幅排序
 
     柱状图灵感：类似 LLM benchmark (MMLU / HellaSwag) 的对比图。基准的"累计涨幅"
     与时间轴弱相关，柱子高度 (= % 涨幅) 一目了然，比折线叠加更直观。
     用户实盘柱用粗黄色 + ★ 标识突出，基准柱按色系分组。
     """
-    if not history:
+    rel = _equity_rel(history)
+    if len(rel) < 2:
         return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} 100" role="img" aria-label="PnL chart (no data yet)">
   <rect width="{W}" height="100" fill="#0d1117"/>
   <text x="{W//2}" y="55" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, monospace" font-size="14">
@@ -122,15 +143,10 @@ def render_svg(
 </svg>
 """
 
-    start_date = history[0]["ts"][:10]
+    start_date = rel[0]["ts"][:10]
 
-    # ===== 上半：用户三线折线（不再叠加基准）=====
-    user_values: List[float] = []
-    for entry in history:
-        for k in ("total_pnl_pct", "ndq_pnl_pct", "gold_pnl_pct"):
-            v = entry.get(k)
-            if v is not None:
-                user_values.append(v)
+    # ===== 上半：总权益曲线（单线，相对窗口首点；不再叠加基准）=====
+    user_values: List[float] = [e["rel_pct"] for e in rel]
     user_values.append(0.0)
     vmin, vmax = min(user_values), max(user_values)
     pad = max((vmax - vmin) * 0.15, 0.5)
@@ -138,18 +154,9 @@ def render_svg(
     vmax += pad
     zero_y = _project_y(0.0, vmin, vmax)
 
-    total_line = _series_polyline(history, "total_pnl_pct", vmin, vmax)
-    ndq_line = _series_polyline(history, "ndq_pnl_pct", vmin, vmax)
-    gold_line = _series_polyline(history, "gold_pnl_pct", vmin, vmax)
+    total_line = _series_polyline(rel, "rel_pct", vmin, vmax)
 
-    # latest_total 永远是 float（next 的 default 是 0.0），但 mypy 看不出来：
-    # 显式 cast 让类型检查器满意，也避免后续 > / < 比较的 None 风险（audit eng M8）
-    _lt = next(
-        (e.get("total_pnl_pct") for e in reversed(history)
-         if e.get("total_pnl_pct") is not None),
-        0.0,
-    )
-    latest_total: float = float(_lt) if _lt is not None else 0.0
+    latest_total: float = float(rel[-1]["rel_pct"])
     arrow = "▲" if latest_total > 0 else ("▼" if latest_total < 0 else "■")
     arrow_color = "#3fb950" if latest_total > 0 else ("#f85149" if latest_total < 0 else "#8b949e")
 
@@ -239,29 +246,23 @@ def render_svg(
   </style>
   <rect width="{W}" height="{H_TOTAL}" fill="#0d1117"/>
 
-  <!-- ===== 上半：折线图（用户三线趋势）===== -->
-  <text x="{MARGIN_L}" y="20" fill="#c9d1d9" class="title">📈 实盘 PnL 趋势 (最近 {WINDOW_DAYS} 天)</text>
+  <!-- ===== 上半：折线图（总权益单线）===== -->
+  <text x="{MARGIN_L}" y="20" fill="#c9d1d9" class="title">📈 总权益曲线（基准币种，起点 = 100，最近 {WINDOW_DAYS} 天）</text>
   <line x1="{MARGIN_L}" y1="{zero_y:.1f}" x2="{W - MARGIN_R}" y2="{zero_y:.1f}"
         stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
-  <text x="{MARGIN_L - 6}" y="{zero_y + 4:.1f}" text-anchor="end" fill="#6e7681" class="label">0%</text>
+  <text x="{MARGIN_L - 6}" y="{zero_y + 4:.1f}" text-anchor="end" fill="#6e7681" class="label">100</text>
   <text x="{MARGIN_L - 6}" y="{MARGIN_T + 10}" text-anchor="end" fill="#3fb950" class="label">+</text>
   <text x="{MARGIN_L - 6}" y="{MARGIN_T + PLOT_H - 2}" text-anchor="end" fill="#f85149" class="label">−</text>
   <text x="{MARGIN_L}" y="{MARGIN_T + PLOT_H + 18}" fill="#6e7681" class="label">{WINDOW_DAYS} 天前</text>
   <text x="{W - MARGIN_R}" y="{MARGIN_T + PLOT_H + 18}" text-anchor="end" fill="#6e7681" class="label">今天</text>
 
-  {f'<polyline points="{ndq_line}" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.85"/>' if ndq_line else ''}
-  {f'<polyline points="{gold_line}" fill="none" stroke="#f0a500" stroke-width="1.5" opacity="0.85"/>' if gold_line else ''}
   {f'<polyline points="{total_line}" fill="none" stroke="#d29922" stroke-width="2.5"/>' if total_line else ''}
   <text x="{W - MARGIN_R - 10}" y="{MARGIN_T + 18}" text-anchor="end" fill="{arrow_color}" font-size="22" font-weight="bold">{arrow}</text>
 
   <!-- 折线图图例 -->
   <g transform="translate({MARGIN_L + 8}, {MARGIN_T + 12})" class="label">
     <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
-    <text x="20" y="4" fill="#c9d1d9" font-weight="bold">Total</text>
-    <line x1="80" y1="0" x2="94" y2="0" stroke="#58a6ff" stroke-width="1.5"/>
-    <text x="100" y="4" fill="#c9d1d9">资产 A</text>
-    <line x1="170" y1="0" x2="184" y2="0" stroke="#f0a500" stroke-width="1.5"/>
-    <text x="190" y="4" fill="#c9d1d9">资产 B</text>
+    <text x="20" y="4" fill="#c9d1d9" font-weight="bold">总权益（时间加权，剔除存取款）</text>
   </g>
 
   <!-- ===== 分隔线 ===== -->
@@ -275,7 +276,7 @@ def render_svg(
   {chr(10).join(bar_svg)}
 
   <!-- 口径脚注：两侧统计口径不同，不可直接比大小（issue #179 P1-A③）-->
-  <text x="{MARGIN_L}" y="{bar_y_end + BAR_BOTTOM_PAD + 8}" fill="#6e7681" class="label">口径：★ 实盘 = 现市值/累计成本 −1（分批建仓，含加仓时点效应）；基准 = 窗口首日一次性买入。口径不同，只看方向不比大小。</text>
+  <text x="{MARGIN_L}" y="{bar_y_end + BAR_BOTTOM_PAD + 8}" fill="#6e7681" class="label">口径：★ 实盘 = 总权益时间加权收益（剔除存取款，含现金）；基准 = 窗口首日满仓一次性买入。口径不同，只看方向不比大小。</text>
 </svg>
 """
 
@@ -311,18 +312,19 @@ def _outperform_events(
     返回 List[{"benchmark", "user_pct", "bench_pct", "diff_pct", "is_outperform",
               "label", "ts"}]，跑赢跑输都记，按 |diff_pct| 倒序。
 
-    口径（#234-3）：user_pct 是实盘累计成本收益（分批建仓），bench_pct 是窗口首日
-    一次性买入——两侧不可比，diff_pct 只有正负有意义。label 是对外文案，只写方向
-    + 口径说明，不写差值（与 SVG 底部脚注同一口径）；diff_pct 留作原始字段。
+    口径（#234-3）：user_pct 是窗口内总权益的时间加权收益（剔除存取款、含现金仓位），
+    bench_pct 是窗口首日满仓一次性买入——仍不可直接比大小（现金拖累等），diff_pct 只有
+    正负有意义。label 是对外文案，只写方向 + 口径说明，不写差值（与 SVG 底部脚注同一口径）；
+    diff_pct 留作原始字段。
     """
-    if snap.total_pnl_pct is None:
+    # user_pct = 窗口内总权益累计涨跌（与 SVG 柱状图 ★ 实盘同源）；不足 2 个点不出事件
+    user_pct = _window_pct(history)
+    if user_pct is None:
         return []
-    user_pct = float(snap.total_pnl_pct)
 
-    # 用 history 的第一条 ts 作为对比起点（与 SVG 同源）
-    if not history:
-        return []
-    start_date = history[0]["ts"][:10]
+    # 用总权益曲线第一个点的 ts 作为对比起点（与 SVG 同源）
+    rel = _equity_rel(history)
+    start_date = rel[0]["ts"][:10]
 
     # 金融视角红线：原版 `if diff <= 0: continue` 是 survivorship bias，对外
     # 展示只有 winning streak 构成误导性宣传。新版同时记 winning + losing 两类
@@ -343,7 +345,7 @@ def _outperform_events(
             "diff_pct": round(diff, 4),
             "is_outperform": win,
             "label": (
-                f"作者账户过去 {len(history)} 个数据点 "
+                f"作者账户过去 {len(rel)} 个数据点 "
                 f"{'跑赢' if win else '跑输'}{series.key}（口径不同，只看方向）"
             ),
         })
@@ -358,6 +360,8 @@ __all__ = [
     "MARGIN_L", "MARGIN_R", "MARGIN_T", "MARGIN_B", "PLOT_W", "PLOT_H",
     "WINDOW_DAYS",
     "Snapshot",
+    "_equity_rel",
+    "_window_pct",
     "_project_y",
     "_series_polyline",
     "_latest_pct",
