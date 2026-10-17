@@ -1,7 +1,7 @@
 """Pydantic 请求/响应模型 — 从 web_api.py 拆分（定义不变）。"""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -797,8 +797,8 @@ class DecisionIntervention(BaseModel):
 
 
 class DecisionMatchedTrade(BaseModel):
-    """自动匹配到的成交（源 trades.db）"""
-    id: int
+    """自动匹配到的成交（源 trades.db 的整数 id，或 portfolio_history.jsonl 的 "history:<行号>"）"""
+    id: Union[int, str]
     ts: str
     direction: str
     units: float
@@ -887,6 +887,8 @@ class SkillBuyRequest(BaseModel):
     currency: Optional[str] = None
     kind: Literal["equity", "etf", "metal", "crypto", "bond", "fund", "other"] = "equity"
     unit_label: str = "股"
+    # 可选幂等键（ADR-016）：也可走 `Idempotency-Key` header；同 key 第二次 → {"status": "duplicate"}
+    idempotency_key: Optional[str] = None
 
 
 class SkillSellRequest(BaseModel):
@@ -894,12 +896,16 @@ class SkillSellRequest(BaseModel):
     symbol: str
     units: float
     price: float
+    # 可选幂等键（ADR-016）：也可走 `Idempotency-Key` header；同 key 第二次 → {"status": "duplicate"}
+    idempotency_key: Optional[str] = None
 
 
 class SkillCashRequest(BaseModel):
     """POST /api/skill/deposit|withdraw body"""
     currency: str
     amount: float
+    # 可选幂等键（ADR-016）：也可走 `Idempotency-Key` header；同 key 第二次 → {"status": "duplicate"}
+    idempotency_key: Optional[str] = None
 
 
 class SkillDeleteHoldingRequest(BaseModel):

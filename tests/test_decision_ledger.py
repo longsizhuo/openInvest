@@ -38,6 +38,8 @@ def test_parse_committee_file(tmp_path):
         "symbol": "GC=F",
         "alloc_cny": -5000.0,
         "alloc_currency": "CNY",
+        "input_health": {},   # 老存档无 Input Health 块 → {}（不猜）
+        "run_at": None,
     }
     assert parse_committee_file(tmp_path / "missing.md") is None
 
@@ -239,3 +241,87 @@ def test_explain_decision(monkeypatch, tmp_path):
     assert "error" in explain_decision("../../etc/GC=F")      # date 段防逃逸
     assert "error" in explain_decision("2026-07-03\n/GC=F")  # fullmatch，不吃尾随换行
     assert "error" in explain_decision("2026-07-03/UNKNOWN")
+
+
+def test_history_as_trades_shapes_and_filters():
+    """portfolio_history.jsonl → trades.db 同形 dict：buy/bought→BUY、sell/sold→SELL；
+    deposit/withdraw 不是成交；补录已有持仓（':existing_position'）不是执行决议。"""
+    from openinvest.core.decision_calc import history_as_trades
+
+    got = history_as_trades([
+        {"ts": "2026-07-03T09:00:00+08:00", "action": "buy", "symbol": "GC=F",
+         "units": 2, "price": 500.0, "source": "mcp"},
+        {"ts": "2026-07-03T10:00:00+08:00", "ts_origin": "2026-07-03T10:00:01+08:00",
+         "action": "sold", "symbol": "BHP.AX", "units": 10, "source": "commsec_email"},
+        {"ts": "2026-07-03T11:00:00+08:00", "action": "deposit", "symbol": "CNY", "units": 100},
+        {"ts": "2026-07-03T12:00:00+08:00", "action": "buy", "symbol": "AAPL", "units": 1,
+         "source": "mcp:existing_position", "funding_source": "external_funding"},
+        {"ts": "2026-07-03T13:00:00+08:00", "action": "buy", "symbol": "NDQ.AX", "units": 1,
+         "source": "dca_daily", "funding_source": "external_funding"},
+        {"ts": "2026-07-03T14:00:00+08:00", "action": "bought", "symbol": "NDQ.AX", "units": 3},
+    ])
+    # dca_daily 自动定投被滤掉；CommSec 回灌（无 source）是真券商成交，保留
+    assert [(t["symbol"], t["direction"], t["status"]) for t in got] == [
+        ("GC=F", "BUY", "executed"), ("BHP.AX", "SELL", "executed"), ("NDQ.AX", "BUY", "executed")]
+    assert got[2]["id"] == "history:5"
+    assert got[0]["id"] == "history:0" and got[0]["verdict_id"] is None
+    assert got[1]["ts"] == "2026-07-03T10:00:01+08:00"  # ts_origin（本地时区）优先
+
+
+def test_list_decisions_matches_agent_buy_from_portfolio_history(monkeypatch, tmp_path):
+    """MCP / CLI 的 buy 走 PortfolioManager.buy → 只写 memory/portfolio_history.jsonl、
+    不写 trades.db。wiki 20 承诺的"7 天内同标的同向成交自动匹配"必须对这条路径成立——
+    此前 list_decisions 只读 TradesDB，agent 记的成交永远 executed=None。"""
+    import openinvest.core.memory_store as ms
+    import openinvest.db.trades_db as trades_db_mod
+    from openinvest.core.portfolio_manager import PortfolioManager
+
+    monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
+    monkeypatch.setattr(trades_db_mod, "TradesDB", _FakeTradesDB)
+    monkeypatch.setattr(_FakeTradesDB, "_TRADES", [], raising=False)  # trades.db 空：只有 history
+
+    date = datetime.now().strftime("%Y-%m-%d")
+    sym = "GC=F"
+    committee_dir = tmp_path / ".committee" / date
+    committee_dir.mkdir(parents=True)
+    (committee_dir / "GC_F.md").write_text(
+        f"# Committee: 伦敦金\n\n**Date**: {date}\n**Symbol**: {sym}\n"
+        f"**Verdict**: ACCUMULATE (confidence 0.70)\n**Suggested allocation CNY**: 1,000\n",
+        encoding="utf-8",
+    )
+
+    store = ms.MemoryStore()  # root = tmp_path（上面已 patch）
+    store.write("user", "user", {"display_name": "t"}, "# user")
+    store.write("strategy", "strategy", {"target_assets": []}, "# strategy")
+    store.write("portfolio", "state", {"schema_version": 2, "cash": {"CNY": 10000.0}, "holdings": []},
+                "# portfolio")
+    PortfolioManager(store).buy(sym, 2, 500.0, currency="CNY", kind="metal", unit_label="克", source="mcp")
+
+    got = next(d for d in list_decisions(days=30) if d["decision_id"] == f"{date}/{sym}")
+    assert got["executed"] is True
+    assert [(t["direction"], t["units"], t["price"], t["status"]) for t in got["matched_trades"]] == [
+        ("BUY", 2, 500.0, "executed")]
+    assert str(got["matched_trades"][0]["id"]).startswith("history:")
+
+    # 反向：补录已有持仓不算执行——同一天另一个 ACCUMULATE 标的只有 existing_position 记录 → 不匹配
+    (committee_dir / "AAPL.md").write_text(
+        f"# Committee: AAPL\n\n**Date**: {date}\n**Symbol**: AAPL\n"
+        f"**Verdict**: ACCUMULATE (confidence 0.70)\n**Suggested allocation CNY**: 1,000\n",
+        encoding="utf-8",
+    )
+    PortfolioManager(store).buy("AAPL", 1, 150.0, currency="USD", source="mcp:existing_position",
+                                source_type="external_funding")
+    aapl = next(d for d in list_decisions(days=30) if d["decision_id"] == f"{date}/AAPL")
+    assert aapl["executed"] is None and aapl["matched_trades"] == []
+
+    # 反向 2：自动定投（jobs/dca_daily.py 写 source="dca_daily"）不算执行决议——生产 90 天 66 笔
+    # 买入 64 笔是它，算进去采纳率直接虚高
+    (committee_dir / "NDQ_AX.md").write_text(
+        f"# Committee: NDQ\n\n**Date**: {date}\n**Symbol**: NDQ.AX\n"
+        f"**Verdict**: ACCUMULATE (confidence 0.70)\n**Suggested allocation CNY**: 1,000\n",
+        encoding="utf-8",
+    )
+    PortfolioManager(store).buy("NDQ.AX", 1, 60.0, currency="AUD", kind="etf", source="dca_daily",
+                                source_type="external_funding")
+    ndq = next(d for d in list_decisions(days=30) if d["decision_id"] == f"{date}/NDQ.AX")
+    assert ndq["executed"] is None and ndq["matched_trades"] == []

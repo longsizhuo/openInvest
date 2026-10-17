@@ -18,12 +18,14 @@ class _FakePM:
     def __init__(self):
         self.calls = []
 
-    def deposit_cash(self, currency, amount, source=None):
+    def deposit_cash(self, currency, amount, source=None, idempotency_key=None):
         self.calls.append(("deposit", currency, amount, source))
+        self.last_key = idempotency_key
         return {"status": "ok", "currency": currency, "amount": amount}
 
-    def withdraw_cash(self, currency, amount, source=None):
+    def withdraw_cash(self, currency, amount, source=None, idempotency_key=None):
         self.calls.append(("withdraw", currency, amount, source))
+        self.last_key = idempotency_key
         if amount > 100:
             raise ValueError("余额不足")
         return {"status": "ok"}
@@ -64,3 +66,11 @@ def test_argparse_imported():
     """回归：portfolio_cmds 曾缺 import argparse，靠懒 annotation 侥幸不炸——
     谁若去掉 from __future__ import annotations 就当场 NameError。"""
     assert hasattr(pc, "argparse")
+
+
+def test_cmd_deposit_passes_idempotency_key(fake_pm, capfd):
+    """--idempotency-key 透传到 PM（ADR-016）；Namespace 没这个属性时传 None（旧调用方不炸）。"""
+    pc.cmd_deposit(argparse.Namespace(currency="CNY", amount=1.0, idempotency_key="k-1"))
+    assert fake_pm.last_key == "k-1"
+    pc.cmd_deposit(argparse.Namespace(currency="CNY", amount=1.0))
+    assert fake_pm.last_key is None

@@ -119,6 +119,14 @@ def main() -> None:
         sys.exit(1)
 
 
+def _add_idempotency_key(p: argparse.ArgumentParser) -> None:
+    """动钱子命令共用（ADR-016）：同 key 的第二笔返回 {"status": "duplicate"} 不入账。"""
+    p.add_argument("--idempotency-key", default=None, metavar="KEY",
+                   help="幂等键：超时 / 结果未知时重试同一笔请复用同一个 key，账本只记一次；"
+                        "只比对 key 不比对参数，另一笔（换标的/数量/金额）必须换新 key；"
+                        "远端模式不传会自动生成 uuid4，出错时回显供重试")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """全部子命令的 argparse 定义（tests/test_mcp_server.py 的 CLI↔MCP 对等测试也读它）。"""
     parser = _JsonArgumentParser(prog="skill")
@@ -229,11 +237,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("deposit", help="存入现金（任意币种）")
     p.add_argument("--currency", "-c", required=True, help="币种 (CNY/AUD/USD/HKD/...)")
     p.add_argument("--amount", "-a", type=float, required=True, help="存入金额（正数）")
+    _add_idempotency_key(p)
     p.set_defaults(func=cmd_deposit)
 
     p = sub.add_parser("withdraw", help="取出现金（任意币种），余额不足报错")
     p.add_argument("--currency", "-c", required=True, help="币种")
     p.add_argument("--amount", "-a", type=float, required=True, help="取出金额（正数）")
+    _add_idempotency_key(p)
     p.set_defaults(func=cmd_withdraw)
 
     p = sub.add_parser("buy", help="加仓 / 建新仓（已有 symbol → 加权平均成本；新 → 建仓）")
@@ -248,12 +258,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--existing-position", action="store_true",
                    help="补录用系统前就持有的仓位：不扣现金（funding_source=external_funding，"
                         "history source 带 ':existing_position'）")
+    _add_idempotency_key(p)
     p.set_defaults(func=cmd_buy)
 
     p = sub.add_parser("sell", help="减仓（units 减，cost_avg 不变，按 holding 的 cost_currency 还现金）")
     p.add_argument("--symbol", required=True)
     p.add_argument("--units", type=float, required=True, help="卖出数量")
     p.add_argument("--price", type=float, required=True, help="卖出单价")
+    _add_idempotency_key(p)
     p.set_defaults(func=cmd_sell)
 
     p = sub.add_parser("delete_holding", help="删除持仓行（units 必须 0 或加 --force）")

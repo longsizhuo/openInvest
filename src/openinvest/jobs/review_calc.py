@@ -43,6 +43,11 @@ EXPECTED_DIRECTION = {
     "HOLD": "flat",  # 期望波动小
 }
 
+# CIO 输出解析不出合法裁决（UNCLEAR）：没有期望方向，**不进任何命中率桶**，只计数。
+# 2026-10 之前它被 .get(verdict, "flat") 折进 HOLD 桶（live 12 条 + 舰队 14%），把 HOLD 命中率灌水。
+UNCLEAR_DIRECTION = "none"
+VERDICT_BUCKETS = ["BUY", "ACCUMULATE", "HOLD", "TRIM", "SELL", "UNCLEAR"]
+
 
 @dataclass
 class VerdictReview:
@@ -61,6 +66,7 @@ class VerdictReview:
     source: str = "live"  # "live" 或 "backtest"
     contaminated: bool = False  # 决议日 ≤ CONTAMINATION_CUTOFF：落在 LLM 训练窗口，记忆穿越非业绩
     weekend_dup: bool = False  # 周末休市资产（FX/加密除外）的周末决议：基准=周五收盘，是周五样本的重复，不进命中率（D8）
+    input_health: Dict[str, Any] = field(default_factory=dict)  # transcript 的 Input Health 块（老存档 {}）
 
 
 # HOLD "没动" 的判定阈值 = K_FLAT × 资产日波动(atr_pct) × sqrt(窗口天数)，再封顶。
@@ -100,6 +106,70 @@ def _is_hit(verdict: str, return_pct: float, flat_threshold: float = 0.03) -> bo
     return False
 
 
+def wilson_ci(k: int, n: int, z: float = 1.96) -> Optional[List[float]]:
+    """命中率的 Wilson 95% 区间 [lo, hi]（3 位小数）。n=0 → None。
+
+    选 Wilson 而非正态近似：n 在 30~300、命中率接近 0/1 时正态区间会越界、且覆盖率不足。
+    """
+    if n <= 0:
+        return None
+    import math
+    p_hat = k / n
+    denom = 1 + z * z / n
+    centre = (p_hat + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p_hat * (1 - p_hat) / n + z * z / (4 * n * n)) / denom
+    return [round(max(0.0, centre - half), 3), round(min(1.0, centre + half), 3)]
+
+
+# 复盘层对 Input Health 的"降级"判定（事实→判断只在这一处）：
+# 行情刷新失败 / 任一 worker 失败 / 市场情绪表盘为空（VIX 拉不到 → VIX 防御静默失效）/ macro 数据为空。
+# 估值 / 事件 / insights 为空不算（黄金本无估值、无事件是常态、Dreaming 本就关着）。
+DEGRADED_EMPTY_INPUTS = ("sentiment_brief", "portfolio_summary")
+
+
+def is_degraded_input(health: Optional[Dict[str, Any]]) -> bool:
+    h = health or {}
+    if h.get("price_fetch_failed") or h.get("macro_data_empty") or h.get("worker_unavailable"):
+        return True
+    return any(name in (h.get("empty_inputs") or []) for name in DEGRADED_EMPTY_INPUTS)
+
+
+def is_forced_hold_review(r: VerdictReview) -> bool:
+    """强制 HOLD：新存档看 Input Health 的 forced_hold；老存档退回展示层同款启发式
+    （HOLD 且自报 ≤ LOOKUP_FORCED_CONF——transcript 只留封顶后的数，认不出 Sanity 3/4）。"""
+    h = r.input_health or {}
+    if "forced_hold" in h:
+        return bool(h["forced_hold"])
+    return r.verdict == "HOLD" and float(r.confidence or 0.0) <= LOOKUP_FORCED_CONF
+
+
+def _label_true(direction: str, ret: Optional[float], mkt_dir: Optional[str]) -> Optional[bool]:
+    """与 _is_hit **同一把尺子**的标签：up = 涨 >0，down = 跌 <0，flat = 留在 flat band 内
+    （band 是 per-row 算的，jsonl 里只剩 directions，所以 flat 从 directions 读）。"""
+    if direction == "up":
+        return None if ret is None else ret > 0
+    if direction == "down":
+        return None if ret is None else ret < 0
+    if direction == "flat":
+        return None if not mkt_dir else mkt_dir == "flat"
+    return None
+
+
+def _direction_base_rate(reviews: List[VerdictReview], window_key: str, direction: str) -> Optional[float]:
+    """同桶全部样本（verdict 无关）里"该方向标签为真"的占比 = 一个永远喊这个方向的傻瓜的命中率。
+
+    尺子必须与 _is_hit 一致：ACCUMULATE 按"涨 >0"算命中，基率就得是 P(涨 >0)，
+    不能拿 directions 的 up（涨 > flat band，口径更严）当基率，否则提升被系统性高估。
+    """
+    # 样本池 = 进命中率的行（有期望方向）；UNCLEAR 行不进命中率也不进基率，与 export 口径一致
+    flags = [_label_true(direction, r.actual_returns.get(window_key), r.directions.get(window_key))
+             for r in reviews if r.verdict in EXPECTED_DIRECTION]
+    flags = [f for f in flags if f is not None]
+    if not flags:
+        return None
+    return round(sum(flags) / len(flags), 3)
+
+
 def _summarize_bucket(reviews: List[VerdictReview], *, suppress_rates: bool) -> Dict[str, Any]:
     """对单桶（holdout 或 contaminated）算命中率聚合，按 verdict 类型 + 窗口分类。
 
@@ -117,6 +187,7 @@ def _summarize_bucket(reviews: List[VerdictReview], *, suppress_rates: bool) -> 
         entry: Dict[str, Any] = {"n": len(hits)}
         if not suppress_rates:
             entry["hit_rate"] = round(sum(hits) / len(hits), 3)
+            entry["ci95"] = wilson_ci(sum(hits), len(hits))
             # 剔除 macro shock 后再算
             non_shock = [r.hits[key] for r in reviews
                          if key in r.hits and not r.macro_shock.get("detected")]
@@ -125,19 +196,33 @@ def _summarize_bucket(reviews: List[VerdictReview], *, suppress_rates: bool) -> 
                 entry["n_excl_shock"] = len(non_shock)
         bucket["by_window"][key] = entry
 
-    for verdict in ["BUY", "ACCUMULATE", "HOLD", "TRIM", "SELL"]:
+    for verdict in VERDICT_BUCKETS:
         subset = [r for r in reviews if r.verdict == verdict]
         if not subset:
             continue
         entry = {"n": len(subset),
                  "avg_confidence": round(sum(r.confidence for r in subset) / len(subset), 3)}
-        if not suppress_rates:
+        expected = EXPECTED_DIRECTION.get(verdict)
+        if not suppress_rates and expected is not None:
             for window in HIT_WINDOWS:
                 key = f"{window}d"
                 hits = [r.hits[key] for r in subset if key in r.hits]
                 if hits:
-                    entry[f"hit_rate_{key}"] = round(sum(hits) / len(hits), 3)
+                    rate = round(sum(hits) / len(hits), 3)
+                    entry[f"hit_rate_{key}"] = rate
+                    # 提升 = 命中率 − 同桶市场基率（HOLD 命中 ≈ 市场横盘基率时提升 ≈ 0，
+                    # 这正是 2026-10 评审发现的"与永远 HOLD 无法区分"）
+                    base = _direction_base_rate(reviews, key, expected)
+                    entry[f"base_rate_{key}"] = base
+                    entry[f"lift_{key}"] = round(rate - base, 3) if base is not None else None
+                    entry[f"ci95_{key}"] = wilson_ci(sum(hits), len(hits))
         bucket["by_verdict"][verdict] = entry
+
+    # 单独标注（不剔除，只让读者看见）：UNCLEAR / 被规则强制的 HOLD / 残缺输入上做的裁决
+    bucket["unclear_count"] = sum(1 for r in reviews if r.verdict not in EXPECTED_DIRECTION)
+    bucket["forced_hold_count"] = sum(1 for r in reviews if is_forced_hold_review(r))
+    bucket["degraded_input_count"] = sum(1 for r in reviews if is_degraded_input(r.input_health))
+    bucket["health_tagged_count"] = sum(1 for r in reviews if r.input_health)
 
     bucket["macro_shock_count"] = sum(1 for r in reviews if r.macro_shock.get("detected"))
     # 决议日 regime 分布 + crash 计数（crash 样本下游免责剔除，但此处留痕统计）
@@ -207,15 +292,30 @@ def _bucket_lines(title: str, bucket: Dict[str, Any], *, note: Optional[str] = N
             lines.append(f"| {w_key} | {w['n']} | {w['hit_rate']*100:.1f}% | — |")
 
     lines += ["\n### 按 verdict 类型命中率\n",
-              "| Verdict | N | 平均 confidence | 1d hit | 7d hit | 30d hit |",
-              "|---|---|---|---|---|---|"]
+              "| Verdict | N | 平均 confidence | 1d hit | 7d hit | 30d hit | 30d 基率 | 30d 提升 | 30d 95% CI |",
+              "|---|---|---|---|---|---|---|---|---|"]
     for v_key, v in bucket["by_verdict"].items():
+        if v_key not in EXPECTED_DIRECTION:
+            lines.append(f"| {v_key} | {v['n']} | {v['avg_confidence']:.2f} | — | — | — | — | — | 不计命中 |")
+            continue
+        base = v.get("base_rate_30d")
+        lift = v.get("lift_30d")
+        ci = v.get("ci95_30d")
         lines.append(
             f"| {v_key} | {v['n']} | {v['avg_confidence']:.2f} | "
             f"{v.get('hit_rate_1d', 0)*100:.0f}% | "
             f"{v.get('hit_rate_7d', 0)*100:.0f}% | "
-            f"{v.get('hit_rate_30d', 0)*100:.0f}% |"
+            f"{v.get('hit_rate_30d', 0)*100:.0f}% | "
+            f"{'—' if base is None else f'{base*100:.0f}%'} | "
+            f"{'—' if lift is None else f'{lift*100:+.0f}pp'} | "
+            f"{'—' if not ci else f'{ci[0]*100:.0f}–{ci[1]*100:.0f}%'} |"
         )
+    lines.append(
+        f"\n> 单独标注（已计入 N，未剔除）：UNCLEAR {bucket.get('unclear_count', 0)} 条不计命中；"
+        f"强制/低置信 HOLD {bucket.get('forced_hold_count', 0)} 条；"
+        f"残缺输入上做的裁决 {bucket.get('degraded_input_count', 0)} 条"
+        f"（带 Input Health 块的样本 {bucket.get('health_tagged_count', 0)} 条，其余老存档按未知处理）。\n"
+    )
     return lines
 
 
@@ -432,6 +532,8 @@ def summarize_path_reviews(reviews: List[PathReview]) -> Dict[str, Any]:
 
 __all__ = [
     "HIT_WINDOWS", "CONTAMINATION_CUTOFF", "EXPECTED_DIRECTION",
+    "UNCLEAR_DIRECTION", "VERDICT_BUCKETS", "DEGRADED_EMPTY_INPUTS",
+    "wilson_ci", "is_degraded_input", "is_forced_hold_review",
     "VerdictReview", "K_FLAT", "FLAT_CEILING_PCT",
     "_flat_band", "_is_hit", "_summarize_bucket",
     "summarize_verdict_reviews", "_bucket_lines",

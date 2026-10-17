@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from openinvest.core.committee.agent_io import AGENT_UNAVAILABLE_MARKER
 
@@ -410,6 +410,45 @@ def single_invest_cap_note(verdict: Dict[str, Any]) -> str:
     return f"金额已按单次上限 {money(cap)} 钳制（CIO 原建议 {money(orig)}，裁决方向不变）"
 
 
+def rewrite_tags(out: Dict[str, Any]) -> List[str]:
+    """从 parse_cio_memo 产出的 `_` 溯源键推回"哪些确定性规则改写了 CIO 原始裁决"。
+
+    纯函数，只读 dict。标签词汇与 runner/intervention._intervention_record 的 rule 名对齐
+    （defense_* / sanity5_* / config_concentration_lens_off），并补上干预账本不记的三类
+    （sanity1 BUY 降档、sanity2 金额钳制、sanity3 worker 失败、aggressive 升档）。
+    落进 transcript 的 Input Health 块，让 verdict_review 不再靠"confidence ≤ 0.4"猜强制 HOLD。
+    """
+    tags: List[str] = []
+    orig_v = out.get("_original_verdict")
+    if out.get("_defense_dca"):
+        tags.append(f"defense_gold_dca_{out['_defense_dca']}")
+    elif out.get("_defense_downgrade"):
+        tags.append(f"defense_{out['_defense_downgrade']}")
+    if out.get("_sanity5_reason"):
+        tags.append(f"sanity5_{out['_sanity5_reason']}")
+    if out.get("_original_trim_reason") == "concentration":
+        tags.append("config_concentration_lens_off")
+    if "_original_confidence_unavailable" in out:
+        tags.append("sanity3_worker_unavailable")
+    if out.get("_risk_profile_applied"):
+        tags.append(str(out["_risk_profile_applied"]))
+    if orig_v == "BUY" and "_original_confidence" in out and not tags:
+        tags.append("sanity1_buy_overdrive")
+    if "_single_invest_cap" in out:   # Sanity 6（PR #430）：买侧金额钳到用户单次入场上限
+        tags.append("single_invest_cap")
+    if "_original_alloc" in out and not tags:
+        tags.append("sanity2_alloc_clamp")
+    if "_original_confidence_cap" in out:
+        tags.append("confidence_cap_env")
+    return tags
+
+
+def forced_hold(out: Dict[str, Any]) -> bool:
+    """最终 HOLD 且原始裁决不是 HOLD = 被规则强制成 HOLD（与 review_calc 展示口径同定义）。"""
+    return (str(out.get("verdict") or "").upper() == "HOLD"
+            and out.get("_original_verdict") not in (None, "HOLD"))
+
+
 def _extract_concentration_from_summary(
     portfolio_summary: str, sym: str,
 ) -> Optional[float]:
@@ -506,6 +545,8 @@ __all__ = [
     "ATR_SPIKE_RE",
     "regime_label_from_text",
     "atr_defense_from_text",
+    "rewrite_tags",
+    "forced_hold",
     "_build_thresholds_from_config",
     "THRESHOLDS",
     "_force_hold",

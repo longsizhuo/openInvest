@@ -8,12 +8,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from dotenv import load_dotenv
-
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.services.commsec_reader import CommSecReader
-
-load_dotenv()
 
 
 def run() -> Dict[str, Any]:

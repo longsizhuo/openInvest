@@ -274,6 +274,26 @@ class PortfolioManager:
     # ---------- 写：单锁 RMW 闭包 ----------
 
     @contextmanager
+    def _ledger_tx(self, idempotency_key: Optional[str]) -> Iterator[_DocTx]:
+        """with_portfolio_tx + 幂等闸（ADR-016）：buy/sell/deposit/withdraw 共用。
+
+        key 记在 portfolio 文档自身的 `ledger_idempotency_keys`（与 trades 同步的
+        `synced_trade_ids` 同款）：check + append 与 cash/holdings 改动在**同一把锁、同一次
+        atomic write** 落盘——并发 / HTTP 超时重发 / agent 重跑同 key 只有一个赢家，其余抛
+        _DuplicateKey 中止事务（commit-on-success，不落盘）；块内业务异常（余额不足等）或
+        commit 失败 / 中途被 kill 时 key 和账本一起不落盘，不存在"key 烧掉了但账没记"的
+        丢单窗口（独立 .state 文件的 state_claim 做不到：两个文件两次写）。不传 key 行为不变。
+        """
+        with self.with_portfolio_tx() as p:
+            if idempotency_key:
+                seen = list(p.get(_LEDGER_KEYS) or [])
+                if idempotency_key in seen:
+                    raise _DuplicateKey(idempotency_key)
+                # ponytail: 只留最近 N 个 key（同 synced_trade_ids）；更老的 key 重放回到无键行为
+                p[_LEDGER_KEYS] = (seen + [idempotency_key])[-_LEDGER_KEYS_KEEP:]
+            yield p
+
+    @contextmanager
     def with_portfolio_tx(self) -> Iterator[_DocTx]:
         """对外暴露的 portfolio RMW 闭包
 
@@ -403,20 +423,25 @@ class PortfolioManager:
 
     def deposit_cash(
         self, currency: str, amount: float, *, source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """存入现金（任意币种）。CLI deposit 与 /api/skill/deposit 共用，
-        非法参数抛 ValueError（消息与原 CLI 输出一致）"""
+        非法参数抛 ValueError（消息与原 CLI 输出一致）。
+        idempotency_key：同 key 第二次返回 {"status": "duplicate"} 不动账本（ADR-016）。"""
         ccy = currency.upper()
         amount = float(amount)
         if amount <= 0:
             raise ValueError("amount 必须 > 0")
         if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
             raise ValueError(f"非法币种 {ccy}")
-        with self.with_portfolio_tx() as p:
-            cash = dict(p.get("cash") or {})
-            new_balance = float(cash.get(ccy, 0) or 0) + amount
-            cash[ccy] = round(new_balance, 2)
-            p["cash"] = cash
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                cash = dict(p.get("cash") or {})
+                new_balance = float(cash.get(ccy, 0) or 0) + amount
+                cash[ccy] = round(new_balance, 2)
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
         self._reload()
         self.store.append_history({
             "ts_origin": _now_iso_local(), "action": "deposit",
@@ -429,19 +454,24 @@ class PortfolioManager:
 
     def withdraw_cash(
         self, currency: str, amount: float, *, source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """取出现金（任意币种）。余额不足抛 ValueError（余额检查在 fcntl 锁内，防 TOCTOU）"""
+        """取出现金（任意币种）。余额不足抛 ValueError（余额检查在 fcntl 锁内，防 TOCTOU）。
+        idempotency_key 语义同 deposit_cash。"""
         ccy = currency.upper()
         amount = float(amount)
         if amount <= 0:
             raise ValueError("amount 必须 > 0")
-        with self.with_portfolio_tx() as p:
-            cash = dict(p.get("cash") or {})
-            current = float(cash.get(ccy, 0) or 0)
-            if current < amount:
-                raise ValueError(f"{ccy} 余额 {current} < 取出 {amount}")
-            cash[ccy] = round(current - amount, 2)
-            p["cash"] = cash
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                cash = dict(p.get("cash") or {})
+                current = float(cash.get(ccy, 0) or 0)
+                if current < amount:
+                    raise ValueError(f"{ccy} 余额 {current} < 取出 {amount}")
+                cash[ccy] = round(current - amount, 2)
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
         self._reload()
         self.store.append_history({
             "ts_origin": _now_iso_local(), "action": "withdraw",
@@ -486,6 +516,7 @@ class PortfolioManager:
         unit_label: str = "股",
         source: str = "skill_cli",
         source_type: str = "cash_deduct",
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """加仓（已有 symbol 增加 units + 加权平均成本；新 symbol 直接建仓）
 
@@ -502,6 +533,9 @@ class PortfolioManager:
         持仓币种不一致直接报错——否则会扣错币种的现金，并把两种币种的价格平均进同一个
         成本（2026-10 盘点：漏写币种给澳元持仓加仓，扣人民币、成本被人民币价拉偏）。
         新建仓不传 = CNY。
+
+        idempotency_key：同 key 第二次返回 {"status": "duplicate"} 不动账本（ADR-016，
+        远端 HTTP 超时重发 / agent 重跑同一笔）。record_existing_position 也经此路径。
         """
         if units <= 0 or price <= 0:
             raise ValueError("units / price 必须 > 0")
@@ -510,48 +544,51 @@ class PortfolioManager:
                 f"非法 source_type {source_type!r}（只接受 cash_deduct / external_funding）"
             )
         cost_cny = units * price  # 金额单位 = ccy（字段名是历史遗留）
-        with self.with_portfolio_tx() as p:
-            holdings = list(p.get("holdings") or [])
-            existing = next((h for h in holdings if h.get("symbol") == symbol), None)
-            held = str(existing.get("cost_currency") or "CNY").upper() if existing else None
-            ccy = (currency or held or "CNY").upper()
-            if held and ccy != held:
-                raise ValueError(
-                    f"{symbol} 持仓按 {held} 计价，这笔买入写的是 {ccy}；"
-                    f"请按 {held} 价格记账（currency 填 {held} 或不填）"
-                )
-            if existing:
-                # 加权平均成本
-                old_units = float(existing.get("units", 0) or 0)
-                old_avg = float(existing.get("avg_cost", 0) or 0)
-                new_units = old_units + units
-                new_avg = (old_units * old_avg + units * price) / new_units
-                existing["units"] = round(new_units, 6)
-                existing["avg_cost"] = round(new_avg, 6)
-                action_kind = "add"
-            else:
-                holdings.append({
-                    "symbol": symbol, "kind": kind, "units": units, "avg_cost": price,
-                    "unit_label": unit_label, "cost_currency": ccy, "proxy_kind": "direct",
-                })
-                action_kind = "new"
-            p["holdings"] = holdings
-
-            # 资金来源决定是否扣现金：external_funding = 外部新钱，子弹池现金不动
-            if source_type == "cash_deduct":
-                cash = dict(p.get("cash") or {})
-                current = float(cash.get(ccy, 0) or 0)
-                # 防穿透：主动建仓不得把子弹池现金扣成负数（与 withdraw_cash 对称，
-                # 锁内校验防 TOCTOU）。钱不来自子弹池的合法场景走 source_type=
-                # 'external_funding'（不动 cash）。存储层仍容忍负现金——那是给
-                # record_external_trade 券商真实结算回灌用的，与主动 buy 无关。
-                if current < cost_cny:
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                holdings = list(p.get("holdings") or [])
+                existing = next((h for h in holdings if h.get("symbol") == symbol), None)
+                held = str(existing.get("cost_currency") or "CNY").upper() if existing else None
+                ccy = (currency or held or "CNY").upper()
+                if held and ccy != held:
                     raise ValueError(
-                        f"{ccy} 现金 {current} < 买入成本 {cost_cny}"
-                        f"（子弹不足；外部新钱建仓请用 source_type='external_funding'）"
+                        f"{symbol} 持仓按 {held} 计价，这笔买入写的是 {ccy}；"
+                        f"请按 {held} 价格记账（currency 填 {held} 或不填）"
                     )
-                cash[ccy] = round(current - cost_cny, 2)
-                p["cash"] = cash
+                if existing:
+                    # 加权平均成本
+                    old_units = float(existing.get("units", 0) or 0)
+                    old_avg = float(existing.get("avg_cost", 0) or 0)
+                    new_units = old_units + units
+                    new_avg = (old_units * old_avg + units * price) / new_units
+                    existing["units"] = round(new_units, 6)
+                    existing["avg_cost"] = round(new_avg, 6)
+                    action_kind = "add"
+                else:
+                    holdings.append({
+                        "symbol": symbol, "kind": kind, "units": units, "avg_cost": price,
+                        "unit_label": unit_label, "cost_currency": ccy, "proxy_kind": "direct",
+                    })
+                    action_kind = "new"
+                p["holdings"] = holdings
+
+                # 资金来源决定是否扣现金：external_funding = 外部新钱，子弹池现金不动
+                if source_type == "cash_deduct":
+                    cash = dict(p.get("cash") or {})
+                    current = float(cash.get(ccy, 0) or 0)
+                    # 防穿透：主动建仓不得把子弹池现金扣成负数（与 withdraw_cash 对称，
+                    # 锁内校验防 TOCTOU）。钱不来自子弹池的合法场景走 source_type=
+                    # 'external_funding'（不动 cash）。存储层仍容忍负现金——那是给
+                    # record_external_trade 券商真实结算回灌用的，与主动 buy 无关。
+                    if current < cost_cny:
+                        raise ValueError(
+                            f"{ccy} 现金 {current} < 买入成本 {cost_cny}"
+                            f"（子弹不足；外部新钱建仓请用 source_type='external_funding'）"
+                        )
+                    cash[ccy] = round(current - cost_cny, 2)
+                    p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
         self._reload()
         self.store.append_history({
             "ts_origin": _now_iso_local(), "action": "buy",
@@ -571,30 +608,34 @@ class PortfolioManager:
         price: float,
         *,
         source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """减仓（units 减少，cost_avg 不变；卖出按 holding 的 cost_currency 还现金）
 
         units 减完后保留为 0（删行走 delete_holding）。symbol 不在持仓 / 持仓不足
-        抛 ValueError，由调用方转 CLI error JSON / HTTP 400。
+        抛 ValueError，由调用方转 CLI error JSON / HTTP 400。idempotency_key 语义同 buy。
         """
         if units <= 0 or price <= 0:
             raise ValueError("units / price 必须 > 0")
-        with self.with_portfolio_tx() as p:
-            holdings = list(p.get("holdings") or [])
-            target = next((h for h in holdings if h.get("symbol") == symbol), None)
-            if target is None:
-                raise ValueError(f"symbol {symbol} 不在持仓里")
-            old_units = float(target.get("units", 0) or 0)
-            if old_units < units:
-                raise ValueError(f"{symbol} 持仓 {old_units} < 卖出 {units}")
-            target["units"] = round(old_units - units, 6)
-            p["holdings"] = holdings
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                holdings = list(p.get("holdings") or [])
+                target = next((h for h in holdings if h.get("symbol") == symbol), None)
+                if target is None:
+                    raise ValueError(f"symbol {symbol} 不在持仓里")
+                old_units = float(target.get("units", 0) or 0)
+                if old_units < units:
+                    raise ValueError(f"{symbol} 持仓 {old_units} < 卖出 {units}")
+                target["units"] = round(old_units - units, 6)
+                p["holdings"] = holdings
 
-            # 卖出收回现金（cost_currency = target 的 cost_currency）
-            ccy = str(target.get("cost_currency", "CNY")).upper()
-            cash = dict(p.get("cash") or {})
-            cash[ccy] = round(float(cash.get(ccy, 0) or 0) + units * price, 2)
-            p["cash"] = cash
+                # 卖出收回现金（cost_currency = target 的 cost_currency）
+                ccy = str(target.get("cost_currency", "CNY")).upper()
+                cash = dict(p.get("cash") or {})
+                cash[ccy] = round(float(cash.get(ccy, 0) or 0) + units * price, 2)
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
         self._reload()
         self.store.append_history({
             "ts_origin": _now_iso_local(), "action": "sell",
@@ -617,6 +658,24 @@ class PortfolioManager:
 
 
 # ============ 工具函数 ============
+
+# 账本幂等闸的去重键表：portfolio.md frontmatter 的 list 字段（ADR-016），与账本同一次 atomic write。
+# ponytail: 只记"见过的 key"不缓存上次响应；重试在秒~分钟内发生，留 500 个绰绰有余。
+_LEDGER_KEYS = "ledger_idempotency_keys"
+_LEDGER_KEYS_KEEP = 500
+
+
+class _DuplicateKey(Exception):
+    """同 idempotency_key 已入账 —— 在 portfolio 锁内抛出，中止事务（不提交）。"""
+
+
+def _duplicate(key: Optional[str]) -> Dict[str, Any]:
+    return {
+        "status": "duplicate", "idempotency_key": key,
+        "note": "同 idempotency_key 的这笔已入账过，本次未重复记账（ADR-016）。key 只用于重试"
+                "完全相同的请求；若这是另一笔（换了标的 / 数量 / 金额），请换一个新 key 重发。",
+    }
+
 
 def _now_iso_local() -> str:
     """本地时区 ISO 时间戳——history.jsonl 的 ts_origin 口径（与 scripts/skill.py 一致）"""

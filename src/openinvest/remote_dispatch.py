@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from typing import Any, Callable, Dict, Optional
 
 import requests
@@ -72,6 +73,19 @@ def _die(err: Dict[str, Any]) -> None:
     sys.exit(1)
 
 
+def _with_idem(err: Dict[str, Any], key: Optional[str]) -> Dict[str, Any]:
+    """"hub 可能已入账、但客户端不知道"的错误（超时 / 连不上 / 5xx / Tunnel 502-524）都回显
+    本次幂等键：agent 带同一个 key 重试，hub 只记一次（ADR-016）。生成新 uuid4 重试才会双记。"""
+    if key:
+        err["idempotency_key"] = key
+        err["hint"] += (
+            f" 这笔写操作可能已在 hub 入账：重试请带 --idempotency-key {key}，hub 同 key 只记一次"
+            f"（hub 须为支持幂等键的版本——`run.sh doctor` 的 hub `version` ≥ 0.45.1；"
+            f"旧 hub 忽略该字段，重试会双记）。"
+        )
+    return err
+
+
 def _request(
     method: str,
     path: str,
@@ -80,9 +94,12 @@ def _request(
     params: Optional[Dict[str, Any]] = None,
     timeout: float = 30,
     ok_404: bool = False,
+    idempotency_key: Optional[str] = None,
 ) -> requests.Response:
     """发请求 + 统一错误映射。基础设施错误（连不上/401/5xx）直接 _die 退出；
-    业务 4xx 交给 caller 处理（400 detail 多数映射回 CLI 的 status=error）"""
+    业务 4xx 交给 caller 处理（400 detail 多数映射回 CLI 的 status=error）。
+    idempotency_key：动钱 POST 传入；网络失败 / 5xx（= 不知道 hub 记没记）时回显在 error JSON
+    里，agent 重试带同一个 key，hub 只入账一次（ADR-016）。"""
     base = _api_base()
     url = f"{base}{path}"
     try:
@@ -91,14 +108,14 @@ def _request(
             headers=_headers(), timeout=timeout,
         )
     except requests.exceptions.RequestException as e:
-        _die({
+        _die(_with_idem({
             "status": "error",
             "error": f"无法连接 hub {base}: {type(e).__name__}: {e}",
             "hint": (
                 "检查 INVEST_API_BASE 是否正确、hub 上 invest-web 服务是否在跑"
                 "（hub 机器: systemctl status invest-web）、网络/Tunnel 是否通。"
             ),
-        })
+        }, idempotency_key))
     if r.status_code == 401:
         _die({
             "status": "error",
@@ -111,17 +128,19 @@ def _request(
     if r.status_code == 404 and ok_404:
         return r
     if r.status_code == 503:
-        _die({
+        _die(_with_idem({
             "status": "error",
             "error": _detail(r) or "hub 返回 503（memory 未初始化或服务降级）",
             "hint": "去 hub 机器上跑 `run.sh doctor` / `run.sh init` 完成 onboarding。",
-        })
+        }, idempotency_key))
     if r.status_code >= 500:
-        _die({
+        # 事务已提交、随后 append_history/_reload 抛 500，或 Tunnel 502/524 吞掉成功响应：
+        # hub 很可能已记账，同样回显 key（#432 评审第 2 条）
+        _die(_with_idem({
             "status": "error",
             "error": f"hub 内部错误 HTTP {r.status_code}: {_detail(r) or r.text[:200]}",
             "hint": "看 hub 日志：journalctl -u invest-web -n 100",
-        })
+        }, idempotency_key))
     # 400 留给调用方（业务错误，CLI 同款 error JSON）；其余 4xx（403 Cloudflare Access 拦截、
     # 404 端点不存在、422 请求体不合法……）原先落到 raise_for_status 抛 traceback（#414 评审）
     if r.status_code >= 400 and r.status_code != 400:
@@ -193,16 +212,24 @@ def _h_doctor(_: argparse.Namespace) -> None:
     _print_json(out)
 
 
+def _idem_key(args: argparse.Namespace) -> str:
+    """动钱命令的幂等键：--idempotency-key 显式给了就复用（重试同一笔），否则本次调用生成
+    一个 uuid4。hub 端同 key 只入账一次（ADR-016）；网络失败时 _request 把 key 回显给 agent。"""
+    return getattr(args, "idempotency_key", None) or str(uuid.uuid4())
+
+
 def _h_deposit(args: argparse.Namespace) -> None:
+    key = _idem_key(args)
     _print_response_or_die(_request("POST", "/api/skill/deposit", json_body={
-        "currency": args.currency, "amount": float(args.amount),
-    }))
+        "currency": args.currency, "amount": float(args.amount), "idempotency_key": key,
+    }, idempotency_key=key))
 
 
 def _h_withdraw(args: argparse.Namespace) -> None:
+    key = _idem_key(args)
     _print_response_or_die(_request("POST", "/api/skill/withdraw", json_body={
-        "currency": args.currency, "amount": float(args.amount),
-    }))
+        "currency": args.currency, "amount": float(args.amount), "idempotency_key": key,
+    }, idempotency_key=key))
 
 
 def _h_buy(args: argparse.Namespace) -> None:
@@ -214,21 +241,24 @@ def _h_buy(args: argparse.Namespace) -> None:
             "hint": "在 hub 机器上跑 `run.sh buy ... --existing-position`，"
                     "或用 remote MCP 的 `record_existing_position` 工具。",
         })
+    key = _idem_key(args)
     body = {
         "symbol": args.symbol, "units": float(args.units), "price": float(args.price),
-        "kind": args.kind, "unit_label": args.unit_label,
+        "kind": args.kind, "unit_label": args.unit_label, "idempotency_key": key,
     }
     # 不写 --currency 就不带这个键（不发 null）：新 hub 按持仓币种记；还没升级的 hub
     # 回落到它自己的默认 CNY，至少不会因为 null 校验失败而 422
     if args.currency:
         body["currency"] = args.currency
-    _print_response_or_die(_request("POST", "/api/skill/buy", json_body=body))
+    _print_response_or_die(_request("POST", "/api/skill/buy", json_body=body, idempotency_key=key))
 
 
 def _h_sell(args: argparse.Namespace) -> None:
+    key = _idem_key(args)
     _print_response_or_die(_request("POST", "/api/skill/sell", json_body={
         "symbol": args.symbol, "units": float(args.units), "price": float(args.price),
-    }))
+        "idempotency_key": key,
+    }, idempotency_key=key))
 
 
 def _h_delete_holding(args: argparse.Namespace) -> None:

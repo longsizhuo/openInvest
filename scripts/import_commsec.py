@@ -22,12 +22,9 @@ import os
 import sys
 from typing import Any, Dict, List
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-from openinvest.core.portfolio_manager import PortfolioManager  # noqa: E402
-from openinvest.services.commsec_reader import CommSecReader  # noqa: E402
+# .env 由 openinvest.paths 单点加载（下面的 import 链会触发）；裸 load_dotenv() 会向上搜目录
+from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.services.commsec_reader import CommSecReader
 
 
 def _print_trade(t: Dict[str, Any]) -> None:

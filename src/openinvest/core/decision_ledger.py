@@ -20,6 +20,7 @@ from openinvest.core.decision_calc import (  # noqa: F401
     _match_trades,
     _safe_stem,
     _vid_matches,
+    history_as_trades,
     summarize_decisions,
 )
 
@@ -57,6 +58,18 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
             macro = json.loads(macro_m.group(1))
         except json.JSONDecodeError:
             pass
+    # Input Health 块（2026-10 计分板诚实化）：哪些输入为空 / 行情最后一根 / 规则改写 / 强制 HOLD。
+    # 老存档没有这块 → {}（读方按"未知"处理，不猜）。
+    health: Dict[str, Any] = {}
+    health_m = re.search(r"## Input Health.*?```json\n(.*?)\n```", text, re.DOTALL)
+    if health_m:
+        try:
+            parsed_health = json.loads(health_m.group(1))
+            if isinstance(parsed_health, dict):
+                health = parsed_health
+        except json.JSONDecodeError:
+            pass
+    run_m = re.search(r"\*\*Run at\*\*:\s*(\S+)", text)
     sym_m = re.search(r"\*\*Symbol\*\*:\s*(\S+)", text)
     # 标签带基准币种（"Suggested allocation CNY" / "… AUD"），老存档都是 CNY
     alloc_m = re.search(r"\*\*Suggested allocation ([A-Z]{3})\*\*:\s*(-?[\d,.]+)", text)
@@ -73,6 +86,8 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
         "symbol": sym_m.group(1) if sym_m else None,
         "alloc_cny": alloc,
         "alloc_currency": alloc_m.group(1) if alloc_m else None,
+        "input_health": health,
+        "run_at": run_m.group(1) if run_m else None,
     }
 
 
@@ -206,6 +221,7 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
       memory/.committee/<date>/<sym>.md   决议（含被规则改写后的最终 verdict）
       .dreams/interventions.jsonl         规则干预（原始 verdict → 最终 verdict）
       trades.db                           实际成交（显式 verdict_id 或窗口匹配）
+      memory/portfolio_history.jsonl      MCP/CLI buy|sell 记的成交（只在这里，不写 trades.db）
       .dreams/verdict_review.jsonl        事后 returns/hits（verdict_review cron 回填）
       .dreams/executions.jsonl            用户执行/拒绝声明（本模块写入）
     """
@@ -227,6 +243,9 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
     except Exception as e:  # noqa: BLE001  账本读失败不挡视图
         log.warning(f"decision_ledger 读 trades.db 失败 graceful：{e}")
         trades = []
+    # agent 路径（MCP/CLI → PortfolioManager.buy|sell）只写 portfolio_history.jsonl；
+    # 不并进来，wiki 承诺的"7 天同标的同向自动匹配"对 agent 记的成交永远不成立
+    trades = trades + history_as_trades(_load_jsonl(MemoryStore().root / "portfolio_history.jsonl"))
 
     # sanitized stem → 真实 symbol 回退映射（Coordinator/旧版 md 无 **Symbol**: 行时用；
     # 否则 decision_id 退化成 "GC_F" 与 interventions/trades 的 "GC=F" 永远 join 不上）

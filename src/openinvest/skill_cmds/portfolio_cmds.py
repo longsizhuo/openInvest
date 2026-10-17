@@ -44,7 +44,8 @@ def cmd_deposit(args: argparse.Namespace) -> None:
     """
     pm = _resolve_pm()
     try:
-        out = pm.deposit_cash(args.currency, args.amount, source="skill_cli")
+        out = pm.deposit_cash(args.currency, args.amount, source="skill_cli",
+                              idempotency_key=getattr(args, "idempotency_key", None))
     except ValueError as e:
         _print_json({"status": "error", "error": str(e)})
         sys.exit(1)
@@ -66,7 +67,8 @@ def cmd_withdraw(args: argparse.Namespace) -> None:
 
     pm = _resolve_pm()
     try:
-        out = pm.withdraw_cash(args.currency, amount, source="skill_cli")
+        out = pm.withdraw_cash(args.currency, amount, source="skill_cli",
+                               idempotency_key=getattr(args, "idempotency_key", None))
     except ValueError as e:
         # 历史行为：余额不足时 JSON 走 stderr + exit 1（SystemExit(str)）
         raise SystemExit(json.dumps({
@@ -97,6 +99,7 @@ def cmd_buy(args: argparse.Namespace) -> None:
             currency=args.currency, kind=args.kind, unit_label=args.unit_label,
             source="skill_cli:existing_position" if existing else "skill_cli",
             source_type="external_funding" if existing else "cash_deduct",
+            idempotency_key=getattr(args, "idempotency_key", None),
         )
     except ValueError as e:
         _print_json({"status": "error", "error": str(e)})
@@ -120,7 +123,8 @@ def cmd_sell(args: argparse.Namespace) -> None:
 
     pm = _resolve_pm()
     try:
-        out = pm.sell(args.symbol, units, price, source="skill_cli")
+        out = pm.sell(args.symbol, units, price, source="skill_cli",
+                      idempotency_key=getattr(args, "idempotency_key", None))
     except ValueError as e:
         # 历史行为：持仓校验失败时 JSON 走 stderr + exit 1（SystemExit(str)）
         raise SystemExit(json.dumps({

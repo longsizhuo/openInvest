@@ -11,7 +11,10 @@
 命中率定义：
 - BUY / ACCUMULATE → 后续涨 >0% = hit
 - SELL / TRIM → 后续跌 <0% = hit
-- HOLD → 波动 |return| < 3% = hit (说明"无操作"是对的)
+- HOLD → 波动 |return| < flat band = hit (说明"无操作"是对的)
+- UNCLEAR（CIO 输出解析不出合法裁决）→ **不计命中**，只计数（2026-10 之前被折进 HOLD 桶灌水）
+每桶同时给同样本市场基率、提升（命中 − 基率）与 Wilson 95% CI；强制 HOLD / 残缺输入
+（transcript 的 Input Health 块）单独计数不剔除。
 
 上下文归因（A1 增强）：
 - 事后 30 天内 VIX 变化 > 30% → 标记 "macro_shock"，verdict 错也免责
@@ -37,6 +40,7 @@ from openinvest.jobs.review_calc import (  # noqa: F401
     FLAT_CEILING_PCT,
     HIT_WINDOWS,
     K_FLAT,
+    UNCLEAR_DIRECTION,
     VerdictReview,
     _bucket_lines,
     _flat_band,
@@ -357,8 +361,10 @@ def review_one(
         asset=real_symbol,
         verdict=parsed["verdict"],
         confidence=parsed["confidence"],
-        expected_direction=EXPECTED_DIRECTION.get(parsed["verdict"], "flat"),
+        # UNCLEAR 没有期望方向（"none"）：下面不打 hits，export/summarize 都不把它当 HOLD
+        expected_direction=EXPECTED_DIRECTION.get(parsed["verdict"], UNCLEAR_DIRECTION),
         macro_at_decision=parsed["macro_at_decision"],
+        input_health=parsed.get("input_health") or {},
         source="backtest" if "backtest" in str(committee_dir) else "live",
         # 决议日落在 LLM 训练窗口 → 记忆穿越，下游分桶/Dreaming 据此剔出业绩统计。
         # ISO 日期字典序比较等价于时间序，无需 parse。
@@ -370,12 +376,14 @@ def review_one(
     # 改为对所有 verdict 都算 atr（带缓存）：directions 是 verdict 无关的"市场到底涨没涨"，
     # 必须和 HOLD 用同一条 flat band 才能让下游 regime 基率与 missed_up/avoided_down 口径一致。
     atr = _atr_pct_cached(real_symbol, decision_date)
+    scorable = parsed["verdict"] in EXPECTED_DIRECTION   # UNCLEAR → 只记收益/方向，不记命中
     for window in HIT_WINDOWS:
         ret = _window_return(real_symbol, holding, decision_date, window)
         if ret is not None:
             rv.actual_returns[f"{window}d"] = round(ret, 4)
             flat_th = _flat_band(atr, window) if atr is not None else 0.03
-            rv.hits[f"{window}d"] = _is_hit(parsed["verdict"], ret, flat_th)
+            if scorable:
+                rv.hits[f"{window}d"] = _is_hit(parsed["verdict"], ret, flat_th)
             # 原始市场方向（verdict 无关）：给 Dreaming 算 regime 基率
             rv.directions[f"{window}d"] = (
                 "up" if ret > flat_th else ("down" if ret < -flat_th else "flat")

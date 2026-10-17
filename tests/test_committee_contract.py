@@ -1253,6 +1253,55 @@ def test_run_committee_session_advisory_mode_stubs_prior_insights_and_skips_pers
     )
 
 
+# ============================================================================
+# 契约: Input Health 必须随 run_committee(input_health=) 落到 transcript（2026-10 Track A1）
+# ============================================================================
+
+def test_run_committee_session_passes_input_health_to_run_committee(monkeypatch, tmp_path):
+    """session 算好的输入健康位（market 级 + 资产级）必须到达 run_committee kwargs，
+    否则 transcript 没有 Input Health 块，verdict_review 分不出残缺输入上做的裁决。"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MACRO")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: {})   # 宏观数据为空
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights", lambda *a, **kw: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief", lambda *a, **kw: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief", lambda *a, **kw: "")
+
+    import pandas as pd
+    fake_df = pd.DataFrame({"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+                           index=pd.date_range("2024-05-10", periods=5))
+    fake_df.attrs["yf_fetch_failed"] = True
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data", lambda *a, **kw: fake_df)
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe", lambda *a, **kw: "MD")
+
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {"verdict": {"verdict": "HOLD", "confidence": 0.5, "alloc_cny": 0,
+                            "dominant_view": "macro", "raw": "VERDICT: HOLD"}, "report": None}
+
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
+
+    from openinvest.core.committee_runner import run_committee_session
+    result = run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    h = captured[0].get("input_health")
+    assert isinstance(h, dict), "input_health 没到 run_committee（漂移）"
+    assert h["macro_data_empty"] is True, h
+    assert h["price_fetch_failed"] is True and h["price_last_bar"] == "2024-05-14", h
+    assert "sentiment_brief" in h["empty_inputs"] and "event_brief" in h["empty_inputs"], h
+    assert h["event_brief_source"] == "disabled"
+    assert result["asset_committees"]["TEST.AX"]["input_health"] == h
+
+
+
 # ---------------------------------------------------------------------------
 # 契约 8: Sanity 6 的 single_invest_cap 必须从 service 层流到 run_committee（PR #430）
 # 顾问模式必须传 0——既没有真实策略可言，也不能把主人的单次上限泄进群聊的委员会输出。
