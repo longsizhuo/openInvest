@@ -14,7 +14,8 @@
 |------|------|------|------|
 | `doctor` | Universal | Mandatory first step | JSON, `status: "ready"` or `"needs_setup"` |
 | `init [--from-stdin] [--force]` | Universal | **Not used in this skill** — first-time installation goes through the `invest-setup` skill | — |
-| `status` | Universal | View portfolio | cash + holdings + live prices + P&L |
+| `status` | Universal | View portfolio | cash + holdings + live prices + P&L + `performance` (same block as below) |
+| `performance` | Universal | Real-account performance: "how am I doing / 我的收益率 / 跑赢大盘没" | TWR 30d / YTD / since inception, XIRR (money-weighted, needs ≥30 days), max drawdown with peak→trough dates, annualised volatility, return vs the configured benchmark (`portfolio.benchmark_symbol`, default 510300.SS) and `data_quality` (forward-filled days, cost-fallback symbols, `unreconciled` = opening position inferred from `portfolio.md` − ledger). `{"status": "insufficient_history"}` until the ledger spans 2 trading days. Base currency, zero LLM |
 | `strategy` | Universal | View strategy | target_assets + Dreaming insights |
 | `history [-n N]` | Universal | View the transaction log | last N trades + committee verdicts |
 | `live_prices` | Universal | Background market data | VIX / TNX / USDCNY / AUDCNY / NDQ / GC=F |

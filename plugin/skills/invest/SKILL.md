@@ -90,6 +90,11 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
    "assess the situation / risk / concentration
     / 分析战况"                                       → run.sh status (see Constraints before
                                                         calling anything "overweight")
+   "how am I doing / annualised return / drawdown
+    / 我的收益率 / 跑赢大盘没"                        → run.sh performance (TWR / XIRR / max
+                                                        drawdown / vs benchmark; also inside
+                                                        status.performance — quote TWR as the
+                                                        return, XIRR only as money-weighted)
    "what is my strategy / 我的策略是什么"             → run.sh strategy
    "recent trades / transaction log / 最近交易"       → run.sh history
    "where is the market / VIX now / 现在大盘"         → run.sh live_prices
