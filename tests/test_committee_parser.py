@@ -539,3 +539,15 @@ def test_single_invest_cap_is_last_clamp_so_forced_hold_wins():
     assert d["verdict"] == "HOLD" and d["alloc_cny"] == 0 and "_single_invest_cap" not in d
     rec = _intervention_record("GC=F", "uptrend", 100.0, d, atr_defense_on=True)
     assert rec["rule"] == "defense_accumulate_to_hold" and rec["original_alloc"] == 30000.0
+
+
+def test_cio_and_quant_prompts_no_longer_cite_unsourced_77pct_rule():
+    """全仓找不到来源的"77% 的 ACCUMULATE 判错发生在 uptrend"已删；怀疑清单本身保留"""
+    from pathlib import Path
+    from openinvest.capabilities import committee as _c
+    base = Path(_c.__file__).parent
+    cio = (base / "cio" / "cio.md").read_text(encoding="utf-8")
+    quant = (base / "quant" / "quant.md").read_text(encoding="utf-8")
+    assert "77%" not in cio and "77%" not in quant
+    assert "uptrend 中的 ACCUMULATE 怀疑清单" in cio
+    assert "uptrend 衰竭检查" in quant

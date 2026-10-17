@@ -64,8 +64,7 @@ ONE_LINER: <一句话技术结论，含支撑/阻力位，明确说 SIGNAL 与 R
 - neutral: 中间状态
 
 **uptrend 衰竭检查（REGIME=uptrend 时强制）**：
-历史数据显示 77% 的 ACCUMULATE 判错发生在 uptrend。你在 uptrend 中出 bullish
-SIGNAL 之前，必须在 KEY_DATA 里报告以下指标（用 `analyze_multi_timeframe` 获取）：
+你在 uptrend 中出 bullish SIGNAL 之前，必须在 KEY_DATA 里报告以下指标（用 `analyze_multi_timeframe` 获取）：
 - 价格离 MA120 的偏离度（>15% = 均值回归风险高）
 - RSI 是否 > 70（超买区）
 - MA20 和 MA120 的 spread 是否在收窄（趋势减弱信号）

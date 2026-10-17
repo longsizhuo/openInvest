@@ -119,9 +119,6 @@ TRIM（减仓）只在"预期能在更低价位买回"时才成立——否则�
 {{TRIM_CONSTRAINT}}
 
 **⚠️ uptrend 中的 ACCUMULATE 怀疑清单（强制）**：
-历史数据显示：77% 的 ACCUMULATE 判错发生在 regime=uptrend。LLM 在上涨趋势中
-系统性地忽略见顶信号，持续推 ACCUMULATE 直到市场反转。
-
 当 regime=uptrend **且**你准备给 ACCUMULATE 时，必须在 PERSONAL_NOTE 里回答：
 1. 价格离 120 日均线偏离多远？偏离 > 15% → 均值回归风险高，考虑 HOLD 而非 ACCUMULATE
 2. VIX 是否从近期低位开始上升？VIX 从 <15 升到 >18 = 市场开始焦虑，不是"回调买入"信号
