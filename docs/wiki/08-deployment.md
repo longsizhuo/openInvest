@@ -473,6 +473,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `ingest_event` | ✅ 入库 + 命中持仓时按频控触发委员会 | ❌ 不可用（入库内容会被后续顾问分析召回） |
 | `news_sources` / `add_news_source` / `remove_news_source` | ✅ | ✅ 管理本实例自己的额外源清单（仅公网 http(s) 地址、直连不走 `HTTPS_PROXY` + probe 校验 + 上限 30，群聊自助喂源用） |
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
+| `rebalance_plan` | ✅ | ❌ 不可用（对照真实持仓算该买卖多少，会泄露仓位） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
 | `status` / `strategy` / `history` / `discipline` / `decisions` | ✅ | ❌ 不可用 |
 | `buy` / `sell` / `record_existing_position` | ✅ 记账 | ❌ 不可用 |

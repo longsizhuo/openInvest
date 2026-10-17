@@ -181,6 +181,9 @@ target_allocation_cash: 0.3
 balanced（保守 / balanced / aggressive 三选一，影响 risk_officer 的尾部损失阈值）
 ```
 
+`target_pct` 是该标的占**总资产**的目标比例（小数，0.5 = 50%），`rebalance_plan` 据此算「为了回到目标配置该买卖多少」
+（只出清单、不下单）；不写就把 `target_allocation_stock` 在标的间平分，清单里会标 `equal_split` 并提醒你补上。
+
 ### 3.3 `memory/user.md`
 
 写一段自我介绍（年龄、收入、风险承受、目标），CIO 拿来调风格：

@@ -63,6 +63,7 @@ history 记 `funding_source: external_funding`、`source: skill_cli:existing_pos
 | "我的收益率 / 回撤 / 跑赢大盘没" | `performance`（TWR 30d/YTD/成立以来 + XIRR + 最大回撤 + vs 基准；`status.performance` 同一块） |
 | "黄金现在什么价" | `live_prices` |
 | "纳指跌 10% 我亏多少" | `what_if` |
+| "要不要再平衡 / 回到目标配置该买卖多少" | `rebalance_plan`（按 strategy.md 的 `target_pct` 对照现状，出 BUY/SELL 清单，按整手取整；只出清单，不下单） |
 | "该不该买 AAPL / 跑个委员会" | Coordinator（Claude Code，免 API key）或 `run_committee`（Direct，需 DEEPSEEK_API_KEY） |
 | "为什么今天是 HOLD" | `explain_decision`（完整 4 角色辩论 transcript + CIO memo） |
 | "委员会都拦了我什么" | `discipline` |

@@ -455,7 +455,7 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
     仍只在 REST/CLI（Decision 5/6 刻意不进 MCP），详见 wiki 08 §9
   写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
 - **工具集**（封闭集合，以快照测试 `tests/test_mcp_server.py` 为准）：status /
-  strategy / history / live_prices / what_if / discipline / decisions /
+  strategy / history / live_prices / what_if / rebalance_plan / discipline / decisions /
   explain_decision / record_execution / ingest_event / buy /
   record_existing_position / sell / deposit / withdraw / set_allocations /
   track_asset / untrack_asset / news_sources / add_news_source /
