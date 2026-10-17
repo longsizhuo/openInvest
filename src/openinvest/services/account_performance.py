@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from openinvest.calc.account_metrics import account_metrics
+from openinvest.calc.account_metrics import XIRR_MIN_SPAN_DAYS, account_metrics
 from openinvest.calc.gold import GOLD_OZ_PER_GRAM
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.db.market_store import MarketStore
@@ -180,6 +180,9 @@ def _at(series: Optional[pd.Series], day: str) -> Tuple[Optional[float], bool]:
 
 # ---------- 3. 主入口 ----------
 
+# 机器可读 reason 之外给一句人话：不读 skill 文案的 agent 也别把 insufficient_history 当故障
+_INSUFFICIENT_MSG = "账户历史不足 2 个交易日，记满后出现"
+
 def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: Optional[str] = None,
                               base: Optional[str] = None) -> Dict[str, Any]:
     """status["performance"] / 日报"账户业绩"段共用的业绩块。
@@ -197,7 +200,8 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     records = pm.store.read_history()
     events, skipped = _ledger_events(records, alias)
     if not events:
-        return {"status": "insufficient_history", "reason": "no_ledger", "base_currency": base}
+        return {"status": "insufficient_history", "reason": "no_ledger", "base_currency": base,
+                "message": _INSUFFICIENT_MSG}
     # 账本里出现过、当前持仓已没有的 symbol（卖光 + delete_holding 是正常流程）：元数据从流水推——
     # 计价币种取该 symbol 最近一条记录的 currency，黄金流水固定按 gold_cny_per_gram（不然 AUD 持仓会被
     # 当人民币估值、黄金历史全部无法估值，回撤/波动算成天文数字——CR 阻塞项）
@@ -240,7 +244,7 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     grid = sorted({d for s in prices.values() if s is not None for d in s.index if first_day <= d <= today})
     if len(grid) < 2:
         return {"status": "insufficient_history", "reason": "fewer_than_2_valuation_days",
-                "base_currency": base, "since": first_day}
+                "base_currency": base, "since": first_day, "message": _INSUFFICIENT_MSG}
     # 事件挂到 ≥ 事件日的第一个网格日（周末记的交易在下一交易日估值）；晚于网格的挂末日
     by_day: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for ev in events:
@@ -308,6 +312,10 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     elif cfg_symbol and out.get("benchmark") is None:
         bench_missing = {"symbol": cfg_symbol, "reason": "starts_after_inception"}
     out["status"] = "ok"
+    if out.get("xirr") is None:   # null 不是故障：说明原因（<30 天不报，或现金流求不出根）
+        span = (date.fromisoformat(rows[-1][0]) - date.fromisoformat(rows[0][0])).days
+        out["xirr_note"] = (f"历史不足 {XIRR_MIN_SPAN_DAYS} 天不报" if span < XIRR_MIN_SPAN_DAYS
+                            else "现金流无法求解 XIRR（缺少正负两向现金流或无解）")
     out["base_currency"] = base
     out["opening_nav"] = round(opening_nav, 2)
     out["data_quality"] = {

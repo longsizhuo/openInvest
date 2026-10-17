@@ -786,9 +786,16 @@ async def run_committee(
         max_rounds: Cross-challenge debate rounds (default 1).
 
     Returns:
-        Object with `decision_id`, `cached` flag, `verdict` (verdict,
-        confidence, suggested allocation, CIO memo) and `confidence_lookup`
-        (show this to the user instead of the self-reported confidence).
+        Object with `decision_id`, `cached` flag, `verdict` and
+        `confidence_lookup` (show this to the user instead of the
+        self-reported confidence). The shape differs by path:
+        - `cached: false` (fresh run): `verdict` is an object (verdict,
+          confidence, suggested allocation, ...).
+        - `cached: true` (today's transcript): `verdict` is the verdict string,
+          with `confidence`, `alloc_cny`, `alloc_currency` alongside, plus the
+          CIO memo as `cio_memo` and the deterministic `input_health` block
+          (empty inputs, rewrite rules applied, forced HOLD) — no need to call
+          `explain_decision` just to read them.
     """
     import json
     from openinvest.core.decision_ledger import parse_committee_file
@@ -806,7 +813,9 @@ async def run_committee(
             return {"cached": True, "decision_id": f"{today}/{symbol}",
                     **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny", "alloc_currency")},
                     "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),
-                                                            with_raw=False)}
+                                                            with_raw=False),
+                    # 与 CLI 同款：缓存命中也带 memo 与 Input Health，agent 不必再 explain_decision
+                    "cio_memo": parsed["cio_memo"], "input_health": parsed["input_health"]}
 
     from openinvest.core.committee_runner import run_committee_session
 

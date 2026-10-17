@@ -335,6 +335,40 @@ python -m scripts.archive.rl_optimize_prompts \
 复现：`INVEST_HOME=<只读拷贝> uv run python -m openinvest.jobs.verdict_review` → `docs/verdict_accuracy.md`；
 `uv run python scripts/export_accuracy.py` → `docs/accuracy_summary.json`。
 
+### 8.1 反事实账本（Track A3，2026-10-17）
+
+命中率只回答"方向对没对"，不回答"照做赚不赚、比基准强不强"。每条裁决现在配两个反事实
+（`review_calc.counterfactual_pnl` / `verdict_review._benchmark_return`）：
+
+- **同窗口基准超额** `excess_returns[w]` = 标的收益 − 组合基准（`config portfolio.benchmark_symbol`，默认 510300.SS）同窗口收益。
+  verdict 无关，所以 HOLD 也有：它回答"你拿着的东西这段时间跑没跑赢基准"。
+- **照做净损益** `followed_pnl[w]`（基准币种）= 按 CIO 金额执行并在窗口末平仓、扣往返成本（`ROUNDTRIP_COST_BPS` 按市场后缀的保守估计）、对比留现金。
+  买侧 = 金额 × (收益 − 成本)；卖侧 = |金额| × (−收益 − 成本)。HOLD 金额为 0，不算钱。
+
+实测（同一批 live holdout 323 条，30d 窗口）：
+
+| Verdict | N(有基准) | 30d 超额均值 | 跑赢基准 | N(有金额) | 照做净收益率* | 照做为正 |
+|---|---|---|---|---|---|---|
+| ACCUMULATE | 30 | −2.4pp | 27% | 28 | −6.9% | 29% |
+| HOLD | 198 | −1.1pp | 35% | — | — | — |
+| TRIM | 18 | −3.0pp | 39% | 17 | +4.9% | 71% |
+| 全部有金额 | | | | 45 | **+3.2%** | |
+
+\* 照做净收益率 = Σ净损益 / Σ|CIO 建议金额|（名义金额加权，扣往返成本，30d）。本页只给比率；绝对金额在本机
+`docs/verdict_accuracy.md`（gitignored）里，不进公开仓库。
+
+**解读**（都要带 n 看）：买侧照做在扣成本后是亏的（名义加权 −6.9%），且被买的标的 30 天内 73% 跑输沪深300——
+与主张 8 的"提升为负"互相印证。拿着的持仓整体也跑输基准 1.1pp。**唯一赚钱的是减仓**：17 次 TRIM 照做净赚 +4.9%
+（71% 为正，Wilson 95% 区间约 47–88%）。这与委员会"结构性不会卖"（评审 A3：7 条规则全朝 HOLD 推、0 条朝离场推）
+放在一起看，说明被压制的恰好是有价值的那一侧——但 n=17、名义加权对个别大额减仓敏感，只能当 B5（解锁基本面离场）
+的立项依据，不能当结论。
+
+局限：成本是常量表不是券商实价；基准对黄金/美股用沪深300 是用户配置口径（fork 用户改 `benchmark_symbol`）；
+金额是 CIO 建议额不是实际成交额；窗口末平仓是假设；**币种**：标的收益按报价币种算（美股是 USD 收益），金额却是
+基准币种，汇率变动没算进去，超额也是拿报价币种收益减基准——中途改过基准币种的行不进金额账本（按 transcript 的金额币种过滤）。
+方向由 verdict 定、金额取绝对值（regex 时代 TRIM 负号曾出过 bug；本次复核 390 条存档符号 0 条异常）。
+公开 JSON 只出比率（`excess_mean` / `beat_benchmark_rate`，按 `n_benchmark` 抑制 n<30），不出金额。
+
 ---
 
 ## 局限性 / 不能宣称的事

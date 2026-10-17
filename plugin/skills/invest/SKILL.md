@@ -316,6 +316,9 @@ a signal worth recording.
   portfolio is often only part of the user's money, and the committee's concentration lens is off by
   default (ADR-020). Raise concentration only if the user asks about it. The cap on any add-on buy is
   **always** portfolio cash — this never changes
+- **`max_single_invest_cny` ("单次上限") is a per-order cap on the suggested amount — not a daily or
+  total allowance, and orders can be split.** When the memo says "金额已按单次上限 … 钳制", the CIO's
+  amount was cut to that cap per order. Never tell the user "today's allowance is used up" because of it
 - **Do not run `daily_report` proactively in conversation** — unless the user explicitly says "run the deep analysis" / "run full report"
   or you are setting up the daily cron. That path burns DeepSeek tokens. In conversation, single-asset `run_committee` is enough.
 - **Never fabricate live prices.** Always go through `run.sh status` or `live_prices`. yfinance may return
