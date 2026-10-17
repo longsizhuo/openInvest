@@ -1251,3 +1251,83 @@ def test_run_committee_session_advisory_mode_stubs_prior_insights_and_skips_pers
         "顾问模式必须 persist_to_memory=False —— 否则群聊分析的 transcript 会落进"
         "用户真实 memory，污染他自己的 history/decisions/path_review 统计"
     )
+
+
+# ---------------------------------------------------------------------------
+# 契约 8: Sanity 6 的 single_invest_cap 必须从 service 层流到 run_committee（PR #430）
+# 顾问模式必须传 0——既没有真实策略可言，也不能把主人的单次上限泄进群聊的委员会输出。
+# ---------------------------------------------------------------------------
+
+def _mock_for_symbol_path(monkeypatch):
+    """run_committee_for_symbol 跑到 run_committee 所需的最小 mock（与契约 7 同款）"""
+    monkeypatch.setattr("openinvest.core.runner.session.load_prior_insights", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_sentiment_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.load_valuation_brief", lambda *a, **k: "")
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+    import pandas as pd
+    fake_df = pd.DataFrame(
+        {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.date_range("2024-05-10", periods=5),
+    )
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data", lambda *a, **kw: fake_df)
+    monkeypatch.setattr("openinvest.core.runner.session.analyze_multi_timeframe",
+                        lambda *a, **kw: "MOCK_MARKET_DATA")
+    captured: list[dict] = []
+
+    def fake_run_committee(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "verdict": {"verdict": "HOLD", "confidence": 0.5,
+                        "alloc_cny": 0, "dominant_view": "macro",
+                        "raw": "VERDICT: HOLD\nCONFIDENCE: 0.5"},
+            "report": None,
+        }
+
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee", fake_run_committee)
+    return captured
+
+
+def test_run_committee_for_symbol_passes_single_invest_cap_to_run_committee(monkeypatch, tmp_path):
+    """strategy.md 里标的级 max_single_invest_cny（SENTINEL 数值）必须原样到达 run_committee
+    的 single_invest_cap kwarg——漏传 = Sanity 6 在 Direct 路径静默失效（历史漂移同款）。"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    SENTINEL_CAP = 12345
+    (memory_dir / "strategy.md").write_text(
+        (memory_dir / "strategy.md").read_text().replace(
+            "max_single_invest_cny: 10000", f"max_single_invest_cny: {SENTINEL_CAP}"))
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+    monkeypatch.delenv("INVEST_ADVISORY_MODE", raising=False)
+    captured = _mock_for_symbol_path(monkeypatch)
+
+    from openinvest.core.committee_runner import run_committee_session
+    run_committee_session(symbols=["TEST.AX"], max_debate_rounds=1)
+
+    assert captured, "run_committee 未被调用 — session dispatch 失败"
+    assert captured[0].get("single_invest_cap") == SENTINEL_CAP, (
+        f"single_invest_cap 漂移: 期望 {SENTINEL_CAP}, 实际 {captured[0].get('single_invest_cap')!r}\n"
+        "  → session.py run_committee_for_symbol 没把 utils.base_currency.single_invest_cap(target, pm.strategy) 传给 run_committee"
+    )
+
+
+def test_run_committee_session_advisory_mode_passes_zero_single_invest_cap(monkeypatch, tmp_path):
+    """顾问模式：single_invest_cap 必须是 0（不设限）——主人 strategy.md 里的上限不能泄进群聊输出"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+    monkeypatch.setenv("INVEST_ADVISORY_MODE", "1")
+    captured = _mock_for_symbol_path(monkeypatch)
+
+    from openinvest.core.committee_runner import run_committee_session
+    run_committee_session(symbols=["GC=F"], max_debate_rounds=1)
+
+    assert captured, "run_committee 未被调用 — session dispatch 失败"
+    assert captured[0].get("single_invest_cap") == 0, (
+        f"顾问模式泄露单次上限: 实际 {captured[0].get('single_invest_cap')!r}（应为 0）"
+    )

@@ -1,6 +1,6 @@
 """cio_parse — CIO memo 解析 + Sanity-check 后处理 + 集中度覆写（从 core/committee.py 拆分，逻辑逐字不变）。
 
-职责：verdict/confidence/alloc 等正则 + `parse_cio_memo`（含 6 道 sanity check）
+职责：verdict/confidence/alloc 等正则 + `parse_cio_memo`（含 7 道 sanity check）
 + `regime_label_from_text` / `atr_defense_from_text` 确定性文本提取
 + THRESHOLDS dict（向后兼容导出，import 时即求值）+ `_force_hold`
 + portfolio_summary 集中度提取 `_extract_concentration_from_summary`
@@ -160,6 +160,7 @@ def parse_cio_memo(
     defense_flag_on: bool = False,
     defense_dca: Optional[Dict[str, Any]] = None,
     alloc_ceiling: Optional[int] = None,
+    single_invest_cap: Optional[int] = None,
 ) -> Dict[str, Any]:
     """fields（DeepSeek JSON Output 解析后的 dict）非 None 时走结构化抽取，否则 regex（旧路径）。
     worker_brief（CIO 输入的 worker 简报）非 None 时额外参与 [WORKER_UNAVAILABLE] backstop——
@@ -172,6 +173,10 @@ def parse_cio_memo(
 
     alloc_ceiling：单笔建议金额上限（基准币种）。调用方用 utils.base_currency.alloc_ceiling()
     算好传入（本模块是纯计算层，不碰汇率）；None = 配置值原数（人民币）。
+
+    single_invest_cap（Sanity 6）：用户在 strategy.md 设的单次入场上限（基准币种，调用方用
+    utils.base_currency.single_invest_cap(target, strategy) 换好传入；标的级优先于策略级）。
+    None / 0 = 不设限。只钳买侧正金额，方向不变。
     """
     out: Dict[str, Any] = {"raw": text}
     if fields is not None:
@@ -374,7 +379,35 @@ def parse_cio_memo(
             "（显式杠杆档，消融口径 +CR −Sharpe）",
         )
 
+    # Sanity check 6（必须是最后一道）: 用户单次入场上限（strategy.md max_single_invest_cny）。
+    # 此前只在 prompt 里"建议 ≤ cap"（portfolio_summary 一行），解析层不执行——LLM 超了就原样
+    # 进邮件/账本，唯一硬闸是 Sanity 2 的 ±100k"天文数字"钳。只钳买侧（正 alloc）：字段语义是
+    # "入场"上限，减仓金额不受它约束（否则防御性卖出也被缩成小单）。方向不变、只改金额；记
+    # intervention（rule=single_invest_cap）。放在所有改 verdict/alloc 的规则之后：若放在
+    # Sanity 3/5/防御之前，后续规则把裁决打成 HOLD/0 时，"金额已钳制（方向不变）"那句和干预
+    # 归因都会说错（PR #430 评审）。setdefault：Sanity 1/2 已记的更早原值不被覆盖。
+    if single_invest_cap and out["alloc_cny"] > single_invest_cap:
+        out.setdefault("_original_verdict", out["verdict"])
+        out.setdefault("_original_alloc", out["alloc_cny"])
+        out["_single_invest_cap"] = int(single_invest_cap)
+        log.warning(
+            "parse_cio_memo: alloc_cny=%s 超过用户单次入场上限 %s，钳到上限（方向不变）",
+            out["alloc_cny"], single_invest_cap,
+        )
+        out["alloc_cny"] = int(single_invest_cap)
+
     return out
+
+
+def single_invest_cap_note(verdict: Dict[str, Any]) -> str:
+    """Sanity 6 钳过金额时追加到 CIO memo 末尾的一句人话（transcript / 邮件 / CLI 都渲染 memo）；
+    没钳返回 ""。调用方（debate / coordinator）负责拼进 memo。"""
+    cap = verdict.get("_single_invest_cap")
+    if not cap:
+        return ""
+    from openinvest.utils.base_currency import money
+    orig = verdict.get("_original_alloc", cap)
+    return f"金额已按单次上限 {money(cap)} 钳制（CIO 原建议 {money(orig)}，裁决方向不变）"
 
 
 def _extract_concentration_from_summary(
@@ -477,6 +510,7 @@ __all__ = [
     "THRESHOLDS",
     "_force_hold",
     "parse_cio_memo",
+    "single_invest_cap_note",
     "_extract_concentration_from_summary",
     "_RISK_CONCENTRATION_RE",
     "_override_concentration_in_risk_output",

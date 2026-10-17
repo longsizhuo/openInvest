@@ -43,6 +43,10 @@ _ACCUMULATE = (
     "VERDICT: ACCUMULATE\nCONFIDENCE: 0.6\nDOMINANT_VIEW: quant\n"
     "SUGGESTED_ALLOC_CNY: 9000"
 )
+_ACCUMULATE_OVER_CAP = (
+    "VERDICT: ACCUMULATE\nCONFIDENCE: 0.6\nDOMINANT_VIEW: quant\n"
+    "SUGGESTED_ALLOC_CNY: 30000"   # strategy 里 GC=F cap=10000 → Sanity 6 钳
+)
 _TRIM_REENTRY_ABOVE = (
     "VERDICT: TRIM\nCONFIDENCE: 0.7\nDOMINANT_VIEW: risk\n"
     "SUGGESTED_ALLOC_CNY: -5000\nTRIM_REASON: bearish\nREENTRY_PRICE: 999999"
@@ -124,7 +128,8 @@ def _run_coordinator(memo, sentiment, regime_brief):
 @pytest.mark.parametrize("memo,sentiment,expect_rule", [
     (_ACCUMULATE, "INDEP_DEFENSE_FLAG: on", "defense_gold_dca_tranche"),
     (_TRIM_REENTRY_ABOVE, "INDEP_DEFENSE_FLAG: off", "sanity5_reentry_not_below_current"),
-], ids=["gold_defense_dca", "trim_sanity5"])
+    (_ACCUMULATE_OVER_CAP, "INDEP_DEFENSE_FLAG: off", "single_invest_cap"),
+], ids=["gold_defense_dca", "trim_sanity5", "single_invest_cap"])
 def test_coordinator_matches_direct_postprocess(world, monkeypatch, memo, sentiment, expect_rule):
     mem, regime_brief = world
     v_direct = _run_direct(monkeypatch, memo, sentiment)

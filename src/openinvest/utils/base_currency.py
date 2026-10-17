@@ -23,9 +23,11 @@ def base_currency() -> str:
     return str(load_config().portfolio.base_currency or "").strip().upper() or "CNY"
 
 
-def from_cny(amount_cny: float, base: Optional[str] = None) -> int:
+def from_cny(amount_cny: float, base: Optional[str] = None, *, floor: bool = False) -> int:
     """人民币标定的金额 → 基准币种整数，取两位有效数字（1000 CNY ≈ 210 AUD）。
 
+    floor=True：向下取整到 1 个单位、不取两位有效数字——给"硬上限"用（两位有效数字可能
+    向上舍入，钳出来的金额会略高于用户设的人民币上限）。
     拉不到汇率时原数返回并告警：阈值偏松，但委员会照常能跑。
     """
     base = base or base_currency()
@@ -36,6 +38,8 @@ def from_cny(amount_cny: float, base: Optional[str] = None) -> int:
     if v is None or not math.isfinite(v) or v <= 0:
         log.warning("base_currency: CNY→%s 汇率不可用，金额阈值 %s 按原数使用", base, amount_cny)
         return int(amount_cny)
+    if floor:
+        return max(1, int(math.floor(v)))
     # ponytail: 两位有效数字够阈值用；不足 1 个单位的币种（极弱币以外不会出现）按 1 计
     return max(1, int(round(v, 1 - int(math.floor(math.log10(v))))))
 
@@ -58,6 +62,28 @@ def alloc_ceiling(base: Optional[str] = None) -> int:
     return from_cny(load_config().verdict.alloc_cny_ceiling, base)
 
 
+def single_invest_cap(
+    target: Dict[str, object], strategy: Dict[str, object], base: Optional[str] = None,
+) -> int:
+    """用户单次入场上限（strategy.md 的 max_single_invest_cny，按人民币标定）换成基准币种。
+
+    口径：标的级 target_assets[i].max_single_invest_cny 优先；标的级**显式 0** = 该标的不设限
+    （与 portfolio_manager 的"0 = 不设限"同义，如 ESOP 持仓）；标的级**缺失**才回落到策略级
+    顶层值（与 strategy_write 新建标的时沿用顶层值一致——注意这点与 portfolio_manager 的
+    disposable 口径不同：那边标的级缺失也当不设限）；两级都缺 / 0 → 0 = 不设限。
+    解析层（cio_parse Sanity 6）只拿这个数比较，不碰 strategy.md。
+    非 CNY 基准币种按汇率换算后**向下取整**（硬上限不往上舍；汇率拿不到时按原数，与其它阈值同款退化）。
+    """
+    cap = target.get("max_single_invest_cny")
+    if cap is None:
+        cap = strategy.get("max_single_invest_cny")
+    try:
+        cap_f = float(cap or 0)
+    except (TypeError, ValueError):
+        cap_f = 0.0
+    return from_cny(cap_f, base, floor=True) if cap_f > 0 else 0
+
+
 def prompt_vars() -> Dict[str, object]:
     """委员会提示词模板的币种占位符（capabilities.loader.load_skill 统一注入）。"""
     base = base_currency()
@@ -73,4 +99,4 @@ def prompt_vars() -> Dict[str, object]:
     }
 
 
-__all__ = ["alloc_ceiling", "base_currency", "cur_prefix", "from_cny", "money", "prompt_vars"]
+__all__ = ["alloc_ceiling", "base_currency", "cur_prefix", "from_cny", "money", "prompt_vars", "single_invest_cap"]

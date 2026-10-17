@@ -57,6 +57,9 @@ def _intervention_record(
         # 2026-06-23 已移除）。历史 jsonl 里的 sanity4_solvency_concentration 由
         # rule_family() 继续并入 trim_blocked 桶，聚合不丢。
         rule = "config_concentration_lens_off"
+    elif v.get("_single_invest_cap"):
+        # Sanity 6：用户单次入场上限钳买侧金额（方向不变，只缩金额）
+        rule = "single_invest_cap"
     else:
         rule = "other"
     from datetime import datetime

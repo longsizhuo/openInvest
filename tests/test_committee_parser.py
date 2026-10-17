@@ -456,3 +456,86 @@ def test_sanity5_reentry_price_parses_currency_and_commas():
     r = parse_cio_memo(txt, current_price=2000.0)
     assert r["reentry_price"] == 1234.56
     assert r["verdict"] == "TRIM"
+
+
+# ---------- Sanity check 6：用户单次入场上限 ----------
+
+def test_single_invest_cap_clamps_buy_side_and_records_intervention():
+    """买侧金额超用户单次上限 → 钳到上限、方向不变、带 intervention 标记（rule=single_invest_cap）"""
+    from openinvest.core.committee_runner import _intervention_record
+    text = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 30000"
+    r = parse_cio_memo(text, single_invest_cap=10000)
+    assert r["verdict"] == "ACCUMULATE"          # 方向不变
+    assert r["alloc_cny"] == 10000
+    assert r["_original_alloc"] == 30000
+    assert r["_single_invest_cap"] == 10000
+    rec = _intervention_record("GC=F", "uptrend", 100.0, r, atr_defense_on=False)
+    assert rec["rule"] == "single_invest_cap"
+    assert rec["original_verdict"] == rec["final_verdict"] == "ACCUMULATE"
+    assert rec["original_alloc"] == 30000.0 and rec["final_alloc"] == 10000.0
+    assert rec["delta_exposure_cny"] == 20000.0
+    # memo 末尾那句人话
+    from openinvest.core.committee.cio_parse import single_invest_cap_note
+    note = single_invest_cap_note(r)
+    assert "金额已按单次上限 ¥10,000 钳制" in note and "¥30,000" in note
+
+
+def test_single_invest_cap_zero_or_none_means_unlimited():
+    text = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 30000"
+    for cap in (0, None):
+        r = parse_cio_memo(text, single_invest_cap=cap)
+        assert r["alloc_cny"] == 30000
+        assert "_single_invest_cap" not in r and "_original_verdict" not in r
+    from openinvest.core.committee.cio_parse import single_invest_cap_note
+    assert single_invest_cap_note(r) == ""
+
+
+def test_single_invest_cap_within_cap_untouched():
+    r = parse_cio_memo("VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 8000",
+                       single_invest_cap=10000)
+    assert r["alloc_cny"] == 8000 and "_single_invest_cap" not in r
+
+
+def test_single_invest_cap_leaves_sell_side_alone():
+    """字段语义是"入场"上限：减仓（负 alloc）不受约束，防御性卖出不被缩成小单"""
+    text = ("VERDICT: TRIM\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: -30000\n"
+            "TRIM_REASON: bearish\nREENTRY_PRICE: 50")
+    r = parse_cio_memo(text, single_invest_cap=10000, current_price=100.0)
+    assert r["verdict"] == "TRIM" and r["alloc_cny"] == -30000
+    assert "_single_invest_cap" not in r
+
+
+def test_single_invest_cap_runs_after_ceiling_and_keeps_true_original():
+    """Sanity 2（±100k 天文数字钳）先、Sanity 6 后；_original_alloc 保住最初的 LLM 原值"""
+    r = parse_cio_memo("VERDICT: BUY\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 999999",
+                       single_invest_cap=15000)
+    assert r["alloc_cny"] == 15000 and r["_original_alloc"] == 999999
+
+
+def test_single_invest_cap_resolver_target_level_wins():
+    """标的级 cap 优先于策略级；标的级显式 0 = 该标的不设限（ESOP 口径）；两级都缺 → 0"""
+    from openinvest.utils.base_currency import single_invest_cap
+    assert single_invest_cap({"max_single_invest_cny": 15000}, {"max_single_invest_cny": 10000}, "CNY") == 15000
+    assert single_invest_cap({}, {"max_single_invest_cny": 10000}, "CNY") == 10000
+    assert single_invest_cap({"max_single_invest_cny": 0}, {"max_single_invest_cny": 10000}, "CNY") == 0
+    assert single_invest_cap({}, {}, "CNY") == 0
+    assert single_invest_cap({"max_single_invest_cny": "bogus"}, {}, "CNY") == 0
+
+
+def test_single_invest_cap_is_last_clamp_so_forced_hold_wins():
+    """Sanity 6 必须是最后一道：后续规则把裁决打成 HOLD/0 时，不留 cap 标记、不出"方向不变"那句、
+    也不往 single_invest_cap 名下记干预（PR #430 评审 🟡2）。"""
+    from openinvest.core.committee_runner import _intervention_record
+    from openinvest.core.committee.cio_parse import single_invest_cap_note
+    text = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.8\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 30000"
+    # Sanity 3（worker 失败）→ HOLD/0：此前单独触发的 Sanity 3 不产生干预记录，现在也不该
+    r = parse_cio_memo(text, single_invest_cap=10000,
+                       worker_brief=f"{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted")
+    assert r["verdict"] == "HOLD" and r["alloc_cny"] == 0
+    assert "_single_invest_cap" not in r and single_invest_cap_note(r) == ""
+    assert _intervention_record("GC=F", "uptrend", 100.0, r, atr_defense_on=False) is None
+    # 快崩防御 ACCUMULATE→HOLD：干预归因是 defense，原值 30000 完整进账本，不是 cap
+    d = parse_cio_memo(text, single_invest_cap=10000, defense_flag_on=True)
+    assert d["verdict"] == "HOLD" and d["alloc_cny"] == 0 and "_single_invest_cap" not in d
+    rec = _intervention_record("GC=F", "uptrend", 100.0, d, atr_defense_on=True)
+    assert rec["rule"] == "defense_accumulate_to_hold" and rec["original_alloc"] == 30000.0

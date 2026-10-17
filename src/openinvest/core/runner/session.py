@@ -17,6 +17,7 @@ from openinvest.core.regime_probability import (
     get_regime_probability,
 )
 from openinvest.utils.advisory import is_advisory_mode
+from openinvest.utils.base_currency import single_invest_cap
 from openinvest.utils.exchange_fee import (
     analyze_multi_timeframe, get_history_data, get_macro_data,
 )
@@ -255,6 +256,8 @@ def run_committee_for_symbol(
         valuation_brief=effective_valuation_brief,
         atr_defense_on=atr_defense_on,
         defense_dca=defense_dca,
+        # Sanity 6 输入：用户单次入场上限（顾问模式无真实策略 → 不设限，也不把主人的上限泄进群聊）
+        single_invest_cap=0 if _advisory else single_invest_cap(target, pm.strategy),
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
         persist_to_memory=not _advisory,

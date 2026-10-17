@@ -153,3 +153,14 @@ def test_load_skill_skips_fx_lookup_when_no_placeholder(monkeypatch):
     from openinvest.capabilities.loader import load_skill
     load_skill("macro_strategist")          # 模板里没有 {{ 占位符 -> 不该算币种变量
     assert calls == []
+
+
+def test_single_invest_cap_floors_in_non_cny_base():
+    """硬上限换基准币种向下取整（两位有效数字可能向上舍，钳出来会略高于人民币上限）；CNY 逐位相等"""
+    import math
+    from openinvest.utils.base_currency import single_invest_cap
+    assert single_invest_cap({"max_single_invest_cny": 15000}, {}, "CNY") == 15000
+    _aud()
+    exact = 15000 * AUD_PER_CNY
+    got = single_invest_cap({"max_single_invest_cny": 15000}, {})
+    assert got == math.floor(exact) and got <= exact

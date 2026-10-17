@@ -129,8 +129,9 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 | TRIM 但买回点缺失 / ≥ 现价 | 降级 HOLD（卖了买不回更低 = 纯亏）|
 | 快崩防御触发（VIX 哨兵 OR ATR 突变比）| BUY→ACCUMULATE / ACCUMULATE→HOLD（确定性买侧降级，独立于 regime）|
 | `risk_profile=aggressive` + uptrend + HOLD | 升级 ACCUMULATE（显式杠杆档，默认 steady 不动）|
+| 买侧 `alloc_cny` 超过用户单次入场上限（`strategy.md` 的 `max_single_invest_cny`，标的级优先于策略级；0 = 不设限）| 钳到上限（方向不变）+ 记 intervention `rule=single_invest_cap` + memo 末尾留一句"金额已按单次上限 X 钳制"（Sanity 6；减仓金额不受入场上限约束）|
 
-源：`core/committee/cio_parse.py:parse_cio_memo`（Sanity 0-5 + Defense + risk_profile，全部确定性后处理）。
+源：`core/committee/cio_parse.py:parse_cio_memo`（Sanity 0-6 + Defense + risk_profile，全部确定性后处理）。
 
 ---
 
