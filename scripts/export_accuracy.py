@@ -7,7 +7,9 @@
 - 绝对不输出 symbol / threshold / verdict 原文 / asset / 任何持仓字段
 - 只输出命中率聚合数字 + 样本量
 - 周末休市资产的周末决议（周五样本的重复）剔除，只输出被剔条数 weekend_dup_excluded
-- by_direction 按 bullish / bearish / hold 分组（不出现具体标的）
+- by_direction 按 bullish / bearish / hold / unclear 分组（不出现具体标的）；unclear 只有 total
+- 每个方向桶附同样本市场基率 base_rate、提升 lift（= rate − base_rate）、Wilson 95% 区间 ci95；
+  n<30 与 rate 一起抹掉（红线 #2）
 
 用法：
     python scripts/export_accuracy.py
@@ -28,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openinvest.calc.symbols import is_closed_weekend
+from openinvest.jobs.review_calc import wilson_ci
 
 ROOT = Path(__file__).parent.parent
 
@@ -61,7 +64,21 @@ _DIRECTION_MAP: Dict[str, str] = {
     "flat": "hold",
     "hold": "hold",
     "neutral": "hold",
+    "none": "unclear",   # UNCLEAR：无期望方向，只计数不计命中（不再折进 hold）
 }
+
+def _label_true(bucket: str, row: Dict[str, Any]) -> Optional[bool]:
+    """与 verdict_review._is_hit 同一把尺子的标签（算同桶基率用）：
+    bullish = 涨 >0，bearish = 跌 <0，hold = 留在 flat band 内（directions 已按 per-row band 分好）。"""
+    ret = (row.get("actual_returns") or {}).get(HIT_HORIZON)
+    mkt = str((row.get("directions") or {}).get(HIT_HORIZON) or "").lower()
+    if bucket == "bullish":
+        return None if ret is None else float(ret) > 0
+    if bucket == "bearish":
+        return None if ret is None else float(ret) < 0
+    if bucket == "hold":
+        return None if not mkt else mkt == "flat"
+    return None
 
 
 def _parse_date(date_str: str) -> Optional[datetime]:
@@ -110,17 +127,32 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
     total_hit = 0
     total_count = 0
+    # UNCLEAR（expected_direction=none）：没有 hits，按"已成熟"（directions 有固定窗口）只计 total
+    unclear_total = 0
     # 同样本市场基率（issue #179 P1-A②）：同一 HIT_HORIZON 窗口里市场实际
     # up/down/flat 的占比，verdict 无关——没有它，命中率没有对照系
     #（60% 命中在 70% 单边上涨的窗口里其实是负 alpha）
     dir_counts = {"up": 0, "down": 0, "flat": 0}
     dir_total = 0
+    # 同桶"标签基率"（与命中同尺子）：bullish=P(涨>0) / bearish=P(跌<0) / hold=P(留在 band 内)
+    label_counts = {b: [0, 0] for b in ("bullish", "bearish", "hold")}   # [true, n]
 
     for row in rows:
+        raw_dir = str(row.get("expected_direction") or "").lower().strip()
+        if _DIRECTION_MAP.get(raw_dir, "unclear") == "unclear":
+            if str((row.get("directions") or {}).get(HIT_HORIZON) or ""):
+                unclear_total += 1
+            continue
         # 固定窗口无命中数据 → 跳过
         is_hit = _row_is_hit(row)
         if is_hit is None:
             continue
+
+        for b in label_counts:
+            lt = _label_true(b, row)
+            if lt is not None:
+                label_counts[b][1] += 1
+                label_counts[b][0] += int(lt)
 
         raw_mkt = str((row.get("directions") or {}).get(HIT_HORIZON) or "").lower()
         if raw_mkt in dir_counts:
@@ -136,8 +168,7 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
 
         # 方向分类（不输出 verdict 原文，只用 expected_direction 映射）
-        raw_dir = str(row.get("expected_direction") or "").lower().strip()
-        bucket = _DIRECTION_MAP.get(raw_dir, "hold")
+        bucket = _DIRECTION_MAP[raw_dir]
 
         by_dir[bucket]["total"] += 1
         if is_hit:
@@ -147,16 +178,23 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         if is_hit:
             total_hit += 1
 
-    # 计算各方向命中率（四舍五入 2 位）
+    # 计算各方向命中率（四舍五入 2 位）+ 同桶基率 / 提升 / Wilson 95% CI
     by_dir_out: Dict[str, Any] = {}
     for bucket, counts in by_dir.items():
         t = counts["total"]
         h = counts["hit"]
+        rate = round(h / t, 4) if t > 0 else None
+        lt, ln = label_counts[bucket]
+        base = round(lt / ln, 4) if ln > 0 else None
         by_dir_out[bucket] = {
             "hit": h,
             "total": t,
-            "rate": round(h / t, 4) if t > 0 else None,
+            "rate": rate,
+            "base_rate": base,
+            "lift": round(rate - base, 4) if (rate is not None and base is not None) else None,
+            "ci95": wilson_ci(h, t),
         }
+    by_dir_out["unclear"] = {"hit": None, "total": unclear_total, "rate": None}
 
     return {
         "direction_hit_rate": (
@@ -201,9 +239,16 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
     suppressed_total = 0
     for bucket, counts in by_dir.items():
         c = dict(counts)
+        if bucket == "unclear":
+            new_by_dir[bucket] = c   # 本就只有 total，没有可还原的命中率
+            continue
         if int(c.get("total", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
             c["rate"] = None
             c["hit"] = None
+            # lift = rate − base 可一步还原 rate；CI 的中点也能反推——一并抹掉
+            for k in ("lift", "ci95"):
+                if k in c:
+                    c[k] = None
             n_suppressed += 1
             suppressed_total += int(c.get("total", 0) or 0)
         new_by_dir[bucket] = c

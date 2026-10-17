@@ -302,6 +302,41 @@ python -m scripts.archive.rl_optimize_prompts \
 
 ---
 
+## 主张 8：计分板诚实化——没有一个裁决桶好于"永远喊同一个方向"（2026-10-17）
+
+2026-10 全面评审发现计分板把结果做漂亮了三处：UNCLEAR（CIO 解析不出合法裁决）被
+`.get(verdict, "flat")` 折进 HOLD 桶；HOLD "命中" = 市场没动，但没减基率；命中率没有置信区间。
+修法（PR 计分板诚实化）：
+
+- **UNCLEAR 独立桶，不计命中**：`review_calc.VERDICT_BUCKETS` 含 UNCLEAR，`review_one` 不给它打 hits，
+  `export_accuracy` 公开 JSON 多一个 `unclear.total`。
+- **每桶同尺子基率 + 提升 + Wilson 95% CI**：基率 = 同桶样本里"一个永远喊这个方向的傻瓜"的命中率
+  （ACCUMULATE 按涨 >0 计命中，基率就是 P(涨 >0)；HOLD 是 P(留在 flat band 内)）。
+  `lift = hit_rate − base_rate`。**注意**：若错拿 `directions.up`（涨 > flat band，口径更严）当基率，
+  ACCUMULATE 会被高估成 +15pp——这是实现时真踩过的坑，测试 `test_input_health.py` 守着。
+- **强制 HOLD / 残缺输入单独计数不剔除**：transcript 新增 `## Input Health (deterministic)` 块
+  （哪些输入为空、行情最后一根、worker 失败、规则改写了什么、是否强制 HOLD），
+  `verdict_review` 据此标 `forced_hold_count` / `degraded_input_count`；老存档退回 "HOLD 且自报 ≤0.4" 启发式。
+- **同日重跑不再覆盖**：live 重跑把旧 transcript 归档到 `<date>/runs/`，`<sym>.md` 仍是当日最新。
+
+实测（live 全量 390 条 → holdout 323，30d 窗口 n=246，2026-10-17 重算）：
+
+| Verdict | N | 30d 命中 | 同尺子基率 | 提升 | 95% CI |
+|---|---|---|---|---|---|
+| ACCUMULATE | 32 | 26.7% | 29.7% | −3.0pp | 14–44% |
+| HOLD | 267 | 67.7% | 68.7% | −1.0pp | 61–74% |
+| TRIM | 18 | 66.7% | 70.3% | −3.6pp | 44–84% |
+| UNCLEAR | 6 | 不计 | — | — | — |
+
+**结论**：三个桶的提升全部为负且 CI 都覆盖基率——现在的委员会与"永远 HOLD / 永远喊涨"在统计上
+无法区分。这不是新发现（主张 1 的 100% HOLD 复读机、主张 3 的方向准确率不高），新的是它现在
+每天自动算出来并带区间，不再靠人眼对比两张表。后续任何"改进"必须让某个桶的提升 CI 下界过 0。
+
+复现：`INVEST_HOME=<只读拷贝> uv run python -m openinvest.jobs.verdict_review` → `docs/verdict_accuracy.md`；
+`uv run python scripts/export_accuracy.py` → `docs/accuracy_summary.json`。
+
+---
+
 ## 局限性 / 不能宣称的事
 
 - **样本量小**：66 verdict × 2 资产 × 6 个月。不足以说"100% 适用所有市况"
