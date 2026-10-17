@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import uuid
 from argparse import Namespace
 from typing import Any, Dict, List, Optional
 
@@ -142,8 +143,33 @@ def test_deposit_routes_and_prints_cli_shape(recorder, capfd):
                "new_balance": 1100.0, "cny_total": 1100.0}
     recorder["routes"][f"POST {BASE}/api/skill/deposit"] = FakeResponse(200, payload)
     rd.maybe_dispatch_remote(Namespace(cmd="deposit", currency="CNY", amount=100))
-    assert recorder["calls"][0]["json"] == {"currency": "CNY", "amount": 100.0}
+    sent = recorder["calls"][0]["json"]
+    uuid.UUID(sent.pop("idempotency_key"))  # 不传 --idempotency-key → 本次调用自动生成 uuid4
+    assert sent == {"currency": "CNY", "amount": 100.0}
     assert _out_json(capfd) == payload
+
+
+def test_money_cmds_reuse_explicit_idempotency_key(recorder, capfd):
+    """--idempotency-key 显式给了就原样转发（重试同一笔复用同 key，hub 只入账一次，ADR-016）。"""
+    recorder["routes"][f"POST {BASE}/api/skill/buy"] = FakeResponse(200, {"status": "duplicate"})
+    rd.maybe_dispatch_remote(Namespace(
+        cmd="buy", symbol="X", units=1, price=1, currency="CNY", kind="etf", unit_label="股",
+        idempotency_key="retry-7",
+    ))
+    assert recorder["calls"][0]["json"]["idempotency_key"] == "retry-7"
+    assert _out_json(capfd)["status"] == "duplicate"
+
+
+def test_timeout_echoes_idempotency_key_for_retry(monkeypatch, remote_env, capfd):
+    """超时 = 不知道 hub 记没记。error JSON 回显本次 key，agent 重试带同一个 key 即安全。"""
+    def boom(*a, **k):
+        raise rd.requests.exceptions.Timeout("slow")
+    monkeypatch.setattr(rd.requests, "request", boom)
+    with pytest.raises(SystemExit):
+        rd.maybe_dispatch_remote(Namespace(cmd="sell", symbol="X", units=1, price=1))
+    out = _out_json(capfd)
+    uuid.UUID(out["idempotency_key"])
+    assert f"--idempotency-key {out['idempotency_key']}" in out["hint"]
 
 
 # ---------- 禁用 / 白名单 / 默认拒绝 ----------

@@ -123,19 +123,40 @@ superseded_by: []
 | `PUT /api/holdings/{symbol}` | HTTP PUT | SET | 覆盖 | ✅ |
 | `DELETE /api/holdings/{symbol}` | HTTP DELETE | remove | 第二次 → 404 | ✅ |
 | napcat `/deposit /withdraw /gold*` | QQ 私聊 | 累加 | 单 WS 连接内事件串行处理、无重放 | ✅（直接用户动作）|
-| `deposit_cash / withdraw_cash / buy / sell / delete_holding` | CLI / MCP（含 `record_existing_position`）/ `/api/skill/*` / `/api/deposit` 等 | 累加 | 无去重键 | ⚠ 见下"未决" |
+| `deposit_cash / withdraw_cash / buy / sell` | CLI `--idempotency-key` / MCP `idempotency_key`（含 `record_existing_position`）/ `/api/skill/buy\|sell\|deposit\|withdraw`（body `idempotency_key` 或 `Idempotency-Key` header）| 累加 | 可选幂等键：`PortfolioManager._ledger_tx` 把 key 记进 portfolio 文档自身的 `ledger_idempotency_keys`（同 `synced_trade_ids`），check+append 与 cash/holdings 同一把锁、同一次 atomic write；重复 key 返回 `{"status": "duplicate"}` 不提交事务；失败 / 中断时 key 与账本一起不落盘。远端 CLI 不传 key 自动生成 uuid4，网络失败回显供重试复用 | ✅ PR #432（`tests/test_ledger_idempotency.py` 20 线程同 key 恰好 1 次入账）|
+| `delete_holding` | CLI / MCP / `/api/skill/delete_holding` | remove | 第二次 → "不在持仓" ValueError | ✅（天然幂等）|
+| 退役 GUI 端点 `/api/deposit` `/api/withdraw` `/api/gold/buy\|sell` `/api/cash/{ccy}/*`（`routers/write.py` `cash_write.py`）| HTTP POST | 累加 | 无去重键 | ⚠ GUI 2026-07-05 退役、Web API 已 deprecated，无现存客户端；随 Web API 退场一并删，不再加键 |
 | `db.trades_db.record_trade` | `/api/trades/record` 重试 | INSERT | 无去重键 | ⚠ agent 重试产生重复 *planned* 行，但每行各执行一次（apply 端幂等已守）|
 
-## 未决（systemic，需用户拍板，不在本 PR 范围）
+## 已解决（PR #432）：累加型写路径的幂等键
 
-**所有"累加型 POST 写端点"没有幂等键**（`/api/deposit` `/api/withdraw` `/api/gold/buy|sell`
-`/api/skill/buy|sell`）。本地同进程 GUI/CLI 下，单次点击=单次意图，问题不大；但
-**hub-and-spoke 远端模式（`INVEST_API_BASE`）下，HTTP 客户端超时重发会双重应用**——这是
-REST "POST 非幂等"的通病。彻底关闭需要给写端点引入 `Idempotency-Key` header 方案
-（客户端生成 UUID，服务端按 key 去重 N 分钟）。这是设计决策，留给用户决定是否做、何时做。
+原"未决"：**所有"累加型 POST 写端点"没有幂等键**，hub-and-spoke 远端模式（`INVEST_API_BASE`）
+下 HTTP 客户端超时重发会双重应用。
 
-`record_trade` 的重复 *planned* 行同理可加 `(verdict_id, symbol, intended_date)` 唯一约束，
-但优先级低（每行各执行一次，真正的钱由 apply 端幂等守住）。
+落地方案（不设 TTL，不缓存上次响应——只记"见过的 key"，最近 500 个）：
+
+- **核心**：`core/portfolio_manager.py:PortfolioManager._ledger_tx(idempotency_key)` 包住
+  `with_portfolio_tx`；有 key 时在 portfolio 锁内读文档自身的 `ledger_idempotency_keys` 列表
+  （与 `synced_trade_ids` 同款，#231）：已存在 → 抛 `_DuplicateKey` 中止事务（`transaction`
+  commit-on-success，不落盘），方法返回 `{"status": "duplicate", "idempotency_key": ...}`；不存在 →
+  append 进列表，**与 cash/holdings 改动同一次 atomic write 落盘**。所以业务异常（余额不足）、
+  schema 校验失败、写盘中途被 kill，key 和账本一起不落盘——不存在"key 烧掉了但账没记"的丢单
+  窗口（独立 `.state` 文件的 `state_claim` 是两个文件两次写，`record_external_trade` 那条就留着这个
+  已记录的残余风险）。不传 key 行为完全不变。
+  `buy / sell / deposit_cash / withdraw_cash` 四个方法接 `idempotency_key=`，`record_existing_position`
+  经 `buy(source_type="external_funding")` 同受保护。
+- **入口透传**：CLI `deposit/withdraw/buy/sell --idempotency-key KEY`；MCP 五个动钱工具可选
+  `idempotency_key`（docstring："重试同一笔请复用同一个 key"）；`/api/skill/buy|sell|deposit|withdraw`
+  接 body `idempotency_key` 或 `Idempotency-Key` header。远端 CLI（`remote_dispatch.py`）不传
+  key 时本地生成一次 uuid4 随请求发送；超时/连不上时 error JSON 回显该 key 并提示
+  `--idempotency-key <key>` 重试——这就是"重试复用"的落点（requests 本身不重试 POST）。
+- **测试**：`tests/test_ledger_idempotency.py`（同 key 两次 buy 只变一次 / 不同 key 两次 /
+  并发 20 线程同 key 恰好 1 次 / 失败释放 key / MCP 层透传），`tests/test_web_api.py`
+  （body 与 header 两种 key 都去重），`tests/test_remote_dispatch.py`（自动 uuid4 / 显式 key 原样转发 /
+  超时回显 key）。
+
+仍留的两条见上表 ⚠：退役 GUI 端点随 Web API 退场一并删；`record_trade` 的重复 *planned* 行可加
+`(verdict_id, symbol, intended_date)` 唯一约束，优先级低（每行各执行一次，真正的钱由 apply 端幂等守住）。
 
 ## 不做的事
 

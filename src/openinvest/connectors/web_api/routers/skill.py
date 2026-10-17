@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 
 from openinvest.core.portfolio_manager import PortfolioManager
 
@@ -90,42 +90,54 @@ def skill_what_if(body: SkillWhatIfRequest = Body(default=SkillWhatIfRequest()))
     )
 
 
+# 幂等键（ADR-016）：body.idempotency_key 优先，其次 `Idempotency-Key` header（REST 惯例）。
+# 远端 CLI 超时重发同 key → hub 只入账一次，第二次返回 {"status": "duplicate"}。
+_IDEM_HEADER = Header(None, alias="Idempotency-Key")
+
+
 @router.post("/api/skill/buy", tags=["skill"])
-def skill_buy(body: SkillBuyRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
+def skill_buy(body: SkillBuyRequest = Body(...), pm: PortfolioManager = Depends(get_pm),
+              idem_header: Optional[str] = _IDEM_HEADER) -> Dict[str, Any]:
     """cmd_buy 同款加仓/建仓（加权平均成本 + 同步扣现金 + history 记 skill_remote）"""
     try:
         return pm.buy(
             body.symbol, body.units, body.price,
             currency=body.currency, kind=body.kind, unit_label=body.unit_label,
-            source="skill_remote",
+            source="skill_remote", idempotency_key=body.idempotency_key or idem_header,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/skill/sell", tags=["skill"])
-def skill_sell(body: SkillSellRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
+def skill_sell(body: SkillSellRequest = Body(...), pm: PortfolioManager = Depends(get_pm),
+               idem_header: Optional[str] = _IDEM_HEADER) -> Dict[str, Any]:
     """cmd_sell 同款减仓（units 减、cost_avg 不变、按 cost_currency 还现金）"""
     try:
-        return pm.sell(body.symbol, body.units, body.price, source="skill_remote")
+        return pm.sell(body.symbol, body.units, body.price, source="skill_remote",
+                       idempotency_key=body.idempotency_key or idem_header)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/skill/deposit", tags=["skill"])
-def skill_deposit(body: SkillCashRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
+def skill_deposit(body: SkillCashRequest = Body(...), pm: PortfolioManager = Depends(get_pm),
+                  idem_header: Optional[str] = _IDEM_HEADER) -> Dict[str, Any]:
     """cmd_deposit 同款存现金（/api/cash/* 是 WriteResponse 形状，对不上 CLI，故另设）"""
     try:
-        return pm.deposit_cash(body.currency, body.amount, source="skill_remote")
+        return pm.deposit_cash(body.currency, body.amount, source="skill_remote",
+                               idempotency_key=body.idempotency_key or idem_header)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/skill/withdraw", tags=["skill"])
-def skill_withdraw(body: SkillCashRequest = Body(...), pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
+def skill_withdraw(body: SkillCashRequest = Body(...), pm: PortfolioManager = Depends(get_pm),
+                   idem_header: Optional[str] = _IDEM_HEADER) -> Dict[str, Any]:
     """cmd_withdraw 同款取现金（余额检查在 fcntl 锁内）"""
     try:
-        return pm.withdraw_cash(body.currency, body.amount, source="skill_remote")
+        return pm.withdraw_cash(body.currency, body.amount, source="skill_remote",
+                                idempotency_key=body.idempotency_key or idem_header)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

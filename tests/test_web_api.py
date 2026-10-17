@@ -1190,6 +1190,19 @@ def test_skill_buy_appends_history_with_remote_source(skill_client, tmp_store):
     assert trades[-1]["source"] == "skill_remote"
 
 
+def test_skill_deposit_idempotency_key_body_or_header_records_once(skill_client, tmp_store):
+    """/api/skill/* 接 body.idempotency_key 或 Idempotency-Key header（ADR-016）：远端 CLI
+    超时重发同 key → hub 只入账一次，第二次 200 + {"status": "duplicate"}。"""
+    body = {"currency": "CNY", "amount": 100, "idempotency_key": "dep-1"}
+    assert skill_client.post("/api/skill/deposit", json=body).json()["status"] == "ok"
+    r = skill_client.post("/api/skill/deposit", json=body)
+    assert r.status_code == 200 and r.json()["status"] == "duplicate"
+    r = skill_client.post("/api/skill/deposit", json={"currency": "CNY", "amount": 100},
+                          headers={"Idempotency-Key": "dep-1"})
+    assert r.json()["status"] == "duplicate"
+    assert PortfolioManager(store=tmp_store).cash_amount("CNY") == pytest.approx(12345.67 + 100)
+
+
 def test_skill_sell_insufficient_units_is_400(skill_client):
     r = skill_client.post("/api/skill/sell", json={
         "symbol": "NDQ.AX", "units": 99999, "price": 42.0,

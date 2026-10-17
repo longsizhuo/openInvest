@@ -39,6 +39,12 @@ from openinvest.utils.symbols import safe_symbol
 # 读工具零确认放行；动钱工具必须过 destructiveHint 闸——status 和 sell 不能同级
 _RO = ToolAnnotations(readOnlyHint=True)
 _MONEY = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False)
+# 动钱工具的可选幂等键（ADR-016）：client 自己生成（uuid4）；超时 / 结果未知时重试**复用同一个
+# key**，账本只记一次，之后同 key 返回 {"status": "duplicate"}。不传 = 旧行为（每次都入账）。
+_IDEM_FIELD = Field(description=(
+    "Optional client-generated key (e.g. a UUID4). When retrying this SAME call after a "
+    "timeout or an unknown result, reuse the same key: the ledger records it once and later "
+    "calls return {\"status\": \"duplicate\"} without touching cash or holdings."))
 
 mcp = FastMCP(
     "openinvest",
@@ -452,6 +458,7 @@ def buy(
     existing_position: Annotated[bool, Field(description=(
         "Not supported on buy. For a position held before using openInvest call "
         "`record_existing_position`; passing true here returns an error instead of deducting cash."))] = False,
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
     """Record a buy in the local ledger: adds to an existing position with
     weighted-average cost, or opens a new position for an unseen symbol.
@@ -469,6 +476,7 @@ def buy(
         currency: Currency of `price`; omitted = the existing position's currency (CNY if new).
         kind: Asset kind tag, e.g. "equity", "etf", "commodity".
         unit_label: Human display label for units (default "股", i.e. shares).
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
@@ -479,7 +487,8 @@ def buy(
         return {"status": "error", "error": "buy 不登记已有持仓（会扣现金）；请改用 record_existing_position。"}
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
-                         kind=kind, unit_label=unit_label, source="mcp")
+                         kind=kind, unit_label=unit_label, source="mcp",
+                         idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -496,6 +505,7 @@ def record_existing_position(
         "currency (CNY for a new position); a different currency than the position's is rejected."))] = None,
     kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
     """Record a position the user already held before using openInvest
     (onboarding backfill) WITHOUT touching ledger cash. History is marked
@@ -513,6 +523,7 @@ def record_existing_position(
         currency: Currency of `price`; omitted = the existing position's currency (CNY if new).
         kind: Asset kind tag, e.g. "equity", "etf", "commodity".
         unit_label: Human display label for units (default "股", i.e. shares).
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
@@ -521,7 +532,8 @@ def record_existing_position(
     try:
         return _pm().buy(symbol=symbol, units=units, price=price, currency=currency,
                          kind=kind, unit_label=unit_label,
-                         source="mcp:existing_position", source_type="external_funding")
+                         source="mcp:existing_position", source_type="external_funding",
+                         idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -531,6 +543,7 @@ def sell(
     symbol: Annotated[str, Field(description="yfinance ticker of an existing holding.")],
     units: Annotated[float, Field(description="Quantity sold; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Execution price per unit, in the holding's cost currency.", gt=0)],
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
     """Record a sell in the local ledger: reduces the position's units
     (average cost unchanged) and credits cash in the holding's cost
@@ -544,6 +557,7 @@ def sell(
         symbol: yfinance ticker of an existing holding.
         units: Quantity sold; must be > 0.
         price: Execution price per unit, in the holding's cost currency.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
     Returns:
         Updated position summary, or {"status": "error", "error": ...}.
@@ -552,7 +566,8 @@ def sell(
     if units <= 0 or price <= 0:
         return {"status": "error", "error": "units and price must both be > 0"}
     try:
-        return _pm().sell(symbol=symbol, units=units, price=price, source="mcp")
+        return _pm().sell(symbol=symbol, units=units, price=price, source="mcp",
+                          idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -561,6 +576,7 @@ def sell(
 def deposit(
     currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
     amount: Annotated[float, Field(description="Amount to add; must be > 0.", gt=0)],
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
     """Record a cash deposit into the ledger, in any currency. Bookkeeping
     only — no real payment system is connected.
@@ -568,13 +584,14 @@ def deposit(
     Args:
         currency: ISO-style currency code, e.g. "CNY", "USD", "AUD".
         amount: Amount to add; must be > 0.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
     Returns:
         Updated cash balances, or {"status": "error", "error": ...}.
     """
     _check_advisory()
     try:
-        return _pm().deposit_cash(currency, amount, source="mcp")
+        return _pm().deposit_cash(currency, amount, source="mcp", idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -583,6 +600,7 @@ def deposit(
 def withdraw(
     currency: Annotated[str, Field(description="ISO-style currency code, e.g. 'CNY', 'USD', 'AUD'.")],
     amount: Annotated[float, Field(description="Amount to remove; must be > 0.", gt=0)],
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
     """Record a cash withdrawal from the ledger, in any currency. Fails if
     the balance is insufficient. Bookkeeping only — no real payment system
@@ -591,6 +609,7 @@ def withdraw(
     Args:
         currency: ISO-style currency code, e.g. "CNY", "USD", "AUD".
         amount: Amount to remove; must be > 0.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
     Returns:
         Updated cash balances, or {"status": "error", "error": ...}.
@@ -599,7 +618,7 @@ def withdraw(
     if amount <= 0:
         return {"status": "error", "error": "amount must be > 0"}
     try:
-        return _pm().withdraw_cash(currency, amount, source="mcp")
+        return _pm().withdraw_cash(currency, amount, source="mcp", idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
