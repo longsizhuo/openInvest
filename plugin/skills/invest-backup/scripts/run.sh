@@ -34,10 +34,12 @@ resolve_root() {
 
 ROOT="$(resolve_root)"
 BACKUP_DIR="$ROOT/.backups"
-# 备份对象：git 完全不追踪、又不可再生的数据。db/*.sqlite-journal 等 WAL 临时
-# 文件不带——那是运行时产物，恢复时会自动重建，带了反而可能是半提交状态。
+# 备份对象：git 完全不追踪、又不可再生的数据。*.db-shm / *.sqlite-journal 是运行时
+# 产物，恢复时自动重建，不带。*.db-wal **要带**：调度器长驻持有 SQLite 连接期间，
+# 新成交只躺在 WAL 里、主库文件还没更新——排除它等于丢账（旧版就丢过）。
+# 备份前 checkpoint_dbs 先把 WAL 刷进主库（WAL 通常因此为空）；刷不干净时 WAL 随包带上。
 INCLUDE_PATHS=(memory db .env user_profile.json user_profile.json.bak)
-EXCLUDE_GLOBS=("*.pyc" "*.sqlite-journal" "*.db-shm" "*.db-wal" "*.lock")
+EXCLUDE_GLOBS=("*.pyc" "*.sqlite-journal" "*.db-shm" "*.lock")
 
 usage() {
     cat >&2 <<'EOF'
@@ -46,10 +48,11 @@ Usage: run.sh backup [output_dir]
        run.sh list
 
 backup   打一个 openinvest-backup-<UTC时间戳>.zip，默认存到 $INVEST_HOME/.backups/
+         （先 checkpoint WAL，调度器在跑也安全；后端每天 03:30 另有自动备份 auto_*.zip）
 restore  从 zip 解回 $INVEST_HOME。默认拒绝覆盖已含真实数据的 memory/portfolio.md
          （对齐 lifecycle_cmds.py 的 _write_v2_portfolio 同款 safety guard）。
          --force 跳过这个检查。恢复前总会先把当前状态备份一份，不管有没有 --force。
-list     列出 $INVEST_HOME/.backups/ 下现有的备份
+list     列出 $INVEST_HOME/.backups/ 下现有的备份（手动 openinvest-backup-* + 自动 auto_*）
 EOF
 }
 
@@ -69,9 +72,18 @@ raise SystemExit(0 if has_real else 1)
 " 2>/dev/null
 }
 
+# 备份前把 trades/insights/jobs 三个库的 WAL 刷进主库（与后端每日 backup job 同一个函数）。
+# 失败不拦备份：钉住的旧版 PyPI 后端（SPEC）可能还没有 openinvest.jobs.backup；
+# 那时靠上面不再排除 *.db-wal 兜底，WAL 随包带上，数据不丢。输出走 stderr，不污染结果 JSON。
+checkpoint_dbs() {
+    _py "import json; from openinvest.jobs.backup import checkpoint_dbs; print(json.dumps(checkpoint_dbs()))" >&2 \
+        || echo "warning: checkpoint 未执行（后端版本过旧？），*.db-wal 将随备份一并打包" >&2
+}
+
 cmd_backup() {
     local out_dir="${1:-$BACKUP_DIR}"
     mkdir -p "$out_dir"
+    checkpoint_dbs
     local ts
     ts="$(date -u +%Y%m%d-%H%M%S)"
     local name="openinvest-backup-${ts}-UTC.zip"
@@ -118,7 +130,7 @@ cmd_list() {
         return
     fi
     local files
-    files="$(ls -1t "$BACKUP_DIR"/openinvest-backup-*.zip 2>/dev/null || true)"
+    files="$(ls -1t "$BACKUP_DIR"/openinvest-backup-*.zip "$BACKUP_DIR"/auto_*.zip 2>/dev/null || true)"
     if [ -z "$files" ]; then
         echo '{"status":"ok","backups":[]}'
         return
