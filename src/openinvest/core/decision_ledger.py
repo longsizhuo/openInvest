@@ -57,6 +57,18 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
             macro = json.loads(macro_m.group(1))
         except json.JSONDecodeError:
             pass
+    # Input Health 块（2026-10 计分板诚实化）：哪些输入为空 / 行情最后一根 / 规则改写 / 强制 HOLD。
+    # 老存档没有这块 → {}（读方按"未知"处理，不猜）。
+    health: Dict[str, Any] = {}
+    health_m = re.search(r"## Input Health.*?```json\n(.*?)\n```", text, re.DOTALL)
+    if health_m:
+        try:
+            parsed_health = json.loads(health_m.group(1))
+            if isinstance(parsed_health, dict):
+                health = parsed_health
+        except json.JSONDecodeError:
+            pass
+    run_m = re.search(r"\*\*Run at\*\*:\s*(\S+)", text)
     sym_m = re.search(r"\*\*Symbol\*\*:\s*(\S+)", text)
     # 标签带基准币种（"Suggested allocation CNY" / "… AUD"），老存档都是 CNY
     alloc_m = re.search(r"\*\*Suggested allocation ([A-Z]{3})\*\*:\s*(-?[\d,.]+)", text)
@@ -73,6 +85,8 @@ def parse_committee_text(text: str) -> Optional[Dict[str, Any]]:
         "symbol": sym_m.group(1) if sym_m else None,
         "alloc_cny": alloc,
         "alloc_currency": alloc_m.group(1) if alloc_m else None,
+        "input_health": health,
+        "run_at": run_m.group(1) if run_m else None,
     }
 
 

@@ -38,6 +38,8 @@ def test_parse_committee_file(tmp_path):
         "symbol": "GC=F",
         "alloc_cny": -5000.0,
         "alloc_currency": "CNY",
+        "input_health": {},   # 老存档无 Input Health 块 → {}（不猜）
+        "run_at": None,
     }
     assert parse_committee_file(tmp_path / "missing.md") is None
 

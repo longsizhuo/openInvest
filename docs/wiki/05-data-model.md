@@ -299,7 +299,10 @@ memory/
 │   └── *.md
 ├── daily/                     # 每日委员会决议（v3 多资产 = 多文件）
 │   └── YYYY-MM-DD/<SYMBOL>.md
-├── .committee/                # 委员会异步任务状态
+├── .committee/                # 委员会 transcript（每日每标的）+ 异步任务状态
+│   ├── <date>/<sym>.md        # 当日最新一次裁决（所有读方的唯一可信源；含 Input Health 块）
+│   ├── <date>/<sym>_path.json # 决策时点路径分布快照（path_review 90 天后回看）
+│   ├── <date>/runs/<sym>_<HHMMSS>.md  # 同日重跑时被归档的早先 transcript（2026-10 起不再覆盖丢失）
 │   └── <task_id>/
 │       ├── status.json
 │       └── tool_calls.jsonl

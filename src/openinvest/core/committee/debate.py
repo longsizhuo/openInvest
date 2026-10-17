@@ -116,6 +116,7 @@ def run_committee(
     persist_to_memory: bool = True,
     max_debate_rounds: int = 1,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    input_health: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """对单个资产跑 Macro + Quant/Risk 多轮辩论 + CIO
 
@@ -132,6 +133,9 @@ def run_committee(
         max_debate_rounds: cross-challenge 轮数上限。
             - 1 = 旧行为（仅 1 轮 Round 2 cross-challenge），daily_report 用
             - 4 = 真讨论模式（live 端点用），允许 4 轮拉锯，收敛后提前退出
+        input_health: 调用方（session）算好的输入健康位（price_last_bar / empty_inputs /
+            macro_data_empty …），原样透传给 _persist 写进 transcript 的 Input Health 块；
+            本函数只补它自己知道的 model / cio_json_mode。None = 不带（旧调用零改）。
         progress_callback: 每个 stage 完成时调用，传 dict {phase, ...extra}
             phase 取值：
               - "round_1_start" / "round_1_done"
@@ -355,15 +359,19 @@ def run_committee(
     )
     cio_parsed["alloc_currency"] = base_currency()
 
+    from openinvest.utils.llm import get_llm_config_safe
     debate_meta = {
         "max_rounds": max_debate_rounds,
         "final_round": final_round,
         "converged": converged,
         "quant_history": quant_history,
         "risk_history": risk_history,
+        # Input Health 块用：哪个模型、CIO 走没走 JSON 输出（文本回退 = 多一次重问）
+        "model": get_llm_config_safe()[2],
+        "cio_json_mode": bool(_want_json and cio_fields is not None),
     }
     if persist_to_memory:
-        _persist(report, cio_parsed, debate_meta=debate_meta)
+        _persist(report, cio_parsed, debate_meta=debate_meta, input_health=input_health)
 
     return {
         "asset": sym,
