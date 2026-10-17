@@ -679,3 +679,30 @@ def test_equity_curve_is_rebased_to_window_start():
     assert _window_pct(hist[:1]) is None and _equity_rel([]) == []
     # 不足 2 个点 → 占位图，不画孤零零一个点
     assert "数据采集中" in pnl_snapshot._render_svg_pure(hist[:1], [])
+
+
+def test_first_run_after_deploy_keeps_published_svg_until_two_points(monkeypatch, tmp_path):
+    """部署后第一轮只有 1 个新点（旧点口径不同被过滤）：已发布的旧图不被占位图覆盖，第二轮才换成新曲线。"""
+    table = _fork_world(monkeypatch, tmp_path)
+    svg = tmp_path / "docs" / "pnl_chart.svg"
+    svg.parent.mkdir(parents=True)
+    svg.write_text("<svg>previously published</svg>", encoding="utf-8")
+
+    assert pnl_snapshot.run()["history_points"] == 1
+    assert svg.read_text(encoding="utf-8") == "<svg>previously published</svg>"
+
+    table["AAPL"]["2026-10-09"] = 216.0
+    assert pnl_snapshot.run()["history_points"] == 2
+    assert "<polyline" in svg.read_text(encoding="utf-8")
+
+
+def test_run_does_not_swallow_performance_errors(monkeypatch, tmp_path):
+    """build_account_performance 抛异常要让 job 报 failed（scheduler 写 job_runs、watchdog 能看到），
+    而不是悄悄 skipped——静默死过一次（event_watch 卡死 21 天）。"""
+    _fork_world(monkeypatch, tmp_path)
+
+    def boom(pm, **kw):
+        raise RuntimeError("db gone")
+    monkeypatch.setattr(pnl_snapshot, "build_account_performance", boom)
+    with pytest.raises(RuntimeError, match="db gone"):
+        pnl_snapshot.run()

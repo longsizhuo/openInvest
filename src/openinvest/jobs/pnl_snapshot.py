@@ -72,6 +72,7 @@ from openinvest.jobs.pnl_render import (  # noqa: F401
     W,
     WINDOW_DAYS,
     Snapshot,
+    _equity_rel,
     _latest_pct,
     _pct_label_pos,
     _project_y,
@@ -445,12 +446,14 @@ def run() -> Dict[str, Any]:
     history = _read_history()
     window_pct = _window_pct(history)
 
-    # 渲染并原子写入 SVG
-    SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    svg_content = render_svg(history)
-    tmp = SVG_PATH.with_suffix(".svg.tmp")
-    tmp.write_text(svg_content, encoding="utf-8")
-    tmp.replace(SVG_PATH)
+    # 渲染并原子写入 SVG。部署后第一轮只有 1 个新点（旧点口径不同被过滤）：已有旧图就先留着，
+    # 别用「数据采集中」占位图覆盖已发布的图（autopush 会推上 README）——2h 后下一轮就有 2 个点。
+    if len(_equity_rel(history)) >= 2 or not SVG_PATH.exists():
+        SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        svg_content = render_svg(history)
+        tmp = SVG_PATH.with_suffix(".svg.tmp")
+        tmp.write_text(svg_content, encoding="utf-8")
+        tmp.replace(SVG_PATH)
 
     # 跑赢基准的"可分享瞬间"事件（PM-3 增长杠杆）
     events = _outperform_events(snap)

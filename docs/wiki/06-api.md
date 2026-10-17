@@ -103,7 +103,7 @@ curl http://127.0.0.1:8765/openapi.json
 |--------|------|------|
 | GET | `/api/history?limit=200&symbol=NDQ.AX` | 交易流水 |
 | GET | `/api/daily?since=N` | 最近 N 天每日决策快照 |
-| GET | `/api/pnl_history?since=N` | PnL 时序点（jobs/pnl_snapshot 写）|
+| GET | `/api/pnl_history?since=N` | 总权益曲线时序点（jobs/pnl_snapshot 写）：`equity_idx`＝账户 TWR 指数（成立日 100），`total_pnl_pct`＝`equity_idx − 100`＝成立以来 TWR %；旧版点（两个固定资产的成本收益率，带 `ndq_pnl_pct`/`gold_pnl_pct`）口径不同 |
 | GET | `/api/pnl_chart.svg` | 后端自家 SVG（无 JS 也能看）|
 
 ### 策略 / 配置

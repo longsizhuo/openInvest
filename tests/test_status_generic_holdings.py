@@ -188,3 +188,26 @@ def test_what_if_still_treats_unavailable_price_as_excluded(monkeypatch):
     out = skill_views.build_what_if_view(symbol="AAA", pct=-10)
     assert out["excluded_from_total"] == ["AAA"]
     assert out["current_total_cny"] == 1000.0
+
+
+def test_status_gold_price_is_spot_regardless_of_price_offset(monkeypatch):
+    """走 get_quote 后金价口径不变：now_cny_per_gram 是现货价，持仓的 price_offset_pct 只影响
+    extra.bank_cny_per_gram（银行点差价），不会让设了点差的用户 status 里的现价 / pnl_pct 跳变。"""
+    from openinvest.calc.gold import GoldPriceSnapshot
+
+    def fake_snapshot(offset_pct=0.0):   # 与 utils.gold_price.get_gold_snapshot 同公式
+        spot = 2400.0 / 31.1035 * 7.2
+        return GoldPriceSnapshot(gold_usd_per_oz=2400.0, usdcny_rate=7.2, spot_cny_per_gram=spot,
+                                 bank_cny_per_gram=spot * (1 + offset_pct), offset_pct=offset_pct, is_stale=False)
+    monkeypatch.setattr("openinvest.utils.quotes.get_gold_snapshot", fake_snapshot)
+
+    def status_with_offset(offset):
+        _seed({"CNY": 0.0}, [{"symbol": "G", "kind": "metal", "units": 10.0, "avg_cost": 500.0,
+                              "cost_currency": "CNY", "proxy_kind": "gold_cny_per_gram",
+                              **({"price_offset_pct": offset} if offset is not None else {})}])
+        return skill_views.build_status_view()
+
+    plain, with_offset = status_with_offset(None), status_with_offset(0.012)
+    assert plain["gold"]["now_cny_per_gram"] == with_offset["gold"]["now_cny_per_gram"]
+    assert plain["gold"]["pnl_pct"] == with_offset["gold"]["pnl_pct"]
+    assert with_offset["all_holdings"][0]["extra"]["offset_pct"] == 0.012   # 点差只在 extra 里

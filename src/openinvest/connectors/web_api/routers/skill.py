@@ -50,7 +50,7 @@ def skill_doctor() -> Dict[str, Any]:
 
 @router.get("/api/skill/status", tags=["skill"])
 def skill_status() -> Dict[str, Any]:
-    """cmd_status 同款 JSON（cash/ndq/gold/all_holdings/total_assets_cny/fx/live_prices）"""
+    """cmd_status 同款 JSON（cash/gold/all_holdings/total_assets_cny/fx/live_prices/performance；gold 仅在持有克价口径持仓时出现）"""
     from openinvest.services.skill_views import build_status_view
     try:
         return build_status_view()
