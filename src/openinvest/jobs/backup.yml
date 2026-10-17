@@ -1,5 +1,5 @@
 # backup：每天自动备份账本与记忆（评审路线 Sprint 2 D2）。
-# 先 checkpoint trades.db / insights.db / jobs.sqlite（把 WAL 里没落盘的成交刷进主库），
+# 先 checkpoint db/ 下的 SQLite 库（进包的 trades.db / insights.db / jobs.sqlite 把 WAL 里没落盘的成交刷进主库），
 # 再把 memory/ + 这三个库打成 INVEST_ROOT/.backups/auto_<UTC时间戳>.zip，只留最近 14 份 auto_*。
 # 平日不含 memory/.backtest*（占整份备份 ~89%）；Asia/Shanghai 的周日那次带上（含前瞻纸面舰队），
 # 文件名加 _full 后缀，共用同一个 14 份轮转（自然留 2 份带舰队的）。

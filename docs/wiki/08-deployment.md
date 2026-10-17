@@ -335,13 +335,13 @@ INVEST_HOME=~/openInvest uv run python -m scripts.snapshot restore --in ~/invest
 
 ### 每天自动本地备份（内置 job `backup`，默认开）
 
-调度器每天 03:30（Asia/Shanghai）跑 `jobs/backup.py`：先对 `trades.db` / `insights.db` /
-`jobs.sqlite` 做 `checkpoint(TRUNCATE)`（把 WAL 里还没落盘的成交刷进主库——调度器长驻连接期间
-不会自己做），再把 `memory/`（排除 `*.lock` / `*.bak.*`）+ 这三个库打成
+调度器每天 03:30（Asia/Shanghai）跑 `jobs/backup.py`：先对 `db/` 下的 SQLite 库做
+`checkpoint(TRUNCATE)`（把 WAL 里还没落盘的成交刷进主库——调度器长驻连接期间不会自己做；
+进包的是 `trades.db` / `insights.db` / `jobs.sqlite`），再把 `memory/`（排除 `*.lock` / `*.bak.*`）+ 这三个库打成
 `$INVEST_HOME/.backups/auto_<UTC时间戳>.zip`，只留最近 14 份 `auto_*`（手动备份不动）。
-平日**不含 `memory/.backtest*`**（回测产物，占整份备份约 89%：全量 271 MB vs 22 MB）；Asia/Shanghai 的周日那次带上，
-文件名加 `_full` 后缀（`auto_<stamp>_full.zip`），共用同一个 14 份轮转，14 天里自然留 2 份——
-因为 `.backtest/` 里混着 2026-07-24 起的前瞻纸面舰队，那部分重跑不出来，所以不能整个不备。
+**每日不含 `memory/.backtest*`，每周日（Asia/Shanghai）带上（舰队不可重跑）**：回测产物占整份备份约 89%
+（全量 271 MB vs 22 MB），但 `.backtest/` 里混着 2026-07-24 起的前瞻纸面舰队，那部分重跑不出来，
+所以周日那份整份带上，文件名加 `_full` 后缀（`auto_<stamp>_full.zip`），共用同一个 14 份轮转，14 天里自然留 2 份。
 不备 `market_data.db` / `events.db`（可重拉的缓存）与 `.env`。失败抛异常 → `job_watchdog` 告警。
 zip 内路径相对数据根目录，恢复用 `plugin/skills/invest-backup` 的 `run.sh restore <zip>`。
 这是机内冷备，不替代上面的每周异地备份。

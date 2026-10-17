@@ -18,8 +18,9 @@ verdict_review.FLEET_START），那部分重跑不出来，不能不备。折中
 
 **为什么先 checkpoint**：WAL 库的新成交先落 `trades.db-wal`，主库文件要等 checkpoint 才更新。
 `TradesDB` 只在打开连接时 checkpoint（db/trades_db.py #104），调度器长驻持有连接期间不会再做——
-只拷主库文件的备份会丢 WAL 里的成交。这里对三个库各开一条短连接做 checkpoint(TRUNCATE)
-（db/wal.py，跨连接/跨进程有效）。万一被读事务挡住没刷完（busy=1），残留的 `-wal` 随包带上。
+只拷主库文件的备份会丢 WAL 里的成交。这里对 db/ 下全部 SQLite 库各开一条短连接做 checkpoint(TRUNCATE)
+（db/wal.py，跨连接/跨进程有效；进包的只有下面三个，其余库是为了手动备份整包带的 `-wal` 也刷过）。
+万一被读事务挡住没刷完（busy=1），残留的 `-wal` 随包带上。
 
 **为什么不备 market_data.db（574MB）/ events.db（140MB）**：行情与新闻缓存，丢了能重拉，
 每天 14 份只是占盘；`.env` 也不进自动备份（凭据别每天复制 14 份，手动备份仍会带）。
@@ -47,19 +48,23 @@ log = logging.getLogger(__name__)
 KEEP_AUTO = 14
 DB_FILES = ("db/trades.db", "db/insights.db", "db/jobs.sqlite")
 EXCLUDE_GLOBS = ("*.lock", "*.bak.*", "*.tmp.*")
+SQLITE_GLOBS = ("*.db", "*.sqlite", "*.sqlite3")  # checkpoint 范围：db/ 下所有 SQLite 库
 BACKTEST_PREFIX = ".backtest"  # memory/.backtest、.backtest_cl_v1、.backtest_archive_* …
 FULL_BACKUP_WEEKDAY = 6  # 周一=0 … 周日=6，按 Asia/Shanghai 的日历日
 SH = ZoneInfo("Asia/Shanghai")
 
 
 def checkpoint_dbs(root: Optional[Path] = None) -> Dict[str, Any]:
-    """三个库各 checkpoint(TRUNCATE) 一次。库不存在 → None；报错 → {"error": ...}，不抛。
+    """db/ 下所有 SQLite 库（*.db / *.sqlite / *.sqlite3，外加 DB_FILES 三个）各 checkpoint(TRUNCATE) 一次。
 
-    手动备份路径（invest-backup run.sh）也调这个。
+    库不存在 → None；报错 → {"error": ...}，不抛。范围取全部而不只是 DB_FILES：手动备份路径
+    （invest-backup run.sh）把整个 db/ 连同各库的 -wal 一起打包，这样随包带的 -wal 都是刷过的，
+    不会出现"旧主库 + 新 WAL"的错位。
     """
     root = Path(root) if root is not None else INVEST_ROOT
+    rels = {p.relative_to(root).as_posix() for g in SQLITE_GLOBS for p in (root / "db").glob(g)}
     out: Dict[str, Any] = {}
-    for rel in DB_FILES:
+    for rel in sorted(rels | set(DB_FILES)):
         try:
             out[rel] = checkpoint_file(root / rel)
         except sqlite3.Error as e:
@@ -111,10 +116,14 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
     if include_backtest is None:
         include_backtest = now.astimezone(SH).weekday() == FULL_BACKUP_WEEKDAY
     ckpt = checkpoint_dbs(root)
-    errors = {rel: r["error"] for rel, r in ckpt.items() if r and "error" in r}
+    # 只有进包的库 checkpoint 报错才算本 job 失败；market_data.db 等缓存库报错只记日志
+    errors = {rel: r["error"] for rel, r in ckpt.items() if rel in DB_FILES and r and "error" in r}
     for rel, r in ckpt.items():
-        if r and r.get("busy"):
-            log.warning("[backup] %s checkpoint 被读事务挡住（busy），-wal 将随包带上", rel)
+        if r and "error" in r and rel not in errors:
+            log.warning("[backup] %s checkpoint 失败（不在备份范围，忽略）: %s", rel, r["error"])
+        elif r and r.get("busy"):
+            log.warning("[backup] %s checkpoint 被读事务挡住（busy）%s", rel,
+                        "，-wal 将随包带上" if rel in DB_FILES else "")
 
     files = list(_files_to_back_up(root, include_backtest))
     if not files:
@@ -130,6 +139,9 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
     n = 0
     # ponytail: checkpoint→读文件之间是毫秒窗口，trades.db 只有几十 KB；写入量大了改用
     #   sqlite3.Connection.backup()（scripts/snapshot.py 同款）出一致快照再打包。
+    #   jobs.sqlite 同理：它是回滚日志模式（非 WAL），checkpoint 对它是 no-op，读文件时若恰有别的
+    #   job 在 runner._record_run 提交，可能拷到写了一半的页；03:30 此刻没有其他 job 在跑
+    #   （event_watch / price_sentinel 窗口在 0-2、8-23 点），风险极低，换 Connection.backup() 时一并解决。
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
             for src, arc in files:

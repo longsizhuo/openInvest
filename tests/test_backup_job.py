@@ -133,6 +133,7 @@ def test_excludes_lock_bak_tmp_and_keeps_hidden_dirs(tmp_path):
 
     res = backup.run(root=root, now=T0)
 
+    assert "error" in res["checkpoint"]["db/market_data.db"]  # 缓存库（此处是坏文件）checkpoint 报错：只记日志、不拖垮 job
     with zipfile.ZipFile(res["path"]) as zf:
         names = set(zf.namelist())
     assert names == {
@@ -189,6 +190,32 @@ def test_include_backtest_explicit_override(tmp_path):
     assert res["path"].endswith("_full.zip")
     with zipfile.ZipFile(res["path"]) as zf:
         assert "memory/.backtest/2026-10-01/GC=F.md" in zf.namelist()
+
+
+def test_checkpoint_covers_every_sqlite_under_db(tmp_path):
+    """手动备份把整个 db/ 连 -wal 一起打包 → 所有库的 WAL 都要刷过（含不进自动备份的缓存库）。"""
+    db_dir = tmp_path / "db"
+    db_dir.mkdir()
+    writers = []
+    for name in ("market_data.db", "events.db", "chroma.sqlite3", "extra.sqlite"):
+        c = sqlite3.connect(str(db_dir / name))
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("CREATE TABLE t(x)")
+        c.execute("INSERT INTO t VALUES (1)")
+        c.commit()
+        assert (db_dir / (name + "-wal")).stat().st_size > 0
+        writers.append(c)
+    (db_dir / "readme.txt").write_text("not a db")
+
+    res = backup.checkpoint_dbs(tmp_path)
+
+    for name in ("market_data.db", "events.db", "chroma.sqlite3", "extra.sqlite"):
+        assert res[f"db/{name}"]["busy"] == 0
+        assert (db_dir / (name + "-wal")).stat().st_size == 0
+    assert "db/readme.txt" not in res
+    assert {"db/trades.db", "db/insights.db", "db/jobs.sqlite"} <= set(res)  # 三个账本库键始终在（不存在 → None）
+    for c in writers:
+        c.close()
 
 
 def test_checkpoint_error_still_writes_zip_then_raises(tmp_path):
