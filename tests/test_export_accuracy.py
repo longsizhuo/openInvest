@@ -69,6 +69,18 @@ def _assert_no_small_sample_rate_leak(summary: dict, where: str) -> None:
                 f"{window.get('direction_hit_rate')!r} 仍暴露 ⇒ 被抑制桶的合计 hit 可由"
                 f"减法精确还原（红线 #2 补充抑制）"
             )
+        cal = window.get("calibration") or {}
+        n_excluded = sample_size - int(cal.get("n", 0) or 0)      # 进命中率、没进校准的行（不管原因）
+        if cal and (int(cal.get("n", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC
+                    or window.get("direction_hit_rate") is None
+                    or 0 < n_excluded < MIN_SAMPLE_FOR_PUBLIC):
+            # base_rate_brier = p(1−p) 一步还原整体命中率：direction_hit_rate 被抑制、或校准排除了一小撮
+            # 行（0<sample_size−calibration.n<30，与 direction_hit_rate 相减逆算那几行的命中）时，校准数字也必须抹
+            for k in ("ece", "brier", "base_rate_brier"):
+                assert cal.get(k) is None, (
+                    f"{where}: 窗口 {name!r} calibration.n={cal.get('n')} / direction_hit_rate 被抑制，"
+                    f"却泄露了 calibration.{k}={cal.get(k)!r}（红线 #2）"
+                )
         br = window.get("base_rate") or {}
         if br and int(br.get("n", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
             for k in ("up", "down", "flat"):
@@ -487,3 +499,118 @@ def test_base_rate_and_fixed_horizon():
     supp = _suppress_small_samples(agg)
     assert supp["base_rate"]["n"] == 5
     assert supp["base_rate"]["up"] is None
+
+
+# ---------- A5：公开 JSON 的 calibration（只出整体四个数，n<30 / 命中率被抑制时置 null）----------
+
+def _conf_rows(n_hit, n_miss, *, conf=0.6, direction="flat", date="2026-04-10"):
+    rows = [{**_make_row(date, direction, True), "confidence": conf} for _ in range(n_hit)]
+    return rows + [{**_make_row(date, direction, False), "confidence": conf} for _ in range(n_miss)]
+
+
+def test_calibration_key_values_in_every_window(tmp_path):
+    """手算：40 条 conf 0.6，30 中 10 不中 → p̄=0.75，Brier=(30×0.16+10×0.36)/40=0.21，
+    基率 Brier=0.75×0.25=0.1875，ECE=|0.6−0.75|=0.15。"""
+    jsonl = tmp_path / "v.jsonl"
+    _write_jsonl(jsonl, _conf_rows(30, 10))
+    s = build_summary(jsonl)
+    for name, w in s["windows"].items():
+        assert set(w["calibration"]) == {"ece", "brier", "base_rate_brier", "n", "n_excluded", "n_zero_conf"}, name   # 无分档明细
+    cal = s["windows"]["all"]["calibration"]
+    assert cal == {"ece": 0.15, "brier": 0.21, "base_rate_brier": 0.1875, "n": 40, "n_excluded": 0, "n_zero_conf": 0}
+    _assert_no_small_sample_rate_leak(s, where="calibration")
+
+
+def test_calibration_suppressed_below_30_keeps_n():
+    agg = _suppress_small_samples(_aggregate(_conf_rows(20, 9)))
+    assert agg["calibration"] == {"ece": None, "brier": None, "base_rate_brier": None,
+                                  "n": 29, "n_excluded": 0, "n_zero_conf": 0}
+    ok = _suppress_small_samples(_aggregate(_conf_rows(20, 10)))
+    assert ok["calibration"]["n"] == 30 and ok["calibration"]["brier"] is not None
+
+
+def test_calibration_suppressed_when_hit_rate_complementary_suppressed():
+    """bullish 桶 10 条被抑制 → direction_hit_rate 互补抑制；此时 base_rate_brier(=p̄(1−p̄)) 会把
+    整体命中率还原出来，小桶 hit 可减法逆算——校准数字必须一并抹掉，n 保留。"""
+    rows = _conf_rows(30, 10, direction="flat") + _conf_rows(6, 4, direction="up")
+    agg = _suppress_small_samples(_aggregate(rows))
+    assert agg["sample_size"] == 50 and agg["direction_hit_rate"] is None
+    assert agg["calibration"] == {"ece": None, "brier": None, "base_rate_brier": None,
+                                  "n": 50, "n_excluded": 0, "n_zero_conf": 0}
+    _assert_no_small_sample_rate_leak({"windows": {"all": agg}}, where="complementary")
+
+
+def test_calibration_skips_rows_without_numeric_confidence_and_unclear():
+    rows = _conf_rows(30, 0) + [_make_row("2026-04-10", "up", True)]       # 老存档：没有 confidence
+    rows.append({**_make_row("2026-04-10", "none", None), "confidence": 0.0, "directions": {"30d": "flat"}})
+    assert _aggregate(rows)["calibration"]["n"] == 30
+
+
+def test_public_json_with_calibration_has_no_sensitive_fields(tmp_path):
+    """含 confidence / verdict / asset 的原始行 → 输出 JSON 不得出现 CI grep 的任一关键字，也没有逐档明细。"""
+    rows = [{**r, "asset": "NDQ.AX" if i % 2 else "GC=F", "verdict": "HOLD", "source": "live"}
+            for i, r in enumerate(_conf_rows(30, 10))]
+    jsonl = tmp_path / "v.jsonl"
+    _write_jsonl(jsonl, rows)
+    content = json.dumps(build_summary(jsonl), ensure_ascii=False)
+    assert '"calibration"' in content
+    for forbidden in ('"symbol"', '"threshold"', '"verdict_id"', '"asset"', "NDQ", "GC=F", "GC_F",
+                      "verdict", "asset", '"bins"', "mean_confidence"):
+        assert forbidden not in content, f"公开 JSON 含 {forbidden!r}"
+
+
+def test_leak_predicate_flags_calibration_numbers_on_small_sample():
+    """非空证明：n<30 却带校准数字的 JSON 必被谓词抓住（同 test_leaky_summary_dict_is_flagged_by_predicate）。"""
+    leaky = {"windows": {"30d": {
+        "direction_hit_rate": None, "sample_size": 5, "by_direction": {},
+        "calibration": {"ece": 0.1, "brier": 0.2, "base_rate_brier": 0.2, "n": 5}}}}
+    with pytest.raises(AssertionError):
+        _assert_no_small_sample_rate_leak(leaky, where="<in-memory leaky calibration>")
+
+
+def test_calibration_excludes_zero_confidence_rows_and_counts_them():
+    """自报恰为 0.0（cio_parse 解析失败兜底）不进校准，单列 n_zero_conf（评审 #455-4）。"""
+    ref = _aggregate(_conf_rows(30, 10))
+    agg = _aggregate(_conf_rows(30, 10) + _conf_rows(5, 5, conf=0.0))
+    assert agg["sample_size"] == 50                                  # 命中率口径照旧含这些行
+    cal = agg["calibration"]
+    assert (cal["n"], cal["n_zero_conf"], cal["n_excluded"]) == (40, 10, 10)
+    for k in ("ece", "brier", "base_rate_brier"):
+        assert cal[k] == ref["calibration"][k]
+
+
+def test_calibration_suppressed_when_zero_conf_subset_is_small():
+    """校准样本排除了 n_zero_conf 行而 direction_hit_rate 含它们：两个公开的命中率相减能逆算这几行的命中。
+    所以 0<n_zero_conf<30 时校准数字置 null（计数保留）；0 条或 ≥30 条不受影响。"""
+    small = _suppress_small_samples(_aggregate(_conf_rows(30, 10) + _conf_rows(2, 0, conf=0.0)))
+    assert small["direction_hit_rate"] is not None                   # 命中率本身照常公开
+    assert small["calibration"] == {"ece": None, "brier": None, "base_rate_brier": None,
+                                    "n": 40, "n_excluded": 2, "n_zero_conf": 2}
+    _assert_no_small_sample_rate_leak({"windows": {"all": small}}, where="zero-conf subset")
+    big = _suppress_small_samples(_aggregate(_conf_rows(30, 10) + _conf_rows(15, 15, conf=0.0)))
+    assert big["calibration"]["n_zero_conf"] == 30 and big["calibration"]["brier"] is not None
+    leaky = {"windows": {"30d": {"direction_hit_rate": 0.75, "sample_size": 42, "by_direction": {},
+             "calibration": {"ece": 0.1, "brier": 0.2, "base_rate_brier": 0.19, "n": 40, "n_zero_conf": 2}}}}
+    with pytest.raises(AssertionError):
+        _assert_no_small_sample_rate_leak(leaky, where="<in-memory leaky zero-conf>")
+
+
+def test_calibration_suppressed_when_any_small_subset_is_excluded():
+    """不管排除原因（confidence 缺失 / 非数字 / 0.0）：n_excluded = sample_size − calibration.n 落在 (0, 30) 就置 null。
+    老存档没有 confidence 字段的 5 行 → 校准 n=40、sample_size=45：p̄ 与 Brier 能逆算这 5 行的命中。"""
+    rows = _conf_rows(30, 10) + [_make_row("2026-04-10", "flat", i % 2 == 0) for i in range(5)]   # 5 行无 confidence
+    raw = _aggregate(rows)
+    assert (raw["sample_size"], raw["calibration"]["n"], raw["calibration"]["n_excluded"]) == (45, 40, 5)
+    assert raw["calibration"]["brier"] is not None                   # 原始统计有数；抑制只发生在对外这一层
+    pub = _suppress_small_samples(raw)
+    assert pub["direction_hit_rate"] is not None
+    assert pub["calibration"] == {"ece": None, "brier": None, "base_rate_brier": None,
+                                  "n": 40, "n_excluded": 5, "n_zero_conf": 0}
+    _assert_no_small_sample_rate_leak({"windows": {"all": pub}}, where="n_excluded=5")
+    # 谓词非空证明：同一份数据如果不抑制，谓词必须报
+    with pytest.raises(AssertionError):
+        _assert_no_small_sample_rate_leak({"windows": {"all": raw}}, where="<unsuppressed n_excluded=5>")
+    # 排除 ≥30 行（子集本身够大）不抑制
+    big = _suppress_small_samples(_aggregate(
+        _conf_rows(30, 10) + [_make_row("2026-04-10", "flat", True) for _ in range(30)]))
+    assert big["calibration"]["n_excluded"] == 30 and big["calibration"]["brier"] is not None

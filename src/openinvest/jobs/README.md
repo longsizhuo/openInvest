@@ -10,7 +10,7 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `commsec_sync.py` | 每 2h | 拉 CommSec 成交回执邮件，更新 portfolio.holdings |
 | `dreaming.py` | 每天 3am | 三阶段记忆整合（Light → REM → Deep Sleep），insights/ 沉淀长期模式 |
 | `pnl_snapshot.py` | 工作日每 2h | 算 PnL 写 jsonl 历史，渲染 `docs/pnl_chart.svg` |
-| `verdict_review.py` | 每天 2am（Asia/Shanghai） | 只复盘 live 委员会决议，命中率刷进 verdict_review.jsonl（纪律台账 / GUI 命中率页上游）；尾巴顺手刷新 confidence_lookup.json（邮件/事件提醒/API 裁决旁的同类决议查表，样本 = live + 前瞻纸面舰队，舰队只进这张表）；只读行情库、不触网 |
+| `verdict_review.py` | 每天 2am（Asia/Shanghai） | 只复盘 live 委员会决议，命中率刷进 verdict_review.jsonl（纪律台账 / GUI 命中率页上游）；尾巴顺手刷新 confidence_lookup.json（邮件/事件提醒/API 裁决旁的同类决议查表，样本 = live + 前瞻纸面舰队，舰队只进这张表）与 verdict_neutrality.json（裁决中性度聚合，日报一行读它）；summary/`docs/verdict_accuracy.md` 另有自报置信度校准表；只读行情库、不触网 |
 | `event_watch.py` | 北京 8:00-次日 2:30 每 30min（config `event.watch_schedule` 可改）| 扫多源新闻 → LLM 归一化 → 命中持仓则邮件 + 触发委员会（ADR-006）|
 | `price_sentinel.py` | 同窗口每 5min（config `event.sentinel_schedule` 可改）| 价格垂直线检测（10min vs 日ATR%，零 LLM）→ **先报警邮件后触发委员会**（ADR-025）|
 | `backup.py` | 每天 03:30（Asia/Shanghai）| 先 checkpoint `db/` 下的 SQLite 库（进包的 trades/insights/jobs 三个把 WAL 里没落盘的成交刷进主库），再把 `memory/` + 这三个库打成 `.backups/auto_<UTC时间戳>.zip`（平日不含 `memory/.backtest*`，约占整份 89%；Asia/Shanghai 周日那次带上前瞻舰队，文件名加 `_full`），共用同一个 14 份轮转（手动备份不动，自然留 2 份 `_full`）；不备 market_data.db / events.db（可重拉）；失败抛异常 → job_watchdog 告警。恢复走 `plugin/skills/invest-backup` 的 `run.sh restore` |

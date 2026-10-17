@@ -131,7 +131,8 @@ def test_summarize_buckets_never_merge():
     reviews = [_rv("2024-03-01", "BUY", True),   # contaminated (≤ cutoff)
                _rv("2025-06-02", "BUY", False)]  # holdout (> cutoff)
     s = vr.summarize(reviews)
-    assert set(s) == {"total", "weekend_dup_excluded", "cutoff", "holdout", "contaminated"}
+    assert set(s) == {"total", "weekend_dup_excluded", "cutoff", "calibration", "neutrality",
+                       "holdout", "contaminated"}
     assert s["total"] == 2
     assert s["holdout"]["n"] == 1 and s["contaminated"]["n"] == 1
     # 绝不存在合并成一个数的顶层命中率

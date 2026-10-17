@@ -44,6 +44,7 @@ memory/
 │   ├── short-term-recall.json # Light Sleep 摄入信号
 │   ├── candidates.json        # REM Sleep 候选模式
 │   ├── confidence_lookup.json # verdict_review 每日写：裁决旁展示的同类决议查表（live + 前瞻纸面舰队，每格记 n_live/n_fleet）
+│   ├── verdict_neutrality.json # verdict_review 每日写：裁决分布 vs 市场实际方向分布的聚合 + 一句人话（日报「裁决中性度」一行读它）
 │   └── events.jsonl           # 三阶段审计日志
 └── .state/                    # 简单 KV (已处理邮件 ID 等)
     └── processed_emails.json

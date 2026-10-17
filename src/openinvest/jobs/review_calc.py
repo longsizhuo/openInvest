@@ -11,7 +11,7 @@ shell 各自 `import ... as summarize` 保持历史调用面。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -332,10 +332,14 @@ def summarize_verdict_reviews(reviews: List[VerdictReview]) -> Dict[str, Any]:
     assert len(holdout) + len(contaminated) == len(reviews), \
         "contaminated 分桶必须无遗漏无重叠（每条 review 非 holdout 即 contaminated）"
 
+    # A5：自报置信度校准 + 裁决中性度只看 live 且干净（与公开 JSON 同口径，backtest 不混进来）
+    live_holdout = [r for r in holdout if r.source == "live"]
     return {
         "total": total,
         "weekend_dup_excluded": total - len(reviews),
         "cutoff": CONTAMINATION_CUTOFF,
+        "calibration": calibration_summary(live_holdout),
+        "neutrality": neutrality_summary(live_holdout),
         "holdout": _summarize_bucket(holdout, suppress_rates=len(holdout) < 30),
         "contaminated": {
             **_summarize_bucket(contaminated, suppress_rates=False),
@@ -424,6 +428,150 @@ def _bucket_lines(title: str, bucket: Dict[str, Any], *, note: Optional[str] = N
     )
     return lines
 
+
+
+# =====================================================================
+# 置信度校准 + 裁决中性度（评审路线 Sprint 2 · A5）——只测量/展示，不碰裁决逻辑
+# =====================================================================
+# 校准：CIO 自报的 confidence 当"命中概率"，和 30d 实际命中对账。展示层早已不用自报分
+# （见下面的查表），这里回答的是"自报分到底有没有信息"。n<30 的档不出数字（红线 #2 同阈值）。
+# 中性度：裁决分布 vs 同样本市场实际方向分布——"永远 HOLD"在横盘市里不是判断，是运气。
+
+CALIBRATION_BINS = ("≤0.4", "0.4–0.6", "0.6–0.7", "0.7–0.8", ">0.8")
+CALIBRATION_MIN_N = 30   # 红线 #2 / LOOKUP_MIN_N 同阈值
+
+
+def _confidence_bin(conf: float) -> int:
+    """自报分 → 档位下标。边界：≤0.4 | (0.4,0.6) | [0.6,0.7) | [0.7,0.8] | >0.8。
+    0.6 归 0.6–0.7 档（它是降级常量，生产里扎堆在此）。先 round(2) 防浮点贴边。"""
+    c = round(float(conf), 2)
+    if c <= 0.4:
+        return 0
+    if c < 0.6:
+        return 1
+    if c < 0.7:
+        return 2
+    if c <= 0.8:
+        return 3
+    return 4
+
+
+def calibration_from_pairs(pairs: Iterable[Tuple[float, bool]], *,
+                           min_n: int = CALIBRATION_MIN_N) -> Dict[str, Any]:
+    """[(自报 confidence, 是否命中)] → 校准汇总（纯函数；review 与公开 export 共用同一份算法）。
+
+    - brier = mean (confidence − hit)²：把自报分当"命中概率"打分，越低越好。
+    - base_rate_brier = mean (p̄ − hit)²，p̄ = 整个样本的命中率：一个永远报 p̄ 的傻瓜的 Brier。
+      brier 高于它 = 自报分比"不看内容、永远报平均命中率"还差。每档的 base_rate_brier 用同一个
+      p̄（整体命中率）算，所以各档按样本数加权平均 = 整体值。
+    - ece = Σ (档 n / N) × |档平均自报 − 档命中率|（档权重 ECE）。
+    - 自报恰为 0.0 的行不进校准、单列 n_zero_conf：那是 cio_parse 解析失败的兜底值，不是"自报 0% 把握"，
+      混进来会被当成最低档的"全错预测"拉高 Brier / ECE。
+    样本 n < min_n → 整体数字全 None；档 n < min_n → 该档数字 None（n 始终保留）。
+    """
+    all_pts = [(float(c), 1.0 if h else 0.0) for c, h in pairs]
+    pts = [(c, y) for c, y in all_pts if c != 0.0]
+    n = len(pts)
+    out: Dict[str, Any] = {"n": n, "n_zero_conf": len(all_pts) - n, "min_n": min_n, "hit_rate": None,
+                           "ece": None, "brier": None, "base_rate_brier": None, "bins": []}
+    by_bin: List[List[Tuple[float, float]]] = [[] for _ in CALIBRATION_BINS]
+    for c, y in pts:
+        by_bin[_confidence_bin(c)].append((c, y))
+    p_bar = sum(y for _, y in pts) / n if n else 0.0
+    if n and n >= min_n:
+        out["hit_rate"] = round(p_bar, 3)
+        out["brier"] = round(sum((c - y) ** 2 for c, y in pts) / n, 4)
+        out["base_rate_brier"] = round(sum((p_bar - y) ** 2 for _, y in pts) / n, 4)
+        out["ece"] = round(sum(
+            len(b) / n * abs(sum(c for c, _ in b) / len(b) - sum(y for _, y in b) / len(b))
+            for b in by_bin if b), 4)
+    for label, b in zip(CALIBRATION_BINS, by_bin):
+        cell: Dict[str, Any] = {"label": label, "n": len(b), "hit_rate": None,
+                                "mean_confidence": None, "brier": None, "base_rate_brier": None}
+        if len(b) >= min_n:
+            cell["hit_rate"] = round(sum(y for _, y in b) / len(b), 3)
+            cell["mean_confidence"] = round(sum(c for c, _ in b) / len(b), 3)
+            cell["brier"] = round(sum((c - y) ** 2 for c, y in b) / len(b), 4)
+            cell["base_rate_brier"] = round(sum((p_bar - y) ** 2 for _, y in b) / len(b), 4)
+        out["bins"].append(cell)
+    return out
+
+
+def calibration_summary(reviews: List[VerdictReview], window: str = "30d", *,
+                        min_n: int = CALIBRATION_MIN_N) -> Dict[str, Any]:
+    """按自报 confidence 分档对账 window 窗口的命中。只算有 hits[window] 的行
+    （UNCLEAR 不打 hits，自然排除；强制 HOLD 的 ≤0.4 行照算，它们也是自报分；
+    自报恰为 0.0 的行排除并计入 n_zero_conf）。"""
+    out = calibration_from_pairs(
+        ((r.confidence, r.hits[window]) for r in reviews
+         if window in r.hits and r.verdict in EXPECTED_DIRECTION),
+        min_n=min_n)
+    out["window"] = window
+    return out
+
+
+def neutrality_summary(reviews: List[VerdictReview], window: str = "30d", *,
+                       min_n: int = CALIBRATION_MIN_N) -> Dict[str, Any]:
+    """裁决分布（各 verdict 占比，含 UNCLEAR）vs 同样本（有 directions[window] 的行）市场实际方向分布。
+    sentence = 一行人话；n < min_n 不出（None）——日报据此不出这行。"""
+    rows = [r for r in reviews if r.directions.get(window) in ("up", "down", "flat")]
+    n = len(rows)
+
+    def _cell(c: int) -> Dict[str, Any]:
+        return {"n": c, "share": round(c / n, 3) if n else None}
+
+    vc = {v: 0 for v in VERDICT_BUCKETS}
+    for r in rows:
+        vc[r.verdict if r.verdict in EXPECTED_DIRECTION else "UNCLEAR"] += 1
+    mc = {d: sum(1 for r in rows if r.directions[window] == d) for d in ("up", "down", "flat")}
+    out: Dict[str, Any] = {"window": window, "n": n,
+                           "verdicts": {v: _cell(c) for v, c in vc.items()},
+                           "market": {d: _cell(c) for d, c in mc.items()},
+                           "sentence": None}
+    if n and n >= min_n:
+        out["sentence"] = (
+            f"过去 {n} 条已成熟裁决（{window}）中 {vc['HOLD'] / n:.0%} 是 HOLD，"
+            f"同期市场 {mc['flat'] / n:.0%} 横盘（{mc['down'] / n:.0%} 下跌 / {mc['up'] / n:.0%} 上涨）；"
+            f"BUY {vc['BUY']} 条、SELL {vc['SELL']} 条。")
+    return out
+
+
+def _calibration_lines(cal: Dict[str, Any]) -> List[str]:
+    lines = [f"\n## 置信度校准（CIO 自报 vs {cal.get('window', '30d')} 实际命中 · live 干净样本 n={cal['n']}）\n"]
+    zero = (f"另有 {cal['n_zero_conf']} 条自报恰为 0.0（解析失败兜底），不计入。\n"
+            if cal.get("n_zero_conf") else "")
+    if cal["n"] == 0:
+        return lines + ["_无样本_\n", zero]
+    if cal["ece"] is None:
+        return lines + [f"📊 样本量 {cal['n']} < {cal['min_n']} —— 按红线 #2 不展示具体数字。\n", zero]
+    lines += ["| 自报档 | N | 平均自报 | 实际命中率 | 本档 Brier | 本档基率 Brier |", "|---|---|---|---|---|---|"]
+    for b in cal["bins"]:
+        if b["hit_rate"] is None:
+            lines.append(f"| {b['label']} | {b['n']} | {'n<30 不出数字' if b['n'] else '—'} | — | — | — |")
+        else:
+            lines.append(f"| {b['label']} | {b['n']} | {b['mean_confidence']:.2f} | {b['hit_rate']:.1%} | "
+                         f"{b['brier']:.3f} | {b['base_rate_brier']:.3f} |")
+    verdict = "自报分比「永远报整体命中率」更差" if cal["brier"] > cal["base_rate_brier"] else "自报分好于「永远报整体命中率」"
+    lines.append(f"\n**整体**：命中率 {cal['hit_rate']:.1%}，ECE {cal['ece']:.3f}，"
+                 f"Brier {cal['brier']:.4f} vs 基率 Brier {cal['base_rate_brier']:.4f} → {verdict}。"
+                 "（Brier 以自报分当命中概率；基率 Brier = 常数预测整体命中率。）\n")
+    if zero:
+        lines.append(zero)
+    return lines
+
+
+def _neutrality_lines(neu: Dict[str, Any]) -> List[str]:
+    lines = [f"\n## 裁决中性度（裁决分布 vs 同样本市场 {neu.get('window', '30d')} 实际方向 · live 干净样本 n={neu['n']}）\n"]
+    if neu["n"] == 0:
+        return lines + ["_无样本_\n"]
+    pct = lambda c: "—" if c["share"] is None else f"{c['share']:.0%}"  # noqa: E731
+    lines += ["| 裁决 | N | 占比 |", "|---|---|---|"]
+    lines += [f"| {v} | {c['n']} | {pct(c)} |" for v, c in neu["verdicts"].items()]
+    lines += ["\n| 同期市场方向 | N | 占比 |", "|---|---|---|"]
+    lines += [f"| {d} | {c['n']} | {pct(c)} |" for d, c in neu["market"].items()]
+    n = neu["n"]
+    lines.append(f"\n**{neu['sentence'] or f'样本量 {n} < 30，不出结论'}**\n")
+    return lines
 
 
 # =====================================================================
@@ -644,6 +792,8 @@ __all__ = [
     "VerdictReview", "K_FLAT", "FLAT_CEILING_PCT",
     "_flat_band", "_is_hit", "_summarize_bucket",
     "summarize_verdict_reviews", "_bucket_lines",
+    "CALIBRATION_BINS", "CALIBRATION_MIN_N", "calibration_from_pairs", "calibration_summary",
+    "neutrality_summary", "_calibration_lines", "_neutrality_lines",
     "LOOKUP_MIN_N", "LOOKUP_FORCED_CONF", "build_confidence_lookup", "merge_confidence_lookup",
     "is_forced_or_low_confidence", "confidence_display",
     "WINDOWS", "SHAPE_WINDOW", "SHAPE_CLASSES",

@@ -596,6 +596,10 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         log.warning(f"账户业绩渲染失败 graceful: {e}")
         performance_md = ""
 
+    # 裁决中性度：读最近一次复盘落的聚合（零 LLM；没复盘过 / 读失败 → None → 报告不出这行）
+    from openinvest.jobs.verdict_review import load_neutrality
+    neutrality = load_neutrality()
+
     # D17：委员会 / Gemini / 翻译官都已跑完才读——只进邮件，不进任何 LLM 输入
     asset_events = _load_asset_events(target_assets)
 
@@ -617,6 +621,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         render_target="email" if send_email else "chat",
         asset_events=asset_events,
         confidence_lookup=confidence_lookup,
+        neutrality=neutrality,
     )
 
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）

@@ -7,6 +7,7 @@
 输出：docs/verdict_accuracy.md (gitignored, 含真数字给本地分析用)
      memory/.dreams/verdict_review.jsonl（结构化结果，给 dreaming 用）
      memory/.dreams/confidence_lookup.json（裁决旁展示的同类决议查表，D10 P1）
+     memory/.dreams/verdict_neutrality.json（裁决中性度聚合，日报读它出一行；A5）
 
 命中率定义：
 - BUY / ACCUMULATE → 后续涨 >0% = hit
@@ -45,6 +46,8 @@ from openinvest.jobs.review_calc import (  # noqa: F401
     counterfactual_pnl,
     roundtrip_cost_rate,
     _bucket_lines,
+    _calibration_lines,
+    _neutrality_lines,
     _flat_band,
     build_confidence_lookup,
     merge_confidence_lookup,
@@ -524,6 +527,9 @@ def write_report(reviews: List[VerdictReview], summary: Dict[str, Any]) -> Path:
     lines += _bucket_lines("Holdout（干净业绩 · cutoff 之后）", holdout)
     lines += _bucket_lines("Contaminated（记忆穿越 · cutoff 及之前）", contaminated,
                            note=contaminated.get("note"))
+    # A5：自报置信度校准 + 裁决中性度（live 干净样本，聚合表，不含逐行数据）
+    lines += _calibration_lines(summary["calibration"])
+    lines += _neutrality_lines(summary["neutrality"])
 
     # 诚实解读：仅基于 holdout（真业绩）。holdout 被 sub30 抑制或无方向性样本时退化提示。
     lines.append("\n## 诚实解读（仅基于 holdout 干净样本）\n")
@@ -622,6 +628,40 @@ def write_confidence_lookup(reviews: List[VerdictReview]) -> Path:
     return MemoryStore().write_dream_state(CONFIDENCE_LOOKUP, data)
 
 
+NEUTRALITY = "verdict_neutrality"  # .dreams/verdict_neutrality.json（A5：日报"裁决中性度"一行的来源）
+
+
+def write_neutrality(summary: Dict[str, Any]) -> Path:
+    """每日复盘尾巴落中性度聚合（纯聚合：分布占比 + 一句人话，无 symbol）。日报读它。"""
+    data = {**summary["neutrality"], "generated_at": datetime.now().isoformat(timespec="seconds")}
+    return MemoryStore().write_dream_state(NEUTRALITY, data)
+
+
+NEUTRALITY_MAX_AGE_DAYS = 3   # 复盘 cron 停了 / 一直失败时，日报别无限期挂着最后一次的数
+
+
+def load_neutrality(*, now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    """日报用：最近一次复盘的中性度（带 as_of 复盘日期）。没跑过 / 文件坏 / 样本不足（无 sentence）/
+    generated_at 缺失或超过 NEUTRALITY_MAX_AGE_DAYS 天 → None，调用方据此不出这行；
+    任何读失败只降级不阻断日报。now 仅供测试注入。"""
+    try:
+        data = MemoryStore().read_dream_state(NEUTRALITY)
+    except Exception as e:  # noqa: BLE001
+        log.warning("读裁决中性度失败，日报不出这行: %s", e)
+        return None
+    if not isinstance(data, dict) or not data.get("sentence"):
+        return None
+    try:
+        age = (now or datetime.now()) - datetime.fromisoformat(str(data.get("generated_at")))
+    except (TypeError, ValueError):
+        log.warning("裁决中性度 generated_at 缺失/非法，视为过期，日报不出这行")
+        return None
+    if age > timedelta(days=NEUTRALITY_MAX_AGE_DAYS):
+        log.warning("裁决中性度已过期 %s 天（复盘 job 可能停了），日报不出这行", age.days)
+        return None
+    return {**data, "as_of": str(data["generated_at"])[:10]}
+
+
 def _valid_lookup(read) -> Optional[Dict[str, Any]]:
     try:
         data = read()
@@ -653,6 +693,7 @@ def run(*, include_backtest: bool = False) -> Dict[str, Any]:
     md_path = write_report(reviews, summary)
     jsonl_path = write_jsonl(reviews)
     write_confidence_lookup(reviews)
+    write_neutrality(summary)
     return {
         "status": "ok",
         "summary": summary,

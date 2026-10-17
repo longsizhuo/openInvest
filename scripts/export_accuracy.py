@@ -10,6 +10,11 @@
 - by_direction 按 bullish / bearish / hold / unclear 分组（不出现具体标的）；unclear 只有 total
 - 每个方向桶附同样本市场基率 base_rate、提升 lift（= rate − base_rate）、Wilson 95% 区间 ci95；
   n<30 与 rate 一起抹掉（红线 #2）
+- 每个窗口附 calibration {ece, brier, base_rate_brier, n, n_excluded, n_zero_conf}：CIO 自报置信度的校准（A5）。
+  只出整体数字，不出分档明细；confidence 非数字 / 恰为 0.0（解析失败兜底）的行不进校准，
+  n_excluded = sample_size − n（不管原因），n_zero_conf 是其中 0.0 的条数；
+  n<30 / direction_hit_rate 被抑制 / 0<n_excluded<30 时数字置 null（计数保留）。
+  原因：base_rate_brier = p(1−p) 会泄露整体命中率，与 direction_hit_rate 相减能逆算被排除的那几行的命中
 
 用法：
     python scripts/export_accuracy.py
@@ -27,10 +32,10 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from openinvest.calc.symbols import is_closed_weekend
-from openinvest.jobs.review_calc import wilson_ci
+from openinvest.jobs.review_calc import calibration_from_pairs, wilson_ci
 
 ROOT = Path(__file__).parent.parent
 
@@ -139,6 +144,8 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     # 反事实（只出比率，不出金额）：同窗口基准超额均值 + 跑赢基准比例
     excess: Dict[str, List[float]] = {b: [] for b in ("bullish", "bearish", "hold")}
 
+    cal_pairs: List[Tuple[float, bool]] = []   # (CIO 自报 confidence, 命中)——只在这一层聚合成整体四个数
+
     for row in rows:
         raw_dir = str(row.get("expected_direction") or "").lower().strip()
         if _DIRECTION_MAP.get(raw_dir, "unclear") == "unclear":
@@ -182,6 +189,9 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         total_count += 1
         if is_hit:
             total_hit += 1
+        conf = row.get("confidence")
+        if isinstance(conf, (int, float)) and not isinstance(conf, bool):
+            cal_pairs.append((float(conf), is_hit))
 
     # 计算各方向命中率（四舍五入 2 位）+ 同桶基率 / 提升 / Wilson 95% CI
     by_dir_out: Dict[str, Any] = {}
@@ -205,11 +215,14 @@ def _aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         }
     by_dir_out["unclear"] = {"hit": None, "total": unclear_total, "rate": None}
 
+    cal = calibration_from_pairs(cal_pairs, min_n=1)   # 原始统计；n<30 抑制在 _suppress_small_samples
+    cal["n_excluded"] = total_count - cal["n"]          # 进了命中率、没进校准的行（confidence 非数字 / 0.0）
     return {
         "direction_hit_rate": (
             round(total_hit / total_count, 4) if total_count > 0 else None
         ),
         "sample_size": total_count,
+        "calibration": {k: cal[k] for k in ("ece", "brier", "base_rate_brier", "n", "n_excluded", "n_zero_conf")},
         "hit_horizon": HIT_HORIZON,
         "by_direction": by_dir_out,
         "base_rate": {
@@ -269,6 +282,21 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
     out["by_direction"] = new_by_dir
     if 0 < suppressed_total < MIN_SAMPLE_FOR_PUBLIC:
         out["direction_hit_rate"] = None
+
+    # calibration：n<30 抹数字（n 保留）。另：base_rate_brier = p̄(1−p̄) 一步还原整体命中率，
+    # 所以只要 direction_hit_rate 被抑制（含上面的互补抑制），校准数字也必须一并抹掉，
+    # 否则小桶 hit 可由 p̄ × n − Σ 其余桶 hit 减法逆算
+    # 另：校准样本排除了一些行（confidence 非数字 / 0.0），direction_hit_rate 含它们——校准 n 与 sample_size 的差
+    # 加上 p̄ 能逆算这几行的命中，所以被排除行数 n_excluded = sample_size − calibration.n（不管原因）落在
+    # (0, 30) 时同样置 null（同互补抑制纪律）；0 条或 ≥30 条不受影响
+    cal = out.get("calibration")
+    if cal:
+        n_excluded = int(out.get("sample_size", 0) or 0) - int(cal.get("n", 0) or 0)
+        if (int(cal.get("n", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC
+                or out.get("direction_hit_rate") is None
+                or 0 < n_excluded < MIN_SAMPLE_FOR_PUBLIC):
+            out["calibration"] = {k: (v if k in ("n", "n_excluded", "n_zero_conf") else None)
+                                  for k, v in cal.items()}
 
     # base_rate 是市场属性不是模型业绩，但小样本占比同样噪音大且可被截图误读——
     # 同一 n<30 纪律

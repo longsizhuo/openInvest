@@ -288,6 +288,7 @@ _GLOSSARY = """## 术语表（看不懂的词在这里查）
 
 - **裁决**: 委员会结论。HOLD=持有不动；ACCUMULATE=小额加仓；BUY=买入；TRIM=减一部分；SELL=清仓
 - **同类决议查表**（裁决旁那串字）: 过去同类决议（实盘 + 纸面舰队，括号里注明来源；本机样本不够时用随包的默认表）30 天后怎样。HOLD 写的是"涨跌留在正常波动带内的比例"，旁边给同期市场横盘基率——两者差不多说明只是市场在横盘，不代表判断准；加仓/减仓写的是方向判对的比例。样本 <30 显示"样本不足"
+- **裁决中性度**: 已成熟（30 天）的裁决里 HOLD 占多少，对照同一批样本里市场实际有多少是横盘（涨跌留在该资产正常波动带内）。两个数接近 = HOLD 多主要是因为市场本来就在横盘；HOLD 占比明显更高 = 委员会比市场更倾向“不动”。只描述分布，不代表对错
 - **自报**: CIO 自己写的 0-1 把握度，只作留档（历史上它高低和对错基本无关）
 - **输入缺失/强制 HOLD**: 被规则强制改成 HOLD（数据缺失 / 集中度 lens / 没给买回点 / 防御拦截）或自报 ≤0.4，不查表
 - **主导方**: 这次结论主要听谁的——macro=宏观面 / quant=技术面 / risk=风控
@@ -322,6 +323,7 @@ def assemble_full_report(
     render_target: str = "email",
     asset_events: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     confidence_lookup: Optional[Dict[str, Any]] = None,
+    neutrality: Optional[Dict[str, Any]] = None,
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -350,6 +352,8 @@ def assemble_full_report(
             只展示，不进任何 LLM 输入。
         confidence_lookup: verdict_review 刷新的同类决议查表（entry 层读好传入）；
             裁决旁显示它而不是 CIO 自报的 confidence（D10 P1）。None → "样本不足（n=0）"。
+        neutrality: verdict_review 最近一次复盘的裁决中性度（verdict_review.load_neutrality，
+            entry 层读好传入；含 sentence + as_of）。None / 无 sentence → 不出这行。
         performance_md: 真实账户业绩段（services.account_performance.render_performance_md，
             entry 层算好传入）：TWR / XIRR / 最大回撤 / vs 基准各一行。空 → 不出 section。
 
@@ -520,6 +524,12 @@ def assemble_full_report(
         if performance_md.strip() else ""
     )
 
+    # 裁决中性度（最近一次复盘的聚合，entry 层传入）：一行，email / chat 同一文本。没有复盘结果就不出。
+    neutrality_section = (
+        f"\n**裁决中性度**（{neutrality.get('as_of') or '最近一次'}复盘）: {neutrality['sentence']}\n\n---\n"
+        if (neutrality or {}).get("sentence") else ""
+    )
+
     # chat 变体置顶速览（见 build_tldr_block 动机）；email 不加——邮件本来就
     # 一次性看全文，标题+目录结构已经够用，不需要重复摘要。
     tldr_section = (
@@ -545,7 +555,7 @@ def assemble_full_report(
 {asset_section}
 
 ---
-{performance_section}{discipline_section}
+{performance_section}{neutrality_section}{discipline_section}
 ## {n+2}. 摩擦成本 (CNY → AUD 换汇)
 ```
 {friction_report}
