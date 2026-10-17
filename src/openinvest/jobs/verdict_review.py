@@ -348,19 +348,33 @@ def _build_symbol_resolver() -> Dict[str, Dict[str, Any]]:
 
 # ---------- 主流程 ----------
 
+def _review_context() -> Dict[str, str]:
+    """一次复盘只读一次的上下文：组合基准 symbol + 当前基准币种（CR #442 建议 6）。"""
+    try:
+        from openinvest.utils.base_currency import base_currency
+        base = str(base_currency() or "CNY").upper()
+    except Exception:  # noqa: BLE001
+        base = "CNY"
+    return {"benchmark_symbol": _benchmark_symbol(), "base_ccy": base}
+
+
 def review_one(
     committee_dir: Path,
     stem: str,
     resolver: Optional[Dict[str, Dict[str, Any]]] = None,
     *,
     regime: bool = True,
+    ctx: Optional[Dict[str, str]] = None,
 ) -> Optional[VerdictReview]:
     """对单个 verdict 文件做事后 review。
 
     stem: committee 文件名去掉 .md（可能是转义名 GC_F，也可能是 NDQ.AX）。
     resolver: 转义名 → holding 映射，用于旧文件拿回真实 symbol + proxy_kind。
     regime: False 时不算 regime_at_decision（只要标签的调用方省掉一半耗时，见 review_fleet）。
+    ctx: _review_context() 的结果（基准 symbol + 基准币种），review_all/review_fleet 算一次传入；
+        None → 本条自己读（单条调用方便，但同一次复盘应传同一份，防中途改 config 混进两个基准）。
     """
+    ctx = ctx if ctx is not None else _review_context()
     decision_date = committee_dir.name  # YYYY-MM-DD
     path = committee_dir / f"{stem}.md"
     parsed = _parse_committee_file(path)
@@ -395,7 +409,8 @@ def review_one(
         macro_at_decision=parsed["macro_at_decision"],
         input_health=parsed.get("input_health") or {},
         alloc_cny=float(parsed.get("alloc_cny") or 0.0),
-        benchmark_symbol=_benchmark_symbol(),
+        alloc_currency=str(parsed.get("alloc_currency") or "").upper(),
+        benchmark_symbol=ctx.get("benchmark_symbol", ""),
         cost_rate=roundtrip_cost_rate(real_symbol),
         source="backtest" if "backtest" in str(committee_dir) else "live",
         # 决议日落在 LLM 训练窗口 → 记忆穿越，下游分桶/Dreaming 据此剔出业绩统计。
@@ -421,9 +436,11 @@ def review_one(
             if bench is not None:
                 rv.benchmark_returns[f"{window}d"] = round(bench, 4)
                 rv.excess_returns[f"{window}d"] = round(ret - bench, 4)
-            pnl = counterfactual_pnl(rv.alloc_cny, ret, rv.cost_rate)
-            if pnl is not None:
-                rv.followed_pnl[f"{window}d"] = pnl
+            # 币种口径（CR #442 建议 5a）：金额币种与当前基准币种不一致的行不进金额账本（老存档空=CNY）
+            if (rv.alloc_currency or "CNY") == ctx.get("base_ccy", "CNY"):
+                pnl = counterfactual_pnl(parsed["verdict"], rv.alloc_cny, ret, rv.cost_rate)
+                if pnl is not None:
+                    rv.followed_pnl[f"{window}d"] = pnl
             # 原始市场方向（verdict 无关）：给 Dreaming 算 regime 基率
             rv.directions[f"{window}d"] = (
                 "up" if ret > flat_th else ("down" if ret < -flat_th else "flat")
@@ -458,12 +475,13 @@ def review_all(*, include_backtest: bool = True, include_live: bool = True) -> L
     # 内部用文件里的 **Symbol** 行 + holdings 映射拿回真实 symbol（GC=F）再拉行情。
     # 旧 bug：直接拿 stem（GC_F/NDQ_AX）喂 yfinance → 全 404 → actual_returns 全空。
     resolver = _build_symbol_resolver()
+    ctx = _review_context()
     seen: set = set()  # (date, real_symbol) 去重，防同一 verdict 因转义产生双份
     for date_dir in sources:
         if not date_dir.is_dir():
             continue
         for md_file in date_dir.glob("*.md"):
-            rv = review_one(date_dir, md_file.stem, resolver)
+            rv = review_one(date_dir, md_file.stem, resolver, ctx=ctx)
             if not rv:
                 continue
             dedup_key = (rv.date, rv.asset, rv.source)
@@ -574,6 +592,7 @@ def review_fleet() -> List[VerdictReview]:
     base = MemoryStore().root / ".backtest"
     matured_by = date.today() - timedelta(days=30)   # 更晚的决议 30d 窗口还没到，标签必为空
     out: Dict[Tuple[str, str], VerdictReview] = {}
+    ctx = _review_context()
     for d in sorted(base.iterdir()) if base.exists() else []:
         try:
             day = date.fromisoformat(d.name)
@@ -585,7 +604,7 @@ def review_fleet() -> List[VerdictReview]:
             written = datetime.fromtimestamp(md.stat().st_mtime).date()
             if not day <= written <= day + timedelta(days=1):
                 continue
-            rv = review_one(d, md.stem, {}, regime=False)
+            rv = review_one(d, md.stem, {}, regime=False, ctx=ctx)
             if rv:
                 out.setdefault((rv.date, rv.asset), rv)
     return list(out.values())

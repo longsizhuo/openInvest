@@ -68,7 +68,8 @@ class VerdictReview:
     weekend_dup: bool = False  # 周末休市资产（FX/加密除外）的周末决议：基准=周五收盘，是周五样本的重复，不进命中率（D8）
     input_health: Dict[str, Any] = field(default_factory=dict)  # transcript 的 Input Health 块（老存档 {}）
     # ---- 反事实账本（Track A3，2026-10）：同窗口基准 + 扣往返成本的"照做 vs 不做" ----
-    alloc_cny: float = 0.0                 # CIO 建议金额（基准币种；买正卖负；HOLD 0）
+    alloc_cny: float = 0.0                 # CIO 建议金额（基准币种；买正卖负；HOLD 0；老存档符号不可信，方向看 verdict）
+    alloc_currency: str = ""               # 金额币种（transcript 的 "Suggested allocation XXX" 标签；老存档 ""=CNY）
     benchmark_symbol: str = ""             # 组合基准（config portfolio.benchmark_symbol）
     benchmark_returns: Dict[str, float] = field(default_factory=dict)  # 基准同窗口收益
     excess_returns: Dict[str, float] = field(default_factory=dict)     # 标的 − 基准（verdict 无关）
@@ -197,18 +198,23 @@ def roundtrip_cost_rate(symbol: str) -> float:
     return DEFAULT_ROUNDTRIP_COST_BPS / 10_000
 
 
-def counterfactual_pnl(alloc: float, actual_ret: Optional[float], cost_rate: float) -> Optional[float]:
+def counterfactual_pnl(verdict: str, alloc: float, actual_ret: Optional[float],
+                       cost_rate: float) -> Optional[float]:
     """"照 CIO 的金额做"相对"什么都不做（留现金）"的净损益，基准币种，1 位小数。
 
-    买侧（alloc > 0）：alloc × (标的收益 − 往返成本)
-    卖侧（alloc < 0）：|alloc| × (−标的收益 − 往返成本)——卖掉的那笔躲过了跌、也错过了涨
+    **方向由 verdict 定，金额只取绝对值**：regex 解析时代出过"TRIM 负号"类 bug（debate.py:300），
+    老存档里金额符号不可信，按符号分侧会把钱算到相反的一边（CR #442 必改 1）。
+    看涨（BUY/ACCUMULATE）：|alloc| × (标的收益 − 往返成本)
+    看跌（TRIM/SELL）：|alloc| × (−标的收益 − 往返成本)——卖掉的那笔躲过了跌、也错过了涨
     HOLD / UNCLEAR / 金额 0 → None（没有金额可言；HOLD 的对错看 excess_returns）
     """
-    if actual_ret is None or not alloc:
+    side = EXPECTED_DIRECTION.get(str(verdict or "").upper())
+    if actual_ret is None or not alloc or side not in ("up", "down"):
         return None
-    if alloc > 0:
-        return round(alloc * (actual_ret - cost_rate), 1)
-    return round(abs(alloc) * (-actual_ret - cost_rate), 1)
+    notional = abs(float(alloc))
+    if side == "up":
+        return round(notional * (actual_ret - cost_rate), 1)
+    return round(notional * (-actual_ret - cost_rate), 1)
 
 
 def _summarize_bucket(reviews: List[VerdictReview], *, suppress_rates: bool) -> Dict[str, Any]:
@@ -263,23 +269,31 @@ def _summarize_bucket(reviews: List[VerdictReview], *, suppress_rates: bool) -> 
                     entry[f"excess_mean_{key}"] = round(sum(ex) / len(ex), 4)
                     entry[f"beat_benchmark_rate_{key}"] = round(sum(1 for e in ex if e > 0) / len(ex), 3)
                     entry[f"n_benchmark_{key}"] = len(ex)
-                pnl = [r.followed_pnl[key] for r in subset if key in r.followed_pnl]
-                if pnl:
+                followed = [r for r in subset if key in r.followed_pnl]
+                if followed:
+                    pnl = [r.followed_pnl[key] for r in followed]
+                    notional = sum(abs(r.alloc_cny) for r in followed)
                     entry[f"followed_pnl_sum_{key}"] = round(sum(pnl), 1)
+                    # 名义金额加权净收益率（Σ净损益 / Σ|金额|）：可公开/可跨账户比较的那个数，金额不是
+                    entry[f"followed_net_return_{key}"] = round(sum(pnl) / notional, 4) if notional else None
                     entry[f"followed_positive_rate_{key}"] = round(sum(1 for x in pnl if x > 0) / len(pnl), 3)
                     entry[f"n_followed_{key}"] = len(pnl)
         bucket["by_verdict"][verdict] = entry
 
     # 反事实账本桶级合计：所有有金额的裁决（BUY/ACCUMULATE/TRIM/SELL）照做 vs 现金，扣成本
     bucket["benchmark_symbols"] = sorted({r.benchmark_symbol for r in reviews if r.benchmark_symbol})
-    bucket["benchmark_missing_count"] = sum(
-        1 for r in reviews if "30d" in r.actual_returns and "30d" not in r.excess_returns)
+    bucket["benchmark_missing_count"] = {
+        f"{w}d": sum(1 for r in reviews if f"{w}d" in r.actual_returns and f"{w}d" not in r.excess_returns)
+        for w in HIT_WINDOWS}
     if not suppress_rates:
         for window in HIT_WINDOWS:
             key = f"{window}d"
-            pnl = [r.followed_pnl[key] for r in reviews if key in r.followed_pnl]
-            if pnl:
+            followed = [r for r in reviews if key in r.followed_pnl]
+            if followed:
+                pnl = [r.followed_pnl[key] for r in followed]
+                notional = sum(abs(r.alloc_cny) for r in followed)
                 bucket[f"followed_pnl_total_{key}"] = round(sum(pnl), 1)
+                bucket[f"followed_net_return_{key}"] = round(sum(pnl) / notional, 4) if notional else None
                 bucket[f"followed_n_{key}"] = len(pnl)
 
     # 单独标注（不剔除，只让读者看见）：UNCLEAR / 被规则强制的 HOLD / 残缺输入上做的裁决
@@ -376,8 +390,8 @@ def _bucket_lines(title: str, bucket: Dict[str, Any], *, note: Optional[str] = N
         )
     bench = "、".join(bucket.get("benchmark_symbols") or []) or "未配置"
     lines += [f"\n### 反事实（同窗口基准 {bench}；照做 = 按 CIO 金额执行并在窗口末平仓，扣往返成本，对比留现金）\n",
-              "| Verdict | N(有基准) | 30d 超额均值 | 30d 跑赢基准 | N(有金额) | 30d 照做净损益合计 | 照做为正比例 |",
-              "|---|---|---|---|---|---|---|"]
+              "| Verdict | N(有基准) | 30d 超额均值 | 30d 跑赢基准 | N(有金额) | 30d 照做净损益合计 | 照做净收益率 | 照做为正比例 |",
+              "|---|---|---|---|---|---|---|---|"]
     def _pp(x: Optional[float]) -> str:
         return "—" if x is None else f"{x * 100:+.1f}pp"
 
@@ -394,11 +408,14 @@ def _bucket_lines(title: str, bucket: Dict[str, Any], *, note: Optional[str] = N
         lines.append(
             f"| {v_key} | {nb or 0} | {_pp(v.get('excess_mean_30d'))} | "
             f"{_pct(v.get('beat_benchmark_rate_30d'))} | {nf or 0} | "
-            f"{_money(v.get('followed_pnl_sum_30d'))} | {_pct(v.get('followed_positive_rate_30d'))} |"
+            f"{_money(v.get('followed_pnl_sum_30d'))} | {_pp(v.get('followed_net_return_30d'))} | "
+            f"{_pct(v.get('followed_positive_rate_30d'))} |"
         )
     if bucket.get("followed_n_30d"):
-        lines.append(f"\n**全部有金额的裁决照做（30d，扣成本，vs 留现金）：{bucket['followed_pnl_total_30d']:+,.0f}"
-                     f"（n={bucket['followed_n_30d']}）**；缺基准数据 {bucket.get('benchmark_missing_count', 0)} 条。\n")
+        miss = (bucket.get("benchmark_missing_count") or {}).get("30d", 0)
+        lines.append(f"\n**全部有金额的裁决照做（30d，扣成本，vs 留现金）：{bucket['followed_pnl_total_30d']:+,.0f}，"
+                     f"名义加权净收益率 {_pp(bucket.get('followed_net_return_30d'))}（n={bucket['followed_n_30d']}）**；"
+                     f"缺基准数据 {miss} 条。\n")
     lines.append(
         f"\n> 单独标注（已计入 N，未剔除）：UNCLEAR {bucket.get('unclear_count', 0)} 条不计命中；"
         f"强制/低置信 HOLD {bucket.get('forced_hold_count', 0)} 条；"

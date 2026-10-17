@@ -251,6 +251,11 @@ def _suppress_small_samples(window: Dict[str, Any]) -> Dict[str, Any]:
         if bucket == "unclear":
             new_by_dir[bucket] = c   # 本就只有 total，没有可还原的命中率
             continue
+        # 超额/跑赢比率的分母是 n_benchmark（基准覆盖不全时可能远小于 total）——按它自己的 n 抑制（CR #442 建议 2）
+        if int(c.get("n_benchmark", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
+            for k in ("excess_mean", "beat_benchmark_rate"):
+                if k in c:
+                    c[k] = None
         if int(c.get("total", 0) or 0) < MIN_SAMPLE_FOR_PUBLIC:
             c["rate"] = None
             c["hit"] = None
