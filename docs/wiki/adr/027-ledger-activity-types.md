@@ -22,7 +22,7 @@ documents:
 
 # ADR-027：账本活动类型
 
-- 状态：🟡 提议（2026-10-18），评审通过后实现（评审路线 C7）
+- 状态：🟡 提议（2026-10-18；按 PR #472 评审修订：有状态回放、在途对全部估值方可见、确认 CAS 幂等、按类型的确认延迟、`schema_version` 命名、复权价核实），评审通过后实现（评审路线 C7）
 - 背景：2026-10-17 全面评审对照 Wealthfolio / Ghostfolio / Portfolio Performance / Sharesight：它们都有
   分红 / 利息 / 费用 / 税 / 拆股 / 退回本金 的活动类型；openInvest 的账本只有买卖存取，
   `grep dividend|tax` 在 src/ 零命中，场外基金按"下单即成交"记账（实际 T+1 按当日净值确认）。
@@ -53,24 +53,29 @@ documents:
 
 | 字段 | 说明 |
 |---|---|
-| `schema` | 固定 2（老记录无此字段 = 1） |
-| `action` | `buy` / `sell` / `deposit` / `withdraw` / `dividend` / `interest` / `fee` / `tax` / `split` / `return_of_capital` / `fund_order_placed` / `fund_order_confirmed` / `fund_order_cancelled` / `delete_holding` |
+| `schema_version` | 固定 2（老记录无此字段 = 1）。不叫 `schema`：与 Pydantic v2 的 `BaseModel.schema()` 同名会告警 |
+| `action` | 新写入只用：`buy` / `sell` / `deposit` / `withdraw` / `gift` / `dividend` / `interest` / `fee` / `tax` / `split` / `return_of_capital` / `fund_order_placed` / `fund_order_confirmed` / `fund_order_cancelled` / `delete_holding` / `correction`。历史动作在解析层归一：`bought`→`buy`、`sold`→`sell`、`dca_reconcile_backfill`→`buy`(source=dca_reconcile, external=True)、`dca_reconcile_reverse`→`sell`(同)、`manual_override`→`correction`（它记的是**绝对值**，解析层从前序状态算出增量，见 D3） |
 | `symbol` | 标的（现金类活动可空） |
-| `units` / `price` / `amount` / `currency` | 数量 / 单价 / 金额（金额 = 数量×单价 ± 费用，写入时算好，读方不再猜） |
+| `units` / `price` / `amount` / `currency` | 数量 / 单价 / 不含费用的总额（`amount = units × price`）；费用与税单列，符号与现金影响只看 `cash_effect` |
 | `fee` / `tax_withheld` | 可选，与 `amount` 同币种 |
 | `cash_effect` | 该活动对现金的净影响（符号明确：流入正、流出负），**读方只认这个字段** |
 | `units_effect` | 对持仓数量的净影响（拆股为乘法：见 `split_ratio`） |
 | `split_ratio` | 仅 split：新/旧（10:1 拆写 10，1:10 并写 0.1） |
 | `external` | bool：是否外部现金流（deposit / withdraw / gift 为 True；分红利息为 False） |
 | `trade_date` / `settle_date` / `nav_date` | 日期三件套（场外基金用全部三个） |
-| `source` / `idempotency_key` / `note` | 来源（cli / mcp / dca_daily / commsec / fund_auto_confirm）、幂等键（#432 已有）、备注 |
+| `source` / `idempotency_key` / `note` / `correction` | 来源（cli / mcp / dca_daily / commsec / fund_auto_confirm）、幂等键（#432 已有）、备注、是否修正记录（manual_override 归一后为 True） |
 
 ### D3 单一解析入口 `core/ledger_events.py`（纯）
 
-`ledger_events(records) -> List[Activity]`：老记录按现有别名表归一（bought→buy、price_per_unit→price、
-`funding_source=external_funding`→external=True 等），新记录直接校验。`account_performance` /
-`decision_ledger` / `holdings_digest` / `pnl_snapshot` 全部改读它，各自的私有别名表删除。
-**回放不变量测试**：对生产流水只读拷贝，改前改后 NAV 序列逐日相等。
+`replay_ledger(records) -> Tuple[List[Activity], LedgerState]`：**有状态的折叠**，不是逐条无状态映射——
+`manual_override` 记的是持仓绝对值，必须从前序状态算出增量再归一成 `correction`（`units_effect` = 新−旧，
+`correction=True`）。老记录按现有别名表归一（bought→buy、sold→sell、price_per_unit→price、
+`funding_source=external_funding`→external=True、gift→external=True 等），新记录直接校验。
+读 `portfolio_history.jsonl` 的全部消费方切换到它：`services/account_performance`、`core/decision_ledger`
+（含 `core/decision_calc`）、`services/holdings_digest`、`jobs/pnl_snapshot`、`services/discipline`、
+`skill_cmds/lifecycle_cmds`、`connectors/web_api/routers/read.py`；`core/memory_store` 只保留写入与原始读取。
+各自的私有别名表删除。**回放不变量测试**：对生产流水只读拷贝，改前改后 NAV 序列逐日相等
+（合成脱敏流水进 tests；生产比对结果贴 PR）。
 
 ### D4 新活动对快照的确定性效果
 
@@ -87,7 +92,17 @@ documents:
 | fund_order_cancelled | +amount | 0 | — | 退回在途 |
 
 TWR / XIRR 口径（`account_performance`）：`external=True` 的进分母与 XIRR 现金流；dividend / interest /
-fee / tax 都是内部流，进 NAV 不进分母；split 对 NAV 无影响；在途金额按面值计入 NAV（不然 T+1 当天会假跌）。
+fee / tax 都是内部流，进 NAV 不进分母；split 对 NAV 无影响。
+
+**在途金额对所有估值方可见**（评审指出 D1 的漏洞）：`fund_order_placed` 扣了现金、份额还没到，若只在 TWR 里补回，
+status / `pnl_snapshot` / `holdings_digest` / `rebalance_plan` / 集中度 在 T 到 T+1 之间都会看到总资产凭空少一笔。
+因此在途金额进**唯一的总资产实现** `utils/fx.total_portfolio_value_cny`（#417 起所有估值方都走它）：按面值计入，
+并由 `PortfolioManager.pending_fund_orders()` 统一读取；不允许任何估值方自己读 `extra.pending_orders`。
+
+**split 与复权价**：若 `db/market_data.db` 存的是复权价（yfinance `auto_adjust` 默认 True，需在 PR1 核实
+`daily_prices.source` 的口径），回放时不得再按 `split_ratio` 缩放历史 units，否则市值双重调整；
+正确做法是回放全程用拆股后的数量口径（等价于 原始 units × 未复权价）。PR1 必须先确认价格口径并写进
+`calc/ledger_replay.py` 的 docstring；两种口径各有测试。
 
 ### D5 场外基金两段式 + 自动确认
 
@@ -97,6 +112,12 @@ fee / tax 都是内部流，进 NAV 不进分母；split 对 NAV 无影响；在
 - `confirm_fund_order(order_id, nav=None)`：不传 nav 时用 `utils/eastmoney_fund.fetch_fund_nav_history`
   取 `nav_date` 的净值；新增 job `fund_confirm`（工作日 21:30–23:00 每 30 分钟，看门狗纳入）自动确认
   已到 `nav_date` 且净值已公布的在途单；取不到就留着，status 显示"在途待确认 N 天"。
+- 确认延迟按基金类型配置：`fund.confirm_lag_days` 默认 `{default: 1, qdii: 2, fof: 2}`（QDII / FOF 的确认与净值公布
+  常为 T+2 或更晚；类型从东方财富基金概况取，取不到按 default 并在 status 标"按 T+1 估计"）。
+- **幂等（ADR-016 红线 4，cron 重跑 + 手动并发）**：确认是对 `order_id` 的 `placed → confirmed` 状态转换，检查与写入在
+  同一个 `with_portfolio_tx` 里完成（CAS，参照 ADR-016 #127）；手动 `confirm_fund_order` 与 `fund_confirm` job 同时执行只有
+  一个生效，另一个返回 `already_confirmed`；`fund_order_cancelled` 对已确认的单子拒绝。PR3 在 ADR-016 的全路径审计表里
+  为 `place_fund_order` / `confirm_fund_order`（手动与 job）/ `fund_order_cancelled` / `record_dividend` 等各加一行。
 - 旧行为（`buy` 直接记基金）保留可用，`buy` 对 `kind=fund` 且 symbol 是场外代码时打 warning 建议改用两段式。
 
 ### D6 入口（agent 必须拥有全部功能）
@@ -127,6 +148,6 @@ MCP 工具：`record_dividend`、`record_fee`（含 tax 作为 kind 参数）、
 
 ## 实施切分（三个 PR）
 
-1. `feat(ledger)`: Activity schema + `ledger_events` 解析入口 + 四个消费方切换 + 回放不变量（纯重构，行为不变）。
+1. `feat(ledger)`: Activity schema + `replay_ledger` 有状态解析入口 + 上述全部消费方切换 + 回放不变量 + 价格口径核实（纯重构，行为不变）。
 2. `feat(ledger)`: dividend / interest / fee / tax / split / return_of_capital 写入方法 + MCP/CLI + status + 业绩口径。
 3. `feat(fund)`: 场外基金两段式 + `fund_confirm` job + 自动确认 + status 在途显示。
