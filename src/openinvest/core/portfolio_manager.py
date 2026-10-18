@@ -494,11 +494,7 @@ class PortfolioManager:
                 raise ValueError(f"symbol {symbol} 不在持仓")
             units = float(target.get("units", 0) or 0)
             is_tracking = bool(target.get("is_tracking_only", False))
-            in_transit = [o for o in _pending_of(target) if o.get("status") == "placed"]
-            if in_transit:   # 现金已扣、份额未到：删行 = 在途金额从账上凭空消失，force 也不放行
-                raise ValueError(
-                    f"{symbol} 有 {len(in_transit)} 笔在途申购单未确认（共 {sum(float(o.get('amount') or 0) for o in in_transit):,.2f}）："
-                    f"先 confirm_fund_order 或 cancel_fund_order，否则这笔钱会从账上消失")
+            assert_no_in_transit(target, symbol)   # 现金已扣、份额未到：删行 = 在途金额从账上凭空消失，force 也不放行
             if not is_tracking and units > 0 and not force:
                 raise ValueError(
                     f"{symbol} 持仓 {units} > 0，请先 sell 或加 --force 强删"
@@ -1333,6 +1329,17 @@ class _NoChange(Exception):
 def _pending_of(h: Dict[str, Any]) -> List[Dict[str, Any]]:
     """基金持仓行的订单列表（所有状态；``holding.extra.pending_orders``）。"""
     return [o for o in ((h.get("extra") or {}).get(_PENDING_KEY) or []) if isinstance(o, dict)]
+
+
+def assert_no_in_transit(holding: Dict[str, Any], symbol: str) -> None:
+    """持仓行上还有 ``placed`` 的在途申购单 → ValueError。**任何会删掉持仓行的写路径都必须先过它**
+    （``PortfolioManager.delete_holding``、已弃用的 REST ``DELETE /api/holdings/{symbol}``）：
+    在途金额只存在这一行的 ``extra.pending_orders`` 里，行没了钱就从账上消失、``fund_confirm`` 也找不到单子。"""
+    live = [o for o in _pending_of(holding) if o.get("status") == "placed"]
+    if live:
+        raise ValueError(
+            f"{symbol} 有 {len(live)} 笔在途申购单未确认（共 {sum(float(o.get('amount') or 0) for o in live):,.2f}）："
+            f"先 confirm_fund_order 或 cancel_fund_order，否则这笔钱会从账上消失")
 
 
 def _keep_recent(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

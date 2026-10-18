@@ -139,7 +139,11 @@ def build_rebalance_plan(
         else:
             value = pending_value.get(s, 0.0)
         if value is None:
-            warnings.append(f"{s} 拉不到价格或汇率，未计入总资产，已从清单剔除")
+            # 持仓部分没算进总资产、整行从清单剔除；但它的在途申购面值仍在总资产里（fx 只按 pending_fund_orders 计入）——说出来，
+            # 免得占比的分子分母差一笔却没人知道
+            pend = (f"；它的在途申购 {pending_value[s]:,.2f} {base} 仍计在总资产里（该基金的仓位占比不可算）"
+                    if pending_value.get(s) else "")
+            warnings.append(f"{s} 拉不到价格或汇率，未计入总资产，已从清单剔除{pend}")
             continue
         lot, lot_note = infer_lot_size(s, str(h.get("kind") or ""), by_amount=is_eastmoney_fund(h))
         positions.append({

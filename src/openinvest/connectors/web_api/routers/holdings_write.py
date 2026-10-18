@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.core.portfolio_manager import PortfolioManager, assert_no_in_transit
 
 from openinvest.connectors.web_api.models import (
     HoldingCreateRequest,
@@ -92,7 +92,8 @@ def update_holding(symbol: str, body: HoldingPatchRequest = Body(...), pm: Portf
 
 @router.delete("/api/holdings/{symbol}", tags=["holdings_write"])
 def delete_holding(symbol: str, pm: PortfolioManager = Depends(get_pm)) -> Dict[str, Any]:
-    """删除持仓。units > 0 时拒绝（避免数据丢失），用户必须先卖光或显式 set units=0"""
+    """删除持仓。units > 0 时拒绝（避免数据丢失），用户必须先卖光或显式 set units=0；
+    场外基金还有在途申购单时也拒绝（现金已扣、订单只存在这一行里，删了钱就凭空消失，ADR-027）"""
     with pm.with_portfolio_tx() as p:
         holdings = list(p.get("holdings") or [])
         target = next((h for h in holdings if h.get("symbol") == symbol), None)
@@ -103,6 +104,10 @@ def delete_holding(symbol: str, pm: PortfolioManager = Depends(get_pm)) -> Dict[
                 status_code=400,
                 detail=f"{symbol} 持仓 {target.get('units')} > 0，请先卖光或显式 set units=0",
             )
+        try:
+            assert_no_in_transit(target, symbol)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         p["holdings"] = [h for h in holdings if h.get("symbol") != symbol]
     pm._reload()
     return {"ok": True, "deleted": symbol}

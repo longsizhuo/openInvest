@@ -681,6 +681,48 @@ def test_rebalance_plan_counts_in_transit_value_toward_the_fund(tmp_path, net, m
     assert row["current_pct"] == 50.0 and row["action"] == "NONE"                            # 刚下的单已经算它的仓位，不会建议再买
 
 
+def test_rebalance_plan_says_so_when_a_fund_with_units_cannot_be_priced(tmp_path, net, monkeypatch):
+    """评审建议：持仓拉不到价（整行剔除）时，它的在途面值仍在总资产里——warning 要点出这笔，别让分子分母静默差一笔。"""
+    from openinvest.services import rebalance_plan as rp
+    from openinvest.utils.quotes import QuoteSnapshot
+    monkeypatch.setattr(rp, "get_quote", lambda h: None if h["symbol"] == FUND
+                        else QuoteSnapshot(h["symbol"], 10.0, "CNY", "股", MON))
+    held = [{"symbol": FUND, "kind": "fund", "units": 100.0, "avg_cost": 0.0, "cost_currency": "CNY",
+             "proxy_kind": "eastmoney_fund"},
+            {"symbol": "AAA", "kind": "equity", "units": 100.0, "avg_cost": 10.0, "cost_currency": "CNY"}]
+    pm = _pm(tmp_path, cash={"CNY": 10000.0}, holdings=held)
+    pm.store.write("strategy", "strategy", {
+        "target_allocation_stock": 0.6, "target_allocation_cash": 0.4,
+        "target_assets": [{"symbol": FUND, "target_pct": 0.3, "max_single_invest_cny": 10000},
+                          {"symbol": "AAA", "target_pct": 0.3, "max_single_invest_cny": 10000}]}, "")
+    pm = PortfolioManager(pm.store)
+    pm.place_fund_order(FUND, 4000, order_ts=ORDER_MON_AM)
+    plan = rp.build_rebalance_plan("hybrid", 5, pm=pm)
+    assert plan["status"] == "ok" and [r["symbol"] for r in plan["rows"]] == ["AAA"]            # 基金行被剔除
+    assert plan["total_value"] == 6000.0 + 1000.0 + 4000.0      # 现金 + AAA + 在途面值；基金自己的持仓缺价没算（它的行才被剔除）
+    msg = next(w for w in plan["warnings"] if w.startswith(FUND))
+    assert "已从清单剔除" in msg and "在途申购 4,000.00 CNY" in msg
+
+
+def test_deprecated_rest_delete_cannot_drop_a_fund_row_with_orders_in_transit(tmp_path, net, monkeypatch):
+    """评审建议 #1：place 给新基金建 units=0 的行，REST DELETE 只查 units>0 → 行连同在途单一起没了，钱凭空消失。"""
+    from fastapi.testclient import TestClient
+
+    from openinvest.connectors import web_api
+    pm = _pm(tmp_path)
+    oid = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)["order_id"]
+    monkeypatch.setitem(web_api.app.dependency_overrides, web_api.get_pm,
+                        lambda: PortfolioManager(MemoryStore(tmp_path)))
+    client = TestClient(web_api.app)
+    r = client.delete(f"/api/holdings/{FUND}")
+    assert r.status_code == 400 and "在途申购单" in r.json()["detail"]
+    fresh = PortfolioManager(MemoryStore(tmp_path))
+    assert fresh.holdings.find(FUND) is not None and len(fresh.pending_fund_orders()) == 1
+    assert _total(fresh) == 10000.0                                                       # 总资产没少
+    fresh.cancel_fund_order(oid)
+    assert client.delete(f"/api/holdings/{FUND}").status_code == 200                     # 单子撤了才能删（units=0）
+
+
 # ============ 入口：MCP / CLI ============
 
 def test_mcp_tools_round_trip(tmp_path, net, monkeypatch):
