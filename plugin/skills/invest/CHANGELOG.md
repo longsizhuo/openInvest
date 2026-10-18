@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.29.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.28.0...invest-skill-v0.29.0) (2026-10-18)
+
+
+### Features
+
+* **fund:** 场外基金两段式——下单扣现金记在途，确认日按净值到账（ADR-027 PR3） ([#490](https://github.com/longsizhuo/openInvest/issues/490)) ([36e9e32](https://github.com/longsizhuo/openInvest/commit/36e9e32db2ecb25a7c0430df2c97c17427acdd13))
+* **ledger:** 账本活动类型 + 原始价估值（ADR-027 PR2） ([#482](https://github.com/longsizhuo/openInvest/issues/482)) ([e3bc54a](https://github.com/longsizhuo/openInvest/commit/e3bc54aef53b86fd50c98505f452f782b5d8d518))
+
 ## [0.28.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.27.0...invest-skill-v0.28.0) (2026-10-18)
 
 
