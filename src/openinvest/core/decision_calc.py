@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from openinvest.calc.ledger_replay import replay_ledger
 from openinvest.calc.symbols import safe_symbol
 
 # verdict → 期望交易方向（执行匹配用；HOLD 无方向）
@@ -18,15 +19,15 @@ _VERDICT_DIRECTION = {"BUY": "BUY", "ACCUMULATE": "BUY", "SELL": "SELL", "TRIM":
 # 自动匹配窗口：决议日起 N 个日历天内的同向同标的成交算"执行了该决议"
 MATCH_WINDOW_DAYS = 7
 
-# portfolio_history.jsonl 的 action → trades.db 的 direction。PortfolioManager.buy/sell 写
-# buy/sell；record_external_trade（CommSec 邮件回灌）写 bought/sold。deposit/withdraw/
-# delete_holding 不是成交，不映射。
-_HISTORY_DIRECTION = {"buy": "BUY", "bought": "BUY", "sell": "SELL", "sold": "SELL"}
+# Activity.action → trades.db 的 direction。buy/sell 已含 PortfolioManager.buy/sell 与 CommSec 邮件回灌
+# （bought/sold 在 replay_ledger 里归一）。deposit/withdraw/gift/delete_holding/correction 不是成交，不映射。
+_HISTORY_DIRECTION = {"buy": "BUY", "sell": "SELL"}
 
 # 不是"人看了决议后下的单"的自动写入源：定投 cron（jobs/dca_daily.py）按固定计划买，生产 90 天
-# 66 笔买入里 64 笔是它——若算作执行了同标的的 ACCUMULATE，采纳率会虚高。CommSec 邮件回灌
-# （source 为空 / commsec）是用户在券商真下的单，保留。
-_AUTO_SOURCES = frozenset({"dca_daily"})
+# 66 笔买入里 64 笔是它——若算作执行了同标的的 ACCUMULATE，采纳率会虚高；dca_reconcile 是对账脚本
+# 补/冲的定投行（replay_ledger 把 dca_reconcile_backfill/reverse 归一成 buy/sell 并标 source=dca_reconcile，
+# 旧版它们因 action 不在映射里被跳过）。CommSec 邮件回灌（source 为空 / commsec）是用户在券商真下的单，保留。
+_AUTO_SOURCES = frozenset({"dca_daily", "dca_reconcile"})
 
 
 def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -38,15 +39,19 @@ def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     跳过。id 用 "history:<行号>" 与 trades.db 的整数 id 区分。
     """
     out: List[Dict[str, Any]] = []
-    for i, r in enumerate(records):
-        direction = _HISTORY_DIRECTION.get(str(r.get("action", "")).lower())
-        source = str(r.get("source") or "")
+    activities, _ = replay_ledger(records, alias={})
+    for a in sorted(activities, key=lambda x: x.seq):      # 文件顺序（回放序是日期升序）
+        direction = _HISTORY_DIRECTION.get(a.action)
+        source = a.source or ""
         if not direction or ":existing_position" in source or source in _AUTO_SOURCES:
             continue
         out.append({
-            "id": f"history:{i}", "ts": r.get("ts_origin") or r.get("ts"), "verdict_id": None,
-            "symbol": r.get("symbol"), "direction": direction, "units": r.get("units"),
-            "price": r.get("price"), "status": "executed",
+            "id": f"history:{a.seq}", "ts": a.ts, "verdict_id": None,
+            "symbol": a.symbol, "direction": direction,
+            # units / price 保持记录原样（逐字不变，PR1 纯重构）：matched_trades 直出 JSON，Activity 已把 int 转 float；
+            # price_per_unit 形状的老行（CommSec bought/sold）这里仍是 None——改读 a.price 会让它们的
+            # matched_trades.price 从 null 变有值，属可见变化，留给单独签字的后续 PR。
+            "units": a.raw.get("units"), "price": a.raw.get("price"), "status": "executed",
         })
     return out
 

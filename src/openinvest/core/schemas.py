@@ -222,6 +222,51 @@ class UserData(BaseModel):
     user_email: Optional[str] = None
 
 
+# ============ portfolio_history.jsonl —— 统一 Activity（ADR-027 D2）============
+
+# PR1 只产出这些：历史动作（bought/sold/dca_reconcile_*/manual_override）在解析层归一，
+# 无法识别的行 = "unknown"（保留、计数、不丢）。分红/利息/费用/拆股等新类型是 PR2/PR3 的事。
+ActivityAction = Literal["buy", "sell", "deposit", "withdraw", "gift", "delete_holding", "correction", "unknown"]
+
+
+class Activity(BaseModel):
+    """账本流水的统一读形状：``calc.ledger_replay.replay_ledger`` 把老/新记录折叠成它，读方只认这里的字段。
+
+    符号约定（读方只认 ``cash_effect`` / ``units_effect``，不再自己判 action 的正负）：
+    - ``cash_effect``：对 ``currency`` 现金的净影响，流入正、流出负；external_funding 的买卖不动现金 = 0
+    - ``units_effect``：对 ``symbol`` 持仓数量的净影响（correction / delete_holding 是从前序状态算出的增量）
+    - ``amount``：老记录原样的 ``total_amount``（缺省 ``|units| × price``）；deposit/withdraw 为 ``|金额|``
+    - ``external``：外部现金流（deposit / withdraw / gift / external_funding 买卖）；外部流水金额用
+      ``calc.ledger_replay.external_flow(a)`` 取，不要自己拼
+    """
+    # forbid：replay 少写/多写一个字段立即炸，不会悄悄丢信息
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2   # 不叫 `schema`：与 BaseModel.schema() 同名会告警；老记录无此字段 = 1
+    action: ActivityAction
+    symbol: Optional[str] = None     # deposit/withdraw 沿用老记录：symbol = 币种代码
+    units: Optional[float] = None    # 记录里的数量原样（correction 为修正后的绝对数量）；deposit/withdraw 为 None
+    price: Optional[float] = None    # price 或老记录的 price_per_unit
+    amount: Optional[float] = None
+    currency: str = "CNY"
+    fee: Optional[float] = None
+    tax_withheld: Optional[float] = None
+    cash_effect: float = 0.0
+    units_effect: float = 0.0
+    split_ratio: Optional[float] = None
+    external: bool = False
+    trade_date: Optional[str] = None  # YYYY-MM-DD；None = 记录没有可用日期（不进回放，计入 unknown 计数）
+    settle_date: Optional[str] = None
+    nav_date: Optional[str] = None
+    source: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    note: Optional[str] = None
+    correction: bool = False          # 持仓修正（manual_override / delete_holding）：无现金对手，现金流按当日市价补算
+    ts: Optional[str] = None          # 记录时间戳原样（ts_origin 优先，否则 ts）——决议↔成交按它做时间窗
+    seq: int = -1                     # 原记录在输入列表里的下标（"history:<seq>" 引用）
+    raw: Dict[str, Any] = Field(default_factory=dict, repr=False)   # 原记录（浅拷贝），溯源用，读方不要解析它
+
+
 # ============ helper：把 metadata dict 校验后转回 dict（写 md 用） ============
 
 def validate_strategy(metadata: Dict[str, Any]) -> Dict[str, Any]:

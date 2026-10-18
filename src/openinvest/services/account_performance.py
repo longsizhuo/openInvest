@@ -30,7 +30,9 @@ import pandas as pd
 
 from openinvest.calc.account_metrics import XIRR_MIN_SPAN_DAYS, account_metrics
 from openinvest.calc.gold import GOLD_OZ_PER_GRAM
+from openinvest.calc.ledger_replay import external_flow, replay_ledger
 from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.core.schemas import Activity
 from openinvest.db.market_store import MarketStore
 from openinvest.utils.base_currency import base_currency
 from openinvest.utils.eastmoney_fund import canonical_fund_symbol, extract_fund_code
@@ -47,64 +49,41 @@ GOLD_PROXY_KIND = "gold_cny_per_gram"
 _GOLD_LEDGER_HOLDING = {"symbol": GOLD_LEDGER_SYMBOL, "proxy_kind": GOLD_PROXY_KIND,
                         "yfinance_proxy": "GC=F", "cost_currency": "CNY"}
 _ALL_ROWS = 100000
-_BUY_ACTIONS = {"buy", "bought", "dca_reconcile_backfill", "dca_reconcile_reverse", "gift"}
-_SELL_ACTIONS = {"sell", "sold"}
 
 
 # ---------- 1. 账本 → 事件 ----------
 
-def _ledger_events(records: List[Dict[str, Any]], alias: Dict[str, str]) -> Tuple[List[Dict[str, Any]], int]:
-    """账本记录 → 事件 dict（日期升序）。返回 (events, 跳过的未知 action 数)。
+def _events_of(activities: List[Activity]) -> List[Dict[str, Any]]:
+    """Activity（日期升序）→ 回放事件 dict。事件字段：date / symbol / units（增量）/ cash_ccy / cash（增量）/
+    flow_ccy / flow（外部现金流，+入 −出）/ correction（True = 持仓修正，现金流按当日市价在估值时补算）。
+    unknown 与没有可用日期的行不产生事件。"""
+    return [
+        {"date": a.trade_date, "symbol": a.symbol or "", "units": a.units_effect,
+         "cash_ccy": a.currency, "cash": a.cash_effect,
+         "flow_ccy": a.currency, "flow": external_flow(a), "correction": a.correction}
+        for a in activities if a.action != "unknown" and a.trade_date is not None
+    ]
 
-    事件字段：date / symbol / units（增量）/ cash_ccy / cash（增量）/ flow_ccy / flow（外部现金流，
-    +入 −出）/ correction（True = 持仓修正，现金流按当日市价在估值时补算）。
-    manual_override / delete_holding 是绝对值：先按从零重放算出增量，让所有事件都是增量。
-    """
-    events: List[Dict[str, Any]] = []
-    skipped = 0
-    units_from_zero: Dict[str, float] = defaultdict(float)
-    for r in sorted(records, key=lambda x: (x.get("trade_date") or x.get("ts_origin") or x.get("ts") or "")[:10]):
-        day = str(r.get("trade_date") or r.get("ts_origin") or r.get("ts") or "")[:10]
-        action = str(r.get("action") or "").lower()
-        if len(day) != 10:
-            skipped += 1
+
+def _ledger_events(records: List[Dict[str, Any]], alias: Dict[str, str]) -> Tuple[List[Dict[str, Any]], int]:
+    """账本记录 → 事件 dict（日期升序）。返回 (events, 跳过的未知 action / 无日期行数)。
+    解析全在 ``calc.ledger_replay.replay_ledger``（manual_override / delete_holding 的绝对值→增量在那里折叠）。"""
+    activities, state = replay_ledger(records, alias=alias)
+    return _events_of(activities), state.unknown
+
+
+def _register_ledger_symbols(by_sym: Dict[str, Dict[str, Any]], activities: List[Activity]) -> None:
+    """账本里出现过、当前持仓已没有的 symbol（卖光 + delete_holding 是正常流程）：元数据从流水推——
+    计价币种取该 symbol 第一条记录的 currency，黄金流水固定按 gold_cny_per_gram（不然 AUD 持仓会被
+    当人民币估值、黄金历史全部无法估值，回撤/波动算成天文数字——CR 阻塞项）。unknown 行也算（symbol 照登记）。"""
+    for a in activities:
+        sym = a.symbol or ""
+        if not sym or sym in by_sym or a.action in ("deposit", "withdraw"):
             continue
-        sym = alias.get(str(r.get("symbol") or ""), str(r.get("symbol") or ""))
-        ccy = str(r.get("currency") or "CNY").upper()
-        units = float(r.get("units") or 0)
-        price = float(r.get("price") or r.get("price_per_unit") or 0)
-        amount = float(r.get("total_amount") or abs(units) * price)
-        ev: Dict[str, Any] = {"date": day, "symbol": sym, "units": 0.0, "cash_ccy": ccy, "cash": 0.0,
-                              "flow_ccy": ccy, "flow": 0.0, "correction": False}
-        if action in _BUY_ACTIONS:
-            sign = 1.0 if units >= 0 else -1.0
-            ev["units"] = units
-            if r.get("funding_source") == "external_funding" or action == "gift":
-                ev["flow"] = sign * amount          # 外部新钱建仓（对账冲回则为流出）
-            else:
-                ev["cash"] = -sign * amount         # 子弹池现金 ↔ 持仓，内部转换
-        elif action in _SELL_ACTIONS:
-            ev["units"] = -abs(units)
-            net = r.get("net_amount")
-            ev["cash"] = float(net) if net is not None else amount - float(r.get("fee") or 0)
-        elif action == "deposit":
-            ev["cash"] = abs(units)
-            ev["flow"] = abs(units)
-        elif action == "withdraw":
-            ev["cash"] = -abs(units)
-            ev["flow"] = -abs(units)
-        elif action == "manual_override":
-            ev["units"] = units - units_from_zero[sym]
-            ev["correction"] = True
-        elif action == "delete_holding":
-            ev["units"] = -units_from_zero[sym]
-            ev["correction"] = True
+        if sym == GOLD_LEDGER_SYMBOL:
+            by_sym[sym] = dict(_GOLD_LEDGER_HOLDING)
         else:
-            skipped += 1
-            continue
-        units_from_zero[sym] += ev["units"]
-        events.append(ev)
-    return events, skipped
+            by_sym[sym] = {"symbol": sym, "cost_currency": a.currency, "_from_ledger": True}
 
 
 # ---------- 2. 行情库读序列 ----------
@@ -197,23 +176,12 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     holdings = [dict(h) for h in pm.holdings if not h.get("is_tracking_only")]
     by_sym = {str(h.get("symbol")): h for h in holdings}
     alias = {GOLD_LEDGER_SYMBOL: s for s, h in by_sym.items() if str(h.get("proxy_kind") or "") == GOLD_PROXY_KIND}
-    records = pm.store.read_history()
-    events, skipped = _ledger_events(records, alias)
+    activities, replay_state = replay_ledger(pm.store.read_history(), alias=alias)
+    events, skipped = _events_of(activities), replay_state.unknown
     if not events:
         return {"status": "insufficient_history", "reason": "no_ledger", "base_currency": base,
                 "message": _INSUFFICIENT_MSG}
-    # 账本里出现过、当前持仓已没有的 symbol（卖光 + delete_holding 是正常流程）：元数据从流水推——
-    # 计价币种取该 symbol 最近一条记录的 currency，黄金流水固定按 gold_cny_per_gram（不然 AUD 持仓会被
-    # 当人民币估值、黄金历史全部无法估值，回撤/波动算成天文数字——CR 阻塞项）
-    for r in sorted(records, key=lambda x: (x.get("trade_date") or x.get("ts_origin") or x.get("ts") or "")[:10]):
-        sym = alias.get(str(r.get("symbol") or ""), str(r.get("symbol") or ""))
-        if not sym or sym in by_sym or str(r.get("action") or "").lower() in ("deposit", "withdraw"):
-            continue
-        if sym == GOLD_LEDGER_SYMBOL:
-            by_sym[sym] = dict(_GOLD_LEDGER_HOLDING)
-        else:
-            by_sym[sym] = {"symbol": sym, "cost_currency": str(r.get("currency") or "CNY").upper(),
-                           "_from_ledger": True}
+    _register_ledger_symbols(by_sym, activities)   # 账本里有、持仓里已没有的 symbol：元数据从流水推
 
     # 开盘状态 = 当前 − Σ账本增量（账本早于系统上线的部分）
     delta_units: Dict[str, float] = defaultdict(float)

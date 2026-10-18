@@ -8,6 +8,8 @@ schema_source:
   - src/openinvest/core/portfolio_manager.py:PortfolioManager
   - src/openinvest/core/memory_store.py:MemoryStore
   - src/openinvest/services/account_performance.py:_ledger_events
+  - src/openinvest/calc/ledger_replay.py:replay_ledger
+  - src/openinvest/core/schemas.py:Activity
 documents:
   endpoints: []
   config_keys: []
@@ -17,12 +19,13 @@ documents:
     - record_split
     - place_fund_order
     - confirm_fund_order
-    - ledger_events
+    - replay_ledger
 ---
 
 # ADR-027：账本活动类型
 
-- 状态：🟡 提议（2026-10-18；按 PR #472 评审修订：有状态回放、在途对全部估值方可见、确认 CAS 幂等、按类型的确认延迟、`schema_version` 命名、复权价核实），评审通过后实现（评审路线 C7）
+- 状态：🟡 提议（2026-10-18；按 PR #472 评审修订：有状态回放、在途对全部估值方可见、确认 CAS 幂等、按类型的确认延迟、`schema_version` 命名、复权价核实），评审通过后实现（评审路线 C7）；
+  **PR1 已实现（#PRNUM）**：Activity schema + `calc/ledger_replay.py:replay_ledger` + 消费方切换 + 回放不变量 + 复权价核实（见 D3/D4 的 PR1 注）
 - 背景：2026-10-17 全面评审对照 Wealthfolio / Ghostfolio / Portfolio Performance / Sharesight：它们都有
   分红 / 利息 / 费用 / 税 / 拆股 / 退回本金 的活动类型；openInvest 的账本只有买卖存取，
   `grep dividend|tax` 在 src/ 零命中，场外基金按"下单即成交"记账（实际 T+1 按当日净值确认）。
@@ -65,16 +68,24 @@ documents:
 | `trade_date` / `settle_date` / `nav_date` | 日期三件套（场外基金用全部三个） |
 | `source` / `idempotency_key` / `note` / `correction` | 来源（cli / mcp / dca_daily / commsec / fund_auto_confirm）、幂等键（#432 已有）、备注、是否修正记录（manual_override 归一后为 True） |
 
-### D3 单一解析入口 `core/ledger_events.py`（纯）
+### D3 单一解析入口 `calc/ledger_replay.py`（纯）
 
-`replay_ledger(records) -> Tuple[List[Activity], LedgerState]`：**有状态的折叠**，不是逐条无状态映射——
+`replay_ledger(records, *, alias) -> Tuple[List[Activity], LedgerState]`：**有状态的折叠**，不是逐条无状态映射——
 `manual_override` 记的是持仓绝对值，必须从前序状态算出增量再归一成 `correction`（`units_effect` = 新−旧，
 `correction=True`）。老记录按现有别名表归一（bought→buy、sold→sell、price_per_unit→price、
 `funding_source=external_funding`→external=True、gift→external=True 等），新记录直接校验。
 读 `portfolio_history.jsonl` 的全部消费方切换到它：`services/account_performance`、`core/decision_ledger`
 （含 `core/decision_calc`）、`services/holdings_digest`、`jobs/pnl_snapshot`、`services/discipline`、
 `skill_cmds/lifecycle_cmds`、`connectors/web_api/routers/read.py`；`core/memory_store` 只保留写入与原始读取。
-各自的私有别名表删除。**回放不变量测试**：对生产流水只读拷贝，改前改后 NAV 序列逐日相等
+各自的私有别名表删除。
+> **PR1 注（实现与上面清单的差异）**：实际自己解析流水字段的只有 `services/account_performance`（含"账本里有、持仓里没有的
+> symbol"登记）和 `core/decision_calc.history_as_trades`（`decision_ledger` 经它读），这两处已切换。`holdings_digest` /
+> `jobs/pnl_snapshot` 不读流水（经 `account_performance` 取业绩），`services/discipline` 读的是 verdict_review / interventions；
+> `skill_cmds/lifecycle_cmds`（判空）、`routers/read.py` 与 `services/skill_views`（原样展示原始行）不解析字段，故不动；
+> `scripts/reconcile_dca_phantom` 是写入侧对账脚本，按原始动作名查自己写的行，保持原样。`gift` 保持 `gift`（D2 动作表里它自成一类）
+> 而不是并进 `buy`，否则决议↔成交匹配无法把赠股和下单区分开。`tests/test_ledger_replay_invariance.py` 另守"没人再自抄别名表"。
+
+**回放不变量测试**：对生产流水只读拷贝，改前改后 NAV 序列逐日相等
 （合成脱敏流水进 tests；生产比对结果贴 PR）。
 
 ### D4 新活动对快照的确定性效果
@@ -103,6 +114,13 @@ status / `pnl_snapshot` / `holdings_digest` / `rebalance_plan` / 集中度 在 T
 `daily_prices.source` 的口径），回放时不得再按 `split_ratio` 缩放历史 units，否则市值双重调整；
 正确做法是回放全程用拆股后的数量口径（等价于 原始 units × 未复权价）。PR1 必须先确认价格口径并写进
 `calc/ledger_replay.py` 的 docstring；两种口径各有测试。
+
+> **PR1 核实结论**：`daily_prices.close` **是复权价，且拆股与分红都复权**（全仓只用 `yf.Ticker().history(period=...)`，yfinance 1.7.0
+> 默认 `auto_adjust=True`，无任何调用传 `auto_adjust=False`；生产库实测 NVDA 2024-06-07 收盘 120.68 = 拆股后口径）。精确的回放规则因此是：
+> ① **split**：价格序列已按拆股后口径连续，回放的数量必须在**所有历史日期**用拆股后口径（拆股前数量 ×ratio 重述）；上一段
+> "不得再按 split_ratio 缩放历史 units"指的是不能在拆股日才 ×ratio——否则拆股前"拆股前数量 × 复权价"低估 ratio 倍、拆股日 NAV 凭空跳变。
+> ② **分红**：复权价路径已把分红当再投资算进收益，PR2 若再把 `dividend` 现金记进 NAV，该标的 TWR 会把同一笔分红算两次——
+> PR2 须二选一（有分红活动的标的改读未复权价，或分红只做现金流分类不入 NAV）。
 
 ### D5 场外基金两段式 + 自动确认
 

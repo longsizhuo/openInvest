@@ -6,12 +6,14 @@ intent: 数据模型
 schema_source:
   - src/openinvest/core/schemas.py:Holding
   - src/openinvest/core/schemas.py:PortfolioData
+  - src/openinvest/core/schemas.py:Activity
+  - src/openinvest/calc/ledger_replay.py:replay_ledger
   - src/openinvest/core/portfolio_manager.py:PortfolioManager
   - src/openinvest/core/portfolio_manager.py:HoldingsView
 documents:
   endpoints: []
   config_keys: []
-  symbols: [with_portfolio_tx, _file_lock, _atomic_write_text]
+  symbols: [with_portfolio_tx, _file_lock, _atomic_write_text, replay_ledger]
 ---
 
 # 数据模型
@@ -333,18 +335,43 @@ memory/
 
 详见 [memory_layout.md](../memory_layout.md)。
 
-### 6.1 `portfolio_history.jsonl` 怎么被账户业绩重放
+### 6.1 `portfolio_history.jsonl`：Activity 归一与账户业绩重放
 
-`status.performance` / `openinvest performance` / 日报"账户业绩"段（`services/account_performance.py`
-→ 纯计算 `calc/account_metrics.py`）把流水重放成日度 NAV 序列，再算 TWR / XIRR / 最大回撤 / 波动 / vs 基准：
+流水记录形状**不统一**（`action` 有 buy / bought / sold / gift / manual_override / dca_reconcile_* …；价格有 `price`
+也有 `price_per_unit`+`total_amount`；外部现金流靠 `funding_source=external_funding` 或 `deposit`/`withdraw` 识别）。
+**唯一读法**是 `calc/ledger_replay.py:replay_ledger(records, alias=...) -> (List[Activity], LedgerState)`
+（ADR-027 D2/D3）：按日期序**有状态**地把每条记录折叠成统一的 `core/schemas.py:Activity`，读方只认它的
+`cash_effect` / `units_effect` / `external` / `correction`，不再各抄一份别名表（`tests/test_ledger_replay_invariance.py`
+守"没人再自抄别名表"）。老记录照旧能读，无法识别的行保留为 `action="unknown"` 并计数（`LedgerState.unknown`），不丢。
+`MemoryStore.read_history()` 只留原始读取——`/api/history` 与 `history` 命令按原样展示原始行，不经归一。
 
-| 流水 `action` | 持仓 | 现金 | 外部现金流（进 TWR 分母、XIRR） |
+| 老 `action`（记录原样）| 归一后 Activity | `cash_effect` | `units_effect` | `external` |
+|---|---|---|---|---|
+| `buy` / `bought`（`funding_source` 缺省 = 子弹池现金）| `buy` | −总额 | +units | False |
+| `buy` / `bought` 带 `funding_source=external_funding` | `buy` | 0 | +units | True |
+| `dca_reconcile_backfill` / `dca_reconcile_reverse` | `buy` / `sell`，`source=dca_reconcile` | 0（对账行必带 external_funding）| ±units | True |
+| `gift` | `gift`（自成一类，不并进 buy）| 0 | +units | True |
+| `sell` / `sold` | `sell` | `net_amount`（缺省 总额−fee）| −units | False |
+| `deposit` / `withdraw` | 同名 | ±金额（取款符号两种写法都归一为负）| 0 | True |
+| `manual_override` | `correction` | 0 | 新绝对值 − 回放持仓 | False，`correction=True` |
+| `delete_holding` | 同名，`correction=True` | 0 | −回放持仓 | False |
+| 其他 / 没有可用日期 | `unknown` | 0 | 0 | False |
+
+`LedgerState` 是回放累计态（每 symbol 的 units / 近似 avg_cost + 每币种现金 Σ，从零开始，**不是**当前快照、不写回快照）。
+外部现金流金额用 `external_flow(activity)` 取：deposit/withdraw 就是 `cash_effect`；external_funding 的买卖与赠股是
+新钱直接变持仓（`cash_effect`=0），流量 = ±总额。价格口径（`daily_prices.close` 是 yfinance 拆股+分红复权价）写在
+`calc/ledger_replay.py` 的 docstring，PR2 的 split / 分红回放按它实现。
+
+账户业绩（`status.performance` / `openinvest performance` / 日报"账户业绩"段，`services/account_performance.py`
+→ 纯计算 `calc/account_metrics.py`）把 Activity 重放成日度 NAV 序列，再算 TWR / XIRR / 最大回撤 / 波动 / vs 基准：
+
+| Activity | 持仓 | 现金 | 外部现金流（进 TWR 分母、XIRR） |
 |---|---|---|---|
-| `buy` / `bought`（`funding_source` 缺省 = 子弹池现金）| +units | −成本 | 无（内部转换）|
-| `buy` / `dca_reconcile_*` 带 `funding_source=external_funding`、`gift` | ±units | 不动 | ±成本（外部新钱）|
-| `sell` / `sold` | −units | +`net_amount`（或 总额−fee）| 无 |
+| `buy`（内部）| +units | −成本 | 无（内部转换）|
+| `buy` / `sell` 带 `external`、`gift` | ±units | 不动 | ±成本（外部新钱）|
+| `sell` | −units | +`cash_effect` | 无 |
 | `deposit` / `withdraw` | — | ±金额 | ±金额 |
-| `manual_override` / `delete_holding` | 置为绝对值 | 不动 | 增量 × 当日收盘（持仓修正不是收益）|
+| `correction` / `delete_holding` | 置为绝对值 | 不动 | 增量 × 当日收盘（持仓修正不是收益）|
 
 - **锚定当前状态**：流水早于系统上线的持仓/现金没有记录，所以开盘状态 = `portfolio.md` 当前值 − Σ流水增量，
   序列末日 NAV 恒等于 status 总资产；差额列在 `data_quality.unreconciled`（补录请用 `buy --existing-position`）。
