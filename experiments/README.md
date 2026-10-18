@@ -17,7 +17,8 @@
 
 **冻结一个实验进 main 时**：建 `experiments/<name>/`，子目录约定
 `data/ inputs/ scripts/ baselines/ README.md SCHEMA.md`，PII 扫描过再 commit。
-现有子包：`ta-analysts/`（TA 分析师消融，ADR-009）、`verdict_variance/`（同输入重跑 90 次的裁决方差，A4）。
+现有子包：`ta-analysts/`（TA 分析师消融，ADR-009）、`verdict_variance/`（同输入重跑 90 次的裁决方差，A4）、
+`sealed_vote/`（B4 密封投票 A/B 臂的设计、成本、判据；产物在 `memory/.backtest_sealed/`，不进仓库）。
 
 ## 文件清单
 

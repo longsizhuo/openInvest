@@ -46,6 +46,29 @@ verdict_review / dreaming / #141 样本计数都只读 `.backtest`,碰不到它�
 - 开 / 停:在上面 crontab 那行 `--prospective` 后加 / 删 `--t2-confidence-arm`
 - 判读口径(臂、指标、护栏、停止规则)按私有归档里的预注册,不在本 repo
 
+## 试跑臂：B4 密封投票（评审路线 B4，2026-10）
+
+`--prospective --sealed-arm [--sealed-n 3]`:对照臂(上面那份)和 T2 臂跑完后,同一批新鲜标的、**同一份输入**
+(同 market_data / regime / 中性持仓;macro_view 借对照臂这次跑出来的那份,对照臂当天已整天跑完被续跑跳过时才自己跑一次)
+再跑一臂:每个标的独立采样 N 次(默认 3)`run_committee(max_debate_rounds=1)`——Quant/Risk 并行互不可见、CIO 只看 Round-1
+简报——按票聚合成一条裁决:verdict 取严格多数(N=3 即 ≥2 票相同,三者各异 → HOLD 并标 split)、confidence := 最大票占比
+(1.0 / 0.67;split 0.33)、alloc := 多数票金额的中位数(HOLD 恒 0)。写 `memory/.backtest_sealed/<今天>/`,
+Input Health 块多 `arm=sealed_n3 / votes=[…] / flip / split`;同日已落盘的标的跳过(断点续跑);任一次抽样失败 → 该标的不落盘,
+下次续跑重来(臂内每行恒有 N 票)。对照臂、T2 臂、live 裁决一个字节都不变(`tests/test_sealed_arm.py` 守)。
+
+- 复盘:`verdict_review` 每日 job 尾巴调 `run_arm()`,只写独立的 `memory/.dreams/verdict_review_sealed.jsonl` 与
+  `docs/verdict_accuracy_sealed.md`(均不入库),**不进** live 命中率页 / 公开 JSON / confidence_lookup(`tests/test_arm_review.py` 守)
+- 实验设计、成本、判据、局限 → [`experiments/sealed_vote/README.md`](../sealed_vote/README.md)
+- **开 / 停**:在 crontab 那行 `--prospective` 后加 / 删 `--sealed-arm`。**合并并等生产 checkout 自动 pull 之后再改 crontab**
+  (旧代码不认这个 flag,argparse 报错会让整条舰队 cron 失败)。改后的行:
+
+```
+30 22 * * * export PATH="$HOME/.local/bin:$PATH"; cd /home/ubuntu/projects-review/invest && BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective --t2-confidence-arm --sealed-arm --assets "$(uv run python -c "import yaml; print(','.join(yaml.safe_load(open('experiments/paper_fleet/universe.yml'))['symbols']))")" >> memory/.backtest/fleet_daily.log 2>&1
+```
+
+- 实验开跑后别改 `--sealed-n`(同一目录混不同 N 的行不可比;复盘报告会按 `arm` 标签分开计数提示)
+- 备份:`jobs/backup.py` 的 `.backtest*` 前缀规则自动覆盖 `.backtest_sealed/`(周日全量带上)
+
 ## 标的池
 
 - `universe.yml` — 舰队每日 50 标的(八资产类别)
