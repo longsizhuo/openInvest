@@ -69,5 +69,5 @@ INVEST_HOME=<拷贝> uv run python experiments/verdict_variance/run_variance.py 
   为空。生产里这些非空，上下文更长时方差可能不同——这里量的是缺这三块时的方差。
 - **有效样本是 4 个输入**，不是 30 条；每个输入内是 15–30 次近似独立重跑。方向翻转率的 95% 区间按 30 条算，偏乐观。
 - 单次运行、单模型、`--max-rounds 1`；模型/提示词变化后需重测。
-- 未做任何"多次抽样取多数"的方案对比——这里只测量。
+- 未做任何"多次抽样取多数"的方案对比——这里只测量。该对比由 [`experiments/sealed_vote/`](../sealed_vote/README.md)（B4 四臂：舰队每日 N=3 取多数的 sealed 臂，以及 debate / macro-soft 臂）承接。
 - 逐条明细不在仓库里，本目录的汇总无法复算到条；要复现请自己跑一遍（结果会因抽样而不同）。

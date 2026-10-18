@@ -491,7 +491,7 @@ Access Service Token 和应用 Bearer token 是两层独立鉴权，组合使用
 
 **与 REST 转发的关系**：CLI→REST 转发（下文 `INVEST_API_BASE`）进入维护模式，
 仍支持但不再演进——它还覆盖 remote MCP 没有的 Coordinator 协议
-（prepare/save_committee）与 doctor/event_check；日常读写/Direct 委员会请优先
+（prepare/save_committee）与 event_check（doctor 已有 MCP 工具）；日常读写/Direct 委员会请优先
 remote MCP。HTTP 使用 stateless SSE：`run_committee` 在同一请求中返回最终结果，
 期间发送 SDK 心跳，并在客户端提供 progress token 时推送阶段进度。同步工具的
 阻塞 IO 在线程池执行，慢查询不会占住事件循环、阻塞其他客户端或心跳。
@@ -536,7 +536,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `what_if` | ✅ | ❌ 不可用（本质是读真实持仓做假设推演，会泄露仓位/浮盈） |
 | `rebalance_plan` | ✅ | ❌ 不可用（对照真实持仓算该买卖多少，会泄露仓位） |
 | `record_execution` | ✅ | ❌ 不可用（写真实决策账本，顾问模式下无合法用途） |
-| `status` / `strategy` / `history` / `discipline` / `decisions` | ✅ | ❌ 不可用 |
+| `status` / `strategy` / `history` / `discipline` / `decisions` / `doctor` | ✅ | ❌ 不可用 |
 | `buy` / `sell` / `record_existing_position` | ✅ 记账 | ❌ 不可用 |
 | `deposit` / `withdraw` | ✅ 记账 | ❌ 不可用 |
 | `set_allocations` | ✅ | ❌ 不可用 |

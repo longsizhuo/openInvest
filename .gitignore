@@ -33,6 +33,7 @@ docs/pnl_chart.svg
 
 # verdict review 报告含真实命中率数据，不入库
 docs/verdict_accuracy.md
+docs/verdict_accuracy_arms.md
 .env.bak.*
 
 # 旧 GUI 静态产物目录（GUI 2026-07-05 已退役、sync_gui_dist 已删）；保留忽略以防旧部署残留入库

@@ -203,6 +203,12 @@ def holdings(self) -> HoldingsView:
 **proxy_kind 取值**：
 - `direct`：symbol 就是 yfinance ticker（NDQ.AX / AAPL）
 - `gold_cny_per_gram`：上面那个反推链路
+
+**黄金（`GC=F`）只能按 人民币/克 记账**：`units` = 克数、`avg_cost` = CNY/克、`cost_currency: CNY`、`unit_label: 克`。
+全仓估值（status / what_if / 委员会 / 日报）都把 `GC=F` 当 CNY/克，按 USD/盎司记会和克价对不上（假浮亏 −78%，#443）。
+所以 `buy` / `record_existing_position` 对 `GC=F`（大小写不敏感，统一写成 `GC=F`）拒收非 CNY 币种和非克的单位并给出正确写法
+（`buy --symbol GC=F --units 5 --price 880 -c CNY --kind metal --unit-label 克`），合法记法自动落 `kind: metal` +
+`proxy_kind: gold_cny_per_gram`。拒绝而不自动换算：换算要猜汇率，且 USD 记账扣的是 USD 现金。旧版本留下的 USD/oz 黄金行会让定投每天报错，`doctor` 为此出一条非阻塞的 `gold_booking` warning（不影响总 `status`），修法是 `delete_holding --force` 后按 CNY/克重记。
 - 未来扩展：`crypto_cny`（走 USDT 中转）等
 
 ### `is_tracking_only`

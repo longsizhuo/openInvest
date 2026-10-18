@@ -7,6 +7,8 @@ import inspect
 import pytest
 
 EXPECTED_TOOLS = {
+    # 健康自检：纯 MCP agent（无 Bash 权限）的第一步，与 CLI `doctor` 同源（#444）
+    "doctor",
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "record_execution", "ingest_event",
     "buy", "sell", "deposit", "withdraw", "run_committee",
@@ -49,7 +51,7 @@ def test_every_tool_dispatches_off_the_event_loop():
 
 
 READONLY_TOOLS = {
-    "status", "strategy", "history", "live_prices", "what_if", "discipline",
+    "doctor", "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "news_sources", "rebalance_plan",
 }
 # destructive 桶：动钱 4 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
@@ -126,7 +128,7 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
     from openinvest.connectors import mcp_server as m
 
     calls = {
-        "status": {}, "history": {}, "strategy": {}, "discipline": {}, "decisions": {},
+        "doctor": {}, "status": {}, "history": {}, "strategy": {}, "discipline": {}, "decisions": {},
         "what_if": {"symbol": "GC=F"},
         "rebalance_plan": {},
         "buy": {"symbol": "GC=F", "units": 1, "price": 1},

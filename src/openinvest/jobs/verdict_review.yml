@@ -2,6 +2,8 @@
 # 下游：纪律台账（services/discipline，只数 live）、GUI 命中率页（/api/verdict_review/summary，
 # 按来源分桶）、decision_ledger；顺手写 .dreams/confidence_lookup.json（裁决旁展示的同类决议
 # 查表，D10 P1；样本 = live + .backtest/ 里的前瞻纸面舰队，舰队行只进这张表，约 +20 秒）；再写 .dreams/verdict_neutrality.json（裁决中性度聚合，日报一行读它，A5）。不进委员会 prompt，零 LLM、零发送。
+# 尾巴还会复盘 B4 实验臂（.backtest_sealed / _debate / _macrosoft → .dreams/verdict_review_<臂>.jsonl + docs/verdict_accuracy_arms.md），
+# 与上面所有 live 产物物理分离；它出错只打 warning，不影响 live 复盘。
 # 2026-10 D4 签字开启：run() 只复盘 live（研究用全量重建手动跑 --include-backtest），
 # 行情只读 market_data.db、不触网（进程内缓存）。
 # 时区：02:00 Asia/Shanghai = 前一天 18:00 UTC，周日/周一两次落在 UTC 周六/周日——

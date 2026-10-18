@@ -29,6 +29,7 @@ position as a plain `buy` shrinks the cash the user reported by its cost.
 **"I just want to watch it, not hold it"**: `track_asset` alone (native entry point since issue #179).
 It is an idempotent upsert: re-tracking doesn't error, it only updates the fields you pass.
 `untrack_asset` removes a symbol, and `set_allocations` changes the stock/cash target allocation.
+Per-asset target weights (what `rebalance_plan` reads) are written with `track_asset --target-pct W` or `set_allocations --target-pct SYMBOL=W`; they must sum to ≤ the stock target.
 Only if you still need "a zero-unit row shown in the holdings table" for display purposes should
 you use `POST /api/holdings` with `is_tracking_only: true` — or skip persistence entirely and
 just analyze (Method 3).

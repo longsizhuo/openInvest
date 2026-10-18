@@ -16,6 +16,9 @@
 跑法：
   python -m scripts.backtest_committee --start 2026-03-01 --end 2026-04-25 --assets NDQ.AX,GC=F
   python -m scripts.backtest_committee --days 30  # 简化：跑最近 30 天
+  python -m scripts.backtest_committee --prospective --assets ... [--t2-confidence-arm] [--sealed-arm]
+      # 前瞻舰队（cron）；可选试跑臂（均写独立目录，live 不变）：T2 置信度定义 / B4 sealed（每标的 N 次抽样取多数）/
+      # debate（rounds=4，= live 日报配置）/ macro-soft（CIO 规则 2：Macro 偏空打折不否决）
 
 注意：
 - 每日每资产 1 次 committee = 6 次 LLM 调用 = 30 天 × 2 资产 = 360 次 LLM call
@@ -25,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 from datetime import datetime, timedelta
@@ -41,7 +45,11 @@ load_dotenv(ROOT / ".env")  # 让 _create_agent 能拿到 DEEPSEEK_API_KEY
 from openinvest.core.memory_store import MemoryStore  # noqa: E402
 # 污染 cutoff 单一可信源——落盘 `**Contaminated**` 标记与 verdict_review 分桶共用同一常量，
 # 不让 backtest 和聚合两处各自硬编码 "2024-12-31" 漂移（机器强制，见 CLAUDE.md）。
-from openinvest.jobs.verdict_review import CONTAMINATION_CUTOFF  # noqa: E402
+from openinvest.jobs.verdict_review import (  # noqa: E402
+    CONTAMINATION_CUTOFF, DEBATE_ARM_SUBDIR, MACROSOFT_ARM_SUBDIR, SEALED_ARM_SUBDIR,
+)
+# aggregate_votes 的多数判定只在 review_calc 定义一次（复盘侧 vote_stability 同用）；这里 re-export 保持 bc.aggregate_votes 可用
+from openinvest.jobs.review_calc import aggregate_votes  # noqa: E402,F401
 
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
@@ -103,6 +111,59 @@ def _t2_arm():
     """T2 臂唯一开关：换掉 run_committee 解析的 build_cio_prompt（钉 debate 命名空间，
     façade patch 无效）。patch 是进程级的，但两臂串行——对照臂跑完才进，退出即还原。"""
     return patch("openinvest.core.committee.debate.build_cio_prompt", build_cio_prompt_t2)
+
+
+# B4 密封投票臂（评审路线 B4，2026-10）：对照臂 = 原 memory/.backtest/ 不变；实验臂 = 同日同标的、同输入
+# （同一份 market_data / regime / 中性持仓 / macro_view），每个标的独立采样 N 次
+# run_committee(max_debate_rounds=1)（Quant/Risk 并行互不可见，CIO 只看 Round-1 简报），按票聚合成一条裁决，
+# 写 memory/.backtest_sealed/<今天>/。只由 `--prospective --sealed-arm` 打开；live 委员会不 import 本脚本，
+# live 行为零改。产物含逐标的逐次裁决 → 只写数据目录（gitignored），不进仓库。
+SEALED_DEFAULT_N = 3
+SEALED_MIN_N = 3   # 少于 3 次凑不出"多数"，实验臂就和对照臂没区别
+
+
+# B4 的另外两臂（同样只加臂，live 不变；输入与对照臂逐字相同，macro_view 借对照臂的）：
+# - debate：rounds=4、单次抽样 = live 日报的配置（daily_report.py max_debate_rounds=4），写 .backtest_debate/。
+#   回答"辩论有没有害"：对照臂和 sealed 臂都是 rounds=1，没有辩论的对照就测不出辩论的效果。
+# - macro-soft：CIO prompt 变体，写 .backtest_macrosoft/。#461：Macro 单一共享信号 risk_off 否决全部买入
+#   （cio.md:19 规则 2）；变体把规则 2 在"Macro risk_off 且 STRENGTH < 8"时由否决改为打折。
+#   做法同 T2 臂：运行期 patch debate 命名空间里的 build_cio_prompt，live 委员会不 import 本脚本 → live prompt 逐字节不变；
+#   cio.md 改了规则 2 的措辞 → 锚点失效直接报错，宁可停也不静默跑出别的 prompt。
+DEBATE_ROUNDS = 4
+_CIO_RULE2 = "2. **Quant vs Macro 分歧**: 看 Risk Officer 倒向哪边"
+
+
+def build_cio_prompt_macro_soft(asset: Dict[str, Any], json_mode: bool = False) -> str:
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+    from openinvest.capabilities.committee.i18n import bilingual
+
+    prompt = build_cio_prompt(asset, json_mode=json_mode)
+    if prompt.count(_CIO_RULE2) != 1:
+        raise RuntimeError(f"cio.md 已变，macro-soft 变体锚点失效：{_CIO_RULE2!r}")
+    exception = bilingual(
+        "。\n   **例外——Macro 偏空但不否决（macro-soft 试跑变体）**：当 Macro SIGNAL=risk_off 且 Macro STRENGTH < 8、"
+        "Quant 看多、Risk Officer 不是 high_risk 时，Macro 的 risk_off **不构成否决**：允许给 ACCUMULATE（仍不允许 BUY），"
+        "SUGGESTED_ALLOC 取你按其余规则本来会给的金额 × (10 − Macro STRENGTH) / 10，并在备忘录里写明这个折扣系数；"
+        "Macro STRENGTH ≥ 8 的 risk_off 仍然否决（HOLD）。",
+        ".\n   **Exception -- Macro bearish but not a veto (macro-soft trial variant)**: when Macro SIGNAL=risk_off with "
+        "Macro STRENGTH < 8, Quant is bullish and the Risk Officer is not high_risk, Macro's risk_off is **not a veto**: "
+        "ACCUMULATE is allowed (BUY still is not), SUGGESTED_ALLOC = the amount you would otherwise give under the other rules "
+        "x (10 - Macro STRENGTH) / 10, and state the discount factor in the memo; a risk_off with Macro STRENGTH >= 8 still vetoes (HOLD).",
+    )
+    return prompt.replace(_CIO_RULE2, _CIO_RULE2 + exception)
+
+
+def _macro_soft_arm():
+    """macro-soft 臂唯一开关（同 _t2_arm：钉 debate 命名空间，façade patch 无效；进程级但各臂串行，退出即还原）。"""
+    return patch("openinvest.core.committee.debate.build_cio_prompt", build_cio_prompt_macro_soft)
+
+
+def macro_signal_strength(macro_view: str) -> "tuple[str | None, float | None]":
+    """从 Macro 输出抽 SIGNAL / STRENGTH（macro_view 是 "[backtest macro failed…]" 之类 → (None, None)）。"""
+    import re
+    sig = re.search(r"^SIGNAL:\s*(\S+)", macro_view or "", re.M)
+    st = re.search(r"^STRENGTH:\s*(\d+(?:\.\d+)?)", macro_view or "", re.M)
+    return (sig.group(1) if sig else None), (float(st.group(1)) if st else None)
 
 
 def _currency_of(symbol: str) -> str:
@@ -216,13 +277,26 @@ def _patch_tools_to_date(decision_date: str):
 def run_one_day(decision_date: str, asset_symbols: List[str],
                 *, resume: bool = True,
                 portfolio_summary_override: "str | None" = None,
-                out_subdir: str = ".backtest") -> Dict[str, Any]:
+                out_subdir: str = ".backtest",
+                votes: int = 1,
+                macro_view_override: "str | None" = None,
+                max_rounds_override: "int | None" = None,
+                arm_health: "Dict[str, Any] | None" = None) -> Dict[str, Any]:
     """对单个历史日期跑一次完整 committee（每个资产）
 
     resume=True（默认，CLI 分片回测用）：已写出 <symbol>.md 的资产跳过，支持断点续跑。
     resume=False（run_walk_forward 用）：无条件跑全部资产——walk_forward 每次从零重建
         PaperTradeSimulator，必须拿到每天真实 verdict 才能正确回放成交，跳过会让权益
         曲线/指标算在残缺成交集上（静默错误），所以它不能用断点续跑。
+    votes（B4 密封投票臂）：1 = 原行为（INVEST_MAX_DEBATE_ROUNDS，默认 1，单次抽样）。
+        ≥2 = 每个资产独立抽样 votes 次 run_committee(max_debate_rounds=1)，按 aggregate_votes
+        聚合成一条裁决落盘，Input Health 块带 arm / votes / flip / split。任何一次抽样抛异常
+        → 该资产整体失败、不落盘（下次续跑重来），保证臂内每一行都恰有 votes 票。
+    macro_view_override：非 None 时不再重跑 Macro，直接用它（密封臂借对照臂的 macro_view，
+        两臂 macro 输入逐字相同；None → 自己跑一次）。返回值里带 "macro_view" 供下一臂借用。
+    max_rounds_override：非 None 时代替 INVEST_MAX_DEBATE_ROUNDS（debate 臂传 4）。votes>1 时恒为 1。
+    arm_health：非 None = 单次抽样的实验臂（debate / macro-soft）——Input Health 多 arm 标签、macro_signal /
+        macro_strength、final_round / converged，并把 debate_meta 一并落盘；None = 对照臂（落盘格式不变）。
     """
     from openinvest.core.committee import (
         run_macro_view, run_committee, parse_cio_memo, _persist, safe_symbol
@@ -260,12 +334,28 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
     print(f"\n📅 [{decision_date}] 跑 backtest... (待跑 {len(pending)}/{len(asset_symbols)})")
 
     with _patch_tools_to_date(decision_date):
-        # Macro 一次跨资产共享
-        try:
-            macro_data = ef.get_macro_data()
-            macro_view = run_macro_view(macro_data)
-        except Exception as e:
-            macro_view = f"[backtest macro failed: {e}]"
+        # Macro 一次跨资产共享（密封臂借对照臂的，保证两臂 macro 输入相同）
+        if macro_view_override is not None:
+            macro_view = macro_view_override
+        else:
+            try:
+                macro_data = ef.get_macro_data()
+                macro_view = run_macro_view(macro_data)
+            except Exception as e:
+                macro_view = f"[backtest macro failed: {e}]"
+        results["macro_view"] = macro_view
+        macro_sig, macro_str = macro_signal_strength(macro_view)
+        macro_keys = {"macro_signal": macro_sig, "macro_strength": macro_str}
+
+        def _macro_shared(symbol: str) -> bool:
+            """实验臂这行用的 macro_view 是不是对照臂同日同标的 transcript 里的那一份。借来的 macro_view 并不保证：
+            对照臂当天整天被续跑跳过（臂自己重跑了 Macro），或对照臂中途失败重跑（先落盘的标的用的是上一次的 Macro）。
+            核对不了（对照臂没有这个标的的 transcript）也记 False——复盘按 False 把这行从配对里剔掉并计数。"""
+            ctrl = store.root / ".backtest" / decision_date / f"{safe_symbol(symbol)}.md"
+            try:
+                return macro_view.strip() in ctrl.read_text(encoding="utf-8")
+            except OSError:
+                return False
 
         # 当日各资产相互独立(共享同一 macro_view + portfolio 快照),并行跑 = 3× 提速。
         # 全在 _patch_tools_to_date 内(patch 是日期级 process-global,所有线程同一 cutoff);
@@ -303,7 +393,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                 # max_debate_rounds 从环境变量读（Optuna 训练用）
                 import os as _os
                 max_rounds = int(_os.getenv("INVEST_MAX_DEBATE_ROUNDS", "1"))
-                result = run_committee(
+                run_kwargs = dict(
                     asset=asset,
                     market_data=market_data,
                     macro_view=macro_view,
@@ -311,13 +401,51 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                     prior_insights="",  # backtest 不用 insights 防穿越
                     regime_brief=regime_brief,  # 注入确定性 regime（与 live 一致）
                     persist_to_memory=False,  # 我们手动 persist 到 .backtest/
-                    max_debate_rounds=max_rounds,
                 )
+                persist_extra: Dict[str, Any] = {}
+                agg = None
+                if votes > 1:
+                    # 密封投票臂：同一份输入独立抽样 votes 次（rounds=1：Quant/Risk 互不可见），
+                    # 串行（并发已在标的维度，BACKTEST_WORKERS）；任一次抛异常 → 走外层 except，不落盘。
+                    runs = [run_committee(**run_kwargs, max_debate_rounds=1) for _ in range(votes)]
+                    vote_list = [{"verdict": r["verdict"]["verdict"],
+                                  "confidence": r["verdict"]["confidence"],
+                                  "alloc": r["verdict"].get("alloc_cny") or 0} for r in runs]
+                    agg = aggregate_votes(vote_list)
+                    rep = runs[agg["rep"]]
+                    report = rep["report"]
+                    # 代表票的 verdict dict 当底；split 的 HOLD 是投票结果不是规则改写，丢掉 `_` 溯源键
+                    base = {k: v for k, v in rep["verdict"].items()
+                            if not (agg["split"] and k.startswith("_"))}
+                    verdict = {**base, "verdict": agg["verdict"],
+                               "confidence": agg["confidence"], "alloc_cny": agg["alloc"]}
+                    if agg["split"]:
+                        report = dataclasses.replace(report, cio_memo=(
+                            report.cio_memo.rstrip() + "\n\n⚠️ sealed-vote：票数分裂"
+                            f"（{'/'.join(v['verdict'] for v in vote_list)}），无多数 → HOLD"))
+                    persist_extra = {
+                        "debate_meta": rep["debate"],
+                        "input_health": {"arm": f"sealed_n{votes}", "votes": vote_list,
+                                         "flip": agg["flip"], "split": agg["split"], **macro_keys,
+                                         "macro_shared": _macro_shared(symbol),
+                                         "final_round": rep["debate"]["final_round"]},
+                    }
+                else:
+                    result = run_committee(
+                        **run_kwargs, max_debate_rounds=max_rounds_override or max_rounds)
+                    report = result["report"]
+                    verdict = result["verdict"]
+                    if arm_health is not None:
+                        d = result["debate"]
+                        persist_extra = {
+                            "debate_meta": d,
+                            "input_health": {**arm_health, **macro_keys, "macro_shared": _macro_shared(symbol),
+                                             "final_round": d["final_round"], "converged": d["converged"]},
+                        }
 
-                # 手动 persist 到 .backtest/<date>/
-                report = result["report"]
-                verdict = result["verdict"]
-                _persist(report, verdict, output_dir=out_dir_base, date_override=decision_date)
+                # 手动 persist 到 .backtest/<date>/（密封臂：.backtest_sealed/<date>/）
+                _persist(report, verdict, output_dir=out_dir_base, date_override=decision_date,
+                         **persist_extra)
 
                 # 机器强制污染标记：决议日 ≤ cutoff = 落在 LLM 训练窗口（记忆穿越非业绩）。
                 # 追加一行到 _persist 刚写的 transcript（不改 _persist 共享格式），verdict_review
@@ -331,12 +459,16 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                         f"{'<=' if contaminated else '>'} cutoff {CONTAMINATION_CUTOFF})\n"
                     )
 
-                print(f"  ✓ {symbol}: {verdict['verdict']} (conf {verdict['confidence']:.2f})")
-                return symbol, {
+                tail = f" votes={'/'.join(v['verdict'] for v in vote_list)}" if agg else ""
+                print(f"  ✓ {symbol}: {verdict['verdict']} (conf {verdict['confidence']:.2f}){tail}")
+                out = {
                     "verdict": verdict["verdict"],
                     "confidence": verdict["confidence"],
                     "alloc_cny": verdict["alloc_cny"],
                 }
+                if agg:
+                    out.update(votes=vote_list, flip=agg["flip"], split=agg["split"])
+                return symbol, out
             except Exception as e:
                 print(f"  ✗ {symbol}: failed {type(e).__name__}: {e}")
                 return symbol, {"error": str(e)[:200]}
@@ -392,9 +524,45 @@ def main():
         help="（仅 --prospective）D11 P2 舰队试跑：对照臂跑完后，同一批标的再跑一臂 CIO 用 T2 "
              f"CONFIDENCE 定义的委员会，写 memory/{T2_ARM_SUBDIR}/<今天>/；对照臂不变。",
     )
+    parser.add_argument(
+        "--sealed-arm", action="store_true",
+        help="（仅 --prospective）评审路线 B4 密封投票臂：对照臂跑完后，同一批标的、同一份输入再跑一臂——"
+             f"每个标的独立采样 N 次 rounds=1 委员会（--sealed-n，默认 {SEALED_DEFAULT_N}），"
+             f"按多数票聚合，写 memory/{SEALED_ARM_SUBDIR}/<今天>/；对照臂不变，live 裁决不变。",
+    )
+    parser.add_argument(
+        "--debate-arm", action="store_true",
+        help=f"（仅 --prospective）B4 对照：同一批标的、同一份输入再跑一臂 rounds={DEBATE_ROUNDS} 单次抽样"
+             f"（= live 日报的辩论配置），写 memory/{DEBATE_ARM_SUBDIR}/<今天>/；回答\"辩论有没有害\"。",
+    )
+    parser.add_argument(
+        "--macro-soft-arm", action="store_true",
+        help="（仅 --prospective）#461：同一批标的、同一份输入再跑一臂，CIO 规则 2 换成\"Macro risk_off 且 STRENGTH<8 "
+             f"时不否决、金额按 (10−STRENGTH)/10 打折\"的变体，写 memory/{MACROSOFT_ARM_SUBDIR}/<今天>/；live prompt 不变。",
+    )
+    parser.add_argument(
+        "--sealed-n", type=int, default=SEALED_DEFAULT_N,
+        help=f"密封臂每标的抽样次数（默认 {SEALED_DEFAULT_N}，最少 {SEALED_MIN_N}）。"
+             "实验开跑后别改：同一目录混不同 N 的行，复盘报告会按 arm 标签分开计数提示。",
+    )
     args = parser.parse_args()
     if args.t2_confidence_arm and not args.prospective:
         raise SystemExit("❌ --t2-confidence-arm 只能和 --prospective 一起用（舰队试跑，不碰回填）")
+    if args.sealed_arm and not args.prospective:
+        raise SystemExit("❌ --sealed-arm 只能和 --prospective 一起用（舰队试跑，不碰回填）")
+    for flag, on in (("--debate-arm", args.debate_arm), ("--macro-soft-arm", args.macro_soft_arm)):
+        if on and not args.prospective:
+            raise SystemExit(f"❌ {flag} 只能和 --prospective 一起用（舰队试跑，不碰回填）")
+    if args.sealed_arm or args.debate_arm or args.macro_soft_arm:
+        # 对照臂与 macro-soft 臂读 INVEST_MAX_DEBATE_ROUNDS，sealed 臂固定 1 轮、debate 臂固定 4 轮：
+        # 环境变量一旦不是 1（Optuna 实验遗留之类），臂与臂之间就悄悄多出“轮数”这个变量，复盘报告还看不出来。花钱前直接拒绝。
+        raw_rounds = os.environ.get("INVEST_MAX_DEBATE_ROUNDS", "").strip()
+        if raw_rounds and raw_rounds != "1":
+            raise SystemExit(f"❌ 试跑臂要求对照臂 rounds=1，但环境变量 INVEST_MAX_DEBATE_ROUNDS={raw_rounds!r}"
+                             "（对照 / macro-soft 臂会读它，sealed 固定 1 轮、debate 固定 4 轮）。"
+                             "unset 它或设成 1 再跑。")
+    if args.sealed_arm and args.sealed_n < SEALED_MIN_N:
+        raise SystemExit(f"❌ --sealed-n 至少 {SEALED_MIN_N}（少于 3 次凑不出多数票）")
 
     # 解析时间范围
     today = datetime.now().date()
@@ -450,6 +618,37 @@ def main():
             ok_t2 = sum(1 for v in res_t2.get("verdicts", {}).values() if v and not v.get("error"))
             print(f"\n✅ T2 臂完成：{ok_t2}/{len(fresh)} 成功，写入 memory/{T2_ARM_SUBDIR}/{d}/")
             failed = failed or ok_t2 < len(fresh)
+        if args.sealed_arm:
+            # 借对照臂这次跑出来的 macro_view（对照臂整天已跑完被断点续跑跳过时没有 → 自己跑一次）
+            res_sealed = run_one_day(d, fresh, out_subdir=SEALED_ARM_SUBDIR, votes=args.sealed_n,
+                                     macro_view_override=res.get("macro_view"))
+            ok_sealed = sum(1 for v in res_sealed.get("verdicts", {}).values() if v and not v.get("error"))
+            print(f"\n✅ 密封投票臂完成：{ok_sealed}/{len(fresh)} 成功（每标的 {args.sealed_n} 票），"
+                  f"写入 memory/{SEALED_ARM_SUBDIR}/{d}/")
+            failed = failed or ok_sealed < len(fresh)
+        # 其余试跑臂同样借对照臂的 macro_view；顺序固定 sealed → debate → macro-soft（macro-soft 的锚点失效不会拦住前两臂）
+        if args.debate_arm:
+            res_d = run_one_day(d, fresh, out_subdir=DEBATE_ARM_SUBDIR, max_rounds_override=DEBATE_ROUNDS,
+                                macro_view_override=res.get("macro_view"),
+                                arm_health={"arm": f"debate_r{DEBATE_ROUNDS}"})
+            ok_d = sum(1 for v in res_d.get("verdicts", {}).values() if v and not v.get("error"))
+            print(f"\n✅ debate 臂完成（rounds={DEBATE_ROUNDS}）：{ok_d}/{len(fresh)} 成功，写入 memory/{DEBATE_ARM_SUBDIR}/{d}/")
+            failed = failed or ok_d < len(fresh)
+        if args.macro_soft_arm:
+            try:
+                for jm in (False, True):
+                    build_cio_prompt_macro_soft({"symbol": "PREFLIGHT"}, json_mode=jm)  # 锚点失效在花 LLM 钱之前就炸
+            except RuntimeError as e:
+                print(f"\n❌ macro-soft 臂跳过：{e}")
+                failed = True
+            else:
+                with _macro_soft_arm():
+                    res_m = run_one_day(d, fresh, out_subdir=MACROSOFT_ARM_SUBDIR,
+                                        macro_view_override=res.get("macro_view"),
+                                        arm_health={"arm": "macrosoft_r1"})
+                ok_m = sum(1 for v in res_m.get("verdicts", {}).values() if v and not v.get("error"))
+                print(f"\n✅ macro-soft 臂完成：{ok_m}/{len(fresh)} 成功，写入 memory/{MACROSOFT_ARM_SUBDIR}/{d}/")
+                failed = failed or ok_m < len(fresh)
         if failed:
             raise SystemExit(1)   # 让 cron 日志/退出码暴露失败，不静默成功
         return

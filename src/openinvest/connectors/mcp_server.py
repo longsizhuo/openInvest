@@ -9,7 +9,7 @@
 
 写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在高频能力（现 23 个）（80+ REST 端点全暴露会撑爆 agent context），
+工具刻意克制在高频能力（现 24 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -141,6 +141,33 @@ def status() -> Dict[str, Any]:
     _check_advisory()
     from openinvest.services.skill_views import build_status_view
     return build_status_view()
+
+
+@_tool(annotations=_RO)
+def doctor() -> Dict[str, Any]:
+    """Health check, the first call of a session (same output as `run.sh doctor`,
+    for agents without shell access): is onboarding done, and which optional
+    pieces are missing.
+
+    `status` is "ready" when memory (user / strategy / portfolio) is initialized,
+    or "needs_setup" when it is not (or portfolio.md is still the v1 format) —
+    only then hand over to the `invest-setup` skill. A missing LLM key or mail
+    credentials never makes it "needs_setup": those `checks` entries are marked
+    `optional_for_coordinator` / `optional_for_email`. The Coordinator path
+    (`prepare_committee` + subagents) works without a key; only the Direct path
+    (`run_committee`, cron) needs one, see `direct_ready`.
+
+    Read-only; makes one short HTTP probe to the configured LLM endpoint when a
+    key is set.
+
+    Returns:
+        Object with `status`, `version`, `coordinator_ready`, `direct_ready`,
+        `next_step`, and `checks` (name / status / detail / hint per check).
+    """
+    _check_advisory()
+    from openinvest.paths import INVEST_ROOT
+    from openinvest.services.skill_views import build_doctor_view
+    return build_doctor_view(INVEST_ROOT)
 
 
 @_tool(annotations=_RO)
@@ -489,13 +516,16 @@ def remove_news_source(
 
 @_tool(annotations=_MONEY)
 def buy(
-    symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
+    symbol: Annotated[str, Field(description=(
+        "yfinance ticker, e.g. 'AAPL', '510300.SS'. Gold is 'GC=F' and must be booked per gram in CNY: "
+        "units = grams, price = CNY/gram, currency='CNY', kind='metal', unit_label='克' "
+        "(USD/oz bookings are rejected)."))],
     units: Annotated[float, Field(description="Quantity bought; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Execution price per unit, in `currency`.", gt=0)],
     currency: Annotated[Optional[str], Field(description=(
         "Currency of `price`, e.g. 'CNY', 'USD', 'AUD'. Omit to use the existing position's "
         "currency (CNY for a new position); a different currency than the position's is rejected."))] = None,
-    kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
+    kind: Annotated[str, Field(description="Asset kind tag: 'equity', 'etf', 'metal' (gold), 'crypto', 'bond', 'fund', 'other'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
     existing_position: Annotated[bool, Field(description=(
         "Not supported on buy. For a position held before using openInvest call "
@@ -512,11 +542,12 @@ def buy(
     openInvest is not a purchase: record it with `record_existing_position`.
 
     Args:
-        symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
+        symbol: yfinance ticker (e.g. "AAPL", "510300.SS"). Gold = "GC=F", booked in
+            CNY per gram only (units = grams, currency "CNY", kind "metal", unit_label "克").
         units: Quantity bought; must be > 0.
         price: Execution price per unit, in `currency`.
         currency: Currency of `price`; omitted = the existing position's currency (CNY if new).
-        kind: Asset kind tag, e.g. "equity", "etf", "commodity".
+        kind: Asset kind tag: "equity", "etf", "metal" (gold), "crypto", "bond", "fund", "other".
         unit_label: Human display label for units (default "股", i.e. shares).
         idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
@@ -539,13 +570,16 @@ def buy(
 # 在老版本上照样扣现金。独立工具在老 server 上直接报 Unknown tool，宁可失败也不扣错钱。
 @_tool(annotations=_MONEY)
 def record_existing_position(
-    symbol: Annotated[str, Field(description="yfinance ticker, e.g. 'AAPL', '510300.SS', 'GC=F'.")],
+    symbol: Annotated[str, Field(description=(
+        "yfinance ticker, e.g. 'AAPL', '510300.SS'. Gold is 'GC=F' and must be booked per gram in CNY: "
+        "units = grams, price = CNY/gram, currency='CNY', kind='metal', unit_label='克' "
+        "(USD/oz bookings are rejected)."))],
     units: Annotated[float, Field(description="Quantity held; must be > 0.", gt=0)],
     price: Annotated[float, Field(description="Average cost per unit, in `currency`.", gt=0)],
     currency: Annotated[Optional[str], Field(description=(
         "Currency of `price`, e.g. 'CNY', 'USD', 'AUD'. Omit to use the existing position's "
         "currency (CNY for a new position); a different currency than the position's is rejected."))] = None,
-    kind: Annotated[str, Field(description="Asset kind tag, e.g. 'equity', 'etf', 'commodity'.")] = "equity",
+    kind: Annotated[str, Field(description="Asset kind tag: 'equity', 'etf', 'metal' (gold), 'crypto', 'bond', 'fund', 'other'.")] = "equity",
     unit_label: Annotated[str, Field(description="Human display label for units (default '股', i.e. shares).")] = "股",
     idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
@@ -559,11 +593,12 @@ def record_existing_position(
     list; use `track_asset` for committee coverage.
 
     Args:
-        symbol: yfinance ticker (e.g. "AAPL", "510300.SS", "GC=F").
+        symbol: yfinance ticker (e.g. "AAPL", "510300.SS"). Gold = "GC=F", booked in
+            CNY per gram only (units = grams, currency "CNY", kind "metal", unit_label "克").
         units: Quantity held; must be > 0.
         price: Average cost per unit, in `currency`.
         currency: Currency of `price`; omitted = the existing position's currency (CNY if new).
-        kind: Asset kind tag, e.g. "equity", "etf", "commodity".
+        kind: Asset kind tag: "equity", "etf", "metal" (gold), "crypto", "bond", "fund", "other".
         unit_label: Human display label for units (default "股", i.e. shares).
         idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
@@ -672,26 +707,33 @@ _STRAT_W = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotent
 
 @_tool(annotations=_STRAT_W)
 def set_allocations(
-    target_allocation_stock: Annotated[float, Field(description="Stock weight in [0, 1], e.g. 0.7. Must sum to ~1.0 with cash.", ge=0, le=1)],
-    target_allocation_cash: Annotated[float, Field(description="Cash weight in [0, 1], e.g. 0.3. Must sum to ~1.0 with stock.", ge=0, le=1)],
+    target_allocation_stock: Annotated[Optional[float], Field(description="Stock weight in [0, 1], e.g. 0.7. Pass together with target_allocation_cash (they must sum to ~1.0); omit both to leave the stock/cash split unchanged.", ge=0, le=1)] = None,
+    target_allocation_cash: Annotated[Optional[float], Field(description="Cash weight in [0, 1], e.g. 0.3. Pass together with target_allocation_stock; omit both to leave the split unchanged.", ge=0, le=1)] = None,
+    target_pcts: Annotated[Optional[Dict[str, Optional[float]]], Field(description="Per-asset target weights as {symbol: fraction of total assets in [0, 1]}, e.g. {'510300.SS': 0.3, 'GC=F': 0.2}. Symbols must already be tracked (see track_asset). A null value clears that asset's target (back to an equal split). The weights must sum to <= target_allocation_stock (the new one if you pass it in the same call).")] = None,
 ) -> Dict[str, Any]:
-    """Update the strategy's target stock/cash allocation ratio. The two
-    values must sum to ≈1.0; schema validation rejects and rolls back any
-    write that would corrupt the strategy file.
+    """Update the strategy's target allocation: the stock/cash ratio and/or
+    the per-asset target weights that `rebalance_plan` reads. The stock and
+    cash values must sum to ≈1.0, and the per-asset weights must sum to at
+    most the stock target; schema validation rejects and rolls back any write
+    that would corrupt the strategy file. Everything in one call is validated
+    and written atomically — to lower the stock target below the current sum
+    of per-asset weights, pass the new weights in the same call.
 
-    Use when the user says e.g. "set my target to 70% stock / 30% cash".
+    Use when the user says e.g. "set my target to 70% stock / 30% cash" or
+    "put 30% in 510300.SS and 20% in gold".
 
     Args:
-        target_allocation_stock: Stock weight in [0, 1], e.g. 0.7.
-        target_allocation_cash: Cash weight in [0, 1], e.g. 0.3.
+        target_allocation_stock: Stock weight in [0, 1], e.g. 0.7 (with cash).
+        target_allocation_cash: Cash weight in [0, 1], e.g. 0.3 (with stock).
+        target_pcts: {symbol: weight in [0, 1]} per tracked asset; null clears.
 
     Returns:
-        The updated allocation, or {"status": "error", "error": ...}.
+        The updated allocation and target assets, or {"status": "error", "error": ...}.
     """
     _check_advisory()
     from openinvest.services import strategy_write as svc
     try:
-        return svc.set_allocations(target_allocation_stock, target_allocation_cash)
+        return svc.set_allocations(target_allocation_stock, target_allocation_cash, target_pcts=target_pcts)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -704,13 +746,14 @@ def track_asset(
     channel: Annotated[Optional[str], Field(description="Where the user actually buys it (broker/app name).")] = None,
     price_offset_pct: Annotated[Optional[float], Field(description="Systematic offset between quote and actual fill price, in percent (e.g. bank gold spread).")] = None,
     sell_fee_pct: Annotated[Optional[float], Field(description="Sell-side fee in percent, used by fee-aware math.")] = None,
+    target_pct: Annotated[Optional[float], Field(description="Target weight of this asset as a fraction of total assets, in [0, 1] (0.3 = 30%); read by rebalance_plan. The weights of all tracked assets must sum to <= target_allocation_stock, otherwise the write is rejected and the current sum is reported. Assets without one split the remainder equally. To clear a target use set_allocations with a null value.", ge=0, le=1)] = None,
 ) -> Dict[str, Any]:
     """Add a symbol to the tracked-asset list, or update an existing entry
     (idempotent upsert: only the fields you pass are changed). The tracked
     list decides which symbols the committee and DCA jobs cover.
 
     Use when the user says "track AAPL" or wants to change a tracked
-    asset's cap/channel/fees.
+    asset's cap/channel/fees/target weight.
 
     Args:
         symbol: yfinance ticker to track (e.g. "AAPL", "0700.HK", "BTC-USD").
@@ -722,6 +765,9 @@ def track_asset(
         price_offset_pct: Systematic offset between the quote and the user's
             actual fill price, in percent (e.g. bank gold spread).
         sell_fee_pct: Sell-side fee in percent, used by fee-aware math.
+        target_pct: Target weight as a fraction of total assets in [0, 1]
+            (read by rebalance_plan); all tracked assets' weights must sum
+            to <= target_allocation_stock or the write is rejected.
 
     Returns:
         The stored asset entry, or {"status": "error", "error": ...}.
@@ -735,6 +781,7 @@ def track_asset(
             "channel": channel,
             "price_offset_pct": price_offset_pct,
             "sell_fee_pct": sell_fee_pct,
+            "target_pct": target_pct,
         })
     except ValueError as e:
         return {"status": "error", "error": str(e)}

@@ -30,6 +30,9 @@ class TargetAsset(BaseModel):
     max_single_invest_cny: float = Field(..., ge=0, le=1_000_000)
     price_offset_pct: Optional[float] = Field(None, ge=-0.1, le=0.1)
     sell_fee_pct: Optional[float] = Field(None, ge=0, le=0.05)
+    # target_pct（占总资产的 0~1 小数，rebalance_plan 读）刻意不在这里声明：手写的 strategy.md 里
+    # 可能有 `target_pct: 30` 这类历史写法，声明 ge/le 会让每一次无关的 strategy 写入都被整份校验拒绝。
+    # 范围 + Σ ≤ 股票目标由 services/strategy_write 只对「本次写入新改的值」校验（#449）。
 
     @field_validator("symbol")
     @classmethod
