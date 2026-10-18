@@ -4,7 +4,8 @@
 
 ## 内容
 
-- `invest-web.service` — FastAPI Web API 后端（`uvicorn connectors.web_api:app --host 127.0.0.1 --port 8765`）
+- `invest-web.service` — FastAPI Web API 后端（`openinvest-web`，host/port 走 `INVEST_WEB_HOST`/`INVEST_WEB_PORT`，默认 127.0.0.1:8765）
+  - 走 `openinvest-web` 入口而不是裸 `uvicorn`：入口带"非 loopback 绑定必须设 `INVEST_API_TOKEN`"守卫，裸 uvicorn 会绕过它
   - 依赖 `network-online.target`；`Restart=on-failure RestartSec=15`
   - `ProtectSystem=strict` + `ReadWritePaths=%h/openInvest`（允许写 memory/db）
 - `invest-mcp.service` — remote MCP（`openinvest-mcp --http`，streamable-HTTP 绑 127.0.0.1:8766）
@@ -38,4 +39,4 @@ sudo systemctl status invest-web
   写死 `/home/ubuntu/...`，fork 用户用 `ec2-user`/`pi`/`deploy` 等账号时无法直接用，
   改用 `%h` 后只需要改 `User=` 一行就能跑
 - **绑 127.0.0.1**：公网入口由 Caddy 反代 + Cloudflare Access 鉴权（开源默认 localhost-only 模式同样适用）
-- 其他用户场景（不用 systemd）：直接 `python -m connectors.web_api` 或写 docker-compose
+- 其他用户场景（不用 systemd）：直接 `openinvest-web`（或 `python -m openinvest.connectors.web_api`）或用仓库根的 `docker-compose.yml`

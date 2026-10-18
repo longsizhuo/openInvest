@@ -11,17 +11,36 @@ services:
         required: false            # 没 .env 也能起（server + GUI 能跑；committee 端点要 key 才工作）
     environment:
       - TZ=Asia/Shanghai
+      # 容器内必须绑 0.0.0.0，宿主的端口映射才进得来 → openinvest-web 的启动守卫要求
+      # INVEST_API_TOKEN（非 loopback 绑定 + 无 token = 拒绝启动）。token 写进 .env：
+      #   INVEST_API_TOKEN=$(openssl rand -hex 32)
+      # 设了之后 /api/*（除 /api/health 探活）都要带 `Authorization: Bearer <token>`。
+      - INVEST_WEB_HOST=0.0.0.0
     ports:
-      # 默认只绑 host loopback（安全）：本机直连或前面挂 Caddy 反代。
-      # 要 LAN/公网暴露：改成 "8765:8765" 并设 INVEST_API_TOKEN（见 connectors/web_api token 说明）。
+      # host 侧默认只绑 loopback：本机直连或前面挂 Caddy 反代。
+      # 要 LAN/公网暴露：改成 "8765:8765"（token 已是必填，无需再额外设）。
       - "127.0.0.1:8765:8765"
     volumes:
       - ./memory:/app/memory       # portfolio 状态 source of truth，必挂
       - ./db:/app/db
       - ./cache_data:/app/cache_data
       - ./logs:/app/logs
-    # __main__.py 写死 host=127.0.0.1（容器内不可达），故直接调 uvicorn 绑 0.0.0.0
-    command: ["uvicorn", "connectors.web_api:app", "--host", "0.0.0.0", "--port", "8765"]
+    # 走 openinvest-web 入口（带 token 守卫），不要直接起 uvicorn 绕过它——2026-10 评审 D6：
+    # 旧写法裸调 uvicorn --host 0.0.0.0，全靠上面的 127.0.0.1 端口映射兜底，改一下 ports 就
+    # 把无鉴权的全量读写 API 暴露出去。这里启动前先查 token，缺了给 compose 专属提示再退出。
+    # （`$$` 是 compose 转义，让变量留给容器内 sh 展开；`docker compose run --rm invest-web
+    #  openinvest init` 会整体替换 command，onboarding 不受这个检查影响。）
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$INVEST_API_TOKEN" ]; then
+          echo "❌ INVEST_API_TOKEN 未设置，invest-web 拒绝启动。" >&2
+          echo "   容器内绑 0.0.0.0（端口映射需要），非 loopback 绑定必须有 bearer 鉴权。" >&2
+          echo "   在 .env 加一行：INVEST_API_TOKEN=\$$(openssl rand -hex 32)，然后 docker compose up -d" >&2
+          exit 1
+        fi
+        exec openinvest-web
 
   # ── 定时任务 scheduler（无端口，跑 daily_report / pnl_snapshot 等 cron）──────
   invest-agent:

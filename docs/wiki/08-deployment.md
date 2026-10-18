@@ -76,14 +76,15 @@ docker compose up -d --build                 # 本地构建（首次几分钟：
 docker compose pull && docker compose up -d
 ```
 
-验证：`curl http://localhost:8765/api/health`。
+验证：`curl http://localhost:8765/api/health`（探活不需要 token）。
 
 | 服务 | 作用 | 端口 |
 |------|------|------|
 | `invest-web` | FastAPI（deprecated，仅 hub 转发 + 内部触发）| 宿主 `127.0.0.1:8765`（默认只绑 loopback）|
 | `invest-agent` | scheduler：跑 `jobs/*.yml`（daily_report / pnl_snapshot…）| 无 |
 
-- **暴露到 LAN/公网**：把 `invest-web` 的 `ports` 改成 `"8765:8765"` 并设 `INVEST_API_TOKEN`；或保持 loopback、前面挂 Caddy + CF Access（见下文第 1–2 节）。
+- **`INVEST_API_TOKEN` 必填**：容器内 `invest-web` 必须绑 `0.0.0.0`（宿主端口映射才进得来），而 `openinvest-web` 入口的守卫规定"非 loopback 绑定 + 无 token = 拒绝启动"。compose 在起进程前先查这个变量，缺了直接给提示退出（不再靠 `127.0.0.1:8765` 端口映射兜底一个无鉴权的 API）。在 `.env` 加 `INVEST_API_TOKEN=$(openssl rand -hex 32)` 的结果；设了之后 `/api/*` 都要带 `Authorization: Bearer <token>`（`/api/health` 探活豁免）。`docker compose run --rm invest-web openinvest init` 这类一次性命令会替换启动命令，不受影响。
+- **暴露到 LAN/公网**：把 `invest-web` 的 `ports` 改成 `"8765:8765"`（token 已是必填）；或保持 loopback、前面挂 Caddy + CF Access（见下文第 1–2 节）。
 - **数据持久化**：`memory/`（账本，必挂）/ `db/` / `cache_data/` / `logs/` 都 bind-mount 到宿主，容器重建不丢。
 - **镜像可见性**：GHCR 包首发是 private——要 `docker compose pull` 匿名拉，须在 GitHub Packages 把它设为 Public（或 `docker login ghcr.io`）。
 
@@ -117,8 +118,11 @@ openinvest init                 # onboarding 建 memory/
 ```ini
 Environment=INVEST_HOME=%h/openInvest
 EnvironmentFile=%h/openInvest/.env
-ExecStart=%h/.local/bin/openinvest-web
+Environment=INVEST_WEB_HOST=127.0.0.1
+Environment=INVEST_WEB_PORT=8765
+ExecStart=%h/.local/bin/uv run --no-sync openinvest-web
 # host/port 走 env：INVEST_WEB_HOST（默认 127.0.0.1）/ INVEST_WEB_PORT（默认 8765）
+# 必须走 openinvest-web 入口，不要裸 uvicorn——入口带"非 loopback 绑定必须设 INVEST_API_TOKEN"守卫
 Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=%h/openInvest
@@ -282,7 +286,7 @@ INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
 
 ```bash
 sudo systemctl list-units --type=service | grep invest
-# invest-web.service          uvicorn FastAPI :8765
+# invest-web.service          openinvest-web (FastAPI) :8765
 # invest-scheduler.service    APScheduler 跑所有 jobs/*.yml
 ```
 

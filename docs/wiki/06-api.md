@@ -49,8 +49,9 @@ open http://127.0.0.1:8765/docs
 curl http://127.0.0.1:8765/openapi.json
 ```
 
-（开发仓形态 `uvicorn openinvest.connectors.web_api:app` 也可；旧
-`uvicorn connectors.web_api:app` 是兼容 shim，文档不再教。）
+（开发仓形态 `uvicorn openinvest.connectors.web_api:app` 也可，但它**绕过** `openinvest-web` 的
+"非 loopback 绑定必须设 `INVEST_API_TOKEN`"守卫——只限本机 loopback 开发用，systemd / docker 部署一律走
+`openinvest-web`；旧 `uvicorn connectors.web_api:app` 是兼容 shim，文档不再教。）
 
 生产部署：见 [08-deployment.md](08-deployment.md)。
 
