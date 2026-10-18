@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.1](https://github.com/longsizhuo/openInvest/compare/v0.51.0...v0.51.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **ops:** 运维加固 D3 超时+心跳 / D6 部署守卫 / D7 锁·jsonl·bak·scheduler unit ([#459](https://github.com/longsizhuo/openInvest/issues/459)) ([3149869](https://github.com/longsizhuo/openInvest/commit/3149869c89193f7afe334872faeeef2bf26723df))
+
 ## [0.51.0](https://github.com/longsizhuo/openInvest/compare/v0.50.0...v0.51.0) (2026-10-18)
 
 
