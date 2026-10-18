@@ -88,6 +88,38 @@ def _nan_to_none(v):
     return None if np.isnan(fv) else fv
 
 
+def adjusted_with_raw(df: pd.DataFrame) -> pd.DataFrame:
+    """yfinance ``history(auto_adjust=False)`` 的帧 → 复权帧 + ``CloseRaw`` 列。
+
+    复权部分与 ``history(auto_adjust=True)`` **逐位相同**（同 ``yfinance.utils.auto_adjust`` 的算法：
+    ratio = Adj Close / Close；Open/High/Low 乘 ratio；Close 取 Adj Close），所以 regime / 技术指标 /
+    forward_return 读到的 ``close`` 不会因为抓取参数变了而变（``tests/test_raw_close.py`` 逐位断言）。
+    ``CloseRaw`` = yfinance 的 ``Close``：只按拆股复权、不含分红复权——账户估值用它（账本里的分红现金
+    是真钱，历史价再复权一遍就算了两次）。
+
+    没有 ``Adj Close`` 列（指数 / 期货 / FX 的 Yahoo 响应没有 adjclose，yfinance 本身退化成 Close）→
+    不做复权，``CloseRaw`` = ``Close``。
+    """
+    if df is None or df.empty or "Close" not in df.columns:
+        return df
+    out = df.copy()
+    if "Adj Close" in df.columns:
+        ratio = (df["Adj Close"] / df["Close"]).to_numpy()
+        for col in ("Open", "High", "Low"):
+            if col in df.columns:
+                out[col] = df[col] * ratio
+        out["Close"] = df["Adj Close"]
+        out = out.drop(columns=["Adj Close"])
+    out["CloseRaw"] = df["Close"]
+    return out
+
+
+def history_with_raw(ticker, **kwargs) -> pd.DataFrame:
+    """``ticker.history(auto_adjust=False, **kwargs)`` 经 :func:`adjusted_with_raw` 折成「旧 close 语义 + CloseRaw」。
+    get_history_data / scripts.backfill_history / backfill_raw_close 共用这一条抓取口径。"""
+    return adjusted_with_raw(ticker.history(auto_adjust=False, **kwargs))
+
+
 # ==========================================
 # 1. 通用数据获取 (yfinance)
 # ==========================================
@@ -165,7 +197,7 @@ def get_history_data(
         try:
             print(f"🔄 [yfinance] Refreshing {symbol} (period={fetch_period})...")
             ticker = yf.Ticker(symbol)
-            df_yf = ticker.history(period=fetch_period)
+            df_yf = history_with_raw(ticker, period=fetch_period)
             # 复权拼接哨兵（issue #179 P1-A④）：yfinance auto_adjust 在分红/拆股后
             # 会**全历史回溯**重新复权，而 5d 增量只更新最近几行——DB 里旧复权基准
             # 与新增行在缝合点断裂（ATR/RSI/regime 全被假跳变污染）。重叠日期的
@@ -189,7 +221,7 @@ def get_history_data(
                         f"⚠️ [splice-sentinel] {symbol} 重叠日 {mismatched} close "
                         f"整体偏移 >1%，疑似分红/拆股复权基准变化，改 2y 全量重取自愈"
                     )
-                    df_yf = ticker.history(period="2y")
+                    df_yf = history_with_raw(ticker, period="2y")
             if not df_yf.empty:
                 yf_got_data = True
                 for idx, row in df_yf.iterrows():
@@ -206,6 +238,7 @@ def get_history_data(
                         high=_nan_to_none(row.get('High')),
                         low=_nan_to_none(row.get('Low')),
                         volume=_nan_to_none(row.get('Volume')),
+                        close_raw=_nan_to_none(row.get('CloseRaw')),
                     )
                 df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
         except Exception as e:

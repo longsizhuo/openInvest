@@ -474,3 +474,24 @@ def test_daily_report_survives_digest_failure(monkeypatch):
     res = _run_daily_report(monkeypatch, boom)
     assert res["status"] == "success" and "## 今日持仓归因" not in res["full_report"]
     assert "## 1. 宏观环境" in res["full_report"]
+
+
+def test_digest_reports_price_basis_and_reads_raw_when_complete(tmp_path, monkeypatch):
+    """价格口径同账户业绩：最近一段 close_raw 全有 → 原始价（除息日的价差不被复权抹平）；缺 → 复权价。"""
+    class _Pair(_FakeStore):
+        def __init__(self, table, raw):
+            super().__init__(table)
+            self.raw = raw
+
+        def get_close_pair_df(self, symbol):
+            df = _df(self.table[symbol])
+            df["CloseRaw"] = pd.to_numeric([self.raw.get(symbol, {}).get(d) for d in self.table[symbol]])
+            return df
+
+    table = {**TABLE, "AAA": {D8: 10.0, D9: 9.5}}
+    raw = {"AAA": {D8: 10.2, D9: 9.7}, "NDQ.AX": {D8: 50.0, D9: None}}
+    monkeypatch.setattr(hd, "MarketStore", lambda: _Pair(table, raw))
+    d = _build(tmp_path)
+    assert d["price_basis"] == {"AAA": "raw", "NDQ.AX": "adjusted", "GC=F": "adjusted"}
+    assert _row(d, "AAA")["prev_close"] == 10.2 and _row(d, "AAA")["close"] == 9.7
+    assert _row(d, "NDQ.AX")["close"] == 51.0   # 缺 D9 的 raw → 整只回退复权价

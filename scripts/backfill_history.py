@@ -16,8 +16,8 @@ long daily CSV in front of the futures series — shipped in the repo, so a self
 user never downloads anything per-asset.
 
 Both paths are idempotent and non-destructive: ``MarketStore.backfill_ohlcv_row``
-inserts missing dates and only ever updates high/low on existing rows, never the
-authoritative close. Safe to run at setup and periodically.
+inserts missing dates and only ever updates high/low (and the raw close, ADR-027 PR2) on
+existing rows, never the authoritative close. Safe to run at setup and periodically.
 
   uv run python -m scripts.backfill_history              # all stored symbols
   uv run python -m scripts.backfill_history GC=F 510300.SS   # specific symbols
@@ -35,6 +35,7 @@ import pandas as pd
 import yfinance as yf
 
 from openinvest.db.market_store import MarketStore
+from openinvest.utils.exchange_fee import history_with_raw
 
 ROOT = Path(__file__).resolve().parent.parent
 INPUTS = ROOT / "experiments" / "ta-analysts" / "inputs"
@@ -59,7 +60,8 @@ def _num(v):
 
 
 def _yf_max(symbol):
-    df = yf.Ticker(symbol).history(period="max")
+    # auto_adjust=False：close 写复权价（Adj Close，语义不变），close_raw 写原始价（ADR-027 PR2）
+    df = history_with_raw(yf.Ticker(symbol), period="max")
     if df is None or df.empty:
         return None
     if df.index.tz is not None:
@@ -88,6 +90,7 @@ def backfill(symbol: str, ms: MarketStore) -> None:
                 symbol, r.Index.strftime("%Y-%m-%d"),
                 close, _num(r.High), _num(r.Low),
                 _num(getattr(r, "Volume", 0)) or 0.0, source="yfinance_max",
+                close_raw=_num(getattr(r, "CloseRaw", None)),
             )
             ins += res == "inserted"; upd += res == "updated"
     else:

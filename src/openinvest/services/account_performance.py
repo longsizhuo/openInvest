@@ -11,6 +11,12 @@
 估值复用全仓库唯一总资产实现 ``utils.fx.total_portfolio_value``（``rate_override`` 喂当日汇率），
 成本兜底 / 缺价缺汇率口径与 status 完全一致。
 
+价格口径（ADR-027 PR2，``price_basis``）：``daily_prices.close`` 是复权价（拆股 + 分红都复权），账本里的
+分红现金是真钱，历史市值再用复权价就把同一笔分红算两次。所以某 symbol 在所需日期范围内（成立日前最后一根 bar
+起到今天）``close_raw`` **每一天都有** → 用原始价（``price_basis[sym] = "raw"``）；只要缺一天就**整只**回退
+复权价（``"adjusted"``），绝不在一条序列里混用两种口径。场外基金（东方财富前复权净值）与黄金克价代理
+（期货 / 外汇没有分红，复权价 == 原始价）没有 close_raw，恒为 ``adjusted``。基准（total-return 比较）始终读复权价。
+
 外部现金流（进 TWR 分母、XIRR 现金流）：deposit / withdraw、``funding_source=external_funding``
 的买入与 DCA 对账、赠金，以及 manual_override / delete_holding 这类无现金对手的持仓修正
 （按当日收盘估值）。buy(cash_deduct) / sell / CommSec 成交是现金↔持仓的内部转换，不是现金流。
@@ -105,25 +111,58 @@ def _db_closes(store: MarketStore, symbol: str) -> Optional[pd.Series]:
     return s[~s.index.duplicated(keep="last")].sort_index()
 
 
-def _price_series(store: MarketStore, symbol: str, holding: Optional[Dict[str, Any]]) -> Optional[pd.Series]:
-    """持仓按 cost_currency 计价的收盘序列。口径与 utils.quotes.get_quote 一致：
-    黄金代理 = GC=F USD/oz ÷ 31.1035 × USDCNY；场外基金读 FUND:<code>；其余直接按 symbol/proxy。"""
+def _raw_closes(store: MarketStore, symbol: str) -> Optional[pd.Series]:
+    """行情库该 symbol 的原始价序列（index 同 _db_closes；NaN = 该日没有 close_raw）；没有 / 读不了 → None。
+    读失败按「没有 raw」处理（回退复权价），不拖垮估值。"""
+    try:
+        df = store.get_close_pair_df(symbol)
+    except Exception as e:  # noqa: BLE001
+        log.debug("account_performance: 读 %s close_raw 失败（按无原始价处理）: %s", symbol, e)
+        return None
+    if df is None or df.empty or "CloseRaw" not in df:
+        return None
+    s = pd.to_numeric(df["CloseRaw"], errors="coerce")
+    s.index = [ts.strftime("%Y-%m-%d") for ts in s.index]
+    return s[~s.index.duplicated(keep="last")].sort_index()
+
+
+def _pick_basis(adj: pd.Series, raw: Optional[pd.Series], since: Optional[str]) -> Tuple[pd.Series, str]:
+    """(价格序列, "raw" | "adjusted")：所需范围（``since`` 当天或之前的最后一根 bar 起；since=None = 全部）内
+    复权序列的每一天 ``raw`` 都有正值 → 原始价；缺任意一天 → 整只复权价。不混用。"""
+    if raw is None:
+        return adj, "adjusted"
+    start = max(adj.index.searchsorted(since, side="right") - 1, 0) if since else 0
+    need = adj.index[start:]
+    r = raw.reindex(need)
+    if len(need) and r.notna().all() and (r > 0).all():
+        return r, "raw"
+    return adj, "adjusted"
+
+
+def _price_series(store: MarketStore, symbol: str, holding: Optional[Dict[str, Any]],
+                  since: Optional[str] = None) -> Tuple[Optional[pd.Series], str]:
+    """(持仓按 cost_currency 计价的收盘序列, price_basis)。口径与 utils.quotes.get_quote 一致：
+    黄金代理 = GC=F USD/oz ÷ 31.1035 × USDCNY；场外基金读 FUND:<code>；其余直接按 symbol/proxy。
+    价格口径见模块 docstring：只有直读 yfinance 的标的有机会用原始价，黄金代理 / 场外基金恒为 adjusted。"""
     h = holding or {}
     proxy = str(h.get("yfinance_proxy") or symbol)
     if (not h or h.get("_from_ledger")) and extract_fund_code(symbol):
         # 已删掉的场外基金持仓：元数据没了，按代码读 FUND:<code>
-        return _db_closes(store, canonical_fund_symbol(symbol))
+        return _db_closes(store, canonical_fund_symbol(symbol)), "adjusted"
     if str(h.get("proxy_kind") or "") == GOLD_PROXY_KIND:
         oz, usdcny = _db_closes(store, proxy), _db_closes(store, "USDCNY=X")
         if oz is None or usdcny is None:
-            return None
+            return None, "adjusted"
         # 只在 GC=F 的交易日上出点（汇率前值填充到这些日期）：FX 对偶有周末行，不该把周末拉进估值网格
         fx_on_oz = usdcny.reindex(sorted(set(oz.index) | set(usdcny.index))).ffill().reindex(oz.index)
         both = pd.DataFrame({"oz": oz, "fx": fx_on_oz}).dropna()
-        return (both["oz"] / GOLD_OZ_PER_GRAM * both["fx"]).rename(symbol) if not both.empty else None
+        return ((both["oz"] / GOLD_OZ_PER_GRAM * both["fx"]).rename(symbol) if not both.empty else None), "adjusted"
     if h and is_eastmoney_fund(h):
-        return _db_closes(store, canonical_fund_symbol(symbol))
-    return _db_closes(store, proxy)
+        return _db_closes(store, canonical_fund_symbol(symbol)), "adjusted"
+    adj = _db_closes(store, proxy)
+    if adj is None:
+        return None, "adjusted"
+    return _pick_basis(adj, _raw_closes(store, proxy), since)
 
 
 def _fx_series(store: MarketStore, ccy: str, base: str) -> Optional[pd.Series]:
@@ -201,14 +240,16 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     }
 
     # 价格 / 汇率序列（只读库，各一次）
-    prices = {sym: _price_series(store, sym, by_sym.get(sym)) for sym in units}
+    first_day = events[0]["date"]
+    priced = {sym: _price_series(store, sym, by_sym.get(sym), since=first_day) for sym in units}
+    prices = {sym: p for sym, (p, _) in priced.items()}
+    price_basis = {sym: b for sym, (p, b) in priced.items() if p is not None}
     ccys = {str(c).upper() for c in cash} | {
         "CNY" if str(by_sym.get(s, {}).get("proxy_kind") or "") == GOLD_PROXY_KIND
         else str(by_sym.get(s, {}).get("cost_currency") or "CNY").upper() for s in units
     }
     fx = {c: _fx_series(store, c, base) for c in ccys if c != base}
 
-    first_day = events[0]["date"]
     grid = sorted({d for s in prices.values() if s is not None for d in s.index if first_day <= d <= today})
     if len(grid) < 2:
         return {"status": "insufficient_history", "reason": "fewer_than_2_valuation_days",
@@ -285,6 +326,7 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         out["xirr_note"] = (f"历史不足 {XIRR_MIN_SPAN_DAYS} 天不报" if span < XIRR_MIN_SPAN_DAYS
                             else "现金流无法求解 XIRR（缺少正负两向现金流或无解）")
     out["base_currency"] = base
+    out["price_basis"] = price_basis   # {symbol: "raw" | "adjusted"}，见模块 docstring
     out["opening_nav"] = round(opening_nav, 2)
     out["data_quality"] = {
         "days": len(rows),

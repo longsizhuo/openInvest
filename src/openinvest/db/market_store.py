@@ -17,14 +17,20 @@ _is_phantom_weekend = is_closed_weekend
 # 现价缓存 GC=F/USDCNY=X、betashares NAV 兜底）把同日已回填的 high/low/volume 冲成
 # NULL，ATR/RVOL 静默退化成收盘价差。改 upsert：close/source 后写者赢（同旧语义），
 # OHLCV 新值为 NULL 时保留旧值。
+#
+# ADR-027 PR2：close = 复权价（yfinance Adj Close，拆股 + 分红都复权，所有指标 / regime 读它，语义不变）；
+# close_raw = 原始价（yfinance Close：只按拆股复权、不含分红复权），账户估值用它——账本里的分红现金是真钱，
+# 历史价再复权一遍就算了两次。只有 yfinance 路径写它；场外基金 / 黄金代理 / betashares NAV 兜底不写（NULL）。
+# 与 OHLCV 同款：新值为 NULL 时保留旧值。
 _UPSERT_DAILY_PRICE = (
-    "INSERT INTO daily_prices (symbol, date, close, source, high, low, volume) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+    "INSERT INTO daily_prices (symbol, date, close, source, high, low, volume, close_raw) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
     "ON CONFLICT(symbol, date) DO UPDATE SET "
     "close = excluded.close, source = excluded.source, "
     "high = COALESCE(excluded.high, high), "
     "low = COALESCE(excluded.low, low), "
-    "volume = COALESCE(excluded.volume, volume)"
+    "volume = COALESCE(excluded.volume, volume), "
+    "close_raw = COALESCE(excluded.close_raw, close_raw)"
 )
 
 
@@ -70,7 +76,7 @@ class MarketStore:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_prices (
                 symbol TEXT, date TEXT, close REAL, source TEXT,
-                high REAL, low REAL, volume REAL,
+                high REAL, low REAL, volume REAL, close_raw REAL,
                 PRIMARY KEY (symbol, date)
             )""")
         # 2. ETF 持仓详情 (Top 10)
@@ -92,7 +98,7 @@ class MarketStore:
                 PRIMARY KEY (symbol, date, key)
             )""")
         self.conn.commit()
-        # 兼容迁移：给老库的 daily_prices 补 high/low/volume 列
+        # 兼容迁移：给老库的 daily_prices 补 high/low/volume/close_raw 列
         self._migrate_ohlcv_columns()
 
     def _migrate_ohlcv_columns(self):
@@ -106,11 +112,14 @@ class MarketStore:
             cursor = self.conn.cursor()
             cursor.execute("PRAGMA table_info(daily_prices)")
             existing = {row[1] for row in cursor.fetchall()}
-            for col in ("high", "low", "volume"):
+            for col in ("high", "low", "volume", "close_raw"):
                 if col not in existing:
-                    cursor.execute(
-                        f"ALTER TABLE daily_prices ADD COLUMN {col} REAL"
-                    )
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE daily_prices ADD COLUMN {col} REAL"
+                        )
+                    except sqlite3.OperationalError:
+                        pass  # 另一个进程刚加完（并发启动 check-then-alter 竞态）：列已在，等价于已迁移
             self.conn.commit()
 
     def save_ndq_snapshot(self, date_str, nav, stats, holdings, sectors):
@@ -120,7 +129,7 @@ class MarketStore:
             # _UPSERT_DAILY_PRICE 的 COALESCE 保留 yfinance 已填的 OHLCV（#231）。
             cursor.execute(
                 _UPSERT_DAILY_PRICE,
-                ("NDQ.AX", date_str, nav, "betashares_scraper", None, None, None),
+                ("NDQ.AX", date_str, nav, "betashares_scraper", None, None, None, None),
             )
             for k, v in stats.items():
                 cursor.execute("INSERT OR REPLACE INTO etf_stats VALUES (?, ?, ?, ?)", ("NDQ.AX", date_str, k, v))
@@ -176,10 +185,10 @@ class MarketStore:
         return df.tail(days)
 
     def backfill_ohlcv_row(self, symbol, date_str, close, high, low, volume,
-                           source="yfinance_backfill"):
+                           source="yfinance_backfill", close_raw=None):
         """回填一日 OHLCV（非破坏式）：
 
-        - (symbol, date) 已存在：只补 high/low/volume，**不动既有 close/source**
+        - (symbol, date) 已存在：只补 high/low/volume（和非空的 close_raw），**不动既有 close/source**
           （保留 betashares NAV 等权威收盘价，避免回填顺手改写历史决策依据）。
         - 不存在：整行 INSERT，close 用 yfinance。
 
@@ -196,17 +205,18 @@ class MarketStore:
             exists = cursor.fetchone() is not None
             if exists:
                 cursor.execute(
-                    "UPDATE daily_prices SET high = ?, low = ?, volume = ? "
+                    "UPDATE daily_prices SET high = ?, low = ?, volume = ?, "
+                    "close_raw = COALESCE(?, close_raw) "
                     "WHERE symbol = ? AND date = ?",
-                    (high, low, volume, symbol, date_str),
+                    (high, low, volume, close_raw, symbol, date_str),
                 )
                 result = "updated"
             else:
                 cursor.execute(
                     "INSERT INTO daily_prices "
-                    "(symbol, date, close, source, high, low, volume) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (symbol, date_str, close, source, high, low, volume),
+                    "(symbol, date, close, source, high, low, volume, close_raw) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (symbol, date_str, close, source, high, low, volume, close_raw),
                 )
                 result = "inserted"
             self.conn.commit()
@@ -220,8 +230,8 @@ class MarketStore:
             return [r[0] for r in cursor.fetchall()]
 
     def save_generic_price(self, symbol, date_str, close, source="yfinance",
-                           high=None, low=None, volume=None):
-        """存储一日行情。close 必填；high/low/volume 可选（OHLCV 回填 / 日常刷新用）。
+                           high=None, low=None, volume=None, close_raw=None):
+        """存储一日行情。close 必填；high/low/volume/close_raw 可选（OHLCV 回填 / 日常刷新用）。
 
         只传 close 的调用方（gold_price 现价缓存 / betashares 兜底）：新行
         high/low/volume 落 NULL；已有行只改 close/source，OHLCV 保留（#231）。
@@ -232,6 +242,42 @@ class MarketStore:
             cursor = self.conn.cursor()
             cursor.execute(
                 _UPSERT_DAILY_PRICE,
-                (symbol, date_str, close, source, high, low, volume),
+                (symbol, date_str, close, source, high, low, volume, close_raw),
             )
             self.conn.commit()
+    def get_close_pair_df(self, symbol):
+        """账户估值用：复权价 + 原始价成对读出，index=Date，列 ``Close`` / ``CloseRaw``（NULL → NaN）。
+
+        单独一个方法而不是给 get_history_df 加列——后者的列集合是 regime / 技术指标一路下游的契约
+        （"列存在 ⟺ 有数据"），``close_raw`` 只给估值层看。
+        """
+        import pandas as pd
+        with self._lock:
+            df = pd.read_sql_query(
+                "SELECT date as Date, close as Close, close_raw as CloseRaw "
+                "FROM daily_prices WHERE symbol = ? ORDER BY date ASC",
+                self.conn, params=(symbol,),
+            )
+            self.conn.rollback()  # #104
+        if not df.empty:
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.set_index("Date")
+        return df
+
+    def set_close_raw(self, symbol, rows):
+        """只回填已有行的 close_raw（``rows``: [(date_str, raw_close)]），不新增行、不动 close / OHLCV。
+        返回 (更新行数, 库里没有这天的行数)。backfill_raw_close 用。"""
+        updated = missing = 0
+        with self._lock:
+            cursor = self.conn.cursor()
+            for date_str, raw in rows:
+                cursor.execute(
+                    "UPDATE daily_prices SET close_raw = ? WHERE symbol = ? AND date = ?",
+                    (raw, symbol, date_str),
+                )
+                if cursor.rowcount:
+                    updated += 1
+                else:
+                    missing += 1
+            self.conn.commit()
+        return updated, missing

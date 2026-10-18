@@ -329,3 +329,88 @@ def test_status_view_carries_performance(tmp_path, monkeypatch):
     monkeypatch.setattr(ap, "build_account_performance", boom)
     view = skill_views.build_status_view()
     assert view["performance"]["status"] == "error" and "db gone" in view["performance"]["error"]
+
+
+# ---------- 价格口径（ADR-027 PR2）：全有 close_raw → raw，缺一天 → 整只 adjusted ----------
+
+class _PairStore(_FakeStore):
+    """带 close_raw 的假行情库：table[symbol] = {date: close}（复权）；raw[symbol] = {date: close_raw 或 None}。"""
+
+    def __init__(self, table, raw):
+        super().__init__(table)
+        self.raw = raw
+
+    def get_close_pair_df(self, symbol):
+        if symbol not in self.table:
+            return pd.DataFrame()
+        df = _df(self.table[symbol]).rename(columns={"Close": "Close"})
+        df["CloseRaw"] = [self.raw.get(symbol, {}).get(d) for d in self.table[symbol]]
+        df["CloseRaw"] = pd.to_numeric(df["CloseRaw"], errors="coerce")
+        return df
+
+
+ADJ = dict(zip(DAYS, [9.8, 9.9, 10.0, 10.0, 10.0]))      # 复权价：分红折进了历史
+RAW = dict(zip(DAYS, [10.0, 10.0, 10.0, 10.0, 10.0]))    # 原始价：平盘
+_BUY_AAA = [{"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 100.0,
+             "price": 10.0, "currency": "CNY", "funding_source": "external_funding"}]
+
+
+def _perf_with(tmp_path, monkeypatch, raw, since_history=None):
+    monkeypatch.setattr(ap, "MarketStore", lambda: _PairStore({"AAA": ADJ}, {"AAA": raw}))
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 100.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=since_history or _BUY_AAA)
+    captured = {}
+    orig = ap.account_metrics
+    monkeypatch.setattr(ap, "account_metrics",
+                        lambda rows, o, t, **kw: (captured.update(rows=rows), orig(rows, o, t, **kw))[1])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    perf["_navs"] = [r[1] for r in captured["rows"]]
+    return perf
+
+
+def test_full_close_raw_in_range_uses_raw_prices(tmp_path, monkeypatch):
+    perf = _perf_with(tmp_path, monkeypatch, RAW)
+    assert perf["price_basis"] == {"AAA": "raw"}
+    assert perf["_navs"] == [1000.0] * 5     # 原始价平盘；复权价会给出 980 → 1000 的"凭空"升值
+
+
+def test_one_missing_day_in_range_falls_back_whole_symbol(tmp_path, monkeypatch):
+    perf = _perf_with(tmp_path, monkeypatch, {**RAW, "2026-01-07": None})
+    assert perf["price_basis"] == {"AAA": "adjusted"}
+    assert perf["_navs"] == [980.0, 990.0, 1000.0, 1000.0, 1000.0]   # 整条序列都是复权价，没有混用 raw 的那几天
+
+
+def test_missing_raw_before_inception_does_not_matter(tmp_path, monkeypatch):
+    """所需范围 = 成立日（含它之前最后一根 bar）起；更早的行缺 close_raw 不拖累。"""
+    raw = {**RAW, "2026-01-05": None}
+    # 成立日 01-07：01-05 / 01-06 都在范围外之前，范围从 01-07 的 bar 起
+    perf = _perf_with(tmp_path, monkeypatch, raw, since_history=[{**_BUY_AAA[0], "ts_origin": "2026-01-07T10:00:00"}])
+    assert perf["price_basis"] == {"AAA": "raw"}
+    assert perf["_navs"] == [1000.0] * 3
+
+
+def test_store_without_close_raw_support_is_adjusted(tmp_path, monkeypatch):
+    """行情库读不了 close_raw（老库 / 读失败）→ 复权价，和改前完全一样。"""
+    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({"AAA": ADJ}))
+    pm = _pm(tmp_path, cash={"CNY": 0.0},
+             holdings=[{"symbol": "AAA", "units": 100.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
+             history=_BUY_AAA)
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["price_basis"] == {"AAA": "adjusted"}
+
+
+def test_gold_proxy_and_funds_are_always_adjusted(tmp_path, monkeypatch):
+    monkeypatch.setattr(ap, "MarketStore", lambda: _PairStore(
+        {"GC=F": dict(zip(DAYS, [3110.35] * 5)), "USDCNY=X": dict(zip(DAYS, [7.0] * 5)),
+         "FUND:000001": dict(zip(DAYS, [1.0, 1.0, 1.1, 1.1, 1.1]))},
+        {"GC=F": dict(zip(DAYS, [3110.35] * 5)), "FUND:000001": dict(zip(DAYS, [1.0] * 5))}))
+    pm = _pm(tmp_path, cash={"CNY": 0.0}, holdings=[
+        {"symbol": "GC=F", "units": 10.0, "avg_cost": 650.0, "cost_currency": "CNY",
+         "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
+        {"symbol": "FUND:000001", "kind": "fund", "units": 100.0, "avg_cost": 1.0, "cost_currency": "CNY"},
+    ], history=[
+        {"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "GC=F", "units": 10.0,
+         "price": 650.0, "currency": "CNY", "funding_source": "external_funding"}])
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["price_basis"]["GC=F"] == "adjusted" and perf["price_basis"]["FUND:000001"] == "adjusted"

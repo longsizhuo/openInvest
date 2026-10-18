@@ -192,10 +192,15 @@ def build_holdings_digest(pm: Optional[PortfolioManager] = None, *, today: Optio
     fx_cache: Dict[str, Any] = {}
     rows: List[Dict[str, Any]] = []
     pre_skipped: List[Dict[str, str]] = []
+    price_basis: Dict[str, str] = {}
+    # 价格口径同账户业绩（raw | adjusted，见 services.account_performance 模块 docstring）：只看最近两根 bar，
+    # 所以「所需范围」= 最近 MAX_BAR_AGE_DAYS+5 天；再早的行缺 close_raw 不影响。
+    since = (date.fromisoformat(today) - timedelta(days=MAX_BAR_AGE_DAYS + 5)).isoformat()
     for h in holdings:
         sym = str(h.get("symbol"))
         ccy = "CNY" if str(h.get("proxy_kind") or "") == GOLD_PROXY_KIND else str(h.get("cost_currency") or "CNY").upper()
-        two = _last_two(_price_series(store, sym, h), today)
+        series, basis = _price_series(store, sym, h, since=since)
+        two = _last_two(series, today)
         if two is None:
             pre_skipped.append({"symbol": sym, "reason": "no_history"})
             continue
@@ -203,6 +208,7 @@ def build_holdings_digest(pm: Optional[PortfolioManager] = None, *, today: Optio
         if (date.fromisoformat(today) - date.fromisoformat(d1)).days > MAX_BAR_AGE_DAYS:
             pre_skipped.append({"symbol": sym, "reason": f"stale:{d1}"})
             continue
+        price_basis[sym] = basis
         if ccy not in fx_cache:
             fx_cache[ccy] = _fx_series(store, ccy, base)
         fx0, fx1, fx_stale = 1.0, 1.0, False
@@ -226,7 +232,8 @@ def build_holdings_digest(pm: Optional[PortfolioManager] = None, *, today: Optio
     as_of = max(dates, key=lambda d: (dates[d], d))     # 多数持仓的最新收盘日（并列取较新）
     prevs = Counter(r["prev_date"] for r in attr["holdings"] if r["date"] == as_of)
     out.update(status="ok", attribution=attr, as_of=as_of,
-               prev_as_of=max(prevs, key=lambda d: (prevs[d], d)), benchmark=benchmark)
+               prev_as_of=max(prevs, key=lambda d: (prevs[d], d)), benchmark=benchmark,
+               price_basis=price_basis)
 
     symbols = [h["symbol"] for h in holdings]
     tracks = {s: a.get("tracks") for s, a in targets.items()}

@@ -398,6 +398,15 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--keep", type=int, default=20, help="每个 family 至少保留最新 N 份（默认 20）")
     c.add_argument("--days", type=int, default=7, help="mtime 在 N 天内的一律保留（默认 7）；与 --keep 取并集")
     c.set_defaults(func=cmd_maintenance)
+
+    p = sub.add_parser(
+        "backfill_raw_close",
+        help="给行情库已有行回填原始价 close_raw（联网拉 yfinance period=max，幂等）：账户估值读原始价，"
+             "账本里的分红现金才不会和复权价里的分红算两次。默认持仓 + target_assets；场外基金 / 黄金克价代理不回填",
+    )
+    p.add_argument("--symbols", default=None, metavar="A,B",
+                   help="逗号分隔的行情库 symbol（如 NDQ.AX,SPY）；不填 = 当前持仓 + target_assets")
+    p.set_defaults(func=cmd_backfill_raw_close)
     return parser
 
 

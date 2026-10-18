@@ -56,7 +56,7 @@ def test_splice_sentinel_full_refetch_on_adjust_change(monkeypatch):
         def __init__(self, s):
             pass
 
-        def history(self, period):
+        def history(self, period, **kw):   # kw：抓取现传 auto_adjust=False（ADR-027 PR2）
             calls.append(period)
             if period == "5d":
                 # 两个重叠日（07-06/07-07）的 close 都按新复权基准掉了 ~5%
