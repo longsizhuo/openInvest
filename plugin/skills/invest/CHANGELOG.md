@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.29.0...invest-skill-v0.30.0) (2026-10-18)
+
+
+### Features
+
+* **committee:** agent-run committee over MCP with backend-held facts ([#495](https://github.com/longsizhuo/openInvest/issues/495)) ([164e5d2](https://github.com/longsizhuo/openInvest/commit/164e5d2e63980a0ae17f280ce1be549f821ed5e8))
+
 ## [0.29.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.28.0...invest-skill-v0.29.0) (2026-10-18)
 
 
