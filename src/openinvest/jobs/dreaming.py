@@ -358,7 +358,7 @@ def _llm_verify_candidates(
     )
 
     # 统一从 utils.llm 读 LLM 配置（默认 DeepSeek，可通过 LLM_* env 换千问/智谱）
-    from openinvest.utils.llm import get_llm_config_safe, needs_thinking_disabled
+    from openinvest.utils.llm import get_llm_config_safe, json_object_kwargs, needs_thinking_disabled, sampling_kwargs
     api_key, base_url, model, _provider = get_llm_config_safe()
     if not api_key:
         log.warning("LLM_API_KEY / DEEPSEEK_API_KEY 未设，跳过 LLM 验伪 (全部 KEEP)")
@@ -378,9 +378,9 @@ def _llm_verify_candidates(
                 {"role": "system", "content": LLM_VERIFY_SYSTEM_PROMPT},
                 {"role": "user", "content": user_payload},
             ],
-            temperature=0.1,  # 验伪要稳定，不要发散
+            **sampling_kwargs(model, 0.1),  # 验伪要稳定，不要发散
             timeout=60,
-            response_format={"type": "json_object"},
+            **json_object_kwargs(model),
             extra_body=extra_body or None,
         )
         raw = response.choices[0].message.content or "{}"

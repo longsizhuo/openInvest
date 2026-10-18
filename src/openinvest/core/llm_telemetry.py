@@ -52,6 +52,10 @@ PRICING_CNY_PER_M_TOKENS: Dict[str, Dict[str, float]] = {
     # OpenAI 价格更贵，先用 gpt-4o 作为占位（如真用上要更新）
     "gpt-4o": {"input": 17.0, "output": 70.0},        # ~$2.5/$10 ≈ ¥17/¥70
     "gpt-4o-mini": {"input": 1.1, "output": 4.3},
+    # Claude 走 OpenAI 兼容层（api.anthropic.com/v1/），该层不支持 prompt caching → 只有未命中价
+    "claude-sonnet-5-5": {"input": 14.0, "output": 70.0},  # $2/$10 ≈ ¥14/¥70
+    "claude-opus-5-5": {"input": 28.0, "output": 140.0},  # $4/$20
+    "claude-haiku-5-5": {"input": 0.7, "output": 3.5},     # $0.10/$0.50（prompt ≤100K；超出 5× 价未建模）
 }
 
 # 落盘路径

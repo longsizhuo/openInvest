@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.1](https://github.com/longsizhuo/openInvest/compare/v0.54.0...v0.54.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **llm:** omit temperature and json_object for Claude models ([#483](https://github.com/longsizhuo/openInvest/issues/483)) ([cafdfb8](https://github.com/longsizhuo/openInvest/commit/cafdfb89a9627baded01ef13152a1f18fa1902f7))
+
 ## [0.54.0](https://github.com/longsizhuo/openInvest/compare/v0.53.1...v0.54.0) (2026-10-18)
 
 

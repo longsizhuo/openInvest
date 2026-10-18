@@ -152,6 +152,31 @@ def get_thinking_disable_kwargs(model: Optional[str] = None) -> dict:
     return {"extra_body": {"thinking": {"type": "disabled"}}}
 
 
+def is_claude(model: Optional[str] = None) -> bool:
+    # 子串判：覆盖网关前缀（anthropic/claude-…、anthropic.claude-…）。
+    # ponytail: 老 Claude（≤4.6）也跟着走下面两条规则；真要钉老模型再细分
+    return "claude" in (model or get_llm_config_safe()[2]).lower()
+
+
+def sampling_kwargs(model: Optional[str], temperature: float) -> dict:
+    """``chat.completions.create`` 的 temperature kwargs。
+
+    Claude 4.7 起（含 Sonnet/Opus 5.x）temperature 只收默认值，传 <1 直接 400
+    （OpenAI 兼容层同样），委员会每次调用都会被吞成 [WORKER_UNAVAILABLE] → 静默 HOLD。
+    claude-* 一律不传；其他 provider 原样。
+    """
+    return {} if is_claude(model) else {"temperature": temperature}
+
+
+def json_object_kwargs(model: Optional[str]) -> dict:
+    """``response_format={"type": "json_object"}`` kwargs。
+
+    Anthropic 兼容层对 json_object 直接 400（只收 json_schema，文档写的"忽略"与实测不符，
+    2026-10-18）。claude-* 不传，靠 prompt 要求纯 JSON——实测 Sonnet 5.5 吐裸 JSON 可直接 loads。
+    """
+    return {} if is_claude(model) else {"response_format": {"type": "json_object"}}
+
+
 # NOTE 2026-05-19: 之前有个 needs_reasoning_carry(model) helper 按 model 名嗅探
 # 是否要 carry reasoning_content，是 hack。现在 SDKAgent 改成 response-driven：
 # 上一轮 API response 含 reasoning_content 就 carry，不靠 model name —— MiMo /
