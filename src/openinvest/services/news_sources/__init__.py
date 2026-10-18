@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,19 @@ class RawNewsItem:
     def __post_init__(self):
         if not self.fetched_at:
             self.fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# 各适配器共用的小工具（原先 ddgs/searxng/rss 各复制一份，#236）
+def _normalize_domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower().replace("www.", "")
+    except Exception:
+        return ""
+
+
+def _trim(s: str, n: int) -> str:
+    s = (s or "").strip()
+    return s if len(s) <= n else s[:n].rstrip() + "..."
 
 
 def _source_of(label: str) -> str:

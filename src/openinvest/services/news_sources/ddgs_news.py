@@ -7,21 +7,11 @@
 from __future__ import annotations
 
 import logging
-import re
-from datetime import datetime, timezone
-from typing import List, Optional
-from urllib.parse import urlparse
+from typing import List
 
-from openinvest.services.news_sources import RawNewsItem
+from openinvest.services.news_sources import RawNewsItem, _normalize_domain, _trim
 
 log = logging.getLogger(__name__)
-
-
-def _normalize_domain(url: str) -> str:
-    try:
-        return urlparse(url).netloc.lower().replace("www.", "")
-    except Exception:
-        return ""
 
 
 def fetch_ddgs_news(
@@ -71,10 +61,3 @@ def fetch_ddgs_news(
         )
         items.append(item)
     return items
-
-
-def _trim(s: str, n: int) -> str:
-    s = (s or "").strip()
-    return s if len(s) <= n else s[:n].rstrip() + "..."
-
-

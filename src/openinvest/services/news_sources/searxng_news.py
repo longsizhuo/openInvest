@@ -19,20 +19,12 @@ from __future__ import annotations
 import logging
 import os
 from typing import List
-from urllib.parse import urlparse
 
 import requests
 
-from openinvest.services.news_sources import RawNewsItem
+from openinvest.services.news_sources import RawNewsItem, _normalize_domain, _trim
 
 log = logging.getLogger(__name__)
-
-
-def _normalize_domain(url: str) -> str:
-    try:
-        return urlparse(url).netloc.lower().replace("www.", "")
-    except Exception:
-        return ""
 
 
 def searxng_base_url() -> str:
@@ -93,8 +85,3 @@ def fetch_searxng_news(
             )
         )
     return items
-
-
-def _trim(s: str, n: int) -> str:
-    s = (s or "").strip()
-    return s if len(s) <= n else s[:n].rstrip() + "..."
