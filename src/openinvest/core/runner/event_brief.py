@@ -45,6 +45,38 @@ def _check_as_of(as_of: Optional[datetime]) -> None:
         raise ValueError(f"as_of 必须是带时区的 datetime，收到 {as_of!r}")
 
 
+def _recall_events(symbol: str, *, as_of: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """事件 RAG 召回（原始事件列表）。flag 关 / store 缺 / 召回失败 → []，不阻断 committee。
+
+    召回参数全走 config.event.*；as_of 透传 EventStore.recall(as_of=)（issue #196）。
+    """
+    from openinvest.core.config import load_config
+    cfg = load_config()
+    if not cfg.event.enabled:
+        return []
+    try:
+        from openinvest.services.embeddings import embed_query
+        store = _get_event_store()
+        if store is None:
+            return []
+        # embed_query：hash provider 返回 None → 不精排、按时间倒序（hash 精排 = 随机挑，2026-10-08）
+        q_embed = embed_query(symbol) if store.vec_loaded else None
+        # issue #26: 召回时把用户标的扩展为代理集合（NDQ.AX 也命中 ^NDX 指数事件）
+        from openinvest.services.symbol_map import proxy_symbols_for
+        return store.recall(
+            symbol,
+            time_window_days=cfg.event.rag_window_days,
+            min_severity=cfg.event.rag_min_severity,
+            top_k=cfg.event.rag_top_k,
+            query_embedding=q_embed,
+            aliases=sorted(proxy_symbols_for(symbol)),
+            as_of=as_of,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"event RAG recall 失败 {symbol}: {type(e).__name__}: {e}")
+        return []
+
+
 def _resolve_event_brief(
     symbol: str, override: Optional[str], *, as_of: Optional[datetime] = None,
 ) -> str:
@@ -68,34 +100,11 @@ def _resolve_event_brief(
     _check_as_of(as_of)
     if override is not None:
         return override
-    from openinvest.core.config import load_config
-    cfg = load_config()
-    if not cfg.event.enabled:
-        return ""
     try:
-        from openinvest.services.embeddings import embed_query
-        store = _get_event_store()
-        if store is None:
-            return ""
-        # embed_query：hash provider 返回 None → 不精排、按时间倒序（hash 精排 = 随机挑，2026-10-08）
-        q_embed = embed_query(symbol) if store.vec_loaded else None
-        # issue #26: 召回时把用户标的扩展为代理集合（NDQ.AX 也命中 ^NDX 指数事件）
-        from openinvest.services.symbol_map import proxy_symbols_for
-        events = store.recall(
-            symbol,
-            time_window_days=cfg.event.rag_window_days,
-            min_severity=cfg.event.rag_min_severity,
-            top_k=cfg.event.rag_top_k,
-            query_embedding=q_embed,
-            aliases=sorted(proxy_symbols_for(symbol)),
-            as_of=as_of,
-        )
-        return format_event_brief(events)
+        return format_event_brief(_recall_events(symbol, as_of=as_of))
     except Exception as e:  # noqa: BLE001
-        log.warning(f"event RAG recall 失败 {symbol}: {type(e).__name__}: {e}")
+        log.warning(f"event brief 格式化失败 {symbol}: {type(e).__name__}: {e}")
         return ""
-
-
 
 
 def resolve_event_brief_multi(
@@ -106,15 +115,17 @@ def resolve_event_brief_multi(
     跨资产共享 loader：跑一次，结果同时注入
     run_macro_view(event_brief=...) 和每个 run_committee(..., event_brief=...)。
 
-    去重策略：按 "ts|one_line_claim" 拆行后 dict 去重（保留首次出现顺序），
-    避免同一事件被多个 symbol 各自召回后重复出现在 Macro prompt 里。
+    去重策略：先按 event_id 去重（同一事件被多个 symbol 各自召回只留一次，保留首次出现顺序），
+    再把合并后的事件列表**一次性**交给 format_event_brief——同论点转载归并
+    （event.max_corroboration）因此跨 symbol 也成立，而不是只在单 symbol 召回内成立。
+    EVENT_STANCE 由这份 brief 的头行解析，计数随之按"不同论点"算。
 
-    任何单 symbol 召回失败都 graceful 跳过（_resolve_event_brief 内部也已 graceful）。
+    任何单 symbol 召回失败都 graceful 跳过（_recall_events 内部也已 graceful）。
     全部失败时返回 ""，不阻断 daily_report 主流程。
 
     Args:
         symbols: 所有 target_assets 的 symbol 列表（如 ["NDQ.AX", "GC=F"]）
-        as_of: issue #196 回测 as-of-D 截断（逐 symbol 透传 _resolve_event_brief）；
+        as_of: issue #196 回测 as-of-D 截断（逐 symbol 透传 _recall_events）；
             None = 生产现行为
 
     Returns:
@@ -124,29 +135,24 @@ def resolve_event_brief_multi(
     if not symbols:
         return ""
 
-    # 按 symbol 逐个召回，汇总所有事件段落
-    # _resolve_event_brief(symbol, override=None) → 走内部 feature flag 召回逻辑
-    all_briefs: List[str] = []
+    events: List[Dict[str, Any]] = []
+    seen_ids: set = set()
     for sym in symbols:
         try:
-            brief = _resolve_event_brief(sym, override=None, as_of=as_of)
-            if brief:
-                all_briefs.append(brief)
+            for e in _recall_events(sym, as_of=as_of):
+                eid = e.get("event_id")
+                if eid is not None:
+                    if eid in seen_ids:
+                        continue
+                    seen_ids.add(eid)
+                events.append(e)
         except Exception as e:  # noqa: BLE001
             log.warning(f"resolve_event_brief_multi: {sym} 召回失败（已跳过）: {type(e).__name__}: {e}")
-
-    if not all_briefs:
+    try:
+        return format_event_brief(events)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"resolve_event_brief_multi: 格式化失败（退化为空）: {type(e).__name__}: {e}")
         return ""
-
-    # 按"段落"去重：每个事件以两行为一块（ts/stance 行 + claim 行）
-    # 用首行（含 ts + claim）作为 key，保留首次出现顺序
-    # 实现：把所有 brief 拼起来再按段分割，用 dict.fromkeys 去重
-    combined = "\n\n".join(all_briefs)
-    # 段落以空行分隔；split("\n\n") 可能产生空串，filter 掉
-    paragraphs = [p.strip() for p in combined.split("\n\n") if p.strip()]
-    # 去重 key = 段落全文（完全相同才去重，避免同 ts 不同 claim 被错误合并）
-    deduped = list(dict.fromkeys(paragraphs))
-    return "\n\n".join(deduped)
 
 # 注：_EVENT_STORE_SINGLETON 是模块级可变单例，刻意不放进 __all__——
 # 否则 façade 的 `import *` 会带出一个 import 时的 None 快照（不跟踪真单例），

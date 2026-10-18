@@ -247,6 +247,10 @@ class EventConfig:
     rag_window_days: int = 7                    # 向量召回新闻事件的最长历史天数
     rag_min_severity: str = "mid"               # 向量召回新闻事件的最低严重度级别
     rag_top_k: int = 8                          # 每个标的召回的新闻事件最大数量
+    # 同论点（转载/改写稿）在 brief 里最多出几条，超出的折叠，并在保留条 claim 行末标 "(×N 来源)"；
+    # EVENT_STANCE 计数随 brief 同步。0 = 不归并。同论点 = 影响标的集合 / stance / severity / 来源身份
+    # （agent vs 爬虫）都相同 + 整句 claim 相似度 >= 0.85 + 数字按顺序一致，详见 core/runner/event_format.py。
+    max_corroboration: int = 1
     max_per_source: int = 15                    # 每次拉取新闻的最大条数
     # #153②：RSS 泛头条预过滤——标题/摘要含 watched 别名或 macro 关键词才进 LLM
     # 归一化（审计：两个泛头条 feed 占 72% 产出、92% 事件与持仓无关）。

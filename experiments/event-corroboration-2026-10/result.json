@@ -1,0 +1,60 @@
+{
+ "params": {
+  "start": "2026-09-19",
+  "end": "2026-10-18",
+  "hour_utc": 2,
+  "old_rev": "c460c47"
+ },
+ "summary": {
+  "days": 30,
+  "days_with_brief_old": 30,
+  "brief_entries_old": 672,
+  "brief_entries_new": 658,
+  "days_brief_count_changed": 10,
+  "max_daily_reduction": 2,
+  "marked_lines_new": 9,
+  "residual_dup_groups_new": 0,
+  "market_stance": {
+   "risk_old": 378,
+   "risk_new": 377,
+   "opp_old": 221,
+   "opp_new": 208,
+   "days_counts_changed": 10,
+   "days_net_label_changed": 1
+  },
+  "per_symbol_stance": {
+   "S1": {
+    "risk_old": 142,
+    "risk_new": 141,
+    "opp_old": 88,
+    "opp_new": 85,
+    "days_counts_changed": 4,
+    "days_net_label_changed": 0
+   },
+   "S2": {
+    "risk_old": 49,
+    "risk_new": 49,
+    "opp_old": 16,
+    "opp_new": 16,
+    "days_counts_changed": 0,
+    "days_net_label_changed": 0
+   },
+   "S3": {
+    "risk_old": 50,
+    "risk_new": 50,
+    "opp_old": 59,
+    "opp_new": 49,
+    "days_counts_changed": 7,
+    "days_net_label_changed": 0
+   },
+   "S4": {
+    "risk_old": 154,
+    "risk_new": 154,
+    "opp_old": 69,
+    "opp_new": 67,
+    "days_counts_changed": 2,
+    "days_net_label_changed": 0
+   }
+  }
+ }
+}
