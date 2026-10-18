@@ -299,6 +299,13 @@ def test_cash_deposit_aud(client, tmp_store):
     assert r.json()["aud_cash"] == pytest.approx(150.0)
 
 
+def test_cash_amount_must_be_positive(client):
+    """金额必须 > 0（CashWriteRequest.amount gt=0）：0 / 负数 → 422，deposit / withdraw 都守"""
+    for op in ("deposit", "withdraw"):
+        assert client.post(f"/api/cash/CNY/{op}", json={"amount": 0}).status_code == 422
+        assert client.post(f"/api/cash/CNY/{op}", json={"amount": -100}).status_code == 422
+
+
 def test_cash_withdraw_cny(client, tmp_store):
     r = client.post("/api/cash/CNY/withdraw", json={"amount": 1000.0})
     assert r.status_code == 200
