@@ -254,7 +254,7 @@ CLI `run_committee`（含同日缓存命中、远端 hub 模式 `INVEST_API_BASE
 邮件 / `/view` 页末尾的小字 `（自报 0.xx）` 是 CIO 自报原数；API / MCP / CLI 的 `confidence_lookup` 不带这段，自报原数照旧在 `confidence` 字段（留档）。transcript 里 `**Verdict**: X (confidence Y)`、
 verdict / 建议金额 / sanity 降级 / high_confidence_buy / 第二天 Quant/Risk 读到的历史决议全部不变。
 查表由下面的 `verdict_review` job 每天写到 `memory/.dreams/confidence_lookup.json`：样本 = live 决议 + 前瞻纸面舰队
-（`memory/.backtest/<日期>/`，日期 ≥ 2026-07-24 且文件在决议日当天/次日写出；T2 试跑臂的 `.backtest_t2conf/`、B4 密封投票臂的 `.backtest_sealed/` 和事后补跑的回测都不进），
+（`memory/.backtest/<日期>/`，日期 ≥ 2026-07-24 且文件在决议日当天/次日写出；T2 试跑臂的 `.backtest_t2conf/`、B4 三个实验臂的 `.backtest_sealed/` / `.backtest_debate/` / `.backtest_macrosoft/` 和事后补跑的回测都不进），
 都要非污染、30d 已成熟、不是周末重复（`calc.symbols.is_closed_weekend`），不按自报分剔除（≤0.4 只在展示时打标）。
 标签同 verdict_review：T2 30d 规则（HOLD = 涨跌留在 flat band 内，有方向的 = 方向对），行情只读 `market_data.db`。
 舰队是中性持仓、没有事件/估值/情绪输入，所以每格都记来源构成 `n_live` / `n_fleet`。市场横盘基率 = 同一批样本不分 verdict 30 天落在波动带内的比例。
