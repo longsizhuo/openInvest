@@ -1,10 +1,11 @@
 """B4 密封投票实验臂（评审路线 B4）——舰队侧契约测试。
 
-守三件事：
+守四件事：
 - 聚合规则（多数 / 平票 / 无多数 / 多数票金额中位数）是纯函数，边界写死
 - run_one_day(votes=N)：同一份输入抽 N 次、落 Input Health(arm/votes/flip/split)、同日跑过就跳过、
   任一次抽样失败整标的不落盘；votes=1 的对照臂落盘格式不变
-- main() 把臂接在对照臂之后、借对照臂的 macro_view；--sealed-arm 只能配 --prospective
+- debate 臂（rounds=4 单次抽样）/ macro-soft 臂（CIO 规则 2 变体）：落盘健康位、变体只动规则 2 且只在臂内生效
+- main() 把四臂接在对照臂之后、借对照臂的 macro_view；各 flag 只能配 --prospective
 
 复盘侧（review_arm / run_arm / 不污染 live）见 tests/test_arm_review.py。不联网、不调 LLM。
 """
@@ -115,7 +116,8 @@ def _install_stubs(monkeypatch, tmp_path, verdict_script: List[Dict[str, Any]]):
                                  quant_view=f"QUANT#{len(calls)}", risk_view=f"RISK#{len(calls)}",
                                  cio_memo=f"CIO MEMO#{len(calls)}")
         return {"asset": kw["asset"]["symbol"], "verdict": verdict, "report": report,
-                "debate": {"max_rounds": 1, "final_round": 1, "converged": False,
+                "debate": {"max_rounds": kw["max_debate_rounds"], "final_round": step.get("final_round", 1),
+                           "converged": step.get("converged", False),
                            "quant_history": [], "risk_history": [], "model": "m-test",
                            "cio_json_mode": True}}
 
@@ -206,6 +208,107 @@ def test_control_arm_transcript_format_is_unchanged(monkeypatch, tmp_path):
     assert "**Debate**" not in text
 
 
+# ---------- debate 臂 / macro-soft 臂（单次抽样的实验臂） ----------
+
+MACRO_RISK_OFF = "SIGNAL: risk_off\nSTRENGTH: 6\nSCORE: -3\nONE_LINER: x"
+
+
+def test_debate_arm_is_single_sample_rounds4_and_records_rounds(monkeypatch, tmp_path):
+    calls, macro_calls = _install_stubs(monkeypatch, tmp_path, [
+        {"verdict": "HOLD", "final_round": 3, "converged": True}])
+    out = bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.DEBATE_ARM_SUBDIR, macro_view_override=MACRO_RISK_OFF,
+                         max_rounds_override=bc.DEBATE_ROUNDS, arm_health={"arm": "debate_r4"})
+    assert len(calls) == 1 and macro_calls == []
+    assert calls[0]["max_debate_rounds"] == 4 and calls[0]["macro_view"] == MACRO_RISK_OFF
+    text = (tmp_path / "memory" / bc.DEBATE_ARM_SUBDIR / DAY / "AAPL.md").read_text(encoding="utf-8")
+    h = parse_committee_text(text)["input_health"]
+    assert h["arm"] == "debate_r4" and h["final_round"] == 3 and h["converged"] is True
+    assert (h["macro_signal"], h["macro_strength"]) == ("risk_off", 6.0)
+    assert "votes" not in h and "**Debate**: 3 round(s) (max 4, converged)" in text
+    assert out["verdicts"]["AAPL"]["verdict"] == "HOLD" and "votes" not in out["verdicts"]["AAPL"]
+
+
+def test_macro_soft_arm_health_and_env_rounds_unchanged(monkeypatch, tmp_path):
+    calls, _ = _install_stubs(monkeypatch, tmp_path, [{"verdict": "ACCUMULATE", "alloc": 2400}])
+    bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.MACROSOFT_ARM_SUBDIR, macro_view_override=MACRO_RISK_OFF,
+                   arm_health={"arm": "macrosoft_r1"})
+    assert calls[0]["max_debate_rounds"] == 1                  # 没传 override → 仍是 INVEST_MAX_DEBATE_ROUNDS 缺省
+    text = (tmp_path / "memory" / bc.MACROSOFT_ARM_SUBDIR / DAY / "AAPL.md").read_text(encoding="utf-8")
+    parsed = parse_committee_text(text)
+    assert (parsed["verdict"], parsed["alloc_cny"]) == ("ACCUMULATE", 2400.0)
+    assert parsed["input_health"]["arm"] == "macrosoft_r1" and parsed["input_health"]["macro_strength"] == 6.0
+
+
+def test_macro_signal_strength_parse():
+    assert bc.macro_signal_strength(MACRO_RISK_OFF) == ("risk_off", 6.0)
+    assert bc.macro_signal_strength("[backtest macro failed: boom]") == (None, None)
+
+
+def _cio_prompts(monkeypatch):
+    """跑一次 stub 委员会（rounds=1），返回 CIO agent 收到的 system prompt（同 test_fleet_confidence_t2 的做法）。"""
+    import openinvest.core.committee.debate as debate
+    seen = []
+
+    class _Stub:
+        last_tool_calls = []
+
+        def __init__(self, role):
+            self.role = role
+
+        def run(self, ctx):
+            if self.role == "cio":
+                return "VERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: risk\nSUGGESTED_ALLOC_CNY: 0\n"
+            return "SIGNAL: neutral\nONE_LINER: stub\nSTRENGTH: weak"
+
+        def tool_call_summary(self):
+            return ""
+
+    def fake_create_agent(system_prompt, *, role="unknown", **kw):
+        if role == "cio":
+            seen.append(system_prompt)
+        return _Stub(role)
+
+    monkeypatch.setattr(debate, "_create_agent", fake_create_agent)
+    monkeypatch.setattr("openinvest.utils.llm.supports_json_output", lambda: False)
+    monkeypatch.delenv("INVEST_CIO_THINKING", raising=False)
+    debate.run_committee(asset={"symbol": "QQQ", "display_name": "QQQ"}, market_data="(stub)", macro_view="(stub)",
+                         portfolio_summary="(stub)", persist_to_memory=False, max_debate_rounds=1)
+    return seen
+
+
+def test_macro_soft_variant_only_touches_rule2_and_live_prompt_is_unchanged(monkeypatch):
+    import hashlib
+
+    import openinvest.core.committee.debate as debate
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+
+    asset = {"symbol": "QQQ", "display_name": "QQQ"}
+    for json_mode in (False, True):
+        live = build_cio_prompt(asset, json_mode=json_mode)
+        soft = bc.build_cio_prompt_macro_soft(asset, json_mode=json_mode)
+        assert "macro-soft 试跑变体" in soft and "× (10 − Macro STRENGTH) / 10" in soft
+        assert "STRENGTH ≥ 8 的 risk_off 仍然否决" in soft
+        start = soft.index("。\n   **例外——Macro 偏空但不否决")
+        end = soft.index("仍然否决（HOLD）。", start) + len("仍然否决（HOLD）。")
+        assert soft[:start] + soft[end:] == live            # 变体 = live + 规则 2 后面插入一段，别无二致
+
+    sha = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()  # noqa: E731
+    before = sha(build_cio_prompt(asset))
+    live_seen = _cio_prompts(monkeypatch)
+    with bc._macro_soft_arm():
+        soft_seen = _cio_prompts(monkeypatch)
+    after_seen = _cio_prompts(monkeypatch)
+    assert [sha(p) for p in live_seen] == [before] and [sha(p) for p in after_seen] == [before]
+    assert len(soft_seen) == 1 and "macro-soft 试跑变体" in soft_seen[0]
+    assert debate.build_cio_prompt is build_cio_prompt       # 开关退出后命名空间还原
+
+
+def test_macro_soft_anchor_drift_fails_loudly(monkeypatch):
+    monkeypatch.setattr(bc, "_CIO_RULE2", "2. 这句话 cio.md 里没有")
+    with pytest.raises(RuntimeError, match="锚点失效"):
+        bc.build_cio_prompt_macro_soft({"symbol": "QQQ"})
+
+
 # ---------- main()：flag 约束 + 调度顺序 ----------
 
 def test_sealed_flags_require_prospective_and_min_n(monkeypatch):
@@ -242,6 +345,51 @@ def test_main_runs_sealed_arm_after_control_and_shares_macro(monkeypatch):
     assert "out_subdir" not in seen[0] and "votes" not in seen[0]            # 对照臂：原调用不变
     assert seen[1]["out_subdir"] == SEALED_ARM_SUBDIR and seen[1]["votes"] == 5
     assert seen[1]["macro_view_override"] == "MACRO-X" and seen[1]["syms"] == ["AAA", "BBB"]
+
+
+def test_main_runs_all_four_arms_in_order_sharing_macro(monkeypatch):
+    import openinvest.core.committee.debate as debate
+    from openinvest.capabilities.committee.cio import build_cio_prompt
+
+    seen: List[Dict[str, Any]] = []
+
+    def fake(d, syms, **kw):
+        seen.append({"variant_active": debate.build_cio_prompt is bc.build_cio_prompt_macro_soft, **kw})
+        return {"date": d, "macro_view": "MACRO-X", "verdicts": {s: {"verdict": "HOLD"} for s in syms}}
+
+    _prospective_main(monkeypatch, ["--sealed-arm", "--debate-arm", "--macro-soft-arm"], fake)
+    assert len(seen) == 4
+    control, sealed, debate_kw, soft = seen
+    assert "out_subdir" not in control and not control["variant_active"]
+    assert sealed["out_subdir"] == bc.SEALED_ARM_SUBDIR and sealed["votes"] == 3
+    assert debate_kw["out_subdir"] == bc.DEBATE_ARM_SUBDIR and debate_kw["max_rounds_override"] == 4
+    assert debate_kw["arm_health"] == {"arm": "debate_r4"} and not debate_kw["variant_active"]
+    assert soft["out_subdir"] == bc.MACROSOFT_ARM_SUBDIR and soft["arm_health"] == {"arm": "macrosoft_r1"}
+    assert soft["variant_active"], "macro-soft 臂必须在变体开关里跑"
+    assert "max_rounds_override" not in soft and "votes" not in soft
+    assert {k["macro_view_override"] for k in (sealed, debate_kw, soft)} == {"MACRO-X"}
+    assert debate.build_cio_prompt is build_cio_prompt          # 跑完还原
+
+
+def test_macro_soft_anchor_failure_skips_that_arm_only_and_exits_nonzero(monkeypatch):
+    seen: List[Dict[str, Any]] = []
+
+    def fake(d, syms, **kw):
+        seen.append(kw)
+        return {"date": d, "macro_view": "M", "verdicts": {s: {"verdict": "HOLD"} for s in syms}}
+
+    monkeypatch.setattr(bc, "_CIO_RULE2", "2. 没有这句")
+    with pytest.raises(SystemExit) as ei:
+        _prospective_main(monkeypatch, ["--debate-arm", "--macro-soft-arm"], fake)
+    assert ei.value.code == 1
+    assert [k.get("out_subdir") for k in seen] == [None, bc.DEBATE_ARM_SUBDIR]   # debate 臂照跑，macro-soft 没花钱
+
+
+def test_new_arm_flags_require_prospective(monkeypatch):
+    for flag in ("--debate-arm", "--macro-soft-arm"):
+        monkeypatch.setattr("sys.argv", ["backtest_committee", flag, "--days", "1"])
+        with pytest.raises(SystemExit, match="--prospective"):
+            bc.main()
 
 
 def test_main_without_sealed_flag_is_unchanged_and_failure_exits_nonzero(monkeypatch):
