@@ -56,12 +56,12 @@ _ALL_ROWS = 100000
 def _events_of(activities: List[Activity]) -> List[Dict[str, Any]]:
     """Activity（日期升序）→ 回放事件 dict。事件字段：date / symbol / units（增量）/ cash_ccy / cash（增量）/
     flow_ccy / flow（外部现金流，+入 −出）/ correction（True = 持仓修正，现金流按当日市价在估值时补算）。
-    unknown 与没有可用日期的行不产生事件。"""
+    不能回放的行（unknown / 没有可用日期 / 数值解析失败）不产生事件。"""
     return [
         {"date": a.trade_date, "symbol": a.symbol or "", "units": a.units_effect,
          "cash_ccy": a.currency, "cash": a.cash_effect,
          "flow_ccy": a.currency, "flow": external_flow(a), "correction": a.correction}
-        for a in activities if a.action != "unknown" and a.trade_date is not None
+        for a in activities if a.replayable
     ]
 
 

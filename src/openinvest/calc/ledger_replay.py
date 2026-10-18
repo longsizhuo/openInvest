@@ -24,6 +24,10 @@
 其余 / 没有可用日期             unknown     0（保留、计数、不进回放）
 ==============================  ==========  ==========================  ============================
 
+数值字段（units / price / total_amount / net_amount / fee）解析不了的行：``action`` 分类照旧、``unparsed=True``、
+效果全 0，不进回放、计入 ``LedgerState.unknown``——一行脏数据不能让整个读方崩（旧 ``history_as_trades`` 从不转数字，
+所以它不能因为别处的脏行而抛）。
+
 ``gift`` 不并进 ``buy``（ADR-027 D2 的新写入动作表里 gift 自成一类）：并了之后"赠股"和"我下的买单"
 在 Activity 上不可区分，决议匹配会把它当成交。``manual_override`` 记的是**绝对值**，所以必须按日期序
 折叠、从前序状态算增量——这就是回放是有状态的原因。
@@ -72,7 +76,7 @@ class LedgerState:
     units: Dict[str, float] = field(default_factory=dict)
     avg_cost: Dict[str, float] = field(default_factory=dict)   # 近似加权均价（买入加权、卖出不变、清仓归零），不含汇率
     cash: Dict[str, float] = field(default_factory=dict)       # Σ cash_effect
-    unknown: int = 0                                           # 未知 action / 无可用日期 的行数（保留在 Activity 列表里）
+    unknown: int = 0                                           # 不进回放的行数：未知 action / 无可用日期 / 数值解析失败（仍在 Activity 列表里）
 
 
 def _day(r: Mapping[str, Any]) -> str:
@@ -90,45 +94,56 @@ def _opt_f(v: Any) -> Optional[float]:
         return None
 
 
+# 老 action → Activity.action（不在表里 = unknown）
+_ACTION = {**_BUY_LIKE, "gift": "gift", "sell": "sell", "sold": "sell", "deposit": "deposit", "withdraw": "withdraw",
+           "manual_override": "correction", "delete_holding": "delete_holding"}
+
+
+def _effects(raw_action: str, r: Mapping[str, Any], sym: str, held: Mapping[str, float]) -> Dict[str, Any]:
+    """数量 / 金额 / 现金与持仓效果。数值字段解析不了会抛 ValueError / TypeError（调用方降级为 unparsed）。"""
+    if raw_action not in _ACTION:
+        return {"action": "unknown"}
+    units = float(r.get("units") or 0)
+    price = float(r.get("price") or r.get("price_per_unit") or 0)
+    amount = float(r.get("total_amount") or abs(units) * price)
+    trade = dict(units=None if r.get("units") is None else units, price=price or None, amount=amount)
+    if raw_action in _BUY_LIKE:
+        sign = 1.0 if units >= 0 else -1.0
+        ext = r.get("funding_source") == _EXTERNAL_FUNDING
+        return dict(trade, action=_ACTION[raw_action], units_effect=units, external=ext,
+                    cash_effect=0.0 if ext else -sign * amount)
+    if raw_action == "gift":
+        return dict(trade, action="gift", units_effect=units, external=True, cash_effect=0.0)
+    if raw_action in _SELL_LIKE:
+        net = r.get("net_amount")
+        return dict(trade, action="sell", units_effect=-abs(units),
+                    cash_effect=float(net) if net is not None else amount - float(r.get("fee") or 0))
+    if raw_action in _CASH_ACTIONS:
+        sign = 1.0 if raw_action == "deposit" else -1.0
+        return dict(action=raw_action, amount=abs(units), external=True, cash_effect=sign * abs(units))
+    if raw_action == "manual_override":
+        return dict(trade, action="correction", correction=True, units_effect=units - held.get(sym, 0.0))
+    return dict(action="delete_holding", correction=True, units_effect=-held.get(sym, 0.0))
+
+
 def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mapping[str, float]) -> Activity:
     """单条记录 → Activity。``held`` = 到这条为止的回放持仓（只给 manual_override / delete_holding 算增量用）。"""
     raw_action = str(r.get("action") or "").lower()
     raw_sym = str(r.get("symbol") or "")
     sym = alias.get(raw_sym, raw_sym)
     day = _day(r)
-    units = float(r.get("units") or 0)
-    price = float(r.get("price") or r.get("price_per_unit") or 0)
-    amount = float(r.get("total_amount") or abs(units) * price)
     f: Dict[str, Any] = dict(
         symbol=sym or None, currency=str(r.get("currency") or "CNY").upper(),
         trade_date=day if len(day) == 10 else None,
         settle_date=_s(r.get("settle_date")), nav_date=_s(r.get("nav_date")),
-        source=_s(r.get("source")), idempotency_key=_s(r.get("idempotency_key")), note=_s(r.get("note")),
+        source="dca_reconcile" if raw_action in _RECONCILE else _s(r.get("source")),
+        idempotency_key=_s(r.get("idempotency_key")), note=_s(r.get("note")),
         fee=_opt_f(r.get("fee")), ts=_s(r.get("ts_origin") or r.get("ts")), seq=seq, raw=r,
     )
-    trade = dict(units=None if r.get("units") is None else units, price=price or None, amount=amount)
-    if raw_action in _BUY_LIKE:
-        sign = 1.0 if units >= 0 else -1.0
-        ext = r.get("funding_source") == _EXTERNAL_FUNDING
-        if raw_action in _RECONCILE:
-            f["source"] = "dca_reconcile"
-        f.update(trade, action=_BUY_LIKE[raw_action], units_effect=units, external=ext,
-                 cash_effect=0.0 if ext else -sign * amount)
-    elif raw_action == "gift":
-        f.update(trade, action="gift", units_effect=units, external=True, cash_effect=0.0)
-    elif raw_action in _SELL_LIKE:
-        net = r.get("net_amount")
-        f.update(trade, action="sell", units_effect=-abs(units),
-                 cash_effect=float(net) if net is not None else amount - float(r.get("fee") or 0))
-    elif raw_action in _CASH_ACTIONS:
-        sign = 1.0 if raw_action == "deposit" else -1.0
-        f.update(action=raw_action, amount=abs(units), external=True, cash_effect=sign * abs(units))
-    elif raw_action == "manual_override":
-        f.update(trade, action="correction", correction=True, units_effect=units - held.get(sym, 0.0))
-    elif raw_action == "delete_holding":
-        f.update(action="delete_holding", correction=True, units_effect=-held.get(sym, 0.0))
-    else:
-        f.update(action="unknown")
+    try:
+        f.update(_effects(raw_action, r, sym, held))
+    except (TypeError, ValueError):
+        f.update(action=_ACTION.get(raw_action, "unknown"), unparsed=True)
     return Activity(**f)
 
 
@@ -159,7 +174,7 @@ def replay_ledger(records: List[Dict[str, Any]], *, alias: Mapping[str, str]) ->
     for seq, r in sorted(enumerate(records), key=lambda p: _day(p[1])):
         a = _activity(seq, r, alias, state.units)
         out.append(a)
-        if a.action == "unknown" or a.trade_date is None:
+        if not a.replayable:
             state.unknown += 1
             continue
         _apply(state, a)

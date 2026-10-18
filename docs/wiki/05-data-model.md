@@ -357,6 +357,9 @@ memory/
 | `delete_holding` | 同名，`correction=True` | 0 | −回放持仓 | False |
 | 其他 / 没有可用日期 | `unknown` | 0 | 0 | False |
 
+数值字段（units / price / total_amount / net_amount / fee）解析不了的行：`action` 分类照旧、`unparsed=True`、效果全 0，
+不进回放、计入 `LedgerState.unknown`——一行脏数据不会让账户业绩或决议账本视图整个挂掉（`Activity.replayable` 为 False）。
+
 `LedgerState` 是回放累计态（每 symbol 的 units / 近似 avg_cost + 每币种现金 Σ，从零开始，**不是**当前快照、不写回快照）。
 外部现金流金额用 `external_flow(activity)` 取：deposit/withdraw 就是 `cash_effect`；external_funding 的买卖与赠股是
 新钱直接变持仓（`cash_effect`=0），流量 = ±总额。价格口径（`daily_prices.close` 是 yfinance 拆股+分红复权价）写在

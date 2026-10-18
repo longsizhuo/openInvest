@@ -261,10 +261,16 @@ class Activity(BaseModel):
     source: Optional[str] = None
     idempotency_key: Optional[str] = None
     note: Optional[str] = None
+    unparsed: bool = False            # 数值字段解析失败：action 分类保留、效果全 0，不进回放（脏行不挡读方）
     correction: bool = False          # 持仓修正（manual_override / delete_holding）：无现金对手，现金流按当日市价补算
     ts: Optional[str] = None          # 记录时间戳原样（ts_origin 优先，否则 ts）——决议↔成交按它做时间窗
     seq: int = -1                     # 原记录在输入列表里的下标（"history:<seq>" 引用）
     raw: Dict[str, Any] = Field(default_factory=dict, repr=False)   # 原记录（浅拷贝），溯源用，读方不要解析它
+
+    @property
+    def replayable(self) -> bool:
+        """能进回放（产生 cash/units 效果）：已识别的 action + 有日期 + 数值可解析。"""
+        return self.action != "unknown" and self.trade_date is not None and not self.unparsed
 
 
 # ============ helper：把 metadata dict 校验后转回 dict（写 md 用） ============

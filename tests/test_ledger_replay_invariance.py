@@ -450,6 +450,53 @@ def test_empty_and_replay_does_not_mutate_input():
 
 
 # ===================================================================================
+# 3b. 脏数据：一行数值解析不了，不能让读方崩（PR #479 评审建议 1）
+# ===================================================================================
+
+def _garbage_rows() -> List[Dict[str, Any]]:
+    d = {"ts": "2026-01-09T12:00:00", "currency": "CNY"}
+    return [
+        {**d, "action": "buy", "symbol": "AAA", "units": "N/A", "price": 10.0, "source": "mcp"},         # 有日期
+        {**d, "action": "sell", "symbol": "AAA", "units": 1.0, "price": 10.0, "net_amount": "z"},
+        {**d, "action": "sold", "symbol": "AAA", "units": 1.0, "price_per_unit": 10.0, "fee": "q"},
+        {"action": "buy", "symbol": "AAA", "units": "N/A", "price": 1.0},                               # 无日期
+        {**d, "action": "frobnicate", "symbol": "AAA", "units": "N/A"},                                 # 未知 action
+        {**d, "action": "deposit", "symbol": "CNY", "units": "abc"},
+    ]
+
+
+def test_unparseable_numeric_rows_degrade_instead_of_raising():
+    clean, dirty = synthetic_ledger(), synthetic_ledger() + _garbage_rows()
+    # 旧 history_as_trades 从不转数字：脏行存在也不抛、输出与旧实现逐字相同
+    assert history_as_trades(dirty) == _old_history_as_trades(dirty)
+    acts, state = replay_ledger(dirty, alias=SYNTH_ALIAS)
+    assert len(acts) == len(dirty)
+    by_seq = {a.seq: a for a in acts}
+    n = len(clean)
+    # action 分类保留（决议匹配靠它），效果全 0、不进回放；未知 action 的脏数值不用解析
+    assert [(by_seq[n + i].action, by_seq[n + i].unparsed) for i in range(6)] == \
+        [("buy", True), ("sell", True), ("sell", True), ("buy", True), ("unknown", False), ("deposit", True)]
+    assert all(not by_seq[n + i].replayable and by_seq[n + i].cash_effect == 0 and by_seq[n + i].units_effect == 0
+               for i in range(6))
+    # 脏行不进事件、不影响其它行：事件 = 干净流水的事件，只多 6 个跳过计数
+    events, skipped = ap._ledger_events(dirty, SYNTH_ALIAS)
+    clean_events, clean_skipped = _old_ledger_events(clean, SYNTH_ALIAS)
+    assert events == clean_events and skipped == clean_skipped + 6
+    assert state.unknown == skipped
+
+
+def test_unparseable_row_does_not_break_account_performance(monkeypatch, tmp_path):
+    base_perf, base_cap = _run_perf(monkeypatch, tmp_path / "clean", synthetic_ledger(), old_path=False)
+    dirty_rows = [r for r in _garbage_rows() if r.get("ts")]          # append_history 会给无日期行补 ts，这里只放有日期的
+    perf, cap = _run_perf(monkeypatch, tmp_path / "dirty", synthetic_ledger() + dirty_rows, old_path=False)
+    assert perf["status"] == "ok" and cap["rows"] == base_cap["rows"]
+    assert perf["data_quality"]["skipped_events"] == base_perf["data_quality"]["skipped_events"] + len(dirty_rows)
+    for p in (perf, base_perf):
+        p["data_quality"].pop("skipped_events")
+    assert perf == base_perf
+
+
+# ===================================================================================
 # 4. 没人再自抄别名表
 # ===================================================================================
 
