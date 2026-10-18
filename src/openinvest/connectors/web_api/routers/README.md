@@ -12,7 +12,7 @@ from-import 符号）。响应模型集中在 `../models.py`，`get_pm` 依赖�
 
 - `meta.py` — 健康检查（/api/health）。
 - `read.py` — 只读端点：持仓 / 行情 / 策略 / 历史 / symbol 搜索。
-- `holdings_write.py` / `cash_write.py` / `strategy_write.py` / `write.py` / `user.py` — 写入类端点（持仓、现金、策略、交易记账、用户配置）。
+- `holdings_write.py` / `cash_write.py` / `strategy_write.py` / `user.py` — 写入类端点（持仓、现金、策略、交易记账、用户配置）。
 - `committee.py` — 委员会异步任务编排（run/status/prepare/save）。
 - `committee_sessions.py` — 历史委员会决议列表 + 单条 markdown（#55 后从 system.py 拆出）。
 - `events.py` / `commsec.py` / `trades.py` / `skill.py` — 事件流、CommSec 邮件、内部账本、skill 桥接端点。
@@ -25,3 +25,5 @@ from-import 符号）。响应模型集中在 `../models.py`，`get_pm` 依赖�
 > 2026-06-15：`system.py`（#55 漏下的 catch-all）按域拆成上述
 > insights/observability/verdict_review/committee_sessions/regime/state 六个
 > router，path 全不变，旧 `system.py` 已删除（全仓无外部 import）。
+
+> 2026-10：`write.py`（v1 的 `/api/deposit|withdraw|gold/buy|sell|set|offset` 六个端点，与 `cash_write.py`、`/api/skill/*` 并列的第三份平行实现）已删除——退役 GUI 之外无消费者（remote_dispatch 只走 `/api/skill/*`，journal 实测零调用），#236。

@@ -248,34 +248,6 @@ class SymbolSearchResponse(BaseModel):
 
 # ===== 写操作请求模型 =====
 
-class DepositRequest(BaseModel):
-    """POST /api/deposit body"""
-    currency: Literal["cny", "aud"] = Field("cny", description="cny=人民币 / aud=澳元")
-    amount: float = Field(..., gt=0, description="正数金额")
-
-
-class WithdrawRequest(BaseModel):
-    """POST /api/withdraw body"""
-    currency: Literal["cny", "aud"] = Field("cny", description="cny=人民币 / aud=澳元")
-    amount: float = Field(..., gt=0, description="正数金额")
-
-
-class GoldTradeRequest(BaseModel):
-    """POST /api/gold/buy 和 /api/gold/sell 共用 body"""
-    grams: float = Field(..., gt=0, description="买入/卖出克数")
-    price_per_gram: float = Field(..., gt=0, description="单价 CNY/g")
-
-
-class GoldSetRequest(BaseModel):
-    """POST /api/gold/set body — 直接覆盖克数（不计流水，仅校正用）"""
-    grams: float = Field(..., ge=0, description="目标克数（≥0）")
-
-
-class GoldOffsetRequest(BaseModel):
-    """POST /api/gold/offset body — 报当日实际买入克价，反推渠道点差"""
-    bank_price: float = Field(..., gt=0, description="当日实际买入克价 CNY/g（任何银行/纸黄金渠道都通用）")
-
-
 class WriteResponse(BaseModel):
     """写操作统一响应：返回新写入字段 + history 是否记录"""
     ok: bool = True
@@ -971,11 +943,6 @@ __all__ = [
     "HoldingPatchRequest",
     "SymbolSearchResult",
     "SymbolSearchResponse",
-    "DepositRequest",
-    "WithdrawRequest",
-    "GoldTradeRequest",
-    "GoldSetRequest",
-    "GoldOffsetRequest",
     "WriteResponse",
     "CommitteeRunRequest",
     "CommitteeRunResponse",

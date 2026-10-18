@@ -89,13 +89,13 @@ async def _bearer_token_auth(request, call_next):
 
 # ============ 挂载各 tag router ============
 from openinvest.connectors.web_api.routers import (  # noqa: E402
-    meta, read, holdings_write, user, write, cash_write, strategy_write,
+    meta, read, holdings_write, user, cash_write, strategy_write,
     committee, events, commsec, trades, skill,
     insights, observability, verdict_review, committee_sessions, regime, state,
     config, decisions,
 )
 
-for _m in (meta, read, holdings_write, user, write, cash_write, strategy_write,
+for _m in (meta, read, holdings_write, user, cash_write, strategy_write,
            committee, events, commsec, trades, skill,
            insights, observability, verdict_review, committee_sessions, regime, state,
            config, decisions):

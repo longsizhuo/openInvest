@@ -124,17 +124,6 @@ def get_gold_snapshot(offset_pct: float = 0.015) -> Optional[GoldPriceSnapshot]:
     )
 
 
-def infer_offset_pct(reported_bank_price_cny_per_gram: float) -> Optional[float]:
-    """用户报"今天买入克价 X"时反推当下点差（任何银行/纸黄金渠道都通用）
-
-    返回的 offset_pct 写回 memory/strategy.md 的 target_assets[gold].price_offset_pct
-    """
-    snap = get_gold_snapshot(offset_pct=0.0)  # 拿现货价
-    if snap is None or snap.spot_cny_per_gram <= 0:
-        return None
-    return reported_bank_price_cny_per_gram / snap.spot_cny_per_gram - 1.0
-
-
 if __name__ == "__main__":
     snap = get_gold_snapshot()
     if snap:

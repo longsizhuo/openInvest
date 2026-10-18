@@ -25,7 +25,7 @@ from openinvest.connectors.web_api.models import (
 )
 
 log = logging.getLogger("web_api")
-from openinvest.connectors.web_api.routers.write import _now_iso
+from openinvest.core.memory_store import _now_iso
 
 router = APIRouter()
 
