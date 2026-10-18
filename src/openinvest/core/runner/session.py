@@ -400,7 +400,7 @@ def run_committee_session(
 
     Args:
         symbols: 要跑的 symbol 列表。None → 读 strategy.target_assets 全部
-        max_debate_rounds: Quant/Risk cross-challenge 轮数上限，默认 4（三路径对齐）
+        max_debate_rounds: Quant/Risk 辩论总轮数上限（含 Round 1），默认 4 = Round 1 + 最多 3 轮 cross-challenge（三路径对齐）
         progress_callback: phase 事件推送（Web SSE 用；Skill/Cron 传 None）
         event_brief_override: 优先级最高的 event_brief 注入。含空串等价"我不要事件"
         event_ids: Web event-trigger 路径用。session 内部翻译成 brief。与 override

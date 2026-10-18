@@ -227,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--max-rounds", type=int, default=1, dest="max_rounds",
-        help="cross-challenge 最大轮数，默认 1（同 daily_report cron）",
+        help="辩论总轮数上限（含 Round 1），默认 1 = 只跑 Round 1、不做 cross-challenge（同 daily_report cron）",
     )
     p.set_defaults(func=cmd_run_committee)
 
