@@ -387,13 +387,11 @@ capabilities/
 │   │   ├── risk_officer/
 │   │   │   ├── SKILL.md
 │   │   │   └── SKILL_rebuttal.md
-│   │   ├── wealth_context_officer/SKILL.md
 │   │   └── README.md
 │   ├── cio.py                           ← 薄 wrapper：build_cio_prompt() = load_skill("cio", ...)
 │   ├── macro_strategist.py
 │   ├── quant.py
-│   ├── risk_officer.py
-│   └── wealth_context_officer.py
+│   └── risk_officer.py
 ├── loader.py                            ← load_skill() + 占位符渲染（零依赖）
 ├── tools.py
 ├── sdk_agent.py

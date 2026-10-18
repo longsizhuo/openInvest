@@ -24,7 +24,7 @@
 重构说明（refactor/skill-cmds-pkg）：
 本文件已退化为**薄壳 façade / dispatcher**。所有 cmd_*() 实现已逐字搬到
 scripts/skill_cmds/ 子包（按职责拆 5 个子模块）：
-  - skill_cmds/_helpers.py        共享工具 _print_json / _safe_close / _now_iso_local
+  - skill_cmds/_helpers.py        共享工具 _print_json / _safe_close
   - skill_cmds/analysis_cmds.py   status / strategy / history / what_if / correlate
                                   / live_prices / event_check
   - skill_cmds/committee_cmds.py  prepare_committee / run_committee / save_committee
@@ -228,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--max-rounds", type=int, default=1, dest="max_rounds",
-        help="cross-challenge 最大轮数，默认 1（同 daily_report cron）",
+        help="辩论总轮数上限（含 Round 1），默认 1 = 只跑 Round 1、不做 cross-challenge（同 daily_report cron）",
     )
     p.set_defaults(func=cmd_run_committee)
 

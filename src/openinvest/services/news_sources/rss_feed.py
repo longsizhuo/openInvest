@@ -27,7 +27,7 @@ import urllib3
 import yaml
 
 from openinvest.core.memory_store import _atomic_write_text, _file_lock
-from openinvest.services.news_sources import RawNewsItem
+from openinvest.services.news_sources import RawNewsItem, _trim
 
 log = logging.getLogger(__name__)
 
@@ -367,11 +367,6 @@ def remove_extra_feed(key: str) -> bool:
             return False
         _write_extra_feeds(kept)
     return True
-
-
-def _trim(s: str, n: int) -> str:
-    s = (s or "").strip()
-    return s if len(s) <= n else s[:n].rstrip() + "..."
 
 
 def _strip_html(s: str) -> str:

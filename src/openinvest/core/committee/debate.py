@@ -135,9 +135,10 @@ def run_committee(
         single_invest_cap: 用户单次入场上限（基准币种，调用方用
             utils.base_currency.single_invest_cap(target, strategy) 换好传入）。
             parse_cio_memo Sanity 6 据此钳买侧金额；None/0 = 不设限。
-        max_debate_rounds: cross-challenge 轮数上限。
-            - 1 = 旧行为（仅 1 轮 Round 2 cross-challenge），daily_report 用
-            - 4 = 真讨论模式（live 端点用），允许 4 轮拉锯，收敛后提前退出
+        max_debate_rounds: 辩论**总**轮数上限（含 Round 1 独立陈述）。cross-challenge 轮次是
+            Round 2..max_debate_rounds，即 `range(2, max(2, max_debate_rounds + 1))`。
+            - 1 = 只跑 Round 1，**不做 cross-challenge**（range 为空），daily_report / CLI 默认
+            - 4 = 真讨论模式（live 端点用）：Round 1 + 最多 3 轮 cross-challenge，收敛后提前退出
         input_health: 调用方（session）算好的输入健康位（price_last_bar / empty_inputs /
             macro_data_empty …），原样透传给 _persist 写进 transcript 的 Input Health 块；
             本函数只补它自己知道的 model / cio_json_mode。None = 不带（旧调用零改）。

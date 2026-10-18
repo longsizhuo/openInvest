@@ -51,3 +51,11 @@ def test_silent_failure_gets_structured_hint(tmp_path):
 def test_success_and_stdin_pass_through(tmp_path):
     assert _run(tmp_path, "ok") == (0, [{"status": "ok"}])
     assert _run(tmp_path, "stdin", stdin='{"profile": 1}\n') == (0, [{"profile": 1}])
+
+
+def test_setup_skill_run_sh_is_symlink_to_invest():
+    """invest-setup 的 run.sh 必须是指向 invest 那份的 symlink，不是第二份拷贝（#236）：
+    两份 bootstrap 一旦分叉，SPEC 版本 / uvx 兜底 / 提示逻辑就会各改各的。"""
+    setup = RUN_SH.parents[2] / "invest-setup/scripts/run.sh"
+    assert setup.is_symlink()
+    assert setup.resolve() == RUN_SH.resolve()

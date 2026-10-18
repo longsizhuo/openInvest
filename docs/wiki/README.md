@@ -13,8 +13,10 @@ documents:
 
 > **2026-07-05**：Web GUI 已退役（等重做），Web API 标记 deprecated（存量端点服务 remote hub 模式）。文档中 GUI/:8765 面板相关描述均为历史内容；当前入口 = CLI 子命令 + MCP 工具。
 
+> **路径约定**：2026-07-04 起后端代码在 `src/openinvest/`（PyPI 布局）。01–03 章已写全路径；其余章节里省略前缀的 `core/…` `jobs/…` `services/…` `connectors/…` `capabilities/…` `calc/…` `utils/…` 均指 `src/openinvest/` 下同名目录。数据目录（`memory/` `db/` `docs/` `logs/`）仍在仓库根 / `$INVEST_HOME`。
+
 > 多资产 AI 投资委员会系统的完整文档。
-> 主仓库 [longsizhuo/openInvest](https://github.com/longsizhuo/openInvest) · GUI [longsizhuo/invest-gui](https://github.com/longsizhuo/invest-gui)
+> 主仓库 [longsizhuo/openInvest](https://github.com/longsizhuo/openInvest) · 前端 GUI [longsizhuo/invest-gui](https://github.com/longsizhuo/invest-gui)（**已于 2026-07-05 退役**，仅作历史参考）
 > 主页 [README.md](../../README.md) · 30 分钟 fork [QUICK_START.md](../QUICK_START.md)
 
 ---
@@ -30,7 +32,7 @@ documents:
 1. [01-architecture.md](01-architecture.md) —— 心智模型必读
 2. [05-data-model.md](05-data-model.md) —— v2 schema + concurrent RMW
 3. [07-extending.md](07-extending.md) —— cookbook: 加资产 / 数据源 / agent 角色
-4. [06-api.md](06-api.md) —— REST 端点 + 前端类型同步
+4. [06-api.md](06-api.md) —— REST 端点（deprecated，仅服务 remote hub 模式）
 5. [08-deployment.md](08-deployment.md) —— Caddy + CF Access + systemd
 
 ### 🧠 我是研究者，想懂"为什么这么设计"
@@ -48,7 +50,7 @@ documents:
 12. [21-intel-sentinel.md](21-intel-sentinel.md) —— 情报哨兵：任意 agent 平台定时喂料 ingest_event 的标准配方
 13. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
 
-### 🎨 我是设计师 / 前端，想改 GUI
+### 🎨 我是设计师 / 前端（GUI 已退役，以下为重做时的历史参考）
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA
 2. [invest-gui/README.md](https://github.com/longsizhuo/invest-gui#readme) —— 前端仓库结构
 
@@ -65,9 +67,9 @@ documents:
 | 05 | [数据模型](05-data-model.md) | v2 schema (cash dict + holdings list) + 迁移 + 并发安全 |
 | 06 | [Web API](06-api.md) | FastAPI 40+ 端点 + Pydantic + 同源部署 |
 | 07 | [扩展指南](07-extending.md) | 加新资产 / 新数据源 / 新 agent 角色 |
-| 08 | [生产部署](08-deployment.md) | Caddy + Cloudflare Access + systemd + sync_gui_dist |
+| 08 | [生产部署](08-deployment.md) | Caddy + Cloudflare Access + systemd |
 | 09 | [故障排查](09-troubleshooting.md) | 线上跑挂去哪查 journal / SSE 断了 / sync 失败 |
-| 10 | [设计系统](10-design-system.md) | GUI token + 排版三层 + IA 决策 |
+| 10 | [设计系统](10-design-system.md) | （GUI 已退役，历史参考）GUI token + 排版三层 + IA 决策 |
 | 11 | [RL 训练 / Backtest](11-rl-training.md) | Optuna 调参 + paper trade simulation + DSPy（不是真 ML 训练）|
 | 12 | [Verification 实测验证](12-verification.md) | 7 个核心主张的实测数据 + negative results + 复现命令 |
 | 13 | [参数调优可行性诊断](13-param-tuning-feasibility.md) | 50+ 硬编码常数清单 + 耦合分析 + Optuna 回顾 + sweep 策略 |

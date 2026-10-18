@@ -35,7 +35,7 @@ docs/pnl_chart.svg
 docs/verdict_accuracy.md
 .env.bak.*
 
-# 前端 GUI dist 通过 scripts/sync_gui_dist 拉 invest-gui release，不入 git
+# 旧 GUI 静态产物目录（GUI 2026-07-05 已退役、sync_gui_dist 已删）；保留忽略以防旧部署残留入库
 static/
 
 # DSPy v2/v3 trainset 大文件（3-4MB），用 scripts/research/build_dspy_trainset_v*.py 重建

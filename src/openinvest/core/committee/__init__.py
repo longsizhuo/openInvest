@@ -7,8 +7,9 @@
 - 收敛判定：连续 2 轮 SIGNAL+STRENGTH 都没变 → 提前退出
 - progress_callback：每个 stage emit 一次（启动 / Round N / converged / cio_done）
 
-LLM 调用数：
-- max_debate_rounds=1（旧默认，daily_report 用）：5 LLM × N 资产
+LLM 调用数（max_debate_rounds = 含 Round 1 的总轮数；Macro 跨资产共享，只算 1 次）：
+- max_debate_rounds=1（默认，daily_report 用，不做 cross-challenge）：
+  Macro + Quant + Risk + CIO = 4 LLM
 - max_debate_rounds=4（live 真讨论模式）：最多 (1 + 4*2 + 1) = 10 LLM，
   但收敛后会提前退出，平均 6-8 LLM
 
