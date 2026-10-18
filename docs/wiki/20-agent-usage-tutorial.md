@@ -225,6 +225,31 @@ hermes cron create "0 2 * * 1-5" --name daily-invest-report \
   prompt（"跑 `daily_report` 子命令，把输出按 X 加工后投递"），报告主体仍由后端生成
 - OpenClaw 等其他带 cron 的 agent 同理——能定时跑 shell 就能用
 
+### 筛选 / 期权链 / 财报电话会 / SEC 文件：openInvest 不自建，请 host agent 并用托管 MCP
+
+这四类数据 openInvest **不自建、不代理、不加依赖**。用户问"帮我筛一下 XX 条件的股票""看下 NVDA 的期权链"
+"这次财报电话会说了什么""查下 10-K 原文"时，由 **host agent 在 openInvest 旁边再注册一个托管 MCP 自己调**。
+三个可选（来源核对于 2026-10）：
+
+| MCP | 接入 | 覆盖面 | 成本 |
+|-----|------|--------|------|
+| **Alpha Vantage**（官方托管） | 远程端点 `https://mcp.alphavantage.co/mcp`（官方文档页以"our official MCP server"链到它）；免费 key 在 [alphavantage.co/support](https://www.alphavantage.co/support/#api-key) 领取。key 怎么带（URL 查询参数还是请求头）以官方 MCP 页为准，这里没有核实，不抄 | 官方 API 目录含期权数据、财报电话会逐字稿、基本面；具体暴露哪些工具以服务端 `tools/list` 为准 | 免费 key 每日 25 次 |
+| **Financial Datasets**（托管） | `https://mcp.financialdatasets.ai`（无凭证时返回 401）；key 在 [financialdatasets.ai](https://www.financialdatasets.ai/) 申请。开源仓库 [financial-datasets/mcp-server](https://github.com/financial-datasets/mcp-server) 也可本地 stdio 跑，环境变量 `FINANCIAL_DATASETS_API_KEY`。托管端点的鉴权头名称这里没有核实 | 三大报表（利润表 / 资产负债表 / 现金流）、股价、公司新闻、加密货币；官网另列内部人交易（Form 4）和 10-K 检索 | 付费 API |
+| **OpenBB MCP server**（自托管，PyPI [`openbb-mcp-server`](https://pypi.org/project/openbb-mcp-server/)） | `pip install openbb-mcp-server openbb` 后 `openbb-mcp`，默认 `http://127.0.0.1:8001/mcp`（streamable-http，`--transport sse` 可选）；只放本机，别暴露公网。`--allowed-categories equity,news` 限定暴露范围，`--tool-discovery` 把全量工具藏到搜索工具后面 | 已装 OpenBB 扩展的路由，按类别分组：equity / economy / news / fixedincome / derivatives / etf / currency / commodity / index / regulators / crypto | 免费（底层数据源可能要各自的 key） |
+
+注册用你的 agent 自己的 MCP 命令（Claude Code：`claude mcp add --transport http <名字> <url>`；Codex / Hermes / Cursor 走各自的 MCP 配置）。
+**key 不要贴进对话、笔记或账本。**
+
+**边界：只作委员会之外的背景，不进裁决输入。** 这些 MCP 返回的东西用来回答用户在委员会之外的问题；不要塞进
+`ingest_event`、委员会 prompt / brief 或 `record_execution` 的理由。原因：委员会的输入是确定性、可回放
+（as-of 安全）的，实时拉的筛选结果 / 期权链 / 逐字稿 / 文件原文不是。裁决仍只来自 `run_committee`。
+对用户说清哪些数字来自委员会、哪些来自托管 MCP。
+
+来源（2026-10 核对）：[Alpha Vantage 文档](https://www.alphavantage.co/documentation/)、
+[mcp.alphavantage.co](https://mcp.alphavantage.co/)、[Financial Datasets](https://www.financialdatasets.ai/)、
+[financial-datasets/mcp-server](https://github.com/financial-datasets/mcp-server)、
+[openbb-mcp-server (PyPI)](https://pypi.org/project/openbb-mcp-server/)。
+
 ## 6. ~~Web GUI~~（已退役 2026-07-05）
 
 GUI 壳层已退役：`run.sh gui` 已删除，后端不再 serve 网页面板。看持仓 / 录入 /

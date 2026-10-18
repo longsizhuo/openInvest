@@ -297,6 +297,27 @@ A-share / regional-market news especially: that is the crawler's blind spot and 
 the only source. If the host has a quotes/news skill installed (e.g. Longbridge), its
 news is worth feeding too — the ledger cares about the information, not where it came from.
 
+## Screeners / options chains / earnings calls / SEC filings: not built here — use a hosted MCP
+
+openInvest does **not** build or proxy these, and will not add a dependency for them. If the user asks
+for a stock screener, an options chain, an earnings-call transcript, or SEC filing text, **you (the host
+agent) register a hosted MCP next to openInvest and call it directly**. Three options (checked 2026-10):
+
+| MCP | Connect | Covers | Cost |
+|-----|---------|--------|------|
+| **Alpha Vantage** (official, hosted) | remote endpoint `https://mcp.alphavantage.co/mcp` (linked from the official docs as "our official MCP server"); free key at `alphavantage.co/support/#api-key` — how the key is attached (URL query vs header) is on the official MCP page, not repeated here | API catalog includes options data, earnings-call transcripts, fundamentals; the exact tool list is whatever the server's `tools/list` returns | free key: 25 requests/day |
+| **Financial Datasets** (hosted) | `https://mcp.financialdatasets.ai` (answers 401 without credentials); key from `financialdatasets.ai`. The open-source repo `financial-datasets/mcp-server` runs locally over stdio with `FINANCIAL_DATASETS_API_KEY` | financial statements (income / balance sheet / cash flow), prices, company news, crypto; the site also lists insider trades (Form 4) and 10-K search | paid API |
+| **OpenBB MCP server** (self-hosted, PyPI `openbb-mcp-server`) | `pip install openbb-mcp-server openbb`, then `openbb-mcp` — serves `http://127.0.0.1:8001/mcp` (streamable-http; `--transport sse` also available). Keep it on localhost. `--allowed-categories equity,news` limits what is exposed; `--tool-discovery` hides the full catalog behind search tools | routes of the installed OpenBB extensions, grouped by category: equity, economy, news, fixedincome, derivatives, etf, currency, commodity, index, regulators, crypto | free (data providers behind it may need their own keys) |
+
+Register with your client's own MCP command (Claude Code: `claude mcp add --transport http <name> <url>`;
+Codex / Hermes / Cursor: their MCP config). **Never paste an API key into the conversation, a note, or the ledger.**
+
+**Boundary — background only, never committee input.** Whatever these return is context for answering the
+user *outside* the committee. Do not pass it to `ingest_event`, into a committee prompt / brief, or into
+`record_execution` reasons: the committee's inputs are deterministic and replayable (as-of-safe), and a
+live screener / options-chain / transcript / filing pull is neither. The verdict still comes only from
+`run_committee`. Say plainly to the user which numbers came from the committee and which from the hosted MCP.
+
 ## Decision-loop workflow (Decision Review + Reflection)
 
 openInvest does the bookkeeping; **you do the collection** — that is the host agent's
