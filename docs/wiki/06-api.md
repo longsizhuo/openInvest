@@ -179,6 +179,12 @@ curl -X POST http://127.0.0.1:8765/api/holdings/import \
 记账请用 CLI / MCP（`deposit` / `withdraw` / `buy` / `sell`），remote hub 走 `/api/skill/{deposit,withdraw,buy,sell}`
 （支持幂等键，ADR-016）；任意币种现金也可用 `/api/cash/{currency}/deposit|withdraw`。
 
+> **能力移除**：`/api/gold/offset`（用户报银行当日买入克价 → 用现货价反推渠道点差 → 写回 `price_offset_pct`）的
+> **自动反推**随端点一起删了（连同 `utils/gold_price.infer_offset_pct`；CLI / MCP 从来没有等价的反推命令）。
+> 需要时手算（报价 ÷ 现货价 − 1，小数口径，范围 ±0.1）后手填：
+> CLI `track_asset --symbol GC=F --price-offset-pct 0.025` / MCP `track_asset(symbol="GC=F", price_offset_pct=0.025)`。
+> 将来想要"一句报价自动反推"，应作为 CLI 子命令 + MCP 工具重做，不要复活 REST 端点。
+
 ### 策略写
 
 | Method | Path | 用途 |
