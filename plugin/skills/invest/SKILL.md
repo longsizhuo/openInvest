@@ -349,7 +349,7 @@ a signal worth recording.
   argument). `price_*` lines are in `status.current_price`'s unit (held: its cost currency, gold booking =
   CNY per gram; tracked-only: the quote source's own price, e.g. `GC=F` in USD/oz); `*_pct` lines are
   percentage points (3 = 3%), **not** the 0–1 fractions `target_pct` uses; `drawdown_from_cost_pct` only
-  works for assets the user holds. Each line re-alerts at most once per 24h and never starts a committee run.
+  works for assets the user holds. Price lines re-alert at most once per 24h; `alert_day_*` lines report a given trading day's move once (on weekends/holidays they describe the last session, and the alert text names that date); no line ever starts a committee run.
 - **Do not run `daily_report` proactively in conversation** — unless the user explicitly says "run the deep analysis" / "run full report"
   or you are setting up the daily cron. That path burns DeepSeek tokens. In conversation, single-asset `run_committee` is enough.
 - **Never fabricate live prices.** Always go through `run.sh status` or `live_prices`. yfinance may return
