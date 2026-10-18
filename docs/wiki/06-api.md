@@ -467,7 +467,7 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
   （Coordinator 路径不需要 key，只有 Direct 路径要，见 `direct_ready`），不会让 agent 去重装
 - **目标权重**：`track_asset(symbol, target_pct=0.3)` 写单个标的、`set_allocations(target_pcts={"510300.SS": 0.3})`
   批量写（CLI：`track_asset --target-pct 0.3` / `set_allocations --target-pct SYMBOL=0.3`，可重复）；
-  `rebalance_plan` 读它。各标的 `target_pct` 之和必须 ≤ `target_allocation_stock`，超了整笔回滚并报出当前合计；
+  `rebalance_plan` 读它。各标的 `target_pct` 之和必须 ≤ `target_allocation_stock`，让合计超限的写入整笔回滚并报出当前合计；校验只针对这次新写的值——以前手改 `strategy.md` 留下的旧问题（如 `target_pct: 30`、合计已超）不会挡住无关的 track/untrack；
   降股票目标时把 `target_pcts` 放进同一次 `set_allocations` 一起调（单独降会因中间态超限被拒）
 - 刻意不把 81 个 REST 端点全暴露（撑爆 agent context）；Coordinator 委员会
   workflow 也不在这里——那是 Skill 的职责（issue #133 Decision 5/6）

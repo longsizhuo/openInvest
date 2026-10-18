@@ -41,18 +41,50 @@ ASSET_FIELDS = (
 )
 
 
-def _validate_or_raise(metadata: Dict[str, Any]) -> None:
+def _targets(meta: Dict[str, Any]) -> tuple:
+    """(股票目标, {symbol: 原始 target_pct})——写前写后各取一份，给 _validate_or_raise 比。"""
+    return (
+        float(meta.get("target_allocation_stock", 0) or 0),
+        {str(a.get("symbol")): a["target_pct"]
+         for a in meta.get("target_assets", []) or [] if a.get("target_pct") is not None},
+    )
+
+
+def _valid_pct(v: Any) -> Optional[float]:
+    """合法的 0~1 小数 → float；其余（30 / "30%" / 负数）→ None。与 rebalance_plan._target_pct 同口径：它忽略的值这里也不计入合计。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if 0.0 <= f <= 1.0 else None
+
+
+def _validate_or_raise(metadata: Dict[str, Any], before: Optional[tuple] = None) -> None:
+    """整份 schema 校验 + target_pct 规则。
+
+    target_pct 规则只拦「这次写入新带来 / 加重的问题」，不惩罚以前手改 strategy.md 留下的旧问题——
+    否则一份写着 `target_pct: 30` 的老文件，连 untrack 一个无关标的都被拒（#457 评审第 1 条）：
+    - 本次新改的 target_pct 必须是 0~1 的小数（没改的旧值不管）；
+    - 各标的合计 ≤ 股票目标，但只在「超出量比写前更大」时拒绝（调高某个权重 / 降低股票目标会，
+      无关写入、调低权重、删标的不会）。before=None（没有写前快照）当作一份干净文件，全量检查。
+    浮点容差 1e-6（0.3+0.2+0.2 ≠ 0.7）。
+    """
     try:
         validate_strategy(metadata)
     except Exception as e:  # ValidationError 或派生
         raise ValueError(f"strategy schema validation failed: {e}") from e
-    # 跨资产约束（单个 target_pct 的 0~1 范围由 schema 管）：各标的 target_pct 之和 ≤ 股票目标，
-    # 否则 rebalance_plan 的目标合计超过能分配给股票的总权重。浮点容差 1e-6（0.3+0.2+0.2 ≠ 0.7）。
-    pcts = {str(a.get("symbol")): float(a["target_pct"])
-            for a in metadata.get("target_assets", []) if a.get("target_pct") is not None}
-    total, cap = sum(pcts.values()), float(metadata.get("target_allocation_stock", 0))
-    if total > cap + 1e-6:
-        detail = " + ".join(f"{s} {v:.1%}" for s, v in pcts.items())
+    cap, pcts = _targets(metadata)
+    old_cap, old_pcts = before if before is not None else (cap, {})
+    bad = [f"{sym}={raw!r}" for sym, raw in pcts.items() if old_pcts.get(sym) != raw and _valid_pct(raw) is None]
+    if bad:
+        raise ValueError(f"target_pct 必须是 0~1 的小数（占总资产，0.3 = 30%），收到 {', '.join(bad)}")
+
+    def excess(c: float, p: Dict[str, Any]) -> float:
+        return max(sum(v for v in map(_valid_pct, p.values()) if v is not None) - c, 0.0)
+
+    if excess(cap, pcts) > excess(old_cap, old_pcts) + 1e-6:
+        total = sum(v for v in map(_valid_pct, pcts.values()) if v is not None)
+        detail = " + ".join(f"{s} {v:.1%}" for s, v in ((s, _valid_pct(r)) for s, r in pcts.items()) if v is not None)
         raise ValueError(
             f"各标的 target_pct 之和 {total:.1%}（{detail}）超过股票目标 target_allocation_stock {cap:.1%}；"
             "调低某些标的的 target_pct，或先用 set_allocations 提高股票目标（可同次传 target_pcts 一起改）"
@@ -91,6 +123,7 @@ def set_allocations(
     if target_allocation_stock is None and not target_pcts:
         raise ValueError("至少传 stock + cash 一组配比，或 target_pcts（按标的权重）")
     with _store(store).transaction("strategy") as tx:
+        before = _targets(tx.metadata)
         if target_allocation_stock is not None:
             tx["target_allocation_stock"] = target_allocation_stock
             tx["target_allocation_cash"] = target_allocation_cash
@@ -105,7 +138,7 @@ def set_allocations(
                 else:
                     a["target_pct"] = pct
             tx["target_assets"] = assets
-        _validate_or_raise(dict(tx.metadata))
+        _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
     parts = []
     if target_allocation_stock is not None:
@@ -125,12 +158,13 @@ def add_target_asset(
     if not symbol:
         raise ValueError("asset 必须含非空 symbol")
     with _store(store).transaction("strategy") as tx:
+        before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
         if any(a.get("symbol") == symbol for a in existing):
             raise StrategyConflict(f"symbol {symbol} 已存在，请用 update 或先 remove")
         existing.append(dict(asset))
         tx["target_assets"] = existing
-        _validate_or_raise(dict(tx.metadata))
+        _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
     return _response(final_meta, f"已新增资产 {symbol}")
 
@@ -143,13 +177,14 @@ def patch_target_asset(
     if not patch:
         raise ValueError("patch 必须至少含一个字段")
     with _store(store).transaction("strategy") as tx:
+        before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
         target = next((a for a in existing if a.get("symbol") == symbol), None)
         if target is None:
             raise StrategyNotFound(f"symbol {symbol} 不存在")
         target.update(patch)
         tx["target_assets"] = existing
-        _validate_or_raise(dict(tx.metadata))
+        _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
     return _response(final_meta, f"{symbol} 已更新: {list(patch.keys())}")
 
@@ -160,11 +195,12 @@ def remove_target_asset(
     """删除 target_asset。schema 要求至少剩 1 个（删最后一个会 ValueError 回滚）。
     symbol 不存在 → StrategyNotFound。"""
     with _store(store).transaction("strategy") as tx:
+        before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
         if not any(a.get("symbol") == symbol for a in existing):
             raise StrategyNotFound(f"symbol {symbol} 不存在")
         tx["target_assets"] = [a for a in existing if a.get("symbol") != symbol]
-        _validate_or_raise(dict(tx.metadata))
+        _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
     return _response(final_meta, f"已删除 {symbol}")
 
@@ -191,6 +227,7 @@ def upsert_target_asset(
         raise ValueError("symbol 不能为空")
     fields = {k: v for k, v in fields.items() if v is not None}
     with _store(store).transaction("strategy") as tx:
+        before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
         target = next((a for a in existing if a.get("symbol") == symbol), None)
         if target is None:
@@ -214,7 +251,7 @@ def upsert_target_asset(
         else:
             msg = f"{symbol} 已在跟踪列表（无字段变更）"
         tx["target_assets"] = existing
-        _validate_or_raise(dict(tx.metadata))
+        _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
     return _response(final_meta, msg)
 

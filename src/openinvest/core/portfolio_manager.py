@@ -546,6 +546,8 @@ class PortfolioManager:
             raise ValueError(
                 f"非法 source_type {source_type!r}（只接受 cash_deduct / external_funding）"
             )
+        if symbol.strip().upper() == _GOLD_SYMBOL:
+            symbol = _GOLD_SYMBOL   # 'gc=f' 与已有 'GC=F' 行是同一个标的：别因大小写新建出第二行
         cost_cny = units * price  # 金额单位 = ccy（字段名是历史遗留）
         try:
             with self._ledger_tx(idempotency_key) as p:
@@ -553,7 +555,7 @@ class PortfolioManager:
                 existing = next((h for h in holdings if h.get("symbol") == symbol), None)
                 held = str(existing.get("cost_currency") or "CNY").upper() if existing else None
                 ccy = (currency or held or "CNY").upper()
-                gold = _gold_booking(symbol, ccy, unit_label, held)   # 非 GC=F → None
+                gold = gold_booking(symbol, ccy, unit_label, held)   # 非 GC=F → None
                 if not gold and held and ccy != held:
                     raise ValueError(
                         f"{symbol} 持仓按 {held} 计价，这笔买入写的是 {ccy}；"
@@ -676,7 +678,7 @@ _GOLD_FIELDS = {"kind": "metal", "unit_label": "克", "proxy_kind": "gold_cny_pe
 _GRAM_LABELS = {"克", "g", "gram", "grams", "股"}
 
 
-def _gold_booking(symbol: str, ccy: str, unit_label: str, held: Optional[str]) -> Optional[Dict[str, str]]:
+def gold_booking(symbol: str, ccy: str, unit_label: str, held: Optional[str]) -> Optional[Dict[str, str]]:
     """GC=F 的入口校验（buy / record_existing_position 共用）：非 GC=F 返回 None；
     合法（CNY + 克）返回要落账的 kind / unit_label / proxy_kind 字段；其余抛 ValueError 并给正确写法。
 

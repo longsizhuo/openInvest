@@ -139,3 +139,37 @@ def test_status_and_what_if_value_booked_gold_per_gram(monkeypatch):
     b = wi["breakdown"]["GC=F"]
     assert b["cur_price"] == SPOT_PER_GRAM and b["cur_value_cny"] == 5 * SPOT_PER_GRAM
     assert b["delta_cny"] == pytest.approx(-0.1 * 5 * SPOT_PER_GRAM, abs=0.01)
+
+
+def test_lowercase_symbol_joins_the_existing_gold_row_instead_of_forking_a_second_one():
+    """#457 评审第 3 条：'gc=f' 与已有 'GC=F' 是同一个标的，不能因大小写新建出第二行。"""
+    pm = _pm(holdings=[{"symbol": "GC=F", "kind": "metal", "units": 5.0, "avg_cost": 880.0, "unit_label": "克",
+                        "cost_currency": "CNY", "proxy_kind": "gold_cny_per_gram"}])
+    pm.buy(" gc=f ", 5, 900.0)
+    assert [h["symbol"] for h in pm.holdings if "f" in h["symbol"].lower()] == ["GC=F"]
+    assert pm.holdings.find("GC=F")["units"] == 10.0
+    pm2 = _pm()
+    pm2.buy("gc=f", 1, 880.0)                                                                   # 新建也落规范写法
+    assert [h["symbol"] for h in pm2.holdings] == ["GC=F"]
+
+
+def test_doctor_warns_about_legacy_non_cny_gold_row_without_flipping_status(tmp_path):
+    """#457 评审第 2 条：旧版留下的 USD/oz 黄金行会让定投每天失败而用户无感 → doctor 出一条 warning，
+    但这是数据问题不是 onboarding 没做完：总 status 仍 ready，不能把 agent 带去 invest-setup。"""
+    from openinvest.services.skill_views import build_doctor_view
+    _pm(holdings=[{"symbol": "GC=F", "kind": "metal", "units": 1.0, "avg_cost": 4100.0, "unit_label": "oz",
+                   "cost_currency": "USD", "proxy_kind": "direct"}])
+    v = build_doctor_view(tmp_path)
+    c = {x["name"]: x for x in v["checks"]}
+    assert v["status"] == "ready" and c["gold_booking"]["status"] == "warning"
+    assert "delete_holding" in c["gold_booking"]["hint"] and "record_existing_position" in c["gold_booking"]["hint"]
+    assert "USD" in c["gold_booking"]["detail"]
+
+
+def test_doctor_has_no_gold_check_for_correct_or_absent_gold_row(tmp_path):
+    from openinvest.services.skill_views import build_doctor_view
+    _pm()                                                                                       # 没有黄金行
+    assert "gold_booking" not in {x["name"] for x in build_doctor_view(tmp_path)["checks"]}
+    _pm(holdings=[{"symbol": "GC=F", "kind": "metal", "units": 5.0, "avg_cost": 880.0, "unit_label": "克",
+                   "cost_currency": "CNY", "proxy_kind": "direct"}])                           # 旧 direct 但 CNY/克：能自愈，不报
+    assert "gold_booking" not in {x["name"] for x in build_doctor_view(tmp_path)["checks"]}

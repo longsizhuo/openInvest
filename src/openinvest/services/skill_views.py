@@ -429,7 +429,7 @@ INIT_PAYLOAD_SHAPE: Dict[str, Any] = {
 def build_doctor_view(root: Path) -> Dict[str, Any]:
     """健康自检：onboarding 是否完成？所有外部依赖可达？
 
-    给 Claude 看的 JSON：每一项是 ok / missing / needs_migration / optional_*，附 hint 教 Claude
+    给 Claude 看的 JSON：每一项是 ok / missing / needs_migration / warning / optional_*，附 hint 教 Claude
     怎么修。让 Claude 第一次帮用户跑 status 失败时，先 doctor 看到底差什么，
     再决定走 AskUserQuestion 还是直接 init。
 
@@ -489,6 +489,28 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
             if portfolio_v1 else None
         ),
     })
+
+    # 黄金行口径（#443）：GC=F 必须 CNY/克。旧版本留下的 USD/oz 行会被估成假浮亏，定投（dca_daily）因此每天报错、
+    # 用户却看不到定投已停——给一条非阻塞 warning（数据要修，但不是 onboarding 没做完，不能让 status 变 needs_setup）。
+    holdings = (getattr(portfolio_doc, "metadata", None) or {}).get("holdings") if portfolio_doc and not portfolio_v1 else None
+    gold_row = next((h for h in holdings if isinstance(h, dict) and str(h.get("symbol") or "").strip().upper() == "GC=F"),
+                    None) if isinstance(holdings, list) else None
+    if gold_row:
+        from openinvest.core.portfolio_manager import gold_booking
+        row_ccy = str(gold_row.get("cost_currency") or "CNY").upper()
+        try:
+            gold_booking("GC=F", row_ccy, str(gold_row.get("unit_label") or "克"), row_ccy)
+        except ValueError as e:
+            checks.append({
+                "name": "gold_booking",
+                "status": "warning",
+                "detail": f"GC=F 持仓按 {row_ccy} / {gold_row.get('unit_label')!r} 记账，不是 人民币/克：{e}",
+                "hint": (
+                    "会被估成假浮亏 / 假浮盈，定投（dca_daily）买黄金也会每天报错。先和用户确认，再 "
+                    "`delete_holding --symbol GC=F --force` 删掉这一行，按 CNY/克 重新记"
+                    "（已持有的用 `record_existing_position`，不扣现金；units=克数，price=CNY/克，kind=metal，unit_label=克）。"
+                ),
+            })
 
     # 2) .env 凭据（全是可选项：Coordinator 路径零凭据，Direct 路径才要 LLM key，邮件只影响 daily_report 发信）
     env_path = root / ".env"
@@ -606,7 +628,7 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
 
     # 只有 onboarding 必需项（memory 未初始化 / portfolio v1 待迁移）挡路；optional_* / skipped 不算
     blocking = [c["name"] for c in checks
-                if c["status"] not in ("ok", "skipped") and not c["status"].startswith("optional")]
+                if c["status"] not in ("ok", "skipped", "warning") and not c["status"].startswith("optional")]
     overall = "ready" if not blocking else "needs_setup"
 
     # ready_for_subcommands 兼容旧字段；新增分路径就绪标志：

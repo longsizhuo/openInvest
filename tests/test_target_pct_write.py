@@ -68,11 +68,45 @@ def test_sum_exactly_at_stock_target_passes_despite_float_noise(store):
     assert sum(v for v in _pcts(store).values()) == pytest.approx(0.7)
 
 
-def test_single_target_pct_out_of_range_rejected_by_schema(store):
-    for bad in (1.5, -0.1):
-        with pytest.raises(ValueError, match="validation failed"):
+def test_single_target_pct_out_of_range_rejected(store):
+    for bad in (1.5, -0.1, 30):                                                                # 30 = 手滑写成百分数
+        with pytest.raises(ValueError, match="0~1 的小数"):
             svc.upsert_target_asset("AAPL", {"target_pct": bad}, store=store)
     assert _pcts(store)["AAPL"] is None
+
+
+def _hand_edit(store, **per_symbol):
+    """模拟 #449 之前手改 strategy.md：直接把 target_pct 写进文件，不经 service 校验。"""
+    meta = dict(store.read("strategy").metadata)
+    meta["target_assets"] = [dict(a, **({"target_pct": per_symbol[a["symbol"]]} if a["symbol"] in per_symbol else {}))
+                             for a in meta["target_assets"]]
+    store.write("strategy", "strategy", meta, "# body")
+
+
+def test_pre_existing_invalid_target_pct_does_not_block_unrelated_writes(store):
+    """#457 评审第 1 条：老文件里手写的 `target_pct: 30` 不能让 untrack / track 一个无关标的都被拒；
+    只有这次新写的值才校验。旧的非法值不计入合计（与 rebalance_plan 忽略它同口径）。"""
+    _hand_edit(store, **{"510300.SS": 30})
+    svc.upsert_target_asset("AAPL", {"display_name": "Apple"}, store=store)                    # 无关 track
+    svc.upsert_target_asset("AAPL", {"target_pct": 0.5}, store=store)                           # 新写合法值：合计只算合法的 0.5
+    svc.remove_target_asset("FUND:110020", store=store)                                         # 无关 untrack
+    assert _pcts(store)["510300.SS"] == 30                                                      # 旧值原样保留，没被悄悄改
+    with pytest.raises(ValueError, match="0~1 的小数"):                                         # 但自己新写成还是非法的 → 拒
+        svc.upsert_target_asset("510300.SS", {"target_pct": 35}, store=store)
+    svc.upsert_target_asset("510300.SS", {"target_pct": 0.2}, store=store)                      # 修好它
+    assert _pcts(store)["510300.SS"] == 0.2
+
+
+def test_pre_existing_over_limit_sum_only_blocks_writes_that_make_it_worse(store):
+    _hand_edit(store, **{"510300.SS": 0.5, "AAPL": 0.4})                                        # Σ 0.9 > 股票目标 0.7（手改留下的）
+    svc.upsert_target_asset("FUND:110020", {"display_name": "x"}, store=store)                  # 无关写入：放行
+    svc.upsert_target_asset("AAPL", {"target_pct": 0.3}, store=store)                           # 调低：放行，哪怕仍超（0.8）
+    with pytest.raises(ValueError, match="超过股票目标"):
+        svc.upsert_target_asset("FUND:110020", {"target_pct": 0.1}, store=store)                # 加重：拒
+    with pytest.raises(ValueError, match="超过股票目标"):
+        svc.set_allocations(0.6, 0.4, store=store)                                              # 降股票目标：拒
+    svc.remove_target_asset("AAPL", store=store)                                                # 删标的：放行（Σ 降到 0.5）
+    assert sum(v for v in _pcts(store).values() if v) == 0.5
 
 
 def test_lowering_stock_target_below_sum_is_rejected_unless_pcts_move_with_it(store):
