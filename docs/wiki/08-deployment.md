@@ -284,20 +284,24 @@ INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
 
 ## 6. systemd 服务清单
 
+仓库 `systemd/` 带三个 unit 模板（`%h` = 服务 `User=` 的 home，fork 用户只需改 `User=`/`Group=`，路径默认 `~/openInvest`）：
+
+| unit | 起什么 | 端口 | 备注 |
+|---|---|---|---|
+| `invest-web.service` | `openinvest-web`（FastAPI）| `127.0.0.1:8765` | REST，供 remote hub 转发 / 内部触发；走 `openinvest-web` 入口（带 token 守卫），别裸 uvicorn |
+| `invest-mcp.service` | `openinvest-mcp --http`（remote MCP）| `127.0.0.1:8766` | spoke agent 经 Caddy `/mcp` 直连；鉴权复用 `INVEST_API_TOKEN` |
+| `invest-scheduler.service` | `python -m openinvest.scheduler.runner` | 无 | 跑 `jobs/*.yml` 全部定时任务（event_watch / price_sentinel / pnl_snapshot / backup / job_watchdog…）；**没有它 job 一个都不跑** |
+
 ```bash
+# 三个一起装（User=ubuntu 先改成你的用户名；路径不是 ~/openInvest 的话改 INVEST_HOME 等 4 行）
+sudo cp systemd/invest-{web,mcp,scheduler}.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now invest-web invest-mcp invest-scheduler
 sudo systemctl list-units --type=service | grep invest
-# invest-web.service          openinvest-web (FastAPI) :8765
-# invest-scheduler.service    APScheduler 跑所有 jobs/*.yml
 ```
 
-`invest-scheduler.service`（如果你跑 cron）unit 类似：
-
-```ini
-ExecStart=%h/.local/bin/uv tool run --from openinvest python -m openinvest.scheduler.runner
-# 或 pip 安装环境里直接 python -m openinvest.scheduler.runner
-```
-
-详见 `systemd/README.md` 和 `scheduler/README.md`。
+升级包后三个都要手动 restart 才拉新代码：`sudo systemctl restart invest-web invest-mcp invest-scheduler`。
+调度器的失败面（job 卡死 / 进程死亡）见下面 §6.1；详见 `systemd/README.md` 和 `scheduler/README.md`。
 
 ### 6.1 调度器防静默停摆：job 超时 + 外部心跳
 
@@ -322,6 +326,21 @@ ExecStart=%h/.local/bin/uv tool run --from openinvest python -m openinvest.sched
 3. `sudo systemctl restart invest-scheduler`，日志里没有 `[heartbeat] ping 失败` 即通；healthchecks.io 面板应在 1 分钟内变绿。
 
 ping 失败只记 `WARNING [heartbeat] ping 失败…`，永远不影响调度。心跳本身是调度器线程池里的一个内部任务（不进 `job_runs`），所以进程死亡**和**线程池被全部占满都会让 ping 断掉。
+
+### 6.2 `memory/` 清理：`*.bak.<时间戳>` 与遗留 `*.lock`
+
+- `memory/portfolio.md.bak.<ts>`：`openinvest init`（含被"已有真实持仓"守卫**拒绝**的那次）/ `migrate_profile` / `migrate_portfolio_to_holdings` 覆盖前各留一份，从无清理（生产实测 247 份，其中 107 份内容逐字相同）。自动备份 job 排除 `*.bak.*`，它们不在任何轮转里。
+- `*.lock`：`memory_store` 的 sidecar 锁文件。当前版本用后即删（取锁后核对 inode 再 unlink，并发安全）；升级前遗留的（生产实测 158 个）用下面的命令清。
+
+```bash
+openinvest maintenance cleanup                 # 默认 dry-run：只打印将删除的数量，不动任何文件
+openinvest maintenance cleanup --apply         # 确认数量后真删
+openinvest maintenance cleanup --keep 30 --days 14   # 调保留策略
+```
+
+保留策略（宁多留）：每个 family（如 `portfolio.md`）**最新 20 份，或** mtime 在 7 天内的——并集保留，其余才删。`*.lock` 只删当前无人持有的（非阻塞 flock 探测，与正在跑的进程不抢锁）。该命令永远只操作本机数据目录，不会被 `INVEST_API_BASE` 转发走。
+
+> **顺序**：先升级并重启 web / mcp / scheduler 到带 inode 核对的新版本，再 `--apply`。旧版本进程取锁后不核对 inode，与清理动作的毫秒级时序重叠时理论上可能和新进程同时进临界区；先 dry-run 看数量，没问题再 apply。
 
 ---
 

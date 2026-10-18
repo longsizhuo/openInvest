@@ -1,0 +1,36 @@
+[Unit]
+Description=Invest Scheduler (APScheduler) — 跑 jobs/*.yml：event_watch / price_sentinel / pnl_snapshot / backup / job_watchdog ...
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 部署到自己机器时改 User/Group 为你的用户名（默认 ubuntu）
+User=ubuntu
+Group=ubuntu
+# %h 在 systemd 里展开成本服务 User 的 home dir
+# fork 用户：把 INVEST_HOME 改成你 clone openInvest 的位置（默认 ~/openInvest）
+Environment=INVEST_HOME=%h/openInvest
+WorkingDirectory=%h/openInvest
+# .env 里放 DEEPSEEK_API_KEY / 邮件凭据 / INVEST_API_TOKEN（job 内部触发 hub 时带上）等；
+# 可选：INVEST_SCHEDULER_HEARTBEAT_URL=<healthchecks.io ping URL> 开外部心跳（dead-man switch，
+# 调度进程死了 job_watchdog 也哑，靠它兜底），见 docs/wiki/08-deployment.md §6.1
+EnvironmentFile=%h/openInvest/.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TZ=Asia/Shanghai
+Environment=UV_CACHE_DIR=%h/openInvest/.uv-cache
+ExecStart=%h/.local/bin/uv run --no-sync python -m openinvest.scheduler.runner
+# SIGTERM → 调度器 shutdown(wait=True) 等在跑的 job；卡住的 job 会被 systemd 在 TimeoutStopSec 后 SIGKILL
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/openInvest
+
+[Install]
+WantedBy=multi-user.target

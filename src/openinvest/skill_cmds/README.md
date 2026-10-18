@@ -10,6 +10,7 @@
 | `analysis_cmds.py` | 只读分析：`status` / `strategy` / `history` / `what_if` / `correlate` / `live_prices` / `event_check`。自有 ROOT 承接 test 对 `cmd_status` 的 no-op patch |
 | `committee_cmds.py` | 委员会：`prepare_committee`（Coordinator）/ `run_committee`（Direct）/ `save_committee`。自有 ROOT 拼 transcript_path |
 | `portfolio_cmds.py` | 写操作：`deposit` / `withdraw` / `buy` / `sell` / `delete_holding` + `_resolve_pm` |
+| `maintenance_cmds.py` | 运维清理：`maintenance cleanup`（`*.bak.<ts>` 保留策略 + 遗留 `*.lock`，默认 dry-run；逻辑在 `services/maintenance.py`） |
 | `lifecycle_cmds.py` | onboarding：`doctor` / `init` + 持仓 LLM 解析。**必须自有 ROOT**（test patch 重定向主目标） |
 
 ## 注意

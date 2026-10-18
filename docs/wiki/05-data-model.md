@@ -243,19 +243,26 @@ with pm.with_portfolio_tx() as p:
 
 ### 5.2 fcntl 文件锁（跨进程）
 
-`core/memory_store.py:_file_lock`：
+`core/memory_store.py:_file_lock`（sidecar `<path>.lock` + flock，**用后即删**）：
 
 ```python
 @contextmanager
 def _file_lock(path: Path):
     lock_path = path.with_suffix(path.suffix + ".lock")
-    with open(lock_path, "w") as fp:
+    while True:
+        fp = open(lock_path, "a")
         fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+        if os.fstat(fp.fileno()).st_ino == os.stat(lock_path).st_ino:
+            break              # 锁住的确实是路径上的那个 inode
+        fp.close()             # 等锁期间被前任 unlink 了 → 重来
+    try:
+        yield
+    finally:
+        os.unlink(lock_path)   # 仍持锁时删；close 才释放
+        fp.close()
 ```
+
+inode 核对是为了让"用后删除"不破坏互斥：否则已 open 旧 inode 的等待者与新建同名文件的第三方会各持一把锁（`tests/test_file_lock_and_jsonl.py` 用多线程 + 多进程 RMW 守这一点）。所有 append-only jsonl 也走同一把锁：`memory_store.append_jsonl(path, record)`（`llm_usage.jsonl` / `executions.jsonl` / `portfolio_history.jsonl` / `.dreams/events.jsonl`）。
 
 → 同一文件多进程（CLI / MCP server / invest-web / scheduler）同时写，**不会丢更新**。
 

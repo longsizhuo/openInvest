@@ -25,15 +25,51 @@ MEMORY_ROOT = INVEST_ROOT / "memory"
 
 @contextmanager
 def _file_lock(path: Path):
-    """fcntl 排它锁 - 跨线程/进程都安全"""
+    """fcntl 排它锁 - 跨线程/进程都安全。锁文件是 sidecar `<path>.lock`，用后删除（不堆积）。
+
+    unlink 的竞态与解法：A 持锁时 B 已 open 了同一个 inode 并阻塞在 flock；A 若 unlink 后释放，
+    B 拿到的是挂在"已删 inode"上的锁，而此刻 C 新建同名文件又能拿到另一把 → 互斥失效。
+    标准解：拿到锁后核对 fstat(fd).st_ino == stat(path).st_ino，不一致（被删/被换）就关掉重来；
+    unlink 只在**仍持锁**时做。fd 开着期间 inode 不会被复用，所以 ino 相等 = 确是同一把锁。
+    （滚动升级窗口：旧版本进程不做核对，极端时序下可能与新版本同时进临界区，窗口仅毫秒级。）
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    with open(lock_path, "w") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    while True:
+        lock_file = open(lock_path, "a")
         try:
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                if os.fstat(lock_file.fileno()).st_ino == os.stat(lock_path).st_ino:
+                    break
+            except FileNotFoundError:
+                pass  # 等锁期间被前任 unlink 了 → 重来
+        except BaseException:
+            lock_file.close()
+            raise
+        lock_file.close()
+    try:
+        yield
+    finally:
+        try:
+            os.unlink(lock_path)  # 仍持锁；close 才释放
+        except FileNotFoundError:
+            pass
+        lock_file.close()
+
+
+def append_jsonl(path: Path, record: Dict[str, Any], *, default: Optional[Callable[[Any], Any]] = None) -> None:
+    """append-only jsonl 的唯一写入口：sidecar flock（`_file_lock`）内追加一行。
+
+    三套 append 纪律（memory_store sidecar flock / decision_ledger 直接 flock 数据文件 /
+    llm_telemetry 无锁）统一到这里。行格式 = `json.dumps(record, ensure_ascii=False) + "\n"`，
+    与历史写法逐字一致。需要"锁内先读再追加"（decision_ledger.record_execution 的幂等闸）的调用方
+    直接用 `_file_lock(path)` 自己写——**别在锁内再调本函数**（flock 同进程二次 open 会自锁）。
+    """
+    line = json.dumps(record, ensure_ascii=False, default=default) + "\n"
+    with _file_lock(path):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
 
 
 def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
@@ -274,10 +310,7 @@ class MemoryStore:
 
     def dream_event(self, event: Dict[str, Any]) -> None:
         """append-only 审计日志：light/REM/deep 各阶段都往这里写"""
-        path = self.root / ".dreams" / "events.jsonl"
-        with _file_lock(path):
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"ts": _now_iso(), **event}, ensure_ascii=False) + "\n")
+        append_jsonl(self.root / ".dreams" / "events.jsonl", {"ts": _now_iso(), **event})
 
     def write_dream_state(self, name: str, data: Dict[str, Any]) -> Path:
         """写 .dreams/<name>.json（短期记忆 / 候选池）"""
@@ -365,10 +398,7 @@ class MemoryStore:
     # ---------- portfolio_history.jsonl - append-only 交易流水 ----------
 
     def append_history(self, trade: Dict[str, Any]) -> None:
-        path = self.root / "portfolio_history.jsonl"
-        with _file_lock(path):
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"ts": _now_iso(), **trade}, ensure_ascii=False) + "\n")
+        append_jsonl(self.root / "portfolio_history.jsonl", {"ts": _now_iso(), **trade})
 
     def read_history(self) -> List[Dict[str, Any]]:
         path = self.root / "portfolio_history.jsonl"

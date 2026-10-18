@@ -27,8 +27,9 @@ from typing import Any, Callable, Dict, Optional
 import requests
 from openinvest.utils.symbols import safe_symbol
 
-# 纯本地命令：不碰 memory/，远端模式下照常本地跑
-LOCAL_WHITELIST = {"live_prices", "correlate"}
+# 纯本地命令：远端模式下照常本地跑。live_prices / correlate 不碰 memory/；
+# maintenance 是 operator 清理本机数据目录（不实例化 MemoryStore，目录不存在就报 0、不创建）
+LOCAL_WHITELIST = {"live_prices", "correlate", "maintenance"}
 
 # 远端禁用命令 → (error, hint)
 DISABLED = {

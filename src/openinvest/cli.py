@@ -68,6 +68,7 @@ from openinvest.skill_cmds.portfolio_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.strategy_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.lifecycle_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
+from openinvest.skill_cmds.maintenance_cmds import *  # noqa: E402,F401,F403
 
 
 # ---------- main ----------
@@ -364,6 +365,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="设一条 override，如 --set verdict.concentration_lens_enabled false")
     p.add_argument("--clear", metavar="KEY", help="删一条 override，回退 env/yaml/默认")
     p.set_defaults(func=cmd_config)
+
+    p = sub.add_parser(
+        "maintenance",
+        help="运维清理（operator 用，非 agent 日常）：cleanup = memory/ 的 *.bak.<ts> 保留策略 + 遗留 *.lock；默认 dry-run",
+    )
+    msub = p.add_subparsers(dest="maintenance_cmd", required=True)
+    c = msub.add_parser("cleanup", help="清理 memory/ 的 *.bak.<ts> 与遗留 *.lock（默认 dry-run，只数不删）")
+    g = c.add_mutually_exclusive_group()
+    g.add_argument("--dry-run", action="store_true", help="只打印将删除的数量（默认行为）")
+    g.add_argument("--apply", action="store_true", help="真删")
+    c.add_argument("--keep", type=int, default=20, help="每个 family 至少保留最新 N 份（默认 20）")
+    c.add_argument("--days", type=int, default=7, help="mtime 在 N 天内的一律保留（默认 7）；与 --keep 取并集")
+    c.set_defaults(func=cmd_maintenance)
     return parser
 
 

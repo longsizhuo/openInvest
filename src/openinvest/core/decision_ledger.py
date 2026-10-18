@@ -176,10 +176,11 @@ def record_execution(
     """记录用户对某决议的执行/拒绝（宿主 Agent 通过 CLI/API/MCP 回写）。
 
     幂等（ADR-016）：与该 decision_id 现存最新记录内容相同 → 跳过 append。
-    check-then-append 全程持 fcntl 排他锁——HTTP 重试 / agent 重发 / CLI 与 MCP
-    并发同写时不会双记（ADR-016 的原子幂等闸要求）。
+    check-then-append 全程持排他锁——HTTP 重试 / agent 重发 / CLI 与 MCP
+    并发同写时不会双记（ADR-016 的原子幂等闸要求）。锁用 memory_store 的 sidecar flock
+    （与其它 jsonl 追加同一纪律），不再直接 flock 数据文件。
     """
-    import fcntl
+    from openinvest.core.memory_store import _file_lock
 
     if "/" not in decision_id:
         raise ValueError(f"decision_id 应为 '<date>/<symbol>'，收到: {decision_id!r}")
@@ -192,9 +193,7 @@ def record_execution(
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
     }
     p = path or _executions_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a+", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+    with _file_lock(p), p.open("a+", encoding="utf-8") as f:
         f.seek(0)
         latest = None
         for line in f.read().splitlines():

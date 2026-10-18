@@ -33,6 +33,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from openinvest.core.memory_store import append_jsonl
 from openinvest.paths import INVEST_ROOT
 
 log = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ def record_llm_call(
     error: Optional[str] = None,
     cache_hit_tokens: int = 0,
 ) -> Dict[str, Any]:
-    """记录一次 LLM 调用。线程安全（单 append fcntl-style 不严格，jsonl 容忍并发追加）
+    """记录一次 LLM 调用。线程/进程安全（memory_store.append_jsonl 的 sidecar flock）
 
     cache_hit_tokens：KVCache 命中的输入 token（DeepSeek usage 返回）→ 按命中价计真实成本。
 
@@ -131,9 +132,7 @@ def record_llm_call(
         record["extra"] = meta.extra
 
     try:
-        TELEMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(TELEMETRY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        append_jsonl(TELEMETRY_FILE, record)
     except Exception as e:  # noqa: BLE001  落盘失败不能阻断业务
         log.warning(f"telemetry 落盘失败: {e}")
 
@@ -188,9 +187,7 @@ def record_tool_call(
         "iteration": iteration,
     }
     try:
-        TOOL_CALLS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(TOOL_CALLS_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        append_jsonl(TOOL_CALLS_FILE, record, default=str)
     except Exception as e:  # noqa: BLE001
         log.warning(f"tool_calls 落盘失败: {e}")
     return record
