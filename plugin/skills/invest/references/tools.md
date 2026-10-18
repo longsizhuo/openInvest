@@ -84,8 +84,8 @@ Call these when the user says "record a trade" (记一笔交易) / "I plan to bu
 | `POST /api/holdings` | Add a yfinance-tracked asset (places no order; only records holding data) | `{symbol, kind, units, avg_cost, cost_currency, channel?}` |
 | `POST /api/holdings/import` | Free-text/CSV holdings description → LLM parse (broker-position paste, bulk entry). `commit:false` previews only, no write; `commit:true` non-destructive write (only adds new symbols; cash only fills currencies currently at 0). Requires backend LLM key | `{content, commit?}` |
 | `PUT /api/holdings/{symbol}` | Modify holding fields | `{units?, avg_cost?, channel?}` |
-| `POST /api/deposit` / `/api/withdraw` | Adjust cash | `{currency: "CNY"\|"AUD"\|..., amount}` |
-| `POST /api/gold/buy` / `/sell` | Gold buy/sell (sell_fee computed automatically) | `{grams, price_per_gram}` |
+| `POST /api/skill/deposit` / `/withdraw` | Adjust cash (same implementation as CLI/MCP `deposit`/`withdraw`; optional `idempotency_key` in body or `Idempotency-Key` header) | `{currency: "CNY"\|"AUD"\|..., amount}` |
+| `POST /api/skill/buy` / `/sell` | Record a buy/sell of any holding, gold (`GC=F`) included (same implementation as CLI/MCP `buy`/`sell`; optional idempotency key as above) | `{symbol, units, price, currency?}` |
 | `POST /api/strategy/asset` | Add a target_assets entry. **Native equivalents already exist**: MCP `track_asset` / CLI `track_asset` (plus `untrack_asset`, `set_allocations`) — prefer the native ones; stop curling this | `{symbol, channel?, max_single_invest_cny}` |
 | `GET /api/events/recent?hours=24&min_severity=low&limit=50` | List news perceived by the event layer in the last N hours (ADR-006). For debugging / "what is the system currently aware of" (系统现在感知到什么) | — |
 | `GET /api/discipline` | Committee discipline ledger: inaction rate (HOLD share of live verdicts) + count of blocked impulsive actions + counterfactual P&L (aligned with ADR-023; lets the agent show "what it blocked") | — |
