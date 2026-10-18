@@ -311,8 +311,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "超了拒绝并报出当前合计")
     p.add_argument("--alert-price-above", type=float, default=None, help="价格线：现价 ≥ 该价时报警（口径同 status 的 current_price）")
     p.add_argument("--alert-price-below", type=float, default=None, help="价格线：现价 ≤ 该价时报警（须小于 --alert-price-above）")
-    p.add_argument("--alert-day-drop-pct", type=float, default=None, help="今日跌幅（相对前收）达到该百分点时报警（3 = 3%%）")
-    p.add_argument("--alert-day-rise-pct", type=float, default=None, help="今日涨幅（相对前收）达到该百分点时报警（3 = 3%%）")
+    p.add_argument("--alert-day-drop-pct", type=float, default=None, help="最新日线跌幅（相对前收）达到该百分点时报警（3 = 3%%；每个交易日只报一次）")
+    p.add_argument("--alert-day-rise-pct", type=float, default=None, help="最新日线涨幅（相对前收）达到该百分点时报警（3 = 3%%；每个交易日只报一次）")
     p.add_argument("--alert-drawdown-from-cost-pct", type=float, default=None,
                    help="持仓较成本浮亏达到该百分点时报警（10 = 10%%；仅持有的标的）。清除某条用 set_allocations --alert SYMBOL:RULE=none；"
                         "报警只有服务端设了 INVEST_EVENT_ALERT=1 才会真发出去")

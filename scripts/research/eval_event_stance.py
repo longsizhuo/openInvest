@@ -88,7 +88,9 @@ def load_events(db_path: Path = EVENTS_DB) -> List[Ev]:
     con = sqlite3.connect(str(db_path))
     out: List[Ev] = []
     for ts_raw, stance, sev, syms_json in con.execute(
-        "SELECT ts, stance, severity, affected_symbols_json FROM events"
+        "SELECT ts, stance, severity, affected_symbols_json FROM events "
+        # price_alert = 用户自设价格线命中，价格已动之后才打的 stance，会给命中率带上回看偏差
+        "WHERE event_type IS NOT 'price_alert'"
     ):
         ts = _parse_ts(ts_raw)
         if ts is None:

@@ -72,6 +72,8 @@ def _parse_alerts(items) -> dict:
         if rule is None:
             if not clear:
                 raise ValueError(f"--alert {item!r} 缺规则名：写成 SYMBOL:RULE=VALUE（RULE ∈ {', '.join(RULES)}），或 SYMBOL=none 清空该标的全部")
+            if out.get(sym):
+                raise ValueError(f"--alert：{sym} 前面已设了规则，后面的 {sym}=none 会把它们整体清空，二选一")
             out[sym] = None
             continue
         try:

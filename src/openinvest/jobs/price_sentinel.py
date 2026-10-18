@@ -11,7 +11,9 @@
 用户自设报警线（C8）：strategy.target_assets[].alerts（price_above / price_below / day_drop_pct /
 day_rise_pct / drawdown_from_cost_pct）每个 tick 用最新价判一次，与上面的 ATR 逻辑并行、互不依赖：
 - 价格口径同 status（services/price_alerts：持仓按 get_quote，黄金按克价），行情是回退兜底（is_stale）时不报
-- 每标的每条规则 24h 冷却，用 state_update 在同一把文件锁内「判冷却 + 盖章」（原子，两个实例不会同报）
+- 冷却用 state_update 在同一把文件锁内「判冷却 + 盖章」（原子，两个实例不会同报）：价格线每标的每条 24h 滚动；
+  day_drop/day_rise 按**行情交易日**——同一根日线只报一次（休市日行情停在上一交易日那根线，按 24h 判
+  会把周五的跌幅周六、周日各再报一遍），新的交易日才能再报
 - 命中写一条事件进 events.db（event_type=price_alert），再经 send_event_alert 同一通道发
   （Discord/邮件）；INVEST_EVENT_ALERT=1 才真发，默认关时只入库不发（冷却照常盖章）
 - **只入库、不触发委员会**：线是用户自己的提醒，不是新信息；委员会额度（共享冷却 + 日上限）留给新闻事件。
@@ -35,6 +37,7 @@ config（ADR-017 白名单，GUI/API/CLI 可改）：
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -52,7 +55,7 @@ _MAX_STALE_MIN = 25
 _ABS_FALLBACK_PCT = 1.0
 # 冷却状态在 memory/.state 里的名字
 _STATE_NAME = "price_sentinel_cooldowns"
-# 用户自设报警线：每标的每条规则的冷却（键 "SYM:rule"）
+# 用户自设报警线：每标的每条规则的冷却（键 "SYM:rule"；价格线值 = 盖章时刻，日涨跌线值 = {"bar", "ts"}）
 _ALERT_STATE_NAME = "price_alert_cooldowns"
 _ALERT_COOLDOWN_MIN = 24 * 60
 _ALERT_UP_RULES = ("price_above", "day_rise_pct")  # 上行线 = 机会措辞，其余 = 风险
@@ -177,24 +180,33 @@ def _alert_targets() -> List[Dict[str, Any]]:
         return []
 
 
-def _claim_alert(ms: Any, sym: str, rule: str, now: datetime) -> Optional[str]:
-    """原子冷却：同一把文件锁内「读 → 判 24h → 盖章」。抢到返回盖的 stamp，冷却内返回 None。"""
+def _claim_alert(ms: Any, sym: str, rule: str, now: datetime, bar: Optional[str] = None) -> Any:
+    """原子冷却：同一把文件锁内「读 → 判冷却 → 盖章」。抢到返回盖的章（给 _release_alert 认领），冷却内返回 None。
+    bar=None（价格线）：24h 滚动。bar=行情交易日（日涨跌线）：该交易日已报过就不再报，换了交易日才再报。"""
     stamp = now.isoformat(timespec="seconds")
+    key = f"{sym}:{rule}"
 
     def _fn(cur: Any):
         cur = cur if isinstance(cur, dict) else {}
-        if not _cooldown_ok(cur, sym, rule, now, _ALERT_COOLDOWN_MIN):
-            return cur, None
-        return {**cur, f"{sym}:{rule}": stamp}, stamp
+        if bar is None:
+            if not _cooldown_ok(cur, sym, rule, now, _ALERT_COOLDOWN_MIN):
+                return cur, None
+            mark: Any = stamp
+        else:
+            prev = cur.get(key)
+            if isinstance(prev, dict) and prev.get("bar") == bar:
+                return cur, None
+            mark = {"bar": bar, "ts": stamp}
+        return {**cur, key: mark}, mark
 
     return ms.state_update(_ALERT_STATE_NAME, _fn)
 
 
-def _release_alert(ms: Any, sym: str, rule: str, stamp: str) -> None:
+def _release_alert(ms: Any, sym: str, rule: str, mark: Any) -> None:
     """入库失败时撤回刚盖的章（只撤自己的，别人期间写的不动），下个 tick 重试。"""
     key = f"{sym}:{rule}"
     ms.state_update(_ALERT_STATE_NAME, lambda cur: (
-        {k: v for k, v in (cur if isinstance(cur, dict) else {}).items() if not (k == key and v == stamp)}, None))
+        {k: v for k, v in (cur if isinstance(cur, dict) else {}).items() if not (k == key and v == mark)}, None))
 
 
 def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
@@ -214,7 +226,8 @@ def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
             if quote.is_stale:  # 行情源挂了在用库里旧价：别拿旧价当"触线"
                 log.info(f"[{sym}] 行情是回退兜底（is_stale），跳过报警线判定")
                 continue
-            hits = [r for r in evaluate_symbol(sym, t["alerts"], t["holding"], price=quote.price, extra=quote.extra)
+            hits = [r for r in evaluate_symbol(sym, t["alerts"], t["holding"], price=quote.price,
+                                               extra=quote.extra, last_updated=quote.last_updated)
                     if r["breached"]]
         except Exception as e:
             log.warning(f"[{sym}] 报警线判定失败: {e}")
@@ -224,15 +237,18 @@ def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
             if dry_run:
                 fired.append(f"{sym}:{rule}")
                 continue
-            stamp = _claim_alert(ms, sym, rule, now)
-            if stamp is None:
-                log.info(f"[{sym}] {rule} 在 24h 冷却内，跳过")
+            mark = _claim_alert(ms, sym, rule, now, r.get("bar_date"))
+            if mark is None:
+                log.info(f"[{sym}] {rule} 在冷却内（价格线 24h / 日涨跌线同一交易日），跳过")
                 continue
             ccy = f" {quote.currency}" if quote.currency else ""
             claim = (f"{sym} 触发你设的报警线：{r['text']}，现价 {quote.price:.2f}{ccy}；{_latest_verdict(sym)}"
                      f"（{now:%Y-%m-%d}）")
             event = {
                 "one_line_claim": claim,
+                # 显式 event_id：默认的 claim_to_event_id 会剥掉 ISO 日期，同价同线隔天命中会被并成一行。
+                # 价格线按盖章时刻、日涨跌线按行情交易日——每次命中一行，且不会和新闻事件撞 id
+                "event_id": hashlib.sha256(f"price_alert|{sym}|{rule}|{r.get('bar_date') or mark}".encode()).hexdigest()[:16],
                 "event_type": "price_alert",
                 "stance": "opportunity" if rule in _ALERT_UP_RULES else "risk",
                 "severity": "low",  # 见模块 docstring：低于所有事件层闸，用户的线不进委员会论据
@@ -245,7 +261,7 @@ def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
                 _, eid = EventStore().upsert_event(event, embedding=None)
             except Exception as e:
                 log.warning(f"[{sym}] {rule} 事件入库失败，撤回冷却下轮重试: {e}")
-                _release_alert(ms, sym, rule, stamp)
+                _release_alert(ms, sym, rule, mark)
                 continue
             log.info(f"[price_alert] {claim}")
             events.append({**event, "event_id": eid})

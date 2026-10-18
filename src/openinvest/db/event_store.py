@@ -481,7 +481,10 @@ class EventStore:
         eff = "CASE WHEN julianday(ts) <= julianday(created_at) THEN ts ELSE created_at END"
         sql = (f"SELECT *, {eff} AS eff_ts, julianday({eff}) AS eff_jd "
                "FROM events INDEXED BY idx_events_ts "
-               f"WHERE ts >= ? AND created_at >= ? AND severity >= ? AND ({match})")
+               # price_alert = 用户自设价格线命中（jobs/price_sentinel），是提醒不是新闻：不管 rag_min_severity 调成多低，
+               # 都不进召回（委员会论据 / 日报 / 持仓摘要）。IS NOT 对 event_type 为 NULL 的行也成立
+               "WHERE ts >= ? AND created_at >= ? AND severity >= ? AND event_type IS NOT 'price_alert' "
+               f"AND ({match})")
         params = [cutoff, cutoff, min_sev_int, *match_syms, *tags]
         if as_of_iso is not None:
             sql += " AND created_at <= ?"

@@ -60,7 +60,7 @@ def load_events(
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
     q = ("SELECT event_id, stance, severity, created_at, affected_symbols_json, "
-         "ingested_by FROM events WHERE severity >= ?")
+         "ingested_by FROM events WHERE severity >= ? AND event_type IS NOT 'price_alert'")
     params: Tuple[Any, ...] = (_SEV_INT.get(min_severity, 1),)
     if ingested_by:
         q += " AND ingested_by = ?"

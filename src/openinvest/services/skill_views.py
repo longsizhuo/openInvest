@@ -17,7 +17,7 @@ import logging
 import math
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from openinvest.core.memory_store import MemoryStore
 
@@ -108,20 +108,23 @@ def build_status_view() -> Dict[str, Any]:
     alert_cfg = {a["symbol"]: a["alerts"] for a in (pm.strategy.get("target_assets") or [])
                  if a.get("symbol") and a.get("alerts")}
 
-    def _alerts_for(sym: str, h: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _alerts_for(sym: str, h: Optional[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[float]]:
+        """(该标的各线求值, 求值用的现价)。没设线 → ([], None)。"""
         if sym not in alert_cfg:
-            return []
+            return [], None
         try:
-            price, extra = current_prices.get(sym), quote_meta.get(sym, {}).get("extra")
+            price = current_prices.get(sym)
+            meta = quote_meta.get(sym, {})
+            extra, updated = meta.get("extra"), meta.get("last_updated")
             if price is None and (h is None or h.get("is_tracking_only")):
                 # 追踪仓 / 没持仓行的跟踪标的 status 本来不拉价，设了线的才补拉（在持仓拉价失败的不重试）
                 q = fetch_quote(sym, h)
                 if q is not None and math.isfinite(q.price) and q.price > 0:
-                    price, extra = q.price, q.extra
-            return evaluate_symbol(sym, alert_cfg[sym], h, price=price, extra=extra)
+                    price, extra, updated = q.price, q.extra, q.last_updated
+            return evaluate_symbol(sym, alert_cfg[sym], h, price=price, extra=extra, last_updated=updated), price
         except Exception as e:  # noqa: BLE001  报警线只是附加信息，不拖垮 status
             log.warning("status alerts(%s) 求值失败: %s", sym, e)
-            return []
+            return [], None
 
     holding_views: List[Dict[str, Any]] = []
     for h in pm.holdings:
@@ -156,12 +159,21 @@ def build_status_view() -> Dict[str, Any]:
                 "pnl": None,
                 "pnl_pct": None,
             })
-        view["alerts"] = _alerts_for(sym, h)
+        view["alerts"], alert_price = _alerts_for(sym, h)
+        if view.get("current_price") is None and alert_price is not None:  # 追踪仓：线是按哪个价算的要看得见
+            view["current_price"] = round(alert_price, 6)
         holding_views.append(view)
-    # 设了报警线但没有持仓行的跟踪标的：也要让用户在 status 里看到线与距离（追踪仓行，无仓位）
+    # 设了报警线但没有持仓行的跟踪标的：也要让用户在 status 里看到线与距离（追踪仓行，无仓位）。
+    # 键与普通行对齐（拉不到价 = null），外部脚本按 h["current_price"] 取值不会 KeyError
     held_syms = {str(h.get("symbol")) for h in pm.holdings}
     for sym in (x for x in alert_cfg if x not in held_syms):
-        holding_views.append({"symbol": sym, "units": 0, "is_tracking_only": True, "alerts": _alerts_for(sym, None)})
+        alerts, alert_price = _alerts_for(sym, None)
+        holding_views.append({
+            "symbol": sym, "units": 0, "is_tracking_only": True,
+            "current_price": round(alert_price, 6) if alert_price is not None else None,
+            "market_value": None, "market_value_cny": None, "pnl": None, "pnl_pct": None,
+            "alerts": alerts,
+        })
 
     # 克价口径持仓（黄金）汇总块——兼容老 agent 读 status["gold"]；多个克价持仓合并，逐仓明细看 all_holdings
     gold_hs = [h for h in held if _is_gold_gram(h)]

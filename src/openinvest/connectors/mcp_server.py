@@ -757,15 +757,15 @@ def track_asset(
     target_pct: Annotated[Optional[float], Field(description="Target weight of this asset as a fraction of total assets, in [0, 1] (0.3 = 30%); read by rebalance_plan. The weights of all tracked assets must sum to <= target_allocation_stock, otherwise the write is rejected and the current sum is reported. Assets without one split the remainder equally. To clear a target use set_allocations with a null value.", ge=0, le=1)] = None,
     alert_price_above: Annotated[Optional[float], Field(description="Alert when the price reaches or exceeds this level. Same price basis as status.current_price (held: cost currency, gold booking = CNY per gram; tracked-only: the quote source's own price).", gt=0)] = None,
     alert_price_below: Annotated[Optional[float], Field(description="Alert when the price falls to or below this level (same price basis as alert_price_above). Must be below alert_price_above if both are set.", gt=0)] = None,
-    alert_day_drop_pct: Annotated[Optional[float], Field(description="Alert when today's drop vs the previous close reaches this many percentage points (3 = 3%, not a 0-1 fraction).", gt=0, le=100)] = None,
-    alert_day_rise_pct: Annotated[Optional[float], Field(description="Alert when today's rise vs the previous close reaches this many percentage points (3 = 3%).", gt=0)] = None,
+    alert_day_drop_pct: Annotated[Optional[float], Field(description="Alert when the latest daily bar's drop vs the previous close reaches this many percentage points (3 = 3%, not a 0-1 fraction). On a closed market that is the last session; each trading day is reported once.", gt=0, le=100)] = None,
+    alert_day_rise_pct: Annotated[Optional[float], Field(description="Alert when the latest daily bar's rise vs the previous close reaches this many percentage points (3 = 3%); each trading day is reported once.", gt=0)] = None,
     alert_drawdown_from_cost_pct: Annotated[Optional[float], Field(description="Alert when a held position is this many percentage points below its average cost (10 = 10%). Only evaluated for assets you hold.", gt=0, le=100)] = None,
 ) -> Dict[str, Any]:
     """Add a symbol to the tracked-asset list, or update an existing entry
     (idempotent upsert: only the fields you pass are changed). The tracked
     list decides which symbols the committee and DCA jobs cover. The
     alert_* parameters set per-asset alert lines the price sentinel checks
-    every few minutes (24h cooldown per line); each one you pass overwrites
+    every few minutes (price lines: 24h cooldown; day-move lines: once per trading day); each one you pass overwrites
     that line only. To clear a line use set_allocations with a null value.
     Delivery needs INVEST_EVENT_ALERT=1 on the server (default off — without
     it a hit is only logged to the event store, nothing is sent).
@@ -788,7 +788,7 @@ def track_asset(
             (read by rebalance_plan); all tracked assets' weights must sum
             to <= target_allocation_stock or the write is rejected.
         alert_price_above / alert_price_below: price lines (status.current_price
-            basis). alert_day_drop_pct / alert_day_rise_pct: today's move vs the
+            basis). alert_day_drop_pct / alert_day_rise_pct: the latest daily bar's move vs the
             previous close, percentage points. alert_drawdown_from_cost_pct:
             held position below average cost, percentage points.
 

@@ -64,6 +64,14 @@ def test_evaluate_missing_inputs_are_undecidable_not_false_alarm():
     assert describe(evaluate({"price_above": 1}, price=None)[0]).endswith("（缺现价）")
 
 
+def test_evaluate_day_rules_carry_bar_date_and_name_it_in_text():
+    hits = _by_rule(evaluate({"day_drop_pct": 3, "price_below": 900}, price=1000.0, day_change_pct=-3.4,
+                             day_bar="2026-10-16"))
+    assert hits["day_drop_pct"]["bar_date"] == "2026-10-16"
+    assert "bar_date" not in hits["price_below"]
+    assert hits["day_drop_pct"]["text"] == "已触及 day_drop_pct 3（2026-10-16 当日 -3.40%）"  # 休市日不写「今日」
+
+
 # ---------- schema ----------
 
 def test_schema_accepts_valid_and_rejects_bad_alerts():
@@ -165,6 +173,9 @@ def test_cli_parse_alerts():
             _parse_alerts([bad])
     with pytest.raises(ValueError, match="整体清空"):
         _parse_alerts(["AAPL=none", "AAPL:price_below=1"])
+    with pytest.raises(ValueError, match="二选一"):  # 反过来的顺序也不能静默吃掉前面的设置
+        _parse_alerts(["AAPL:price_below=1", "AAPL=none"])
+    assert _parse_alerts(["AAPL=none", "AAPL=none"]) == {"AAPL": None}
 
 
 def test_cli_track_asset_and_set_allocations_write_alerts(store, monkeypatch, capfd):
@@ -222,16 +233,19 @@ def test_status_shows_alerts_with_distance_for_held_and_tracked_only(monkeypatch
     _seed(
         [{"symbol": "GC=F", "kind": "metal", "units": 10.0, "avg_cost": 1000.0, "cost_currency": "CNY",
           "proxy_kind": "gold_cny_per_gram"},
-         {"symbol": "510300.SS", "kind": "etf", "units": 100.0, "avg_cost": 4.0, "cost_currency": "CNY"}],
+         {"symbol": "510300.SS", "kind": "etf", "units": 100.0, "avg_cost": 4.0, "cost_currency": "CNY"},
+         {"symbol": "TSLA", "kind": "equity", "units": 0.0, "avg_cost": 0.0, "cost_currency": "USD",
+          "is_tracking_only": True}],
         [{"symbol": "GC=F", "max_single_invest_cny": 1, "alerts": {"price_below": 900, "drawdown_from_cost_pct": 10}},
          {"symbol": "510300.SS", "max_single_invest_cny": 1},
+         {"symbol": "TSLA", "max_single_invest_cny": 1, "alerts": {"price_below": 100}},   # 追踪仓行
          {"symbol": "AAPL", "max_single_invest_cny": 1, "alerts": {"price_above": 250}}],  # 无持仓行
     )
     seen = []
 
     def fake_quote(h):
         seen.append((h["symbol"], h.get("proxy_kind")))
-        price = {"GC=F": 930.0, "510300.SS": 4.5, "AAPL": 200.0}[h["symbol"]]
+        price = {"GC=F": 930.0, "510300.SS": 4.5, "AAPL": 200.0, "TSLA": 120.0}[h["symbol"]]
         return QuoteSnapshot(symbol=h["symbol"], price=price, currency="CNY", unit="u", extra={})
     monkeypatch.setattr("openinvest.utils.quotes.get_quote", fake_quote)
 
@@ -245,4 +259,11 @@ def test_status_shows_alerts_with_distance_for_held_and_tracked_only(monkeypatch
     aapl = rows["AAPL"]                                                        # 只跟踪未持仓：作为追踪仓行出现
     assert aapl["is_tracking_only"] is True and aapl["units"] == 0
     assert aapl["alerts"][0]["text"] == "距 price_above 还有 25.0%"
+    # 键与普通持仓行对齐（外部脚本按 h["current_price"] 取值不 KeyError），现价填线实际用的那个价
+    assert aapl["current_price"] == 200.0
+    for k in ("current_price", "market_value", "market_value_cny", "pnl", "pnl_pct"):
+        assert k in aapl, k
+    assert aapl["market_value"] is None and aapl["pnl_pct"] is None
+    tsla = rows["TSLA"]  # 已有的追踪仓行：status 本来不拉价，设了线才补拉，并把价填回去
+    assert tsla["current_price"] == 120.0 and tsla["alerts"][0]["text"] == "距 price_below 还有 16.7%"
     assert ("AAPL", None) in seen  # 只对设了线的无持仓标的补拉价

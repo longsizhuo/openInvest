@@ -134,8 +134,8 @@ hermes cron add '15 0-15 * * 1-5' "<上面的 prompt>" \
 |---|---|---|
 | `price_above` | 现价 ≥ 线 | 与 `status` 的 `current_price` 同口径：持仓按 `cost_currency`，黄金积存金 = CNY/克；只跟踪未持仓 = 行情源原价（`GC=F` 是 USD/盎司） |
 | `price_below` | 现价 ≤ 线 | 同上；设了两条价格线时必须 `price_below < price_above` |
-| `day_drop_pct` | 今日跌幅 ≥ 阈值 | 相对前收，**百分点**（3 = 3%，不是 target_pct 那种 0~1 小数） |
-| `day_rise_pct` | 今日涨幅 ≥ 阈值 | 同上 |
+| `day_drop_pct` | 最新日线跌幅 ≥ 阈值 | 相对前收，**百分点**（3 = 3%，不是 target_pct 那种 0~1 小数）；休市日看的是上一交易日那根线 |
+| `day_rise_pct` | 最新日线涨幅 ≥ 阈值 | 同上 |
 | `drawdown_from_cost_pct` | 持仓浮亏 ≥ 阈值 | 相对成本，百分点；只对**持有且有成本**的标的判，只跟踪的不判 |
 
 ```bash
@@ -156,15 +156,20 @@ MCP 对应 `track_asset` 的 `alert_price_above` / `alert_price_below` / `alert_
   `event.sentinel_enabled=false` 会连用户线一起停；`INVEST_SENTINEL_DRY_RUN=1` 只检测、不入库、不发、不盖冷却章。
 - 价格走 `get_quote`（黄金按克价，和 `status` 同价）；行情源挂了在用库里旧价（`is_stale`）时不报，
   不拿旧价当触线。休市时用最近收盘价判，所以一条已经被击穿的价格线会在第一个 tick 报出来。
-- **冷却**：每标的每条规则 24 小时。「判冷却 + 盖章」在同一把文件锁内（`MemoryStore.state_update`，
+- **冷却**：「判冷却 + 盖章」在同一把文件锁内（`MemoryStore.state_update`，
   `memory/.state/price_alert_cooldowns.json`，键 `SYMBOL:规则`），两个实例同时进来只有一个抢得到。
-  线一直被击穿的话每 24h 再提醒一次，不是只在穿越的那一刻报。
+  价格线（`price_above` / `price_below`）每标的每条 24 小时滚动：线一直被击穿的话每 24h 再提醒一次，
+  不是只在穿越的那一刻报。日涨跌线（`day_drop_pct` / `day_rise_pct`）按**行情交易日**：同一根日线只报一次，
+  换了交易日才能再报——休市日（周末 / 节假日）行情停在上一交易日那根线上，按 24h 判会把周五的跌幅
+  周六、周日各再报一遍；报警正文写明是哪个交易日（`2026-10-16 当日 -3.40%`），不写「今日」。
 - **同一通道**：命中的事件合成一封 digest 走 `send_event_alert`（Discord DM + 邮件），和 ATR 报警、
   事件报警是同一条路，stance 下行线 = risk、上行线 = opportunity。
 - **总开关不变**：`INVEST_EVENT_ALERT=1` 才真发（2026-09-10 老大要求默认关，没改）。关着时事件照常入库、
   冷却照常盖章，只是不发——所以先关后开的话，关着期间已经命中过的线要等 24h 冷却过完才会再报。
-- **入库**：每次命中写一条 `events.db` 事件，`event_type="price_alert"`、`ingested_by="price_sentinel"`，
-  claim 含日期（同价同线隔 24h 再命中也是新的一行）。
+- **入库**：每次命中写一条 `events.db` 事件，`event_type="price_alert"`、`ingested_by="price_sentinel"`。
+  `event_id` 显式取自「标的 + 规则 + 盖章时刻 / 行情交易日」，不走 claim 文本归一化（后者会剥掉日期，
+  同价同线隔天命中会被并成一行）。`EventStore.recall` 对 `price_alert` 硬排除，研究脚本
+  （`eval_event_stance` 等）也排除——它是价格已动之后才打的 stance，会给命中率带上回看偏差。
 - **只入库、不触发委员会**：线是用户自己的提醒，不是新信息；委员会额度（共享冷却 + 每日上限）留给新闻事件，
   且这些事件**不走** `trigger_for_new_events`。`severity` 固定 `low`，低于触发闸、RAG 召回、日报资产事件
   默认都要求的 `mid`，所以用户的价格线不会经事件层混进委员会的论据（用户把 `event.min_severity` /
@@ -178,6 +183,9 @@ MCP 对应 `track_asset` 的 `alert_price_above` / `alert_price_below` / `alert_
   {"rule": "price_below", "threshold": 900.0, "current": 930.0, "distance_pct": 3.23,
    "breached": false, "text": "距 price_below 还有 3.2%"}]}
 ```
+
+`day_*` 规则的行多一个 `bar_date`（这个涨跌属于哪个交易日）。没有持仓行的跟踪标的那一行，键与普通持仓行一致
+（`current_price` 填线实际用的那个价，`market_value` / `pnl` 等为 `null`）。
 
 `distance_pct` > 0 = 还没到，≤ 0 = 已触及；缺输入（没有成本、今日涨跌拉不到）= `null`，文案"暂无法判定"。
 

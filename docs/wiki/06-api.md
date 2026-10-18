@@ -478,7 +478,7 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
 - **每标的报警线**：`track_asset(symbol, alert_price_below=900, alert_day_drop_pct=2, ...)` 写单个标的（5 个 `alert_*` 参数，
   只覆盖传入的那几条）、`set_allocations(alerts={"GC=F": {"price_below": 900}})` 批量写（值为 null 清该条，symbol 整体为 null
   清空）；CLI：`track_asset --alert-price-below 900` / `set_allocations --alert GC=F:price_below=900`。`status` 的
-  `all_holdings[].alerts` 返回各线与距离。哨兵按线触发、24h 冷却，**只有 `INVEST_EVENT_ALERT=1` 才发**，不触发委员会，
+  `all_holdings[].alerts` 返回各线与距离。哨兵按线触发（价格线 24h 冷却、日涨跌线同一交易日只报一次），**只有 `INVEST_EVENT_ALERT=1` 才发**，不触发委员会，
   详见 [21-intel-sentinel](21-intel-sentinel.md#每标的报警线用户自设价格线--跌幅线)
 - 刻意不把 81 个 REST 端点全暴露（撑爆 agent context）；Coordinator 委员会
   workflow 也不在这里——那是 Skill 的职责（issue #133 Decision 5/6）

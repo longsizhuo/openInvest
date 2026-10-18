@@ -31,8 +31,8 @@ class SymbolAlerts(BaseModel):
 
     price_above: Optional[float] = Field(None, gt=0, allow_inf_nan=False, description="现价 ≥ 该价 时报警")
     price_below: Optional[float] = Field(None, gt=0, allow_inf_nan=False, description="现价 ≤ 该价 时报警")
-    day_drop_pct: Optional[float] = Field(None, gt=0, le=100, description="今日跌幅（相对前收）≥ 该百分点 时报警")
-    day_rise_pct: Optional[float] = Field(None, gt=0, le=1000, description="今日涨幅（相对前收）≥ 该百分点 时报警")
+    day_drop_pct: Optional[float] = Field(None, gt=0, le=100, description="最新日线跌幅（相对前收）≥ 该百分点 时报警，每个交易日只报一次")
+    day_rise_pct: Optional[float] = Field(None, gt=0, le=1000, description="最新日线涨幅（相对前收）≥ 该百分点 时报警，每个交易日只报一次")
     drawdown_from_cost_pct: Optional[float] = Field(None, gt=0, le=100, description="持仓浮亏（相对成本）≥ 该百分点 时报警；需持有且有成本")
 
     @model_validator(mode="after")
