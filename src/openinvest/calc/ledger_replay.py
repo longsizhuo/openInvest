@@ -30,6 +30,9 @@
 
 新写入的记录（PR2 起，``schema_version == 2``）由写入方算好 ``cash_effect`` / ``units_effect`` / ``external``，
 读方**只认这三个字段**（ADR-027 D2）：上表是缺这些字段时的推导口径。DRIP 的那条 buy 也是 v2 记录。
+**唯一例外是 split 的 ``units_effect``**：写入方记的是快照口径（快照份数 × (ratio−1)），回放始终用账本口径
+``held × (ratio−1)``（``held`` = 回放里该标的已累计的份数）——否则拆股后的 manual_override / delete_holding 会用错基数。
+NAV 回放不受影响（split 在拆股后口径下是空操作）。
 
 数值字段（units / price / total_amount / net_amount / fee）解析不了的行：``action`` 分类照旧、``unparsed=True``、
 效果全 0，不进回放、计入 ``LedgerState.unknown``——一行脏数据不能让整个读方崩（旧 ``history_as_trades`` 从不转数字，
@@ -161,6 +164,11 @@ def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mappi
         f.update(_effects(raw_action, r, sym, held))
         if f["action"] != "unknown" and r.get("schema_version") == 2:   # 新记录：写入方算好的效果为准（ADR-027 D2）
             for k in ("cash_effect", "units_effect"):
+                # split 例外：写入方的 units_effect 是「快照份数 × (ratio−1)」，而回放的 LedgerState 累计的是账本份数
+                # （不含系统上线前的开盘持仓）。拆股后再来一条 manual_override / delete_holding 时，「新值 − held」要按同一口径
+                # 才和不拆股时 correction 吸收开盘持仓的语义一致——所以 split 在回放里始终用 held × (ratio−1)（_effects 已算）
+                if k == "units_effect" and f["action"] == "split":
+                    continue
                 if r.get(k) is not None:
                     f[k] = float(r[k])
             if r.get("external") is not None:

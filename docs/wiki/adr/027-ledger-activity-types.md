@@ -129,7 +129,8 @@ status / `pnl_snapshot` / `holdings_digest` / `rebalance_plan` / 集中度 在 T
 > 账户业绩 / 持仓归因按 symbol 选口径：所需日期范围内 `close_raw` 全有 → 原始价，缺一天 → 整只复权价，不混用，返回 `price_basis`。
 > 复权价回退的标的，收入类活动（dividend / return_of_capital / DRIP 买入）不进回放（价格已含，不双计）。split 不论哪种口径都用拆股后
 > 数量（`later_split_factors`）。场外基金（只有前复权净值）与黄金克价代理（期货 × 外汇无分红）不回填，恒为 `adjusted`。
-> 回填：`openinvest backfill_raw_close`。持仓归因的"今日涨跌"不计入当日分红（除息日原始价会下跌，分红现金不在这一段）——另议。
+> 回填：`openinvest backfill_raw_close`。`record_split` 补记历史拆股时，账本里已有除权日当天或之后的份数变动 → 拒绝（快照已混拆股后份数，账本无撤销），
+> `--ledger-only` 只补流水（#482 评审）。持仓归因的"今日涨跌"不计入当日分红（除息日原始价会下跌，分红现金不在这一段）——另议。
 
 ### D5 场外基金两段式 + 自动确认
 

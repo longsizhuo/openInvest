@@ -197,8 +197,10 @@ def test_split_multiplies_units_divides_cost_keeps_cash(tmp_path):
     pm.record_split("NDQ.AX", 0.1)                                    # 10 合 1
     assert (_h(pm)["units"], _h(pm)["avg_cost"]) == (100.0, 50.0)
     (a, _), state = replay_ledger(_rows(pm), alias={})
-    assert (a.action, a.split_ratio, a.units_effect, a.cash_effect) == ("split", 10.0, 900.0, 0.0)
-    assert state.units["NDQ.AX"] == pytest.approx(0.0)                # +900 −900 → 回放增量和
+    # 流水行记的是快照口径（900）；回放始终用账本口径 held×(ratio−1)——这个账本里没有 NDQ.AX 的买卖，held=0 → 0
+    assert _rows(pm)[0]["units_effect"] == 900.0
+    assert (a.action, a.split_ratio, a.units_effect, a.cash_effect) == ("split", 10.0, 0.0, 0.0)
+    assert state.units["NDQ.AX"] == 0.0
 
 
 def test_split_validation(tmp_path):
@@ -471,9 +473,11 @@ def test_mcp_tools_roundtrip(tmp_path):
     assert m.record_fee(amount=1e6, currency="AUD")["status"] == "error"
     assert m.record_split(symbol="NDQ.AX", ratio=2)["units"] == 200.0
     assert m.record_split(symbol="NDQ.AX", ratio=1)["status"] == "error"
+    assert m.record_split(symbol="NDQ.AX", ratio=2, ledger_only=True)["units_effect"] == 0.0     # 快照 200 不动
     assert m.record_return_of_capital(symbol="NDQ.AX", amount=10, currency="AUD")["status"] == "ok"
     rows = PortfolioManager(MemoryStore(tmp_path / "_memory_root")).store.read_history()
-    assert [r["action"] for r in rows] == ["dividend", "interest", "tax", "split", "return_of_capital"]
+    assert [r["action"] for r in rows] == ["dividend", "interest", "tax", "split", "split", "return_of_capital"]
+    assert PortfolioManager(MemoryStore(tmp_path / "_memory_root")).holdings.find("NDQ.AX")["units"] == 200.0
     assert {r["source"] for r in rows} == {"mcp"}
 
 
@@ -503,6 +507,155 @@ def test_cli_subcommands_roundtrip(tmp_path, capfd):
     assert run("record_fee", "--kind", "tax", "--amount", "1", "-c", "AUD")[1]["action"] == "tax"
     assert run("record_split", "--symbol", "NDQ.AX", "--ratio", "2")[1]["units"] == 200.0
     assert run("record_split", "--symbol", "NDQ.AX", "--ratio", "1")[0] == 1
+    assert run("record_split", "--symbol", "NDQ.AX", "--ratio", "2", "--ledger-only")[1]["units_effect"] == 0.0
     assert run("record_return_of_capital", "--symbol", "NDQ.AX", "--amount", "10", "-c", "AUD")[1]["status"] == "ok"
     rows = PortfolioManager(MemoryStore(tmp_path / "_memory_root")).store.read_history()
-    assert [r["action"] for r in rows] == ["dividend", "interest", "tax", "split", "return_of_capital"]
+    assert [r["action"] for r in rows] == ["dividend", "interest", "tax", "split", "split", "return_of_capital"]
+    assert PortfolioManager(MemoryStore(tmp_path / "_memory_root")).holdings.find("NDQ.AX")["units"] == 200.0
+
+
+# ============ 评审 #482：补记历史拆股 ============
+
+def _trade(day, action, units, price=10.0, sym="X"):
+    return {"ts_origin": f"{day}T10:00:00", "action": action, "symbol": sym, "units": units, "price": price,
+            "currency": "CNY", "funding_source": "external_funding"}
+
+
+def _x_pm(root, units=15.0):
+    return _pm(root, cash={"CNY": 0.0}, holdings=[
+        {"symbol": "X", "kind": "equity", "units": units, "avg_cost": 10.0, "cost_currency": "CNY", "proxy_kind": "direct"}],
+        history=[_trade("2026-06-01", "buy", 10.0), _trade("2026-07-01", "buy", 5.0)])
+
+
+def test_backfilling_a_split_refuses_when_later_trades_are_already_post_split(tmp_path):
+    """评审阻塞项：06-01 买 10 → 06-10 拆 2:1（当时没记）→ 07-01 按拆股后口径买 5，快照 15。
+    补记 06-10 的拆股若整体 ×2 会变成 30（应为 25）且账本没有撤销——必须拒绝，不落账、不烧 key。"""
+    pm = _x_pm(tmp_path)
+    with pytest.raises(ValueError, match="ledger_only") as ei:
+        pm.record_split("X", 2, trade_date="2026-06-10", idempotency_key="late-split")
+    assert "2026-07-01 buy" in str(ei.value)
+    assert _h(pm, "X")["units"] == 15.0 and _h(pm, "X")["avg_cost"] == 10.0          # 快照没动
+    assert [r["action"] for r in _rows(pm)] == ["buy", "buy"]                         # 没有 split 行
+    assert "ledger_idempotency_keys" not in pm.store.read("portfolio").metadata        # key 没烧
+    # 确认快照份数已是拆股后口径 → ledger_only：只补流水（账户业绩据此换算 06-01 那笔），快照不动，同一个 key 仍可用
+    out = pm.record_split("X", 2, trade_date="2026-06-10", ledger_only=True, idempotency_key="late-split")
+    assert out["status"] == "ok" and "只记了流水" in out["note"] and out["units_effect"] == 0.0
+    assert _h(pm, "X")["units"] == 15.0 and _h(pm, "X")["avg_cost"] == 10.0
+    row = _rows(pm)[-1]
+    assert (row["action"], row["split_ratio"], row["ledger_only"], row["units_effect"], row["trade_date"]) == ("split", 2.0, True, 0.0, "2026-06-10")
+
+
+def test_split_guard_boundaries(tmp_path):
+    pm = _x_pm(tmp_path, units=15.0)
+    # 同一天的买卖也算"之后"（除权日当天的成交按拆股后口径记）
+    pm.store.append_history(_trade("2026-06-10", "buy", 1.0))
+    with pytest.raises(ValueError):
+        pm.record_split("X", 2, trade_date="2026-06-10")
+    # 除权日晚于最后一笔买卖 → 正常整体 ×ratio（快照里全是拆股前份数）
+    out = pm.record_split("X", 2, trade_date="2026-07-02", idempotency_key="ok-split")
+    assert out["units"] == 30.0 and out["avg_cost"] == 5.0 and "follow_up" in out and "backfill_raw_close" in out["follow_up"]
+    # 已入账的同 key 重试：之后又记了买卖也返回 duplicate，而不是被检查拒绝
+    pm.store.append_history(_trade("2026-07-03", "sell", -1.0))
+    assert pm.record_split("X", 2, trade_date="2026-07-02", idempotency_key="ok-split")["status"] == "duplicate"
+    assert _h(pm, "X")["units"] == 30.0
+    # 补记更早的拆股：后面那次拆股本身不算"份数变动"，不挡路
+    pm2 = _pm(tmp_path / "b", cash={"CNY": 0.0}, holdings=[
+        {"symbol": "X", "kind": "equity", "units": 20.0, "avg_cost": 5.0, "cost_currency": "CNY", "proxy_kind": "direct"}],
+        history=[_trade("2026-06-01", "buy", 10.0)])
+    pm2.record_split("X", 2, trade_date="2026-07-01")                                  # 20 → 40
+    assert _h(pm2, "X")["units"] == 40.0
+    pm2.record_split("X", 2, trade_date="2026-06-10")                                  # 更早的拆股：只有 split 在它之后，不挡
+    assert _h(pm2, "X")["units"] == 80.0
+    # 已清仓（快照 units=0）：快照本来就不变，不需要这道检查
+    pm3 = _x_pm(tmp_path / "c", units=0.0)
+    assert pm3.record_split("X", 2, trade_date="2026-06-10")["units_effect"] == 0.0
+
+
+def test_replay_split_uses_ledger_held_not_snapshot_units_effect():
+    """评审建议 2：账本 buy 10（另有 10 份上线前的持仓，快照 20）→ split 2（写入方记快照口径 units_effect=20）→
+    manual_override 改成 40。回放里 split 用 held×(ratio−1)=10 → LedgerState 20 → 修正量 20、开盘持仓 0
+    （和不拆股时 correction 吸收开盘持仓一致）；用写入方的 20 会得到修正量 10、开盘持仓 10 的半吊子值。"""
+    recs = [
+        _trade("2026-06-01", "buy", 10.0),
+        {"ts_origin": "2026-06-10T10:00:00", "schema_version": 2, "action": "split", "symbol": "X", "split_ratio": 2.0,
+         "units_effect": 20.0, "cash_effect": 0.0, "external": False, "currency": "CNY", "trade_date": "2026-06-10"},
+        {"ts_origin": "2026-07-01T10:00:00", "action": "manual_override", "symbol": "X", "units": 40.0, "price": 10.0,
+         "currency": "CNY"},
+    ]
+    acts, state = replay_ledger(recs, alias={})
+    assert [a.units_effect for a in acts] == [10.0, 10.0, 20.0]
+    assert state.units["X"] == 40.0
+
+
+def test_reviewer_scenario_nav_has_no_phantom_opening_units(tmp_path, monkeypatch):
+    px = dict(zip(DAYS, [10.0] * 5))
+    history = [
+        {"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 10.0, "price": 20.0,
+         "currency": "CNY", "funding_source": "external_funding"},
+        {"ts_origin": "2026-01-06T10:00:00", "schema_version": 2, "action": "split", "symbol": "AAA", "split_ratio": 2.0,
+         "units_effect": 20.0, "cash_effect": 0.0, "external": False, "currency": "CNY", "trade_date": "2026-01-06"},
+        {"ts_origin": "2026-01-08T10:00:00", "action": "manual_override", "symbol": "AAA", "units": 40.0,
+         "price": 10.0, "currency": "CNY"},
+    ]
+    perf, rows = _perf(tmp_path, monkeypatch, {"AAA": px}, {"AAA": dict(px)}, {"CNY": 0.0}, [{**AAA, "units": 40.0}], history)
+    assert perf["data_quality"]["unreconciled"]["units"] == {}
+
+
+# ============ 评审 #482：价格口径缺口 / 边界 / DRIP raw 口径 ============
+
+def test_partial_close_raw_gap_is_reported_and_logged(tmp_path, monkeypatch, caplog):
+    """评审建议 3：有一部分 close_raw、范围内缺一天 → 整只回退复权价时要看得见（warning + data_quality + 日报一行）；
+    从没回填过 raw 是正常状态，不吵。"""
+    adj = dict(zip(DAYS, [9.5] * 5))
+    raw = {**dict(zip(DAYS, [10.0, 10.0, 9.5, 9.5, 9.5])), "2026-01-08": None}
+    history = [BUY_AAA]
+    with caplog.at_level("WARNING", logger="openinvest.services.account_performance"):
+        perf, _ = _perf(tmp_path, monkeypatch, {"AAA": adj}, {"AAA": raw}, {"CNY": 0.0}, [AAA], history)
+    dq = perf["data_quality"]
+    assert perf["price_basis"] == {"AAA": "adjusted"}
+    assert dq["price_basis_gaps"] == {"AAA": {"missing_days": 1, "first": "2026-01-08", "last": "2026-01-08"}}
+    assert any("close_raw" in r.message and "AAA" in r.message for r in caplog.records)
+    assert "原始价缺口" in ap.render_performance_md(perf) and "AAA" in ap.render_performance_md(perf)
+    caplog.clear()
+    perf2, _ = _perf(tmp_path / "never", monkeypatch, {"AAA": adj}, {}, {"CNY": 0.0}, [AAA], history)      # 从没回填
+    assert perf2["price_basis"] == {"AAA": "adjusted"} and "price_basis_gaps" not in perf2["data_quality"]
+    assert not [r for r in caplog.records if "close_raw" in r.message]
+
+
+def test_pick_basis_since_boundaries():
+    idx = ["2026-01-05", "2026-01-06", "2026-01-07"]
+    adj = pd.Series([9.0, 9.5, 10.0], index=idx)
+    full = pd.Series([10.0, 10.0, 10.0], index=idx)
+    # since 早于序列第一根 bar（searchsorted → -1 → start=0）：整段都要有 raw
+    assert ap._pick_basis(adj, full, "2025-01-01")[1] == "raw"
+    assert ap._pick_basis(adj, full.copy().where(full.index != "2026-01-05"), "2025-01-01")[1] == "adjusted"
+    # since 恰在第一根 bar：从它起
+    assert ap._pick_basis(adj, full.copy().where(full.index != "2026-01-05"), "2026-01-06")[1] == "raw"
+    assert ap._pick_basis(adj, full.copy().where(full.index != "2026-01-05"), "2026-01-05")[1] == "adjusted"
+    # since 晚于最后一根 bar：只需要最后那一根
+    only_last = pd.Series([None, None, 10.0], index=idx, dtype=float)
+    assert ap._pick_basis(adj, only_last, "2027-01-01")[1] == "raw"
+    # raw 非正 / None
+    assert ap._pick_basis(adj, pd.Series([10.0, 0.0, 10.0], index=idx), None)[1] == "adjusted"
+    assert ap._pick_basis(adj, None, "2026-01-05")[1] == "adjusted"
+
+
+def test_drip_on_raw_basis_keeps_nav_continuous(tmp_path, monkeypatch):
+    """评审建议 5：raw 口径下 DRIP 进回放（dividend 现金 + drip buy）：除息日原始价 10→9.5（分红 50），
+    按 9.5 再投资 50/9.5 份。NAV 恒 1000，没有外部流，TWR 0。"""
+    raw = dict(zip(DAYS, [10.0, 10.0, 9.5, 9.5, 9.5]))
+    adj = dict(zip(DAYS, [9.5] * 5))
+    drip_units = round(50 / 9.5, 6)
+    history = [
+        BUY_AAA,
+        _income("dividend", "2026-01-07", 50.0, symbol="AAA", cash_effect=50.0, reinvest=True),
+        {"ts_origin": "2026-01-07T10:00:01", "schema_version": 2, "action": "buy", "symbol": "AAA", "units": drip_units,
+         "price": 9.5, "currency": "CNY", "source": "drip", "funding_source": "cash_deduct", "external": False,
+         "cash_effect": -drip_units * 9.5, "units_effect": drip_units, "trade_date": "2026-01-07"},
+    ]
+    holding = {**AAA, "units": 100.0 + drip_units}
+    perf, rows = _perf(tmp_path, monkeypatch, {"AAA": adj}, {"AAA": raw}, {"CNY": 0.0}, [holding], history)
+    assert perf["price_basis"] == {"AAA": "raw"} and "income_in_adjusted_price" not in perf["data_quality"]
+    assert [round(n, 2) for _, n, *_ in rows] == [1000.0] * 5
+    assert {d: (i, o) for d, _, i, o in rows}["2026-01-07"] == (0.0, 0.0)             # dividend 与 drip buy 都是内部流
+    assert perf["twr_all"] == 0.0 and perf["data_quality"]["unreconciled"]["units"] == {}

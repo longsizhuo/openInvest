@@ -255,12 +255,17 @@ def cmd_record_split(args: argparse.Namespace) -> None:
 
     示例:
         skill record_split --symbol NVDA --ratio 10 --trade-date 2024-06-10
+        skill record_split --symbol NVDA --ratio 10 --trade-date 2024-06-10 --ledger-only   # 快照份数已是拆股后的
+
+    补记历史拆股：除权日之后若已记过该标的的买卖 / 修正（按拆股后口径记的），整体 × ratio 会凭空多出份数，
+    所以会被拒绝；确认快照份数本来就对时加 --ledger-only 只补流水。
 
     写逻辑在 core/portfolio_manager.py:PortfolioManager.record_split
     """
     pm = _resolve_pm()
     _run_record(lambda: pm.record_split(
-        args.symbol, args.ratio, trade_date=args.trade_date, note=args.note, source="skill_cli",
+        args.symbol, args.ratio, trade_date=args.trade_date, note=args.note,
+        ledger_only=bool(getattr(args, "ledger_only", False)), source="skill_cli",
         idempotency_key=getattr(args, "idempotency_key", None)))
 
 

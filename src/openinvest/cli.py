@@ -306,6 +306,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("record_split", help="记拆股 / 并股：units × ratio、avg_cost ÷ ratio，现金不变")
     p.add_argument("--symbol", required=True)
     p.add_argument("--ratio", type=float, required=True, help="新 / 旧：10 拆 1 → 10；10 合 1 → 0.1")
+    p.add_argument("--ledger-only", action="store_true",
+                   help="只补流水、不动快照份数 / 成本：快照已经是拆股后口径时用（手动改过份数；或除权日之后的买卖已按拆股后口径记）。"
+                        "账本里有该标的在除权日当天或之后的份数变动而不加它 → 拒绝")
     _activity_flags(p)
     p.set_defaults(func=cmd_record_split)
 

@@ -400,8 +400,9 @@ DRIP（`record_dividend --reinvest`）写两条：`dividend`（+净额）+ 一�
   回填历史用 `openinvest backfill_raw_close [--symbols A,B]`（默认持仓 + target_assets；场外基金只有前复权净值、黄金克价代理
   是期货 × 外汇无分红，二者不回填，恒为 `adjusted`）；新抓取（`get_history_data`、`scripts/backfill_history`）已两列一起写。
   复权价回退的标的，已记的分红 / 退回本金 / DRIP 再买入**不进回放**（价格里已含，不双计），`data_quality.income_in_adjusted_price`
-  列出条数，补齐 close_raw 后自动改按原始价 + 账本现金计入。
-- **拆股**：两列价格都已是拆股后口径，所以回放数量必须全程拆股后口径——拆股前的买卖 / 修正数量 × 此后同标的所有 `split` 的
+  列出条数，补齐 close_raw 后自动改按原始价 + 账本现金计入。「有一部分 close_raw、范围内缺几天」的悄悄翻口径会打 warning 并列在
+  `data_quality.price_basis_gaps`（`{symbol: {missing_days, first, last}}`）；从没回填过是正常状态，不算缺口。
+- **拆股**：`record_split` 整体 × ratio 只在「快照里没有混进拆股后口径的份数」时才对——账本里该标的在除权日当天或之后已有买卖 / 修正（按拆股后口径记的）就**拒绝**，确认快照本来就对用 `--ledger-only` / `ledger_only=true`（只补流水、不动快照）。回放里 split 的 `units_effect` 始终用账本口径 `held × (ratio−1)`，不用写入方记的快照口径。两列价格都已是拆股后口径，所以回放数量必须全程拆股后口径——拆股前的买卖 / 修正数量 × 此后同标的所有 `split` 的
   `split_ratio` 之积（`calc.ledger_replay.later_split_factors`）；split 本身在这个口径下是空操作，NAV 不会在除权日跳变。
 - `status.income_30d`：最近 30 天分红（税后）/ 利息合计（按币种；没有记录就不出这个键）。
 - 估值只读行情库 `db/market_data.db`（不联网），复用 `utils.fx.total_portfolio_value(rate_override=当日汇率)`；

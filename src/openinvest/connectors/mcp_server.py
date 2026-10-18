@@ -809,12 +809,16 @@ def record_split(
     ratio: Annotated[float, Field(description="New shares per old share: a 10-for-1 split is 10, a 1-for-10 reverse split is 0.1. Must be > 0 and not 1.", gt=0)],
     trade_date: Annotated[Optional[str], Field(description="Ex-date of the split, YYYY-MM-DD (default: today). Pass the real ex-date when back-filling: account performance uses it to restate earlier trades.")] = None,
     note: Annotated[Optional[str], Field(description="Free-text note stored with the ledger row.")] = None,
+    ledger_only: Annotated[bool, Field(description="Only write the ledger row, leave the holding's units / average cost untouched. Use it when the snapshot already reflects the split (e.g. you fixed the units by hand, or later trades were booked in post-split units).")] = False,
     idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
     """Record a stock split / reverse split: units x ratio, average cost / ratio,
     cash unchanged (market value is unchanged). Call it once per split — a
     second call multiplies the position again; use an idempotency_key if
-    unsure whether an earlier attempt landed.
+    unsure whether an earlier attempt landed. Rejected when the ledger already
+    has trades / corrections for the symbol on or after trade_date (their units
+    are already post-split, so multiplying the whole snapshot would invent
+    shares) — pass ledger_only=true if the snapshot is already correct.
 
     Confirm symbol, ratio, and ex-date with the user before calling; this
     rewrites the position's units and average cost.
@@ -824,15 +828,16 @@ def record_split(
         ratio: New / old shares (10-for-1 = 10; 1-for-10 reverse = 0.1).
         trade_date: Ex-date YYYY-MM-DD (default today).
         note: Free-text note.
+        ledger_only: Write the ledger row only; do not change units / average cost.
         idempotency_key: Reuse the same key when retrying this exact call; recorded once.
 
     Returns:
-        New units / average cost, or {"status": "error", "error": ...}.
+        New units / average cost (plus a `follow_up` hint), or {"status": "error", "error": ...}.
     """
     _check_advisory()
     try:
-        return _pm().record_split(symbol, ratio, trade_date=trade_date, note=note, source="mcp",
-                                  idempotency_key=idempotency_key)
+        return _pm().record_split(symbol, ratio, trade_date=trade_date, note=note, ledger_only=ledger_only,
+                                  source="mcp", idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 

@@ -840,13 +840,19 @@ class PortfolioManager:
         trade_date: Optional[str] = None,
         note: Optional[str] = None,
         *,
+        ledger_only: bool = False,
         source: str = "skill_cli",
         idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """记一次拆股 / 并股：units × ratio，avg_cost ÷ ratio，现金不变（市值不变）。
         ratio = 新 / 旧：10 拆 1 股变 10 股写 10，10 合 1 写 0.1。``trade_date`` = 除权日（账户业绩把拆股前的买卖数量
         换算成拆股后口径要靠它，补记历史拆股请传真实日期）。symbol 已清仓但账本里有它也记（快照无变化，只记流水）；
-        完全没见过的 symbol 抛 ValueError（防写错）。"""
+        完全没见过的 symbol 抛 ValueError（防写错）。
+
+        快照是**当前**份数，整体 × ratio 只在"快照里没有混进拆股后口径的份数"时才对。所以账本里已有该标的在
+        ``trade_date`` 当天或之后的买卖 / 修正（它们是按拆股后口径记的）→ 拒绝并指路：确认快照份数本来就是拆股后的
+        （例如你已手动改过），传 ``ledger_only=True``——只补流水、不动快照（账户业绩照样据此换算拆股前的数量）。
+        检查在幂等闸之后、事务之内：已入账的同 key 重试仍返回 duplicate，被拒的调用不烧 key。"""
         symbol = (symbol or "").strip()
         if not symbol:
             raise ValueError("symbol 必填")
@@ -862,25 +868,50 @@ class PortfolioManager:
                 held = next((h for h in holdings if h.get("symbol") == symbol), None)
                 if held is not None:
                     found, held_ccy = True, str(held.get("cost_currency") or "CNY").upper()
-                    old_units, old_avg = float(held.get("units", 0) or 0), float(held.get("avg_cost", 0) or 0)
-                    held["units"] = round(old_units * ratio, 6)
-                    held["avg_cost"] = round(old_avg / ratio, 6)
-                    units_effect = held["units"] - old_units
-                    p["holdings"] = holdings
+                if not ledger_only:
+                    # 只有会动到快照份数时才需要这道检查（已清仓 / 没有持仓行 → 快照本来就不变）
+                    later = self._units_changes_since(symbol, day) if held is not None and float(held.get("units", 0) or 0) else []
+                    if later:
+                        raise ValueError(
+                            f"{symbol} 在 {day} 当天或之后已有 {len(later)} 笔份数变动（{later[0]} 等）：它们是按拆股后口径记的，"
+                            f"快照份数已混着拆股后的部分，整体 × {ratio:g} 会凭空多出份数，账本没有撤销。"
+                            f"如果快照份数本来就是拆股后的，加 ledger_only（CLI --ledger-only）只补流水不动快照；"
+                            f"否则先核对份数，或把除权日改成最后一笔份数变动之后")
+                    if held is not None:
+                        old_units, old_avg = float(held.get("units", 0) or 0), float(held.get("avg_cost", 0) or 0)
+                        held["units"] = round(old_units * ratio, 6)
+                        held["avg_cost"] = round(old_avg / ratio, 6)
+                        units_effect = held["units"] - old_units
+                        p["holdings"] = holdings
         except _DuplicateKey:
             return _duplicate(idempotency_key)
         self._reload()
         self.store.append_history(_activity_row(
             "split", currency=held_ccy, day=day, source=source, key=idempotency_key, note=note,
-            symbol=symbol, split_ratio=ratio, cash_effect=0.0, units_effect=units_effect))
+            symbol=symbol, split_ratio=ratio, cash_effect=0.0, units_effect=units_effect,
+            ledger_only=True if ledger_only else None))
         out: Dict[str, Any] = {"status": "ok", "action": "split", "symbol": symbol, "ratio": ratio,
-                               "trade_date": day, "units_effect": units_effect}
-        if found:
+                               "trade_date": day, "units_effect": units_effect,
+                               # 拆股后 Yahoo 会把全部历史重新按新口径给价；行情库 2 年以前的老行不会被增量刷新碰到
+                               "follow_up": f"拆股后跑一次 `openinvest backfill_raw_close --symbols {symbol}`，"
+                                            f"把行情库里 2 年以前的 close_raw 刷成拆股后口径（账户成立日早于 2 年前才有影响）"}
+        if ledger_only:
+            out["note"] = "ledger_only：只记了流水，快照份数 / 成本没动"
+        elif found:
             h = self.find_holding(symbol) or {}
             out.update(units=h.get("units"), avg_cost=h.get("avg_cost"))
         else:
             out["note"] = f"{symbol} 当前已无持仓：快照没有变化，只记了流水（账户业绩据此换算拆股前的数量）"
         return out
+
+    def _units_changes_since(self, symbol: str, day: str) -> List[str]:
+        """账本里该标的在 ``day``（含）之后改变过份数的活动，形如 ``"2026-07-01 buy"``（split 自己不算：
+        它们是乘法，后面再补记更早的拆股时，快照里已有的后拆股效应不冲突）。"""
+        from openinvest.calc.ledger_replay import replay_ledger
+        acts, _ = replay_ledger(self.store.read_history(), alias={})
+        return [f"{a.trade_date} {a.action}" for a in acts
+                if a.replayable and a.symbol == symbol and a.action != "split"
+                and (a.trade_date or "") >= day and a.units_effect != 0]
 
     def record_return_of_capital(
         self,

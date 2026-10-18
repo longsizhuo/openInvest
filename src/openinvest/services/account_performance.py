@@ -136,9 +136,15 @@ def _raw_closes(store: MarketStore, symbol: str) -> Optional[pd.Series]:
     return s[~s.index.duplicated(keep="last")].sort_index()
 
 
-def _pick_basis(adj: pd.Series, raw: Optional[pd.Series], since: Optional[str]) -> Tuple[pd.Series, str]:
+def _pick_basis(adj: pd.Series, raw: Optional[pd.Series], since: Optional[str],
+                gaps: Optional[Dict[str, Any]] = None, sym: str = "") -> Tuple[pd.Series, str]:
     """(价格序列, "raw" | "adjusted")：所需范围（``since`` 当天或之前的最后一根 bar 起；since=None = 全部）内
-    复权序列的每一天 ``raw`` 都有正值 → 原始价；缺任意一天 → 整只复权价。不混用。"""
+    复权序列的每一天 ``raw`` 都有正值 → 原始价；缺任意一天 → 整只复权价。不混用。
+
+    「有一部分 raw、但范围内缺了几天」是**悄悄翻口径**的情形（betashares 兜底 / 黄金缓存 / backtest 预热只写 close，
+    yfinance 又没补上）：整段历史 NAV 会换成复权价、已记的分红被移出回放。此时打 warning，并把缺口记进
+    ``gaps[sym] = {missing_days, first, last}``（→ ``data_quality.price_basis_gaps``）。从没回填过 raw
+    （范围内一天都没有）是正常的未回填状态，不算缺口、不吵。"""
     if raw is None:
         return adj, "adjusted"
     start = max(adj.index.searchsorted(since, side="right") - 1, 0) if since else 0
@@ -146,11 +152,17 @@ def _pick_basis(adj: pd.Series, raw: Optional[pd.Series], since: Optional[str]) 
     r = raw.reindex(need)
     if len(need) and r.notna().all() and (r > 0).all():
         return r, "raw"
+    bad = r.index[~(r.notna() & (r > 0))]
+    if len(bad) and len(bad) < len(need):
+        if gaps is not None:
+            gaps[sym] = {"missing_days": int(len(bad)), "first": bad[0], "last": bad[-1]}
+        log.warning("account_performance: %s 的 close_raw 在所需范围内缺 %d 天（%s ~ %s），整只回退复权价；"
+                    "跑 `openinvest backfill_raw_close` 补齐", sym, len(bad), bad[0], bad[-1])
     return adj, "adjusted"
 
 
 def _price_series(store: MarketStore, symbol: str, holding: Optional[Dict[str, Any]],
-                  since: Optional[str] = None) -> Tuple[Optional[pd.Series], str]:
+                  since: Optional[str] = None, gaps: Optional[Dict[str, Any]] = None) -> Tuple[Optional[pd.Series], str]:
     """(持仓按 cost_currency 计价的收盘序列, price_basis)。口径与 utils.quotes.get_quote 一致：
     黄金代理 = GC=F USD/oz ÷ 31.1035 × USDCNY；场外基金读 FUND:<code>；其余直接按 symbol/proxy。
     价格口径见模块 docstring：只有直读 yfinance 的标的有机会用原始价，黄金代理 / 场外基金恒为 adjusted。"""
@@ -172,7 +184,7 @@ def _price_series(store: MarketStore, symbol: str, holding: Optional[Dict[str, A
     adj = _db_closes(store, proxy)
     if adj is None:
         return None, "adjusted"
-    return _pick_basis(adj, _raw_closes(store, proxy), since)
+    return _pick_basis(adj, _raw_closes(store, proxy), since, gaps, symbol)
 
 
 def _fx_series(store: MarketStore, ccy: str, base: str) -> Optional[pd.Series]:
@@ -235,7 +247,8 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     # 价格序列（只读库）与价格口径先定——下面要据此决定哪些收入类事件进回放
     first_day = events[0]["date"]
     symbols = set(by_sym) | {ev["symbol"] for ev in events if ev["symbol"] or ev["units"]}   # 无 symbol 的利息 / 费用只动现金
-    priced = {sym: _price_series(store, sym, by_sym.get(sym), since=first_day) for sym in symbols}
+    basis_gaps: Dict[str, Any] = {}
+    priced = {sym: _price_series(store, sym, by_sym.get(sym), since=first_day, gaps=basis_gaps) for sym in symbols}
     prices = {sym: p for sym, (p, _) in priced.items()}
     price_basis = {sym: b for sym, (p, b) in priced.items() if p is not None}
 
@@ -368,6 +381,8 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         # 这些标的记了分红 / 退回本金 / DRIP，但价格口径是复权价（缺 close_raw）：复权价里已含，故未入账业绩；
         # 跑 `openinvest backfill_raw_close` 后改按原始价 + 账本现金计入。{symbol: 未入账的条数}
         **({"income_in_adjusted_price": dict(income_in_price)} if income_in_price else {}),
+        # 有一部分 close_raw、但所需范围内缺了几天 → 整只回退复权价的标的：{symbol: {missing_days, first, last}}（补齐后自动回到 raw）
+        **({"price_basis_gaps": basis_gaps} if basis_gaps else {}),
         **({"benchmark_unavailable": bench_missing} if bench_missing else {}),
     }
     return out
@@ -432,6 +447,10 @@ def render_performance_md(perf: Dict[str, Any]) -> str:
         notes.append("按成本价计入：" + "、".join(dq["cost_fallback"]))
     if dq.get("unvalued"):
         notes.append("未计入：" + "、".join(dq["unvalued"]))
+    if dq.get("price_basis_gaps"):
+        notes.append("原始价缺口、整只按复权价：" + "、".join(
+            f"{k}（缺 {v['missing_days']} 天，{v['first']} ~ {v['last']}）" for k, v in sorted(dq["price_basis_gaps"].items()))
+            + "（openinvest backfill_raw_close 补齐）")
     if dq.get("income_in_adjusted_price"):
         notes.append("分红 / 再投资已含在复权价里、未重复入账：" + "、".join(sorted(dq["income_in_adjusted_price"]))
                      + "（跑 openinvest backfill_raw_close 后按原始价 + 账本现金计入）")
