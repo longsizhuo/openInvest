@@ -14,6 +14,7 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `event_watch.py` | 北京 8:00-次日 2:30 每 30min（config `event.watch_schedule` 可改）| 扫多源新闻 → LLM 归一化 → 命中持仓则邮件 + 触发委员会（ADR-006）|
 | `price_sentinel.py` | 同窗口每 5min（config `event.sentinel_schedule` 可改）| 价格垂直线检测（10min vs 日ATR%，零 LLM）→ **先报警邮件后触发委员会**（ADR-025）|
 | `backup.py` | 每天 03:30（Asia/Shanghai）| 先 checkpoint `db/` 下的 SQLite 库（进包的 trades/insights/jobs 三个把 WAL 里没落盘的成交刷进主库），再把 `memory/` + 这三个库打成 `.backups/auto_<UTC时间戳>.zip`（平日不含 `memory/.backtest*`，约占整份 89%；Asia/Shanghai 周日那次带上前瞻舰队，文件名加 `_full`），共用同一个 14 份轮转（手动备份不动，自然留 2 份 `_full`）；不备 market_data.db / events.db（可重拉）；失败抛异常 → job_watchdog 告警。恢复走 `plugin/skills/invest-backup` 的 `run.sh restore` |
+| `fund_confirm.py` | 工作日 21:00-23:30 每 30min（Asia/Shanghai）| 场外基金两段式的第二段（ADR-027）：对每笔 `placed` 且定价日 `nav_date` ≤ 今天的在途申购单调 `PortfolioManager.confirm_fund_order`，取 `nav_date` 当天的单位净值换成份额；净值没公布（QDII / FOF 常晚一两天）就跳过、下一次再试，不算失败；幂等靠订单状态 CAS（与手动确认并发只有一个生效）；单笔确认抛异常不挡其余，批末抛 → `job_runs` 记 `failed`（`job_watchdog` 目前不据 `failed` 告警）；`timeout_minutes: 10` |
 | `job_watchdog.py` | 每小时第 7 分钟 | 巡检 `db/jobs.sqlite` job_runs：enabled job 错过 2 次触发（+15min）/ running 超 max(60min, 3×中位耗时) / event_watch 连续 6 次 fetched=0 → Discord+邮件告警，同一异常 24h 内只报一次（2026-10-07，event_watch 卡死 21 天零告警的补救）|
 
 > `verdict_review.yml`（cron `0 2 * * *` Asia/Shanghai，2026-10 起 `enabled: true`）：只把 `.committee` live 快照刷进 `.dreams/verdict_review.jsonl`（整份覆盖）。行情只读 `db/market_data.db` + 进程内缓存，不调 yfinance。研究要含回测的全量重建（数小时级）手动跑 `python -m openinvest.jobs.verdict_review --include-backtest`。`dreaming` 仍关。
@@ -23,7 +24,7 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 
 ## `timeout_minutes`（每 job 墙钟超时）
 
-`*.yml` 可选字段 `timeout_minutes`（默认 **30**；event_watch 20、price_sentinel 10、daily_report / dreaming 60）。runner 在独立 daemon 线程里跑 job，超时后：
+`*.yml` 可选字段 `timeout_minutes`（默认 **30**；event_watch 20、price_sentinel 10、fund_confirm 10、daily_report / dreaming 60）。runner 在独立 daemon 线程里跑 job，超时后：
 
 1. `job_runs` 该行标 `status='timeout'`，`output_excerpt` 附**超时时刻的线程调用栈**（直接看到卡在哪）；
 2. runner 放弃该线程（Python 线程杀不掉）并返回，APScheduler 的 `max_instances=1` 槽位释放——**下一次触发照常进入**，不再像 2026-07-30 event_watch 那样被永久封死 21 天；

@@ -319,6 +319,31 @@ def build_parser() -> argparse.ArgumentParser:
     _activity_flags(p)
     p.set_defaults(func=cmd_record_return_of_capital)
 
+    p = sub.add_parser("place_fund_order",
+        help="场外基金申购第一段：现金 −金额，订单记在途（总资产按面值含它，不会假跌）；份额等定价日净值公布后确认。"
+             "预计确认日按周一到周五估计、延迟按基金类型（QDII / FOF 更慢）")
+    p.add_argument("--symbol", required=True, help="FUND:<六位代码>（裸六位也认）")
+    p.add_argument("--amount", "-a", type=float, required=True, help="申购金额（人民币，现在就扣现金），> 0")
+    p.add_argument("--currency", "-c", default="CNY", help="币种，场外基金 = CNY（默认）")
+    p.add_argument("--order-ts", default=None, metavar="ISO",
+                   help="下单时刻，北京时间 ISO（如 2026-10-19T14:30:00），缺省现在；15:00 前按当日净值、之后按下一交易日。补记请传真实时刻")
+    p.add_argument("--note", default=None, help="备注")
+    _add_idempotency_key(p)
+    p.set_defaults(func=cmd_place_fund_order)
+
+    p = sub.add_parser("confirm_fund_order",
+        help="场外基金申购第二段：在途单按定价日净值换成份额（fund_confirm job 每晚自动做；手动用于填净值 / 申购费 / 提前确认）。"
+             "已确认的重复调用返回 already_confirmed，不重复入账；净值没公布返回 pending_nav")
+    p.add_argument("--order-id", required=True, help="place_fund_order 返回的 order_id（status 的 pending_fund_orders 里也有）")
+    p.add_argument("--nav", type=float, default=None, help="确认用的单位净值；不填取定价日已公布的净值")
+    p.add_argument("--fee", type=float, default=0.0, help="申购费（从订单金额里扣，份额 = (金额−费用)/净值），默认 0")
+    p.set_defaults(func=cmd_confirm_fund_order)
+
+    p = sub.add_parser("cancel_fund_order",
+        help="撤销在途申购单（券商侧没成交 / 你撤了单）：金额退回现金。只有在途的能撤，已确认的拒绝（要卖用 sell）")
+    p.add_argument("--order-id", required=True, help="在途单的 order_id")
+    p.set_defaults(func=cmd_cancel_fund_order)
+
     p = sub.add_parser("delete_holding", help="删除持仓行（units 必须 0 或加 --force）")
     p.add_argument("--symbol", required=True)
     p.add_argument("--force", action="store_true", help="units > 0 也强删")

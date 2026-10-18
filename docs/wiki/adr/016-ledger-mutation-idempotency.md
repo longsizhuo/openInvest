@@ -125,6 +125,10 @@ superseded_by: []
 | `record_fee`（`--kind fee\|tax`）| CLI `record_fee` / MCP `record_fee` | 累加（现金 −）| 同上；余额不足在锁内校验、不烧 key | ✅ |
 | `record_split` | CLI `record_split` / MCP `record_split` | **乘法**（units × ratio、avg_cost ÷ ratio）——重放最危险：第二次会再乘一遍 | 同上；强烈建议调用方总带 key（MCP 工具描述里写明） | ✅（带 key）；不带 key 的重复调用 = 再拆一次，与 buy 同一"不传 key 行为不变"约定 |
 | `record_return_of_capital` | CLI / MCP `record_return_of_capital` | 累加（现金 +，avg_cost −）| 同上 | ✅ |
+| `place_fund_order`（场外基金申购第一段）| CLI / MCP `place_fund_order` | 累加（现金 −amount，订单追加进 `holding.extra.pending_orders`）| 同上 `PortfolioManager._ledger_tx` 幂等键（ADR-027 PR3）：key、现金、在途订单同一次 atomic write；重放返回 `duplicate`，不二次扣现金、不多一张订单。`order_id` 在锁外生成，重放不会换号。不传 key = 每次都下一张新单（与 buy 同一约定）| ✅ `tests/test_fund_two_phase.py`（含 20 线程同 key 恰好 1 张）|
+| `confirm_fund_order`（手动：CLI / MCP）| CLI / MCP `confirm_fund_order` | 状态转换 `placed → confirmed`（units +、avg_cost 加权）——重放最危险：第二次会再加一遍份额 | **CAS，不靠 key**：读订单 `status`、改持仓、写 `confirmed` 在同一个 `with_portfolio_tx` 里；读到非 `placed` 就在锁内抛 `_NoChange` 中止事务（不提交、文件一个字节都不动），原样返回 `already_confirmed` / `cancelled`。联网取净值在锁外（净值没公布 → `pending_nav`，同样不动账）| ✅ 并发 8 线程恰好 1 个 `ok`、其余 `already_confirmed`；另有"锁外先被别人确认"的确定性用例 |
+| `confirm_fund_order`（`jobs/fund_confirm`，工作日 21:00-23:30 每 30 分钟）| 调度器 cron | 同上 | 同上 CAS——job 重跑 / 与手动确认并发 / 持有旧视图的 job 都只有一个赢家；job 只处理 `nav_date ≤ 今天` 的单，且读到 `already_confirmed` 不算失败 | ✅ `tests/test_fund_two_phase.py::test_job_*` |
+| `cancel_fund_order` | CLI / MCP `cancel_fund_order` | 状态转换 `placed → cancelled`（现金 +amount）| 同一个 CAS：只有 `placed` 能撤；已撤销再撤 → `cancelled`（不二次退钱）；**已确认 → 拒绝**（ValueError，份额已到账，要卖走 sell）| ✅ |
 | `delete_holding` | CLI / MCP / `/api/skill/delete_holding` | remove | 第二次 → "不在持仓" ValueError | ✅（天然幂等）|
 | ~~退役 GUI 端点 `/api/deposit` `/api/withdraw` `/api/gold/buy\|sell\|set\|offset`（`routers/write.py`）~~ | HTTP POST | 累加 | 无去重键 | ✅ 已删除（#236）：与 `cash_write.py` / `/api/skill/*` 重复、无消费者 |
 | 退役 GUI 端点 `/api/cash/{ccy}/deposit\|withdraw`（`cash_write.py`）| HTTP POST | 累加 | 无去重键 | ⚠ GUI 2026-07-05 退役、Web API 已 deprecated，无现存客户端；随 Web API 退场一并删，不再加键 |

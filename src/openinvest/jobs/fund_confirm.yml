@@ -1,0 +1,14 @@
+# fund_confirm：场外基金在途申购单按净值自动确认（ADR-027 D5，场外基金两段式的第二段）。
+# 工作日晚间每 30 分钟扫一遍：对所有 status=placed 且定价日 nav_date <= 今天（北京）的在途单，取 nav_date 当天的单位净值
+# 换成份额；净值还没公布就跳过，下一次再试（普通基金当晚 20-23 点公布；QDII / FOF 常晚一两天，靠连续几晚重试）。
+# 窗口：需求写的是 21:30-23:00 每 30 分钟，单条 cron 表达不了「半点起、整点止」，取超集 21:00-23:30 共 6 次/晚（含那 4 次）。
+# 不跑周末：周末没有新净值；周五晚公布不了的周一晚接着取。幂等见 PortfolioManager.confirm_fund_order 的 CAS（job 重跑 /
+# 与手动 confirm_fund_order 并发都只有一个生效）。没有在途单时几毫秒就返回，不联网。
+name: fund_confirm
+description: 工作日 21:00-23:30 每 30 分钟，把定价日净值已公布的场外基金在途申购单确认成份额（净值没出就跳过，下次再试）
+schedule: "0,30 21-23 * * mon-fri"
+timezone: Asia/Shanghai
+entry: openinvest.jobs.fund_confirm:run
+enabled: true
+# 墙钟超时（分钟，默认 30）：每笔单最多一次净值取数（10s 超时），留足余量；小于触发间隔的两倍
+timeout_minutes: 10

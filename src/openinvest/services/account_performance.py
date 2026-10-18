@@ -23,6 +23,11 @@
 dividend / interest / fee / tax / return_of_capital 是**内部流**（ADR-027 D4）：现金进 NAV、不进 TWR 分母与
 XIRR 现金流——它们就是账户的收益 / 成本；split 零现金效应，只影响数量口径（见 ``_events_of``）。
 
+场外基金两段式（ADR-027 D4）：``fund_order_placed`` 把现金搬进**在途**（NAV 不变，在途按面值计入当日 NAV），
+``fund_order_confirmed`` 当日用份额 × 净值替换在途面值，``fund_order_cancelled`` 把在途退回现金——三者都是内部流，
+不进 TWR 分母。在途余额与持仓 / 现金一样锚定当前状态（开盘在途 = 当前在途 − Σ账本增量），通过 ``total_portfolio_value`` 的
+``pending_fund_orders`` 读口计入（与 status 同一实现）。
+
 网格 = 持仓标的交易日并集（非自然日）；周末记的交易挂到下一个交易日估值。
 """
 from __future__ import annotations
@@ -38,7 +43,7 @@ import pandas as pd
 
 from openinvest.calc.account_metrics import XIRR_MIN_SPAN_DAYS, account_metrics
 from openinvest.calc.gold import GOLD_OZ_PER_GRAM
-from openinvest.calc.ledger_replay import external_flow, later_split_factors, replay_ledger
+from openinvest.calc.ledger_replay import PENDING_SIGN, external_flow, later_split_factors, replay_ledger
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.core.schemas import Activity
 from openinvest.db.market_store import MarketStore
@@ -65,8 +70,8 @@ _PRICED_IN_ACTIONS = frozenset({"dividend", "return_of_capital"})
 
 def _events_of(activities: List[Activity]) -> List[Dict[str, Any]]:
     """Activity（日期升序）→ 回放事件 dict。事件字段：date / symbol / units（增量）/ cash_ccy / cash（增量）/
-    flow_ccy / flow（外部现金流，+入 −出）/ correction（True = 持仓修正，现金流按当日市价在估值时补算）。
-    不能回放的行（unknown / 没有可用日期 / 数值解析失败）不产生事件。
+    flow_ccy / flow（外部现金流，+入 −出）/ correction（True = 持仓修正，现金流按当日市价在估值时补算）/
+    pending（场外基金在途面值的增减，``cash_ccy`` 计价）。不能回放的行（unknown / 没有可用日期 / 数值解析失败）不产生事件。
 
     ``units`` 是**拆股后口径**的增量（行情库的价格——复权价和 close_raw 都一样——已按拆股调整，数量必须同口径，
     见 calc.ledger_replay 的"价格口径"）：每笔买卖 / 修正的数量 × 此后同标的所有 split 的 ratio 之积；
@@ -76,7 +81,9 @@ def _events_of(activities: List[Activity]) -> List[Dict[str, Any]]:
         {"date": a.trade_date, "symbol": a.symbol or "",
          "units": 0.0 if a.action == "split" else a.units_effect * factors.get(a.seq, 1.0),
          "cash_ccy": a.currency, "cash": a.cash_effect,
-         "flow_ccy": a.currency, "flow": external_flow(a), "correction": a.correction}
+         "flow_ccy": a.currency, "flow": external_flow(a), "correction": a.correction,
+         # 场外基金在途余额增减（面值，a.currency 计价）；只有 fund_order_* 才带这个键（没有场外基金单的账本事件逐字不变）
+         **({"pending": PENDING_SIGN[a.action] * (a.amount or 0.0)} if a.action in PENDING_SIGN else {})}
         for a in activities if a.replayable
     ]
 
@@ -268,23 +275,33 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     # 开盘状态 = 当前 − Σ账本增量（账本早于系统上线的部分）
     delta_units: Dict[str, float] = defaultdict(float)
     delta_cash: Dict[str, float] = defaultdict(float)
+    delta_pending: Dict[str, float] = defaultdict(float)
     for ev in events:
         if ev["symbol"] or ev["units"]:
             delta_units[ev["symbol"]] += ev["units"]
         delta_cash[ev["cash_ccy"]] += ev["cash"]
+        delta_pending[ev["cash_ccy"]] += ev.get("pending", 0.0)
     units: Dict[str, float] = defaultdict(float)
     for sym in set(by_sym) | set(delta_units):
         units[sym] = float(by_sym.get(sym, {}).get("units") or 0) - delta_units.get(sym, 0.0)
     cash: Dict[str, float] = defaultdict(float)
     for ccy in {str(c).upper() for c in pm.cash} | set(delta_cash):
         cash[ccy] = float(pm.cash.get(ccy, 0) or 0) - delta_cash.get(ccy, 0.0)
+    # 场外基金在途余额（面值，按币种）：同样锚定当前（pm.pending_fund_orders 是唯一读口）
+    pending: Dict[str, float] = defaultdict(float)
+    for o in pm.pending_fund_orders():
+        pending[str(o.get("currency") or "CNY").upper()] += float(o.get("amount") or 0)
+    for ccy in set(pending) | set(delta_pending):
+        pending[ccy] -= delta_pending.get(ccy, 0.0)
     unreconciled = {
         "units": {s: round(v, 6) for s, v in units.items() if abs(v) > 1e-9},
         "cash": {c: round(v, 2) for c, v in cash.items() if abs(v) > 0.005},
+        **({"pending": {c: round(v, 2) for c, v in pending.items() if abs(v) > 0.005}}
+           if any(abs(v) > 0.005 for v in pending.values()) else {}),
     }
 
     # 汇率序列（只读库，一次）
-    ccys = {str(c).upper() for c in cash} | {
+    ccys = {str(c).upper() for c in cash} | {str(c).upper() for c in pending} | {
         "CNY" if str(by_sym.get(s, {}).get("proxy_kind") or "") == GOLD_PROXY_KIND
         else str(by_sym.get(s, {}).get("cost_currency") or "CNY").upper() for s in units
     }
@@ -314,7 +331,11 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         return px, {c: _at(s, day)[0] for c, s in fx.items()}, ff
 
     def _value(px: Dict[str, Optional[float]], rates: Dict[str, Optional[float]]) -> Tuple[float, Dict[str, str]]:
-        snap = SimpleNamespace(cash=dict(cash), holdings=[_holding_snapshot(s) for s in units])
+        snap = SimpleNamespace(
+            cash=dict(cash), holdings=[_holding_snapshot(s) for s in units],
+            # 在途面值：与 status 同一个 total_portfolio_value 读口（PortfolioManager.pending_fund_orders 的回放版）
+            pending_fund_orders=lambda: [{"currency": c, "amount": v, "status": "placed"}
+                                         for c, v in pending.items() if abs(v) > 1e-9])
         return total_portfolio_value(snap, px, base, rate_override=rates)
 
     def _to_base(ccy: str, amount: float, rates: Dict[str, Optional[float]]) -> Optional[float]:
@@ -331,6 +352,7 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
             if ev["symbol"]:
                 units[ev["symbol"]] += ev["units"]
             cash[ev["cash_ccy"]] += ev["cash"]
+            pending[ev["cash_ccy"]] += ev.get("pending", 0.0)
             flow_ccy, flow = ev["flow_ccy"], ev["flow"]
             if ev["correction"]:
                 h = _holding_snapshot(ev["symbol"])

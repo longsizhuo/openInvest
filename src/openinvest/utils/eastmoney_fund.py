@@ -3,7 +3,8 @@
 openInvest 的交易所资产继续走 yfinance；中国场外公募基金使用独立的
 ``FUND:<六位代码>`` symbol，避免把基金代码误标成 ``.SS`` / ``.SZ``。
 
-两个取数函数：
+三个取数函数：
+- ``fetch_fund_profile``：基金概况页的基金全称 / 简称 / 类型（场外基金两段式据此判 QDII / FOF，决定确认延迟）。
 - ``fetch_fund_nav``：最新已确认单位净值（不是盘中估值），组合估值与 P&L 用。
   走 f10 历史净值接口第一页（响应约 400B），进程内 TTL 缓存，只缓存成功结果。
   lsjz（api.fund.eastmoney.com）本机实测间歇超时，失败时退到 pingzhongdata 的最后一个点。
@@ -30,12 +31,14 @@ log = logging.getLogger(__name__)
 
 _LSJZ_URL = "https://api.fund.eastmoney.com/f10/lsjz"
 _PINGZHONG_URL = "https://fund.eastmoney.com/pingzhongdata/{code}.js"
+_JBGK_URL = "https://fundf10.eastmoney.com/jbgk_{code}.html"
 # lsjz 校验 Referer，缺了直接返回 ErrCode=-999 空数据
 _HEADERS = {
     "Referer": "https://fundf10.eastmoney.com/",
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
 }
 _FUND_CODE_RE = re.compile(r"^(?:FUND:)?(\d{6})(?:\.(?:OF|SS|SZ))?$", re.IGNORECASE)
+_PROFILE_RE = re.compile(r"<th>\s*(基金全称|基金简称|基金类型)\s*</th>\s*<td[^>]*>(.*?)</td>", re.DOTALL)
 _PINGZHONG_RE = re.compile(r"Data_netWorthTrend\s*=\s*(\[.*?\]);", re.DOTALL)
 # 净值日期按北京时间算：pingzhongdata 的 x 是北京时间零点的毫秒时间戳，
 # 按宿主机时区转换会在 UTC 机器上整体早一天
@@ -67,6 +70,25 @@ def canonical_fund_symbol(symbol: str) -> str:
     """返回场外基金 canonical symbol；无法识别时保留原值。"""
     code = extract_fund_code(symbol)
     return f"FUND:{code}" if code else str(symbol or "").strip()
+
+
+def fetch_fund_profile(symbol: str, *, timeout: float = 8.0) -> Optional[Dict[str, str]]:
+    """基金概况页 → ``{"基金全称": ..., "基金简称": ..., "基金类型": ...}``（缺的键不出）；失败 / 解析不出 → ``None``。
+
+    不缓存：只在下单那一刻调一次。类型字符串形如 ``指数型-海外股票`` / ``FOF-稳健型``，QDII 体现在全称 / 简称里
+    （``...(QDII)A``），所以三个字段一起交给 ``calc.fund_rules.classify_fund_kind``。
+    """
+    code = extract_fund_code(symbol)
+    if not code:
+        return None
+    try:
+        response = requests.get(_JBGK_URL.format(code=code), headers=_HEADERS, timeout=timeout)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("东方财富基金概况获取失败 %s: %s", code, exc)
+        return None
+    found = {k: re.sub(r"<[^>]+>|\s+", " ", v).strip() for k, v in _PROFILE_RE.findall(response.text)}
+    return {k: v for k, v in found.items() if v} or None
 
 
 def _parse_nav_date(raw: Any) -> tuple[str, bool]:

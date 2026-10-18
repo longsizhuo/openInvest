@@ -291,7 +291,7 @@ INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
 |---|---|---|---|
 | `invest-web.service` | `openinvest-web`（FastAPI）| `127.0.0.1:8765` | REST，供 remote hub 转发 / 内部触发；走 `openinvest-web` 入口（带 token 守卫），别裸 uvicorn |
 | `invest-mcp.service` | `openinvest-mcp --http`（remote MCP）| `127.0.0.1:8766` | spoke agent 经 Caddy `/mcp` 直连；鉴权复用 `INVEST_API_TOKEN` |
-| `invest-scheduler.service` | `python -m openinvest.scheduler.runner` | 无 | 跑 `jobs/*.yml` 全部定时任务（event_watch / price_sentinel / pnl_snapshot / backup / job_watchdog…）；**没有它 job 一个都不跑** |
+| `invest-scheduler.service` | `python -m openinvest.scheduler.runner` | 无 | 跑 `jobs/*.yml` 全部定时任务（event_watch / price_sentinel / pnl_snapshot / backup / fund_confirm / job_watchdog…）；**没有它 job 一个都不跑** |
 
 ```bash
 # 三个一起装（User=ubuntu 先改成你的用户名；路径不是 ~/openInvest 的话改 INVEST_HOME 等 4 行）
@@ -540,6 +540,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `buy` / `sell` / `record_existing_position` | ✅ 记账 | ❌ 不可用 |
 | `deposit` / `withdraw` | ✅ 记账 | ❌ 不可用 |
 | `record_dividend` / `record_fee` / `record_split` / `record_return_of_capital` | ✅ 记账（分红·利息 / 费用·税 / 拆股 / 退回本金，ADR-027） | ❌ 不可用 |
+| `place_fund_order` / `confirm_fund_order` / `cancel_fund_order` | ✅ 记账（场外基金两段式：下单扣现金记在途 / 按净值确认 / 撤销，ADR-027）；`fund_confirm` job 每个工作日晚自动确认 | ❌ 不可用 |
 | `set_allocations` | ✅ | ❌ 不可用 |
 | `track_asset` / `untrack_asset` | ✅ | ❌ 不可用 |
 

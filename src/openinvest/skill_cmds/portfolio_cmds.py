@@ -28,6 +28,9 @@ __all__ = [
     "cmd_record_fee",
     "cmd_record_split",
     "cmd_record_return_of_capital",
+    "cmd_place_fund_order",
+    "cmd_confirm_fund_order",
+    "cmd_cancel_fund_order",
 ]
 
 
@@ -281,3 +284,46 @@ def cmd_record_return_of_capital(args: argparse.Namespace) -> None:
     _run_record(lambda: pm.record_return_of_capital(
         args.symbol, args.amount, args.currency, trade_date=args.trade_date, note=args.note,
         source="skill_cli", idempotency_key=getattr(args, "idempotency_key", None)))
+
+
+# ---- ADR-027 PR3：场外基金两段式（与 MCP 同名工具同语义，写逻辑在 PortfolioManager.place/confirm/cancel_fund_order）----
+
+def cmd_place_fund_order(args: argparse.Namespace) -> None:
+    """场外基金申购第一段：现金 −金额，订单记在途；总资产按面值含它，下单到确认之间不会假跌。
+
+    示例:
+        skill place_fund_order --symbol FUND:110020 --amount 2000
+        skill place_fund_order --symbol FUND:270042 --amount 1000 --order-ts 2026-10-19T16:20:00   # 15:00 后下单 → 按下一交易日净值
+
+    份额由 fund_confirm job（工作日晚间）在定价日净值公布后自动确认，也可手动 confirm_fund_order。
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.place_fund_order
+    """
+    pm = _resolve_pm()
+    _run_record(lambda: pm.place_fund_order(
+        args.symbol, args.amount, args.currency, order_ts=args.order_ts, note=args.note,
+        idempotency_key=getattr(args, "idempotency_key", None), source="skill_cli"))
+
+
+def cmd_confirm_fund_order(args: argparse.Namespace) -> None:
+    """场外基金申购第二段：在途单按定价日净值换成份额。已确认返回 already_confirmed、净值没公布返回 pending_nav，都不改账。
+
+    示例:
+        skill confirm_fund_order --order-id 3f2a...            # 取定价日已公布的净值
+        skill confirm_fund_order --order-id 3f2a... --nav 2.0153 --fee 1.5
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.confirm_fund_order
+    """
+    pm = _resolve_pm()
+    _run_record(lambda: pm.confirm_fund_order(args.order_id, nav=args.nav, fee=args.fee, source="skill_cli"))
+
+
+def cmd_cancel_fund_order(args: argparse.Namespace) -> None:
+    """撤销在途申购单：金额退回现金。已确认的拒绝（份额已到账，要卖用 sell）。
+
+    示例:
+        skill cancel_fund_order --order-id 3f2a...
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.cancel_fund_order
+    """
+    pm = _resolve_pm()
+    _run_record(lambda: pm.cancel_fund_order(args.order_id, source="skill_cli"))

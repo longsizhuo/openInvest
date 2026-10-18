@@ -464,7 +464,8 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
   strategy / history / live_prices / what_if / rebalance_plan / discipline / decisions /
   explain_decision / record_execution / ingest_event / buy /
   record_existing_position / sell / deposit / withdraw / record_dividend / record_fee /
-  record_split / record_return_of_capital（ADR-027 PR2：分红·利息 / 费用·税 / 拆股 / 退回本金）/ set_allocations /
+  record_split / record_return_of_capital（ADR-027 PR2：分红·利息 / 费用·税 / 拆股 / 退回本金）/
+  place_fund_order / confirm_fund_order / cancel_fund_order（ADR-027 PR3：场外基金下单扣现金记在途 / 按净值确认 / 撤销）/ set_allocations /
   track_asset / untrack_asset / news_sources / add_news_source /
   remove_news_source / run_committee（Direct 路径，当天已跑读缓存）。
   同步工具经线程池执行，慢 IO 不占事件循环

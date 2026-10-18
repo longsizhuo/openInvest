@@ -28,6 +28,7 @@ from .tunable import (
     DCAConfig,
     DreamingTunableConfig,
     EventConfig,
+    FundConfig,
     LanguageConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
@@ -69,6 +70,7 @@ __all__ = [
     "EventConfig",
     "StalenessConfig",
     "SchedulerConfig",
+    "FundConfig",
     # Locked dataclasses
     "LockedVerdictScoring",
     "LockedDreamingScoring",

@@ -25,12 +25,17 @@
 ``interest`` / ``return_of_capital``  同名  ``+amount``                 False
 ``fee`` / ``tax``               同名        ``-amount``                 False
 ``split``                       同名        0                           False，``units_effect`` = 拆股增量，``split_ratio`` = 新/旧
+``fund_order_placed``           同名        ``-amount``（现金 → 在途）  False，在途 ``+amount``
+``fund_order_confirmed``        同名        0                           False，``units_effect`` = +份额，在途 ``-amount``
+``fund_order_cancelled``        同名        ``+amount``（在途退回）     False，在途 ``-amount``
 其余 / 没有可用日期             unknown     0（保留、计数、不进回放）
 ==============================  ==========  ==========================  ============================
 
 新写入的记录（PR2 起，``schema_version == 2``）由写入方算好 ``cash_effect`` / ``units_effect`` / ``external``，
 读方**只认这三个字段**（ADR-027 D2）：上表是缺这些字段时的推导口径。DRIP 的那条 buy 也是 v2 记录。
-**唯一例外是 split 的 ``units_effect``**：写入方记的是快照口径（快照份数 × (ratio−1)），回放始终用账本口径
+场外基金两段式（PR3）：``LedgerState.pending`` 按币种累计在途余额（placed +amount，confirmed / cancelled −amount），
+读方（``account_performance``）把它按面值计入当日 NAV，所以 placed 当天 NAV 不变（现金 → 在途）、confirmed 当天用份额 × 净值
+替换在途面值。**唯一例外是 split 的 ``units_effect``**：写入方记的是快照口径（快照份数 × (ratio−1)），回放始终用账本口径
 ``held × (ratio−1)``（``held`` = 回放里该标的已累计的份数）——否则拆股后的 manual_override / delete_holding 会用错基数。
 NAV 回放不受影响（split 在拆股后口径下是空操作）。
 
@@ -76,6 +81,11 @@ _CASH_ACTIONS = frozenset({"deposit", "withdraw"})
 _INCOME_ACTIONS = frozenset({"dividend", "interest", "return_of_capital"})
 _COST_ACTIONS = frozenset({"fee", "tax"})
 _CASH_ONLY = _CASH_ACTIONS | _INCOME_ACTIONS | _COST_ACTIONS
+# PR3 场外基金两段式：placed / cancelled 只在"现金 ↔ 在途"之间搬钱（不动份额），confirmed 把在途换成份额
+_FUND_CASH_MOVES = frozenset({"fund_order_placed", "fund_order_cancelled"})
+_FUND_ORDER = _FUND_CASH_MOVES | {"fund_order_confirmed"}
+# 在途余额的增减符号（按订单面值 amount）
+PENDING_SIGN = {"fund_order_placed": 1.0, "fund_order_confirmed": -1.0, "fund_order_cancelled": -1.0}
 _EPS = 1e-9
 
 
@@ -85,6 +95,7 @@ class LedgerState:
     units: Dict[str, float] = field(default_factory=dict)
     avg_cost: Dict[str, float] = field(default_factory=dict)   # 近似加权均价（买入加权、卖出不变、清仓归零），不含汇率
     cash: Dict[str, float] = field(default_factory=dict)       # Σ cash_effect
+    pending: Dict[str, float] = field(default_factory=dict)    # 场外基金在途金额（面值）按币种：placed + / confirmed·cancelled −
     unknown: int = 0                                           # 不进回放的行数：未知 action / 无可用日期 / 数值解析失败（仍在 Activity 列表里）
 
 
@@ -106,7 +117,7 @@ def _opt_f(v: Any) -> Optional[float]:
 # 老 action → Activity.action（不在表里 = unknown）
 _ACTION = {**_BUY_LIKE, "gift": "gift", "sell": "sell", "sold": "sell", "deposit": "deposit", "withdraw": "withdraw",
            "manual_override": "correction", "delete_holding": "delete_holding",
-           **{a: a for a in _CASH_ONLY - _CASH_ACTIONS}, "split": "split"}
+           **{a: a for a in _CASH_ONLY - _CASH_ACTIONS}, "split": "split", **{a: a for a in _FUND_ORDER}}
 
 
 def _effects(raw_action: str, r: Mapping[str, Any], sym: str, held: Mapping[str, float]) -> Dict[str, Any]:
@@ -138,6 +149,12 @@ def _effects(raw_action: str, r: Mapping[str, Any], sym: str, held: Mapping[str,
         tax = float(r.get("tax_withheld") or 0)
         cash = {"dividend": amount - tax, "interest": amount, "return_of_capital": amount}.get(raw_action, -amount)
         return dict(action=raw_action, amount=amount, tax_withheld=tax or None, cash_effect=cash)
+    if raw_action in _FUND_ORDER:   # 缺 cash_effect / units_effect 时的推导；v2 记录会被 _activity 用记录值覆盖
+        amount = abs(float(r.get("amount") or 0))
+        cash = {"fund_order_placed": -amount, "fund_order_cancelled": amount}.get(raw_action, 0.0)
+        units = float(r.get("units") or 0) if raw_action == "fund_order_confirmed" else 0.0
+        return dict(action=raw_action, amount=amount, units=units or None, price=_opt_f(r.get("price")),
+                    cash_effect=cash, units_effect=units)
     if raw_action == "split":
         ratio = float(r.get("split_ratio"))   # 缺 / 不是数 → TypeError / ValueError → unparsed
         if not ratio > 0:
@@ -181,6 +198,10 @@ def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mappi
 def _apply(state: LedgerState, a: Activity) -> None:
     state.cash[a.currency] = state.cash.get(a.currency, 0.0) + a.cash_effect
     sym = a.symbol or ""
+    if a.action in PENDING_SIGN:
+        state.pending[a.currency] = state.pending.get(a.currency, 0.0) + PENDING_SIGN[a.action] * (a.amount or 0.0)
+    if a.action in _FUND_CASH_MOVES:
+        return
     if a.action in _CASH_ONLY:
         # return_of_capital 降成本：avg_cost -= amount / 持仓量（降到 0 为止，超出部分是资本利得不是负成本）
         if a.action == "return_of_capital" and sym in state.avg_cost and state.units.get(sym, 0.0) > _EPS:
@@ -192,7 +213,7 @@ def _apply(state: LedgerState, a: Activity) -> None:
     if a.action == "split":
         if sym in state.avg_cost and a.split_ratio:
             state.avg_cost[sym] /= a.split_ratio
-    elif a.action in ("buy", "gift") and a.units_effect > 0:
+    elif a.action in ("buy", "gift", "fund_order_confirmed") and a.units_effect > 0:
         cost = a.amount or 0.0
         state.avg_cost[sym] = (state.avg_cost.get(sym, 0.0) * before + cost) / after if before > _EPS else cost / a.units_effect
     elif after <= _EPS:
@@ -259,4 +280,4 @@ def recent_income(activities: List[Activity], since: str) -> Dict[str, Dict[str,
     return out
 
 
-__all__ = ["LedgerState", "external_flow", "later_split_factors", "recent_income", "replay_ledger"]
+__all__ = ["LedgerState", "PENDING_SIGN", "external_flow", "later_split_factors", "recent_income", "replay_ledger"]

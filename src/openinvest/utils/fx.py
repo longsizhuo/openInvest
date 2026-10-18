@@ -182,7 +182,8 @@ def total_portfolio_value(
             status_dict: {key: "ok" | "cost_fallback" | "missing_price" | "missing_fx" |
                               "tracking_only" | "zero_units" | "excluded"}
                 cost_fallback = 拉不到现价、按成本价计入（计入了，但不是现价）
-                key 是 holding symbol 或 cash currency；调用方可以 grep
+                key 是 holding symbol 或 cash currency；在途场外基金申购（面值计入，ADR-027）的 key 是
+                ``pending_fund:<币种>``（只在有在途单时出现）；调用方可以 grep
                 "missing_*" 给 LLM 兜底告警
     """
     status: dict = {}
@@ -246,6 +247,22 @@ def total_portfolio_value(
             continue
         total += value_in_base
         status[sym] = "cost_fallback" if used_cost else "ok"
+
+    # 3) 在途场外基金申购（ADR-027 D4）：现金已扣、份额还没到，按面值计入——否则下单到确认之间总资产会凭空少一笔。
+    #    读口只认 pm.pending_fund_orders()（PortfolioManager 是 extra.pending_orders 的唯一读方；账户业绩重放的
+    #    快照对象自己提供同名方法）。没有这个方法（老测试替身 / 回测快照）= 没有在途。
+    pending_fn = getattr(pm, "pending_fund_orders", None)
+    by_ccy: dict = {}
+    for o in (pending_fn() if callable(pending_fn) else []):
+        ccy = str(o.get("currency") or "CNY").upper()
+        by_ccy[ccy] = by_ccy.get(ccy, 0.0) + float(o.get("amount") or 0)
+    for ccy, amt in by_ccy.items():
+        converted = _conv(ccy, amt, base, as_of_date, rate_override)
+        if converted is None or not math.isfinite(converted):
+            status[f"pending_fund:{ccy}"] = "missing_fx"
+        else:
+            total += converted
+            status[f"pending_fund:{ccy}"] = "ok"
 
     return round(total, 2), status
 

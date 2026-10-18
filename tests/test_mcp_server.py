@@ -18,6 +18,8 @@ EXPECTED_TOOLS = {
     "record_existing_position",
     # 账本活动（ADR-027 PR2）：interest 并入 record_dividend 的 kind、tax 并入 record_fee 的 kind
     "record_dividend", "record_fee", "record_split", "record_return_of_capital",
+    # 场外基金两段式（ADR-027 PR3）：下单扣现金记在途 → 按净值确认 / 撤销
+    "place_fund_order", "confirm_fund_order", "cancel_fund_order",
     # strategy 写操作（issue #179：读写对等）
     "set_allocations", "track_asset", "untrack_asset",
     # 新闻源管理（用户级额外源，顾问模式放行——只动本实例 rss_feeds.yml）
@@ -56,9 +58,10 @@ READONLY_TOOLS = {
     "doctor", "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "news_sources", "rebalance_plan",
 }
-# destructive 桶：动钱 4 件 + 账本活动 4 件（动现金 / 改持仓数量与成本）+ untrack_asset / remove_news_source（删配置条目，client 该弹确认）
+# destructive 桶：动钱 4 件 + 账本活动 4 件（动现金 / 改持仓数量与成本）+ 场外基金两段式 3 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
 MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position",
                "record_dividend", "record_fee", "record_split", "record_return_of_capital",
+               "place_fund_order", "confirm_fund_order", "cancel_fund_order",
                "untrack_asset", "remove_news_source"}
 
 
@@ -143,6 +146,9 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
         "record_fee": {"amount": 1, "currency": "CNY"},
         "record_split": {"symbol": "GC=F", "ratio": 2},
         "record_return_of_capital": {"symbol": "GC=F", "amount": 1, "currency": "CNY"},
+        "place_fund_order": {"symbol": "FUND:110020", "amount": 1},
+        "confirm_fund_order": {"order_id": "x"},
+        "cancel_fund_order": {"order_id": "x"},
         "set_allocations": {"target_allocation_stock": 0.7, "target_allocation_cash": 0.3},
         "track_asset": {"symbol": "GC=F"},
         "untrack_asset": {"symbol": "GC=F"},

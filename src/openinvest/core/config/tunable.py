@@ -294,6 +294,18 @@ class SchedulerConfig:
 
 
 @dataclass(frozen=True)
+class FundConfig:
+    """场外公募基金两段式（ADR-027 D5，calc/fund_rules.py）
+
+    ``confirm_lag_days``：下单后第几个交易日确认份额（T = 定价日，确认日 = T + lag），按基金类型取；
+    类型从东方财富基金概况推断（QDII / FOF），取不到按 ``default`` 并在记录里标 ``lag_source=default``。
+    YAML 里只写想改的键（dict 与默认值深合并）：``fund: {confirm_lag_days: {qdii: 3}}``。
+    不进 API_SETTABLE（dict 型）；改 defaults.yaml 的 fund: 段。
+    """
+    confirm_lag_days: dict = field(default_factory=lambda: {"default": 1, "qdii": 2, "fof": 2})
+
+
+@dataclass(frozen=True)
 class TunableConfig:
     """所有可调参数的顶层容器"""
     language: LanguageConfig = field(default_factory=LanguageConfig)
@@ -311,3 +323,4 @@ class TunableConfig:
     event: EventConfig = field(default_factory=EventConfig)
     staleness: StalenessConfig = field(default_factory=StalenessConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    fund: FundConfig = field(default_factory=FundConfig)

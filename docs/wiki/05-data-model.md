@@ -114,6 +114,38 @@ holdings:
 已入账单子的 `<trade_id>@<ts>` 去重键（最近 500 个），与 cash/holdings 同一次 atomic
 write，保证崩溃重试不双记。见 [ADR-016](adr/016-ledger-mutation-idempotency.md)。
 
+可选字段 `extra.pending_orders[]`（ADR-027 PR3，仅场外基金持仓行；自动维护勿手改）：场外基金两段式的订单。`place_fund_order` 扣现金的同一次
+atomic write 里追加一条 `status: placed`，`confirm_fund_order` / `fund_confirm` job 按净值换成份额时把它改成 `confirmed`、`cancel_fund_order` 改成 `cancelled`
+（三种转换都是 CAS，见 [ADR-016](adr/016-ledger-mutation-idempotency.md)）。在途单全留，已终结的每个基金行只保留最近 20 条。
+
+```yaml
+  - symbol: FUND:110020
+    kind: fund
+    units: 0.0            # 份额等确认；确认后 += (amount − fee) / nav
+    unit_label: 份
+    avg_cost: 0.0
+    cost_currency: CNY
+    proxy_kind: eastmoney_fund
+    extra:
+      pending_orders:
+        - order_id: 3f2a…          # uuid4 hex，confirm / cancel 靠它
+          status: placed           # placed | confirmed | cancelled
+          amount: 5000.0           # 订单金额（面值，下单时现金已扣）
+          currency: CNY
+          order_date: '2026-10-19' # 下单日（北京时间）
+          nav_date: '2026-10-19'   # 定价日 T：15:00 前下单按当日净值，之后 / 非交易日按下一交易日
+          expected_confirm_date: '2026-10-20'   # T + lag 个交易日；仅展示 / 超期提示
+          calendar: weekday_only   # 只有周一到周五，没有节假日表 → 预计日是估计
+          fund_kind: default       # default | qdii | fof（从东方财富基金概况推断）
+          lag_days: 1
+          lag_source: profile      # profile | default（概况没取到，按默认延迟估计）
+          # confirmed 后追加：confirmed_on / nav / nav_date（实际用的净值日）/ units / fee / nav_date_planned（休市顺延时）
+```
+
+在途金额是"现金已扣、份额未到"的那一段：`PortfolioManager.pending_fund_orders()` 是读它的**唯一**入口，总资产（`utils.fx.total_portfolio_value`，status key
+`pending_fund:<币种>`）按面值计入，所以下单到确认之间总资产不会假跌；任何估值方不得自己去读 `extra.pending_orders`。有在途单的基金行拒绝 `delete_holding`。
+`portfolio.md` 的 body 里会多一节"在途申购"。
+
 **核心抽象**：
 - `cash`：`dict[currency_code, amount]`
 - `holdings`：`list[holding]`，每个 holding 自描述（symbol / kind / units / unit_label / cost / channel）
@@ -359,6 +391,9 @@ memory/
 | `interest` / `return_of_capital` | 同名 | +金额 | 0 | False |
 | `fee` / `tax` | 同名 | −金额 | 0 | False |
 | `split` | 同名，`split_ratio` = 新/旧 | 0 | 拆股增量（units × (ratio−1)）| False |
+| `fund_order_placed`（ADR-027 PR3）| 同名 | −订单金额（现金 → 在途）| 0 | False，`LedgerState.pending` +金额 |
+| `fund_order_confirmed` | 同名 | 0 | +份额（`(金额 − fee) / nav`），`price` = 确认净值 | False，`pending` −金额 |
+| `fund_order_cancelled` | 同名 | +订单金额（在途退回）| 0 | False，`pending` −金额 |
 | 其他 / 没有可用日期 | `unknown` | 0 | 0 | False |
 
 PR2 起新写入的记录是 **v2 记录**（`schema_version: 2`）：写入方（`PortfolioManager.record_*`，同一把 `with_portfolio_tx` 锁）把
@@ -366,6 +401,9 @@ PR2 起新写入的记录是 **v2 记录**（`schema_version: 2`）：写入方�
 DRIP（`record_dividend --reinvest`）写两条：`dividend`（+净额）+ 一条 `buy`（`source=drip`，`external=False`，−成本、+份额，
 `idempotency_key` 为 `<key>#drip`）。写入入口：`record_dividend`（`--kind interest` = 利息）/ `record_fee`（`--kind tax` = 税）/
 `record_split` / `record_return_of_capital`——CLI 子命令与 MCP 工具同名，都带 `idempotency_key`（ADR-016）。
+场外基金两段式（PR3）：`place_fund_order` → `fund_order_placed`（`trade_date` = 下单日，`settle_date` = 预计确认日，`nav_date` = 定价日，带 `order_id`）；
+`confirm_fund_order` / `fund_confirm` job → `fund_order_confirmed`（`trade_date` = 确认动作发生日，`nav_date` = 实际用的净值日）；`cancel_fund_order` → `fund_order_cancelled`。
+同名 CLI 子命令 / MCP 工具；`place` 带 `idempotency_key`，`confirm` / `cancel` 靠订单状态的 CAS 幂等。
 
 数值字段（units / price / total_amount / net_amount / fee）解析不了的行：`action` 分类照旧、`unparsed=True`、效果全 0，
 不进回放、计入 `LedgerState.unknown`——一行脏数据不会让账户业绩或决议账本视图整个挂掉（`Activity.replayable` 为 False）。
@@ -389,9 +427,14 @@ DRIP（`record_dividend --reinvest`）写两条：`dividend`（+净额）+ 一�
 | `dividend` / `interest` / `return_of_capital` | 不变 | +金额 | 无（内部流：收益）|
 | `fee` / `tax` | 不变 | −金额 | 无（内部流：成本）|
 | `split` | 数量换算成拆股后口径（见下）| 不动 | 无 |
+| `fund_order_placed` | 不变 | −金额，**在途 +金额（面值计入当日 NAV）** | 无（内部流：NAV 不变）|
+| `fund_order_confirmed` | +份额（当日起按份额 × 净值估值）| 不动，**在途 −金额** | 无（用份额 × 净值替换在途面值）|
+| `fund_order_cancelled` | 不变 | +金额，**在途 −金额** | 无 |
 
 - **锚定当前状态**：流水早于系统上线的持仓/现金没有记录，所以开盘状态 = `portfolio.md` 当前值 − Σ流水增量，
   序列末日 NAV 恒等于 status 总资产；差额列在 `data_quality.unreconciled`（补录请用 `buy --existing-position`）。
+- **在途锚定当前状态**：开盘在途 = `pm.pending_fund_orders()` 当前合计 − Σ账本里 fund_order_* 的在途增减（不为 0 才出现在 `data_quality.unreconciled.pending`）；
+  回放每天经 `total_portfolio_value` 的 `pending_fund_orders` 读口把在途按面值计入，和 status 同一实现。
 - 黄金流水符号 `GOLD-CNY` 映射到 `proxy_kind=gold_cny_per_gram` 的持仓，克价 = `GC=F`/31.1035 × `USDCNY=X`。
 - **价格口径（`price_basis`，ADR-027 PR2）**：`daily_prices.close` 是 yfinance 复权价（Adj Close：拆股 + 分红都复权；regime /
   指标 / forward_return 读它，语义不变）；同表新增 `close_raw` = yfinance `Close`（只按拆股复权、不含分红复权）。账本里的分红

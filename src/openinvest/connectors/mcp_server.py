@@ -9,7 +9,7 @@
 
 写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在高频能力（现 28 个）（80+ REST 端点全暴露会撑爆 agent context），
+工具刻意克制在高频能力（现 31 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -140,8 +140,11 @@ def status() -> Dict[str, Any]:
         drawdown with peak/trough dates, annualised volatility, return vs the
         configured benchmark, `price_basis` per symbol (raw | adjusted), and data_quality;
         or {"status": "insufficient_history"} until the ledger spans 2 trading days),
-        and `income_30d` (dividends / interest received in the last 30 days by currency;
-        only present when there are any).
+        `income_30d` (dividends / interest received in the last 30 days by currency;
+        only present when there are any), and `pending_fund_orders` +
+        `pending_fund_orders_line` (off-exchange fund orders placed but not yet
+        confirmed — cash already deducted, `total_assets_cny` counts them at face
+        value; only present when there are any).
     """
     _check_advisory()
     from openinvest.services.skill_views import build_status_view
@@ -545,6 +548,10 @@ def buy(
     Confirm symbol, units, and price with the user before calling; this
     moves ledger cash. A position the user already held before using
     openInvest is not a purchase: record it with `record_existing_position`.
+    Off-exchange China mutual funds (`FUND:<6 digits>`) settle T+1 or later
+    at the NAV of the pricing day: use `place_fund_order` +
+    `confirm_fund_order` instead (buy books them as instantly filled and
+    total assets dip by the amount until the real confirmation).
 
     Args:
         symbol: yfinance ticker (e.g. "AAPL", "510300.SS"). Gold = "GC=F", booked in
@@ -874,6 +881,114 @@ def record_return_of_capital(
     try:
         return _pm().record_return_of_capital(symbol, amount, currency, trade_date=trade_date, note=note,
                                               source="mcp", idempotency_key=idempotency_key)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+# ---------- 场外基金两段式（ADR-027 PR3；写逻辑在 PortfolioManager.place/confirm/cancel_fund_order）----------
+# 下单扣现金记在途（总资产按面值含它，不会中间假跌）→ 定价日净值公布后按净值换成份额（fund_confirm job 自动做，也可手动）。
+
+@_tool(annotations=_MONEY)
+def place_fund_order(
+    symbol: Annotated[str, Field(description="Off-exchange China mutual fund: 'FUND:<6-digit code>' (a bare 6-digit code is also accepted).")],
+    amount: Annotated[float, Field(description="Subscription amount in CNY (cash deducted now); must be > 0.", gt=0)],
+    currency: Annotated[str, Field(description="Currency of the amount; off-exchange funds are CNY.")] = "CNY",
+    order_ts: Annotated[Optional[str], Field(description=(
+        "When the order was placed, ISO 8601 in Beijing time (e.g. '2026-10-19T14:30:00'); default now. "
+        "Before 15:00 on a trading day the order is priced at that day's NAV, otherwise at the next trading day's. "
+        "Pass the real time when back-filling an order placed earlier."))] = None,
+    note: Annotated[Optional[str], Field(description="Free-text note stored with the order and ledger row.")] = None,
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
+) -> Dict[str, Any]:
+    """Record the first leg of an off-exchange fund purchase the user already
+    placed with the fund platform: cash - amount, and the order is tracked as
+    in transit (`status.pending_fund_orders`). Total assets do not change
+    (the in-transit amount counts at face value), so there is no fake dip
+    between order day and confirmation. Shares arrive when the pricing-day NAV
+    is published: the `fund_confirm` job confirms automatically, or call
+    `confirm_fund_order`. Bookkeeping only — openInvest never places orders.
+
+    The expected confirm date uses a Monday-Friday calendar (no China holiday
+    table) and a lag by fund type (QDII / FOF are slower, read from the fund's
+    profile); the result says so (`calendar`, `lag_source`).
+
+    Confirm fund, amount, and order time with the user before calling; this
+    moves ledger cash.
+
+    Args:
+        symbol: FUND:<6 digits>.
+        amount: Subscription amount in CNY; must be > 0.
+        currency: Currency of the amount (CNY).
+        order_ts: Order time, ISO 8601 Beijing time (default now).
+        note: Free-text note.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
+
+    Returns:
+        order_id, pricing day (`nav_date`), expected confirm date, and new cash
+        balance, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().place_fund_order(symbol, amount, currency, order_ts=order_ts, note=note,
+                                      idempotency_key=idempotency_key, source="mcp")
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@_tool(annotations=_MONEY)
+def confirm_fund_order(
+    order_id: Annotated[str, Field(description="order_id from place_fund_order / status.pending_fund_orders.")],
+    nav: Annotated[Optional[float], Field(description=(
+        "Unit NAV to confirm at. Omit to fetch the pricing day's published NAV (if it isn't published yet "
+        "the call returns status 'pending_nav' and changes nothing)."), gt=0)] = None,
+    fee: Annotated[float, Field(description="Subscription fee in CNY, taken out of the order amount (units = (amount - fee) / nav). Default 0.", ge=0)] = 0.0,
+) -> Dict[str, Any]:
+    """Second leg of an off-exchange fund purchase: turn an in-transit order
+    into shares at the pricing day's NAV (units = (amount - fee) / nav; average
+    cost updates, cash unchanged). The `fund_confirm` job does this
+    automatically every weekday evening, so call it manually only to supply a
+    NAV / fee yourself or to confirm early.
+
+    Safe to call twice: an order that is already confirmed returns
+    {"status": "already_confirmed"} (a cancelled one {"status": "cancelled"})
+    and nothing changes. If the pricing-day NAV is not published yet the result
+    is {"status": "pending_nav"} and the order stays in transit.
+
+    Args:
+        order_id: The order to confirm.
+        nav: Unit NAV; omit to use the published NAV of the pricing day.
+        fee: Subscription fee in CNY (default 0).
+
+    Returns:
+        Units added, NAV used and new average cost, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().confirm_fund_order(order_id, nav=nav, fee=fee, source="mcp")
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@_tool(annotations=_MONEY)
+def cancel_fund_order(
+    order_id: Annotated[str, Field(description="order_id of an in-transit order (status 'placed').")],
+) -> Dict[str, Any]:
+    """Cancel an in-transit off-exchange fund order that was never executed
+    (the user withdrew it on the fund platform): the amount returns to ledger
+    cash. Only orders still in transit can be cancelled — a confirmed order
+    already holds shares (use `sell` to book a redemption).
+
+    Confirm with the user before calling; this moves ledger cash.
+
+    Args:
+        order_id: The in-transit order to cancel.
+
+    Returns:
+        Cash returned and new balance, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().cancel_fund_order(order_id, source="mcp")
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 

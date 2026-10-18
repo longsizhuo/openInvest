@@ -79,6 +79,18 @@ def _income_30d(pm: Any) -> Optional[Dict[str, Any]]:
     return {"since": since, **rounded, "line": f"最近 {INCOME_WINDOW_DAYS} 天：" + "；".join(parts)}
 
 
+def _pending_fund_fields(pm: Any) -> Dict[str, Any]:
+    """status 的在途场外基金申购：``pending_fund_orders``（订单列表）+ ``pending_fund_orders_line``（一行人话）。"""
+    from datetime import datetime
+
+    from openinvest.calc.fund_rules import CN_TZ, pending_summary_line
+    pending = pm.pending_fund_orders()
+    if not pending:
+        return {}
+    return {"pending_fund_orders": pending,
+            "pending_fund_orders_line": pending_summary_line(pending, datetime.now(CN_TZ).date().isoformat())}
+
+
 def build_status_view() -> Dict[str, Any]:
     """v2 通用化：从 cash dict + holdings list 读，所有持仓同一条定价路径（utils.quotes.get_quote）。
 
@@ -240,6 +252,8 @@ def build_status_view() -> Dict[str, Any]:
         "performance": performance,
         # 最近 30 天分红 / 利息合计（没有记录就不出这个键）
         **({"income_30d": income} if (income := _income_30d(pm)) else {}),
+        # 在途场外基金申购（ADR-027 D6）：现金已扣、份额待确认，total_assets_cny 已按面值含它；没有在途单就不出这两个键
+        **_pending_fund_fields(pm),
         # 拉不到汇率 / 价格、没算进 total 的条目——有就列出来，别让总资产悄悄偏小
         **({"total_assets_excludes": unvalued(_value_status)} if unvalued(_value_status) else {}),
         "fx": {f"{c.lower()}cny": round(r, 4) for c, r in fx_rates.items() if r},
@@ -458,6 +472,17 @@ def build_what_if_view(
             "scenario_value_cny": round(new_v, 2),
             "delta_cny": round(new_v - cur_v, 2),
         }
+
+    # 在途场外基金申购（ADR-027）：现金已扣、份额未到，按面值进两个总额（情景不动它）——否则总额和 delta_pct 的分母少一笔
+    for o in pm.pending_fund_orders():
+        v = to_base(str(o.get("currency") or "CNY").upper(), float(o.get("amount") or 0), "CNY")
+        if v is None:
+            excluded.append(f"在途 {o.get('symbol')}")
+            continue
+        cur_total += v
+        new_total += v
+        breakdown[f"pending:{o.get('symbol')}"] = {"in_transit_fund_order": True, "cur_value_cny": round(v, 2),
+                                                   "scenario_value_cny": round(v, 2), "delta_cny": 0.0}
 
     delta = new_total - cur_total
     return {

@@ -226,10 +226,11 @@ class UserData(BaseModel):
 
 # 历史动作（bought/sold/dca_reconcile_*/manual_override）在解析层归一，无法识别的行 = "unknown"（保留、计数、不丢）。
 # PR2 起新写入还有 dividend / interest / fee / tax / split / return_of_capital（schema_version=2 记录，效果由写入方算好）；
-# 场外基金两段式（fund_order_*）是 PR3 的事。
+# PR3 起场外基金两段式 fund_order_placed / confirmed / cancelled（现金 → 在途 → 份额，同样是 v2 记录）。
 ActivityAction = Literal[
     "buy", "sell", "deposit", "withdraw", "gift", "delete_holding", "correction",
-    "dividend", "interest", "fee", "tax", "split", "return_of_capital", "unknown",
+    "dividend", "interest", "fee", "tax", "split", "return_of_capital",
+    "fund_order_placed", "fund_order_confirmed", "fund_order_cancelled", "unknown",
 ]
 
 
@@ -243,6 +244,10 @@ class Activity(BaseModel):
     - ``external``：外部现金流（deposit / withdraw / gift / external_funding 买卖）；外部流水金额用
       ``calc.ledger_replay.external_flow(a)`` 取，不要自己拼。dividend / interest / fee / tax / return_of_capital
       是内部流（进 NAV、不进 TWR 分母），split 无现金效应
+    - fund_order_*（ADR-027 D4）：``amount`` = 订单金额（面值）。placed ``cash_effect`` = −amount（现金 → 在途），
+      confirmed ``units_effect`` = +份额、``cash_effect`` = 0（在途 → 份额，``price`` = 确认净值，``fee`` = 申购费），
+      cancelled ``cash_effect`` = +amount（在途退回）；三者都是内部流（``external=False``），``amount`` 同时是回放里
+      在途余额的增减量（``LedgerState.pending``）
     - dividend：``amount`` = 税前总额，``tax_withheld`` = 预扣税，``cash_effect`` = 税后净额；fee / tax 的 ``amount`` 是
       正的支出额，``cash_effect`` 为负；split：``split_ratio`` = 新/旧，``units_effect`` = 拆股增加的数量
     """

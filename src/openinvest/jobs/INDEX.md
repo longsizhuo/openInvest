@@ -1,7 +1,7 @@
 # Jobs Index
 
 仿 OpenClaw 的 cron 任务索引。每个任务一份 YAML 配置 + 一个 Python entry。
-**以 `jobs/*.yml` 为准**（`python -m openinvest.scheduler.runner --list` 列出的就是这 11 个）；
+**以 `jobs/*.yml` 为准**（`python -m openinvest.scheduler.runner --list` 列出的就是这 12 个）；
 本表与 yml 不一致时改本表。
 
 ## 调度时间总览（Asia/Shanghai）
@@ -13,6 +13,7 @@
 | `event_watch` | **是** | 北京 0-2、8-23 点每 30 分钟 | `*/30 0-2,8-23 * * *`（config `event.watch_schedule` 可覆盖） | `jobs.event_watch:run` |
 | `price_sentinel` | **是** | 同窗口每 5 分钟 | `*/5 0-2,8-23 * * *`（config `event.sentinel_schedule` 可覆盖） | `jobs.price_sentinel:run` |
 | `job_watchdog` | **是** | 每小时第 7 分钟 | `7 * * * *` | `jobs.job_watchdog:run` |
+| `fund_confirm` | **是**（没有在途单时几毫秒返回，不联网） | 工作日 21:00-23:30 每 30 分钟 | `0,30 21-23 * * mon-fri` | `jobs.fund_confirm:run` |
 | `pnl_snapshot` | **是** | 工作日 9-23 点每 2h | `0 9-23/2 * * mon-fri` | `jobs.pnl_snapshot:run` |
 | `dca_daily` | **是**（真正开关是 config `dca.auto_dca_enabled`，默认 no-op） | 工作日 15:30 / 18:30 / 21:30 | `30 15,18,21 * * mon-fri` | `jobs.dca_daily:run` |
 | `path_review` | **是** | 周日 11:30 | `30 11 * * sun` | `jobs.path_review:run` |

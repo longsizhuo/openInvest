@@ -21,7 +21,10 @@ MATCH_WINDOW_DAYS = 7
 
 # Activity.action → trades.db 的 direction。buy/sell 已含 PortfolioManager.buy/sell 与 CommSec 邮件回灌
 # （bought/sold 在 replay_ledger 里归一）。deposit/withdraw/gift/delete_holding/correction 不是成交，不映射。
-_HISTORY_DIRECTION = {"buy": "BUY", "sell": "SELL"}
+_HISTORY_DIRECTION = {"buy": "BUY", "sell": "SELL",
+                      # 场外基金两段式（ADR-027）：用户下单的那一刻就是"执行了买入决议"，不等确认；
+                      # 确认 / 取消只是同一笔单的后续，不另算成交（被取消的单在 history_as_trades 里剔除）
+                      "fund_order_placed": "BUY"}
 
 # 不是"人看了决议后下的单"的自动写入源：定投 cron（jobs/dca_daily.py）按固定计划买，生产 90 天
 # 66 笔买入里 64 笔是它——若算作执行了同标的的 ACCUMULATE，采纳率会虚高；dca_reconcile 是对账脚本
@@ -40,10 +43,13 @@ def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     out: List[Dict[str, Any]] = []
     activities, _ = replay_ledger(records, alias={})
+    cancelled = {a.raw.get("order_id") for a in activities if a.action == "fund_order_cancelled"} - {None}
     for a in sorted(activities, key=lambda x: x.seq):      # 文件顺序（回放序是日期升序）
         direction = _HISTORY_DIRECTION.get(a.action)
         source = a.source or ""
         if not direction or ":existing_position" in source or source in _AUTO_SOURCES:
+            continue
+        if a.action == "fund_order_placed" and a.raw.get("order_id") in cancelled:
             continue
         out.append({
             "id": f"history:{a.seq}", "ts": a.ts, "verdict_id": None,

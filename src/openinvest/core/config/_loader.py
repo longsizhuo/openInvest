@@ -17,6 +17,7 @@ from .tunable import (
     DCAConfig,
     DreamingTunableConfig,
     EventConfig,
+    FundConfig,
     LanguageConfig,
     MacroBucketConfig,
     OracleAccuracyConfig,
@@ -79,7 +80,7 @@ def _read_env_overrides() -> dict[str, Any]:
     _KNOWN_SECTIONS = sorted(
         ["oracle_accuracy", "macro_buckets", "staleness", "language", "portfolio",
          "regime", "verdict", "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event",
-         "scheduler"],
+         "scheduler", "fund"],
         key=len,
         reverse=True,
     )
@@ -207,6 +208,8 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         sched_data["heartbeat_url"] = ",".join(sched_data["heartbeat_url"])
     scheduler = SchedulerConfig(**{k: v for k, v in sched_data.items() if k in {f.name for f in fields(SchedulerConfig)}})
 
+    fund = FundConfig(**{k: v for k, v in data.get("fund", {}).items() if k in {f.name for f in fields(FundConfig)}})
+
     return TunableConfig(
         language=language,
         portfolio=portfolio,
@@ -223,6 +226,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         event=event,
         staleness=staleness,
         scheduler=scheduler,
+        fund=fund,
     )
 
 

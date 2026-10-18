@@ -10,15 +10,19 @@ schema_source:
   - src/openinvest/services/account_performance.py:_ledger_events
   - src/openinvest/calc/ledger_replay.py:replay_ledger
   - src/openinvest/core/schemas.py:Activity
+  - src/openinvest/calc/fund_rules.py:expected_confirm_date
+  - src/openinvest/jobs/fund_confirm.py:run
 documents:
   endpoints: []
-  config_keys: []
+  config_keys:
+    - fund.confirm_lag_days
   symbols:
     - record_dividend
     - record_fee
     - record_split
     - place_fund_order
     - confirm_fund_order
+    - cancel_fund_order
     - replay_ledger
 ---
 
@@ -27,7 +31,9 @@ documents:
 - 状态：🟡 提议（2026-10-18；按 PR #472 评审修订：有状态回放、在途对全部估值方可见、确认 CAS 幂等、按类型的确认延迟、`schema_version` 命名、复权价核实），评审通过后实现（评审路线 C7）；
   **PR1 已实现（#479）**：Activity schema + `calc/ledger_replay.py:replay_ledger` + 消费方切换 + 回放不变量 + 复权价核实（见 D3/D4 的 PR1 注）；
   **PR2 已实现（#482）**：dividend / interest / fee / tax / split / return_of_capital 写入 + MCP/CLI + status 近 30 天分红利息 + `daily_prices.close_raw`
-  与估值价格口径（见 D4 的 PR2 注）
+  与估值价格口径（见 D4 的 PR2 注）；
+  **PR3 已实现（#490）**：场外基金两段式 `place_fund_order` / `confirm_fund_order` / `cancel_fund_order` + `fund_confirm` job + 在途金额进总资产与业绩回放
+  + status `pending_fund_orders`（见 D5 的 PR3 注）
 - 背景：2026-10-17 全面评审对照 Wealthfolio / Ghostfolio / Portfolio Performance / Sharesight：它们都有
   分红 / 利息 / 费用 / 税 / 拆股 / 退回本金 的活动类型；openInvest 的账本只有买卖存取，
   `grep dividend|tax` 在 src/ 零命中，场外基金按"下单即成交"记账（实际 T+1 按当日净值确认）。
@@ -147,6 +153,28 @@ status / `pnl_snapshot` / `holdings_digest` / `rebalance_plan` / 集中度 在 T
   一个生效，另一个返回 `already_confirmed`；`fund_order_cancelled` 对已确认的单子拒绝。PR3 在 ADR-016 的全路径审计表里
   为 `place_fund_order` / `confirm_fund_order`（手动与 job）/ `fund_order_cancelled` / `record_dividend` 等各加一行。
 - 旧行为（`buy` 直接记基金）保留可用，`buy` 对 `kind=fund` 且 symbol 是场外代码时打 warning 建议改用两段式。
+
+> **PR3 落地（与上面草案的差异 / 补充的决定）**：
+> - **`nav_date` = 定价日 T**（所有基金类型一样：申购按 T 日净值；15:00 北京时间前下单且当天是交易日 → T = 当日，否则下一交易日）。
+>   `expected_confirm_date` = T + `fund.confirm_lag_days[类型]` 个交易日，**只用于展示和超期提示**；`fund_confirm` 的触发条件是
+>   "`nav_date` ≤ 今天且 T 日净值已公布"，不是确认日到了——普通基金当晚净值一出就确认，QDII / FOF 净值晚几天公布就连续几晚重试。
+>   规则全在纯模块 `calc/fund_rules.py`；每条订单记 `calendar=weekday_only`、`fund_kind`、`lag_days`、`lag_source`（`profile` = 从基金概况
+>   取到类型；`default` = 取不到，status 提示"按 T+N 估计"）。基金类型：东方财富基金概况页的基金全称 / 简称 / 类型里带 QDII → `qdii`、带 FOF → `fof`。
+> - **没有 A 股节假日表**：T 落在休市日（如国庆）时，`confirm_fund_order` 顺延用之后第一个已公布的净值日（订单记 `nav_date_planned`，返回里说明）；
+>   预计确认日仍可能比券商晚几天——这是估计，不是承诺。
+> - **订单存 `holding.extra.pending_orders[]`**（状态 `placed → confirmed | cancelled`，与现金同一次 atomic write；在途单全留，已终结的每个基金行保留最近
+>   20 条，CAS 要靠它回答 `already_confirmed`）。没有这只基金就建一行 `kind=fund` `units=0` `proxy_kind=eastmoney_fund`；有在途单的基金行拒绝 `delete_holding`（force 也不行）。
+> - **流水日期**：`fund_order_placed` 的 `trade_date` = 下单日（北京），`settle_date` = 预计确认日，`nav_date` = 定价日；`fund_order_confirmed` / `cancelled` 的
+>   `trade_date` = 动作发生日（账户业绩按它换算成份额 / 退回现金），`nav_date` = 实际用的净值日。三者都是内部流（`external=False`，不进 TWR 分母）。
+>   决议↔成交匹配把 `fund_order_placed` 当一次 BUY（下单那一刻就是"执行了决议"），被取消的单剔除。
+> - **成本含申购费**：`units = (amount − fee) / nav`，`avg_cost` 按订单金额（不是 `amount − fee`）加权，所以申购费体现为浮亏而不是凭空消失。自动确认 `fee=0`
+>   （job 不知道券商实际收了多少）；要记费用，用 `confirm_fund_order --nav N --fee F` 在 job 之前手动确认。
+> - **在途金额按面值进总资产**：`utils.fx.total_portfolio_value`（status key `pending_fund:<币种>`）经 `PortfolioManager.pending_fund_orders()`；
+>   账户业绩回放用 `LedgerState.pending` 的同名读口（placed 当日 NAV 不变，confirmed 当日用份额 × 净值替换在途面值，开盘在途同样锚定当前状态）。
+>   `rebalance_plan` 把在途金额算在对应基金头上（否则刚下单的基金显示 0% 仓位，清单会建议再买一遍）；委员会的 `portfolio_summary` 多一行"在途申购"。
+> - **`fund_confirm` 的窗口**：需求是 21:30–23:00 每 30 分钟，单条 cron 表达不了"半点起、整点止"，实现取超集 `0,30 21-23 * * mon-fri`（21:00–23:30，6 次/晚）。
+>   job 失败（单笔确认抛异常）抛 RuntimeError → `job_runs` 记 `failed`；**注意 `job_watchdog` 目前只报停摆 / 卡死 / 超时 / 零抓取 / 新闻源断流，
+>   不会据 `failed` 行告警**（备份 job 的 docstring 同样写了"据此告警"，并不成立）——预计确认日已过仍没取到净值时，status 的一行人话会提示。
 
 ### D6 入口（agent 必须拥有全部功能）
 

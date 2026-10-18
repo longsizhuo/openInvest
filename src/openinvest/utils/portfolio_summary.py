@@ -83,6 +83,16 @@ def portfolio_summary_text(
         if ccy != "AUD":
             lines.append(f"  - {ccy} 现金: {amt:,.0f} {ccy}")
 
+    # 在途场外基金申购（ADR-027）：现金已扣、份额还没到，总资产已按面值含它——明说，免得 Risk 看到
+    # "总资产 > 现金 + 持仓"自己去对账，或把这只基金当成没仓位。没有 pending_fund_orders 的替身 = 没有在途
+    pending_fn = getattr(pm, "pending_fund_orders", None)
+    for o in (pending_fn() if callable(pending_fn) else []):
+        ccy = str(o.get("currency") or "CNY").upper()
+        amt = float(o.get("amount") or 0)
+        lines.append(
+            f"  - 在途申购 {o.get('symbol')}: {money(amt, base) if ccy == base else f'{amt:,.2f} {ccy}'}"
+            f"（现金已扣、份额预计 {o.get('expected_confirm_date')} 确认，已按面值含在总资产里）")
+
     # 持仓部分：遍历实际 holdings，按 unit_label / cost_currency 通用化展示
     real_holdings = [
         h for h in pm.holdings

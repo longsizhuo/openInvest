@@ -114,3 +114,11 @@ scheduler:
   # 外部心跳（dead-man switch）：healthchecks.io 式 ping URL，调度器每 5 分钟 GET 一次；空 = 不发。
   # URL 本身是凭据，推荐用 env INVEST_SCHEDULER_HEARTBEAT_URL 配，别提交进仓库。
   heartbeat_url: ""
+
+fund:
+  # 场外基金两段式（ADR-027 D5）：下单后第几个交易日确认份额（确认日 = 定价日 T + lag）。类型从东方财富基金概况推断，
+  # 取不到按 default。只写想改的键（与内置默认深合并）。dict 型，不能用 env 覆盖。
+  confirm_lag_days:
+    default: 1
+    qdii: 2
+    fof: 2

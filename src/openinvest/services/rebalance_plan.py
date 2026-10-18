@@ -3,7 +3,8 @@
 只出清单，不下单——人执行。计算体在 calc/rebalance.py（纯函数），本层只做取数：
 - 持仓 / 现金 / 策略：PortfolioManager
 - 现价：utils.quotes.get_quote（黄金 / 场外基金 / yfinance 同一入口）
-- 总资产：utils.fx.total_portfolio_value_cny（全仓唯一实现，占比分母与 status 同口径）
+- 总资产：utils.fx.total_portfolio_value_cny（全仓唯一实现，占比分母与 status 同口径；含在途场外基金申购的面值，
+  这部分算在对应基金头上，见 pending_value）
 - 现金折算：utils.fx.cash_total_in_base（与总资产的现金腿同口径，净负现金不截断）；基准币种：utils.base_currency
 
 口径：
@@ -114,6 +115,14 @@ def build_rebalance_plan(
     for c in sorted(c for c, r in cash_rates.items() if r is None):
         warnings.append(f"{c} 现金拉不到汇率，未计入")
 
+    # 在途场外基金申购（ADR-027）：总资产已按面值含它（fx.total_portfolio_value），占比就得算在这只基金头上——
+    # 否则刚下单的基金显示 0% 仓位，清单会建议再买一遍（总资产里却有这笔钱，分子分母对不上）
+    pending_value: Dict[str, float] = {}
+    for o in pm.pending_fund_orders():
+        r = fx.get_fx_rate(str(o.get("currency") or "CNY").upper(), base)
+        if r:
+            pending_value[o["symbol"]] = pending_value.get(o["symbol"], 0.0) + float(o["amount"]) * r
+
     positions: List[Dict[str, Any]] = []
     meta: Dict[str, Dict[str, Any]] = {}
     for s, a in managed.items():
@@ -124,11 +133,11 @@ def build_rebalance_plan(
         if units > 0:
             st = status.get(s)
             px = prices.get(s) if st == "ok" else (float(h.get("avg_cost") or 0) if st == "cost_fallback" else None)
-            value = units * px * rate if px and rate else None
+            value = units * px * rate + pending_value.get(s, 0.0) if px and rate else None
             if st == "cost_fallback":
                 warnings.append(f"{s} 无现价，按成本价计入总资产，不出买卖数量")
         else:
-            value = 0.0
+            value = pending_value.get(s, 0.0)
         if value is None:
             warnings.append(f"{s} 拉不到价格或汇率，未计入总资产，已从清单剔除")
             continue
@@ -152,11 +161,12 @@ def build_rebalance_plan(
 
     unmanaged = []
     for s, h in held.items():
-        if s in managed or h.get("is_tracking_only") or s not in status or status[s] not in ("ok", "cost_fallback"):
+        valued = status.get(s) in ("ok", "cost_fallback")
+        if s in managed or h.get("is_tracking_only") or not (valued or pending_value.get(s)):
             continue
         rate = fx.get_fx_rate(str(h.get("cost_currency") or "CNY").upper(), base)
-        px = prices.get(s) if status[s] == "ok" else float(h.get("avg_cost") or 0)
-        v = float(h.get("units") or 0) * px * rate if rate else 0.0
+        px = (prices.get(s) if status.get(s) == "ok" else float(h.get("avg_cost") or 0)) if valued else 0.0
+        v = (float(h.get("units") or 0) * px * rate if rate and px else 0.0) + pending_value.get(s, 0.0)
         unmanaged.append({"symbol": s, "name": h.get("display_name") or s,
                           "current_pct": round(v / total * 100, 2), "note": "不在 target_assets，只计入总资产，不出买卖建议"})
 

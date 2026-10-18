@@ -13,10 +13,11 @@ v1 → v2 重构（2026-05-06）：
 from __future__ import annotations
 
 import logging
+import math
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from openinvest.core.memory_store import MemoryStore, _DocTx
 from openinvest.core.schemas import validate_portfolio
@@ -493,6 +494,11 @@ class PortfolioManager:
                 raise ValueError(f"symbol {symbol} 不在持仓")
             units = float(target.get("units", 0) or 0)
             is_tracking = bool(target.get("is_tracking_only", False))
+            in_transit = [o for o in _pending_of(target) if o.get("status") == "placed"]
+            if in_transit:   # 现金已扣、份额未到：删行 = 在途金额从账上凭空消失，force 也不放行
+                raise ValueError(
+                    f"{symbol} 有 {len(in_transit)} 笔在途申购单未确认（共 {sum(float(o.get('amount') or 0) for o in in_transit):,.2f}）："
+                    f"先 confirm_fund_order 或 cancel_fund_order，否则这笔钱会从账上消失")
             if not is_tracking and units > 0 and not force:
                 raise ValueError(
                     f"{symbol} 持仓 {units} > 0，请先 sell 或加 --force 强删"
@@ -549,6 +555,7 @@ class PortfolioManager:
         if symbol.strip().upper() == _GOLD_SYMBOL:
             symbol = _GOLD_SYMBOL   # 'gc=f' 与已有 'GC=F' 行是同一个标的：别因大小写新建出第二行
         cost_cny = units * price  # 金额单位 = ccy（字段名是历史遗留）
+        fund_warning = _fund_buy_warning(self, symbol, kind) if source_type == "cash_deduct" else None
         try:
             with self._ledger_tx(idempotency_key) as p:
                 holdings = list(p.get("holdings") or [])
@@ -604,11 +611,15 @@ class PortfolioManager:
             "symbol": symbol, "units": units, "price": price,
             "currency": ccy, "source": source, "funding_source": source_type,
         })
-        return {
+        out: Dict[str, Any] = {
             "status": "ok", "action": action_kind, "symbol": symbol,
             "units_added": units, "price": price, "currency": ccy,
             "cost_cny_estimate": cost_cny, "funding_source": source_type,
         }
+        if fund_warning:
+            log.warning(fund_warning)
+            out["warning"] = fund_warning
+        return out
 
     def sell(
         self,
@@ -968,6 +979,241 @@ class PortfolioManager:
             out["excess_over_cost"] = excess
         return out
 
+    # ---------- ADR-027 PR3：场外基金两段式（下单扣现金记在途 → 确认日按净值到账）----------
+    # 订单存在基金持仓行的 ``extra.pending_orders[]``（与现金同一次 atomic write）：placed → confirmed | cancelled。
+    # 状态转换是 CAS（检查与写入在同一个 with_portfolio_tx 里，ADR-016 #127 同款）：手动 confirm 与 fund_confirm job 并发
+    # 只有一个生效，另一个读到非 placed 就原样返回 already_confirmed / cancelled，不改任何东西。
+    # 在途金额对所有估值方可见的唯一读口是 :meth:`pending_fund_orders`（utils.fx.total_portfolio_value 经它按面值计入）。
+
+    def pending_fund_orders(self) -> List[Dict[str, Any]]:
+        """所有 ``status=placed`` 的在途申购单（浅拷贝，每条带 ``symbol``）。估值 / status / 业绩读在途的**唯一**入口——
+        不允许任何调用方自己去读 ``extra.pending_orders``。"""
+        return [{**o, "symbol": h.get("symbol")} for h in self.holdings for o in _pending_of(h)
+                if o.get("status") == "placed"]
+
+    def place_fund_order(
+        self,
+        symbol: str,
+        amount: float,
+        currency: str = "CNY",
+        order_ts: Any = None,
+        note: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        *,
+        source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """场外基金申购第一段：现金 −amount，订单以 ``placed`` 记在基金持仓行的 ``extra.pending_orders``（没有这只基金就建一行
+        ``kind=fund`` ``units=0``），流水记 ``fund_order_placed``（现金 → 在途，不是外部现金流）。份额等确认日按净值到账
+        （:meth:`confirm_fund_order` / ``fund_confirm`` job）。总资产在这一步前后不变——在途金额按面值计入。
+
+        - ``symbol``：``FUND:<六位代码>``（也认裸六位 / ``.OF``）；``currency`` 只接受该基金持仓的计价币种（场外基金 = CNY）
+        - ``order_ts``：下单时刻（datetime 或 ISO 字符串，缺省现在；naive 按北京时间）。15:00 前按当日净值、之后按下一交易日
+          （定价日 ``nav_date``）；预计确认日 = 定价日 + lag 个交易日，lag 按基金类型取 ``fund.confirm_lag_days``，类型从东方财富
+          基金概况推断（QDII / FOF），取不到按 default 并标 ``lag_source=default``；交易日历只有周一到周五（``calendar=weekday_only``）
+        - 基金概况在锁外联网取；取不到不挡下单
+        - idempotency_key 语义同 buy（ADR-016）。非法参数 / 现金不足抛 ValueError。"""
+        import uuid
+
+        from openinvest.calc import fund_rules as fr
+        from openinvest.core.config import load_config
+        from openinvest.utils.eastmoney_fund import canonical_fund_symbol, extract_fund_code, fetch_fund_profile
+        from openinvest.utils.quotes import is_eastmoney_fund
+
+        raw = str(symbol or "").strip()
+        code = extract_fund_code(raw)
+        # 带 .SS/.SZ 后缀的六位码是交易所标的（如 510300.SS 沪深300 ETF），不是场外基金；
+        # 只有已有 kind=fund 的老行（历史误标 123456.SZ）才认
+        legacy_row = any(x.get("symbol") == raw and is_eastmoney_fund(x) for x in self.holdings)
+        if code is None or (raw.upper().endswith((".SS", ".SZ")) and not legacy_row):
+            raise ValueError(f"{symbol!r} 不是场外基金代码（写 FUND:<六位代码>）；沪深交易所的 ETF / 股票请用 buy")
+        sym = f"FUND:{code}"
+        ccy = _clean_ccy(currency)
+        amount = round(float(amount), 2)
+        if not amount > 0:
+            raise ValueError("amount 必须 > 0")
+        ts = _parse_order_ts(order_ts)
+        profile = fetch_fund_profile(sym)            # 联网：必须在锁外
+        kind = fr.classify_fund_kind(*profile.values()) if profile else "default"
+        lag = fr.resolve_lag_days(kind if profile else None, load_config().fund.confirm_lag_days)
+        order = {
+            "order_id": uuid.uuid4().hex, "amount": amount, "currency": ccy,
+            "order_date": ts.date().isoformat(), "order_ts": ts.isoformat(timespec="seconds"),
+            "expected_confirm_date": fr.expected_confirm_date(ts, lag).isoformat(),
+            "nav_date": fr.pricing_date(ts).isoformat(), "status": "placed",
+            "calendar": fr.CALENDAR_WEEKDAY_ONLY, "fund_kind": kind, "lag_days": lag,
+            "lag_source": "profile" if profile else "default",
+            **({"note": note} if note else {}),
+        }
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                holdings = list(p.get("holdings") or [])
+                h = next((x for x in holdings if canonical_fund_symbol(str(x.get("symbol") or "")) == sym
+                          and (str(x.get("symbol") or "").upper().startswith("FUND:") or is_eastmoney_fund(x))), None)
+                held_ccy = str(h.get("cost_currency") or "CNY").upper() if h else "CNY"
+                if ccy != held_ccy:
+                    raise ValueError(f"场外基金按人民币净值计价：{sym} 的申购币种必须是 {held_ccy}（当前 {ccy}）")
+                cash = dict(p.get("cash") or {})
+                current = float(cash.get(ccy, 0) or 0)
+                if current < amount:
+                    raise ValueError(f"{ccy} 现金 {current} < 申购金额 {amount}（子弹不足）")
+                cash[ccy] = round(current - amount, 2)
+                if h is None:
+                    h = {"symbol": sym, "kind": "fund", "units": 0.0, "unit_label": "份", "avg_cost": 0.0,
+                         "cost_currency": "CNY", "proxy_kind": "eastmoney_fund"}
+                    holdings.append(h)
+                else:
+                    h.update(kind="fund", proxy_kind="eastmoney_fund")   # symbol 是 FUND: 的行一定是场外基金口径
+                    if h.get("is_tracking_only"):
+                        h["is_tracking_only"] = False                    # 钱已经进去了，不再是追踪仓
+                booked = str(h["symbol"])   # 老行可能是 123456.SZ 这类误标写法：流水 / 返回都用持仓行自己的 symbol，回放才对得上
+                h["extra"] = {**(h.get("extra") or {}), _PENDING_KEY: _keep_recent(_pending_of(h) + [order])}
+                p["holdings"] = holdings
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
+        self._reload()
+        self.store.append_history(_activity_row(
+            "fund_order_placed", currency=ccy, day=order["order_date"], source=source, key=idempotency_key, note=note,
+            symbol=booked, amount=amount, cash_effect=-amount, units_effect=0.0, settle_date=order["expected_confirm_date"],
+            nav_date=order["nav_date"], order_id=order["order_id"], calendar=order["calendar"], fund_kind=kind,
+            lag_days=lag, lag_source=order["lag_source"]))
+        return {
+            "status": "ok", "action": "fund_order_placed", "symbol": booked, **{
+                k: order[k] for k in ("order_id", "amount", "currency", "order_date", "nav_date",
+                                      "expected_confirm_date", "calendar", "fund_kind", "lag_days", "lag_source")},
+            "new_balance": self.cash_amount(ccy),
+            "note": ("预计确认日按周一到周五估计（没有 A 股节假日表）"
+                     + ("；基金类型没取到，按默认延迟估计" if not profile else "")
+                     + "。份额由 fund_confirm job 在定价日净值公布后自动确认，也可手动 confirm_fund_order。"),
+        }
+
+    def confirm_fund_order(
+        self,
+        order_id: str,
+        nav: Optional[float] = None,
+        fee: float = 0.0,
+        *,
+        confirm_date: Optional[str] = None,
+        source: str = "skill_cli",
+    ) -> Dict[str, Any]:
+        """场外基金申购第二段：把在途单按净值换成份额。``units += (amount − fee) / nav``，``avg_cost`` 加权（成本含申购费），
+        订单 → ``confirmed``，流水记 ``fund_order_confirmed``（在途 → 份额，现金不动）。
+
+        - ``nav`` 缺省：取东方财富历史净值里订单定价日（``nav_date``）的单位净值；定价日净值还没公布 → ``{"status": "pending_nav"}``
+          什么都不改（job 下一次再试）；定价日休市 / 无净值而更晚的净值已公布 → 顺延用之后第一个净值（返回里标 ``nav_date_planned``）
+        - ``fee``：申购费（从订单金额里扣，不另扣现金）
+        - ``confirm_date``：确认动作的发生日（缺省今天，北京时间；账户业绩按它把份额记进 NAV）
+        - **CAS**：单子已确认 → ``already_confirmed``、已取消 → ``cancelled``，原样返回、不改任何东西、不报错；
+          订单不存在抛 ValueError。联网取净值在锁外，状态检查与写入在同一个 with_portfolio_tx 里。"""
+        from openinvest.calc import fund_rules as fr
+        from openinvest.utils.eastmoney_fund import fetch_fund_nav_history
+
+        fee = float(fee or 0)
+        if not math.isfinite(fee) or fee < 0:
+            raise ValueError("fee 必须 ≥ 0")
+        if nav is not None:
+            nav = float(nav)
+            if not (math.isfinite(nav) and nav > 0):
+                raise ValueError("nav 必须 > 0")
+        day = _activity_day(confirm_date) if confirm_date else datetime.now(fr.CN_TZ).date().isoformat()
+        self._reload()   # 别的进程（job / 另一个 agent）可能刚写过
+        sym, order = self._locate_order(order_id)
+        if order.get("status") != "placed":
+            return _terminal_order_result(sym, order)
+        planned, used_date = str(order.get("nav_date") or ""), str(order.get("nav_date") or "")
+        if nav is None:
+            history = fetch_fund_nav_history(sym)       # 联网：必须在锁外；未复权的真实单位净值
+            picked = fr.pick_nav(history or [], planned)
+            if picked is None:
+                return {"status": "pending_nav", "order_id": order_id, "symbol": sym, "nav_date": planned,
+                        "reason": "nav_not_published" if history else "nav_fetch_failed",
+                        "note": f"{planned} 的单位净值还没公布" if history else "净值接口取不到，稍后重试或手填 nav"}
+            used_date, nav = picked
+        try:
+            with self.with_portfolio_tx() as p:
+                holdings = list(p.get("holdings") or [])
+                h, o = _find_order(holdings, order_id)
+                if o is None:
+                    raise ValueError(f"找不到在途单 {order_id}")
+                if o.get("status") != "placed":         # CAS：别人先到了
+                    raise _NoChange(_terminal_order_result(str(h.get("symbol")), o))
+                amount, ccy = float(o["amount"]), str(o.get("currency") or "CNY").upper()
+                if fee >= amount:
+                    raise ValueError(f"fee {fee} 必须小于申购金额 {amount}")
+                units = round((amount - fee) / nav, 6)
+                if not units > 0:
+                    raise ValueError("申购金额太小，换不到 0.000001 份")
+                old_units, old_avg = float(h.get("units", 0) or 0), float(h.get("avg_cost", 0) or 0)
+                new_units = old_units + units
+                h["units"] = round(new_units, 6)
+                h["avg_cost"] = round((old_units * old_avg + amount) / new_units, 6)
+                o.update(status="confirmed", confirmed_on=day, nav=nav, nav_date=used_date, units=units,
+                         **({"fee": fee} if fee else {}))
+                if used_date != planned:
+                    o["nav_date_planned"] = planned
+                h["extra"] = {**(h.get("extra") or {}), _PENDING_KEY: _keep_recent(_pending_of(h))}
+                p["holdings"] = holdings
+                expected, units_now, avg_now = o.get("expected_confirm_date"), h["units"], h["avg_cost"]
+        except _NoChange as nc:
+            return nc.result
+        self._reload()
+        self.store.append_history(_activity_row(
+            "fund_order_confirmed", currency=ccy, day=day, source=source, key=None, note=None,
+            symbol=sym, amount=amount, fee=fee or None, price=nav, units=units, cash_effect=0.0, units_effect=units,
+            settle_date=expected, nav_date=used_date, order_id=order_id))
+        out: Dict[str, Any] = {
+            "status": "ok", "action": "fund_order_confirmed", "order_id": order_id, "symbol": sym, "amount": amount,
+            "fee": fee, "nav": nav, "nav_date": used_date, "units": units, "total_units": units_now,
+            "avg_cost": avg_now, "confirm_date": day,
+        }
+        if used_date != planned:
+            out["nav_date_planned"] = planned
+            out["note"] = f"{planned} 没有净值（休市 / 节假日），按之后第一个已公布的净值日 {used_date} 确认"
+        return out
+
+    def cancel_fund_order(self, order_id: str, *, cancel_date: Optional[str] = None,
+                          source: str = "skill_cli") -> Dict[str, Any]:
+        """撤销在途申购单：只有 ``placed`` 能撤，现金 +amount（在途退回），流水记 ``fund_order_cancelled``。
+        已确认抛 ValueError（份额已到账，要卖请走 sell）；已撤销 → ``{"status": "cancelled"}`` 原样返回（幂等）。"""
+        from openinvest.calc import fund_rules as fr
+        day = _activity_day(cancel_date) if cancel_date else datetime.now(fr.CN_TZ).date().isoformat()
+        self._reload()
+        sym, order = self._locate_order(order_id)
+        if order.get("status") == "cancelled":
+            return _terminal_order_result(sym, order)
+        try:
+            with self.with_portfolio_tx() as p:
+                holdings = list(p.get("holdings") or [])
+                h, o = _find_order(holdings, order_id)
+                if o is None:
+                    raise ValueError(f"找不到在途单 {order_id}")
+                if o.get("status") == "cancelled":
+                    raise _NoChange(_terminal_order_result(sym, o))
+                if o.get("status") != "placed":
+                    raise ValueError(f"在途单 {order_id} 已确认（{o.get('units')} 份已到账），不能撤销；要卖出请用 sell")
+                amount, ccy = float(o["amount"]), str(o.get("currency") or "CNY").upper()
+                o.update(status="cancelled", cancelled_on=day)
+                h["extra"] = {**(h.get("extra") or {}), _PENDING_KEY: _keep_recent(_pending_of(h))}
+                cash = dict(p.get("cash") or {})
+                cash[ccy] = round(float(cash.get(ccy, 0) or 0) + amount, 2)
+                p["holdings"] = holdings
+                p["cash"] = cash
+        except _NoChange as nc:
+            return nc.result
+        self._reload()
+        self.store.append_history(_activity_row(
+            "fund_order_cancelled", currency=ccy, day=day, source=source, key=None, note=None,
+            symbol=sym, amount=amount, cash_effect=amount, units_effect=0.0, order_id=order_id))
+        return {"status": "ok", "action": "fund_order_cancelled", "order_id": order_id, "symbol": sym,
+                "amount": amount, "currency": ccy, "new_balance": self.cash_amount(ccy)}
+
+    def _locate_order(self, order_id: str) -> Tuple[str, Dict[str, Any]]:
+        """(基金 symbol, 订单 dict)——读当前快照视图；找不到抛 ValueError。"""
+        h, o = _find_order(list(self.portfolio.get("holdings") or []), order_id)
+        if o is None:
+            raise ValueError(f"找不到在途单 {order_id}（status 的 pending_fund_orders 里有当前在途单；已终结的单子只保留最近 {_KEEP_TERMINAL} 条）")
+        return str(h.get("symbol")), o
+
     # ---------- 内部 ----------
 
     def _reload(self) -> None:
@@ -1072,6 +1318,79 @@ def _stored_raw_close(pm: "PortfolioManager", symbol: str, day: str) -> Optional
         store.conn.close()
 
 
+_PENDING_KEY = "pending_orders"
+_KEEP_TERMINAL = 20   # 每个基金行保留最近 N 条已终结（confirmed / cancelled）的订单：CAS 要靠它回答 already_confirmed
+_TERMINAL_STATUS = {"confirmed": "already_confirmed", "cancelled": "cancelled"}
+
+
+class _NoChange(Exception):
+    """CAS 读到订单已不是 placed —— 在锁内抛出，中止事务（不提交、不重写文件），``result`` 原样返回给调用方。"""
+    def __init__(self, result: Dict[str, Any]):
+        super().__init__(result.get("status"))
+        self.result = result
+
+
+def _pending_of(h: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """基金持仓行的订单列表（所有状态；``holding.extra.pending_orders``）。"""
+    return [o for o in ((h.get("extra") or {}).get(_PENDING_KEY) or []) if isinstance(o, dict)]
+
+
+def _keep_recent(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """在途单全留，已终结的只留最近 N 条（订单是追加的，后面的更新）。"""
+    live = [o for o in orders if o.get("status") == "placed"]
+    done = [o for o in orders if o.get("status") != "placed"][-_KEEP_TERMINAL:]
+    keep = {id(o) for o in live + done}
+    return [o for o in orders if id(o) in keep]
+
+
+def _find_order(holdings: List[Dict[str, Any]], order_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    for h in holdings:
+        for o in _pending_of(h):
+            if o.get("order_id") == order_id:
+                return h, o
+    return None, None
+
+
+def _terminal_order_result(symbol: str, o: Dict[str, Any]) -> Dict[str, Any]:
+    """CAS 失败（订单已终结）时原样返回的结果：不改账，调用方据 status 判断。"""
+    status = _TERMINAL_STATUS.get(str(o.get("status")), str(o.get("status")))
+    out: Dict[str, Any] = {"status": status, "order_id": o.get("order_id"), "symbol": symbol, "amount": o.get("amount")}
+    if status == "already_confirmed":
+        out.update(units=o.get("units"), nav=o.get("nav"), nav_date=o.get("nav_date"), confirmed_on=o.get("confirmed_on"),
+                   note="这笔单已确认过，本次未重复入账")
+    else:
+        out.update(cancelled_on=o.get("cancelled_on"), note="这笔单已撤销，本次未改账")
+    return out
+
+
+def _parse_order_ts(v: Any) -> datetime:
+    """下单时刻 → 带北京时区的 datetime。None = 现在；datetime / ISO 字符串（naive 按北京时间，只有日期 = 当日 00:00）。"""
+    from openinvest.calc import fund_rules as fr
+    if v is None or v == "":
+        return datetime.now(fr.CN_TZ)
+    if isinstance(v, str):
+        try:
+            v = datetime.fromisoformat(v.strip())
+        except ValueError:
+            raise ValueError(f"order_ts 必须是 ISO 时间（如 2026-10-19T14:30:00，按北京时间）: {v!r}") from None
+    if not isinstance(v, datetime):
+        raise ValueError(f"order_ts 必须是 datetime 或 ISO 字符串: {v!r}")
+    return fr.to_cn(v)
+
+
+def _fund_buy_warning(pm: "PortfolioManager", symbol: str, kind: str) -> Optional[str]:
+    """buy 记场外基金（现金扣款）时的提醒：这样记等于"下单即成交"，下单到确认之间总资产会假跌——建议改用两段式。不拒绝。"""
+    from openinvest.utils.eastmoney_fund import extract_fund_code
+    from openinvest.utils.quotes import is_eastmoney_fund
+    held = pm.find_holding(symbol)
+    if (held is not None and is_eastmoney_fund(held)) or (
+            extract_fund_code(symbol) is not None and (str(kind).lower() == "fund" or symbol.upper().startswith("FUND:"))):
+        return (f"{symbol} 是场外基金：buy 按「下单即成交」记账，但实际是 T+1 左右按净值确认份额，"
+                f"中间总资产会假跌一笔。建议改用 place_fund_order（下单扣现金记在途）+ confirm_fund_order（确认日按净值到账，"
+                f"fund_confirm job 会自动确认）。本次已按 buy 记账")
+    return None
+
+
 def _now_iso_local() -> str:
     """本地时区 ISO 时间戳——history.jsonl 的 ts_origin 口径（与 scripts/skill.py 一致）"""
     from datetime import timezone
@@ -1164,6 +1483,14 @@ def _render_portfolio_body_v2(p) -> str:
             if channel:
                 line += f"（渠道 {channel}）"
             lines.append(line)
+        lines.append("")
+
+    in_transit = [(h, o) for h in holdings for o in _pending_of(h) if o.get("status") == "placed"]
+    if in_transit:
+        lines.append("## 在途申购（现金已扣、份额待确认；总资产按面值计入）")
+        for h, o in in_transit:
+            lines.append(f"- `{h['symbol']}`: {float(o.get('amount') or 0):,.2f} {o.get('currency', '')}，"
+                         f"下单 {o.get('order_date')}，预计 {o.get('expected_confirm_date')} 确认")
         lines.append("")
 
     if tracking_holdings:
