@@ -115,6 +115,12 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
                                                         places the orders; quote amounts from the JSON
    "should I buy/sell X / analyze X / 该不该买卖X"    → committee protocol ↓
    "track AAPL / I want to watch TSLA / 跟踪苹果"     → see references/adding-assets.md
+   "alert me if gold falls below 900 / tell me when
+    X drops 3% in a day / 跌破N提醒我 / 日跌超3%报警"  → run.sh track_asset --symbol X
+                                                        --alert-price-below 900 | --alert-day-drop-pct 3
+                                                        (MCP track_asset alert_* args) — then tell
+                                                        the user alerts are only SENT when the server
+                                                        has INVEST_EVENT_ALERT=1 (see Constraints)
    "I already held 3000 X before using this /
     补录我原来就有的持仓"                              → run.sh status first — never re-add a
                                                         symbol it lists (double count); else
@@ -251,6 +257,10 @@ run_committee — schemas auto-discovered; call them directly, no table lookup n
 `track_asset` takes an optional `target_pct` (0–1 share of total assets, read by `rebalance_plan`) and
 `set_allocations` a `target_pcts` map — use them instead of editing strategy.md; the weights must sum
 to ≤ `target_allocation_stock` (a write that exceeds it is rejected with the current sum).
+Per-asset alert lines: `track_asset` takes `alert_price_above` / `alert_price_below` / `alert_day_drop_pct` /
+`alert_day_rise_pct` / `alert_drawdown_from_cost_pct`; `set_allocations` takes an `alerts` map
+(`{symbol: {rule: value}}`, a null value clears that rule, a null symbol clears all its rules). `status`
+shows each line and its distance on `all_holdings[].alerts` (e.g. "距 price_below 还有 3.2%").
 
 **CLI/REST agents**, or long-tail operations MCP does not cover (trades intent flow /
 config whitelist / events / holdings import / gold-specific endpoints) → read
@@ -332,6 +342,14 @@ a signal worth recording.
   `units` = grams, `price` = CNY/gram, `currency=CNY`, `kind=metal`, `unit_label=克`. A USD/ounce booking
   is rejected (the error shows the correct form) — convert the quote first (USD/oz ÷ 31.1035 × USDCNY),
   never retry with another currency to get it through.
+- **Per-asset alert lines (`alerts`) are only delivered when the server runs with `INVEST_EVENT_ALERT=1`
+  (default off, set by the owner on 2026-09-10 because event alerts were too noisy).** Without it a hit is
+  logged to the event store and nothing is sent — so after setting a line, say that plainly instead of
+  promising a notification, and never turn the switch on for the user (it is a server env var, not a tool
+  argument). `price_*` lines are in `status.current_price`'s unit (held: its cost currency, gold booking =
+  CNY per gram; tracked-only: the quote source's own price, e.g. `GC=F` in USD/oz); `*_pct` lines are
+  percentage points (3 = 3%), **not** the 0–1 fractions `target_pct` uses; `drawdown_from_cost_pct` only
+  works for assets the user holds. Each line re-alerts at most once per 24h and never starts a committee run.
 - **Do not run `daily_report` proactively in conversation** — unless the user explicitly says "run the deep analysis" / "run full report"
   or you are setting up the daily cron. That path burns DeepSeek tokens. In conversation, single-asset `run_committee` is enough.
 - **Never fabricate live prices.** Always go through `run.sh status` or `live_prices`. yfinance may return
