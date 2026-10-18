@@ -309,6 +309,65 @@ def test_macro_soft_anchor_drift_fails_loudly(monkeypatch):
         bc.build_cio_prompt_macro_soft({"symbol": "QQQ"})
 
 
+# ---------- 评审 #460：macro_shared / 对照轮数闸 / 共用多数判定 ----------
+
+def _health(tmp_path, subdir):
+    return parse_committee_text((tmp_path / "memory" / subdir / DAY / "AAPL.md").read_text(encoding="utf-8"))["input_health"]
+
+
+def test_macro_shared_true_only_when_arm_macro_is_the_one_in_the_control_transcript(monkeypatch, tmp_path):
+    _install_stubs(monkeypatch, tmp_path, [V("HOLD")] * 12)
+    res = bc.run_one_day(DAY, ["AAPL"])                                   # 对照臂真跑 Macro
+    shared = res["macro_view"]
+    bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.SEALED_ARM_SUBDIR, votes=3, macro_view_override=shared)
+    bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.DEBATE_ARM_SUBDIR, max_rounds_override=4,
+                   macro_view_override=shared, arm_health={"arm": "debate_r4"})
+    bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.MACROSOFT_ARM_SUBDIR, macro_view_override=shared,
+                   arm_health={"arm": "macrosoft_r1"})
+    for sub in (bc.SEALED_ARM_SUBDIR, bc.DEBATE_ARM_SUBDIR, bc.MACROSOFT_ARM_SUBDIR):
+        assert _health(tmp_path, sub)["macro_shared"] is True, sub
+    assert "macro_shared" not in _health(tmp_path, ".backtest")            # 对照臂落盘格式不变
+
+
+def test_macro_shared_false_when_arm_reran_macro_or_control_transcript_is_missing(monkeypatch, tmp_path):
+    _install_stubs(monkeypatch, tmp_path, [V("HOLD")] * 8)
+    # 情形 1：对照臂中途失败重跑——先落盘的标的是上一次的 Macro，臂拿到的是这次的另一份
+    bc.run_one_day(DAY, ["AAPL"])
+    bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.MACROSOFT_ARM_SUBDIR, macro_view_override="ANOTHER MACRO DRAW",
+                   arm_health={"arm": "macrosoft_r1"})
+    assert _health(tmp_path, bc.MACROSOFT_ARM_SUBDIR)["macro_shared"] is False
+    # 情形 2：对照臂整天被续跑跳过（没有 macro_view 可借）→ 臂自己重跑 Macro；这里模拟成对照 transcript 不含这份 macro
+    import shutil
+    shutil.rmtree(tmp_path / "memory" / ".backtest")
+    bc.run_one_day(DAY, ["AAPL"], out_subdir=bc.SEALED_ARM_SUBDIR, votes=3)
+    assert _health(tmp_path, bc.SEALED_ARM_SUBDIR)["macro_shared"] is False    # 核对不了也记 False
+    assert _health(tmp_path, bc.SEALED_ARM_SUBDIR)["final_round"] == 1          # sealed 臂记下实际轮数
+
+
+def test_arms_refuse_to_start_when_control_rounds_env_is_not_1(monkeypatch):
+    seen: List[Dict[str, Any]] = []
+
+    def fake(d, syms, **kw):
+        seen.append(kw)
+        return {"date": d, "macro_view": "M", "verdicts": {s: {"verdict": "HOLD"} for s in syms}}
+
+    for flag in ("--sealed-arm", "--debate-arm", "--macro-soft-arm"):
+        monkeypatch.setenv("INVEST_MAX_DEBATE_ROUNDS", "2")
+        with pytest.raises(SystemExit, match="INVEST_MAX_DEBATE_ROUNDS"):
+            _prospective_main(monkeypatch, [flag], fake)
+    assert seen == [], "拒绝发生在花钱之前：连对照臂都没跑"
+    # 没开任何试跑臂：对照臂行为不变，env 照旧可用（Optuna 之类）
+    _prospective_main(monkeypatch, [], fake)
+    assert len(seen) == 1
+    # env = 1 或未设：放行
+    seen.clear()
+    monkeypatch.setenv("INVEST_MAX_DEBATE_ROUNDS", "1")
+    _prospective_main(monkeypatch, ["--sealed-arm"], fake)
+    monkeypatch.delenv("INVEST_MAX_DEBATE_ROUNDS")
+    _prospective_main(monkeypatch, ["--sealed-arm"], fake)
+    assert len(seen) == 4
+
+
 # ---------- main()：flag 约束 + 调度顺序 ----------
 
 def test_sealed_flags_require_prospective_and_min_n(monkeypatch):

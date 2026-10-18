@@ -58,7 +58,7 @@ verdict_review / dreaming / #141 样本计数都只读 `.backtest`,碰不到它�
 | `--debate-arm` | `memory/.backtest_debate/<今天>/` | rounds=4 单次抽样（= live 日报配置） |
 | `--macro-soft-arm` | `memory/.backtest_macrosoft/<今天>/` | CIO 规则 2 换成“Macro risk_off 且 STRENGTH<8 时不否决、金额 ×(10−STRENGTH)/10”（#461；运行期 patch，live prompt 不变；锚点失效 → 只跳过这一臂） |
 
-落盘：Input Health 多 `arm` 标签（`sealed_n3` / `debate_r4` / `macrosoft_r1`）、`macro_signal` / `macro_strength`，sealed 另有 `votes` / `flip` / `split`，
+落盘：Input Health 多 `arm` 标签（`sealed_n3` / `debate_r4` / `macrosoft_r1`）、`macro_signal` / `macro_strength` / `macro_shared`（这行的 macro 是否确是对照臂同日同标的那份，不是的复盘时剔掉），sealed 另有 `votes` / `flip` / `split`，
 debate 另有 `final_round` / `converged`；同日已落盘的标的跳过（断点续跑）；sealed 臂任一次抽样失败 → 该标的不落盘。对照臂、T2 臂、live 裁决一个字节都不变
 （`tests/test_sealed_arm.py` 守）。
 
@@ -72,6 +72,7 @@ debate 另有 `final_round` / `converged`；同日已落盘的标的跳过（断
 30 22 * * * export PATH="$HOME/.local/bin:$PATH"; cd /home/ubuntu/projects-review/invest && BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective --t2-confidence-arm --sealed-arm --debate-arm --macro-soft-arm --assets "$(uv run python -c "import yaml; print(','.join(yaml.safe_load(open('experiments/paper_fleet/universe.yml'))['symbols']))")" >> memory/.backtest/fleet_daily.log 2>&1
 ```
 
+- 开任一试跑臂时 `INVEST_MAX_DEBATE_ROUNDS` 必须未设或为 1，否则直接退出（花钱前）——对照 / macro-soft 臂读它，sealed / debate 臂固定轮数
 - 实验开跑后别改 `--sealed-n`(同一目录混不同 N 的行不可比;复盘报告会按 `arm` 标签分开计数提示)
 - 墙钟:sealed 与 debate 臂各约为对照臂的 3 倍(标的间并发不变,同标的的抽样 / 辩论轮次串行)
 - 备份:`jobs/backup.py` 的 `.backtest*` 前缀规则自动覆盖三个新目录(周日全量带上)

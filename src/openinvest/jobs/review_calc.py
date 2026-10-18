@@ -698,12 +698,45 @@ def arm_vote_verdicts(r: VerdictReview) -> List[str]:
     return [str(v.get("verdict") or "UNCLEAR").upper() for v in votes if isinstance(v, dict)]
 
 
+def aggregate_votes(votes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """N 次独立抽样 → 一条聚合裁决（纯函数，无 IO；sealed 臂的写侧 scripts/backtest_committee 与读侧
+    vote_stability 共用这一份，多数判定只在这里定义一次）。
+
+    votes: [{"verdict": str, "confidence": float, "alloc": float}, ...]，按抽样顺序。
+    - verdict：严格多数（票数 > N/2；N=3 即 ≥2 票相同）。没有多数（N=3 三者各异、N=4 的 2:2 …）
+      → HOLD 且 split=True。
+    - confidence := 最大票占比（N=3：1.0 / 0.67；三者各异 0.33），即用投票分裂度代替 CIO 自报分。
+    - alloc := 多数票那几次金额的中位数；HOLD（含 split）恒 0（HOLD 不带建议金额）。
+    - flip：N 次裁决的方向类（EXPECTED_DIRECTION；UNCLEAR=none）不全相同——与 A4
+      （experiments/verdict_variance）的翻转口径同一把尺子，数字可直接对比。
+    - rep：代表票下标 = 多数票里最早的一次（split 取 0）；落盘的 transcript 正文取它。
+    """
+    import statistics
+    n = len(votes)
+    if n < 1:
+        raise ValueError("aggregate_votes 需要至少 1 票")
+    top_verdict, top = Counter(v["verdict"] for v in votes).most_common(1)[0]
+    split = top * 2 <= n
+    verdict = "HOLD" if split else top_verdict
+    majority = [i for i, v in enumerate(votes) if v["verdict"] == top_verdict]
+    alloc = 0 if verdict == "HOLD" else round(statistics.median(votes[i]["alloc"] for i in majority))
+    dirs = {EXPECTED_DIRECTION.get(v["verdict"], UNCLEAR_DIRECTION) for v in votes}
+    return {
+        "verdict": verdict,
+        "confidence": round(top / n, 2),
+        "alloc": alloc,
+        "split": split,
+        "flip": len(dirs) > 1,
+        "rep": 0 if split else majority[0],
+    }
+
+
 def _vote_tier(votes: List[str]) -> str:
-    """全票一致 / 严格多数 / 无严格多数（聚合成 HOLD）。与 backtest_committee.aggregate_votes 同定义。"""
-    top = max(votes.count(v) for v in set(votes))
-    if top == len(votes):
+    """全票一致 / 严格多数 / 无严格多数（聚合成 HOLD）。多数判定直接用 aggregate_votes，不另写一份。"""
+    if len(set(votes)) == 1:
         return "unanimous"
-    return "split" if top * 2 <= len(votes) else "majority"
+    agg = aggregate_votes([{"verdict": v, "alloc": 0} for v in votes])
+    return "split" if agg["split"] else "majority"
 
 
 def _rate_ci(k: int, n: int) -> Dict[str, Any]:
@@ -749,8 +782,15 @@ def vote_stability(arm: List[VerdictReview], control: Iterable[VerdictReview] = 
 
 
 def _arm_row_ok(r: VerdictReview) -> bool:
-    """与 summarize_verdict_reviews 的 holdout 同口径：非污染、非休市周末重复。"""
-    return not r.contaminated and not is_closed_weekend(r.asset, r.date)
+    """与 summarize_verdict_reviews 的 holdout 同口径：非污染、非休市周末重复；另外，实验臂行的 macro_view
+    与对照臂同日同标的那份不是同一份（Input Health 的 macro_shared 为 False：对照臂当天被续跑跳过、或中途失败重跑）
+    就不是“同一份输入”的配对，剔掉并在臂一览里计数。没有这个键（对照臂行 / 早期存档）按未知保留。"""
+    return (not r.contaminated and not is_closed_weekend(r.asset, r.date)
+            and (r.input_health or {}).get("macro_shared") is not False)
+
+
+def macro_unshared_count(rows: List[VerdictReview]) -> int:
+    return sum(1 for r in rows if (r.input_health or {}).get("macro_shared") is False)
 
 
 def _side_summary(rows: List[VerdictReview], min_n: int) -> Dict[str, Any]:
@@ -1055,9 +1095,9 @@ def arms_report_lines(arms: Dict[str, List[VerdictReview]], control: List[Verdic
     names = [n for n in ARM_ORDER if n in arms]
     sb = side_by_side(control, {n: arms[n] for n in names}, min_n=min_n)
     cols = ["control"] + names
-    lines = ["## 臂一览\n", "| 臂 | 配置 | 臂内行数 |", "|---|---|---|",
-             f"| control | {ARM_LABELS['control']} | {sum(1 for r in control if _arm_row_ok(r))} |"]
-    lines += [f"| {n} | {ARM_LABELS[n]} | {len(arms[n])} |" for n in names]
+    lines = ["## 臂一览\n", "| 臂 | 配置 | 臂内行数 | macro 与对照不是同一份而剔除的行 |", "|---|---|---|---|",
+             f"| control | {ARM_LABELS['control']} | {sum(1 for r in control if _arm_row_ok(r))} | — |"]
+    lines += [f"| {n} | {ARM_LABELS[n]} | {len(arms[n])} | {macro_unshared_count(arms[n])} |" for n in names]
     lines += [
         f"\n## 并排（所有在场的臂同时具备的 {sb['keys']} 个 标的×日；同一批输入、同一批市场结果）\n",
         "| | " + " | ".join(c for c in cols) + " |", "|---|" + "---|" * len(cols)]

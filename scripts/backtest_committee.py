@@ -30,9 +30,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import os
-import statistics
 import sys
-from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
@@ -50,7 +48,8 @@ from openinvest.core.memory_store import MemoryStore  # noqa: E402
 from openinvest.jobs.verdict_review import (  # noqa: E402
     CONTAMINATION_CUTOFF, DEBATE_ARM_SUBDIR, MACROSOFT_ARM_SUBDIR, SEALED_ARM_SUBDIR,
 )
-from openinvest.jobs.review_calc import EXPECTED_DIRECTION, UNCLEAR_DIRECTION  # noqa: E402
+# aggregate_votes 的多数判定只在 review_calc 定义一次（复盘侧 vote_stability 同用）；这里 re-export 保持 bc.aggregate_votes 可用
+from openinvest.jobs.review_calc import aggregate_votes  # noqa: E402,F401
 
 # 默认资产
 DEFAULT_ASSETS = ["NDQ.AX", "GC=F"]
@@ -121,37 +120,6 @@ def _t2_arm():
 # live 行为零改。产物含逐标的逐次裁决 → 只写数据目录（gitignored），不进仓库。
 SEALED_DEFAULT_N = 3
 SEALED_MIN_N = 3   # 少于 3 次凑不出"多数"，实验臂就和对照臂没区别
-
-
-def aggregate_votes(votes: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """N 次独立抽样 → 一条聚合裁决（纯函数，无 IO）。
-
-    votes: [{"verdict": str, "confidence": float, "alloc": float}, ...]，按抽样顺序。
-    - verdict：严格多数（票数 > N/2；N=3 即 ≥2 票相同）。没有多数（N=3 三者各异、N=4 的 2:2 …）
-      → HOLD 且 split=True。
-    - confidence := 最大票占比（N=3：1.0 / 0.67；三者各异 0.33），即用投票分裂度代替 CIO 自报分。
-    - alloc := 多数票那几次金额的中位数；HOLD（含 split）恒 0（HOLD 不带建议金额）。
-    - flip：N 次裁决的方向类（EXPECTED_DIRECTION；UNCLEAR=none）不全相同——与 A4
-      （experiments/verdict_variance）的翻转口径同一把尺子，数字可直接对比。
-    - rep：代表票下标 = 多数票里最早的一次（split 取 0）；落盘的 transcript 正文取它。
-    """
-    n = len(votes)
-    if n < 1:
-        raise ValueError("aggregate_votes 需要至少 1 票")
-    top_verdict, top = Counter(v["verdict"] for v in votes).most_common(1)[0]
-    split = top * 2 <= n
-    verdict = "HOLD" if split else top_verdict
-    majority = [i for i, v in enumerate(votes) if v["verdict"] == top_verdict]
-    alloc = 0 if verdict == "HOLD" else round(statistics.median(votes[i]["alloc"] for i in majority))
-    dirs = {EXPECTED_DIRECTION.get(v["verdict"], UNCLEAR_DIRECTION) for v in votes}
-    return {
-        "verdict": verdict,
-        "confidence": round(top / n, 2),
-        "alloc": alloc,
-        "split": split,
-        "flip": len(dirs) > 1,
-        "rep": 0 if split else majority[0],
-    }
 
 
 # B4 的另外两臂（同样只加臂，live 不变；输入与对照臂逐字相同，macro_view 借对照臂的）：
@@ -379,6 +347,16 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
         macro_sig, macro_str = macro_signal_strength(macro_view)
         macro_keys = {"macro_signal": macro_sig, "macro_strength": macro_str}
 
+        def _macro_shared(symbol: str) -> bool:
+            """实验臂这行用的 macro_view 是不是对照臂同日同标的 transcript 里的那一份。借来的 macro_view 并不保证：
+            对照臂当天整天被续跑跳过（臂自己重跑了 Macro），或对照臂中途失败重跑（先落盘的标的用的是上一次的 Macro）。
+            核对不了（对照臂没有这个标的的 transcript）也记 False——复盘按 False 把这行从配对里剔掉并计数。"""
+            ctrl = store.root / ".backtest" / decision_date / f"{safe_symbol(symbol)}.md"
+            try:
+                return macro_view.strip() in ctrl.read_text(encoding="utf-8")
+            except OSError:
+                return False
+
         # 当日各资产相互独立(共享同一 macro_view + portfolio 快照),并行跑 = 3× 提速。
         # 全在 _patch_tools_to_date 内(patch 是日期级 process-global,所有线程同一 cutoff);
         # LLM 是 IO-bound(GIL 在 IO 释放);_persist 各资产独立路径;llm_usage append <4096B 原子。
@@ -448,7 +426,9 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                     persist_extra = {
                         "debate_meta": rep["debate"],
                         "input_health": {"arm": f"sealed_n{votes}", "votes": vote_list,
-                                         "flip": agg["flip"], "split": agg["split"], **macro_keys},
+                                         "flip": agg["flip"], "split": agg["split"], **macro_keys,
+                                         "macro_shared": _macro_shared(symbol),
+                                         "final_round": rep["debate"]["final_round"]},
                     }
                 else:
                     result = run_committee(
@@ -459,7 +439,7 @@ def run_one_day(decision_date: str, asset_symbols: List[str],
                         d = result["debate"]
                         persist_extra = {
                             "debate_meta": d,
-                            "input_health": {**arm_health, **macro_keys,
+                            "input_health": {**arm_health, **macro_keys, "macro_shared": _macro_shared(symbol),
                                              "final_round": d["final_round"], "converged": d["converged"]},
                         }
 
@@ -573,6 +553,14 @@ def main():
     for flag, on in (("--debate-arm", args.debate_arm), ("--macro-soft-arm", args.macro_soft_arm)):
         if on and not args.prospective:
             raise SystemExit(f"❌ {flag} 只能和 --prospective 一起用（舰队试跑，不碰回填）")
+    if args.sealed_arm or args.debate_arm or args.macro_soft_arm:
+        # 对照臂与 macro-soft 臂读 INVEST_MAX_DEBATE_ROUNDS，sealed 臂固定 1 轮、debate 臂固定 4 轮：
+        # 环境变量一旦不是 1（Optuna 实验遗留之类），臂与臂之间就悄悄多出“轮数”这个变量，复盘报告还看不出来。花钱前直接拒绝。
+        raw_rounds = os.environ.get("INVEST_MAX_DEBATE_ROUNDS", "").strip()
+        if raw_rounds and raw_rounds != "1":
+            raise SystemExit(f"❌ 试跑臂要求对照臂 rounds=1，但环境变量 INVEST_MAX_DEBATE_ROUNDS={raw_rounds!r}"
+                             "（对照 / macro-soft 臂会读它，sealed 固定 1 轮、debate 固定 4 轮）。"
+                             "unset 它或设成 1 再跑。")
     if args.sealed_arm and args.sealed_n < SEALED_MIN_N:
         raise SystemExit(f"❌ --sealed-n 至少 {SEALED_MIN_N}（少于 3 次凑不出多数票）")
 

@@ -127,6 +127,35 @@ def test_vote_stability_rates_hold_shares_and_tiers():
     assert st["tiers"]["split"]["hit_rate_30d"] is None            # n_scored=1 < min_n
 
 
+# ---------- 评审 #460：macro_shared 剔除 / 多数判定只有一份 ----------
+
+def test_vote_tier_and_aggregate_votes_share_one_majority_definition():
+    """复盘侧的一致度分档和写侧的聚合用同一份多数判定：穷举 N=3..5 的票组合，逐个对账。"""
+    import itertools
+    for n in (3, 4, 5):
+        for votes in itertools.product(("HOLD", "ACCUMULATE", "TRIM"), repeat=n):
+            agg = rc.aggregate_votes([{"verdict": v, "alloc": 0} for v in votes])
+            tier = rc._vote_tier(list(votes))
+            assert (tier == "split") == agg["split"], votes
+            assert (tier == "unanimous") == (len(set(votes)) == 1), votes
+            assert (tier == "majority") == (len(set(votes)) > 1 and not agg["split"]), votes
+
+
+def test_rows_whose_macro_differs_from_control_are_excluded_and_counted():
+    mk = lambda i, shared: _rv2(f"2026-08-0{i}", "A", "HOLD", health={"arm": "debate_r4", "final_round": 3,  # noqa: E731
+                                                                      "converged": True, **({} if shared is None else {"macro_shared": shared})})
+    arm = [mk(3, True), mk(4, False), mk(5, None)]                 # None = 早期存档没有这个键，按未知保留
+    ctl = [_rv2(f"2026-08-0{i}", "A", "HOLD") for i in (3, 4, 5)]
+    cmp_ = rc.arm_vs_control(arm, ctl, min_n=2)
+    assert cmp_["matched"] == 2 and cmp_["arm_total"] == 2
+    assert rc.macro_unshared_count(arm) == 1
+    assert rc.side_by_side(ctl, {"debate": arm}, min_n=2)["keys"] == 2
+    text = "\n".join(rc.arms_report_lines({"debate": arm}, ctl, min_n=2))
+    assert "macro 与对照不是同一份而剔除的行" in text and "| debate |" in text
+    row = next(l for l in text.splitlines() if l.startswith("| debate | debate"))
+    assert row.rstrip().endswith("| 3 | 1 |"), row                  # 臂内 3 行，其中 1 行因 macro 不同被剔除
+
+
 # ---------- 四臂并排 / debate 轮数 / macro-soft H3 ----------
 
 def _rv2(day, asset, verdict, *, ret=0.0, excess=None, alloc=0.0, health=None):

@@ -23,7 +23,7 @@ T2 臂 `.backtest_t2conf/` 一个字节都不变；三个新臂的产物只在�
 | 辩论轮数 | 1（`INVEST_MAX_DEBATE_ROUNDS` 缺省） | 1 | **4**（= `daily_report.py` 的 `max_debate_rounds=4`） | 1 |
 | 每标的抽样 | 1 | **N=3 取多数** | 1 | 1 |
 | CIO prompt | live | live | live | live，**仅规则 2 换成“打折不否决”** |
-| 输入 | 同日同标的：`market_data` / `regime_brief` / 中性持仓 / `macro_view` **逐字相同**（后三臂借对照臂这次跑出来的 `macro_view`） | 同左 | 同左 | 同左 |
+| 输入 | 同日同标的：`market_data` / `regime_brief` / 中性持仓 / `macro_view` **逐字相同**（后三臂借对照臂这次跑出来的 `macro_view`；落盘时核对它是否真的在对照臂同日同标的 transcript 里，结果记 `macro_shared`，False 的行复盘时从配对里剔掉并计数） | 同左 | 同左 | 同左 |
 
 每一臂只比对照臂多**一个**变量，所以每个比较都能归因。debate 臂用的是 live 的辩论配置，但输入仍是舰队的中性持仓
 （没有持仓上下文，Risk 没有可倾向的内容），所以它回答的是“同样的输入下，4 轮辩论比 1 轮差不差”，不是“live 日报差不差”。
@@ -36,7 +36,7 @@ Round 1 的 Quant / Risk 并行起跑，输入互不相交（Quant 只看行情/
 一个小毛边（**未改**，改了就动 live）：`CommitteeReport.to_cio_brief()` 无条件打印 `=== ROUND 2 (cross-challenge 后的调整) ===`
 标题，rounds=1 时它下面是两段空的“调整”，CIO 看到的是空标题。
 
-### sealed 臂的聚合规则（`scripts/backtest_committee.py:aggregate_votes`，纯函数）
+### sealed 臂的聚合规则（`jobs/review_calc.py:aggregate_votes`，纯函数；舰队脚本 re-export，复盘侧的一致度分档用同一份，多数判定只定义一次）
 
 - **verdict**：严格多数（票数 > N/2，N=3 即 ≥2 票相同）；没有多数（N=3 三者各异、N=4 的 2:2 …）→ `HOLD` 并标 `split`。
 - **confidence** := 最大票占比（N=3：1.0 / 0.67；三者各异 0.33）。
@@ -44,13 +44,13 @@ Round 1 的 Quant / Risk 并行起跑，输入互不相交（Quant 只看行情/
 - **flip**：N 次的方向类（`EXPECTED_DIRECTION`，UNCLEAR=none）不全相同——与 A4 的翻转口径同一把尺子，数字可直接比。
 - 落盘的 transcript 正文取**代表票**（多数票里最早的一次；split 取第 1 次，并在 CIO 备忘录末尾注明“票数分裂 → HOLD”）；
   `rewritten` / `forced_hold` 也是代表票的（split 的 HOLD 是投票结果，不是规则改写）。
-- Input Health 块多：`arm="sealed_n3"`、`votes=[{verdict,confidence,alloc}×N]`、`flip`、`split`、`macro_signal`、`macro_strength`。
+- Input Health 块多：`arm="sealed_n3"`、`votes=[{verdict,confidence,alloc}×N]`、`flip`、`split`、`macro_signal`、`macro_strength`、`macro_shared`、`final_round`。
 - 任一次抽样抛异常 → 该标的整体失败、**不落盘**（下次续跑重来），保证臂内每一行都恰有 N 票；同日已落盘的标的跳过（断点续跑同口径）。
 
 ### debate 臂
 
 单次抽样、`run_committee(max_debate_rounds=4)`：Quant / Risk 最多 3 轮 cross-challenge，连续两轮意见稳定即提前收敛，CIO 看完整辩论历史。
-Input Health 多 `arm="debate_r4"`、`final_round`、`converged`（报告里出“实际跑了几轮 / 提前收敛率”）。
+Input Health 多 `arm="debate_r4"`、`macro_signal` / `macro_strength` / `macro_shared`、`final_round`、`converged`（报告里出“实际跑了几轮 / 提前收敛率”）。
 
 ### macro-soft 臂（#461 的证据臂）
 
@@ -69,7 +69,7 @@ Macro 的 STRENGTH 是 0–10；`risk_off` 的实际取值 5–7，所以现状�
   措辞时**直接报错**（花 LLM 钱之前先 preflight，失败只跳过这一臂、其余臂照跑、退出码非 0）。
 - 折扣由 CIO 在备忘录里按规则执行（不是确定性后处理）：首跑里 CIO 的备忘录写出“折扣系数 (10 − 6)/10 = 0.4，基准 45000 × 0.4 = 18000”。
   H3 用名义金额加权的比率，折扣只影响权重；若进入 live 提案，折扣必须落成 `cio_parse` 里的确定性后处理，那是另一个 PR。
-- Input Health 多 `arm="macrosoft_r1"`、`macro_signal`、`macro_strength`（报告里数“仍被 ≥8 否决的行”）。
+- Input Health 多 `arm="macrosoft_r1"`、`macro_signal`、`macro_strength`、`macro_shared`（报告里数“仍被 ≥8 否决的行”）。
 
 ## 怎么开 / 停 / 跑
 
@@ -82,6 +82,8 @@ BACKTEST_WORKERS=25 uv run python -m scripts.backtest_committee --prospective \
 ```
 
 三个 flag 彼此独立，顺序固定 sealed → debate → macro-soft（macro-soft 的锚点失效不会拦住前两臂）；都只能和 `--prospective` 同用。
+**开任一试跑臂时 `INVEST_MAX_DEBATE_ROUNDS` 必须未设或为 1**，否则花钱前直接 `SystemExit`：对照臂与 macro-soft 臂读它，sealed 固定 1 轮、debate 固定 4 轮，
+env 一旦不是 1（Optuna 实验遗留之类），臂与臂之间会悄悄多出“轮数”这个变量，报告完全看不出来。
 调度和 T2 臂一样：舰队的 crontab 行（不在仓库里，见 [`../paper_fleet/README.md`](../paper_fleet/README.md)）在 `--prospective` 后加 flag 即开，删掉即停。
 **合并后等生产 checkout 自动 pull 了再改 crontab**（旧代码不认 flag，argparse 报错会让整条舰队 cron 失败）。
 
@@ -145,6 +147,8 @@ H1 / H2 / H3 是“多选一通过”，名义误报率随之放大，所以这�
 4. **相邻交易日的 30d 窗口高度重叠、同日标的共享市场环境**，真实独立样本远少于 n，所有 CI 偏窄，符号检验的 p 偏小。
    H3 的超额用基准（`portfolio.benchmark_symbol`，默认沪深 300）算，对债券 / 黄金 / 美股标的基准并不贴切——所以 H3 同时要求照做净收益率 > 0（对比留现金）。
 5. **宏观角色只抽了一次**：各臂共用同一份 `macro_view`（和对照臂相同）。宏观采样噪声没有被平均掉——这是有意的（保证各臂输入逐字相同）。
+   “借对照臂的 macro_view”只在对照臂这次真跑了 Macro 时成立：对照臂当天整天被续跑跳过、或中途失败重跑（先落盘的标的用的是上一次的 Macro）时，
+   臂拿到的是另一份。所以每行落盘时核对一次（`macro_shared`），不是同一份的行在复盘里剔掉并在“臂一览”里计数。
 6. 单模型（deepseek-v4-flash）、单温度（Quant/Risk 0.2、CIO 0.1）；换模型要重测。舰队是中性持仓，结论不能直接外推到带持仓输入的 live。
 7. sealed 与对照臂的“密封”相同（都是 rounds=1）；live 现状是日报 4 轮、Web 默认 4、事件重跑 2、Direct CLI 1。
 
