@@ -49,3 +49,11 @@ def _isolate_memory_root(tmp_path, monkeypatch):
     需要特定目录的测试照常在 test body 里 patch MEMORY_ROOT（晚于本 fixture，不冲突）。"""
     import openinvest.core.memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "_memory_root")
+
+
+@pytest.fixture(autouse=True)
+def _no_digest_calendar_network(monkeypatch):
+    """日报"今日持仓归因"的财报 / 除息日历是该段唯一联网的一步（yfinance Ticker.calendar）。
+    测试默认当取不到（→ "无数据源"），任何经 daily_report.run 的测试都不会真发请求；
+    要测日历的测试显式给 build_holdings_digest 传 calendar_fn。"""
+    monkeypatch.setattr("openinvest.services.holdings_digest._yf_calendar", lambda symbol: {})
