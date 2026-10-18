@@ -27,7 +27,7 @@ class GoldHolding(BaseModel):
     grams: float = Field(..., description="持仓克数")
     avg_cost_cny_per_gram: float = Field(..., description="加权均价 CNY/g")
     spot_cny_per_gram: Optional[float] = Field(None, description="实时现货价 CNY/g（yfinance）")
-    bank_cny_per_gram: Optional[float] = Field(None, description="渠道参考克价（含点差，渠道由 strategy/INVEST_GOLD_CHANNEL 决定）")
+    bank_cny_per_gram: Optional[float] = Field(None, description="渠道参考克价（含点差，渠道由 strategy.target_assets[GC=F] 决定）")
     offset_pct: float = Field(0.0, description="渠道点差（spot → 实际买入克价的溢价）")
     market_value_cny: Optional[float] = Field(None, description="持仓现值 CNY")
     pnl_cny: Optional[float] = Field(None, description="浮盈 CNY")

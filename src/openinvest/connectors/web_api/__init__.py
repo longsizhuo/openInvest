@@ -31,7 +31,7 @@ log = logging.getLogger("web_api")
 
 app = FastAPI(
     title="invest Web API",
-    description="多资产投资 agent 系统的 REST API（被 invest-gui 前端消费）",
+    description="多资产投资 agent 系统的 REST API（deprecated：仅服务 remote hub 模式，GUI 已于 2026-07-05 退役，不再新增端点）",
     version="0.1.0",
 )
 

@@ -21,5 +21,5 @@ node_modules
 logs/
 cache_data/
 memory/
-# static/ 是构建期由 scripts.sync_gui_dist 重新生成（烤 GUI），别 COPY 进本地陈旧副本
+# static/ 是旧 GUI 产物（GUI 2026-07-05 已退役、sync_gui_dist 已删，不再生成），别 COPY 进本地陈旧副本
 static/
