@@ -373,12 +373,14 @@ a signal worth recording.
   amount was cut to that cap per order. Never tell the user "today's allowance is used up" because of it
 - **Dividends / interest / fees / taxes / splits are ledger activities, not trades or deposits**: `record_dividend`
   (cash + gross − tax withheld; `--reinvest` = DRIP), `record_fee` (`--kind tax` for tax), `record_split`
-  (`--ratio` = new/old: 10-for-1 → 10, 1-for-10 → 0.1), `record_return_of_capital` (lowers average cost).
+  (`--ratio` = new/old: 10-for-1 → 10, 1-for-10 → 0.1; pass the real ex-date — if later trades were already booked in post-split units it is refused, and `--ledger-only` writes the ledger row without touching units),
+  `record_return_of_capital` (lowers average cost).
   They count as account return/cost, not as money in/out. Account performance values history at the
   **raw** (not dividend-adjusted) price once `close_raw` is backfilled — run `backfill_raw_close` once after
   upgrading, and read `performance.price_basis` (`raw` | `adjusted`) before quoting a return: for an
   `adjusted` symbol a recorded dividend is deliberately left out of the NAV (the adjusted price already
-  contains it; `data_quality.income_in_adjusted_price` says so). `status.income_30d` totals the last 30 days.
+  contains it; `data_quality.income_in_adjusted_price` says so); `data_quality.price_basis_gaps` lists symbols
+  that fell back to `adjusted` because some days lack `close_raw` (run `backfill_raw_close`). `status.income_30d` totals the last 30 days.
 - **Gold (`GC=F`) is booked per gram in CNY only**: `buy` / `record_existing_position` with
   `units` = grams, `price` = CNY/gram, `currency=CNY`, `kind=metal`, `unit_label=克`. A USD/ounce booking
   is rejected (the error shows the correct form) — convert the quote first (USD/oz ÷ 31.1035 × USDCNY),
