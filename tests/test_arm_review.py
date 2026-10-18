@@ -127,19 +127,88 @@ def test_vote_stability_rates_hold_shares_and_tiers():
     assert st["tiers"]["split"]["hit_rate_30d"] is None            # n_scored=1 < min_n
 
 
-# ---------- 复盘：review_arm / run_arm 端到端 + 不污染 live ----------
+# ---------- 四臂并排 / debate 轮数 / macro-soft H3 ----------
+
+def _rv2(day, asset, verdict, *, ret=0.0, excess=None, alloc=0.0, health=None):
+    rv = _rv(day, asset, verdict, ret=ret, mkt="flat", hit=True)
+    rv.alloc_cny = alloc
+    if excess is not None:
+        rv.excess_returns["30d"] = excess
+    if alloc and verdict in rc.DIRECTIONAL_BUY:
+        rv.followed_pnl["30d"] = rc.counterfactual_pnl(verdict, alloc, ret, 0.001)
+    rv.input_health = health or {}
+    return rv
+
+
+def test_macro_soft_h3_counts_only_unlocked_rows_and_gates_each_number():
+    arm = [_rv2("2026-08-03", "A", "ACCUMULATE", ret=0.05, alloc=1000, health={"macro_signal": "risk_off", "macro_strength": 6}),
+           _rv2("2026-08-03", "B", "ACCUMULATE", ret=-0.02, alloc=1000, health={"macro_signal": "risk_off", "macro_strength": 6}),
+           _rv2("2026-08-04", "A", "ACCUMULATE", ret=0.10, alloc=2000, health={"macro_signal": "risk_off", "macro_strength": 6}),
+           _rv2("2026-08-04", "B", "HOLD", health={"macro_signal": "risk_off", "macro_strength": 8})]
+    ctl = [_rv2("2026-08-03", "A", "HOLD", excess=0.03), _rv2("2026-08-03", "B", "HOLD", excess=-0.04),
+           _rv2("2026-08-04", "A", "ACCUMULATE", excess=0.08), _rv2("2026-08-04", "B", "HOLD", excess=0.0)]
+    h = rc.macro_soft_h3(arm, ctl, min_n=2)
+    assert (h["directional"], h["unlocked"], h["agree_with_control"], h["matured"]) == (3, 2, 1, 2)
+    assert h["excess_30d"]["mean"] == pytest.approx(-0.005)                 # 取的是对照臂同日同标的行的超额
+    assert h["mean_return_30d"] == pytest.approx(0.015)
+    # 照做：49 + (−21) = 28，名义 2000 → 1.4%（只算解锁的两行，agree 的那行不算）
+    assert h["followed_net_return_30d"] == pytest.approx(0.014) and h["followed_n_30d"] == 2
+    assert (h["n_macro_risk_off"], h["n_still_vetoed_strength_ge_8"]) == (4, 1)
+    assert h["status"] == "fail"                                            # 超额 CI 下界 < 0
+    # 成熟解锁行 < min_n：所有数字抹掉，状态 insufficient（红线 #2）
+    h3 = rc.macro_soft_h3(arm, ctl, min_n=3)
+    assert h3["status"] == "insufficient" and h3["excess_30d"] is None and h3["followed_net_return_30d"] is None
+    assert h3["mean_return_30d"] is None and h3["unlocked"] == 2
+
+
+def test_side_by_side_uses_only_keys_every_arm_has_and_arm_rounds_summary():
+    ctl = [_rv2("2026-08-03", "A", "HOLD"), _rv2("2026-08-03", "B", "HOLD"), _rv2("2026-08-04", "A", "HOLD")]
+    sealed = [_rv2("2026-08-03", "A", "HOLD"), _rv2("2026-08-04", "A", "HOLD")]
+    debate = [_rv2("2026-08-03", "A", "HOLD", health={"final_round": 3, "converged": True}),
+              _rv2("2026-08-03", "B", "HOLD", health={"final_round": 4, "converged": False}),
+              _rv2("2026-08-04", "A", "TRIM", health={"final_round": 2, "converged": True})]
+    sb = rc.side_by_side(ctl, {"sealed": sealed, "debate": debate}, min_n=2)
+    assert sb["keys"] == 2 and set(sb["sides"]) == {"control", "sealed", "debate"}
+    assert all(s["n_rows"] == 2 for s in sb["sides"].values())
+    assert sb["sides"]["debate"]["directional_rows"] == 1 and sb["sides"]["control"]["directional_rows"] == 0
+    d = rc.arm_rounds_summary(debate)
+    assert d["n"] == 3 and d["mean_rounds"] == 3.0 and d["converged"]["k"] == 2
+
+
+def test_arms_report_lines_has_every_section_and_no_symbols():
+    ctl = [_rv2("2026-08-03", "SECRET1", "HOLD", excess=0.01), _rv2("2026-08-04", "SECRET1", "HOLD", excess=0.02)]
+    sealed = [_rv2("2026-08-03", "SECRET1", "HOLD", health={"arm": "sealed_n3", "votes": [{"verdict": "HOLD"}] * 3}),
+              _rv2("2026-08-04", "SECRET1", "HOLD", health={"arm": "sealed_n3", "votes": [{"verdict": "HOLD"}] * 3})]
+    debate = [_rv2("2026-08-03", "SECRET1", "HOLD", health={"final_round": 2, "converged": True}),
+              _rv2("2026-08-04", "SECRET1", "HOLD", health={"final_round": 4, "converged": False})]
+    soft = [_rv2("2026-08-03", "SECRET1", "ACCUMULATE", ret=0.02, alloc=500,
+                 health={"macro_signal": "risk_off", "macro_strength": 6}),
+            _rv2("2026-08-04", "SECRET1", "HOLD", health={"macro_signal": "risk_off", "macro_strength": 6})]
+    text = "\n".join(rc.arms_report_lines({"sealed": sealed, "debate": debate, "macrosoft": soft}, ctl, min_n=2))
+    for must in ("## 臂一览", "## 并排（所有在场的臂同时具备的 2 个 标的×日", "全票一致", "debate 臂：辩论实际跑了几轮",
+                 "## H3：macro-soft 臂", "配对对照（macrosoft vs 对照臂", "配对对照（debate vs 对照臂",
+                 "H3 macro-soft 解锁行成熟 n ≥ 30"):
+        assert must in text, must
+    assert "SECRET1" not in text
+    # 只有一个臂在场时不出别的臂的节
+    only = "\n".join(rc.arms_report_lines({"debate": debate}, ctl, min_n=2))
+    assert "H3：macro-soft" not in only and "全票一致" not in only and "debate 臂：辩论" in only
+
+
+# ---------- 复盘：review_arm / run_arms 端到端 + 不污染 live ----------
 
 HEALTH_FMT = "## Input Health (deterministic)\n```json\n{health}\n```\n"
 
 
 def _write_transcript(mem: Path, subdir: str, day: str, sym: str, verdict: str, conf: float,
-                      alloc: int, votes: List[str] | None = None) -> None:
+                      alloc: int, votes: List[str] | None = None, health_extra: Dict[str, Any] | None = None) -> None:
     d = mem / subdir / day
     d.mkdir(parents=True, exist_ok=True)
     health: Dict[str, Any] = {"schema": 1, "worker_unavailable": [], "rewritten": [], "forced_hold": False}
     if votes:
         health.update(arm=f"sealed_n{len(votes)}", flip=len(set(votes)) > 1, split=False,
                       votes=[{"verdict": v, "confidence": 0.62, "alloc": 0} for v in votes])
+    health.update(health_extra or {})
     p = d / f"{sym}.md"
     p.write_text(
         f"# Committee: {sym}\n**Date**: {day}\n**Symbol**: {sym}\n**Verdict**: {verdict} (confidence {conf:.2f})\n"
@@ -171,13 +240,22 @@ def review_env(monkeypatch, tmp_path):
     return mem
 
 
+SOFT_HEALTH = {"arm": "macrosoft_r1", "macro_signal": "risk_off", "macro_strength": 6.0,
+               "final_round": 1, "converged": False}
+
+
 def _seed_arm_and_control(mem: Path) -> None:
+    """对照臂 3 行 + sealed / debate / macro-soft 三臂各 3 行（同样 3 个 日期×标的）。"""
     rows = [("2026-08-03", "AAPL", ["ACCUMULATE", "ACCUMULATE", "HOLD"], "ACCUMULATE", 0.67, 4000, "HOLD", 0),
             ("2026-08-03", "MSFT", ["HOLD", "HOLD", "HOLD"], "HOLD", 1.0, 0, "ACCUMULATE", 3000),
             ("2026-08-04", "AAPL", ["ACCUMULATE", "BUY", "TRIM"], "HOLD", 0.33, 0, "HOLD", 0)]
     for day, sym, votes, v, c, a, cv, ca in rows:
         _write_transcript(mem, vr.SEALED_ARM_SUBDIR, day, sym, v, c, a, votes)
         _write_transcript(mem, ".backtest", day, sym, cv, 0.62, ca)
+        _write_transcript(mem, vr.DEBATE_ARM_SUBDIR, day, sym, "HOLD", 0.55, 0,
+                          health_extra={"arm": "debate_r4", "final_round": 3, "converged": True})
+        soft_v, soft_a = ("ACCUMULATE", 2400) if (day, sym) != ("2026-08-03", "MSFT") else ("HOLD", 0)
+        _write_transcript(mem, vr.MACROSOFT_ARM_SUBDIR, day, sym, soft_v, 0.55, soft_a, health_extra=SOFT_HEALTH)
 
 
 def test_review_arm_tags_source_and_reads_votes_back(review_env):
@@ -192,31 +270,48 @@ def test_review_arm_tags_source_and_reads_votes_back(review_env):
     assert "30d" in r.hits                                   # 复用 review_one：标签只读行情库
     control = vr.review_arm_control(arm)
     assert len(control) == 3 and {c.source for c in control} == {"backtest"}
+    soft = vr.review_arm(vr.MACROSOFT_ARM_SUBDIR, name="macrosoft")
+    assert {x.source for x in soft} == {"arm:macrosoft"} and soft[0].input_health["macro_strength"] == 6.0
+    # 多个臂共用同一批 (日期, 标的) 时对照行只读一次
+    assert len(vr.review_arm_control(arm + soft)) == 3
 
 
-def test_run_arm_writes_only_its_own_artifacts_and_report_is_anonymous(review_env, tmp_path):
+def test_run_arms_writes_only_its_own_artifacts_and_report_is_anonymous(review_env, tmp_path):
     _seed_arm_and_control(review_env)
-    res = vr.run_arm()
-    assert res["status"] == "ok" and res["n_arm"] == 3 and res["n_matched"] == 3
-    jl = review_env / ".dreams" / "verdict_review_sealed.jsonl"
-    assert Path(res["jsonl"]) == jl
-    rows = [json.loads(x) for x in jl.read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 3 and {r["source"] for r in rows} == {"arm:sealed"}
+    res = vr.run_arms()
+    assert res["status"] == "ok" and res["arms"] == {"sealed": 3, "debate": 3, "macrosoft": 3}
+    for name in ("sealed", "debate", "macrosoft"):
+        jl = review_env / ".dreams" / f"verdict_review_{name}.jsonl"
+        assert Path(res["jsonl"][name]) == jl
+        rows = [json.loads(x) for x in jl.read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 3 and {r["source"] for r in rows} == {f"arm:{name}"}
     report = Path(res["report"])
-    assert report == tmp_path / "docs" / "verdict_accuracy_sealed.md"
+    assert report == tmp_path / "docs" / "verdict_accuracy_arms.md"
     text = report.read_text(encoding="utf-8")
-    assert "实验臂" in text and "全票一致" in text and "n<30 不展示" in text
+    for must in ("实验臂", "全票一致", "n<30 不展示", "## 并排", "debate 臂：辩论实际跑了几轮", "## H3：macro-soft 臂"):
+        assert must in text, must
     assert "AAPL" not in text and "MSFT" not in text, "报告只含聚合，不能出现 symbol"
-    # 没有臂目录 → skipped，不写任何文件
-    (tmp_path / "docs" / "verdict_accuracy_sealed.md").unlink()
-    jl.unlink()
+    # 没有任何臂目录 → skipped，不写任何文件
+    import shutil
+    for name in list((review_env / ".dreams").glob("verdict_review_*.jsonl")) + [report]:
+        name.unlink()
+    for sub in (vr.SEALED_ARM_SUBDIR, vr.DEBATE_ARM_SUBDIR, vr.MACROSOFT_ARM_SUBDIR):
+        shutil.rmtree(review_env / sub)
+    assert vr.run_arms()["status"] == "skipped"
+    assert not report.exists() and not list((review_env / ".dreams").glob("verdict_review_*.jsonl"))
+
+
+def test_run_arms_works_with_only_some_arms_present(review_env):
+    _seed_arm_and_control(review_env)
     import shutil
     shutil.rmtree(review_env / vr.SEALED_ARM_SUBDIR)
-    assert vr.run_arm()["status"] == "skipped"
-    assert not jl.exists() and not report.exists()
+    shutil.rmtree(review_env / vr.MACROSOFT_ARM_SUBDIR)
+    res = vr.run_arms()
+    assert res["arms"] == {"debate": 3}
+    assert not (review_env / ".dreams" / "verdict_review_sealed.jsonl").exists()
 
 
-def test_run_arm_never_pollutes_live_jsonl_lookup_or_public_json(review_env):
+def test_run_arms_never_pollutes_live_jsonl_lookup_or_public_json(review_env):
     """有/无实验臂目录各跑一次 run()：live jsonl / confidence_lookup / 公开 JSON 逐项相同（除时间戳）。"""
     import shutil
 
@@ -231,25 +326,30 @@ def test_run_arm_never_pollutes_live_jsonl_lookup_or_public_json(review_env):
         return live_path.read_text(encoding="utf-8"), lookup, public
 
     _write_transcript(review_env, ".committee", "2026-08-03", "AAPL", "HOLD", 0.62, 0)
-    _seed_arm_and_control(review_env)        # 对照行进 .backtest（舰队口径本来就会收），臂行进 .backtest_sealed
-    arm_dir, parked = review_env / vr.SEALED_ARM_SUBDIR, review_env / "_parked"
+    _seed_arm_and_control(review_env)        # 对照行进 .backtest（舰队口径本来就会收），臂行进各自的 .backtest_*
+    arm_dirs = [review_env / s for s in (vr.SEALED_ARM_SUBDIR, vr.DEBATE_ARM_SUBDIR, vr.MACROSOFT_ARM_SUBDIR)]
+    parked = review_env / "_parked"
+    parked.mkdir()
 
-    shutil.move(str(arm_dir), str(parked))   # 基线：没有实验臂
+    for d in arm_dirs:                        # 基线：没有任何实验臂
+        shutil.move(str(d), str(parked / d.name))
     assert vr.run()["status"] == "ok"
     baseline = snapshot()
-    assert not (review_env / ".dreams" / "verdict_review_sealed.jsonl").exists()
+    assert not list((review_env / ".dreams").glob("verdict_review_*.jsonl"))
 
-    shutil.move(str(parked), str(arm_dir))   # 实验臂回来；run() 尾巴会调 run_arm()
+    for d in arm_dirs:                        # 实验臂回来；run() 尾巴会调 run_arms()
+        shutil.move(str(parked / d.name), str(d))
     assert vr.run()["status"] == "ok"
     assert snapshot() == baseline, "实验臂不得改变 live jsonl / confidence_lookup / 公开 JSON"
     assert all(not str(json.loads(x)["source"]).startswith("arm:") for x in baseline[0].splitlines())
-    sealed = (review_env / ".dreams" / "verdict_review_sealed.jsonl").read_text(encoding="utf-8")
-    assert len(sealed.splitlines()) == 3     # 臂行只在独立 jsonl
+    for name in ("sealed", "debate", "macrosoft"):   # 臂行只在各自的独立 jsonl
+        jl = review_env / ".dreams" / f"verdict_review_{name}.jsonl"
+        assert len(jl.read_text(encoding="utf-8").splitlines()) == 3
 
 
 def test_run_survives_a_broken_arm_review(review_env, monkeypatch):
     """实验臂复盘炸了，live 复盘照常返回 ok（不拖垮已写完的 live 产物）。"""
     _write_transcript(review_env, ".committee", "2026-08-03", "AAPL", "HOLD", 0.62, 0)
-    monkeypatch.setattr(vr, "run_arm", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("arm boom")))
+    monkeypatch.setattr(vr, "run_arms", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("arm boom")))
     assert vr.run()["status"] == "ok"
     assert (review_env / ".dreams" / "verdict_review.jsonl").exists()

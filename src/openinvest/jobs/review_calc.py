@@ -886,40 +886,130 @@ def _paired_row(label: str, d: Dict[str, Any]) -> str:
     return (f"| {label} | {d['n']} | {d['arm_only']} | {d['control_only']} | {d['both']} | {d['neither']} | {p} |")
 
 
-def arm_report_lines(name: str, cmp_: Dict[str, Any], stab: Dict[str, Any]) -> List[str]:
-    """实验臂复盘报告正文（markdown 行）。只含聚合，不含 symbol / 逐行裁决 / 金额。"""
+ARM_ORDER = ("sealed", "debate", "macrosoft")
+ARM_LABELS = {
+    "control": "对照 1r×1（现有舰队产物）",
+    "sealed": "sealed 1r×N票（密封投票）",
+    "debate": "debate 4r×1（live 日报配置）",
+    "macrosoft": "macro-soft 1r×1（CIO 规则 2 打折不否决）",
+}
+DIRECTIONAL_BUY = ("BUY", "ACCUMULATE")
+
+
+def arm_rounds_summary(arm: List[VerdictReview]) -> Dict[str, Any]:
+    """debate 臂：实际辩论轮数与收敛率（Input Health 的 final_round / converged；没有的行不算）。"""
+    got = [((r.input_health or {}).get("final_round"), (r.input_health or {}).get("converged")) for r in arm]
+    got = [(int(fr), bool(cv)) for fr, cv in got if isinstance(fr, int)]
+    n = len(got)
+    return {"n": n, "mean_rounds": round(sum(fr for fr, _ in got) / n, 2) if n else None,
+            "converged": _rate_ci(sum(1 for _, cv in got if cv), n)}
+
+
+def _mean_ci(xs: List[float]) -> Optional[Dict[str, float]]:
+    """均值与正态近似 95% CI（n ≥ 2）。n 小或偏态时偏窄——调用方先过 n ≥ min_n 闸。"""
+    import math
+    import statistics
+    if len(xs) < 2:
+        return None
+    m, sd = statistics.fmean(xs), statistics.stdev(xs)
+    half = 1.96 * sd / math.sqrt(len(xs))
+    return {"mean": round(m, 4), "lo": round(m - half, 4), "hi": round(m + half, 4)}
+
+
+def macro_soft_h3(arm: List[VerdictReview], control: List[VerdictReview], *,
+                  min_n: int = ARM_MIN_N) -> Dict[str, Any]:
+    """H3（macro-soft 臂）：被"解锁"的买入——臂给了 BUY/ACCUMULATE、而对照臂同日同标的没有买——
+    事后值不值：30d 照做净收益率（扣往返成本、对比留现金，复用 #442）与相对基准的 30d 超额
+    （取对照臂同日同标的行的 excess_returns，verdict 无关，同一标的同一窗口两臂本就相同）。
+    每个数字按自己的分母做 n<min_n 抑制。达标 = 成熟解锁行 n ≥ min_n 且 超额均值 95% CI 下界 > 0 且 照做净收益率 > 0。"""
+    c_by = {(r.date, r.asset): r for r in control if _arm_row_ok(r)}
+    rows = [r for r in arm if _arm_row_ok(r)]
+    directional = [r for r in rows if r.verdict in DIRECTIONAL_BUY]
+    unlocked = [r for r in directional
+                if (r.date, r.asset) in c_by and c_by[(r.date, r.asset)].verdict not in DIRECTIONAL_BUY]
+    matured = [r for r in unlocked if "30d" in r.actual_returns]
+    ex = [c_by[(r.date, r.asset)].excess_returns["30d"] for r in matured
+          if "30d" in c_by[(r.date, r.asset)].excess_returns]
+    rets = [r.actual_returns["30d"] for r in matured]
+    followed = _summarize_bucket(unlocked, suppress_rates=False)
+    f_n = followed.get("followed_n_30d", 0)
+    f_net = followed.get("followed_net_return_30d") if f_n >= min_n else None
+    ex_ci = _mean_ci(ex) if len(ex) >= min_n else None
+    soft_vetoed = [r for r in rows if (r.input_health or {}).get("macro_signal") == "risk_off"
+                   and isinstance((r.input_health or {}).get("macro_strength"), (int, float))
+                   and (r.input_health or {}).get("macro_strength") >= 8]
+    n_risk_off = sum(1 for r in rows if (r.input_health or {}).get("macro_signal") == "risk_off")
+    if len(matured) < min_n or ex_ci is None or f_net is None:
+        status = "insufficient"
+    else:
+        status = "pass" if (ex_ci["lo"] > 0 and f_net > 0) else "fail"
+    return {
+        "rows": len(rows), "directional": len(directional), "unlocked": len(unlocked),
+        "agree_with_control": sum(1 for r in directional
+                                  if (r.date, r.asset) in c_by and c_by[(r.date, r.asset)].verdict in DIRECTIONAL_BUY),
+        "matured": len(matured), "min_n": min_n,
+        "mean_return_30d": round(sum(rets) / len(rets), 4) if len(rets) >= min_n else None,
+        "excess_30d": ex_ci, "followed_net_return_30d": f_net, "followed_n_30d": f_n,
+        "n_macro_risk_off": n_risk_off, "n_still_vetoed_strength_ge_8": len(soft_vetoed),
+        "benchmark_symbols": followed.get("benchmark_symbols", []),
+        "status": status,
+    }
+
+
+def side_by_side(control: List[VerdictReview], arms: Dict[str, List[VerdictReview]], *,
+                 min_n: int = ARM_MIN_N) -> Dict[str, Any]:
+    """所有在场的臂（含对照臂）同时具备的 (日期, 标的) 键上并排——每一侧是同一批输入、同一批市场结果。"""
+    sides_rows = {"control": {(r.date, r.asset): r for r in control if _arm_row_ok(r)}}
+    sides_rows.update({n: {(r.date, r.asset): r for r in rows if _arm_row_ok(r)} for n, rows in arms.items()})
+    keys = sorted(set.intersection(*[set(d) for d in sides_rows.values()])) if sides_rows else []
+    out: Dict[str, Any] = {"keys": len(keys), "min_n": min_n, "sides": {}}
+    for n, by in sides_rows.items():
+        rows = [by[k] for k in keys]
+        side = _side_summary(rows, min_n)
+        churn = direction_churn(rows)
+        side["churn"] = _rate_ci(sum(churn.values()), len(churn))
+        side["directional_rows"] = sum(1 for r in rows if r.verdict in EXPECTED_DIRECTION and r.verdict != "HOLD")
+        out["sides"][n] = side
+    return out
+
+
+def arm_report_lines(name: str, cmp_: Dict[str, Any], stab: Optional[Dict[str, Any]]) -> List[str]:
+    """单个实验臂 vs 对照臂的报告片段（markdown 行）。只含聚合，不含 symbol / 逐行裁决 / 金额。
+    stab=None（debate / macro-soft 没有逐票记录）→ 不出臂内稳定度一节。"""
     A, C, P = cmp_["arm"], cmp_["control"], cmp_["paired_30d"]
     min_n = cmp_["min_n"]
-    lines = [
-        f"## 臂内稳定度（{name} · 有逐票记录的 {stab['n']} 个 标的×日）\n",
-        f"臂标签：{'、'.join(f'{k} × {v}' for k, v in stab['arm_tags'].items()) or '—'}"
-        "（同一目录里出现不止一种说明中途改过 N，别把它们当同一臂读）\n",
-    ]
-    if not stab["n"]:
-        lines.append("_无逐票记录_\n")
-    else:
-        lines += ["| 指标 | 数 |", "|---|---|",
-                  f"| 全票一致 | {_fmt_rate(stab['unanimous'])} |",
-                  f"| 方向翻转（N 票方向类不全相同，A4 口径，A4 基线 26.7%） | {_fmt_rate(stab['flip'])} |",
-                  f"| 无多数 → HOLD（split） | {_fmt_rate(stab['split'])} |"]
-        lines.append(f"\n非全票一致的行 **{stab['n'] - stab['unanimous']['k']}** 条"
-                     f"（H2 功效闸：判读日 < {min_n} 条判\"功效不足\"，既不算通过也不算否定）。")
-        lines.append(f"\n**HOLD 占比**：单票 {_fmt_pct(stab['hold_share_votes'])} → 聚合后 "
-                     f"{_fmt_pct(stab['hold_share_final'])}；同日同标的对照臂 {_fmt_pct(stab['hold_share_control'])}。\n")
-        lines += ["### 票数一致度 vs 30d 命中（分裂度带不带信息）\n",
-                  "| 一致度 | 行数 | 30d 成熟可评分 | 30d 命中率 |", "|---|---|---|---|"]
-        label = {"unanimous": "全票一致", "majority": "多数（非全票）", "split": "无多数 → HOLD"}
-        for t in ARM_TIERS:
-            c = stab["tiers"][t]
-            hit = _fmt_pct(c["hit_rate_30d"]) if c["hit_rate_30d"] is not None else f"n<{min_n} 不展示"
-            lines.append(f"| {label[t]} | {c['n']} | {c['n_scored_30d']} | {hit} |")
+    lines: List[str] = []
+    if stab is not None:
+        lines += [
+            f"## 臂内稳定度（{name} · 有逐票记录的 {stab['n']} 个 标的×日）\n",
+            f"臂标签：{'、'.join(f'{k} × {v}' for k, v in stab['arm_tags'].items()) or '—'}"
+            "（同一目录里出现不止一种说明中途改过 N，别把它们当同一臂读）\n",
+        ]
+        if not stab["n"]:
+            lines.append("_无逐票记录_\n")
+        else:
+            lines += ["| 指标 | 数 |", "|---|---|",
+                      f"| 全票一致 | {_fmt_rate(stab['unanimous'])} |",
+                      f"| 方向翻转（N 票方向类不全相同，A4 口径，A4 基线 26.7%） | {_fmt_rate(stab['flip'])} |",
+                      f"| 无多数 → HOLD（split） | {_fmt_rate(stab['split'])} |"]
+            lines.append(f"\n非全票一致的行 **{stab['n'] - stab['unanimous']['k']}** 条"
+                         f"（H2 功效闸：判读日 < {min_n} 条判\"功效不足\"，既不算通过也不算否定）。")
+            lines.append(f"\n**HOLD 占比**：单票 {_fmt_pct(stab['hold_share_votes'])} → 聚合后 "
+                         f"{_fmt_pct(stab['hold_share_final'])}；同日同标的对照臂 {_fmt_pct(stab['hold_share_control'])}。\n")
+            lines += ["### 票数一致度 vs 30d 命中（分裂度带不带信息）\n",
+                      "| 一致度 | 行数 | 30d 成熟可评分 | 30d 命中率 |", "|---|---|---|---|"]
+            label = {"unanimous": "全票一致", "majority": "多数（非全票）", "split": "无多数 → HOLD"}
+            for t in ARM_TIERS:
+                c = stab["tiers"][t]
+                hit = _fmt_pct(c["hit_rate_30d"]) if c["hit_rate_30d"] is not None else f"n<{min_n} 不展示"
+                lines.append(f"| {label[t]} | {c['n']} | {c['n_scored_30d']} | {hit} |")
 
     bench = "、".join(A.get("benchmark_symbols") or C.get("benchmark_symbols") or []) or "未配置"
     lines += [
-        f"\n## 配对对照（同日同标的 {cmp_['matched']} 个；臂共 {cmp_['arm_total']}、对照臂共 {cmp_['control_total']}）\n",
-        "> 对照臂 = 同日同标的的 `.backtest` 舰队行（单次抽样）。两臂输入相同（同 market_data / regime / 中性持仓 / "
-        "macro_view），差别只在抽样次数与聚合。基率口径同 live 命中率页（同侧样本里永远喊本行方向的傻瓜）。\n",
-        f"| | 实验臂 | 对照臂 |", "|---|---|---|",
+        f"\n## 配对对照（{name} vs 对照臂 · 同日同标的 {cmp_['matched']} 个；臂共 {cmp_['arm_total']}、对照臂共 {cmp_['control_total']}）\n",
+        "> 对照臂 = 同日同标的的 `.backtest` 舰队行（rounds=1、单次抽样）。两臂的 market_data / regime / 中性持仓 / "
+        "macro_view 逐字相同，差别只在该臂自己的那个变量。基率口径同 live 命中率页（同侧样本里永远喊本行方向的傻瓜）。\n",
+        f"| | {name} | 对照臂 |", "|---|---|---|",
         f"| 行数 | {A['n_rows']} | {C['n_rows']} |",
         f"| 30d 成熟可评分 n | {A['n_scored_30d']} | {C['n_scored_30d']} |",
     ]
@@ -935,14 +1025,14 @@ def arm_report_lines(name: str, cmp_: Dict[str, Any], stab: Dict[str, Any]) -> L
         f"| 照做净收益率（30d，扣往返成本，名义加权；n 有金额） | "
         f"{_fmt_pp(A['followed_net_return_30d'])}（n={A['followed_n_30d']}） | "
         f"{_fmt_pp(C['followed_net_return_30d'])}（n={C['followed_n_30d']}） |",
-        "\n### 配对检验（同日同标的；只看两臂结果不同的那些对，精确符号检验双侧 p）\n",
-        "| 比较 | 对数 | 仅实验臂为真 | 仅对照臂为真 | 都真 | 都假 | p |", "|---|---|---|---|---|---|---|",
+        f"\n### 配对检验（{name} vs 对照臂；同日同标的，只看两臂结果不同的那些对，精确符号检验双侧 p）\n",
+        f"| 比较 | 对数 | 仅{name}为真 | 仅对照臂为真 | 都真 | 都假 | p |", "|---|---|---|---|---|---|---|",
         _paired_row("30d 命中（两臂都已成熟可评分）", P),
         _paired_row("逐日方向翻转（相邻决议日方向类不同；越少越稳）", cmp_["paired_churn"]),
         _paired_row("HOLD（越少越不囤）", cmp_["paired_hold"]),
         "",
         f"### 按 verdict 分（超额 = 标的 − 基准 {bench} 同窗口收益，verdict 无关；n<{min_n} 的格子不展示数字）\n",
-        "| Verdict | 臂 N | 臂 30d 命中 | 臂 提升 | 臂 超额均值 | 臂 照做净收益率 | 对照 N | 对照 30d 命中 | 对照 提升 | 对照 超额均值 | 对照 照做净收益率 |",
+        f"| Verdict | {name} N | {name} 30d 命中 | {name} 提升 | {name} 超额均值 | {name} 照做净收益率 | 对照 N | 对照 30d 命中 | 对照 提升 | 对照 超额均值 | 对照 照做净收益率 |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for v in [v for v in VERDICT_BUCKETS if v in A["by_verdict"] or v in C["by_verdict"]]:
@@ -955,10 +1045,73 @@ def arm_report_lines(name: str, cmp_: Dict[str, Any], stab: Dict[str, Any]) -> L
             cells += [str(c["n"]), _fmt_pct(c.get("hit_rate_30d")), _fmt_pp(c.get("lift_30d")),
                       _fmt_pp(c.get("excess_mean_30d")), _fmt_pp(c.get("followed_net_return_30d"))]
         lines.append(f"| {v} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def arms_report_lines(arms: Dict[str, List[VerdictReview]], control: List[VerdictReview], *,
+                      min_n: int = ARM_MIN_N) -> List[str]:
+    """全部实验臂的复盘报告（markdown 行）：臂一览 → 四臂并排 → 每臂 vs 对照臂 → debate 轮数 → macro-soft H3。
+    arms: {"sealed": rows, "debate": rows, "macrosoft": rows}（没跑的臂不要放进来）。"""
+    names = [n for n in ARM_ORDER if n in arms]
+    sb = side_by_side(control, {n: arms[n] for n in names}, min_n=min_n)
+    cols = ["control"] + names
+    lines = ["## 臂一览\n", "| 臂 | 配置 | 臂内行数 |", "|---|---|---|",
+             f"| control | {ARM_LABELS['control']} | {sum(1 for r in control if _arm_row_ok(r))} |"]
+    lines += [f"| {n} | {ARM_LABELS[n]} | {len(arms[n])} |" for n in names]
+    lines += [
+        f"\n## 并排（所有在场的臂同时具备的 {sb['keys']} 个 标的×日；同一批输入、同一批市场结果）\n",
+        "| | " + " | ".join(c for c in cols) + " |", "|---|" + "---|" * len(cols)]
+
+    def row(label: str, fn) -> None:
+        lines.append(f"| {label} | " + " | ".join(fn(sb["sides"][c]) for c in cols) + " |")
+
+    row("30d 成熟可评分 n", lambda s: str(s["n_scored_30d"]))
+    if any(s["suppressed"] for s in sb["sides"].values()):
+        lines.append(f"| 30d 命中 / 基率 / 提升 / CI | " + " | ".join(
+            f"n<{min_n} 不展示" if sb["sides"][c]["suppressed"] else "已展示" for c in cols) + " |")
+    row("30d 命中率", lambda s: _fmt_pct(s["hit_rate_30d"]))
+    row("同尺子基率", lambda s: _fmt_pct(s["base_rate_30d"]))
+    row("提升", lambda s: _fmt_pp(s["lift_30d"]))
+    row("提升 95% CI", lambda s: _fmt_ci(s["lift_ci95_30d"], pp=True))
+    row("HOLD 占比", lambda s: _fmt_pct(s["hold_share"]))
+    row("非 HOLD 裁决行数", lambda s: str(s["directional_rows"]))
+    row("逐日方向翻转率（越低越稳）", lambda s: _fmt_rate(s["churn"]))
+    row("照做净收益率（30d，n 有金额）",
+        lambda s: f"{_fmt_pp(s['followed_net_return_30d'])}（n={s['followed_n_30d']}）")
+    lines.append("")
+
+    cmps = {n: arm_vs_control(arms[n], control, min_n=min_n) for n in names}
+    for n in names:
+        has_votes = any(arm_vote_verdicts(r) for r in arms[n])
+        lines.append("")
+        lines += arm_report_lines(n, cmps[n], vote_stability(arms[n], control, min_n=min_n) if has_votes else None)
+
+    if "debate" in arms:
+        d = arm_rounds_summary(arms["debate"])
+        lines += ["", "## debate 臂：辩论实际跑了几轮（上限 4）\n",
+                  f"有轮数记录的 {d['n']} 行：平均 {d['mean_rounds']} 轮；提前收敛（连续 2 轮意见稳定）{_fmt_rate(d['converged'])}。\n"]
+    if "macrosoft" in arms:
+        h = macro_soft_h3(arms["macrosoft"], control, min_n=min_n)
+        ex = h["excess_30d"]
+        bench = "、".join(h["benchmark_symbols"]) or "未配置"
+        status = {"pass": "达标", "fail": "未达标", "insufficient": f"成熟解锁行不足（需 ≥{min_n}）"}[h["status"]]
+        lines += [
+            "", "## H3：macro-soft 臂“解锁”的买入（臂给了 BUY/ACCUMULATE、对照臂同日同标的没有买）\n",
+            "| 项 | 数 |", "|---|---|",
+            f"| 臂内 BUY/ACCUMULATE 行 | {h['directional']}（对照臂也买 {h['agree_with_control']}，解锁 {h['unlocked']}） |",
+            f"| Macro risk_off 的行 / 其中 STRENGTH ≥ 8 仍否决的行 | {h['n_macro_risk_off']} / {h['n_still_vetoed_strength_ge_8']} |",
+            f"| 解锁行 30d 成熟 n | {h['matured']} |",
+            f"| 解锁行 30d 平均收益 | {_fmt_pct(h['mean_return_30d'])} |",
+            f"| 解锁行 30d 平均超额（基准 {bench}；对照臂同日同标的行） | "
+            + ("—" if ex is None else f"{ex['mean'] * 100:+.2f}pp（95% CI {ex['lo'] * 100:+.2f} ~ {ex['hi'] * 100:+.2f}pp）") + " |",
+            f"| 解锁行 30d 照做净收益率（扣往返成本，名义加权，n 有金额） | {_fmt_pp(h['followed_net_return_30d'])}（n={h['followed_n_30d']}） |",
+            f"| **H3** | **{status}** |", ""]
     lines.append(
-        "\n> 判据（experiments/sealed_vote/README.md，开跑前冻结）：H1 整侧 30d 提升 CI 下界 > 0；或 H2 配对逐日方向翻转"
-        "显著更少（符号检验 p<0.05）且 HOLD 不显著更多——过其一才提 live 切换提案（另一个 PR，用户签字）。"
-        "相邻交易日的 30d 窗口高度重叠、同日标的共享市场环境，真实独立样本远少于 n，CI 偏窄、p 偏小。\n")
+        "\n> 判据（experiments/sealed_vote/README.md，开跑前冻结，判读 +65 天）：H1 sealed 整侧 30d 提升 CI 下界 > 0；"
+        "H2 sealed 配对逐日方向翻转显著更少（符号检验 p<0.05）且 HOLD 不显著更多；H3 macro-soft 解锁行成熟 n ≥ 30 且 30d 超额 95% CI 下界 > 0 "
+        "且照做净收益率 > 0。debate 臂回答“辩论有没有害”（与对照臂比 HOLD / 翻转 / 提升）。"
+        "过其一才提 live 切换提案（另一个 PR，用户签字）。相邻交易日的 30d 窗口高度重叠、同日标的共享市场环境，"
+        "真实独立样本远少于 n，CI 偏窄、p 偏小。\n")
     return lines
 
 

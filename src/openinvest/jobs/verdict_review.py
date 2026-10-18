@@ -8,8 +8,8 @@
      memory/.dreams/verdict_review.jsonl（结构化结果，给 dreaming 用）
      memory/.dreams/confidence_lookup.json（裁决旁展示的同类决议查表，D10 P1）
      memory/.dreams/verdict_neutrality.json（裁决中性度聚合，日报读它出一行；A5）
-     memory/.dreams/verdict_review_sealed.jsonl + docs/verdict_accuracy_sealed.md（B4 密封投票实验臂，
-         review_arm / run_arm；与上面所有 live 产物物理分离，不进命中率页 / 公开 JSON / 查表）
+     memory/.dreams/verdict_review_<臂>.jsonl + docs/verdict_accuracy_arms.md（B4 实验臂 sealed / debate /
+         macrosoft，review_arm / run_arms；与上面所有 live 产物物理分离，不进命中率页 / 公开 JSON / 查表）
 
 命中率定义：
 - BUY / ACCUMULATE → 后续涨 >0% = hit
@@ -45,8 +45,7 @@ from openinvest.jobs.review_calc import (  # noqa: F401
     K_FLAT,
     UNCLEAR_DIRECTION,
     VerdictReview,
-    arm_report_lines,
-    arm_vs_control,
+    arms_report_lines,
     counterfactual_pnl,
     roundtrip_cost_rate,
     _bucket_lines,
@@ -55,7 +54,6 @@ from openinvest.jobs.review_calc import (  # noqa: F401
     _flat_band,
     build_confidence_lookup,
     merge_confidence_lookup,
-    vote_stability,
     _is_hit,
     _summarize_bucket,
 )
@@ -624,18 +622,23 @@ def review_fleet() -> List[VerdictReview]:
     return list(out.values())
 
 
-# ---------- 实验臂（评审路线 B4 密封投票）：独立复盘，不进任何 live 产物 ----------
+# ---------- 实验臂（评审路线 B4）：独立复盘，不进任何 live 产物 ----------
 
-SEALED_ARM_SUBDIR = ".backtest_sealed"   # scripts/backtest_committee --sealed-arm 写，本节读；目录名单一可信源在此
+# 臂名 → memory/ 下的目录。scripts/backtest_committee 的 --sealed-arm / --debate-arm / --macro-soft-arm 写，本节读；
+# 目录名单一可信源在此。
+ARM_DIRS = {"sealed": ".backtest_sealed", "debate": ".backtest_debate", "macrosoft": ".backtest_macrosoft"}
+SEALED_ARM_SUBDIR, DEBATE_ARM_SUBDIR, MACROSOFT_ARM_SUBDIR = (
+    ARM_DIRS["sealed"], ARM_DIRS["debate"], ARM_DIRS["macrosoft"])
 SEALED_ARM_NAME = "sealed"
 FLEET_CONTROL_SUBDIR = ".backtest"       # 对照臂 = 同日同标的的舰队行
+ARMS_REPORT = "verdict_accuracy_arms.md"
 
 
 def review_arm(subdir: str = SEALED_ARM_SUBDIR, *, name: str = SEALED_ARM_NAME) -> List[VerdictReview]:
     """实验臂 memory/<subdir>/<date>/*.md → 复盘行（复用 review_one，source="arm:<name>"）。
 
     只读该目录 + 只读 market_data.db；不写任何东西，也不碰 review_all / review_fleet 的输出，
-    所以实验臂行进不了 verdict_review.jsonl / confidence_lookup / 公开 JSON（写文件见 run_arm）。
+    所以实验臂行进不了 verdict_review.jsonl / confidence_lookup / 公开 JSON（写文件见 run_arms）。
     未成熟的行也要（稳定度只需要逐票记录，不需要 30d 标签）。resolver={}：舰队是中性持仓，按标的原生计价。
     """
     base = MemoryStore().root / subdir
@@ -657,11 +660,15 @@ def review_arm(subdir: str = SEALED_ARM_SUBDIR, *, name: str = SEALED_ARM_NAME) 
 
 def review_arm_control(arm: List[VerdictReview], control_subdir: str = FLEET_CONTROL_SUBDIR) -> List[VerdictReview]:
     """实验臂每一行对应的对照臂行：同日同标的的 .backtest/<date>/<sym>.md（同样 review_one，source 保持 "backtest"）。
-    对照臂当天没有该标的的文件就缺席，由 arm_vs_control 取交集。"""
+    对照臂当天没有该标的的文件就缺席，由 arm_vs_control 取交集。多个臂的同一 (日期, 标的) 只读一次。"""
     base = MemoryStore().root / control_subdir
     ctx = _review_context()
     out: List[VerdictReview] = []
+    seen: set = set()
     for r in arm:
+        if (r.date, r.asset) in seen:
+            continue
+        seen.add((r.date, r.asset))
         stem = safe_symbol(r.asset)
         if (base / r.date / f"{stem}.md").exists():
             rv = review_one(base / r.date, stem, {}, regime=False, ctx=ctx)
@@ -681,34 +688,34 @@ def write_arm_jsonl(arm: List[VerdictReview], name: str = SEALED_ARM_NAME) -> Pa
     return out
 
 
-def write_arm_report(name: str, cmp_: Dict[str, Any], stab: Dict[str, Any]) -> Path:
-    """docs/verdict_accuracy_<name>.md（gitignored，同 verdict_accuracy.md）。只含聚合，无 symbol / 逐行 / 金额。"""
+def write_arms_report(arms: Dict[str, List[VerdictReview]], control: List[VerdictReview]) -> Path:
+    """docs/verdict_accuracy_arms.md（gitignored，同 verdict_accuracy.md）。只含聚合，无 symbol / 逐行 / 金额。"""
     docs_dir = ROOT / "docs"
     docs_dir.mkdir(exist_ok=True)
-    out = docs_dir / f"verdict_accuracy_{name}.md"
-    head = [f"# Verdict Accuracy Report — 实验臂 {name}",
+    out = docs_dir / ARMS_REPORT
+    head = ["# Verdict Accuracy Report — 实验臂（B4）",
             f"\n*Generated: {datetime.now().isoformat(timespec='seconds')}*\n",
-            "> 🧪 **实验臂，不是 live**：本页和 `.dreams/verdict_review_" + name + ".jsonl` 只服务 A/B 判读，"
+            "> 🧪 **实验臂，不是 live**：本页和 `.dreams/verdict_review_<臂>.jsonl` 只服务 A/B 判读，"
             "不进 live 命中率页 / 公开 JSON / confidence_lookup / 纪律台账。\n"]
-    out.write_text("\n".join(head + arm_report_lines(name, cmp_, stab)), encoding="utf-8")
+    out.write_text("\n".join(head + arms_report_lines(arms, control)), encoding="utf-8")
     return out
 
 
-def run_arm(subdir: str = SEALED_ARM_SUBDIR, *, name: str = SEALED_ARM_NAME) -> Dict[str, Any]:
-    """实验臂复盘入口：臂行 + 同日同标的对照行 → 稳定度 + 配对对照 → 独立 jsonl 与报告。
-    臂目录不存在 / 没有任何行 → skipped（不写文件）。run() 尾巴调它，失败也不影响 live 复盘。"""
+def run_arms() -> Dict[str, Any]:
+    """实验臂复盘入口：每个有行的臂 + 同日同标的对照行 → 四臂并排 / 配对对照 / H3 → 每臂独立 jsonl 与一份报告。
+    没有任何臂目录 / 没有任何行 → skipped（不写文件）。run() 尾巴调它，失败也不影响 live 复盘。"""
     _CLOSES_CACHE.clear()   # 常驻 scheduler 进程：独立调用时也别吃旧快照
     _ATR_CACHE.clear()
-    arm = review_arm(subdir, name=name)
-    if not arm:
-        return {"status": "skipped", "reason": f"no rows under {subdir}"}
-    control = review_arm_control(arm)
-    cmp_ = arm_vs_control(arm, control)
-    stab = vote_stability(arm, control)
+    arms = {n: review_arm(sub, name=n) for n, sub in ARM_DIRS.items()}
+    arms = {n: rows for n, rows in arms.items() if rows}
+    if not arms:
+        return {"status": "skipped", "reason": "no rows under any arm dir"}
+    control = review_arm_control([r for rows in arms.values() for r in rows])
     return {
-        "status": "ok", "arm": name, "n_arm": len(arm), "n_matched": cmp_["matched"],
-        "report": str(write_arm_report(name, cmp_, stab)),
-        "jsonl": str(write_arm_jsonl(arm, name)),
+        "status": "ok", "arms": {n: len(rows) for n, rows in arms.items()},
+        "n_control": len(control),
+        "report": str(write_arms_report(arms, control)),
+        "jsonl": {n: str(write_arm_jsonl(rows, n)) for n, rows in arms.items()},
     }
 
 
@@ -778,7 +785,7 @@ def load_confidence_lookup() -> Optional[Dict[str, Any]]:
 def _run_arm_safely() -> None:
     """B4 实验臂复盘（独立产物）；它出任何错都不许拖垮 live 复盘。"""
     try:
-        run_arm()
+        run_arms()
     except Exception as e:  # noqa: BLE001
         log.warning("实验臂复盘失败（live 复盘不受影响）: %s: %s", type(e).__name__, e)
 
