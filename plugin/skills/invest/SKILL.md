@@ -80,9 +80,15 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
 ## Decision tree (identical up front, whichever path you take)
 
 ```
-1. Run `run.sh doctor`                               ← mandatory first step
-   ├─ status: "ready"        → go to step 2 (keep using this skill)
-   └─ status: "needs_setup"  → **switch to the `invest-setup` skill** (not handled here)
+1. Run `run.sh doctor` (no shell access? call the MCP `doctor` tool — same output)   ← mandatory first step
+   ├─ status: "ready"        → go to step 2 (keep using this skill). A missing LLM key / mail
+   │                          credentials / .env shows up only as `optional_*` checks and never
+   │                          flips the status: Coordinator needs no key (only Direct does — see
+   │                          `direct_ready`), so do NOT re-onboard for those
+   └─ status: "needs_setup"  → memory not initialized (or portfolio.md still the v1 format) →
+                              **switch to the `invest-setup` skill** (not handled here)
+   (An older MCP server answers `Unknown tool` for `doctor`: call `status` instead — a normal
+    reply means onboarding is done.)
 
 2. Pick the subcommand by user intent:
 
@@ -200,7 +206,7 @@ machine but has no key, tell the user to run `run.sh init` to configure it first
 > spokes register the HTTP MCP directly — all tools fully available, no CLI forwarding:
 > `claude mcp add --transport http openinvest https://<hub>/mcp --header "Authorization: Bearer $INVEST_API_TOKEN"`
 > The CLI→REST forwarding below is still supported (maintenance mode); the Coordinator protocol (prepare/save) and
-> doctor/event_check still go through it. For deployment see backend wiki 08 §9.
+> event_check still go through it (`doctor` is an MCP tool too). For deployment see backend wiki 08 §9.
 
 With `INVEST_API_BASE` set in `.env`, this machine is a **client**: every subcommand is
 auto-forwarded to the remote hub (another machine running the invest web_api), and
@@ -237,11 +243,14 @@ add `Authorization: Bearer $INVEST_API_TOKEN` when curling.
 
 ## Tool lookup (MCP first; long tail in references/tools.md)
 
-**MCP users** (auto-registered once the plugin is installed; same for Claude Code / Codex): status / strategy /
+**MCP users** (auto-registered once the plugin is installed; same for Claude Code / Codex): doctor / status / strategy /
 history / live_prices / what_if / rebalance_plan / discipline / decisions / explain_decision /
 record_execution / ingest_event / buy / record_existing_position / sell / deposit / withdraw /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
 run_committee — schemas auto-discovered; call them directly, no table lookup needed.
+`track_asset` takes an optional `target_pct` (0–1 share of total assets, read by `rebalance_plan`) and
+`set_allocations` a `target_pcts` map — use them instead of editing strategy.md; the weights must sum
+to ≤ `target_allocation_stock` (a write that exceeds it is rejected with the current sum).
 
 **CLI/REST agents**, or long-tail operations MCP does not cover (trades intent flow /
 config whitelist / events / holdings import / gold-specific endpoints) → read
@@ -319,6 +328,10 @@ a signal worth recording.
 - **`max_single_invest_cny` ("单次上限") is a per-order cap on the suggested amount — not a daily or
   total allowance, and orders can be split.** When the memo says "金额已按单次上限 … 钳制", the CIO's
   amount was cut to that cap per order. Never tell the user "today's allowance is used up" because of it
+- **Gold (`GC=F`) is booked per gram in CNY only**: `buy` / `record_existing_position` with
+  `units` = grams, `price` = CNY/gram, `currency=CNY`, `kind=metal`, `unit_label=克`. A USD/ounce booking
+  is rejected (the error shows the correct form) — convert the quote first (USD/oz ÷ 31.1035 × USDCNY),
+  never retry with another currency to get it through.
 - **Do not run `daily_report` proactively in conversation** — unless the user explicitly says "run the deep analysis" / "run full report"
   or you are setting up the daily cron. That path burns DeepSeek tokens. In conversation, single-asset `run_committee` is enough.
 - **Never fabricate live prices.** Always go through `run.sh status` or `live_prices`. yfinance may return
@@ -344,7 +357,8 @@ a signal worth recording.
 
 ## Where to look when something breaks
 
-Read the `doctor` JSON output carefully. Every check has a `hint` field telling you how to fix it.
+Read the `doctor` JSON output carefully. Every check has a `hint` field telling you how to fix it;
+checks marked `optional_*` are not faults, they only say which path/feature (Direct, e-mail) is unavailable.
 If doctor is all green but a subcommand still fails, read `references/troubleshooting.md`.
 
 Common Direct-path errors:
