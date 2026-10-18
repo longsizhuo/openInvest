@@ -37,7 +37,8 @@ def _t(s: str) -> datetime:
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "RUN_LOG_DB", tmp_path / "jobs.sqlite")
     runner._ensure_run_log_table()
-    conn = sqlite3.connect(runner.RUN_LOG_DB)
+    # check_same_thread=False：runner 现在在独立线程里跑 job 函数（墙钟超时），job 里读这个连接
+    conn = sqlite3.connect(runner.RUN_LOG_DB, check_same_thread=False)
     yield conn
     conn.close()
 

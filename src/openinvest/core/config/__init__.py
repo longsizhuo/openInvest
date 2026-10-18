@@ -34,6 +34,7 @@ from .tunable import (
     RegimeConfig,
     PathConfig,
     RewardConfig,
+    SchedulerConfig,
     SentimentConfig,
     StalenessConfig,
     TunableConfig,
@@ -67,6 +68,7 @@ __all__ = [
     "DCAConfig",
     "EventConfig",
     "StalenessConfig",
+    "SchedulerConfig",
     # Locked dataclasses
     "LockedVerdictScoring",
     "LockedDreamingScoring",

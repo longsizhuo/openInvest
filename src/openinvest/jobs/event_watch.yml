@@ -12,3 +12,5 @@ timezone: Asia/Shanghai
 entry: openinvest.jobs.event_watch:run
 enabled: true  # 2026-05-15 default-on：用户记不住开关流程。无 DEEPSEEK_API_KEY 时
                # normalizer 失败 → scheduler 记 job_runs failed，不影响其他 job
+# 墙钟超时（分钟，默认 30）：生产 3156 次运行 p95=52s、max=910s；超时后 job_runs 标 timeout + 看门狗告警，下次触发照常进入
+timeout_minutes: 20

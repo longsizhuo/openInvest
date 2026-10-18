@@ -10,6 +10,9 @@
 daemon 以 `python -m` 启动，本模块在进程里叫 __main__：job 里 `import runner` 拿到的是
 另一份空副本。跨 job 共享的进程级状态别放这里，放 scheduler/cron.py 这类按名导入的模块。
 
+每个 job 有墙钟超时（jobs/*.yml `timeout_minutes`，默认 30）；外部心跳 `scheduler.heartbeat_url`
+每 5 分钟 GET 一次（dead-man switch）。两者的设计取舍见 `_wrap_job` / `_heartbeat` 注释。
+
 使用：
     python -m openinvest.scheduler.runner               # 后台跑所有 enabled job
     python -m openinvest.scheduler.runner --once daily_report
@@ -25,8 +28,10 @@ import os
 import signal
 import sqlite3
 import sys
+import threading
 import time
 import traceback
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -156,28 +161,114 @@ def _resolve_entry(entry: str) -> Callable[[], Any]:
     return fn
 
 
-def _wrap_job(job_name: str, entry: str) -> Callable[[], None]:
-    """把 entry 包装成一个会写 run_log + 异常隔离的可执行函数"""
+DEFAULT_TIMEOUT_MINUTES = 30.0
+# 超时后仍活着的线程上限（每 job）。Python 线程杀不掉：超时只能"放弃等它"，让 APScheduler 的
+# max_instances=1 槽位释放、下一次触发能进来；被放弃的线程留在后台（daemon，不拦进程退出）。
+# 真卡死的 job 每次触发都会再泄漏一个线程，所以设上限：已有 MAX_ORPHANS 个没退出的就拒绝再启动
+# （只打 error 日志，不写 job_runs 行——看门狗的 stale 判据会在 2 个周期后接着报，重启调度器清空）。
+MAX_ORPHANS = 3
+_ORPHANS: Dict[str, List[threading.Thread]] = {}
+
+
+def _job_timeout_minutes(cfg: Dict[str, Any]) -> float:
+    """jobs/*.yml 的 `timeout_minutes`；缺省 / 非正数 / 非数字 → 默认 30（打 warning）。"""
+    raw = cfg.get("timeout_minutes", DEFAULT_TIMEOUT_MINUTES)
+    try:
+        v = float(raw)
+        if v > 0:
+            return v
+    except (TypeError, ValueError):
+        pass
+    log.warning(f"[{cfg.get('name')}] timeout_minutes={raw!r} 非法，退回默认 {DEFAULT_TIMEOUT_MINUTES:g}")
+    return DEFAULT_TIMEOUT_MINUTES
+
+
+def _run_with_timeout(job_name: str, entry: str, timeout_minutes: float):
+    """在 daemon 线程里跑 entry，最多等 timeout_minutes。返回 (status, error, output)。
+
+    超时 → status='timeout'，output 附该线程此刻的调用栈（直接指出卡在哪，2026-07-30 的
+    event_watch 线程池 join 卡死当时就缺这个）。
+    """
+    box: Dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            box["result"] = _resolve_entry(entry)()
+        except BaseException as e:  # noqa: BLE001  SystemExit 等也要落成 failed，别让行停在 running
+            box["exc"] = e
+            box["tb"] = traceback.format_exc()
+        if box.get("abandoned"):
+            log.warning(f"[{job_name}] 超时被放弃的线程后来自行结束了（慢而非死锁）")
+
+    t = threading.Thread(target=target, name=f"job:{job_name}", daemon=True)
+    t.start()
+    t.join(timeout_minutes * 60)
+    if t.is_alive():
+        box["abandoned"] = True
+        _ORPHANS.setdefault(job_name, []).append(t)
+        frame = sys._current_frames().get(t.ident)
+        stack = "".join(traceback.format_stack(frame)) if frame is not None else "(线程栈不可得)"
+        log.error(f"[{job_name}] 超过 {timeout_minutes:g} 分钟未结束，标 timeout 并放弃该线程\n{stack}")
+        return (
+            "timeout",
+            f"TimeoutError: 超过 {timeout_minutes:g} 分钟未结束（线程无法强杀，仍在后台）",
+            f"超时时刻的线程调用栈:\n{stack}",
+        )
+    if "exc" in box:
+        log.error(f"[{job_name}] 失败", exc_info=box["exc"])
+        return "failed", f"{type(box['exc']).__name__}: {box['exc']}", box["tb"]
+    log.info(f"[{job_name}] 成功")
+    result = box.get("result")
+    return "success", None, str(result) if result is not None else ""
+
+
+def _wrap_job(job_name: str, entry: str,
+              timeout_minutes: float = DEFAULT_TIMEOUT_MINUTES) -> Callable[[], None]:
+    """把 entry 包装成一个会写 run_log + 异常隔离 + 墙钟超时的可执行函数"""
     def wrapped() -> None:
+        alive = [t for t in _ORPHANS.get(job_name, []) if t.is_alive()]
+        _ORPHANS[job_name] = alive
+        if len(alive) >= MAX_ORPHANS:
+            log.error(f"[{job_name}] 已有 {len(alive)} 个超时后仍未退出的线程（上限 {MAX_ORPHANS}），"
+                      f"拒绝再启动；重启调度器可清空")
+            return
         started = datetime.now().astimezone().isoformat(timespec="seconds")
-        log.info(f"[{job_name}] 启动 (started={started})")
+        log.info(f"[{job_name}] 启动 (started={started}, timeout={timeout_minutes:g}min)")
         run_id = _record_start(job_name, started)
         status, error, output = "running", None, None
         try:
-            fn = _resolve_entry(entry)
-            result = fn()
-            status = "success"
-            output = str(result) if result is not None else ""
-            log.info(f"[{job_name}] 成功")
-        except Exception as e:
-            status = "failed"
-            error = f"{type(e).__name__}: {e}"
-            output = traceback.format_exc()
-            log.exception(f"[{job_name}] 失败")
+            status, error, output = _run_with_timeout(job_name, entry, timeout_minutes)
         finally:
             finished = datetime.now().astimezone().isoformat(timespec="seconds")
             _record_run(job_name, started, finished, status, error, output, run_id)
     return wrapped
+
+
+# ---------- 外部心跳（dead-man switch） ----------
+
+HEARTBEAT_INTERVAL_MIN = 5
+
+
+def _heartbeat() -> None:
+    """GET 一次 `scheduler.heartbeat_url`（healthchecks.io 式 ping URL；空 = 不发）。
+
+    job_watchdog 自己是调度器里的 job——调度进程死了/线程池全卡死，它也一起哑（job_watchdog.py
+    docstring 的盲区）。本函数同样跑在调度器线程池里，所以 ping 断了 = 进程没了或池子满了，
+    由外部服务（healthchecks.io 等，period 5min / grace 10min）在它那边告警。
+    每次重读 config：改 URL 不用重启；失败只记 warning，绝不影响调度。
+    """
+    try:
+        from openinvest.core.config import load_config
+        url = (load_config(_force_reload=True).scheduler.heartbeat_url or "").strip()
+        if not url:
+            return
+        if not url.startswith(("http://", "https://")):
+            log.warning("[heartbeat] heartbeat_url 必须是 http(s)://，已忽略")
+            return
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            resp.read(1)
+    except Exception as e:  # noqa: BLE001  监控外发永远不拦调度
+        log.warning(f"[heartbeat] ping 失败（不影响调度）: {type(e).__name__}: {e}")
 
 
 # ---------- scheduler 管理 ----------
@@ -248,7 +339,7 @@ def register_jobs(sched: BackgroundScheduler, quiet: bool = False) -> List[Dict[
 
         trigger = crontab_trigger(schedule, timezone=cfg.get("timezone", "Asia/Shanghai"))
         sched.add_job(
-            _wrap_job(cfg["name"], cfg["entry"]),
+            _wrap_job(cfg["name"], cfg["entry"], _job_timeout_minutes(cfg)),
             trigger=trigger,
             id=cfg["name"],
             name=cfg["name"],
@@ -289,7 +380,7 @@ def cmd_once(job_name: str) -> int:
         return 1
     log.info(f"[{job_name}] 单次执行模式")
     _ensure_run_log_table()
-    _wrap_job(cfg["name"], cfg["entry"])()
+    _wrap_job(cfg["name"], cfg["entry"], _job_timeout_minutes(cfg))()
     return 0
 
 
@@ -305,6 +396,11 @@ def cmd_daemon() -> int:
         minutes=10,
         id="_config_refresh",
         name="_config_refresh",
+    )
+    # 外部心跳：启动即 ping 一次，之后每 5 分钟；URL 为空时是个空操作
+    sched.add_job(
+        _heartbeat, "interval", minutes=HEARTBEAT_INTERVAL_MIN,
+        id="_heartbeat", name="_heartbeat", next_run_time=datetime.now(timezone.utc),
     )
     sched.start()
     log.info("调度器已启动。Ctrl+C 退出。")

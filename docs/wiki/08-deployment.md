@@ -295,6 +295,30 @@ ExecStart=%h/.local/bin/uv tool run --from openinvest python -m openinvest.sched
 
 详见 `systemd/README.md` 和 `scheduler/README.md`。
 
+### 6.1 调度器防静默停摆：job 超时 + 外部心跳
+
+2026-07-30 起 `event_watch` 因新闻抓取线程池 join 卡死 21 天：APScheduler `max_instances=1` 把之后每次触发都跳过，`job_runs` 一行没有。两层防线：
+
+**① 每 job 墙钟超时（`jobs/*.yml` 的 `timeout_minutes`，默认 30）**
+
+- runner 在 daemon 线程里跑 job，超时 → `job_runs.status='timeout'`（附线程调用栈）→ 放弃该线程、释放 `max_instances=1` 槽位 → 下一次触发正常进入；`job_watchdog` 把 timeout 当失败告警。
+- 线程杀不掉，所以有上限：同一 job 累计 3 个超时线程未退出时 runner 拒绝再启动它，看门狗转报"停摆"，`sudo systemctl restart invest-scheduler` 清空。
+- 字段说明与各 job 默认值见 `src/openinvest/jobs/README.md`。改了要重启调度器。
+
+**② 外部心跳（dead-man switch，可选）**
+
+看门狗自己跑在调度器里——调度进程死了它也哑。配一个外部"死人开关"服务，调度器每 5 分钟（启动时先一次）GET 它的 ping URL；ping 断了由外部服务告警：
+
+1. 在 [healthchecks.io](https://healthchecks.io)（免费档够用）建一个 check：Period = 5 minutes，Grace = 10 minutes，通知渠道自选；复制它的 ping URL（`https://hc-ping.com/<uuid>`）。
+2. 写进 `.env`（URL 是凭据，别提交进仓库）：
+   ```bash
+   INVEST_SCHEDULER_HEARTBEAT_URL=https://hc-ping.com/<uuid>
+   ```
+   也可写 `core/config/defaults.yaml` 的 `scheduler.heartbeat_url`（git clone 形态）。留空 = 不发。
+3. `sudo systemctl restart invest-scheduler`，日志里没有 `[heartbeat] ping 失败` 即通；healthchecks.io 面板应在 1 分钟内变绿。
+
+ping 失败只记 `WARNING [heartbeat] ping 失败…`，永远不影响调度。心跳本身是调度器线程池里的一个内部任务（不进 `job_runs`），所以进程死亡**和**线程池被全部占满都会让 ping 断掉。
+
 ---
 
 ## 7. 备份策略

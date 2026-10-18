@@ -24,6 +24,7 @@ from .tunable import (
     PathConfig,
     PortfolioConfig,
     RewardConfig,
+    SchedulerConfig,
     SentimentConfig,
     StalenessConfig,
     TunableConfig,
@@ -77,7 +78,8 @@ def _read_env_overrides() -> dict[str, Any]:
     # 已知的多词 section 名（按长度降序排列，确保最长前缀优先匹配）
     _KNOWN_SECTIONS = sorted(
         ["oracle_accuracy", "macro_buckets", "staleness", "language", "portfolio",
-         "regime", "verdict", "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event"],
+         "regime", "verdict", "dreaming", "reward", "sentiment", "valuation", "path", "dca", "event",
+         "scheduler"],
         key=len,
         reverse=True,
     )
@@ -199,6 +201,12 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     event = EventConfig(**{k: v for k, v in event_data.items() if k in {f.name for f in fields(EventConfig)}})
     staleness = StalenessConfig(**{k: v for k, v in data.get("staleness", {}).items() if k in {f.name for f in fields(StalenessConfig)}})
 
+    sched_data = dict(data.get("scheduler", {}))
+    # env 层通用强转：URL 里带逗号会被拆成 list，拼回字符串（同 event 的 cron 串）
+    if isinstance(sched_data.get("heartbeat_url"), list):
+        sched_data["heartbeat_url"] = ",".join(sched_data["heartbeat_url"])
+    scheduler = SchedulerConfig(**{k: v for k, v in sched_data.items() if k in {f.name for f in fields(SchedulerConfig)}})
+
     return TunableConfig(
         language=language,
         portfolio=portfolio,
@@ -214,6 +222,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         dca=dca,
         event=event,
         staleness=staleness,
+        scheduler=scheduler,
     )
 
 

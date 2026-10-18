@@ -8,3 +8,5 @@ schedule: "*/5 0-2,8-23 * * *"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.price_sentinel:run
 enabled: true  # 与 event_watch 同理 default-on；关闭走 config event.sentinel_enabled
+# 墙钟超时（分钟，默认 30）：每 5 分钟一次，生产 max=69s；卡住最多挡 2 个周期
+timeout_minutes: 10

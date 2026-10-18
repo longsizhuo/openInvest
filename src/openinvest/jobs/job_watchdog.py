@@ -10,12 +10,16 @@
   (c) zero_fetch event_watch 最近 6 次成功运行 fetched 全为 0（新闻源全挂也是"成功"）
   (d) silent_src 单个新闻源曾经抓到过、最近一轮仍在抓，但已连续 24h 抓到 0 条
                 （2026-10 yfinance 新闻接口 404 被吞成 []，其他源照常 → (c) 看不见，断了 13 天）
+  (e) timeout    runner 的 per-job 墙钟超时（jobs/*.yml timeout_minutes）把 job_runs 标成
+                'timeout'：24h 内每条各报一次。超时后 runner 放弃该线程让下次触发进得来，
+                所以最新一行可能已是 success——不能只看最后一行，否则"超时了又恢复"没人知道
 
 命中走与其他 job 相同的告警通道（Discord DM best-effort + 邮件）。同一异常 24h 内最多
 报一次：state_claim 去重键 = 异常锚点（上次启动时间 / running 行 id / 零抓取连击起点）
 + 自"可报警时刻"起算的 24h 桶序号——异常持续则每 24h 提醒一次，恢复后再犯是新锚点立即报。
 
-盲区：调度器进程整体挂掉时本 job 也不跑——那需要外部 dead-man switch，不在本 job 范围。
+盲区：调度器进程整体挂掉时本 job 也不跑——靠外部心跳（runner `_heartbeat`，
+`scheduler.heartbeat_url`，docs/wiki/08-deployment.md）补。
 """
 from __future__ import annotations
 
@@ -40,6 +44,7 @@ GRACE = timedelta(minutes=15)
 HUNG_FLOOR = timedelta(minutes=60)
 ZERO_FETCH_RUNS = 6
 SOURCE_SILENT = timedelta(hours=24)
+TIMEOUT_LOOKBACK = timedelta(hours=24)
 _STATE = "job_watchdog_alerts"
 # runner 把 job 返回的 dict 以 str(result) 落进 output_excerpt（Python repr，不是 JSON）
 _FETCHED_RE = re.compile(r"""['"]fetched['"]:\s*(\d+)""")
@@ -67,6 +72,20 @@ def find_problems(
     """
     out: List[Dict[str, Any]] = []
     for name, schedule, tz in jobs:
+        for rid, s_at, f_at, err in conn.execute(
+            "SELECT id, started_at, finished_at, error FROM job_runs "
+            "WHERE job_name = ? AND status = 'timeout' ORDER BY id DESC LIMIT 20", (name,),
+        ).fetchall():
+            if f_at is None or now - _ts(f_at) > TIMEOUT_LOOKBACK:
+                continue
+            out.append({
+                "key": f"{name}:timeout:{rid}",
+                "since": _ts(f_at),
+                "text": (f"`{name}` 执行超时：run #{rid}（{s_at} 启动）{err or 'timeout'}。"
+                         f"该线程已被放弃；同一 job 的超时线程累计达上限（runner.MAX_ORPHANS，"
+                         f"默认 3）仍未退出时调度器会拒绝再启动它（届时转为停摆告警，重启调度器清空）。"
+                         f"超时时刻的线程调用栈见 job_runs.output_excerpt。"),
+            })
         last = conn.execute(
             "SELECT id, started_at, status, finished_at FROM job_runs WHERE job_name = ? "
             "ORDER BY id DESC LIMIT 1", (name,),

@@ -4,3 +4,5 @@ schedule: "0 10 * * *"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.daily_report:run
 enabled: false
+# 墙钟超时（分钟，默认 30）：完整委员会，生产 max=945s；默认停用
+timeout_minutes: 60

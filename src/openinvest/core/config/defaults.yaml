@@ -109,3 +109,8 @@ reward:
   sharpe_bonus_threshold: 1.0
   lam_mdd: 1.0
   lam_return: 0.05
+
+scheduler:
+  # 外部心跳（dead-man switch）：healthchecks.io 式 ping URL，调度器每 5 分钟 GET 一次；空 = 不发。
+  # URL 本身是凭据，推荐用 env INVEST_SCHEDULER_HEARTBEAT_URL 配，别提交进仓库。
+  heartbeat_url: ""

@@ -4,3 +4,5 @@ schedule: "0 3 * * *"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.dreaming:run
 enabled: false  # P3 完成后再启用
+# 墙钟超时（分钟，默认 30）：三阶段记忆整合；默认停用
+timeout_minutes: 60

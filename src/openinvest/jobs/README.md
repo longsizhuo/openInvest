@@ -21,6 +21,18 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 - `INDEX.md` — 所有 job 的输入/输出 spec（人类参考）
 - `*.yml` — APScheduler cron 配置（声明式）
 
+## `timeout_minutes`（每 job 墙钟超时）
+
+`*.yml` 可选字段 `timeout_minutes`（默认 **30**；event_watch 20、price_sentinel 10、daily_report / dreaming 60）。runner 在独立 daemon 线程里跑 job，超时后：
+
+1. `job_runs` 该行标 `status='timeout'`，`output_excerpt` 附**超时时刻的线程调用栈**（直接看到卡在哪）；
+2. runner 放弃该线程（Python 线程杀不掉）并返回，APScheduler 的 `max_instances=1` 槽位释放——**下一次触发照常进入**，不再像 2026-07-30 event_watch 那样被永久封死 21 天；
+3. `job_watchdog` 把 24h 内每条 `timeout` 行各报一次（Discord + 邮件）。
+
+上限：每个 job 最多容忍 `runner.MAX_ORPHANS = 3` 个"超时后仍未退出"的线程，达到后 runner 拒绝再启动该 job（只打 error 日志，不写 job_runs 行；看门狗 2 个周期后以"停摆"接手告警），**重启调度器**清空。被放弃的线程若后来自行结束会打一条 warning（说明是慢而非死锁）。
+
+改 `timeout_minutes` 需**重启调度器**才生效（`_config_refresh` 只在 cron 表达式变化时重注册）。给新 job 定值参考 `db/jobs.sqlite` 的历史耗时：留 ≥3× p95 余量，且小于 job 触发间隔的两倍。
+
 ## 与其他目录的关系
 
 - 上游：被 `scheduler/runner.py` 注册；也可单跑 `python -m jobs.daily_report`

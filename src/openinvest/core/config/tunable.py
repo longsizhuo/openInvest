@@ -282,6 +282,14 @@ class StalenessConfig:
 
 
 @dataclass(frozen=True)
+class SchedulerConfig:
+    """调度器运维参数（不进 API_SETTABLE：ping URL 本身是凭据，只经 env / yaml 配）"""
+    # healthchecks.io 式外部心跳 URL；空 = 不发。调度器每 5 分钟 GET 一次，失败只记日志。
+    # env: INVEST_SCHEDULER_HEARTBEAT_URL。用法见 docs/wiki/08-deployment.md。
+    heartbeat_url: str = ""
+
+
+@dataclass(frozen=True)
 class TunableConfig:
     """所有可调参数的顶层容器"""
     language: LanguageConfig = field(default_factory=LanguageConfig)
@@ -298,3 +306,4 @@ class TunableConfig:
     dca: DCAConfig = field(default_factory=DCAConfig)
     event: EventConfig = field(default_factory=EventConfig)
     staleness: StalenessConfig = field(default_factory=StalenessConfig)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
