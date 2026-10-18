@@ -25,7 +25,7 @@ documents:
 # ADR-027：账本活动类型
 
 - 状态：🟡 提议（2026-10-18；按 PR #472 评审修订：有状态回放、在途对全部估值方可见、确认 CAS 幂等、按类型的确认延迟、`schema_version` 命名、复权价核实），评审通过后实现（评审路线 C7）；
-  **PR1 已实现（#PRNUM）**：Activity schema + `calc/ledger_replay.py:replay_ledger` + 消费方切换 + 回放不变量 + 复权价核实（见 D3/D4 的 PR1 注）
+  **PR1 已实现（#479）**：Activity schema + `calc/ledger_replay.py:replay_ledger` + 消费方切换 + 回放不变量 + 复权价核实（见 D3/D4 的 PR1 注）
 - 背景：2026-10-17 全面评审对照 Wealthfolio / Ghostfolio / Portfolio Performance / Sharesight：它们都有
   分红 / 利息 / 费用 / 税 / 拆股 / 退回本金 的活动类型；openInvest 的账本只有买卖存取，
   `grep dividend|tax` 在 src/ 零命中，场外基金按"下单即成交"记账（实际 T+1 按当日净值确认）。
