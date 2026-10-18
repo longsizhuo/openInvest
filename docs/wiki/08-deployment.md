@@ -137,6 +137,7 @@ sudo systemctl status invest-web
 
 → 仅写 INVEST_HOME 目录（systemd 加固）。
 → Restart=on-failure：进程挂了自动起，但**升级包后必须手动 restart 拉新**。
+→ 端口已被占（比如旧进程没停干净）：`openinvest-web` 以**退出码 1**退出并打印提示，`Restart=on-failure`（compose 的 `restart: always` 同理）每 15 秒重试直到端口空出，不会静默停在 inactive。
 
 ### 1.4 Caddy 站点配置
 

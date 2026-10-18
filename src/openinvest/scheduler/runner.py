@@ -223,15 +223,18 @@ def _run_with_timeout(job_name: str, entry: str, timeout_minutes: float):
 
 
 def _wrap_job(job_name: str, entry: str,
-              timeout_minutes: float = DEFAULT_TIMEOUT_MINUTES) -> Callable[[], None]:
-    """把 entry 包装成一个会写 run_log + 异常隔离 + 墙钟超时的可执行函数"""
-    def wrapped() -> None:
+              timeout_minutes: float = DEFAULT_TIMEOUT_MINUTES) -> Callable[[], str]:
+    """把 entry 包装成一个会写 run_log + 异常隔离 + 墙钟超时的可执行函数。
+
+    返回本次终态 success / failed / timeout，或 "refused"（遗留线程满额拒绝启动）；
+    APScheduler 忽略返回值，`--once` 据此决定退出码。"""
+    def wrapped() -> str:
         alive = [t for t in _ORPHANS.get(job_name, []) if t.is_alive()]
         _ORPHANS[job_name] = alive
         if len(alive) >= MAX_ORPHANS:
             log.error(f"[{job_name}] 已有 {len(alive)} 个超时后仍未退出的线程（上限 {MAX_ORPHANS}），"
                       f"拒绝再启动；重启调度器可清空")
-            return
+            return "refused"
         started = datetime.now().astimezone().isoformat(timespec="seconds")
         log.info(f"[{job_name}] 启动 (started={started}, timeout={timeout_minutes:g}min)")
         run_id = _record_start(job_name, started)
@@ -241,6 +244,7 @@ def _wrap_job(job_name: str, entry: str,
         finally:
             finished = datetime.now().astimezone().isoformat(timespec="seconds")
             _record_run(job_name, started, finished, status, error, output, run_id)
+        return status
     return wrapped
 
 
@@ -380,8 +384,11 @@ def cmd_once(job_name: str) -> int:
         return 1
     log.info(f"[{job_name}] 单次执行模式")
     _ensure_run_log_table()
-    _wrap_job(cfg["name"], cfg["entry"], _job_timeout_minutes(cfg))()
-    return 0
+    status = _wrap_job(cfg["name"], cfg["entry"], _job_timeout_minutes(cfg))()
+    if status == "timeout":
+        # 一次性进程：被放弃的线程随进程退出被直接终止（非原子的写 / 发了一半的外部副作用无从保证）
+        log.warning(f"[{job_name}] 单次执行超时，进程即将退出，被放弃的线程随之终止")
+    return 0 if status == "success" else 1
 
 
 def cmd_daemon() -> int:

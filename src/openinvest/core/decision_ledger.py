@@ -180,6 +180,8 @@ def record_execution(
     并发同写时不会双记（ADR-016 的原子幂等闸要求）。锁用 memory_store 的 sidecar flock
     （与其它 jsonl 追加同一纪律），不再直接 flock 数据文件。
     """
+    import fcntl
+
     from openinvest.core.memory_store import _file_lock
 
     if "/" not in decision_id:
@@ -194,6 +196,11 @@ def record_execution(
     }
     p = path or _executions_path()
     with _file_lock(p), p.open("a+", encoding="utf-8") as f:
+        # 过渡一版（下个版本可删）：旧版本进程只 flock 数据文件本身、不认 sidecar，长寿命进程
+        # （invest-mcp / invest-web / agent 拉起的 stdio openinvest-mcp）可能在新版本上线后还活很久。
+        # 两把锁都拿：新进程之间由 sidecar 串行（顺序固定 sidecar→数据文件，不会死锁），
+        # 与旧进程之间由数据文件锁互斥——ADR-016 的原子幂等闸在混跑期不破。
+        fcntl.flock(f, fcntl.LOCK_EX)
         f.seek(0)
         latest = None
         for line in f.read().splitlines():

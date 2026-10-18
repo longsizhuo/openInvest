@@ -218,6 +218,15 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
             alerted.append(sym)
             continue
 
+        # 发报警前对**最新**冷却状态再核一次（run 开头读的 state 可能已过期）：本 job 有墙钟超时
+        # （scheduler/runner.py），超时被放弃的旧实例若在新实例已报警之后才醒来，它手里的 state
+        # 快照还是旧的，会把同一次异动再报一遍。仍保持"先报警后落冷却"的至少一次语义，只是把
+        # 过期快照的重复窗口收窄到两个实例同时在途的几秒内。
+        if not _cooldown_ok(ms.state_get(_STATE_NAME, {}) or {}, sym, hit["direction"], now,
+                            cfg.event.sentinel_cooldown_min):
+            log.info(f"[{sym}] 异动 {hit['move_pct']:+.2f}% 刚被另一实例报过，跳过")
+            continue
+
         try:
             store = EventStore()
             _, eid = store.upsert_event(event, embedding=None)  # 纯价格事件无文本向量
@@ -247,13 +256,18 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
             except Exception as e:
                 log.warning(f"[{sym}] 委员会触发失败（报警已发出，不回滚）: {e}")
 
-        state[f"{sym}:{hit['direction']}"] = now.isoformat(timespec="seconds")
         alerted.append(sym)
         # 每报警一个 symbol 立即落盘一次——不要攒到循环结束才写（dry_run 已在上面
         # continue 掉，走到这里必然是真实报警）。冷却状态是防重复报警的唯一闸门，
         # 立即持久化比"等全部处理完再一次性写"更安全：即便后面某个 symbol 抛出
         # 未预期异常导致 run() 提前退出，已经报过的 symbol 的冷却时间也不会丢。
-        ms.state_set(_STATE_NAME, state)
+        # 只合并本 key（state_update 持锁 RMW），不整份回写 run 开头读的旧 state——
+        # 否则被放弃的旧实例晚醒时会把新实例刚写的其它 symbol 冷却覆盖掉。
+        _key, _stamp = f"{sym}:{hit['direction']}", now.isoformat(timespec="seconds")
+        ms.state_update(
+            _STATE_NAME,
+            lambda cur, _k=_key, _v=_stamp: ({**(cur if isinstance(cur, dict) else {}), _k: _v}, None),
+        )
 
     return {"status": "ok", "checked": len(symbols), "alerted": len(alerted),
             "symbols": alerted, "dry_run": dry_run}

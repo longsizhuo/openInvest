@@ -141,6 +141,65 @@ def test_shipped_job_ymls_carry_sane_timeouts():
         assert 0 < runner._job_timeout_minutes(c) <= 120, c["name"]
 
 
+# ---------- --once：退出码要让外层 cron/CI 看得出超时 ----------
+
+def _once_cfg(monkeypatch):
+    monkeypatch.setattr(runner, "_load_job_configs", lambda: [
+        {"name": "probe", "schedule": "* * * * *", "entry": "x:y", "timeout_minutes": TINY}])
+
+
+def test_once_returns_nonzero_on_timeout_and_zero_on_success(db, monkeypatch):
+    _once_cfg(monkeypatch)
+    release = threading.Event()
+    job, _ = _slow_then_fast(release)
+    monkeypatch.setattr(runner, "_resolve_entry", lambda entry: job)
+    try:
+        assert runner.cmd_once("probe") == 1          # 第一次卡住 → timeout → 非 0
+        assert runner.cmd_once("probe") == 0          # 第二次正常 → 0
+    finally:
+        release.set()
+    assert [r[0] for r in _rows(db)] == ["timeout", "success"]
+
+
+def test_once_returns_nonzero_on_failed_job(db, monkeypatch):
+    _once_cfg(monkeypatch)
+
+    def boom():
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(runner, "_resolve_entry", lambda entry: boom)
+    assert runner.cmd_once("probe") == 1
+
+
+# ---------- cmd_daemon 注册心跳，且启动即触发 ----------
+
+def test_daemon_registers_heartbeat_firing_immediately(db, monkeypatch):
+    added = []
+
+    class FakeSched:
+        def add_job(self, fn, trigger=None, **kw):
+            added.append((fn, trigger, kw))
+
+        def start(self):
+            pass
+
+        def shutdown(self, wait=True):
+            pass
+
+    handlers = {}
+    monkeypatch.setattr(runner, "build_scheduler", lambda: FakeSched())
+    monkeypatch.setattr(runner, "register_jobs", lambda sched, quiet=False: [])
+    monkeypatch.setattr(runner.signal, "signal", lambda sig, h: handlers.setdefault(sig, h))
+    # 主循环的 sleep(1) 里模拟收到 SIGTERM，让 cmd_daemon 正常返回
+    monkeypatch.setattr(runner.time, "sleep", lambda s: handlers[runner.signal.SIGTERM](runner.signal.SIGTERM, None))
+    t0 = datetime.now(ZoneInfo("UTC"))
+    assert runner.cmd_daemon() == 0
+    [(fn, trigger, kw)] = [a for a in added if a[2].get("id") == "_heartbeat"]
+    assert fn is runner._heartbeat and trigger == "interval"
+    assert kw["minutes"] == runner.HEARTBEAT_INTERVAL_MIN == 5
+    assert abs((kw["next_run_time"] - t0).total_seconds()) < 5   # 启动即 ping，不是等 5 分钟
+
+
 # ---------- 看门狗：timeout 行按失败告警 ----------
 
 SH = ZoneInfo("Asia/Shanghai")

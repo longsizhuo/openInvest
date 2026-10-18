@@ -174,3 +174,33 @@ def test_record_execution_idempotent_under_concurrency_and_leaves_no_lock(tmp_pa
     record_execution("2026-10-18/GC=F", False, reason="改主意", path=p)  # 内容变了 → 追加
     assert len(p.read_text(encoding="utf-8").splitlines()) == 2
     assert _leftover_locks(tmp_path) == []
+
+
+def test_record_execution_still_excludes_old_version_process_flocking_data_file(tmp_path):
+    """过渡期：旧版本进程只 flock 数据文件本身（不认 sidecar）。新版本必须也拿数据文件锁，
+    否则混跑期间 ADR-016 的幂等闸在新旧进程之间不互斥 → 重复记账。"""
+    import fcntl
+    import time
+
+    p = tmp_path / ".dreams" / "executions.jsonl"
+    p.parent.mkdir(parents=True)
+    old = open(p, "a+", encoding="utf-8")        # "旧进程"：直接 flock 数据文件
+    fcntl.flock(old, fcntl.LOCK_EX)
+    done = threading.Event()
+
+    def new_process():
+        record_execution("2026-10-18/GC=F", True, reason="r", path=p)
+        done.set()
+
+    t = threading.Thread(target=new_process)
+    t.start()
+    try:
+        time.sleep(0.5)
+        assert not done.is_set()                  # 旧进程还持着数据文件锁 → 新进程必须等
+        assert p.read_text(encoding="utf-8") == ""
+    finally:
+        fcntl.flock(old, fcntl.LOCK_UN)
+        old.close()
+    t.join(10)
+    assert done.is_set() and len(p.read_text(encoding="utf-8").splitlines()) == 1
+    assert _leftover_locks(tmp_path) == []

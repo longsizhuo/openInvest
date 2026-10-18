@@ -60,6 +60,9 @@ superseded_by: []
 3. **防疲劳**：同 symbol 同方向 `sentinel_cooldown_min`（默认 120 分钟）
    静默；急涨后急跌属不同方向各自可报。冷却状态持久在
    `memory/.state/price_sentinel_cooldowns.json`。
+   runner 的 per-job 超时会放弃卡住的实例（见 `jobs/README.md` `timeout_minutes`），旧实例晚醒时
+   手里的冷却快照是过期的——所以发报警前对最新状态再核一次，落冷却只合并本 key（`state_update`），
+   不整份回写。语义仍是「先报警后落冷却」（至少一次）。
 4. **闭市保护**：最后一根 5m bar 距今 >25 分钟视为闭市/数据停滞，跳过——
    不拿昨天的尾巴当今天的异动。
 

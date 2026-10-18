@@ -14,6 +14,9 @@
   每个 family（`.bak.` 前的部分，如 portfolio.md）最新 `keep` 份，**或** mtime 在 `days` 天内的——两者取并集，
   其余才删。`*.lock` 只删当前没人持有的（非阻塞 flock 探测 + 持锁期间 unlink + inode 核对，
   与 `_file_lock` 同一套协议，不会和正在跑的进程抢锁）。
+  "无人持有"的 flock 探测只对 flock 型锁成立，所以只认 `_file_lock` sidecar 的形状：0 字节，且去掉 `.lock`
+  后是数据文件名（后缀 .md/.json/.jsonl/.yml/.yaml）。别的工具放进 memory/ 的"文件存在即上锁"型锁
+  （如 git 的 `index.lock`、`HEAD.lock`）形状不符，不碰。
 """
 from __future__ import annotations
 
@@ -27,6 +30,15 @@ from typing import Any, Dict, List, Optional, Tuple
 BAK_KEEP = 20
 BAK_DAYS = 7
 _BAK_RE = re.compile(r"^(?P<family>.+)\.bak\.\d{8}-\d{6}$")
+_SIDECAR_DATA_SUFFIXES = {".md", ".json", ".jsonl", ".yml", ".yaml"}
+
+
+def _is_sidecar(p: Path) -> bool:
+    """`_file_lock` 的 sidecar：`<data>.<ext>.lock`，从不写内容（0 字节）。"""
+    try:
+        return Path(p.stem).suffix in _SIDECAR_DATA_SUFFIXES and p.stat().st_size == 0
+    except OSError:
+        return False
 
 
 def plan_bak(root: Path, keep: int = BAK_KEEP, days: int = BAK_DAYS,
@@ -53,7 +65,7 @@ def _walk_locks(root: Path) -> List[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         # .backtest* 体量大（占整份备份 ~89%）且不含 sidecar，别遍历
         dirnames[:] = [d for d in dirnames if not d.startswith(".backtest")]
-        out += [Path(dirpath) / f for f in filenames if f.endswith(".lock")]
+        out += [q for q in (Path(dirpath) / f for f in filenames if f.endswith(".lock")) if _is_sidecar(q)]
     return out
 
 

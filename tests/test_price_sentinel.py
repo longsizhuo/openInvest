@@ -145,6 +145,33 @@ class TestRun:
         assert out2["alerted"] == 0
         assert sentinel_env.alert.call_count == 1
 
+    def test_late_waking_abandoned_instance_does_not_double_alert(self, sentinel_env, monkeypatch):
+        """runner 超时会放弃卡住的实例、让新实例进来。旧实例醒来时手里的冷却快照是过期的：
+        发报警前必须对最新状态再核一次，别把新实例刚报过的异动再报一遍。"""
+        from openinvest.core.memory_store import MemoryStore
+        real_fetch = ps._fetch_frames
+
+        def fetch_then_other_instance_alerts(sym):
+            # run() 已读完 state 快照；此刻"新实例"报警并落了冷却
+            MemoryStore().state_set(ps._STATE_NAME, {"GC=F:up": datetime.now(timezone.utc).isoformat()})
+            return real_fetch(sym)
+
+        monkeypatch.setattr(ps, "_fetch_frames", fetch_then_other_instance_alerts)
+        out = ps.run(dry_run=False)
+        assert out["alerted"] == 0
+        sentinel_env.alert.assert_not_called()
+        sentinel_env.trigger.assert_not_called()
+
+    def test_cooldown_stamp_merges_instead_of_clobbering_other_keys(self, sentinel_env):
+        """落冷却只合并本 key：另一实例在本实例报警期间写的其它 symbol 冷却不能被整份回写覆盖。"""
+        from openinvest.core.memory_store import MemoryStore
+        other = datetime.now(timezone.utc).isoformat()
+        sentinel_env.alert.side_effect = lambda *a, **k: MemoryStore().state_set(
+            ps._STATE_NAME, {"NDQ.AX:down": other})
+        ps.run(dry_run=False)
+        state = MemoryStore().state_get(ps._STATE_NAME)
+        assert state["NDQ.AX:down"] == other and "GC=F:up" in state
+
     def test_stale_bars_skip(self, sentinel_env, monkeypatch):
         """最后一根 bar 太旧（闭市）→ 不拿昨天尾巴当异动。"""
         old = datetime.now(timezone.utc) - timedelta(hours=3)

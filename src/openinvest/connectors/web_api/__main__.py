@@ -24,13 +24,13 @@ def main() -> None:
             "或改绑 127.0.0.1 走反向代理。"
         )
 
-    # 端口已被占 = 服务大概率已在跑——给 URL 优雅退出，别甩 uvicorn traceback
+    # 端口已被占 = 服务大概率已在跑——给 URL 优雅退出，别甩 uvicorn traceback。
+    # 退出码 1（不是 0）：systemd Restart=on-failure 才会重试、compose/监控才看得见"没起来"；
+    # 退出 0 会让 unit 静默停在 inactive（2026-10 评审 #459：systemd/compose 改走本入口后这条路径才被踩到）。
     import socket
     with socket.socket() as _s:
         if _s.connect_ex((host, port)) == 0:
-            print(f"ℹ️  端口 {port} 已有服务在跑（http://{host}:{port}）；要重启先停掉占用进程。",
-                  file=sys.stderr)
-            return
+            sys.exit(f"ℹ️  端口 {port} 已有服务在跑（http://{host}:{port}）；要重启先停掉占用进程。")
     print(f"🚀 API http://{host}:{port} （Swagger: /docs，Ctrl+C 退出）", file=sys.stderr)
     import uvicorn
     uvicorn.run("openinvest.connectors.web_api:app", host=host, port=port)

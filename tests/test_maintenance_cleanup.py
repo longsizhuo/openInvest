@@ -103,6 +103,22 @@ def test_stale_locks_removed_but_held_lock_and_backtest_dirs_untouched(mem):
         os.close(fd)
 
 
+def test_foreign_lock_files_are_never_touched(mem):
+    """"无人持有"的 flock 探测只对 flock 型锁成立：别的工具的"文件存在即上锁"型锁（git 的
+    index.lock 等）、非 0 字节的 .lock 一概不碰，也不计入 found。"""
+    (mem / "index.lock").write_text("")                      # git 风格：O_EXCL 存在即锁，无数据后缀
+    (mem / "HEAD.lock").write_text("")
+    (mem / "notes.txt.lock").write_text("")                  # 后缀不是 memory_store 的数据文件类型
+    (mem / "x.json.lock").write_text("pid 123")              # sidecar 从不写内容；有内容的不是它
+    sidecar = mem / "portfolio.md.lock"
+    sidecar.write_text("")
+    out = maintenance.cleanup(mem, apply=True, now=NOW)
+    assert out["lock"] == {"found": 1, "in_use": 0, "deleted": 1}
+    assert not sidecar.exists()
+    for name in ("index.lock", "HEAD.lock", "notes.txt.lock", "x.json.lock"):
+        assert (mem / name).exists(), name
+
+
 def test_missing_root_reports_zero_and_creates_nothing(tmp_path):
     root = tmp_path / "nope" / "memory"
     out = maintenance.cleanup(root, apply=True)

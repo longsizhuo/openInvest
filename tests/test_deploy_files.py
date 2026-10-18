@@ -82,3 +82,24 @@ def test_web_main_refuses_non_loopback_without_token(monkeypatch):
 def test_web_main_allows_non_loopback_with_token_and_loopback_without(monkeypatch):
     assert _run_web_main(monkeypatch, "0.0.0.0", "s3cret")["host"] == "0.0.0.0"
     assert _run_web_main(monkeypatch, "127.0.0.1", None)["host"] == "127.0.0.1"
+
+
+def test_web_main_port_in_use_exits_nonzero(monkeypatch):
+    """端口已被占：退出码必须非 0——systemd Restart=on-failure 才会重试、监控才看得见。
+    （曾 return → 退出码 0 → unit 静默停在 inactive；PR #459 评审）"""
+    import socket
+
+    import uvicorn
+
+    from openinvest.connectors.web_api import __main__ as web_main
+
+    with socket.socket() as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        monkeypatch.setenv("INVEST_WEB_HOST", "127.0.0.1")
+        monkeypatch.setenv("INVEST_WEB_PORT", str(srv.getsockname()[1]))
+        monkeypatch.delenv("INVEST_API_TOKEN", raising=False)
+        monkeypatch.setattr(uvicorn, "run", lambda *a, **k: pytest.fail("端口被占时不该再起 uvicorn"))
+        with pytest.raises(SystemExit) as e:
+            web_main.main()
+    assert e.value.code not in (0, None) and "已有服务在跑" in str(e.value.code)
