@@ -60,11 +60,11 @@ documents:
 
 | Connector | 触发协议 | 适合 |
 |-----------|---------|------|
-| `connectors/web_api/`（**deprecated**）| HTTP REST + SSE | remote hub 模式（INVEST_API_BASE 转发）+ 内部触发；不再新增端点 |
-| `connectors/mcp_server.py`（`openinvest-mcp`）| MCP stdio | 任意 MCP 宿主（Claude Code / Codex / Hermes / OpenClaw / Cursor / ...）|
+| `src/openinvest/connectors/web_api/`（**deprecated**）| HTTP REST + SSE | remote hub 模式（INVEST_API_BASE 转发）+ 内部触发；不再新增端点 |
+| `src/openinvest/connectors/mcp_server.py`（`openinvest-mcp`）| MCP stdio | 任意 MCP 宿主（Claude Code / Codex / Hermes / OpenClaw / Cursor / ...）|
 | `skills/invest/scripts/run.sh` (CLI) | Agent Skill（Claude Code / Codex / Hermes / ...）| 让宿主 agent 自己当协调者跑 |
 
-**关键约束**：connector 必须**只做协议转换**，业务逻辑全部 forward 给 `core/`。
+**关键约束**：connector 必须**只做协议转换**，业务逻辑全部 forward 给 `src/openinvest/core/`。
 违反这条 → connector 之间会出现行为飘移（已有教训：早期 QQ bot connector 自己改 portfolio dict 导致 Web 写入失败——该 connector 已于 2026-07 退役）。
 
 详见各 connector 子目录 README：
@@ -106,7 +106,7 @@ documents:
 > 纯度由 import-linter 契约 + CI AST 守卫机器强制，全文见
 > [adr/026](adr/026-pure-calculation-layer.md)。
 
-### 3.1 编排器：`core/committee/` 包（`debate.py:run_committee` 为入口）
+### 3.1 编排器：`src/openinvest/core/committee/` 包（`debate.py:run_committee` 为入口）
 
 ```python
 def run_committee(asset, market_data, macro_view, portfolio_summary,
@@ -118,7 +118,7 @@ def run_committee(asset, market_data, macro_view, portfolio_summary,
 
 `progress_callback` 让 Web SSE 端点可以实时 push stage 进度（"round_1_done" / "round_2_done" / "cio_done"）。
 
-### 3.2 状态机：`core/portfolio_manager.py`
+### 3.2 状态机：`src/openinvest/core/portfolio_manager.py`
 
 ```python
 with pm.with_portfolio_tx() as p:
@@ -131,7 +131,7 @@ with pm.with_portfolio_tx() as p:
 **所有写操作必须走这个 RMW 闭包**——保证 fcntl 文件锁 + Pydantic schema validate + 原子写。
 异常时整个 tx 不落盘（commit-on-success）。
 
-### 3.3 数据校验：`core/schemas.py`
+### 3.3 数据校验：`src/openinvest/core/schemas.py`
 
 Pydantic v2 强 schema，写入前必过：
 - `cash` 必须是 `dict[str, NonNegativeFloat]`
@@ -139,7 +139,7 @@ Pydantic v2 强 schema，写入前必过：
 - `holdings[].symbol` 必须非空
 - 任何不满足 → ValidationError，写不进 memory
 
-### 3.4 REGIME 分类与概率口径：`calc/regime.py` + `core/regime_probability.py`（纯核在 `calc/regime_probability.py`）
+### 3.4 REGIME 分类与概率口径：`src/openinvest/calc/regime.py` + `src/openinvest/core/regime_probability.py`（纯核在 `src/openinvest/calc/regime_probability.py`）
 
 6 类 regime（uptrend/downtrend/range_bound/crash/recovery/unknown），**确定性算法
 不走 LLM**。2026-05-31 起 regime 不再翻译成方向锁（消融证明方向锁层=1 个杠杆+2 个
@@ -270,8 +270,8 @@ holdings:
 每层都设计成可独立替换：
 
 - **加 connector**（如 Telegram bot）：新建一个协议转换文件（历史范例 napcat_bot.py 已删除，git history 可考），**不要碰 core**；多数场景直接接 MCP 更省
-- **加 agent 角色**（如 ESG 分析师）：在 `capabilities/committee/` 加 prompt 文件，在 `core/committee/debate.py:run_committee` 注册
-- **换 LLM provider**（DeepSeek → OpenAI）：改 `capabilities/sdk_agent.py` 的 client init，prompt 不动
+- **加 agent 角色**（如 ESG 分析师）：在 `src/openinvest/capabilities/committee/` 加 prompt 文件，在 `src/openinvest/core/committee/debate.py:run_committee` 注册
+- **换 LLM provider**（DeepSeek → OpenAI）：改 `src/openinvest/capabilities/sdk_agent.py` 的 client init，prompt 不动
 - **换持久化**（Markdown → SQLite）：实现 `MemoryStore` 同接口，core 不动
 
 详见 [07-extending.md](07-extending.md)。

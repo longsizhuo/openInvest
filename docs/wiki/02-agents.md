@@ -34,11 +34,12 @@ documents:
 
 | Role | 能看到 | 被屏蔽 | 输出格式 | 文件 |
 |------|--------|--------|----------|------|
-| **Macro Strategist** | VIX / TNX / 全球宏观 brief + **盘中事件上下文 event_brief（仅 Macro 看得到，事件 RAG 严格隔离）** | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `capabilities/committee/macro_strategist/macro_strategist.py` |
-| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 中性概率口径 + 确定性事实块（估值/情绪） | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `capabilities/committee/quant/quant.py` |
-| **Wealth Context Officer**（第 5 角色，跨资产共享） | user.md 的 wealth_context（家族 backup / 应急金 / 账户性质）+ portfolio cash | 技术指标、Macro view、个股持仓明细 | 真实流动性评级（给 Risk + CIO 用） | `capabilities/committee/wealth_context_officer/wealth_context_officer.py` |
-| **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights + **Wealth Context Officer 真实流动性视角** | 技术指标、Macro view | 风险等级 + 集中度评分 | `capabilities/committee/risk_officer/risk_officer.py` |
-| **CIO** | 三人完整 transcript + Wealth Context 视角 + 用户 risk_level（含在 portfolio_summary 文本里） | — | 5 选 1 verdict + confidence + alloc | `capabilities/committee/cio/cio.py` |
+| **Macro Strategist** | VIX / TNX / 全球宏观 brief + **盘中事件上下文 event_brief（仅 Macro 看得到，事件 RAG 严格隔离）** | 用户持仓、技术指标 | `SIGNAL` + `STRENGTH` + `SCORE` | `src/openinvest/capabilities/committee/macro_strategist/macro_strategist.py` |
+| **Quant Analyst** | 技术指标（Wilder RSI / MA / 真百分位 / 真 TR ATR / RVOL）+ REGIME 中性概率口径 + 确定性事实块（估值/情绪） | 用户持仓、Dreaming insights | 看涨/看跌 + 信号强度 | `src/openinvest/capabilities/committee/quant/quant.py` |
+| **Risk Officer** | 持仓集中度 / 浮盈缓冲 / Dreaming insights + portfolio cash（流动性统一按账户现金判） | 技术指标、Macro view | 风险等级 + 集中度评分 | `src/openinvest/capabilities/committee/risk_officer/risk_officer.py` |
+| **CIO** | 三人完整 transcript + 用户 risk_level（含在 portfolio_summary 文本里） | — | 5 选 1 verdict + confidence + alloc | `src/openinvest/capabilities/committee/cio/cio.py` |
+
+> **历史说明**：曾有第 5 个前置角色 Wealth Context Officer（读 user.md 的 `wealth_context`，给 Risk + CIO 一个"真实流动性"视角）。作者本人从未填过该字段、常年空转，已于 2026-07-08（`a425e9d`）连同 `PUT /api/user/wealth_context`、`wealth_context_view` 全链路穿线一并删除；`src/` 零引用。现在 Risk Officer 统一按 portfolio cash 判流动性。[12-verification](12-verification.md) 主张 7 是当时的实测记录，仅作历史。
 
 **信息隔离的目的**：避免 LLM 在同一 context 里相互污染观点。Quant 不知道用户亏了多少（不会偏向"赶紧补仓"），Risk Officer 不知道 RSI（不会被技术信号牵着鼻子走）。**注意这种"物理隔离"只在 Round 1 严格成立**——见下文 [Cross-Challenge 协议](#cross-challenge-协议) 的轮次说明。
 
@@ -46,7 +47,7 @@ documents:
 
 ## 一次完整跑 6 步（Direct 路径视角）
 
-下面的 round 划分**对应 Direct 路径**（`core/committee/` 包，包括 cron / Web GUI / skill `run_committee`）。Coordinator 路径（Claude Code spawn 4 subagent）分法略不同——见本节末"两条路径 LLM 调用数对照"。
+下面的 round 划分**对应 Direct 路径**（`src/openinvest/core/committee/` 包，包括 cron / Web GUI / skill `run_committee`）。Coordinator 路径（Claude Code spawn 4 subagent）分法略不同——见本节末"两条路径 LLM 调用数对照"。
 
 ```
 Round 0  ─ Macro 1 LLM call（跨资产共享，每次跑只 1 次）
@@ -64,7 +65,7 @@ Round 4  ─ CIO 看完整 transcript，1 LLM call 出 verdict
 
 实测耗时（DeepSeek-Chat + 2 资产并行 + 收敛退出）：**~16 秒**（journal log 实证）。
 
-文件：`core/committee/debate.py:run_committee` 是入口；`core/runner/session.py:run_committee_for_symbol` 是端到端封装。
+文件：`src/openinvest/core/committee/debate.py:run_committee` 是入口；`src/openinvest/core/runner/session.py:run_committee_for_symbol` 是端到端封装。
 
 ### 两条路径 LLM 调用数对照（避免歧义）
 
@@ -98,7 +99,7 @@ uptrend 杠杆效应保留为显式 `verdict.risk_profile=aggressive` 开关（�
 
 ### 6 类 regime（uptrend / downtrend / range_bound / crash / recovery / unknown）
 
-源：`core/regime.py:THRESHOLDS`（#113 起尺度无关比值口径，任意资产零配置自动适配，per-asset 覆盖已删）
+源：`src/openinvest/core/regime.py:THRESHOLDS`（#113 起尺度无关比值口径，任意资产零配置自动适配，per-asset 覆盖已删）
 
 | Regime | 触发条件 | 给 Quant 的口径 |
 |--------|---------|-------------------|
@@ -108,7 +109,7 @@ uptrend 杠杆效应保留为显式 `verdict.risk_profile=aggressive` 开关（�
 | `crash` | **双触发器（任一即触发）**：① 急跌 `atr_spike_ratio ≥ crash_atr_spike_ratio_min`（默认 2.0，波动较自身常态翻倍）**且** `return_30d ≤ −20%`；② 深跌 `return_30d ≤ −30%`（不看波动） | **强制 neutral**（可执行性约束：崩盘期任何方向都难理性执行） |
 | `recovery` | crash 未触发 + 从近 30 日低点反弹 ≥ 10% + 价格仍在低位（真百分位 < 50%） | 中性概率口径，方向自决 |
 
-> 说明（与 `core/regime.py` 实现对齐，2026-05-26）：
+> 说明（与 `src/openinvest/core/regime.py` 实现对齐，2026-05-26）：
 > - 趋势判断用的是 **MA20 对 MA120 的偏离度**（单一 spread 阈值），**不是** MA20>MA50>MA200 三线多头排列；代码里只算 MA20/MA120/MA250，没有 MA50/MA200。
 > - `crash` 是 **双触发器（OR）**：路径一急跌（波动腿 AND 20% 跌幅腿）+ 路径二深跌（30 日跌 ≥ 30%，不看波动）。路径二专门抓"低波动慢阴跌"——深跌本身即 crash，无需高 ATR 佐证。
 > - `recovery` 为无状态实现：用"已从近 30 日低点反弹 ≥ 10% 且分位 < 50%"近似"刚走出 crash"。
@@ -131,7 +132,7 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 | `risk_profile=aggressive` + uptrend + HOLD | 升级 ACCUMULATE（显式杠杆档，默认 steady 不动）|
 | BUY/ACCUMULATE 的 `alloc_cny` 超过用户单次入场上限（每笔建议金额上限，非当日额度，可分多笔；`strategy.md` 的 `max_single_invest_cny`，标的级优先于策略级；0 = 不设限）| 钳到上限（方向不变）+ 记 intervention `rule=single_invest_cap` + memo 末尾留一句"金额已按单次上限 X 钳制"（Sanity 6；HOLD/TRIM/SELL 与减仓金额不受入场上限约束）|
 
-源：`core/committee/cio_parse.py:parse_cio_memo`（Sanity 0-6 + Defense + risk_profile，全部确定性后处理）。
+源：`src/openinvest/core/committee/cio_parse.py:parse_cio_memo`（Sanity 0-6 + Defense + risk_profile，全部确定性后处理）。
 
 ---
 
@@ -191,7 +192,7 @@ CIO 输出 verdict 后，`parse_cio_memo()` 自动校验：
 
 ### 收敛检测
 
-实现：`core/committee/debate.py:_check_convergence`
+实现：`src/openinvest/core/committee/debate.py:_check_convergence`
 
 ```python
 # 连续两轮，Quant 和 Risk 各自的 SIGNAL + STRENGTH 都稳定
@@ -242,7 +243,7 @@ GUI `/committee` → "4 角色 + 规则" tab 直接展示所有 4 个角色的�
 | 路径 | 协调者 | Worker 实现 | 模型 |
 |------|--------|-------------|------|
 | **Skill** | 用户的 Claude | Claude `Agent({subagent_type})` 真 spawn 4 个 subagent | Claude 4 |
-| **Web/Cron** | `core/committee/` | 4 个 `SDKAgent` + ThreadPoolExecutor 同进程多线程 | DeepSeek |
+| **Web/Cron** | `src/openinvest/core/committee/` | 4 个 `SDKAgent` + ThreadPoolExecutor 同进程多线程 | DeepSeek |
 
 详见 [04-execution-paths.md](04-execution-paths.md) 和 [adr/001-dual-execution-paths.md](adr/001-dual-execution-paths.md)。
 

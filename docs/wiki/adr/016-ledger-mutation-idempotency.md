@@ -8,10 +8,6 @@ documents:
     - POST /api/holdings
     - PUT /api/holdings/{symbol}
     - DELETE /api/holdings/{symbol}
-    - POST /api/deposit
-    - POST /api/withdraw
-    - POST /api/gold/buy
-    - POST /api/gold/sell
     - POST /api/trades/record
     - PATCH /api/trades/{trade_id}/status
     - POST /api/skill/buy
@@ -125,7 +121,8 @@ superseded_by: []
 | napcat `/deposit /withdraw /gold*` | QQ 私聊 | 累加 | 单 WS 连接内事件串行处理、无重放 | ✅（直接用户动作）|
 | `deposit_cash / withdraw_cash / buy / sell` | CLI `--idempotency-key` / MCP `idempotency_key`（含 `record_existing_position`）/ `/api/skill/buy\|sell\|deposit\|withdraw`（body `idempotency_key` 或 `Idempotency-Key` header）| 累加 | 可选幂等键：`PortfolioManager._ledger_tx` 把 key 记进 portfolio 文档自身的 `ledger_idempotency_keys`（同 `synced_trade_ids`），check+append 与 cash/holdings 同一把锁、同一次 atomic write；重复 key 返回 `{"status": "duplicate"}` 不提交事务；失败 / 中断时 key 与账本一起不落盘。远端 CLI 不传 key 自动生成 uuid4，网络失败回显供重试复用 | ✅ PR #432（`tests/test_ledger_idempotency.py` 20 线程同 key 恰好 1 次入账）|
 | `delete_holding` | CLI / MCP / `/api/skill/delete_holding` | remove | 第二次 → "不在持仓" ValueError | ✅（天然幂等）|
-| 退役 GUI 端点 `/api/deposit` `/api/withdraw` `/api/gold/buy\|sell` `/api/cash/{ccy}/*`（`routers/write.py` `cash_write.py`）| HTTP POST | 累加 | 无去重键 | ⚠ GUI 2026-07-05 退役、Web API 已 deprecated，无现存客户端；随 Web API 退场一并删，不再加键 |
+| ~~退役 GUI 端点 `/api/deposit` `/api/withdraw` `/api/gold/buy\|sell\|set\|offset`（`routers/write.py`）~~ | HTTP POST | 累加 | 无去重键 | ✅ 已删除（#236）：与 `cash_write.py` / `/api/skill/*` 重复、无消费者 |
+| 退役 GUI 端点 `/api/cash/{ccy}/deposit\|withdraw`（`cash_write.py`）| HTTP POST | 累加 | 无去重键 | ⚠ GUI 2026-07-05 退役、Web API 已 deprecated，无现存客户端；随 Web API 退场一并删，不再加键 |
 | `db.trades_db.record_trade` | `/api/trades/record` 重试 | INSERT | 无去重键 | ⚠ agent 重试产生重复 *planned* 行，但每行各执行一次（apply 端幂等已守）|
 
 ## 已解决（PR #432）：累加型写路径的幂等键

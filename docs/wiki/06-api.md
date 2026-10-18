@@ -171,14 +171,13 @@ curl -X POST http://127.0.0.1:8765/api/holdings/import \
   -d '{"content": "510300 ETF 3000股 成本4.2元（支付宝）\n余额宝 5万", "commit": false}'
 ```
 
-### 旧的专用端点（兼容保留）
+### 旧的专用端点（已删除）
 
-```
-POST /api/deposit     POST /api/withdraw
-POST /api/gold/buy    POST /api/gold/sell    POST /api/gold/set    POST /api/gold/offset
-```
-
-新代码请用 holdings 通用接口，专用接口仅给老前端兼容。
+`POST /api/deposit` · `/api/withdraw` · `/api/gold/buy` · `/api/gold/sell` · `/api/gold/set` · `/api/gold/offset`
+六个 v1 端点（`routers/write.py`）已于 #236 删除：与 `/api/cash/{ccy}/*`、`/api/skill/*` 重复，
+且已漂移（currency 锁 cny/aud、金价卖出费率硬编码、history action 名不同），退役 GUI 之外无消费者。
+记账请用 CLI / MCP（`deposit` / `withdraw` / `buy` / `sell`），remote hub 走 `/api/skill/{deposit,withdraw,buy,sell}`
+（支持幂等键，ADR-016）；任意币种现金也可用 `/api/cash/{currency}/deposit|withdraw`。
 
 ### 策略写
 

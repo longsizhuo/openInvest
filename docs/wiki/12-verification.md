@@ -176,6 +176,8 @@ alloc_aggressiveness 0.06 vs 0.25 reward 几乎相同；regime 阈值变化也�
 
 ## 主张 7：WealthContextOfficer 解决"低现金=高风险"误判
 
+> **已退役（历史记录）**：WealthContextOfficer 于 2026-07-08（`a425e9d`）删除，`src/` 零引用；下文实测与路径均为当时快照。Risk Officer 现统一按 portfolio cash 判流动性。
+
 **问题**（2026-05-12 用户实盘报告）：
 > "agent 一直说我现金太少，让我卖掉换现金。但实际我的现金 backup 还有家族，
 > 这些只是零花钱。"

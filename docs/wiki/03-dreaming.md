@@ -42,13 +42,13 @@ documents:
 > 出 verdict，每条 verdict + 事后 7d/30d 行情就是一个样本——**与用户交不交易无关**，
 > 样本量随系统运行天然增长。
 
-数据源是 `jobs/verdict_review.py` 产出的 `memory/.dreams/verdict_review.jsonl`，
+数据源是 `src/openinvest/jobs/verdict_review.py` 产出的 `memory/.dreams/verdict_review.jsonl`，
 每行一条 verdict 的事后复盘（已做 proxy-aware 黄金 CNY/克换算 + forward window
 成熟度过滤，见 [05-data-model](05-data-model.md)）。
 
 ## 三阶段后台整合
 
-每天凌晨 03:00 跑（`jobs/dreaming.yml`）：
+每天凌晨 03:00 跑（`src/openinvest/jobs/dreaming.yml`）：
 
 ```
                               ┌─────────────────┐
@@ -79,7 +79,7 @@ documents:
 
 ## 1. Light Sleep（摄入信号）
 
-源：`jobs/dreaming.py:light_sleep`
+源：`src/openinvest/jobs/dreaming.py:light_sleep`
 
 读 `verdict_review.jsonl`，每条 verdict 补上**决议日的市场 regime**
 （用 committee 同款 `core.regime.classify_regime`，截断到决议日防穿越）。
@@ -92,7 +92,7 @@ documents:
 
 ## 2. REM Sleep（按 verdict × regime 聚合）
 
-源：`jobs/dreaming.py:rem_sleep`
+源：`src/openinvest/jobs/dreaming.py:rem_sleep`
 
 按 `(asset, verdict, regime)` 分桶，统计每个组合 7d/30d 的命中率。例如：
 
@@ -133,7 +133,7 @@ HOLD 没命中时再分方向：
 
 ## 3. Deep Sleep（固化）
 
-源：`jobs/dreaming.py:deep_sleep`
+源：`src/openinvest/jobs/dreaming.py:deep_sleep`
 
 **阈值门**：`score ≥ 0.8` 且 `count ≥ 3`。评分（`_score`）：
 
@@ -168,7 +168,7 @@ CIO 在下一次决策时通过 `MEMORY.md` 索引看到这条 → 在该 regime
 
 ## 4. 怎么被 CIO / Risk Officer 看到
 
-`core/runner/loaders.py:load_prior_insights` 在跑委员会前读 `memory/insights/*.md`，
+`src/openinvest/core/runner/loaders.py:load_prior_insights` 在跑委员会前读 `memory/insights/*.md`，
 注入到 prompt 上下文（`prior_insights`）。这是 [三路径单一可信源](04-execution-paths.md)
 的一部分——Skill / Web / Cron 三条路径都经 `run_committee_session` 注入，不漏。
 
@@ -198,7 +198,7 @@ Dreaming（行为 insight）和 DSPy oracle 训练（[11-rl-training](11-rl-trai
 | 坑 | 缓解 |
 |----|------|
 | 样本量小，模式不稳 | 阈值门 `count≥3` + 黑天鹅免责；可用更多委员会运行/backtest 扩样 |
-| Deep Sleep 写入并发（cron + 手动同时跑）| `core/consolidation_lock.py` 提供独占锁 |
+| Deep Sleep 写入并发（cron + 手动同时跑）| `src/openinvest/core/consolidation_lock.py` 提供独占锁 |
 | insights 文件越积越多 | 计划加"老化机制"：N 天未触发 → archive；目前未实现 |
 | `K_FLAT` 等阈值过拟合 | 现为固定常数；真要调走 Phase 3 holdout + 离线 backtest + 人拍板 |
 
