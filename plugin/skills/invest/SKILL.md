@@ -113,6 +113,16 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
                                                         sell_to_rebalance] [--band-pct 5] — a list
                                                         only (BUY/SELL, whole lots, reason); the user
                                                         places the orders; quote amounts from the JSON
+   "I got a dividend / interest / paid a fee or tax /
+    X split / 收到分红 利息 交了费 拆股 退回本金"      → run.sh record_dividend (--kind interest) /
+                                                        record_fee (--kind tax) / record_split /
+                                                        record_return_of_capital (MCP tools of the same
+                                                        name) — bookkeeping of what already happened,
+                                                        pass the REAL date (--trade-date); always send
+                                                        an idempotency key (a repeated split multiplies
+                                                        the position twice); never use deposit/withdraw
+                                                        for these (that would book them as new money
+                                                        instead of return)
    "should I buy/sell X / analyze X / 该不该买卖X"    → committee protocol ↓
    "track AAPL / I want to watch TSLA / 跟踪苹果"     → see references/adding-assets.md
    "alert me if gold falls below 900 / tell me when
@@ -240,6 +250,7 @@ same shape as local**, decision tree applies as usual):
 | `prepare/save_committee` | Via hub RPC — the Coordinator protocol (spawn 4 subagents) is **completely unchanged** |
 | `buy/sell/deposit/...` write ops | Land in the hub ledger (history `source: skill_remote`) |
 | `buy --existing-position` | **Refused** (the REST endpoint can't carry it, and forwarding would deduct hub cash) — run it on the hub, or use the remote MCP tool `record_existing_position` |
+| `record_dividend/record_fee/record_split/record_return_of_capital`, `backfill_raw_close` | **Refused** (no REST endpoint, by design) — run them on the hub, or use the remote MCP tools of the same name |
 | `event_check` | Forwards the hub's manual scan; `--live` / `--recall` disabled (hub cron already covers them) |
 
 **Discipline**: in remote mode this machine has no `memory/`, so "reading/writing memory
@@ -252,6 +263,7 @@ add `Authorization: Bearer $INVEST_API_TOKEN` when curling.
 **MCP users** (auto-registered once the plugin is installed; same for Claude Code / Codex): doctor / status / strategy /
 history / live_prices / what_if / rebalance_plan / discipline / decisions / explain_decision /
 record_execution / ingest_event / buy / record_existing_position / sell / deposit / withdraw /
+record_dividend / record_fee / record_split / record_return_of_capital /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
 run_committee — schemas auto-discovered; call them directly, no table lookup needed.
 `track_asset` takes an optional `target_pct` (0–1 share of total assets, read by `rebalance_plan`) and
@@ -359,6 +371,14 @@ a signal worth recording.
 - **`max_single_invest_cny` ("单次上限") is a per-order cap on the suggested amount — not a daily or
   total allowance, and orders can be split.** When the memo says "金额已按单次上限 … 钳制", the CIO's
   amount was cut to that cap per order. Never tell the user "today's allowance is used up" because of it
+- **Dividends / interest / fees / taxes / splits are ledger activities, not trades or deposits**: `record_dividend`
+  (cash + gross − tax withheld; `--reinvest` = DRIP), `record_fee` (`--kind tax` for tax), `record_split`
+  (`--ratio` = new/old: 10-for-1 → 10, 1-for-10 → 0.1), `record_return_of_capital` (lowers average cost).
+  They count as account return/cost, not as money in/out. Account performance values history at the
+  **raw** (not dividend-adjusted) price once `close_raw` is backfilled — run `backfill_raw_close` once after
+  upgrading, and read `performance.price_basis` (`raw` | `adjusted`) before quoting a return: for an
+  `adjusted` symbol a recorded dividend is deliberately left out of the NAV (the adjusted price already
+  contains it; `data_quality.income_in_adjusted_price` says so). `status.income_30d` totals the last 30 days.
 - **Gold (`GC=F`) is booked per gram in CNY only**: `buy` / `record_existing_position` with
   `units` = grams, `price` = CNY/gram, `currency=CNY`, `kind=metal`, `unit_label=克`. A USD/ounce booking
   is rejected (the error shows the correct form) — convert the quote first (USD/oz ÷ 31.1035 × USDCNY),
