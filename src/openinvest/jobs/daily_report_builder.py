@@ -288,6 +288,7 @@ _GLOSSARY = """## 术语表（看不懂的词在这里查）
 
 - **裁决**: 委员会结论。HOLD=持有不动；ACCUMULATE=小额加仓；BUY=买入；TRIM=减一部分；SELL=清仓
 - **同类决议查表**（裁决旁那串字）: 过去同类决议（实盘 + 纸面舰队，括号里注明来源；本机样本不够时用随包的默认表）30 天后怎样。HOLD 写的是"涨跌留在正常波动带内的比例"，旁边给同期市场横盘基率——两者差不多说明只是市场在横盘，不代表判断准；加仓/减仓写的是方向判对的比例。样本 <30 显示"样本不足"
+- **今日持仓归因**: 每个持仓**自己**最近两根收盘的涨跌（休市日用最近两个交易日，日期标在表头）。**对组合贡献** = 昨日权重 × 当日收益，单位是百分点（pp），各持仓相加 = 持仓合计涨跌；合计不含现金，所以和含现金的净值口径（TWR）不是同一个数。**汇率影响** = 外币持仓涨跌里由汇率变动带来的那部分（本币涨跌 + 汇率影响 = 基准币种涨跌）。**对比基准** = 该持仓涨跌减去基准同期涨跌（百分点）。"近 7 天相关事件"是已入库的新闻，不是前瞻日历；前瞻只有个股财报 / 除息日，取不到写"无数据源"
 - **裁决中性度**: 已成熟（30 天）的裁决里 HOLD 占多少，对照同一批样本里市场实际有多少是横盘（涨跌留在该资产正常波动带内）。两个数接近 = HOLD 多主要是因为市场本来就在横盘；HOLD 占比明显更高 = 委员会比市场更倾向“不动”。只描述分布，不代表对错
 - **自报**: CIO 自己写的 0-1 把握度，只作留档（历史上它高低和对错基本无关）
 - **输入缺失/强制 HOLD**: 被规则强制改成 HOLD（数据缺失 / 集中度 lens / 没给买回点 / 防御拦截）或自报 ≤0.4，不查表
@@ -324,6 +325,7 @@ def assemble_full_report(
     asset_events: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     confidence_lookup: Optional[Dict[str, Any]] = None,
     neutrality: Optional[Dict[str, Any]] = None,
+    holdings_digest_md: str = "",
 ) -> str:
     """给定所有委员会结果 + 辅助数据，组装最终 markdown 报告
 
@@ -356,6 +358,9 @@ def assemble_full_report(
             entry 层读好传入；含 sentence + as_of）。None / 无 sentence → 不出这行。
         performance_md: 真实账户业绩段（services.account_performance.render_performance_md，
             entry 层算好传入）：TWR / XIRR / 最大回撤 / vs 基准各一行。空 → 不出 section。
+        holdings_digest_md: "今日持仓归因"整段（services.holdings_digest.render_digest_md，含 ## 标题，
+            entry 层按 render_target 渲染好传入——email 是表格、chat 是列表；不可信文本已在渲染时转义）。
+            置顶（TL;DR 之后、宏观之前）：先看今天发生了什么，再看委员会怎么说。空 → 不出 section。
 
     Returns:
         完整 markdown 报告字符串
@@ -537,9 +542,12 @@ def assemble_full_report(
         if render_target == "chat" else ""
     )
 
+    # 今日持仓归因：新维度必须进邮件 / chat（用户规则），所以是渲染好的整段，不是 prompt 输入。
+    digest_section = f"\n{holdings_digest_md}\n\n---\n" if holdings_digest_md.strip() else ""
+
     return f"""
 # 投资委员会日报 ({today})
-{tldr_section}
+{tldr_section}{digest_section}
 ## 1. 宏观环境 (跨资产共享)
 {_t(macro_view)}
 

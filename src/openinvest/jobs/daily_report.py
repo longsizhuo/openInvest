@@ -596,6 +596,20 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         log.warning(f"账户业绩渲染失败 graceful: {e}")
         performance_md = ""
 
+    # send_email=False 只会是宿主 agent cron（cmd_daily_report）调用——报告投递去
+    # Discord/Weixin/QQ 等聊天平台，走无 HTML 的 chat 变体。
+    render_target = "email" if send_email else "chat"
+
+    # 今日持仓归因（每持仓涨跌 / 对组合贡献 / 汇率 / 对比基准 + 近 7 天事件 + 未来 7 天财报·除息；
+    # 持仓行情 / 汇率 / 事件只读本地库，联网仅日历与基准刷新（后者每天一次、通常账户业绩段已刷过）；
+    # 零 LLM；失败不阻断报告，子步骤失败在段内降级为 n/a）
+    try:
+        from openinvest.services.holdings_digest import build_holdings_digest, render_digest_md
+        holdings_digest_md = render_digest_md(build_holdings_digest(pm, today=today), render_target)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"今日持仓归因渲染失败 graceful: {e}")
+        holdings_digest_md = ""
+
     # 裁决中性度：读最近一次复盘落的聚合（零 LLM；没复盘过 / 读失败 → None → 报告不出这行）
     from openinvest.jobs.verdict_review import load_neutrality
     neutrality = load_neutrality()
@@ -616,9 +630,8 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         plain_summaries=plain_summaries,
         discipline_md=discipline_md,
         performance_md=performance_md,
-        # send_email=False 只会是宿主 agent cron（cmd_daily_report）调用——
-        # 报告投递去 Discord/Weixin/QQ 等聊天平台，走无 HTML 的 chat 变体。
-        render_target="email" if send_email else "chat",
+        holdings_digest_md=holdings_digest_md,
+        render_target=render_target,
         asset_events=asset_events,
         confidence_lookup=confidence_lookup,
         neutrality=neutrality,
