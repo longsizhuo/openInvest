@@ -423,6 +423,29 @@ HOLD 比横盘占比高约 10pp，且一次 BUY / SELL 都没有——与主张 
 
 复现：`INVEST_HOME=<只读拷贝> uv run python -m openinvest.jobs.verdict_review` → `docs/verdict_accuracy.md`「置信度校准」「裁决中性度」两节。
 
+### 8.3 B4 密封投票：舰队 A/B 臂已开跑（评审路线 B4，2026-10）
+
+> **实验已开跑，判读日期 = 开跑日 + 35 天。** 开跑日 = 舰队 crontab 加上 `--sealed-arm` 之后第一个落盘日
+> （以 `memory/.backtest_sealed/` 里最早的日期目录为准）。
+> 一句话翻译：舰队多跑一臂对照（角色不互相看 + 每个标的跑三次投票），你收到的裁决不变；35 天后出判读。
+
+A4（8.2 末段）量出：同一份输入重跑 3 次方向翻转 26.7%，自报置信度恒 0.62——单次抽样的方差和信号同量级。
+B4 把"每个标的只抽一次"换成"同一份输入独立抽 N=3 次（`run_committee(max_debate_rounds=1)`：Quant/Risk 互不可见，CIO 只看 Round-1 简报）、
+按多数票聚合、用最大票占比（1.0 / 0.67 / 分裂 0.33）代替自报置信度、建议金额取多数票的中位数"，作为舰队的**第二臂**，
+与现有舰队产物（对照臂）同日同标的同输入并排。方式同 T2 置信度臂：**只加实验臂，不改任何 live 裁决**，产物只在数据目录
+（`.backtest_sealed/`、`.dreams/verdict_review_sealed.jsonl`、`docs/verdict_accuracy_sealed.md`，均 gitignored），
+不进 live 命中率页 / 公开 JSON / confidence_lookup。
+
+**判据（开跑前冻结）**：判读日实验臂整侧 30d「提升」的 95% CI 下界 > 0（H1），**或**配对逐日方向翻转显著少于对照臂且 HOLD 占比不更高（H2，
+精确符号检验 p < 0.05）→ 才起草 live 切换提案（另一个 PR，附一句话信号翻译 + 确定性回算差异报告，用户签字）。都不过就关臂，negative result 写回本节。
+
+**读之前先知道的三件事**：(1) 舰队对照臂本来就是 rounds=1，本实验隔离的是"多数票 + 分裂度"，不是"辩论 vs 不辩论"
+（live 日报 4 轮、Web 默认 4、事件重跑 2、Direct CLI 1）；(2) 舰队裁决 94% 是 HOLD，H1 功效很低、H2 可能"功效不足"；
+(3) 判读日只有开跑头约 5 天的决议满 30 天窗口，H1 建议推到开跑 + 65 天再看。成本 ≈ +¥13 / 月。
+设计、聚合规则、成本、判据与全部局限见 [`experiments/sealed_vote/README.md`](../../experiments/sealed_vote/README.md)。
+
+结果：**未出**（判读日前不写任何数字）。
+
 ---
 
 ## 局限性 / 不能宣称的事
