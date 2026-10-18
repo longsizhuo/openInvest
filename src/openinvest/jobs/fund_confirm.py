@@ -9,7 +9,7 @@
 - **幂等（ADR-016 红线 4）**：确认是对 ``order_id`` 的 ``placed → confirmed`` CAS，检查与写入在同一个 with_portfolio_tx 里——
   job 重跑 / 与手动 ``confirm_fund_order`` 并发都只有一个生效，另一个读到 ``already_confirmed``。
 - **失败**：单笔确认抛异常（账本损坏、金额非法……）不挡其余订单，跑完整批后统一抛 RuntimeError → runner 记
-  job_runs ``failed``。注意 job_watchdog 目前不会据 ``failed`` 行告警（只报停摆 / 卡死 / 超时），要看 job_runs。
+  job_runs ``failed``；fund_confirm.yml 标了 ``alert_on_failure: true``，job_watchdog 据此告警（判据 f，同一天只报一次）。
 - **申购费**：自动确认按 fee=0（job 不知道券商实际收了多少）；要记费用，到点前手动 ``confirm_fund_order --nav N --fee F``。
 """
 from __future__ import annotations

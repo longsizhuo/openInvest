@@ -173,8 +173,10 @@ status / `pnl_snapshot` / `holdings_digest` / `rebalance_plan` / 集中度 在 T
 >   账户业绩回放用 `LedgerState.pending` 的同名读口（placed 当日 NAV 不变，confirmed 当日用份额 × 净值替换在途面值，开盘在途同样锚定当前状态）。
 >   `rebalance_plan` 把在途金额算在对应基金头上（否则刚下单的基金显示 0% 仓位，清单会建议再买一遍）；委员会的 `portfolio_summary` 多一行"在途申购"。
 > - **`fund_confirm` 的窗口**：需求是 21:30–23:00 每 30 分钟，单条 cron 表达不了"半点起、整点止"，实现取超集 `0,30 21-23 * * mon-fri`（21:00–23:30，6 次/晚）。
->   job 失败（单笔确认抛异常）抛 RuntimeError → `job_runs` 记 `failed`；**注意 `job_watchdog` 目前只报停摆 / 卡死 / 超时 / 零抓取 / 新闻源断流，
->   不会据 `failed` 行告警**（备份 job 的 docstring 同样写了"据此告警"，并不成立）——预计确认日已过仍没取到净值时，status 的一行人话会提示。
+>   job 失败（单笔确认抛异常）抛 RuntimeError → `job_runs` 记 `failed`。**`job_watchdog` 原先只报停摆 / 卡死 / 超时 / 零抓取 / 新闻源断流，
+>   并不会据 `failed` 行告警**（备份 job 的 docstring 曾同样写了"据此告警"，并不成立）；PR3 补了判据 (f)：yml 标 `alert_on_failure: true`
+>   的 job（fund_confirm / backup / verdict_review / price_sentinel）最近一次运行是 `failed` 时按 (job, 当日) 去重告警一次，默认不标的 job 行为不变。
+>   预计确认日已过仍没取到净值（这不算 job 失败）由 status 的一行人话提示。
 
 ### D6 入口（agent 必须拥有全部功能）
 

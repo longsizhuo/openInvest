@@ -14,13 +14,17 @@ APScheduler 自动发现的定时任务。每个 `.py` 配套一个 `.yml` 描�
 | `event_watch.py` | 北京 8:00-次日 2:30 每 30min（config `event.watch_schedule` 可改）| 扫多源新闻 → LLM 归一化 → 命中持仓则邮件 + 触发委员会（ADR-006）|
 | `price_sentinel.py` | 同窗口每 5min（config `event.sentinel_schedule` 可改）| 价格垂直线检测（10min vs 日ATR%，零 LLM）→ **先报警邮件后触发委员会**（ADR-025）|
 | `backup.py` | 每天 03:30（Asia/Shanghai）| 先 checkpoint `db/` 下的 SQLite 库（进包的 trades/insights/jobs 三个把 WAL 里没落盘的成交刷进主库），再把 `memory/` + 这三个库打成 `.backups/auto_<UTC时间戳>.zip`（平日不含 `memory/.backtest*`，约占整份 89%；Asia/Shanghai 周日那次带上前瞻舰队，文件名加 `_full`），共用同一个 14 份轮转（手动备份不动，自然留 2 份 `_full`）；不备 market_data.db / events.db（可重拉）；失败抛异常 → job_watchdog 告警。恢复走 `plugin/skills/invest-backup` 的 `run.sh restore` |
-| `fund_confirm.py` | 工作日 21:00-23:30 每 30min（Asia/Shanghai）| 场外基金两段式的第二段（ADR-027）：对每笔 `placed` 且定价日 `nav_date` ≤ 今天的在途申购单调 `PortfolioManager.confirm_fund_order`，取 `nav_date` 当天的单位净值换成份额；净值没公布（QDII / FOF 常晚一两天）就跳过、下一次再试，不算失败；幂等靠订单状态 CAS（与手动确认并发只有一个生效）；单笔确认抛异常不挡其余，批末抛 → `job_runs` 记 `failed`（`job_watchdog` 目前不据 `failed` 告警）；`timeout_minutes: 10` |
-| `job_watchdog.py` | 每小时第 7 分钟 | 巡检 `db/jobs.sqlite` job_runs：enabled job 错过 2 次触发（+15min）/ running 超 max(60min, 3×中位耗时) / event_watch 连续 6 次 fetched=0 → Discord+邮件告警，同一异常 24h 内只报一次（2026-10-07，event_watch 卡死 21 天零告警的补救）|
+| `fund_confirm.py` | 工作日 21:00-23:30 每 30min（Asia/Shanghai）| 场外基金两段式的第二段（ADR-027）：对每笔 `placed` 且定价日 `nav_date` ≤ 今天的在途申购单调 `PortfolioManager.confirm_fund_order`，取 `nav_date` 当天的单位净值换成份额；净值没公布（QDII / FOF 常晚一两天）就跳过、下一次再试，不算失败；幂等靠订单状态 CAS（与手动确认并发只有一个生效）；单笔确认抛异常不挡其余，批末抛 → `job_runs` 记 `failed`（yml 标了 `alert_on_failure`，`job_watchdog` 据此告警）；`timeout_minutes: 10` |
+| `job_watchdog.py` | 每小时第 7 分钟 | 巡检 `db/jobs.sqlite` job_runs：enabled job 错过 2 次触发（+15min）/ running 超 max(60min, 3×中位耗时) / event_watch 连续 6 次 fetched=0 / 标了 `alert_on_failure` 的 job 最近一次 failed → Discord+邮件告警，同一异常 24h 内只报一次（2026-10-07，event_watch 卡死 21 天零告警的补救）|
 
 > `verdict_review.yml`（cron `0 2 * * *` Asia/Shanghai，2026-10 起 `enabled: true`）：只把 `.committee` live 快照刷进 `.dreams/verdict_review.jsonl`（整份覆盖）。行情只读 `db/market_data.db` + 进程内缓存，不调 yfinance。研究要含回测的全量重建（数小时级）手动跑 `python -m openinvest.jobs.verdict_review --include-backtest`。`dreaming` 仍关。
 
 - `INDEX.md` — 所有 job 的输入/输出 spec（人类参考）
 - `*.yml` — APScheduler cron 配置（声明式）
+
+## `alert_on_failure`（失败要不要报警）
+
+`*.yml` 可选字段 `alert_on_failure: true`（默认 false）。`job_watchdog` 对标了它的 enabled job 看**最近一次已结束的运行**：是 `failed`（job 抛了异常）就发一次告警（Discord + 邮件，与其余看门狗告警同通道），去重键 = (job, 失败那天的 Asia/Shanghai 日期)——`price_sentinel` 每 5 分钟、`fund_confirm` 每晚 6 次，同一天连续失败只报一次；下一次运行成功即视为恢复；失败一直是最近一次（周末 / 隔夜没再跑）则每 24h 提醒一次。目前标了的：`backup`、`verdict_review`、`price_sentinel`、`fund_confirm`。没标的 job 失败仍只落 `job_runs`（2026-10 之前所有 job 都是这样——backup 的 docstring 曾写"据此告警"，并不成立）。`timeout` 不需要标：看门狗对所有 job 的 timeout 行都报（见下）。
 
 ## `timeout_minutes`（每 job 墙钟超时）
 

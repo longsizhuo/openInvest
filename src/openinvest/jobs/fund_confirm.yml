@@ -12,3 +12,5 @@ entry: openinvest.jobs.fund_confirm:run
 enabled: true
 # 墙钟超时（分钟，默认 30）：每笔单最多一次净值取数（10s 超时），留足余量；小于触发间隔的两倍
 timeout_minutes: 10
+# 失败要报警：最近一次运行是 failed 时 job_watchdog 发一次告警（同一天连续失败只报一次，见 jobs/job_watchdog.py 判据 f）
+alert_on_failure: true

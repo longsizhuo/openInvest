@@ -13,3 +13,5 @@ schedule: "30 3 * * *"
 timezone: Asia/Shanghai
 entry: openinvest.jobs.backup:run
 enabled: true
+# 失败要报警：最近一次运行是 failed 时 job_watchdog 发一次告警（同一天连续失败只报一次，见 jobs/job_watchdog.py 判据 f）
+alert_on_failure: true

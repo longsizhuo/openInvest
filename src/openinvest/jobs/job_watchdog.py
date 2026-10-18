@@ -13,6 +13,12 @@
   (e) timeout    runner 的 per-job 墙钟超时（jobs/*.yml timeout_minutes）把 job_runs 标成
                 'timeout'：24h 内每条各报一次。超时后 runner 放弃该线程让下次触发进得来，
                 所以最新一行可能已是 success——不能只看最后一行，否则"超时了又恢复"没人知道
+  (f) failed     jobs/*.yml 标了 `alert_on_failure: true` 的 job（backup / verdict_review / price_sentinel /
+                fund_confirm）最近一次已结束的运行是 'failed'（job 抛了异常，runner 记 error）。此前 failed 只落
+                job_runs 不报警——"失败抛异常，看门狗据此告警"的说法并不成立（2026-10 ADR-027 PR3 查出）。
+                默认不标 = 行为不变（别的 job 失败仍只落库）。去重键 (job, 失败那天的 Asia/Shanghai 日期)：
+                price_sentinel 每 5 分钟一次、fund_confirm 每晚 6 次，同一天连续失败只报一次；只看**最近一次**，
+                下一次成功就算恢复（失败一直是最近一次——周末 / 隔夜没再跑——则与其余判据一样每 24h 提醒一次）。timeout 不在这里重复报——(e) 已对所有 job 报
 
 命中走与其他 job 相同的告警通道（Discord DM best-effort + 邮件）。同一异常 24h 内最多
 报一次：state_claim 去重键 = 异常锚点（上次启动时间 / running 行 id / 零抓取连击起点）
@@ -28,7 +34,8 @@ import re
 import sqlite3
 import statistics
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Collection, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
 
@@ -64,8 +71,10 @@ def _trigger(schedule: str, tz: str) -> CronTrigger:
 def find_problems(
     conn: sqlite3.Connection, jobs: List[Tuple[str, str, str]], now: datetime,
     scheduled_since: Optional[Dict[str, datetime]] = None,
+    alert_on_failure: Collection[str] = (),
 ) -> List[Dict[str, Any]]:
     """纯读 job_runs → 异常列表。jobs = [(name, cron, timezone)]，只传 enabled 的。
+    alert_on_failure = jobs/*.yml 标了 `alert_on_failure: true` 的 job 名（判据 f，默认空 = 不查）。
 
     每条 finding = {key, since, text}：key 是去重锚点（不含 24h 桶号），since 是
     该异常变得"可报警"的时刻。
@@ -86,6 +95,21 @@ def find_problems(
                          f"默认 3）仍未退出时调度器会拒绝再启动它（届时转为停摆告警，重启调度器清空）。"
                          f"超时时刻的线程调用栈见 job_runs.output_excerpt。"),
             })
+        if name in alert_on_failure:
+            done = conn.execute(
+                "SELECT id, started_at, finished_at, status, error FROM job_runs "
+                "WHERE job_name = ? AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1", (name,),
+            ).fetchone()
+            if done is not None and done[3] == "failed":
+                rid, s_at, f_at, _, err = done
+                day = _ts(s_at).astimezone(ZoneInfo(tz)).date().isoformat()
+                out.append({
+                    "key": f"{name}:failed:{day}",
+                    "since": _ts(f_at),
+                    "text": (f"`{name}` 运行失败：run #{rid}（{s_at} 启动）{(err or 'failed')[:300]}。"
+                             f"该 job 标了 alert_on_failure；同一天连续失败只提醒一次，下一次运行成功即视为恢复。"
+                             f"详情见 job_runs.output_excerpt（回溯栈）与 logs/invest.log。"),
+                })
         last = conn.execute(
             "SELECT id, started_at, status, finished_at FROM job_runs WHERE job_name = ? "
             "ORDER BY id DESC LIMIT 1", (name,),
@@ -209,14 +233,13 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
     from openinvest.scheduler import runner
 
     now = now or datetime.now().astimezone()
-    jobs = [
-        (c["name"], runner._resolve_schedule(c["name"], c["schedule"]),
-         c.get("timezone", "Asia/Shanghai"))
-        for c in runner._load_job_configs() if c.get("enabled", False)
-    ]
+    configs = [c for c in runner._load_job_configs() if c.get("enabled", False)]
+    jobs = [(c["name"], runner._resolve_schedule(c["name"], c["schedule"]), c.get("timezone", "Asia/Shanghai"))
+            for c in configs]
+    flagged = {c["name"] for c in configs if c.get("alert_on_failure", False) is True}
     conn = sqlite3.connect(runner.RUN_LOG_DB)
     try:
-        findings = find_problems(conn, jobs, now, SCHEDULED_SINCE)
+        findings = find_problems(conn, jobs, now, SCHEDULED_SINCE, flagged)
     finally:
         conn.close()
     store = MemoryStore()

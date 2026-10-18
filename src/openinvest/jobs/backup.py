@@ -25,8 +25,8 @@ verdict_review.FLEET_START），那部分重跑不出来，不能不备。折中
 **为什么不备 market_data.db（574MB）/ events.db（140MB）**：行情与新闻缓存，丢了能重拉，
 每天 14 份只是占盘；`.env` 也不进自动备份（凭据别每天复制 14 份，手动备份仍会带）。
 
-失败（zip 写不出 / checkpoint 报错 / 文件读不了）一律抛异常——runner 记 job_runs failed，
-job_watchdog 据此告警。checkpoint 报错时 zip 仍会写完（有备份总比没有强）再抛。
+失败（zip 写不出 / checkpoint 报错 / 文件读不了）一律抛异常——runner 记 job_runs failed；backup.yml 标了
+`alert_on_failure: true`，job_watchdog 据此告警（判据 f；默认不标的 job 失败只落库，不报警）。checkpoint 报错时 zip 仍会写完（有备份总比没有强）再抛。
 """
 from __future__ import annotations
 

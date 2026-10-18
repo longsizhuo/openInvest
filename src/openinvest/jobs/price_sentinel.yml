@@ -10,3 +10,5 @@ entry: openinvest.jobs.price_sentinel:run
 enabled: true  # 与 event_watch 同理 default-on；关闭走 config event.sentinel_enabled
 # 墙钟超时（分钟，默认 30）：每 5 分钟一次，生产 max=69s；卡住最多挡 2 个周期
 timeout_minutes: 10
+# 失败要报警：最近一次运行是 failed 时 job_watchdog 发一次告警（同一天连续失败只报一次，见 jobs/job_watchdog.py 判据 f）
+alert_on_failure: true

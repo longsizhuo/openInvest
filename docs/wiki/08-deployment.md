@@ -311,6 +311,7 @@ sudo systemctl list-units --type=service | grep invest
 **① 每 job 墙钟超时（`jobs/*.yml` 的 `timeout_minutes`，默认 30）**
 
 - runner 在 daemon 线程里跑 job，超时 → `job_runs.status='timeout'`（附线程调用栈）→ 放弃该线程、释放 `max_instances=1` 槽位 → 下一次触发正常进入；`job_watchdog` 把 timeout 当失败告警。
+- **失败告警**：`jobs/*.yml` 可选 `alert_on_failure: true`（目前 backup / verdict_review / price_sentinel / fund_confirm）——最近一次已结束的运行是 `failed` 时看门狗发一次告警，按 (job, 当日) 去重；没标的 job 失败只落 `job_runs`。
 - 线程杀不掉，所以有上限：同一 job 累计 3 个超时线程未退出时 runner 拒绝再启动它，看门狗转报"停摆"，`sudo systemctl restart invest-scheduler` 清空。
 - 字段说明与各 job 默认值见 `src/openinvest/jobs/README.md`。改了要重启调度器。
 
@@ -390,7 +391,7 @@ INVEST_HOME=~/openInvest uv run python -m scripts.snapshot restore --in ~/invest
 **每日不含 `memory/.backtest*`，每周日（Asia/Shanghai）带上（舰队不可重跑）**：回测产物占整份备份约 89%
 （全量 271 MB vs 22 MB），但 `.backtest/` 里混着 2026-07-24 起的前瞻纸面舰队，那部分重跑不出来，
 所以周日那份整份带上，文件名加 `_full` 后缀（`auto_<stamp>_full.zip`），共用同一个 14 份轮转，14 天里自然留 2 份。
-不备 `market_data.db` / `events.db`（可重拉的缓存）与 `.env`。失败抛异常 → `job_watchdog` 告警。
+不备 `market_data.db` / `events.db`（可重拉的缓存）与 `.env`。失败抛异常 → `job_runs` 记 `failed`；`backup.yml` 标了 `alert_on_failure: true`，`job_watchdog` 据此告警（同一天只报一次）。
 zip 内路径相对数据根目录，恢复用 `plugin/skills/invest-backup` 的 `run.sh restore <zip>`。
 这是机内冷备，不替代上面的每周异地备份。
 

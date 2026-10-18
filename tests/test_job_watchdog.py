@@ -329,3 +329,124 @@ def test_run_alerts_silent_source_once_per_24h(wired):
     job_watchdog.run(now=_t("2026-10-13T20:07:00"))
     job_watchdog.run(now=_t("2026-10-13T21:07:00"))
     assert len(sent) == 1 and "yfinance" in sent[0][0]["text"]
+
+
+# ---------- (f) failed：yml 标了 alert_on_failure 的 job，最近一次运行 failed 就报 ----------
+# 此前 failed 只落 job_runs、看门狗从不据它告警（backup 的 docstring 却写着"据此告警"）。
+
+FLAGGED = "fund_confirm"
+FC_CRON = "0,30 21-23 * * mon-fri"
+FC_JOB = (FLAGGED, FC_CRON, "Asia/Shanghai")
+
+
+def _add_err(conn, job, started, status, error=None, secs=5):
+    _add(conn, job, started, status=status, secs=secs)
+    if error:
+        conn.execute("UPDATE job_runs SET error = ? WHERE id = (SELECT MAX(id) FROM job_runs)", (error,))
+        conn.commit()
+
+
+def test_failed_last_run_of_flagged_job_is_reported(db):
+    _add(db, FLAGGED, _t("2026-01-05T21:00:00"))
+    _add_err(db, FLAGGED, _t("2026-01-05T21:30:00"), "failed", "RuntimeError: fund_confirm: 1 笔在途单确认失败")
+    found = find_problems(db, [FC_JOB], _t("2026-01-05T22:07:00"), alert_on_failure={FLAGGED})
+    assert len(found) == 1
+    assert found[0]["key"] == f"{FLAGGED}:failed:2026-01-05" and "运行失败" in found[0]["text"]
+    assert "1 笔在途单确认失败" in found[0]["text"] and found[0]["since"] == _t("2026-01-05T21:30:05")
+
+
+def test_unflagged_job_failure_is_still_only_logged(db):
+    """默认不标 = 行为不变：失败只落库，不进 findings。"""
+    _add_err(db, FLAGGED, _t("2026-01-05T21:30:00"), "failed", "RuntimeError: x")
+    assert find_problems(db, [FC_JOB], _t("2026-01-05T22:07:00")) == []
+    assert find_problems(db, [FC_JOB], _t("2026-01-05T22:07:00"), alert_on_failure={"backup"}) == []   # 标的是别的 job
+
+
+def test_recovered_job_is_not_reported_only_the_latest_run_counts(db):
+    _add_err(db, FLAGGED, _t("2026-01-05T21:00:00"), "failed", "boom")
+    _add(db, FLAGGED, _t("2026-01-05T21:30:00"))                                  # 下一次成功 = 恢复
+    assert find_problems(db, [FC_JOB], _t("2026-01-05T22:07:00"), alert_on_failure={FLAGGED}) == []
+
+
+def test_running_row_is_skipped_to_the_last_finished_run(db):
+    _add_err(db, FLAGGED, _t("2026-01-05T21:00:00"), "failed", "boom")
+    _add(db, FLAGGED, _t("2026-01-05T21:30:00"), status="running")                # 正在跑的一行不算"最近一次结果"
+    found = find_problems(db, [FC_JOB], _t("2026-01-05T21:31:00"), alert_on_failure={FLAGGED})
+    assert [f["key"] for f in found] == [f"{FLAGGED}:failed:2026-01-05"]
+
+
+def test_day_in_key_is_the_jobs_own_timezone_date(db):
+    """北京 2026-01-06 02:00 的失败（UTC 还是 01-05）按 Asia/Shanghai 记成 01-06。"""
+    started = datetime.fromisoformat("2026-01-05T18:00:00+00:00")
+    _add_err(db, "verdict_review", started, "failed", "boom")
+    found = find_problems(db, [("verdict_review", "0 2 * * *", "Asia/Shanghai")], started + timedelta(hours=1),
+                          alert_on_failure={"verdict_review"})
+    assert found[0]["key"] == "verdict_review:failed:2026-01-06"
+
+
+def test_timeout_of_flagged_job_is_reported_exactly_once(db):
+    """timeout 本来就对所有 job 报（判据 e）；标了 alert_on_failure 的 job 不能因此多报一条。"""
+    _add_err(db, FLAGGED, _t("2026-01-05T21:30:00"), "timeout", "TimeoutError: x", secs=600)
+    found = find_problems(db, [FC_JOB], _t("2026-01-05T22:07:00"), alert_on_failure={FLAGGED})
+    assert len(found) == 1 and ":timeout:" in found[0]["key"]
+
+
+@pytest.fixture
+def wired_flagged(db, tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(runner, "_load_job_configs", lambda: [
+        {"name": FLAGGED, "schedule": FC_CRON, "timezone": "Asia/Shanghai", "enabled": True, "alert_on_failure": True},
+        {"name": "pnl_snapshot", "schedule": "0 9-23/2 * * mon-fri", "timezone": "Asia/Shanghai", "enabled": True},
+        {"name": "backup", "schedule": "30 3 * * *", "timezone": "Asia/Shanghai", "enabled": False, "alert_on_failure": True},
+    ])
+    monkeypatch.setattr(runner, "_resolve_schedule", lambda name, s: s)
+    store = MemoryStore(root=tmp_path / "memory")
+    monkeypatch.setattr(job_watchdog, "MemoryStore", lambda: store)
+    monkeypatch.setattr(job_watchdog, "_send", lambda findings: sent.append(findings))
+    return db, sent
+
+
+def test_run_alerts_a_failed_flagged_job_once_per_day_not_per_run(wired_flagged):
+    db, sent = wired_flagged
+    # 21:00 / 21:30 / 22:00 三次连续失败，看门狗每小时第 7 分钟巡检
+    for hh, mm in ((21, 0), (21, 30), (22, 0)):
+        _add_err(db, FLAGGED, _t(f"2026-01-05T{hh}:{mm:02d}:00"), "failed", "RuntimeError: boom")
+    out1 = job_watchdog.run(now=_t("2026-01-05T22:07:00"))
+    out2 = job_watchdog.run(now=_t("2026-01-05T23:07:00"))                       # 同一天再巡检：不重复
+    assert len(sent) == 1 and out1["alerted"] and out2["alerted"] == []
+    assert "fund_confirm" in sent[0][0]["text"] and "boom" in sent[0][0]["text"]
+    # 次日又失败 = 新的 (job, 当日) → 再报一次
+    _add_err(db, FLAGGED, _t("2026-01-06T21:30:00"), "failed", "RuntimeError: boom again")
+    job_watchdog.run(now=_t("2026-01-06T22:07:00"))
+    assert len(sent) == 2 and "boom again" in sent[1][0]["text"]
+
+
+def test_run_ignores_unflagged_and_disabled_jobs_and_recovery(wired_flagged):
+    db, sent = wired_flagged
+    _add_err(db, "pnl_snapshot", _t("2026-01-05T21:00:00"), "failed", "RuntimeError: x")      # enabled 但没标
+    _add_err(db, "backup", _t("2026-01-05T03:30:00"), "failed", "RuntimeError: x")             # 标了但 disabled
+    _add_err(db, FLAGGED, _t("2026-01-05T21:00:00"), "failed", "boom")
+    _add(db, FLAGGED, _t("2026-01-05T21:30:00"))                                              # 已恢复
+    out = job_watchdog.run(now=_t("2026-01-05T21:40:00"))
+    assert sent == [] and out["findings"] == []
+
+
+def test_run_failure_alert_send_failure_unclaims_so_next_run_retries(wired_flagged, monkeypatch):
+    db, sent = wired_flagged
+    _add_err(db, FLAGGED, _t("2026-01-05T21:30:00"), "failed", "boom")
+
+    def _down(findings):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(job_watchdog, "_send", _down)
+    with pytest.raises(RuntimeError):
+        job_watchdog.run(now=_t("2026-01-05T22:07:00"))
+    monkeypatch.setattr(job_watchdog, "_send", lambda f: sent.append(f))
+    assert job_watchdog.run(now=_t("2026-01-05T23:07:00"))["alerted"] and len(sent) == 1
+
+
+def test_shipped_ymls_flag_exactly_the_jobs_that_should_alert_on_failure():
+    cfgs = {c["name"]: c for c in runner._load_job_configs()}
+    flagged = {n for n, c in cfgs.items() if c.get("alert_on_failure", False) is True}
+    assert flagged == {"fund_confirm", "backup", "verdict_review", "price_sentinel"}
+    assert all(isinstance(c.get("alert_on_failure", False), bool) for c in cfgs.values())
