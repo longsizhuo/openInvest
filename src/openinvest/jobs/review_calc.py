@@ -10,6 +10,7 @@ shell 各自 `import ... as summarize` 保持历史调用面。
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -676,6 +677,289 @@ def confidence_display(v: Dict[str, Any], lookup: Optional[Dict[str, Any]],
         return (f"同类 HOLD 之后 30 天涨跌留在正常波动带内的比例 {rate:.0%}"
                 f"（n={n}{base}；{note}）{raw_txt}")
     return f"同类 {verdict} 30 天后方向判对的比例 {rate:.0%}（n={n}；{note}）{raw_txt}"
+
+
+# =====================================================================
+# 实验臂对照纯核（评审路线 B4 密封投票臂）——只测量/展示，零 IO
+# =====================================================================
+# 实验臂（同日同标的、同输入，只差"抽样 N 次 + 按票聚合"）和对照臂（.backtest 舰队行）并排。
+# 本节只吃传入的 VerdictReview 列表；实验臂行永不进 summarize_verdict_reviews / build_confidence_lookup /
+# 公开 JSON——调用方 jobs/verdict_review.run_arm 单独写 jsonl + 报告。
+
+ARM_MIN_N = 30   # 红线 #2 同阈值：成熟（30d）可评分样本 < 30 的格子不展示命中率数字
+ARM_TIERS = ("unanimous", "majority", "split")   # 票数一致度：全票 / 多数（非全票）/ 无多数→HOLD
+
+
+def arm_vote_verdicts(r: VerdictReview) -> List[str]:
+    """实验臂行的逐票 verdict（transcript Input Health 的 votes）；对照臂行 / 老存档没有 → []。"""
+    votes = (r.input_health or {}).get("votes")
+    if not isinstance(votes, list):
+        return []
+    return [str(v.get("verdict") or "UNCLEAR").upper() for v in votes if isinstance(v, dict)]
+
+
+def _vote_tier(votes: List[str]) -> str:
+    """全票一致 / 严格多数 / 无严格多数（聚合成 HOLD）。与 backtest_committee.aggregate_votes 同定义。"""
+    top = max(votes.count(v) for v in set(votes))
+    if top == len(votes):
+        return "unanimous"
+    return "split" if top * 2 <= len(votes) else "majority"
+
+
+def _rate_ci(k: int, n: int) -> Dict[str, Any]:
+    return {"k": k, "n": n, "rate": round(k / n, 3) if n else None, "ci95": wilson_ci(k, n)}
+
+
+def _share(k: int, n: int) -> Optional[float]:
+    return round(k / n, 3) if n else None
+
+
+def vote_stability(arm: List[VerdictReview], control: Iterable[VerdictReview] = (), *,
+                   min_n: int = ARM_MIN_N) -> Dict[str, Any]:
+    """臂内稳定度（A4 口径）：全票一致率、方向翻转率（N 票的方向类不全相同）、无多数率、HOLD 占比
+    （单票 / 聚合后 / 对照臂），以及按票数一致度分档的 30d 命中（"用投票分裂度代替自报置信度"的核心问题：
+    分裂度到底带不带信息）。没有 votes 的行（对照臂行 / 老存档）不算。
+    control 传对照臂行（HOLD 占比并排用），内部只取与臂同日同标的、同口径（非污染/非休市周末重复）的那些。"""
+    arm = [r for r in arm if _arm_row_ok(r)]
+    keys = {(r.date, r.asset) for r in arm}
+    control = [r for r in control if (r.date, r.asset) in keys and _arm_row_ok(r)]
+    rows = [(r, v) for r in arm for v in [arm_vote_verdicts(r)] if len(v) >= 2]
+    n = len(rows)
+    tier_of = [_vote_tier(v) for _, v in rows]
+    flips = sum(1 for _, v in rows if len({EXPECTED_DIRECTION.get(x, UNCLEAR_DIRECTION) for x in v}) > 1)
+    all_votes = [x for _, v in rows for x in v]
+    tiers: Dict[str, Dict[str, Any]] = {}
+    for t in ARM_TIERS:
+        sub = [r for (r, _), tt in zip(rows, tier_of) if tt == t]
+        scored = [r for r in sub if "30d" in r.hits]
+        tiers[t] = {"n": len(sub), "n_scored_30d": len(scored),
+                    "hit_rate_30d": (round(sum(r.hits["30d"] for r in scored) / len(scored), 3)
+                                     if len(scored) >= min_n else None)}
+    return {
+        "n": n,
+        "arm_tags": dict(Counter(str((r.input_health or {}).get("arm") or "?") for r, _ in rows)),
+        "unanimous": _rate_ci(tier_of.count("unanimous"), n),
+        "flip": _rate_ci(flips, n),
+        "split": _rate_ci(tier_of.count("split"), n),
+        "hold_share_votes": _share(all_votes.count("HOLD"), len(all_votes)),
+        "hold_share_final": _share(sum(1 for r, _ in rows if r.verdict == "HOLD"), n),
+        "hold_share_control": _share(sum(1 for r in control if r.verdict == "HOLD"), len(control)),
+        "tiers": tiers,
+    }
+
+
+def _arm_row_ok(r: VerdictReview) -> bool:
+    """与 summarize_verdict_reviews 的 holdout 同口径：非污染、非休市周末重复。"""
+    return not r.contaminated and not is_closed_weekend(r.asset, r.date)
+
+
+def _side_summary(rows: List[VerdictReview], min_n: int) -> Dict[str, Any]:
+    """一侧（臂 / 对照臂）的 30d 摘要。逐 verdict 的命中/基率/提升/超额/照做净收益全部复用
+    _summarize_bucket（#431 同尺子基率 + #442 反事实），这里只补整侧合计的基率与提升。"""
+    bucket = _summarize_bucket(rows, suppress_rates=False)
+    scored = [r for r in rows if "30d" in r.hits]
+    n30 = len(scored)
+    followed_n = bucket.get("followed_n_30d", 0)
+    out: Dict[str, Any] = {
+        "n_rows": len(rows), "n_scored_30d": n30, "suppressed": n30 < min_n,
+        "hold_share": _share(sum(1 for r in rows if r.verdict == "HOLD"), len(rows)),
+        "hit_rate_30d": None, "base_rate_30d": None, "lift_30d": None,
+        "ci95_30d": None, "lift_ci95_30d": None,
+        "followed_net_return_30d": bucket.get("followed_net_return_30d") if followed_n >= min_n else None,
+        "followed_n_30d": followed_n,
+        "benchmark_symbols": bucket.get("benchmark_symbols", []),
+        "by_verdict": {},
+    }
+    # 每个数字各按自己的分母抑制（n<30 不出数字，红线 #2；与公开 JSON 的 n_benchmark 抑制同口径）
+    gates = (("n_scored_30d", ("hit_rate_30d", "base_rate_30d", "lift_30d", "ci95_30d")),
+             ("n_benchmark_30d", ("excess_mean_30d", "beat_benchmark_rate_30d")),
+             ("n_followed_30d", ("followed_net_return_30d",)))
+    for v, cell in bucket["by_verdict"].items():
+        slim: Dict[str, Any] = {
+            "n": cell["n"], "n_benchmark_30d": cell.get("n_benchmark_30d", 0),
+            "n_followed_30d": cell.get("n_followed_30d", 0),
+            "n_scored_30d": sum(1 for r in rows if r.verdict == v and "30d" in r.hits)}
+        for n_key, keys in gates:
+            if slim[n_key] >= min_n:
+                slim.update({k: cell[k] for k in keys if k in cell})
+        out["by_verdict"][v] = slim
+    if n30 >= min_n:
+        k = sum(1 for r in scored if r.hits["30d"])
+        bases = {d: _direction_base_rate(rows, "30d", d) for d in ("up", "down", "flat")}
+        per_row = [bases[EXPECTED_DIRECTION[r.verdict]] for r in scored]
+        per_row = [b for b in per_row if b is not None]
+        ci = wilson_ci(k, n30)
+        out.update(hit_rate_30d=round(k / n30, 3), ci95_30d=ci)
+        if per_row and ci:
+            base = sum(per_row) / len(per_row)   # 整侧基率 = 各行"永远喊本行方向的傻瓜"命中率的均值
+            out.update(base_rate_30d=round(base, 3), lift_30d=round(k / n30 - base, 3),
+                       lift_ci95_30d=[round(ci[0] - base, 3), round(ci[1] - base, 3)])  # 基率当常数，同 live 页口径
+    return out
+
+
+def arm_vs_control(arm: List[VerdictReview], control: List[VerdictReview], *,
+                   min_n: int = ARM_MIN_N) -> Dict[str, Any]:
+    """同日同标的（date, asset）取交集后两侧并排；配对 30d：谁命中谁没命中。"""
+    a_by = {(r.date, r.asset): r for r in arm if _arm_row_ok(r)}
+    c_by = {(r.date, r.asset): r for r in control if _arm_row_ok(r)}
+    keys = sorted(set(a_by) & set(c_by))
+    a_rows, c_rows = [a_by[k] for k in keys], [c_by[k] for k in keys]
+    hits = [(a_by[k].hits["30d"], c_by[k].hits["30d"]) for k in keys
+            if "30d" in a_by[k].hits and "30d" in c_by[k].hits]
+    a_churn, c_churn = direction_churn(a_rows), direction_churn(c_rows)
+    return {
+        "matched": len(keys), "arm_total": len(a_by), "control_total": len(c_by), "min_n": min_n,
+        "arm": _side_summary(a_rows, min_n),
+        "control": _side_summary(c_rows, min_n),
+        # 配对（同日同标的）：30d 谁命中 / 逐日方向翻转谁多 / HOLD 谁多——都是"两臂不一致的那些对"上的符号检验
+        "paired_30d": _discordant(hits),
+        "paired_churn": _discordant([(a_churn[k], c_churn[k]) for k in sorted(set(a_churn) & set(c_churn))]),
+        "paired_hold": _discordant([(a_by[k].verdict == "HOLD", c_by[k].verdict == "HOLD") for k in keys]),
+    }
+
+
+def sign_test_p(b: int, c: int) -> Optional[float]:
+    """精确二项符号检验（双侧，H0: 不一致对里 b 与 c 各占一半）。b + c = 0 → None。
+    配对对照只看"两臂结果不同的那些对"，共同的市场环境（同日同标的）天然抵消。"""
+    import math
+    n = b + c
+    if n == 0:
+        return None
+    k = min(b, c)
+    return round(min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n), 4)
+
+
+CHURN_MAX_GAP_DAYS = 4   # 相邻两个决议日相隔 ≤4 天才算"逐日"对（周末 3、含一天假日 4；更远的断档不比）
+
+
+def direction_churn(rows: List[VerdictReview]) -> Dict[Tuple[str, str], bool]:
+    """逐日方向翻转：同一标的相邻两个决议日的方向类（EXPECTED_DIRECTION；UNCLEAR=none）是否不同。
+    键 = (asset, 后一天)。两侧传同一批 (date, asset) 时键集相同，可逐键配对。
+    用途：同一标的的输入逐日只有微小变化，裁决方向的逐日翻转里有一部分是纯抽样噪声；
+    多票聚合应该把这部分压下去——这是"稳定度更高"唯一能在两臂间同口径比较的量
+    （对照臂每天只有 1 票，没有臂内重复可比）。"""
+    from datetime import date as _date
+    by_asset: Dict[str, List[VerdictReview]] = {}
+    for r in rows:
+        by_asset.setdefault(r.asset, []).append(r)
+    out: Dict[Tuple[str, str], bool] = {}
+    for asset, rs in by_asset.items():
+        rs = sorted(rs, key=lambda x: x.date)
+        for prev, cur in zip(rs, rs[1:]):
+            if (_date.fromisoformat(cur.date) - _date.fromisoformat(prev.date)).days > CHURN_MAX_GAP_DAYS:
+                continue
+            out[(asset, cur.date)] = (EXPECTED_DIRECTION.get(prev.verdict, UNCLEAR_DIRECTION)
+                                      != EXPECTED_DIRECTION.get(cur.verdict, UNCLEAR_DIRECTION))
+    return out
+
+
+def _discordant(pairs: List[Tuple[bool, bool]]) -> Dict[str, Any]:
+    """[(臂, 对照)] 布尔对 → 仅臂为真 / 仅对照为真 / 都真 / 都假 + 符号检验 p。"""
+    b = sum(1 for x, y in pairs if x and not y)
+    c = sum(1 for x, y in pairs if y and not x)
+    return {"n": len(pairs), "arm_only": b, "control_only": c,
+            "both": sum(1 for x, y in pairs if x and y),
+            "neither": sum(1 for x, y in pairs if not x and not y),
+            "p": sign_test_p(b, c)}
+
+
+def _fmt_pct(x: Optional[float]) -> str:
+    return "—" if x is None else f"{x * 100:.1f}%"
+
+
+def _fmt_pp(x: Optional[float]) -> str:
+    return "—" if x is None else f"{x * 100:+.1f}pp"
+
+
+def _fmt_ci(ci: Optional[List[float]], pp: bool = False) -> str:
+    if not ci:
+        return "—"
+    return f"{ci[0] * 100:+.1f} ~ {ci[1] * 100:+.1f}pp" if pp else f"{ci[0] * 100:.0f}–{ci[1] * 100:.0f}%"
+
+
+def _fmt_rate(c: Dict[str, Any]) -> str:
+    return f"{c['k']}/{c['n']} = {_fmt_pct(c['rate'])}（95% CI {_fmt_ci(c['ci95'])}）" if c["n"] else "—"
+
+
+def _paired_row(label: str, d: Dict[str, Any]) -> str:
+    p = "—" if d["p"] is None else f"{d['p']:.3f}"
+    return (f"| {label} | {d['n']} | {d['arm_only']} | {d['control_only']} | {d['both']} | {d['neither']} | {p} |")
+
+
+def arm_report_lines(name: str, cmp_: Dict[str, Any], stab: Dict[str, Any]) -> List[str]:
+    """实验臂复盘报告正文（markdown 行）。只含聚合，不含 symbol / 逐行裁决 / 金额。"""
+    A, C, P = cmp_["arm"], cmp_["control"], cmp_["paired_30d"]
+    min_n = cmp_["min_n"]
+    lines = [
+        f"## 臂内稳定度（{name} · 有逐票记录的 {stab['n']} 个 标的×日）\n",
+        f"臂标签：{'、'.join(f'{k} × {v}' for k, v in stab['arm_tags'].items()) or '—'}"
+        "（同一目录里出现不止一种说明中途改过 N，别把它们当同一臂读）\n",
+    ]
+    if not stab["n"]:
+        lines.append("_无逐票记录_\n")
+    else:
+        lines += ["| 指标 | 数 |", "|---|---|",
+                  f"| 全票一致 | {_fmt_rate(stab['unanimous'])} |",
+                  f"| 方向翻转（N 票方向类不全相同，A4 口径，A4 基线 26.7%） | {_fmt_rate(stab['flip'])} |",
+                  f"| 无多数 → HOLD（split） | {_fmt_rate(stab['split'])} |"]
+        lines.append(f"\n非全票一致的行 **{stab['n'] - stab['unanimous']['k']}** 条"
+                     f"（H2 功效闸：判读日 < {min_n} 条判\"功效不足\"，既不算通过也不算否定）。")
+        lines.append(f"\n**HOLD 占比**：单票 {_fmt_pct(stab['hold_share_votes'])} → 聚合后 "
+                     f"{_fmt_pct(stab['hold_share_final'])}；同日同标的对照臂 {_fmt_pct(stab['hold_share_control'])}。\n")
+        lines += ["### 票数一致度 vs 30d 命中（分裂度带不带信息）\n",
+                  "| 一致度 | 行数 | 30d 成熟可评分 | 30d 命中率 |", "|---|---|---|---|"]
+        label = {"unanimous": "全票一致", "majority": "多数（非全票）", "split": "无多数 → HOLD"}
+        for t in ARM_TIERS:
+            c = stab["tiers"][t]
+            hit = _fmt_pct(c["hit_rate_30d"]) if c["hit_rate_30d"] is not None else f"n<{min_n} 不展示"
+            lines.append(f"| {label[t]} | {c['n']} | {c['n_scored_30d']} | {hit} |")
+
+    bench = "、".join(A.get("benchmark_symbols") or C.get("benchmark_symbols") or []) or "未配置"
+    lines += [
+        f"\n## 配对对照（同日同标的 {cmp_['matched']} 个；臂共 {cmp_['arm_total']}、对照臂共 {cmp_['control_total']}）\n",
+        "> 对照臂 = 同日同标的的 `.backtest` 舰队行（单次抽样）。两臂输入相同（同 market_data / regime / 中性持仓 / "
+        "macro_view），差别只在抽样次数与聚合。基率口径同 live 命中率页（同侧样本里永远喊本行方向的傻瓜）。\n",
+        f"| | 实验臂 | 对照臂 |", "|---|---|---|",
+        f"| 行数 | {A['n_rows']} | {C['n_rows']} |",
+        f"| 30d 成熟可评分 n | {A['n_scored_30d']} | {C['n_scored_30d']} |",
+    ]
+    if A["suppressed"] or C["suppressed"]:
+        lines.append(f"| 30d 命中 / 基率 / 提升 / CI | n<{min_n} 不展示（红线 #2） | n<{min_n} 不展示 |")
+    lines += [
+        f"| 30d 命中率 | {_fmt_pct(A['hit_rate_30d'])} | {_fmt_pct(C['hit_rate_30d'])} |",
+        f"| 同尺子基率 | {_fmt_pct(A['base_rate_30d'])} | {_fmt_pct(C['base_rate_30d'])} |",
+        f"| 提升 | {_fmt_pp(A['lift_30d'])} | {_fmt_pp(C['lift_30d'])} |",
+        f"| 命中率 95% CI | {_fmt_ci(A['ci95_30d'])} | {_fmt_ci(C['ci95_30d'])} |",
+        f"| 提升 95% CI（Wilson 区间减基率） | {_fmt_ci(A['lift_ci95_30d'], pp=True)} | {_fmt_ci(C['lift_ci95_30d'], pp=True)} |",
+        f"| HOLD 占比 | {_fmt_pct(A['hold_share'])} | {_fmt_pct(C['hold_share'])} |",
+        f"| 照做净收益率（30d，扣往返成本，名义加权；n 有金额） | "
+        f"{_fmt_pp(A['followed_net_return_30d'])}（n={A['followed_n_30d']}） | "
+        f"{_fmt_pp(C['followed_net_return_30d'])}（n={C['followed_n_30d']}） |",
+        "\n### 配对检验（同日同标的；只看两臂结果不同的那些对，精确符号检验双侧 p）\n",
+        "| 比较 | 对数 | 仅实验臂为真 | 仅对照臂为真 | 都真 | 都假 | p |", "|---|---|---|---|---|---|---|",
+        _paired_row("30d 命中（两臂都已成熟可评分）", P),
+        _paired_row("逐日方向翻转（相邻决议日方向类不同；越少越稳）", cmp_["paired_churn"]),
+        _paired_row("HOLD（越少越不囤）", cmp_["paired_hold"]),
+        "",
+        f"### 按 verdict 分（超额 = 标的 − 基准 {bench} 同窗口收益，verdict 无关；n<{min_n} 的格子不展示数字）\n",
+        "| Verdict | 臂 N | 臂 30d 命中 | 臂 提升 | 臂 超额均值 | 臂 照做净收益率 | 对照 N | 对照 30d 命中 | 对照 提升 | 对照 超额均值 | 对照 照做净收益率 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for v in [v for v in VERDICT_BUCKETS if v in A["by_verdict"] or v in C["by_verdict"]]:
+        cells: List[str] = []
+        for side in (A, C):
+            c = side["by_verdict"].get(v)
+            if not c:
+                cells += ["0", "—", "—", "—", "—"]
+                continue
+            cells += [str(c["n"]), _fmt_pct(c.get("hit_rate_30d")), _fmt_pp(c.get("lift_30d")),
+                      _fmt_pp(c.get("excess_mean_30d")), _fmt_pp(c.get("followed_net_return_30d"))]
+        lines.append(f"| {v} | " + " | ".join(cells) + " |")
+    lines.append(
+        "\n> 判据（experiments/sealed_vote/README.md，开跑前冻结）：H1 整侧 30d 提升 CI 下界 > 0；或 H2 配对逐日方向翻转"
+        "显著更少（符号检验 p<0.05）且 HOLD 不显著更多——过其一才提 live 切换提案（另一个 PR，用户签字）。"
+        "相邻交易日的 30d 窗口高度重叠、同日标的共享市场环境，真实独立样本远少于 n，CI 偏窄、p 偏小。\n")
+    return lines
 
 
 # =====================================================================
