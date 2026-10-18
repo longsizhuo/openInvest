@@ -30,6 +30,9 @@ class TargetAsset(BaseModel):
     max_single_invest_cny: float = Field(..., ge=0, le=1_000_000)
     price_offset_pct: Optional[float] = Field(None, ge=-0.1, le=0.1)
     sell_fee_pct: Optional[float] = Field(None, ge=0, le=0.05)
+    # 目标权重（占总资产的小数）；rebalance_plan 读它。缺省的标的按「股票目标 − 已分配」平分。
+    # 各标的之和 ≤ target_allocation_stock 由 services/strategy_write 在写入时校验（#449）。
+    target_pct: Optional[float] = Field(None, ge=0, le=1)
 
     @field_validator("symbol")
     @classmethod

@@ -534,6 +534,9 @@ class PortfolioManager:
         成本（2026-10 盘点：漏写币种给澳元持仓加仓，扣人民币、成本被人民币价拉偏）。
         新建仓不传 = CNY。
 
+        黄金（GC=F）：只接受 CNY / 克（currency=CNY、unit_label=克，price = 人民币/克），
+        其余 ValueError 并给正确写法；合法记法自动落 kind=metal + proxy_kind=gold_cny_per_gram（#443）。
+
         idempotency_key：同 key 第二次返回 {"status": "duplicate"} 不动账本（ADR-016，
         远端 HTTP 超时重发 / agent 重跑同一笔）。record_existing_position 也经此路径。
         """
@@ -550,7 +553,8 @@ class PortfolioManager:
                 existing = next((h for h in holdings if h.get("symbol") == symbol), None)
                 held = str(existing.get("cost_currency") or "CNY").upper() if existing else None
                 ccy = (currency or held or "CNY").upper()
-                if held and ccy != held:
+                gold = _gold_booking(symbol, ccy, unit_label, held)   # 非 GC=F → None
+                if not gold and held and ccy != held:
                     raise ValueError(
                         f"{symbol} 持仓按 {held} 计价，这笔买入写的是 {ccy}；"
                         f"请按 {held} 价格记账（currency 填 {held} 或不填）"
@@ -563,11 +567,14 @@ class PortfolioManager:
                     new_avg = (old_units * old_avg + units * price) / new_units
                     existing["units"] = round(new_units, 6)
                     existing["avg_cost"] = round(new_avg, 6)
+                    if gold:
+                        existing.update(gold)   # 顺手修复被旧版本记成 proxy_kind=direct 的黄金行
                     action_kind = "add"
                 else:
                     holdings.append({
                         "symbol": symbol, "kind": kind, "units": units, "avg_cost": price,
                         "unit_label": unit_label, "cost_currency": ccy, "proxy_kind": "direct",
+                        **(gold or {}),
                     })
                     action_kind = "new"
                 p["holdings"] = holdings
@@ -658,6 +665,40 @@ class PortfolioManager:
 
 
 # ============ 工具函数 ============
+
+# 黄金（GC=F）只有一种合法记法：CNY / 克。全仓估值（status / what_if / committee / daily_report）
+# 都把 GC=F 当 CNY/克（GC=F USD/oz ÷ 31.1035 × USDCNY 反推）；账里记成 USD/oz 会被拿去跟克价比，
+# 假浮亏 −78%（#443）；记成 CNY/克却没带 proxy_kind 又会被当 USD/oz 拉，假浮盈 +375%。
+_GOLD_SYMBOL = "GC=F"
+_GOLD_FIELDS = {"kind": "metal", "unit_label": "克", "proxy_kind": "gold_cny_per_gram",
+                "yfinance_proxy": _GOLD_SYMBOL}
+# "股" = buy 的默认 unit_label（调用方没指定单位），按克处理；oz / 盎司 / ounce 等显式其他单位一律拒收。
+_GRAM_LABELS = {"克", "g", "gram", "grams", "股"}
+
+
+def _gold_booking(symbol: str, ccy: str, unit_label: str, held: Optional[str]) -> Optional[Dict[str, str]]:
+    """GC=F 的入口校验（buy / record_existing_position 共用）：非 GC=F 返回 None；
+    合法（CNY + 克）返回要落账的 kind / unit_label / proxy_kind 字段；其余抛 ValueError 并给正确写法。
+
+    选「拒绝」而不是自动换算 USD/oz → CNY/克：换算要猜汇率，且 USD 买入扣的是 USD 现金、
+    CNY 记账扣的是 CNY 现金，悄悄改币种就是悄悄记错账（#402：不编汇率）；拒绝 + 示例让调用方重发一次就对了。
+    """
+    if symbol.strip().upper() != _GOLD_SYMBOL:
+        return None
+    how = (f"黄金必须按「人民币 / 克」记账：price 填 CNY/克、currency=CNY、unit_label=克，"
+           f"如 buy {symbol} --units 5 --price 880 -c CNY --kind metal --unit-label 克"
+           f"（MCP: symbol='{symbol}', units=5, price=880, currency='CNY', kind='metal', unit_label='克'）；"
+           f"美元/盎司报价先折成 CNY/克（USD/oz ÷ 31.1035 × USDCNY）")
+    if held and held != "CNY":
+        raise ValueError(
+            f"{symbol} 现有持仓按 {held} 记账（旧版本遗留的错误口径，会被估成假浮亏）。"
+            f"先 delete_holding --symbol {symbol} --force 删掉，再按 CNY/克重新记。{how}")
+    if ccy != "CNY":
+        raise ValueError(f"{symbol} 不接受 {ccy} 计价。{how}")
+    if unit_label.strip().lower() not in _GRAM_LABELS:
+        raise ValueError(f"{symbol} 不接受单位 {unit_label!r}。{how}")
+    return dict(_GOLD_FIELDS)
+
 
 # 账本幂等闸的去重键表：portfolio.md frontmatter 的 list 字段（ADR-016），与账本同一次 atomic write。
 # ponytail: 只记"见过的 key"不缓存上次响应；重试在秒~分钟内发生，留 500 个绰绰有余。

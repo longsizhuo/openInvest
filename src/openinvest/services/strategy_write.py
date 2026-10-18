@@ -37,6 +37,7 @@ ASSET_FIELDS = (
     "max_single_invest_cny",
     "price_offset_pct",
     "sell_fee_pct",
+    "target_pct",
 )
 
 
@@ -45,6 +46,17 @@ def _validate_or_raise(metadata: Dict[str, Any]) -> None:
         validate_strategy(metadata)
     except Exception as e:  # ValidationError 或派生
         raise ValueError(f"strategy schema validation failed: {e}") from e
+    # 跨资产约束（单个 target_pct 的 0~1 范围由 schema 管）：各标的 target_pct 之和 ≤ 股票目标，
+    # 否则 rebalance_plan 的目标合计超过能分配给股票的总权重。浮点容差 1e-6（0.3+0.2+0.2 ≠ 0.7）。
+    pcts = {str(a.get("symbol")): float(a["target_pct"])
+            for a in metadata.get("target_assets", []) if a.get("target_pct") is not None}
+    total, cap = sum(pcts.values()), float(metadata.get("target_allocation_stock", 0))
+    if total > cap + 1e-6:
+        detail = " + ".join(f"{s} {v:.1%}" for s, v in pcts.items())
+        raise ValueError(
+            f"各标的 target_pct 之和 {total:.1%}（{detail}）超过股票目标 target_allocation_stock {cap:.1%}；"
+            "调低某些标的的 target_pct，或先用 set_allocations 提高股票目标（可同次传 target_pcts 一起改）"
+        )
 
 
 def _response(metadata: Dict[str, Any], message: str) -> Dict[str, Any]:
@@ -62,21 +74,46 @@ def _store(store: Optional[MemoryStore]) -> MemoryStore:
 
 
 def set_allocations(
-    target_allocation_stock: float,
-    target_allocation_cash: float,
+    target_allocation_stock: Optional[float] = None,
+    target_allocation_cash: Optional[float] = None,
     *,
+    target_pcts: Optional[Dict[str, Optional[float]]] = None,
     store: Optional[MemoryStore] = None,
 ) -> Dict[str, Any]:
-    """改资产配置目标（stock/cash 比例）。两者之和必须 ≈ 1（schema 强约束）。"""
+    """改资产配置目标：stock/cash 比例（两者之和必须 ≈ 1，要传就一起传）和/或按标的的 target_pct。
+
+    target_pcts：{symbol: 0~1 小数 | None}，symbol 必须已在 target_assets（先 track_asset），None = 清掉该标的的
+    target_pct（回到平分）。和 stock/cash 同一次事务校验——降低股票目标时可以同次把各标的权重一起调低，
+    分两次写的话中间态会因 Σtarget_pct > 股票目标被拒。
+    """
+    if (target_allocation_stock is None) != (target_allocation_cash is None):
+        raise ValueError("target_allocation_stock 与 target_allocation_cash 要么都传要么都不传（两者之和必须 ≈ 1）")
+    if target_allocation_stock is None and not target_pcts:
+        raise ValueError("至少传 stock + cash 一组配比，或 target_pcts（按标的权重）")
     with _store(store).transaction("strategy") as tx:
-        tx["target_allocation_stock"] = target_allocation_stock
-        tx["target_allocation_cash"] = target_allocation_cash
+        if target_allocation_stock is not None:
+            tx["target_allocation_stock"] = target_allocation_stock
+            tx["target_allocation_cash"] = target_allocation_cash
+        if target_pcts:
+            assets: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+            for sym, pct in target_pcts.items():
+                a = next((x for x in assets if x.get("symbol") == sym), None)
+                if a is None:
+                    raise StrategyNotFound(f"symbol {sym} 不在 target_assets（先 track_asset 跟踪它再设 target_pct）")
+                if pct is None:
+                    a.pop("target_pct", None)
+                else:
+                    a["target_pct"] = pct
+            tx["target_assets"] = assets
         _validate_or_raise(dict(tx.metadata))
         final_meta = dict(tx.metadata)
-    return _response(
-        final_meta,
-        f"目标配置已更新: 股 {target_allocation_stock:.0%} / 现 {target_allocation_cash:.0%}",
-    )
+    parts = []
+    if target_allocation_stock is not None:
+        parts.append(f"股 {target_allocation_stock:.0%} / 现 {target_allocation_cash:.0%}")
+    if target_pcts:
+        parts.append("target_pct " + ", ".join(
+            f"{k}={'清除' if v is None else format(v, '.0%')}" for k, v in target_pcts.items()))
+    return _response(final_meta, "目标配置已更新: " + "；".join(parts))
 
 
 def add_target_asset(

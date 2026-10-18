@@ -183,6 +183,7 @@ balanced（保守 / balanced / aggressive 三选一，影响 risk_officer 的尾
 
 `target_pct` 是该标的占**总资产**的目标比例（小数，0.5 = 50%），`rebalance_plan` 据此算「为了回到目标配置该买卖多少」
 （只出清单、不下单）；不写就把 `target_allocation_stock` 在标的间平分，清单里会标 `equal_split` 并提醒你补上。
+各标的之和必须 ≤ `target_allocation_stock`。不用手改文件：让 agent 调 `track_asset --target-pct 0.5`（MCP `target_pct`）或 `set_allocations --target-pct NDQ.AX=0.5 --target-pct GC=F=0.2`，写入时会校验合计。
 
 ### 3.3 `memory/user.md`
 
@@ -332,7 +333,7 @@ rm -rf ~/openInvest/memory/.committee/* ~/openInvest/memory/.runs/* ~/openInvest
 
 走完上面 5 步，下面这些都应该能正常：
 
-- [ ] `uvx openinvest doctor` 返回 ok
+- [ ] `uvx openinvest doctor` 返回 `status: "ready"`（缺 LLM key / 邮件只会标 optional，不影响）
 - [ ] `uvx openinvest status` 显示自己的持仓数字
 - [ ] `uvx openinvest run_committee <SYM>` 能跑出 `~/openInvest/memory/daily/<date>/<SYMBOL>.md`
 - [ ] `claude mcp list` 里能看到 openinvest，agent 能读持仓

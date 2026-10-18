@@ -252,11 +252,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_withdraw)
 
     p = sub.add_parser("buy", help="加仓 / 建新仓（已有 symbol → 加权平均成本；新 → 建仓）")
-    p.add_argument("--symbol", required=True, help="yfinance symbol（如 510300.SS / AAPL / BTC-USD）")
-    p.add_argument("--units", type=float, required=True, help="买入数量")
-    p.add_argument("--price", type=float, required=True, help="单价（与 currency 同币种）")
+    p.add_argument("--symbol", required=True,
+                   help="yfinance symbol（如 510300.SS / AAPL / BTC-USD）。黄金 GC=F 必须按 人民币/克 记："
+                        "-c CNY --kind metal --unit-label 克，price = CNY/克，其余口径会被拒绝")
+    p.add_argument("--units", type=float, required=True, help="买入数量（黄金 = 克数）")
+    p.add_argument("--price", type=float, required=True, help="单价（与 currency 同币种；黄金 = CNY/克）")
     p.add_argument("--currency", "-c", default=None,
-                   help="计价币种；不填 = 已有持仓沿用其币种、新建仓 CNY；与已有持仓币种不一致会报错")
+                   help="计价币种；不填 = 已有持仓沿用其币种、新建仓 CNY；与已有持仓币种不一致会报错；GC=F 只接受 CNY")
     p.add_argument("--kind", choices=["equity", "etf", "metal", "crypto", "bond", "fund", "other"],
                    default="equity", help="资产类型，默认 equity")
     p.add_argument("--unit-label", default="股", help="单位（股/克/oz/coin），默认 '股'")
@@ -279,9 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_delete_holding)
 
     # ---- strategy 写操作（issue #179：读写对等，与 MCP 工具同名同语义）----
-    p = sub.add_parser("set_allocations", help="改股票/现金目标配比（两者和必须 ≈1）")
-    p.add_argument("--stock", type=float, required=True, help="股票目标比例 0~1")
-    p.add_argument("--cash", type=float, required=True, help="现金目标比例 0~1")
+    p = sub.add_parser("set_allocations", help="改股票/现金目标配比（两者和必须 ≈1）和/或按标的的目标权重 --target-pct")
+    p.add_argument("--stock", type=float, default=None, help="股票目标比例 0~1（与 --cash 一起传）")
+    p.add_argument("--cash", type=float, default=None, help="现金目标比例 0~1（与 --stock 一起传）")
+    p.add_argument("--target-pct", action="append", metavar="SYMBOL=PCT", default=None,
+                   help="按标的设目标权重（占总资产的 0~1 小数，可重复，如 --target-pct 510300.SS=0.3；"
+                        "SYMBOL=none 清掉）。symbol 须已在跟踪列表；各标的之和 ≤ 股票目标")
     p.set_defaults(func=cmd_set_allocations)
 
     p = sub.add_parser(
@@ -295,6 +300,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="单笔投入上限 CNY（0~1,000,000；新建必填）")
     p.add_argument("--price-offset-pct", type=float, default=None, help="报价偏移 -0.1~0.1")
     p.add_argument("--sell-fee-pct", type=float, default=None, help="卖出费率 0~0.05")
+    p.add_argument("--target-pct", type=float, default=None,
+                   help="目标权重（占总资产的 0~1 小数，0.3 = 30%%）；rebalance_plan 读它。各标的之和须 ≤ 股票目标，"
+                        "超了拒绝并报出当前合计")
     p.set_defaults(func=cmd_track_asset)
 
     p = sub.add_parser("untrack_asset", help="移除跟踪标的（schema 保证至少剩 1 个）")

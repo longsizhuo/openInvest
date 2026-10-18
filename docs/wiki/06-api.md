@@ -451,16 +451,24 @@ claude mcp add openinvest -e INVEST_HOME=<数据目录> -- uvx openinvest-mcp
   - **streamable-HTTP（`openinvest-mcp --http`，2026-07，BETA）**：remote MCP，hub 常驻
     127.0.0.1:8766（`INVEST_MCP_HOST/PORT`），spoke agent 直连 `/mcp`；鉴权复用
     `INVEST_API_TOKEN`（bearer，`/health` 豁免），stateless + SSE（请求内推进度与心跳）。
-    能力差集注记：Coordinator 协议（prepare/save_committee）与 doctor/event_check
+    能力差集注记：Coordinator 协议（prepare/save_committee）与 event_check
     仍只在 REST/CLI（Decision 5/6 刻意不进 MCP），详见 wiki 08 §9
   写操作与 CLI/REST 并存安全（`with_portfolio_tx` fcntl 锁同一模型）
-- **工具集**（封闭集合，以快照测试 `tests/test_mcp_server.py` 为准）：status /
+- **工具集**（封闭集合，以快照测试 `tests/test_mcp_server.py` 为准）：doctor / status /
   strategy / history / live_prices / what_if / rebalance_plan / discipline / decisions /
   explain_decision / record_execution / ingest_event / buy /
   record_existing_position / sell / deposit / withdraw / set_allocations /
   track_asset / untrack_asset / news_sources / add_news_source /
   remove_news_source / run_committee（Direct 路径，当天已跑读缓存）。
   同步工具经线程池执行，慢 IO 不占事件循环
+- **doctor**（只读，顾问模式拒绝）：纯 MCP agent 的第一步，与 CLI `doctor` / `GET /api/doctor` 同源。
+  `status` 只看 onboarding 必需项：memory 未初始化（或 portfolio 是 v1）→ `needs_setup`，否则 `ready`；
+  缺 LLM key / 邮件凭据 / `.env` 只在对应 check 标 `optional_for_coordinator` / `optional_for_email`
+  （Coordinator 路径不需要 key，只有 Direct 路径要，见 `direct_ready`），不会让 agent 去重装
+- **目标权重**：`track_asset(symbol, target_pct=0.3)` 写单个标的、`set_allocations(target_pcts={"510300.SS": 0.3})`
+  批量写（CLI：`track_asset --target-pct 0.3` / `set_allocations --target-pct SYMBOL=0.3`，可重复）；
+  `rebalance_plan` 读它。各标的 `target_pct` 之和必须 ≤ `target_allocation_stock`，超了整笔回滚并报出当前合计；
+  降股票目标时把 `target_pcts` 放进同一次 `set_allocations` 一起调（单独降会因中间态超限被拒）
 - 刻意不把 81 个 REST 端点全暴露（撑爆 agent context）；Coordinator 委员会
   workflow 也不在这里——那是 Skill 的职责（issue #133 Decision 5/6）
 

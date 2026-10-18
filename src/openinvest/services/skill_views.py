@@ -429,9 +429,13 @@ INIT_PAYLOAD_SHAPE: Dict[str, Any] = {
 def build_doctor_view(root: Path) -> Dict[str, Any]:
     """健康自检：onboarding 是否完成？所有外部依赖可达？
 
-    给 Claude 看的 JSON：每一项是 ok / missing / unreachable，附 hint 教 Claude
+    给 Claude 看的 JSON：每一项是 ok / missing / needs_migration / optional_*，附 hint 教 Claude
     怎么修。让 Claude 第一次帮用户跑 status 失败时，先 doctor 看到底差什么，
     再决定走 AskUserQuestion 还是直接 init。
+
+    总 status 只看 onboarding 必需项（memory 未初始化 / portfolio 是 v1 旧格式 → needs_setup）；
+    LLM key / 邮件凭据 / .env 文件缺失是 **optional_***：Coordinator 路径本来就不要 LLM key（#444），
+    缺了不该让 agent 切去 invest-setup 重装——只有 Direct 路径（direct_ready）要 key。
 
     Args:
         root: 项目根（CLI 传 scripts.skill.ROOT——测试会 patch 它；web_api 传自己的 repo root）
@@ -486,57 +490,60 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         ),
     })
 
-    # 2) .env 凭据
+    # 2) .env 凭据（全是可选项：Coordinator 路径零凭据，Direct 路径才要 LLM key，邮件只影响 daily_report 发信）
     env_path = root / ".env"
     # LLM_API_KEY 优先；兼容老 fork 用户的 DEEPSEEK_API_KEY
-    has_deepseek = bool(os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY"))
+    has_llm_key = bool(os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY"))
     has_email_sender = bool(os.getenv("EMAIL_SENDER"))
     has_email_pass = bool(os.getenv("EMAIL_PASSWORD"))
+    has_email = has_email_sender and has_email_pass
     checks.append({
         "name": ".env_file",
-        "status": "ok" if env_path.exists() else "missing",
+        "status": "ok" if env_path.exists() else "optional_for_coordinator",
         "detail": str(env_path) if env_path.exists() else f"{env_path} 不存在",
         "hint": (
             None if env_path.exists() else
-            f"让用户自己在 {env_path} 写 LLM_API_KEY= / EMAIL_SENDER= / EMAIL_PASSWORD="
-            "（都可选；不要在对话里收集密钥），或在自己的终端里跑 `run.sh init`"
+            f"可选：Direct 路径 / 发邮件才需要凭据，让用户自己在 {env_path} 写 LLM_API_KEY= / EMAIL_SENDER= / "
+            "EMAIL_PASSWORD=（不要在对话里收集密钥），或在自己的终端里跑 `run.sh init`；也可直接设进进程环境变量。"
         ),
     })
     checks.append({
-        "name": "deepseek_key",
-        "status": "ok" if has_deepseek else "missing",
+        "name": "llm_key",
+        "status": "ok" if has_llm_key else "optional_for_coordinator",
         "detail": (
-            "LLM_API_KEY / DEEPSEEK_API_KEY 已设" if has_deepseek
+            "LLM_API_KEY / DEEPSEEK_API_KEY 已设" if has_llm_key
             else "LLM_API_KEY / DEEPSEEK_API_KEY 均缺失"
         ),
         "hint": (
-            None if has_deepseek else
-            "向用户引导：去 https://platform.deepseek.com 注册 → API keys 页面创建 "
-            f"→ 用户自己把 LLM_API_KEY=sk-xxxx 写进 {env_path}（不要在对话里收集）。"
-            "没有 key 仍可用 Coordinator 路径，但无人值守的 cron 跑不了。"
+            None if has_llm_key else
+            "可选：只有 Direct 路径（run_committee / 无人值守 cron）需要；Coordinator 路径（prepare_committee + "
+            "spawn 4 subagent）不需要，别为这个重装。要用 Direct 时让用户自己把 LLM_API_KEY=sk-xxxx 写进 "
+            f"{env_path}（不要在对话里收集）；默认 DeepSeek（https://platform.deepseek.com），"
+            "换 OpenAI 兼容的其他厂商再设 LLM_BASE_URL / LLM_MODEL。"
         ),
     })
     checks.append({
         "name": "gmail_credentials",
-        "status": "ok" if (has_email_sender and has_email_pass) else "missing",
+        "status": "ok" if has_email else "optional_for_email",
         "detail": (
             f"sender={os.getenv('EMAIL_SENDER')}, password set"
-            if (has_email_sender and has_email_pass) else
+            if has_email else
             "EMAIL_SENDER 或 EMAIL_PASSWORD 缺失"
         ),
         "hint": (
-            None if (has_email_sender and has_email_pass) else
-            "Gmail 必须用 App Password（不是登录密码），需先开 2FA 然后去 "
-            "https://myaccount.google.com/apppasswords 生成 16 位 App Password。"
-            f"用户自己写进 {env_path}（不要在对话里收集）；未配置时 daily_report 仍能跑完，只是不发邮件。"
+            None if has_email else
+            "可选：只影响 daily_report 发邮件（未配置时日报仍能跑完，只是不发信），与 Coordinator / Direct 路径无关。"
+            "要发信时 Gmail 必须用 App Password（不是登录密码），需先开 2FA 然后去 "
+            f"https://myaccount.google.com/apppasswords 生成 16 位 App Password，用户自己写进 {env_path}"
+            "（不要在对话里收集）。"
         ),
     })
 
     # 3) LLM key 实测可达（audit PM Major: 失败前置）
     # 用统一的 utils.llm 读 base_url/key，支持 LLM_* 切千问/智谱
-    deepseek_reachable = "skipped"
-    deepseek_detail = "LLM_API_KEY / DEEPSEEK_API_KEY 未设，跳过实测"
-    if has_deepseek:
+    llm_reachable = "skipped"
+    llm_detail = "LLM_API_KEY / DEEPSEEK_API_KEY 未设，跳过实测"
+    if has_llm_key:
         try:
             import requests
             from openinvest.utils.llm import get_llm_config_safe
@@ -550,25 +557,25 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
                 timeout=8,
             )
             if r.status_code == 200:
-                deepseek_reachable = "ok"
-                deepseek_detail = f"LLM API ({_llm_base}) 响应 200，key 有效"
+                llm_reachable = "ok"
+                llm_detail = f"LLM API ({_llm_base}) 响应 200，key 有效"
             elif r.status_code == 401:
-                deepseek_reachable = "auth_failed"
-                deepseek_detail = f"LLM API ({_llm_base}) 返回 401，key 无效或已过期"
+                llm_reachable = "auth_failed"
+                llm_detail = f"LLM API ({_llm_base}) 返回 401，key 无效或已过期"
             else:
-                deepseek_reachable = "unreachable"
-                deepseek_detail = f"LLM API ({_llm_base}) 返回 HTTP {r.status_code}"
+                llm_reachable = "unreachable"
+                llm_detail = f"LLM API ({_llm_base}) 返回 HTTP {r.status_code}"
         except Exception as e:
-            deepseek_reachable = "network_error"
-            deepseek_detail = f"无法连接 LLM API: {type(e).__name__}: {e}"
+            llm_reachable = "network_error"
+            llm_detail = f"无法连接 LLM API: {type(e).__name__}: {e}"
     checks.append({
-        "name": "deepseek_reachable",
-        "status": deepseek_reachable if deepseek_reachable in ("ok", "skipped") else "missing",
-        "detail": deepseek_detail,
+        "name": "llm_reachable",
+        "status": llm_reachable if llm_reachable in ("ok", "skipped") else "optional_for_coordinator",
+        "detail": llm_detail,
         "hint": (
-            None if deepseek_reachable in ("ok", "skipped") else
-            "去 https://platform.deepseek.com 检查 key 是否被禁用 / 余额不足。"
-            "失败时仍可用 Claude skill 模式跑 prepare_committee。"
+            None if llm_reachable in ("ok", "skipped") else
+            "只影响 Direct 路径：检查 key 是否被禁用 / 余额不足 / LLM_BASE_URL 是否可达。"
+            "失败时仍可用 Coordinator 路径跑 prepare_committee。"
         ),
     })
 
@@ -585,23 +592,28 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         "hint": None,
     })
 
-    # 4) Python venv（skill 本身能跑到这里就证明 venv ok，但报告上有更友好）
-    checks.append({
-        "name": "python_venv",
-        "status": "ok",
-        "detail": f"running on {sys.version.split()[0]}",
-        "hint": None,
-    })
+    # 4) Python venv：git clone 形态的遗留项（跑到这里就证明 venv ok，只报告版本）。
+    # uvx / wheel 形态下数据目录里没有 pyproject.toml + skills/（同 paths._detect_root 的 clone 判据），没有 venv 可言 → 跳过
+    if (root / "pyproject.toml").exists() and (root / "skills").is_dir():
+        checks.append({
+            "name": "python_venv",
+            "status": "ok",
+            "detail": f"running on {sys.version.split()[0]}",
+            "hint": None,
+        })
 
     # 5) GUI 壳层已退役（2026-07-05）——web_gui 体检项随之删除，GUI 重做时另起前端
 
-    overall = "ready" if all(c["status"] == "ok" for c in checks) else "needs_setup"
+    # 只有 onboarding 必需项（memory 未初始化 / portfolio v1 待迁移）挡路；optional_* / skipped 不算
+    blocking = [c["name"] for c in checks
+                if c["status"] not in ("ok", "skipped") and not c["status"].startswith("optional")]
+    overall = "ready" if not blocking else "needs_setup"
 
     # ready_for_subcommands 兼容旧字段；新增分路径就绪标志：
     # - coordinator_ready：Claude Code 走 prepare_committee + spawn 4 subagent，
     #   不需要 DeepSeek key（用 Claude 订阅扮演 worker）
     # - direct_ready：任意 agent 走 run_committee，需要 DeepSeek key 跑 4 角色
-    # 旧 ready_for_subcommands 之前要求 has_deepseek，会让 Coordinator 用户被
+    # 旧 ready_for_subcommands 之前要求 LLM key，会让 Coordinator 用户被
     # 误判"还没就绪" → agent 反复引导去注册 DeepSeek，体验糟糕
     from openinvest import __version__  # 远端 CLI 靠它判断 hub 是否支持幂等键（#432 评审第 3 条）
 
@@ -610,10 +622,11 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         "version": __version__,
         "ready_for_subcommands": memory_ok,  # 等价于 coordinator_ready
         "coordinator_ready": memory_ok,
-        "direct_ready": memory_ok and has_deepseek,
+        "direct_ready": memory_ok and has_llm_key,
         "next_step": (
-            "用户已就绪。Claude Code 用户直接调 status / prepare_committee；"
-            "其他 agent（Cursor/Cline/Codex）走 run_committee（需 DEEPSEEK_API_KEY）"
+            "用户已就绪（不要切 invest-setup）。Coordinator 路径（Claude Code / Hermes）直接调 status / "
+            "prepare_committee；Direct 路径（Cursor/Cline/Codex/cron）走 run_committee，"
+            + ("LLM key 已配置" if has_llm_key else "需要先配 LLM_API_KEY，见 checks 里 llm_key 的 hint（可选项，缺了只是 Direct 路径不可用）")
             if overall == "ready" else
             f"portfolio.md 是 v1 旧格式：先跑 `{migrate_cmd}`，再看其他 status≠ok 的项"
             if portfolio_v1 else
