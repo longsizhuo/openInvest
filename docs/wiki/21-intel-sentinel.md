@@ -3,15 +3,22 @@ type: wiki-chapter
 title: 情报哨兵（agent 定时喂料）
 tags: [sentinel, ingest-event, news, agent, cron, event-watch]
 intent: 用任意 agent 平台的定时任务给事件账本主动喂料的标准配方
+schema_source:
+  - src/openinvest/core/schemas.py:SymbolAlerts
+  - src/openinvest/calc/price_alerts.py:evaluate
 documents:
   endpoints: []
   config_keys:
     - SEARXNG_URL
+    - INVEST_EVENT_ALERT
     - event.committee_cooldown_hours
     - event.committee_daily_cap
     - event.committee_escalation_bypass
+    - event.sentinel_enabled
   symbols:
     - ingest_event
+    - track_asset
+    - set_allocations
 ---
 
 # 情报哨兵（agent 定时喂料）
@@ -112,6 +119,79 @@ hermes cron add '15 0-15 * * 1-5' "<上面的 prompt>" \
    不动钱——命中 target_assets 的高严重度事件会按上面的频控触发委员会（花 LLM，不下单）。
 3. **第三方技能先审后用**：社区技能市场的财经 skill 装之前过一遍源码
    （网络回传 / 命令执行 / 凭据读取），有内置扫描器的平台先跑扫描。
+
+## 每标的报警线（用户自设价格线 / 跌幅线）
+
+> **一句话**：你可以给每个跟踪标的设自己的价格线或涨跌幅线，碰到就报（报警总开关仍默认关）；
+> `status` 能看到离线还有多远。
+
+内置价格哨兵（`jobs/price_sentinel`，ADR-025）只盯"10 分钟走完日 ATR 的 0.8 倍"这种垂直线，
+对持仓基本是聋的：生产 60 天 0 次，10-14 CPI 当天金价 −1.6%/14 分钟也没报。
+用户自己的线是另一类信号——"金价跌破 900 告诉我""这只一天跌 3% 告诉我"——不靠波动率归一化，
+由用户说了算。线存在 `strategy.target_assets[].alerts`，同一个哨兵 job 每个 tick 顺带判一次。
+
+| 规则 | 命中条件 | 口径 |
+|---|---|---|
+| `price_above` | 现价 ≥ 线 | 与 `status` 的 `current_price` 同口径：持仓按 `cost_currency`，黄金积存金 = CNY/克；只跟踪未持仓 = 行情源原价（`GC=F` 是 USD/盎司） |
+| `price_below` | 现价 ≤ 线 | 同上；设了两条价格线时必须 `price_below < price_above` |
+| `day_drop_pct` | 今日跌幅 ≥ 阈值 | 相对前收，**百分点**（3 = 3%，不是 target_pct 那种 0~1 小数） |
+| `day_rise_pct` | 今日涨幅 ≥ 阈值 | 同上 |
+| `drawdown_from_cost_pct` | 持仓浮亏 ≥ 阈值 | 相对成本，百分点；只对**持有且有成本**的标的判，只跟踪的不判 |
+
+```bash
+openinvest track_asset --symbol GC=F --alert-price-below 900 --alert-day-drop-pct 2
+openinvest set_allocations --alert GC=F:price_above=1100 --alert 0700.HK:day_drop_pct=3
+openinvest set_allocations --alert GC=F:price_below=none    # 清一条
+openinvest set_allocations --alert GC=F=none                # 清空该标的全部
+```
+
+MCP 对应 `track_asset` 的 `alert_price_above` / `alert_price_below` / `alert_day_drop_pct` /
+`alert_day_rise_pct` / `alert_drawdown_from_cost_pct`（只覆盖传入的那几条），和 `set_allocations`
+的 `alerts` 映射（`{symbol: {规则: 值}}`，值为 null 清该条，symbol 整体为 null 清空）。键名拼错、
+阈值 ≤ 0、两条价格线反了都在写入时被 schema 拒绝，不会静默永不触发。
+
+**运行行为**
+
+- 每个 tick（默认每 5 分钟）先判用户线、再跑原有 ATR 逻辑，两者互不依赖；用户线整体出错只记日志，不拦 ATR。
+  `event.sentinel_enabled=false` 会连用户线一起停；`INVEST_SENTINEL_DRY_RUN=1` 只检测、不入库、不发、不盖冷却章。
+- 价格走 `get_quote`（黄金按克价，和 `status` 同价）；行情源挂了在用库里旧价（`is_stale`）时不报，
+  不拿旧价当触线。休市时用最近收盘价判，所以一条已经被击穿的价格线会在第一个 tick 报出来。
+- **冷却**：每标的每条规则 24 小时。「判冷却 + 盖章」在同一把文件锁内（`MemoryStore.state_update`，
+  `memory/.state/price_alert_cooldowns.json`，键 `SYMBOL:规则`），两个实例同时进来只有一个抢得到。
+  线一直被击穿的话每 24h 再提醒一次，不是只在穿越的那一刻报。
+- **同一通道**：命中的事件合成一封 digest 走 `send_event_alert`（Discord DM + 邮件），和 ATR 报警、
+  事件报警是同一条路，stance 下行线 = risk、上行线 = opportunity。
+- **总开关不变**：`INVEST_EVENT_ALERT=1` 才真发（2026-09-10 老大要求默认关，没改）。关着时事件照常入库、
+  冷却照常盖章，只是不发——所以先关后开的话，关着期间已经命中过的线要等 24h 冷却过完才会再报。
+- **入库**：每次命中写一条 `events.db` 事件，`event_type="price_alert"`、`ingested_by="price_sentinel"`，
+  claim 含日期（同价同线隔 24h 再命中也是新的一行）。
+- **只入库、不触发委员会**：线是用户自己的提醒，不是新信息；委员会额度（共享冷却 + 每日上限）留给新闻事件，
+  且这些事件**不走** `trigger_for_new_events`。`severity` 固定 `low`，低于触发闸、RAG 召回、日报资产事件
+  默认都要求的 `mid`，所以用户的价格线不会经事件层混进委员会的论据（用户把 `event.min_severity` /
+  `event.rag_min_severity` 调到 `low` 才会看见它们——那是他自己的选择）。
+
+**可见性**：`status` 的每个 `all_holdings[]` 行多一个 `alerts` 数组（没设线 = `[]`）；只跟踪、没有持仓行的标的
+设了线时，会作为 `is_tracking_only` 行出现，保证线不会"设了却看不见"：
+
+```json
+{"symbol": "GC=F", "alerts": [
+  {"rule": "price_below", "threshold": 900.0, "current": 930.0, "distance_pct": 3.23,
+   "breached": false, "text": "距 price_below 还有 3.2%"}]}
+```
+
+`distance_pct` > 0 = 还没到，≤ 0 = 已触及；缺输入（没有成本、今日涨跌拉不到）= `null`，文案"暂无法判定"。
+
+排查：
+
+```bash
+# 命中过的线（入库不代表发出去了——发不发看 INVEST_EVENT_ALERT）
+python3 -c "
+import sqlite3
+con = sqlite3.connect('db/events.db')
+for r in con.execute(\"SELECT created_at, one_line_claim FROM events WHERE event_type='price_alert' ORDER BY rowid DESC LIMIT 10\"):
+    print(r)"
+cat memory/.state/price_alert_cooldowns.json   # 各线上次盖章时刻
+```
 
 ## 验证与排查
 

@@ -8,6 +8,17 @@
   committee 路径拖慢或阻塞；委员会触发失败也不影响已发出的报警
 - 冷却：同 symbol 同方向 cooldown_min 分钟内不重复报（memory/.state 持久化）
 
+用户自设报警线（C8）：strategy.target_assets[].alerts（price_above / price_below / day_drop_pct /
+day_rise_pct / drawdown_from_cost_pct）每个 tick 用最新价判一次，与上面的 ATR 逻辑并行、互不依赖：
+- 价格口径同 status（services/price_alerts：持仓按 get_quote，黄金按克价），行情是回退兜底（is_stale）时不报
+- 每标的每条规则 24h 冷却，用 state_update 在同一把文件锁内「判冷却 + 盖章」（原子，两个实例不会同报）
+- 命中写一条事件进 events.db（event_type=price_alert），再经 send_event_alert 同一通道发
+  （Discord/邮件）；INVEST_EVENT_ALERT=1 才真发，默认关时只入库不发（冷却照常盖章）
+- **只入库、不触发委员会**：线是用户自己的提醒，不是新信息；委员会额度（共享冷却 + 日上限）留给新闻事件。
+  severity=low 让 RAG 召回 / 日报资产事件 / 触发闸（默认都要 ≥ mid）天然看不见它，
+  用户的价格线不会经事件层混进委员会的论据
+- event.sentinel_enabled=false / INVEST_SENTINEL_DRY_RUN=1 对这条路径同样生效（整个 job 停 / 只检测不落任何东西）
+
 数据现实：yfinance 期货/股票分钟线延迟 ~10-15 分钟，本哨兵定位是"系统先于
 用户开口"的 FOMO 拦截 + 下跌侧衔接 DCA/防御哨兵，不是抢跑工具（ADR-023
 诚实定位）。报警阈值用日 ATR% 归一化（10 分钟走完一根日常波动的大部分才叫
@@ -41,6 +52,10 @@ _MAX_STALE_MIN = 25
 _ABS_FALLBACK_PCT = 1.0
 # 冷却状态在 memory/.state 里的名字
 _STATE_NAME = "price_sentinel_cooldowns"
+# 用户自设报警线：每标的每条规则的冷却（键 "SYM:rule"）
+_ALERT_STATE_NAME = "price_alert_cooldowns"
+_ALERT_COOLDOWN_MIN = 24 * 60
+_ALERT_UP_RULES = ("price_above", "day_rise_pct")  # 上行线 = 机会措辞，其余 = 风险
 
 
 # ---------- 纯函数（可单测） ----------
@@ -145,6 +160,110 @@ def _fetch_frames(symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# ---------- 用户自设报警线（C8） ----------
+
+def _alert_targets() -> List[Dict[str, Any]]:
+    """strategy.target_assets 里设了 alerts 的标的 → [{symbol, alerts, holding}]。PM 不可用 → []。"""
+    try:
+        from openinvest.core.portfolio_manager import PortfolioManager
+
+        pm = PortfolioManager()
+        return [
+            {"symbol": a["symbol"], "alerts": a["alerts"], "holding": pm.holdings.find(a["symbol"])}
+            for a in (pm.strategy.get("target_assets") or []) if a.get("symbol") and a.get("alerts")
+        ]
+    except Exception as e:  # 没初始化 / 读失败：这条路径静默让位，不影响 ATR 哨兵
+        log.warning(f"[price_alert] 读 target_assets 失败，本轮跳过用户报警线: {e}")
+        return []
+
+
+def _claim_alert(ms: Any, sym: str, rule: str, now: datetime) -> Optional[str]:
+    """原子冷却：同一把文件锁内「读 → 判 24h → 盖章」。抢到返回盖的 stamp，冷却内返回 None。"""
+    stamp = now.isoformat(timespec="seconds")
+
+    def _fn(cur: Any):
+        cur = cur if isinstance(cur, dict) else {}
+        if not _cooldown_ok(cur, sym, rule, now, _ALERT_COOLDOWN_MIN):
+            return cur, None
+        return {**cur, f"{sym}:{rule}": stamp}, stamp
+
+    return ms.state_update(_ALERT_STATE_NAME, _fn)
+
+
+def _release_alert(ms: Any, sym: str, rule: str, stamp: str) -> None:
+    """入库失败时撤回刚盖的章（只撤自己的，别人期间写的不动），下个 tick 重试。"""
+    key = f"{sym}:{rule}"
+    ms.state_update(_ALERT_STATE_NAME, lambda cur: (
+        {k: v for k, v in (cur if isinstance(cur, dict) else {}).items() if not (k == key and v == stamp)}, None))
+
+
+def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
+    """判所有带 alerts 的 target_asset，命中即冷却 → 入库 → 一条 digest 报警。返回命中的 "SYM:rule"。"""
+    from openinvest.db.event_store import EventStore
+    from openinvest.services.event_notifier import send_event_alert
+    from openinvest.services.price_alerts import evaluate_symbol, fetch_quote
+
+    fired: List[str] = []
+    events: List[Dict[str, Any]] = []
+    for t in _alert_targets():
+        sym = t["symbol"]
+        try:
+            quote = fetch_quote(sym, t["holding"])
+            if quote is None or not (quote.price > 0):
+                continue
+            if quote.is_stale:  # 行情源挂了在用库里旧价：别拿旧价当"触线"
+                log.info(f"[{sym}] 行情是回退兜底（is_stale），跳过报警线判定")
+                continue
+            hits = [r for r in evaluate_symbol(sym, t["alerts"], t["holding"], price=quote.price, extra=quote.extra)
+                    if r["breached"]]
+        except Exception as e:
+            log.warning(f"[{sym}] 报警线判定失败: {e}")
+            continue
+        for r in hits:
+            rule = r["rule"]
+            if dry_run:
+                fired.append(f"{sym}:{rule}")
+                continue
+            stamp = _claim_alert(ms, sym, rule, now)
+            if stamp is None:
+                log.info(f"[{sym}] {rule} 在 24h 冷却内，跳过")
+                continue
+            ccy = f" {quote.currency}" if quote.currency else ""
+            claim = (f"{sym} 触发你设的报警线：{r['text']}，现价 {quote.price:.2f}{ccy}；{_latest_verdict(sym)}"
+                     f"（{now:%Y-%m-%d}）")
+            event = {
+                "one_line_claim": claim,
+                "event_type": "price_alert",
+                "stance": "opportunity" if rule in _ALERT_UP_RULES else "risk",
+                "severity": "low",  # 见模块 docstring：低于所有事件层闸，用户的线不进委员会论据
+                "affected_symbols": [sym],
+                "entities": ["price_alert", sym.lower(), rule],
+                "ts": now.isoformat(timespec="seconds"),
+                "ingested_by": "price_sentinel",
+            }
+            try:
+                _, eid = EventStore().upsert_event(event, embedding=None)
+            except Exception as e:
+                log.warning(f"[{sym}] {rule} 事件入库失败，撤回冷却下轮重试: {e}")
+                _release_alert(ms, sym, rule, stamp)
+                continue
+            log.info(f"[price_alert] {claim}")
+            events.append({**event, "event_id": eid})
+            fired.append(f"{sym}:{rule}")
+
+    if events:
+        try:
+            # 持仓快照要拉行情：只在报警真会发时才算（send_event_alert 总开关默认关，判据同它内部）
+            snap = {}
+            if os.getenv("INVEST_EVENT_ALERT", "0") == "1":
+                from openinvest.services.event_trigger import _holdings_snapshot
+                snap = _holdings_snapshot(sorted({e["affected_symbols"][0] for e in events}))
+            send_event_alert(events, committee_task_id=None, holdings_snapshot=snap)
+        except Exception as e:
+            log.warning(f"[price_alert] 报警发送失败（事件已入库、冷却已盖章）: {e}")
+    return fired
+
+
 # ---------- 主流程 ----------
 
 def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
@@ -172,6 +291,13 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
     state: Dict[str, Any] = ms.state_get(_STATE_NAME, {}) or {}
     now = datetime.now(timezone.utc)
     alerted: List[str] = []
+
+    # 用户自设报警线先判：与 ATR 并行、互不依赖，任何异常都不拦后面的 ATR 逻辑
+    try:
+        price_alerts = _check_user_alerts(ms, now, dry_run)
+    except Exception as e:
+        log.warning(f"[price_alert] 用户报警线整体失败（不影响 ATR 哨兵）: {e}")
+        price_alerts = []
 
     for sym in symbols:
         frames = _fetch_frames(sym)
@@ -270,7 +396,7 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
         )
 
     return {"status": "ok", "checked": len(symbols), "alerted": len(alerted),
-            "symbols": alerted, "dry_run": dry_run}
+            "symbols": alerted, "price_alerts": price_alerts, "dry_run": dry_run}
 
 
 if __name__ == "__main__":

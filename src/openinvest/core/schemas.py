@@ -20,6 +20,28 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # ============ strategy.md ============
 
+class SymbolAlerts(BaseModel):
+    """target_assets[].alerts：用户给单个标的设的报警线（C8，jobs/price_sentinel 每个 tick 判一次）。
+
+    price_* 与 status 的 current_price 同口径（持仓按 cost_currency；黄金积存金 = CNY/克；
+    只跟踪未持仓 = 行情源原价，如 GC=F 为 USD/oz）。*_pct 是**百分点**（3 = 3%），
+    与 target_pct 的 0~1 小数不同。extra=forbid：拼错的键（price_blow）直接报错，不会静默永不触发。
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    price_above: Optional[float] = Field(None, gt=0, allow_inf_nan=False, description="现价 ≥ 该价 时报警")
+    price_below: Optional[float] = Field(None, gt=0, allow_inf_nan=False, description="现价 ≤ 该价 时报警")
+    day_drop_pct: Optional[float] = Field(None, gt=0, le=100, description="今日跌幅（相对前收）≥ 该百分点 时报警")
+    day_rise_pct: Optional[float] = Field(None, gt=0, le=1000, description="今日涨幅（相对前收）≥ 该百分点 时报警")
+    drawdown_from_cost_pct: Optional[float] = Field(None, gt=0, le=100, description="持仓浮亏（相对成本）≥ 该百分点 时报警；需持有且有成本")
+
+    @model_validator(mode="after")
+    def _price_band_ordered(self) -> "SymbolAlerts":
+        if self.price_above is not None and self.price_below is not None and self.price_below >= self.price_above:
+            raise ValueError(f"price_below ({self.price_below}) 必须小于 price_above ({self.price_above})，否则两条线永远同时触发")
+        return self
+
+
 class TargetAsset(BaseModel):
     """strategy.target_assets[] 中的单个资产配置（决策层 schema）"""
     model_config = ConfigDict(extra="allow")
@@ -30,6 +52,7 @@ class TargetAsset(BaseModel):
     max_single_invest_cny: float = Field(..., ge=0, le=1_000_000)
     price_offset_pct: Optional[float] = Field(None, ge=-0.1, le=0.1)
     sell_fee_pct: Optional[float] = Field(None, ge=0, le=0.05)
+    alerts: Optional[SymbolAlerts] = Field(None, description="每标的报警线（价格线 / 日涨跌 / 成本回撤），哨兵按它触发")
     # target_pct（占总资产的 0~1 小数，rebalance_plan 读）刻意不在这里声明：手写的 strategy.md 里
     # 可能有 `target_pct: 30` 这类历史写法，声明 ge/le 会让每一次无关的 strategy 写入都被整份校验拒绝。
     # 范围 + Σ ≤ 股票目标由 services/strategy_write 只对「本次写入新改的值」校验（#449）。

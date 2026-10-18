@@ -38,6 +38,7 @@ ASSET_FIELDS = (
     "price_offset_pct",
     "sell_fee_pct",
     "target_pct",
+    "alerts",
 )
 
 
@@ -91,6 +92,25 @@ def _validate_or_raise(metadata: Dict[str, Any], before: Optional[tuple] = None)
         )
 
 
+def _merge_alerts(asset: Dict[str, Any], spec: Optional[Dict[str, Any]]) -> None:
+    """把 alerts 改动并进 asset（C8 每标的报警线）。spec 里有值的键覆盖、null 的键清掉、没提到的键不动；
+    spec=None 清空该标的全部 alerts；清到空就删 alerts 键（strategy.md 不留 `alerts: {}`）。
+    键名/取值合法性不在这查——整份 schema 校验（core.schemas.SymbolAlerts，extra=forbid）统一拦。"""
+    if spec is None:
+        asset.pop("alerts", None)
+        return
+    cur = dict(asset.get("alerts") or {})
+    for k, v in spec.items():
+        if v is None:
+            cur.pop(k, None)
+        else:
+            cur[k] = v
+    if cur:
+        asset["alerts"] = cur
+    else:
+        asset.pop("alerts", None)
+
+
 def _response(metadata: Dict[str, Any], message: str) -> Dict[str, Any]:
     return {
         "status": "ok",
@@ -110,33 +130,43 @@ def set_allocations(
     target_allocation_cash: Optional[float] = None,
     *,
     target_pcts: Optional[Dict[str, Optional[float]]] = None,
+    alerts: Optional[Dict[str, Optional[Dict[str, Any]]]] = None,
     store: Optional[MemoryStore] = None,
 ) -> Dict[str, Any]:
-    """改资产配置目标：stock/cash 比例（两者之和必须 ≈ 1，要传就一起传）和/或按标的的 target_pct。
+    """改资产配置目标：stock/cash 比例（两者之和必须 ≈ 1，要传就一起传）和/或按标的的 target_pct / alerts。
 
     target_pcts：{symbol: 0~1 小数 | None}，symbol 必须已在 target_assets（先 track_asset），None = 清掉该标的的
     target_pct（回到平分）。和 stock/cash 同一次事务校验——降低股票目标时可以同次把各标的权重一起调低，
     分两次写的话中间态会因 Σtarget_pct > 股票目标被拒。
+    alerts：{symbol: {price_above/price_below/day_drop_pct/day_rise_pct/drawdown_from_cost_pct: 值 | None} | None}，
+    合并语义同 track_asset（值覆盖、null 清键、没提的键不动），整个 symbol 写 None = 清空它的全部报警线。
     """
     if (target_allocation_stock is None) != (target_allocation_cash is None):
         raise ValueError("target_allocation_stock 与 target_allocation_cash 要么都传要么都不传（两者之和必须 ≈ 1）")
-    if target_allocation_stock is None and not target_pcts:
-        raise ValueError("至少传 stock + cash 一组配比，或 target_pcts（按标的权重）")
+    if target_allocation_stock is None and not target_pcts and not alerts:
+        raise ValueError("至少传 stock + cash 一组配比，或 target_pcts（按标的权重），或 alerts（按标的报警线）")
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
         if target_allocation_stock is not None:
             tx["target_allocation_stock"] = target_allocation_stock
             tx["target_allocation_cash"] = target_allocation_cash
-        if target_pcts:
+        if target_pcts or alerts:
             assets: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
-            for sym, pct in target_pcts.items():
+
+            def _asset(sym: str, what: str) -> Dict[str, Any]:
                 a = next((x for x in assets if x.get("symbol") == sym), None)
                 if a is None:
-                    raise StrategyNotFound(f"symbol {sym} 不在 target_assets（先 track_asset 跟踪它再设 target_pct）")
+                    raise StrategyNotFound(f"symbol {sym} 不在 target_assets（先 track_asset 跟踪它再设 {what}）")
+                return a
+
+            for sym, pct in (target_pcts or {}).items():
+                a = _asset(sym, "target_pct")
                 if pct is None:
                     a.pop("target_pct", None)
                 else:
                     a["target_pct"] = pct
+            for sym, spec in (alerts or {}).items():
+                _merge_alerts(_asset(sym, "alerts"), spec)
             tx["target_assets"] = assets
         _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
@@ -146,6 +176,8 @@ def set_allocations(
     if target_pcts:
         parts.append("target_pct " + ", ".join(
             f"{k}={'清除' if v is None else format(v, '.0%')}" for k, v in target_pcts.items()))
+    if alerts:
+        parts.append("alerts " + ", ".join(f"{k}={'清空' if v is None else sorted(v)}" for k, v in alerts.items()))
     return _response(final_meta, "目标配置已更新: " + "；".join(parts))
 
 
@@ -226,6 +258,7 @@ def upsert_target_asset(
     if not symbol:
         raise ValueError("symbol 不能为空")
     fields = {k: v for k, v in fields.items() if v is not None}
+    alerts = fields.pop("alerts", None)  # 嵌套对象，走 _merge_alerts（合并 / null 清键），不能整块 update 覆盖
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
@@ -244,10 +277,15 @@ def upsert_target_asset(
                     )
                 fields["max_single_invest_cny"] = default_cap
                 msg += f"（单笔上限沿用策略的单次入场上限 {float(default_cap):,.0f} CNY）"
-            existing.append({"symbol": symbol, **fields})
-        elif fields:
+            target = {"symbol": symbol, **fields}
+            existing.append(target)
+            if alerts:
+                _merge_alerts(target, alerts)
+        elif fields or alerts:
             target.update(fields)
-            msg = f"{symbol} 已更新: {list(fields.keys())}"
+            if alerts:
+                _merge_alerts(target, alerts)
+            msg = f"{symbol} 已更新: {[*fields, *(['alerts'] if alerts else [])]}"
         else:
             msg = f"{symbol} 已在跟踪列表（无字段变更）"
         tx["target_assets"] = existing

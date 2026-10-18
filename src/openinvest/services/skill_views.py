@@ -103,6 +103,26 @@ def build_status_view() -> Dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         performance = {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
+    # 每标的报警线（C8）：strategy.target_assets[].alerts → 阈值与离触发线的距离（求值与哨兵共用 services/price_alerts）
+    from openinvest.services.price_alerts import evaluate_symbol, fetch_quote
+    alert_cfg = {a["symbol"]: a["alerts"] for a in (pm.strategy.get("target_assets") or [])
+                 if a.get("symbol") and a.get("alerts")}
+
+    def _alerts_for(sym: str, h: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if sym not in alert_cfg:
+            return []
+        try:
+            price, extra = current_prices.get(sym), quote_meta.get(sym, {}).get("extra")
+            if price is None and (h is None or h.get("is_tracking_only")):
+                # 追踪仓 / 没持仓行的跟踪标的 status 本来不拉价，设了线的才补拉（在持仓拉价失败的不重试）
+                q = fetch_quote(sym, h)
+                if q is not None and math.isfinite(q.price) and q.price > 0:
+                    price, extra = q.price, q.extra
+            return evaluate_symbol(sym, alert_cfg[sym], h, price=price, extra=extra)
+        except Exception as e:  # noqa: BLE001  报警线只是附加信息，不拖垮 status
+            log.warning("status alerts(%s) 求值失败: %s", sym, e)
+            return []
+
     holding_views: List[Dict[str, Any]] = []
     for h in pm.holdings:
         view = {k: h[k] for k in (
@@ -136,7 +156,12 @@ def build_status_view() -> Dict[str, Any]:
                 "pnl": None,
                 "pnl_pct": None,
             })
+        view["alerts"] = _alerts_for(sym, h)
         holding_views.append(view)
+    # 设了报警线但没有持仓行的跟踪标的：也要让用户在 status 里看到线与距离（追踪仓行，无仓位）
+    held_syms = {str(h.get("symbol")) for h in pm.holdings}
+    for sym in (x for x in alert_cfg if x not in held_syms):
+        holding_views.append({"symbol": sym, "units": 0, "is_tracking_only": True, "alerts": _alerts_for(sym, None)})
 
     # 克价口径持仓（黄金）汇总块——兼容老 agent 读 status["gold"]；多个克价持仓合并，逐仓明细看 all_holdings
     gold_hs = [h for h in held if _is_gold_gram(h)]

@@ -130,7 +130,10 @@ def status() -> Dict[str, Any]:
     Returns:
         Object with `cash` (currency → amount), `all_holdings` (every position,
         priced the same way whatever the symbol: units, avg_cost, live price,
-        market value, pnl_pct; null price fields when a quote is unavailable),
+        market value, pnl_pct; null price fields when a quote is unavailable;
+        each carries `alerts`, the user's per-asset alert lines with the
+        distance still to go, e.g. "距 price_below 还有 3.2%" — a tracked asset
+        with alert lines but no holding row appears as an is_tracking_only row),
         `total_assets_cny`, `fx` (rate to CNY per non-CNY currency in use), an
         optional `gold` summary when a gold-per-gram holding exists, and
         `performance` (real-account TWR 30d / YTD / since inception, XIRR, max
@@ -710,9 +713,11 @@ def set_allocations(
     target_allocation_stock: Annotated[Optional[float], Field(description="Stock weight in [0, 1], e.g. 0.7. Pass together with target_allocation_cash (they must sum to ~1.0); omit both to leave the stock/cash split unchanged.", ge=0, le=1)] = None,
     target_allocation_cash: Annotated[Optional[float], Field(description="Cash weight in [0, 1], e.g. 0.3. Pass together with target_allocation_stock; omit both to leave the split unchanged.", ge=0, le=1)] = None,
     target_pcts: Annotated[Optional[Dict[str, Optional[float]]], Field(description="Per-asset target weights as {symbol: fraction of total assets in [0, 1]}, e.g. {'510300.SS': 0.3, 'GC=F': 0.2}. Symbols must already be tracked (see track_asset). A null value clears that asset's target (back to an equal split). The weights must sum to <= target_allocation_stock (the new one if you pass it in the same call).")] = None,
+    alerts: Annotated[Optional[Dict[str, Optional[Dict[str, Optional[float]]]]], Field(description="Per-asset alert lines as {symbol: {rule: value}}, rule in price_above / price_below / day_drop_pct / day_rise_pct / drawdown_from_cost_pct, e.g. {'GC=F': {'price_below': 900, 'day_drop_pct': 2}}. Rules you name overwrite, a null rule value clears just that rule, rules you don't mention stay; a null for the whole symbol clears all its alerts. Symbols must already be tracked. *_pct values are percentage points (3 = 3%), unlike target_pct. Alerts are only delivered when INVEST_EVENT_ALERT=1 is set on the server.")] = None,
 ) -> Dict[str, Any]:
     """Update the strategy's target allocation: the stock/cash ratio and/or
-    the per-asset target weights that `rebalance_plan` reads. The stock and
+    the per-asset target weights that `rebalance_plan` reads, and/or the
+    per-asset alert lines the price sentinel watches. The stock and
     cash values must sum to ≈1.0, and the per-asset weights must sum to at
     most the stock target; schema validation rejects and rolls back any write
     that would corrupt the strategy file. Everything in one call is validated
@@ -726,6 +731,8 @@ def set_allocations(
         target_allocation_stock: Stock weight in [0, 1], e.g. 0.7 (with cash).
         target_allocation_cash: Cash weight in [0, 1], e.g. 0.3 (with stock).
         target_pcts: {symbol: weight in [0, 1]} per tracked asset; null clears.
+        alerts: {symbol: {rule: value}} alert lines per tracked asset; null
+            clears a rule (or, for a whole symbol, all its rules).
 
     Returns:
         The updated allocation and target assets, or {"status": "error", "error": ...}.
@@ -733,7 +740,8 @@ def set_allocations(
     _check_advisory()
     from openinvest.services import strategy_write as svc
     try:
-        return svc.set_allocations(target_allocation_stock, target_allocation_cash, target_pcts=target_pcts)
+        return svc.set_allocations(target_allocation_stock, target_allocation_cash,
+                                   target_pcts=target_pcts, alerts=alerts)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 
@@ -747,13 +755,24 @@ def track_asset(
     price_offset_pct: Annotated[Optional[float], Field(description="Systematic offset between quote and actual fill price, in percent (e.g. bank gold spread).")] = None,
     sell_fee_pct: Annotated[Optional[float], Field(description="Sell-side fee in percent, used by fee-aware math.")] = None,
     target_pct: Annotated[Optional[float], Field(description="Target weight of this asset as a fraction of total assets, in [0, 1] (0.3 = 30%); read by rebalance_plan. The weights of all tracked assets must sum to <= target_allocation_stock, otherwise the write is rejected and the current sum is reported. Assets without one split the remainder equally. To clear a target use set_allocations with a null value.", ge=0, le=1)] = None,
+    alert_price_above: Annotated[Optional[float], Field(description="Alert when the price reaches or exceeds this level. Same price basis as status.current_price (held: cost currency, gold booking = CNY per gram; tracked-only: the quote source's own price).", gt=0)] = None,
+    alert_price_below: Annotated[Optional[float], Field(description="Alert when the price falls to or below this level (same price basis as alert_price_above). Must be below alert_price_above if both are set.", gt=0)] = None,
+    alert_day_drop_pct: Annotated[Optional[float], Field(description="Alert when today's drop vs the previous close reaches this many percentage points (3 = 3%, not a 0-1 fraction).", gt=0, le=100)] = None,
+    alert_day_rise_pct: Annotated[Optional[float], Field(description="Alert when today's rise vs the previous close reaches this many percentage points (3 = 3%).", gt=0)] = None,
+    alert_drawdown_from_cost_pct: Annotated[Optional[float], Field(description="Alert when a held position is this many percentage points below its average cost (10 = 10%). Only evaluated for assets you hold.", gt=0, le=100)] = None,
 ) -> Dict[str, Any]:
     """Add a symbol to the tracked-asset list, or update an existing entry
     (idempotent upsert: only the fields you pass are changed). The tracked
-    list decides which symbols the committee and DCA jobs cover.
+    list decides which symbols the committee and DCA jobs cover. The
+    alert_* parameters set per-asset alert lines the price sentinel checks
+    every few minutes (24h cooldown per line); each one you pass overwrites
+    that line only. To clear a line use set_allocations with a null value.
+    Delivery needs INVEST_EVENT_ALERT=1 on the server (default off — without
+    it a hit is only logged to the event store, nothing is sent).
 
-    Use when the user says "track AAPL" or wants to change a tracked
-    asset's cap/channel/fees/target weight.
+    Use when the user says "track AAPL", wants to change a tracked
+    asset's cap/channel/fees/target weight, or says "alert me when X drops
+    below N" / "tell me if it falls 3% in a day".
 
     Args:
         symbol: yfinance ticker to track (e.g. "AAPL", "0700.HK", "BTC-USD").
@@ -768,12 +787,23 @@ def track_asset(
         target_pct: Target weight as a fraction of total assets in [0, 1]
             (read by rebalance_plan); all tracked assets' weights must sum
             to <= target_allocation_stock or the write is rejected.
+        alert_price_above / alert_price_below: price lines (status.current_price
+            basis). alert_day_drop_pct / alert_day_rise_pct: today's move vs the
+            previous close, percentage points. alert_drawdown_from_cost_pct:
+            held position below average cost, percentage points.
 
     Returns:
         The stored asset entry, or {"status": "error", "error": ...}.
     """
     _check_advisory()
     from openinvest.services import strategy_write as svc
+    alerts = {k: v for k, v in {
+        "price_above": alert_price_above,
+        "price_below": alert_price_below,
+        "day_drop_pct": alert_day_drop_pct,
+        "day_rise_pct": alert_day_rise_pct,
+        "drawdown_from_cost_pct": alert_drawdown_from_cost_pct,
+    }.items() if v is not None}
     try:
         return svc.upsert_target_asset(symbol, {
             "max_single_invest_cny": max_single_invest_cny,
@@ -782,6 +812,7 @@ def track_asset(
             "price_offset_pct": price_offset_pct,
             "sell_fee_pct": sell_fee_pct,
             "target_pct": target_pct,
+            "alerts": alerts or None,
         })
     except ValueError as e:
         return {"status": "error", "error": str(e)}

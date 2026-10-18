@@ -282,12 +282,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_delete_holding)
 
     # ---- strategy 写操作（issue #179：读写对等，与 MCP 工具同名同语义）----
-    p = sub.add_parser("set_allocations", help="改股票/现金目标配比（两者和必须 ≈1）和/或按标的的目标权重 --target-pct")
+    p = sub.add_parser("set_allocations", help="改股票/现金目标配比（两者和必须 ≈1）和/或按标的的目标权重 --target-pct、报警线 --alert")
     p.add_argument("--stock", type=float, default=None, help="股票目标比例 0~1（与 --cash 一起传）")
     p.add_argument("--cash", type=float, default=None, help="现金目标比例 0~1（与 --stock 一起传）")
     p.add_argument("--target-pct", action="append", metavar="SYMBOL=PCT", default=None,
                    help="按标的设目标权重（占总资产的 0~1 小数，可重复，如 --target-pct 510300.SS=0.3；"
                         "SYMBOL=none 清掉）。symbol 须已在跟踪列表；各标的之和 ≤ 股票目标")
+    p.add_argument("--alert", action="append", metavar="SYMBOL:RULE=VALUE", default=None,
+                   help="按标的设报警线（可重复，如 --alert GC=F:price_below=900 --alert GC=F:day_drop_pct=2）。"
+                        "RULE ∈ price_above / price_below / day_drop_pct / day_rise_pct / drawdown_from_cost_pct；"
+                        "*_pct 是百分点（3 = 3%%）。SYMBOL:RULE=none 清掉这一条，SYMBOL=none 清空该标的全部。"
+                        "只有服务端设了 INVEST_EVENT_ALERT=1 才会真发出去")
     p.set_defaults(func=cmd_set_allocations)
 
     p = sub.add_parser(
@@ -304,6 +309,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-pct", type=float, default=None,
                    help="目标权重（占总资产的 0~1 小数，0.3 = 30%%）；rebalance_plan 读它。各标的之和须 ≤ 股票目标，"
                         "超了拒绝并报出当前合计")
+    p.add_argument("--alert-price-above", type=float, default=None, help="价格线：现价 ≥ 该价时报警（口径同 status 的 current_price）")
+    p.add_argument("--alert-price-below", type=float, default=None, help="价格线：现价 ≤ 该价时报警（须小于 --alert-price-above）")
+    p.add_argument("--alert-day-drop-pct", type=float, default=None, help="今日跌幅（相对前收）达到该百分点时报警（3 = 3%%）")
+    p.add_argument("--alert-day-rise-pct", type=float, default=None, help="今日涨幅（相对前收）达到该百分点时报警（3 = 3%%）")
+    p.add_argument("--alert-drawdown-from-cost-pct", type=float, default=None,
+                   help="持仓较成本浮亏达到该百分点时报警（10 = 10%%；仅持有的标的）。清除某条用 set_allocations --alert SYMBOL:RULE=none；"
+                        "报警只有服务端设了 INVEST_EVENT_ALERT=1 才会真发出去")
     p.set_defaults(func=cmd_track_asset)
 
     p = sub.add_parser("untrack_asset", help="移除跟踪标的（schema 保证至少剩 1 个）")
