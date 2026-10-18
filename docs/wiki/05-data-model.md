@@ -355,15 +355,26 @@ memory/
 | `deposit` / `withdraw` | 同名 | ±金额（取款符号两种写法都归一为负）| 0 | True |
 | `manual_override` | `correction` | 0 | 新绝对值 − 回放持仓 | False，`correction=True` |
 | `delete_holding` | 同名，`correction=True` | 0 | −回放持仓 | False |
+| `dividend`（ADR-027 PR2）| 同名 | `amount − tax_withheld`（税后净额）| 0 | False |
+| `interest` / `return_of_capital` | 同名 | +金额 | 0 | False |
+| `fee` / `tax` | 同名 | −金额 | 0 | False |
+| `split` | 同名，`split_ratio` = 新/旧 | 0 | 拆股增量（units × (ratio−1)）| False |
 | 其他 / 没有可用日期 | `unknown` | 0 | 0 | False |
+
+PR2 起新写入的记录是 **v2 记录**（`schema_version: 2`）：写入方（`PortfolioManager.record_*`，同一把 `with_portfolio_tx` 锁）把
+`cash_effect` / `units_effect` / `external` 算好写进流水，读方**只认这三个字段**；上表是缺这些字段时的推导口径。
+DRIP（`record_dividend --reinvest`）写两条：`dividend`（+净额）+ 一条 `buy`（`source=drip`，`external=False`，−成本、+份额，
+`idempotency_key` 为 `<key>#drip`）。写入入口：`record_dividend`（`--kind interest` = 利息）/ `record_fee`（`--kind tax` = 税）/
+`record_split` / `record_return_of_capital`——CLI 子命令与 MCP 工具同名，都带 `idempotency_key`（ADR-016）。
 
 数值字段（units / price / total_amount / net_amount / fee）解析不了的行：`action` 分类照旧、`unparsed=True`、效果全 0，
 不进回放、计入 `LedgerState.unknown`——一行脏数据不会让账户业绩或决议账本视图整个挂掉（`Activity.replayable` 为 False）。
 
 `LedgerState` 是回放累计态（每 symbol 的 units / 近似 avg_cost + 每币种现金 Σ，从零开始，**不是**当前快照、不写回快照）。
 外部现金流金额用 `external_flow(activity)` 取：deposit/withdraw 就是 `cash_effect`；external_funding 的买卖与赠股是
-新钱直接变持仓（`cash_effect`=0），流量 = ±总额。价格口径（`daily_prices.close` 是 yfinance 拆股+分红复权价）写在
-`calc/ledger_replay.py` 的 docstring，PR2 的 split / 分红回放按它实现。
+新钱直接变持仓（`cash_effect`=0），流量 = ±总额。dividend / interest / fee / tax / return_of_capital 是**内部流**（进 NAV、
+不进 TWR 分母与 XIRR 现金流——它们就是账户的收益 / 成本），split 零现金效应。价格口径写在 `calc/ledger_replay.py` 的 docstring，
+摘要见下面"价格口径"。
 
 账户业绩（`status.performance` / `openinvest performance` / 日报"账户业绩"段，`services/account_performance.py`
 → 纯计算 `calc/account_metrics.py`）把 Activity 重放成日度 NAV 序列，再算 TWR / XIRR / 最大回撤 / 波动 / vs 基准：
@@ -375,10 +386,24 @@ memory/
 | `sell` | −units | +`cash_effect` | 无 |
 | `deposit` / `withdraw` | — | ±金额 | ±金额 |
 | `correction` / `delete_holding` | 置为绝对值 | 不动 | 增量 × 当日收盘（持仓修正不是收益）|
+| `dividend` / `interest` / `return_of_capital` | 不变 | +金额 | 无（内部流：收益）|
+| `fee` / `tax` | 不变 | −金额 | 无（内部流：成本）|
+| `split` | 数量换算成拆股后口径（见下）| 不动 | 无 |
 
 - **锚定当前状态**：流水早于系统上线的持仓/现金没有记录，所以开盘状态 = `portfolio.md` 当前值 − Σ流水增量，
   序列末日 NAV 恒等于 status 总资产；差额列在 `data_quality.unreconciled`（补录请用 `buy --existing-position`）。
 - 黄金流水符号 `GOLD-CNY` 映射到 `proxy_kind=gold_cny_per_gram` 的持仓，克价 = `GC=F`/31.1035 × `USDCNY=X`。
+- **价格口径（`price_basis`，ADR-027 PR2）**：`daily_prices.close` 是 yfinance 复权价（Adj Close：拆股 + 分红都复权；regime /
+  指标 / forward_return 读它，语义不变）；同表新增 `close_raw` = yfinance `Close`（只按拆股复权、不含分红复权）。账本里的分红
+  是真钱，历史市值再用复权价就把同一笔分红算两次——所以估值时某 symbol 在所需日期范围内（成立日前最后一根 bar 起）
+  `close_raw` 每天都有 → 用原始价（`price_basis[sym]="raw"`），缺一天 → **整只**回退复权价（`"adjusted"`），绝不混用。
+  回填历史用 `openinvest backfill_raw_close [--symbols A,B]`（默认持仓 + target_assets；场外基金只有前复权净值、黄金克价代理
+  是期货 × 外汇无分红，二者不回填，恒为 `adjusted`）；新抓取（`get_history_data`、`scripts/backfill_history`）已两列一起写。
+  复权价回退的标的，已记的分红 / 退回本金 / DRIP 再买入**不进回放**（价格里已含，不双计），`data_quality.income_in_adjusted_price`
+  列出条数，补齐 close_raw 后自动改按原始价 + 账本现金计入。
+- **拆股**：两列价格都已是拆股后口径，所以回放数量必须全程拆股后口径——拆股前的买卖 / 修正数量 × 此后同标的所有 `split` 的
+  `split_ratio` 之积（`calc.ledger_replay.later_split_factors`）；split 本身在这个口径下是空操作，NAV 不会在除权日跳变。
+- `status.income_30d`：最近 30 天分红（税后）/ 利息合计（按币种；没有记录就不出这个键）。
 - 估值只读行情库 `db/market_data.db`（不联网），复用 `utils.fx.total_portfolio_value(rate_override=当日汇率)`；
   网格 = 持仓标的交易日并集，缺价日前值填充并计入 `data_quality.filled_days`。
 - 公式：TWR 日度链接 `r_d = (End_d + Out_d − Start_d − In_d) / (Start_d + In_d)`；XIRR 二分法、年 = 365.25 天、

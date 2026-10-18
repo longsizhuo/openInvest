@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, Iterator, List, Optional
 
 from openinvest.core.memory_store import MemoryStore, _DocTx
@@ -657,6 +657,286 @@ class PortfolioManager:
             "remaining_units": old_units - units,
         }
 
+    # ---------- ADR-027 PR2：分红 / 利息 / 费用 / 税 / 拆股 / 退回本金 ----------
+    # 全部走 _ledger_tx（fcntl 锁 + atomic write + 可选 idempotency_key，同 buy）：快照（cash / units / avg_cost）
+    # 在事务里落下，流水行（schema_version=2，cash_effect / units_effect / external 写入方算好）在事务后追加。
+    # 效果表见 docs/wiki/adr/027-ledger-activity-types.md D4；读方只认流水里的 cash_effect / units_effect / external。
+
+    def _require_known_symbol(self, symbol: str) -> bool:
+        """symbol 必须是当前持仓，或流水里出现过（卖光 / 删行的标的合法）；都不是 → ValueError（拦手滑写错的 symbol：
+        账本是追加式的，写错的分红 / 拆股没有"撤销"）。返回当前是否还持有。"""
+        if self.find_holding(symbol) is not None:
+            return True
+        if any(str(r.get("symbol") or "") == symbol for r in self.store.read_history()):
+            return False
+        raise ValueError(f"{symbol} 既不在当前持仓、账本里也没有它的记录；请核对 symbol（大小写 / 后缀）")
+
+    def record_dividend(
+        self,
+        symbol: str,
+        gross: float,
+        currency: str,
+        tax_withheld: float = 0.0,
+        reinvest: bool = False,
+        trade_date: Optional[str] = None,
+        note: Optional[str] = None,
+        *,
+        reinvest_price: Optional[float] = None,
+        source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记一笔分红：现金 +（gross − tax_withheld），持仓数量 / 成本不变；不是外部现金流（进 NAV 不进 TWR 分母）。
+
+        gross = 税前总额（券商对账单的"分红总额"）；tax_withheld = 已被预扣的税；``currency`` = 现金到账币种。
+        ``trade_date`` = 到账日（YYYY-MM-DD，缺省今天）——账户业绩按它在 NAV 里入账，补记历史分红请传真实日期。
+        reinvest=True（DRIP）：同一事务里再追加一笔 buy（source=drip，external=False，用掉这笔净额），
+        单价 = ``reinvest_price``，缺省取行情库当日原始收盘价（``backfill_raw_close`` 回填的 close_raw，往前最多 7 天）；
+        持仓必须存在且 ``currency`` 必须等于该持仓的计价币种。
+        symbol 已无持仓但账本里有它（例如除息后卖掉、派息日才到账）允许记；完全没见过的 symbol 抛 ValueError（防写错）。
+        idempotency_key 语义同 buy（ADR-016）。非法参数抛 ValueError。"""
+        symbol = (symbol or "").strip()
+        if not symbol:
+            raise ValueError("symbol 必填")
+        still_held = self._require_known_symbol(symbol)
+        ccy = _clean_ccy(currency)
+        gross, tax = float(gross), float(tax_withheld or 0)
+        if not gross > 0:
+            raise ValueError("gross 必须 > 0")
+        if not 0 <= tax <= gross:
+            raise ValueError("tax_withheld 必须在 0..gross 之间")
+        day = _activity_day(trade_date)
+        net = round(gross - tax, 2)
+        price = None
+        if reinvest:
+            price = float(reinvest_price) if reinvest_price else _stored_raw_close(self, symbol, day)
+            if not price or price <= 0:
+                raise ValueError(
+                    f"reinvest 需要单价：行情库没有 {symbol} 在 {day} 前 7 天内的原始收盘价。"
+                    f"传 reinvest_price，或先跑 `openinvest backfill_raw_close --symbols {symbol}`")
+        reinvested = None
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                cash = dict(p.get("cash") or {})
+                cash[ccy] = round(float(cash.get(ccy, 0) or 0) + net, 2)
+                holdings = list(p.get("holdings") or [])
+                held = next((h for h in holdings if h.get("symbol") == symbol), None)
+                if reinvest:
+                    held_ccy = str(held.get("cost_currency") or "CNY").upper() if held else None
+                    if held is None or float(held.get("units", 0) or 0) <= 0:
+                        raise ValueError(f"{symbol} 当前没有持仓，不能再投资（reinvest）")
+                    if ccy != held_ccy:
+                        raise ValueError(f"{symbol} 持仓按 {held_ccy} 计价，再投资的分红币种必须同为 {held_ccy}（当前 {ccy}）")
+                    units = round(net / price, 6)
+                    if units <= 0:
+                        raise ValueError("分红净额太小，再投资买不到 0.000001 份")
+                    cost = units * price
+                    old_units, old_avg = float(held.get("units", 0) or 0), float(held.get("avg_cost", 0) or 0)
+                    held["units"] = round(old_units + units, 6)
+                    held["avg_cost"] = round((old_units * old_avg + cost) / (old_units + units), 6)
+                    cash[ccy] = round(cash[ccy] - cost, 2)
+                    p["holdings"] = holdings
+                    reinvested = {"units": units, "price": price, "cost": round(cost, 2)}
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
+        self._reload()
+        self.store.append_history(_activity_row(
+            "dividend", currency=ccy, day=day, source=source, key=idempotency_key, note=note,
+            symbol=symbol, amount=gross, tax_withheld=tax or None, cash_effect=net, units_effect=0.0,
+            reinvest=bool(reinvest)))
+        if reinvested:
+            cost = reinvested["units"] * reinvested["price"]
+            self.store.append_history({
+                "ts_origin": _now_iso_local(), "schema_version": 2, "action": "buy", "symbol": symbol,
+                "units": reinvested["units"], "price": reinvested["price"], "currency": ccy,
+                "source": "drip", "funding_source": "cash_deduct", "external": False,
+                "cash_effect": -cost, "units_effect": reinvested["units"], "trade_date": day,
+                **({"idempotency_key": f"{idempotency_key}#drip"} if idempotency_key else {}),
+                "note": f"DRIP: reinvested {symbol} dividend",
+            })
+        out: Dict[str, Any] = {
+            "status": "ok", "action": "dividend", "symbol": symbol, "gross": gross, "tax_withheld": tax,
+            "net_cash": net, "currency": ccy, "trade_date": day, "reinvested": reinvested,
+            "new_balance": self.cash_amount(ccy),
+        }
+        if not still_held:
+            out["note"] = f"{symbol} 当前已无持仓（账本里有它的记录）：只记了分红现金"
+        return out
+
+    def record_interest(
+        self,
+        amount: float,
+        currency: str,
+        symbol: Optional[str] = None,
+        trade_date: Optional[str] = None,
+        note: Optional[str] = None,
+        *,
+        source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记一笔利息（货币基金 / 现金账户利息）：现金 +amount，内部流。symbol 可空（账户级）。"""
+        ccy = _clean_ccy(currency)
+        amount = float(amount)
+        if not amount > 0:
+            raise ValueError("amount 必须 > 0")
+        day = _activity_day(trade_date)
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                cash = dict(p.get("cash") or {})
+                cash[ccy] = round(float(cash.get(ccy, 0) or 0) + amount, 2)
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
+        self._reload()
+        self.store.append_history(_activity_row(
+            "interest", currency=ccy, day=day, source=source, key=idempotency_key, note=note,
+            symbol=(symbol or "").strip() or None, amount=amount, cash_effect=amount, units_effect=0.0))
+        return {"status": "ok", "action": "interest", "amount": amount, "currency": ccy, "trade_date": day,
+                "new_balance": self.cash_amount(ccy)}
+
+    def record_fee(
+        self,
+        amount: float,
+        currency: str,
+        symbol: Optional[str] = None,
+        kind: str = "fee",
+        trade_date: Optional[str] = None,
+        note: Optional[str] = None,
+        *,
+        source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记一笔费用（kind="fee"：账户管理费 / 汇款费 / 单独收的佣金）或税（kind="tax"：红利税补缴等）：
+        现金 −amount，内部流（是账户的成本，进 NAV）。symbol 可空（账户级）。
+        买卖自带的手续费不用单记——buy / sell 已按成交额入账。余额不足抛 ValueError（同 withdraw）。"""
+        if kind not in ("fee", "tax"):
+            raise ValueError("kind 只接受 fee / tax")
+        ccy = _clean_ccy(currency)
+        amount = float(amount)
+        if not amount > 0:
+            raise ValueError("amount 必须 > 0")
+        day = _activity_day(trade_date)
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                cash = dict(p.get("cash") or {})
+                current = float(cash.get(ccy, 0) or 0)
+                if current < amount:
+                    raise ValueError(f"{ccy} 现金 {current} < {kind} {amount}（先 deposit 补足现金，或核对金额）")
+                cash[ccy] = round(current - amount, 2)
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
+        self._reload()
+        self.store.append_history(_activity_row(
+            kind, currency=ccy, day=day, source=source, key=idempotency_key, note=note,
+            symbol=(symbol or "").strip() or None, amount=amount, cash_effect=-amount, units_effect=0.0))
+        return {"status": "ok", "action": kind, "amount": amount, "currency": ccy, "trade_date": day,
+                "new_balance": self.cash_amount(ccy)}
+
+    def record_split(
+        self,
+        symbol: str,
+        ratio: float,
+        trade_date: Optional[str] = None,
+        note: Optional[str] = None,
+        *,
+        source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记一次拆股 / 并股：units × ratio，avg_cost ÷ ratio，现金不变（市值不变）。
+        ratio = 新 / 旧：10 拆 1 股变 10 股写 10，10 合 1 写 0.1。``trade_date`` = 除权日（账户业绩把拆股前的买卖数量
+        换算成拆股后口径要靠它，补记历史拆股请传真实日期）。symbol 已清仓但账本里有它也记（快照无变化，只记流水）；
+        完全没见过的 symbol 抛 ValueError（防写错）。"""
+        symbol = (symbol or "").strip()
+        if not symbol:
+            raise ValueError("symbol 必填")
+        self._require_known_symbol(symbol)
+        ratio = float(ratio)
+        if not ratio > 0 or ratio == 1:
+            raise ValueError("ratio 必须 > 0 且 ≠ 1（新 / 旧：10 拆 1 写 10，10 合 1 写 0.1）")
+        day = _activity_day(trade_date)
+        units_effect, held_ccy, found = 0.0, "CNY", False
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                holdings = list(p.get("holdings") or [])
+                held = next((h for h in holdings if h.get("symbol") == symbol), None)
+                if held is not None:
+                    found, held_ccy = True, str(held.get("cost_currency") or "CNY").upper()
+                    old_units, old_avg = float(held.get("units", 0) or 0), float(held.get("avg_cost", 0) or 0)
+                    held["units"] = round(old_units * ratio, 6)
+                    held["avg_cost"] = round(old_avg / ratio, 6)
+                    units_effect = held["units"] - old_units
+                    p["holdings"] = holdings
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
+        self._reload()
+        self.store.append_history(_activity_row(
+            "split", currency=held_ccy, day=day, source=source, key=idempotency_key, note=note,
+            symbol=symbol, split_ratio=ratio, cash_effect=0.0, units_effect=units_effect))
+        out: Dict[str, Any] = {"status": "ok", "action": "split", "symbol": symbol, "ratio": ratio,
+                               "trade_date": day, "units_effect": units_effect}
+        if found:
+            h = self.find_holding(symbol) or {}
+            out.update(units=h.get("units"), avg_cost=h.get("avg_cost"))
+        else:
+            out["note"] = f"{symbol} 当前已无持仓：快照没有变化，只记了流水（账户业绩据此换算拆股前的数量）"
+        return out
+
+    def record_return_of_capital(
+        self,
+        symbol: str,
+        amount: float,
+        currency: str,
+        trade_date: Optional[str] = None,
+        note: Optional[str] = None,
+        *,
+        source: str = "skill_cli",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记一笔退回本金（return of capital，如部分 ETF / REIT 分配）：现金 +amount，avg_cost −= amount / 持仓量
+        （成本降低，不是收益），数量不变。持仓必须存在，``currency`` 必须等于它的计价币种（否则成本会混币种）。
+        降到成本为 0 为止，超出部分按资本利得处理（返回 ``excess_over_cost``）。"""
+        symbol = (symbol or "").strip()
+        if not symbol:
+            raise ValueError("symbol 必填")
+        ccy = _clean_ccy(currency)
+        amount = float(amount)
+        if not amount > 0:
+            raise ValueError("amount 必须 > 0")
+        day = _activity_day(trade_date)
+        excess = 0.0
+        try:
+            with self._ledger_tx(idempotency_key) as p:
+                holdings = list(p.get("holdings") or [])
+                held = next((h for h in holdings if h.get("symbol") == symbol), None)
+                units = float(held.get("units", 0) or 0) if held else 0.0
+                if held is None or units <= 0:
+                    raise ValueError(f"{symbol} 当前没有持仓，无法降低成本")
+                held_ccy = str(held.get("cost_currency") or "CNY").upper()
+                if ccy != held_ccy:
+                    raise ValueError(f"{symbol} 持仓按 {held_ccy} 计价，退回本金币种必须同为 {held_ccy}（当前 {ccy}）")
+                old_avg = float(held.get("avg_cost", 0) or 0)
+                new_avg = old_avg - amount / units
+                if new_avg < 0:
+                    excess, new_avg = round(-new_avg * units, 2), 0.0
+                held["avg_cost"] = round(new_avg, 6)
+                p["holdings"] = holdings
+                cash = dict(p.get("cash") or {})
+                cash[ccy] = round(float(cash.get(ccy, 0) or 0) + amount, 2)
+                p["cash"] = cash
+        except _DuplicateKey:
+            return _duplicate(idempotency_key)
+        self._reload()
+        self.store.append_history(_activity_row(
+            "return_of_capital", currency=ccy, day=day, source=source, key=idempotency_key, note=note,
+            symbol=symbol, amount=amount, cash_effect=amount, units_effect=0.0))
+        out: Dict[str, Any] = {"status": "ok", "action": "return_of_capital", "symbol": symbol, "amount": amount,
+                               "currency": ccy, "trade_date": day,
+                               "avg_cost": (self.find_holding(symbol) or {}).get("avg_cost")}
+        if excess:
+            out["excess_over_cost"] = excess
+        return out
+
     # ---------- 内部 ----------
 
     def _reload(self) -> None:
@@ -718,6 +998,47 @@ def _duplicate(key: Optional[str]) -> Dict[str, Any]:
         "note": "同 idempotency_key 的这笔已入账过，本次未重复记账（ADR-016）。key 只用于重试"
                 "完全相同的请求；若这是另一笔（换了标的 / 数量 / 金额），请换一个新 key 重发。",
     }
+
+
+def _clean_ccy(currency: str) -> str:
+    ccy = str(currency or "").strip().upper()
+    if not (3 <= len(ccy) <= 5) or not ccy.isalpha():
+        raise ValueError(f"非法币种 {ccy}")
+    return ccy
+
+
+def _activity_day(trade_date: Optional[str]) -> str:
+    """活动发生日 YYYY-MM-DD（本地日期）；缺省今天，格式不对抛 ValueError。"""
+    if trade_date is None or str(trade_date).strip() == "":
+        return datetime.now().date().isoformat()
+    try:
+        return date.fromisoformat(str(trade_date).strip()).isoformat()
+    except ValueError:
+        raise ValueError(f"trade_date 必须是 YYYY-MM-DD: {trade_date!r}") from None
+
+
+def _activity_row(action: str, *, currency: str, day: str, source: str, key: Optional[str], note: Optional[str],
+                  **fields: Any) -> Dict[str, Any]:
+    """ADR-027 D2 的新流水记录：schema_version=2，cash_effect / units_effect / external 由写入方算好。
+    这些活动都是内部流（external=False）；None 字段不落盘。"""
+    row: Dict[str, Any] = {
+        "ts_origin": _now_iso_local(), "schema_version": 2, "action": action, "currency": currency,
+        "trade_date": day, "source": source, "external": False,
+        **{k: v for k, v in fields.items() if v is not None},
+        **({"idempotency_key": key} if key else {}), **({"note": note} if note else {}),
+    }
+    return row
+
+
+def _stored_raw_close(pm: "PortfolioManager", symbol: str, day: str) -> Optional[float]:
+    """DRIP 缺省单价：行情库该标的 ``day`` 当天（往前最多 7 天）的原始收盘价（close_raw）。库里没有 → None。"""
+    from openinvest.db.market_store import MarketStore
+    held = pm.find_holding(symbol) or {}
+    store = MarketStore()
+    try:
+        return store.get_raw_close_on(str(held.get("yfinance_proxy") or symbol), day)
+    finally:
+        store.conn.close()
 
 
 def _now_iso_local() -> str:

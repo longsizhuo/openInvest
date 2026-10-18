@@ -54,6 +54,31 @@ def _is_gold_gram(h: Dict[str, Any]) -> bool:
 
 # ---------- status ----------
 
+INCOME_WINDOW_DAYS = 30
+_INCOME_LABEL = {"dividend": "分红（税后）", "interest": "利息"}
+
+
+def _income_30d(pm: Any) -> Optional[Dict[str, Any]]:
+    """最近 30 天分红 / 利息合计（ADR-027 D6）：{since, dividend: {币种: 金额}, interest: {...}, line}。
+    没有任何记录 → None（status 不出这个键）；流水读不了也是 None，不拖垮 status。"""
+    from datetime import date, timedelta
+
+    from openinvest.calc.ledger_replay import recent_income, replay_ledger
+    since = (date.today() - timedelta(days=INCOME_WINDOW_DAYS)).isoformat()
+    try:
+        activities, _ = replay_ledger(pm.store.read_history(), alias={})
+    except Exception as e:  # noqa: BLE001
+        log.warning("status income_30d 读流水失败: %s", e)
+        return None
+    got = recent_income(activities, since)
+    if not got:
+        return None
+    rounded = {a: {c: round(v, 2) for c, v in by.items()} for a, by in got.items()}
+    parts = [f"{_INCOME_LABEL[a]} " + " + ".join(f"{c} {v:,.2f}" for c, v in sorted(by.items()))
+             for a, by in rounded.items()]
+    return {"since": since, **rounded, "line": f"最近 {INCOME_WINDOW_DAYS} 天：" + "；".join(parts)}
+
+
 def build_status_view() -> Dict[str, Any]:
     """v2 通用化：从 cash dict + holdings list 读，所有持仓同一条定价路径（utils.quotes.get_quote）。
 
@@ -213,6 +238,8 @@ def build_status_view() -> Dict[str, Any]:
         # 真实账户业绩：twr_30d / twr_ytd / twr_all / xirr / max_drawdown / volatility_annual /
         # benchmark / data_quality（基准币种）；历史不足 → {"status": "insufficient_history"}
         "performance": performance,
+        # 最近 30 天分红 / 利息合计（没有记录就不出这个键）
+        **({"income_30d": income} if (income := _income_30d(pm)) else {}),
         # 拉不到汇率 / 价格、没算进 total 的条目——有就列出来，别让总资产悄悄偏小
         **({"total_assets_excludes": unvalued(_value_status)} if unvalued(_value_status) else {}),
         "fx": {f"{c.lower()}cny": round(r, 4) for c, r in fx_rates.items() if r},

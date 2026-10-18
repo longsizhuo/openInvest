@@ -224,9 +224,13 @@ class UserData(BaseModel):
 
 # ============ portfolio_history.jsonl —— 统一 Activity（ADR-027 D2）============
 
-# PR1 只产出这些：历史动作（bought/sold/dca_reconcile_*/manual_override）在解析层归一，
-# 无法识别的行 = "unknown"（保留、计数、不丢）。分红/利息/费用/拆股等新类型是 PR2/PR3 的事。
-ActivityAction = Literal["buy", "sell", "deposit", "withdraw", "gift", "delete_holding", "correction", "unknown"]
+# 历史动作（bought/sold/dca_reconcile_*/manual_override）在解析层归一，无法识别的行 = "unknown"（保留、计数、不丢）。
+# PR2 起新写入还有 dividend / interest / fee / tax / split / return_of_capital（schema_version=2 记录，效果由写入方算好）；
+# 场外基金两段式（fund_order_*）是 PR3 的事。
+ActivityAction = Literal[
+    "buy", "sell", "deposit", "withdraw", "gift", "delete_holding", "correction",
+    "dividend", "interest", "fee", "tax", "split", "return_of_capital", "unknown",
+]
 
 
 class Activity(BaseModel):
@@ -237,7 +241,10 @@ class Activity(BaseModel):
     - ``units_effect``：对 ``symbol`` 持仓数量的净影响（correction / delete_holding 是从前序状态算出的增量）
     - ``amount``：老记录原样的 ``total_amount``（缺省 ``|units| × price``）；deposit/withdraw 为 ``|金额|``
     - ``external``：外部现金流（deposit / withdraw / gift / external_funding 买卖）；外部流水金额用
-      ``calc.ledger_replay.external_flow(a)`` 取，不要自己拼
+      ``calc.ledger_replay.external_flow(a)`` 取，不要自己拼。dividend / interest / fee / tax / return_of_capital
+      是内部流（进 NAV、不进 TWR 分母），split 无现金效应
+    - dividend：``amount`` = 税前总额，``tax_withheld`` = 预扣税，``cash_effect`` = 税后净额；fee / tax 的 ``amount`` 是
+      正的支出额，``cash_effect`` 为负；split：``split_ratio`` = 新/旧，``units_effect`` = 拆股增加的数量
     """
     # forbid：replay 少写/多写一个字段立即炸，不会悄悄丢信息
     model_config = ConfigDict(extra="forbid")

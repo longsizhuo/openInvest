@@ -24,6 +24,10 @@ __all__ = [
     "cmd_sell",
     "cmd_delete_holding",
     "cmd_import_holdings",
+    "cmd_record_dividend",
+    "cmd_record_fee",
+    "cmd_record_split",
+    "cmd_record_return_of_capital",
 ]
 
 
@@ -188,3 +192,87 @@ def cmd_import_holdings(args: argparse.Namespace) -> None:
         out["summary"] = commit_parsed(_resolve_pm(), parsed)
         out["committed"] = True
     _print_json(out)
+
+
+# ---- ADR-027 PR2：分红 / 利息 / 费用 / 税 / 拆股 / 退回本金（与 MCP 同名工具同语义，写逻辑在 PortfolioManager.record_*）----
+
+def _run_record(call) -> None:
+    try:
+        out = call()
+    except ValueError as e:
+        _print_json({"status": "error", "error": str(e)})
+        sys.exit(1)
+    _print_json(out)
+
+
+def cmd_record_dividend(args: argparse.Namespace) -> None:
+    """记分红（--kind dividend，默认）或利息（--kind interest）。现金 +净额，不是外部现金流。
+
+    示例:
+        skill record_dividend --symbol NDQ.AX --amount 120 --currency AUD --trade-date 2026-07-01
+        skill record_dividend --symbol AAPL --amount 50 -c USD --tax-withheld 7.5
+        skill record_dividend --symbol AAPL --amount 50 -c USD --reinvest --reinvest-price 190.5   # DRIP
+        skill record_dividend --kind interest --amount 3.2 -c CNY --symbol 000198.OF
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.record_dividend / record_interest
+    """
+    pm = _resolve_pm()
+    key = getattr(args, "idempotency_key", None)
+    if args.kind == "interest":
+        if args.tax_withheld or args.reinvest or args.reinvest_price:
+            _print_json({"status": "error", "error": "interest 不支持 --tax-withheld / --reinvest（预扣税请另记 record_fee --kind tax）"})
+            sys.exit(1)
+        _run_record(lambda: pm.record_interest(
+            args.amount, args.currency, symbol=args.symbol, trade_date=args.trade_date, note=args.note,
+            source="skill_cli", idempotency_key=key))
+        return
+    if not args.symbol:
+        _print_json({"status": "error", "error": "分红必须给 --symbol"})
+        sys.exit(1)
+    _run_record(lambda: pm.record_dividend(
+        args.symbol, args.amount, args.currency, tax_withheld=args.tax_withheld, reinvest=args.reinvest,
+        trade_date=args.trade_date, note=args.note, reinvest_price=args.reinvest_price,
+        source="skill_cli", idempotency_key=key))
+
+
+def cmd_record_fee(args: argparse.Namespace) -> None:
+    """记费用（--kind fee，默认）或税（--kind tax）：现金 −金额，是账户成本，不是外部现金流。
+
+    示例:
+        skill record_fee --amount 15 --currency AUD --note "account fee"
+        skill record_fee --kind tax --amount 7.5 --currency USD --symbol AAPL
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.record_fee
+    """
+    pm = _resolve_pm()
+    _run_record(lambda: pm.record_fee(
+        args.amount, args.currency, symbol=args.symbol, kind=args.kind, trade_date=args.trade_date,
+        note=args.note, source="skill_cli", idempotency_key=getattr(args, "idempotency_key", None)))
+
+
+def cmd_record_split(args: argparse.Namespace) -> None:
+    """记拆股 / 并股：units × ratio、avg_cost ÷ ratio，现金不变。ratio = 新/旧（10 拆 1 → 10；10 合 1 → 0.1）。
+
+    示例:
+        skill record_split --symbol NVDA --ratio 10 --trade-date 2024-06-10
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.record_split
+    """
+    pm = _resolve_pm()
+    _run_record(lambda: pm.record_split(
+        args.symbol, args.ratio, trade_date=args.trade_date, note=args.note, source="skill_cli",
+        idempotency_key=getattr(args, "idempotency_key", None)))
+
+
+def cmd_record_return_of_capital(args: argparse.Namespace) -> None:
+    """记退回本金：现金 +金额，avg_cost 降低 amount/持仓量，数量不变（成本降低，不是收益）。
+
+    示例:
+        skill record_return_of_capital --symbol VNQ --amount 30 --currency USD
+
+    写逻辑在 core/portfolio_manager.py:PortfolioManager.record_return_of_capital
+    """
+    pm = _resolve_pm()
+    _run_record(lambda: pm.record_return_of_capital(
+        args.symbol, args.amount, args.currency, trade_date=args.trade_date, note=args.note,
+        source="skill_cli", idempotency_key=getattr(args, "idempotency_key", None)))

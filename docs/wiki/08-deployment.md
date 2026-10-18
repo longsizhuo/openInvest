@@ -539,6 +539,7 @@ INVEST_ADVISORY_MODE=1 uvx openinvest mcp
 | `status` / `strategy` / `history` / `discipline` / `decisions` / `doctor` | ✅ | ❌ 不可用 |
 | `buy` / `sell` / `record_existing_position` | ✅ 记账 | ❌ 不可用 |
 | `deposit` / `withdraw` | ✅ 记账 | ❌ 不可用 |
+| `record_dividend` / `record_fee` / `record_split` / `record_return_of_capital` | ✅ 记账（分红·利息 / 费用·税 / 拆股 / 退回本金，ADR-027） | ❌ 不可用 |
 | `set_allocations` | ✅ | ❌ 不可用 |
 | `track_asset` / `untrack_asset` | ✅ | ❌ 不可用 |
 

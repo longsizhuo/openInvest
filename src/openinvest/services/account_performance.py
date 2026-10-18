@@ -20,6 +20,8 @@
 外部现金流（进 TWR 分母、XIRR 现金流）：deposit / withdraw、``funding_source=external_funding``
 的买入与 DCA 对账、赠金，以及 manual_override / delete_holding 这类无现金对手的持仓修正
 （按当日收盘估值）。buy(cash_deduct) / sell / CommSec 成交是现金↔持仓的内部转换，不是现金流。
+dividend / interest / fee / tax / return_of_capital 是**内部流**（ADR-027 D4）：现金进 NAV、不进 TWR 分母与
+XIRR 现金流——它们就是账户的收益 / 成本；split 零现金效应，只影响数量口径（见 ``_events_of``）。
 
 网格 = 持仓标的交易日并集（非自然日）；周末记的交易挂到下一个交易日估值。
 """
@@ -36,7 +38,7 @@ import pandas as pd
 
 from openinvest.calc.account_metrics import XIRR_MIN_SPAN_DAYS, account_metrics
 from openinvest.calc.gold import GOLD_OZ_PER_GRAM
-from openinvest.calc.ledger_replay import external_flow, replay_ledger
+from openinvest.calc.ledger_replay import external_flow, later_split_factors, replay_ledger
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.core.schemas import Activity
 from openinvest.db.market_store import MarketStore
@@ -55,6 +57,8 @@ GOLD_PROXY_KIND = "gold_cny_per_gram"
 _GOLD_LEDGER_HOLDING = {"symbol": GOLD_LEDGER_SYMBOL, "proxy_kind": GOLD_PROXY_KIND,
                         "yfinance_proxy": "GC=F", "cost_currency": "CNY"}
 _ALL_ROWS = 100000
+# 复权价里已经含了的收入类活动（分红 / 退回本金；DRIP 的再买入另按 source=drip 判）：见 build_account_performance
+_PRICED_IN_ACTIONS = frozenset({"dividend", "return_of_capital"})
 
 
 # ---------- 1. 账本 → 事件 ----------
@@ -62,9 +66,15 @@ _ALL_ROWS = 100000
 def _events_of(activities: List[Activity]) -> List[Dict[str, Any]]:
     """Activity（日期升序）→ 回放事件 dict。事件字段：date / symbol / units（增量）/ cash_ccy / cash（增量）/
     flow_ccy / flow（外部现金流，+入 −出）/ correction（True = 持仓修正，现金流按当日市价在估值时补算）。
-    不能回放的行（unknown / 没有可用日期 / 数值解析失败）不产生事件。"""
+    不能回放的行（unknown / 没有可用日期 / 数值解析失败）不产生事件。
+
+    ``units`` 是**拆股后口径**的增量（行情库的价格——复权价和 close_raw 都一样——已按拆股调整，数量必须同口径，
+    见 calc.ledger_replay 的"价格口径"）：每笔买卖 / 修正的数量 × 此后同标的所有 split 的 ratio 之积；
+    split 自己在这个口径下是空操作（units=0）。账本里没有 split 时与旧行为逐字一致。"""
+    factors = later_split_factors(activities)
     return [
-        {"date": a.trade_date, "symbol": a.symbol or "", "units": a.units_effect,
+        {"date": a.trade_date, "symbol": a.symbol or "",
+         "units": 0.0 if a.action == "split" else a.units_effect * factors.get(a.seq, 1.0),
          "cash_ccy": a.currency, "cash": a.cash_effect,
          "flow_ccy": a.currency, "flow": external_flow(a), "correction": a.correction}
         for a in activities if a.replayable
@@ -222,11 +232,32 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
                 "message": _INSUFFICIENT_MSG}
     _register_ledger_symbols(by_sym, activities)   # 账本里有、持仓里已没有的 symbol：元数据从流水推
 
+    # 价格序列（只读库）与价格口径先定——下面要据此决定哪些收入类事件进回放
+    first_day = events[0]["date"]
+    symbols = set(by_sym) | {ev["symbol"] for ev in events if ev["symbol"] or ev["units"]}   # 无 symbol 的利息 / 费用只动现金
+    priced = {sym: _price_series(store, sym, by_sym.get(sym), since=first_day) for sym in symbols}
+    prices = {sym: p for sym, (p, _) in priced.items()}
+    price_basis = {sym: b for sym, (p, b) in priced.items() if p is not None}
+
+    # 复权价（price_basis=adjusted）已把分红当再投资折进了价格：该标的的 dividend / return_of_capital 和 DRIP 那条
+    # 再买入不进回放（= PR1 规则，绝不双计）；close_raw 补齐（backfill_raw_close）后自动改按原始价 + 账本现金入账
+    in_price = {s for s, (p, b) in priced.items() if p is not None and b == "adjusted"}
+    income_in_price: Dict[str, int] = defaultdict(int)
+    kept: List[Dict[str, Any]] = []
+    for ev, is_income in zip(events, [a.action in _PRICED_IN_ACTIONS or a.source == "drip"
+                                      for a in activities if a.replayable]):
+        if is_income and ev["symbol"] in in_price:
+            income_in_price[ev["symbol"]] += 1
+        else:
+            kept.append(ev)
+    events = kept
+
     # 开盘状态 = 当前 − Σ账本增量（账本早于系统上线的部分）
     delta_units: Dict[str, float] = defaultdict(float)
     delta_cash: Dict[str, float] = defaultdict(float)
     for ev in events:
-        delta_units[ev["symbol"]] += ev["units"]
+        if ev["symbol"] or ev["units"]:
+            delta_units[ev["symbol"]] += ev["units"]
         delta_cash[ev["cash_ccy"]] += ev["cash"]
     units: Dict[str, float] = defaultdict(float)
     for sym in set(by_sym) | set(delta_units):
@@ -239,11 +270,7 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         "cash": {c: round(v, 2) for c, v in cash.items() if abs(v) > 0.005},
     }
 
-    # 价格 / 汇率序列（只读库，各一次）
-    first_day = events[0]["date"]
-    priced = {sym: _price_series(store, sym, by_sym.get(sym), since=first_day) for sym in units}
-    prices = {sym: p for sym, (p, _) in priced.items()}
-    price_basis = {sym: b for sym, (p, b) in priced.items() if p is not None}
+    # 汇率序列（只读库，一次）
     ccys = {str(c).upper() for c in cash} | {
         "CNY" if str(by_sym.get(s, {}).get("proxy_kind") or "") == GOLD_PROXY_KIND
         else str(by_sym.get(s, {}).get("cost_currency") or "CNY").upper() for s in units
@@ -288,7 +315,8 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         inflow = outflow = 0.0
         px, rates, ff = _market(day)   # 一天只取一次：修正事件取价与收盘估值共用
         for ev in by_day.get(day, ()):
-            units[ev["symbol"]] += ev["units"]
+            if ev["symbol"]:
+                units[ev["symbol"]] += ev["units"]
             cash[ev["cash_ccy"]] += ev["cash"]
             flow_ccy, flow = ev["flow_ccy"], ev["flow"]
             if ev["correction"]:
@@ -337,6 +365,9 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
         "cost_fallback": sorted(cost_fallback),
         "unvalued": unvalued(last_status),
         "unreconciled": unreconciled,
+        # 这些标的记了分红 / 退回本金 / DRIP，但价格口径是复权价（缺 close_raw）：复权价里已含，故未入账业绩；
+        # 跑 `openinvest backfill_raw_close` 后改按原始价 + 账本现金计入。{symbol: 未入账的条数}
+        **({"income_in_adjusted_price": dict(income_in_price)} if income_in_price else {}),
         **({"benchmark_unavailable": bench_missing} if bench_missing else {}),
     }
     return out
@@ -401,6 +432,9 @@ def render_performance_md(perf: Dict[str, Any]) -> str:
         notes.append("按成本价计入：" + "、".join(dq["cost_fallback"]))
     if dq.get("unvalued"):
         notes.append("未计入：" + "、".join(dq["unvalued"]))
+    if dq.get("income_in_adjusted_price"):
+        notes.append("分红 / 再投资已含在复权价里、未重复入账：" + "、".join(sorted(dq["income_in_adjusted_price"]))
+                     + "（跑 openinvest backfill_raw_close 后按原始价 + 账本现金计入）")
     if dq.get("unreconciled", {}).get("units") or dq.get("unreconciled", {}).get("cash"):
         notes.append("账本早于系统的开盘持仓按成立日估值（status performance.data_quality.unreconciled）")
     lines.append(f"- 数据：{dq.get('days')} 个交易日" + ("；" + "；".join(notes) if notes else ""))

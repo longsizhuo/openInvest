@@ -9,7 +9,7 @@
 
 写安全与 CLI / web API 并存同一模型（with_portfolio_tx fcntl 锁）。
 
-工具刻意克制在高频能力（现 24 个）（80+ REST 端点全暴露会撑爆 agent context），
+工具刻意克制在高频能力（现 28 个）（80+ REST 端点全暴露会撑爆 agent context），
 全部复用 service 层 / PortfolioManager / decision_ledger——与 CLI、REST 同源，
 防三 adapter 漂移。委员会 Coordinator workflow 不在此处（Decision 5：那是
 Skill 的职责，MCP 只暴露 Direct 路径 run_committee）。
@@ -138,8 +138,10 @@ def status() -> Dict[str, Any]:
         optional `gold` summary when a gold-per-gram holding exists, and
         `performance` (real-account TWR 30d / YTD / since inception, XIRR, max
         drawdown with peak/trough dates, annualised volatility, return vs the
-        configured benchmark, and data_quality; or {"status":
-        "insufficient_history"} until the ledger spans 2 trading days).
+        configured benchmark, `price_basis` per symbol (raw | adjusted), and data_quality;
+        or {"status": "insufficient_history"} until the ledger spans 2 trading days),
+        and `income_30d` (dividends / interest received in the last 30 days by currency;
+        only present when there are any).
     """
     _check_advisory()
     from openinvest.services.skill_views import build_status_view
@@ -699,6 +701,174 @@ def withdraw(
         return {"status": "error", "error": "amount must be > 0"}
     try:
         return _pm().withdraw_cash(currency, amount, source="mcp", idempotency_key=idempotency_key)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+# ---------- 账本活动：分红 / 利息 / 费用 / 税 / 拆股 / 退回本金（ADR-027 PR2；写逻辑在 PortfolioManager.record_*）----------
+# 同样是已发生事实的记账（不下单）；全部走 fcntl 锁 + 可选幂等键。interest 并入 record_dividend 的 kind、tax 并入
+# record_fee 的 kind，少两个工具（工具面刻意克制）。
+
+_DATE_FIELD = Field(description="Date the event happened, YYYY-MM-DD (default: today). Account performance books it on this date, so pass the real date when back-filling history.")
+
+
+@_tool(annotations=_MONEY)
+def record_dividend(
+    amount: Annotated[float, Field(description="Gross amount before withholding tax (for kind='interest': the interest credited); must be > 0.", gt=0)],
+    currency: Annotated[str, Field(description="Currency the cash was credited in, e.g. 'CNY', 'USD', 'AUD'.")],
+    symbol: Annotated[Optional[str], Field(description="yfinance ticker the dividend belongs to (required for kind='dividend'; optional for interest = account-level).")] = None,
+    kind: Annotated[Literal["dividend", "interest"], Field(description="'dividend' (default) or 'interest' (money-market / cash-account interest).")] = "dividend",
+    tax_withheld: Annotated[float, Field(description="Tax already withheld at source (kind='dividend' only); cash credited = amount - tax_withheld.", ge=0)] = 0.0,
+    reinvest: Annotated[bool, Field(description="DRIP: use the net cash to buy more of `symbol` (adds a second ledger row, source='drip'). The holding must exist and be in `currency`.")] = False,
+    reinvest_price: Annotated[Optional[float], Field(description="Reinvestment price per unit. Omit to use the stored raw close for the date (run `backfill_raw_close` first).", gt=0)] = None,
+    trade_date: Annotated[Optional[str], _DATE_FIELD] = None,
+    note: Annotated[Optional[str], Field(description="Free-text note stored with the ledger row.")] = None,
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
+) -> Dict[str, Any]:
+    """Record a dividend (or interest) the user already received: credits ledger
+    cash by amount - tax_withheld, positions unchanged. It counts as account
+    return (inside NAV), not as a deposit. Bookkeeping only — openInvest
+    never moves money.
+
+    Confirm symbol, gross amount, withholding tax, and the date with the
+    user before calling; this moves ledger cash. A symbol that is neither held
+    nor in the ledger is rejected (typo guard).
+
+    Args:
+        amount: Gross amount before withholding tax; must be > 0.
+        currency: Currency of the cash credited.
+        symbol: Ticker (required for dividends; optional for interest).
+        kind: "dividend" (default) or "interest".
+        tax_withheld: Tax withheld at source; credited cash = amount - tax_withheld.
+        reinvest: DRIP — buy more `symbol` with the net amount.
+        reinvest_price: Price per unit for the reinvestment (default: stored raw close).
+        trade_date: YYYY-MM-DD the cash arrived (default today).
+        note: Free-text note.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
+
+    Returns:
+        Cash credited and new balance, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        if kind == "interest":
+            if tax_withheld or reinvest or reinvest_price:
+                return {"status": "error", "error": "interest does not take tax_withheld / reinvest (book withholding tax with record_fee kind='tax')"}
+            return _pm().record_interest(amount, currency, symbol=symbol, trade_date=trade_date, note=note,
+                                         source="mcp", idempotency_key=idempotency_key)
+        if not symbol:
+            return {"status": "error", "error": "symbol is required for a dividend"}
+        return _pm().record_dividend(symbol, amount, currency, tax_withheld=tax_withheld, reinvest=reinvest,
+                                     trade_date=trade_date, note=note, reinvest_price=reinvest_price,
+                                     source="mcp", idempotency_key=idempotency_key)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@_tool(annotations=_MONEY)
+def record_fee(
+    amount: Annotated[float, Field(description="Amount paid (positive number); must be > 0.", gt=0)],
+    currency: Annotated[str, Field(description="Currency the cash left in, e.g. 'CNY', 'USD', 'AUD'.")],
+    kind: Annotated[Literal["fee", "tax"], Field(description="'fee' (default: account / remittance / standalone commission) or 'tax' (e.g. dividend tax settled afterwards).")] = "fee",
+    symbol: Annotated[Optional[str], Field(description="Ticker the fee/tax relates to (optional; omit for account-level).")] = None,
+    trade_date: Annotated[Optional[str], _DATE_FIELD] = None,
+    note: Annotated[Optional[str], Field(description="Free-text note stored with the ledger row.")] = None,
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
+) -> Dict[str, Any]:
+    """Record a fee or a tax the user already paid: debits ledger cash, positions
+    unchanged. It is an account cost (inside NAV), not a withdrawal. Trade
+    commissions need no separate entry — buy / sell already book the trade.
+    Fails if the currency's cash balance is lower than the amount.
+
+    Confirm the amount and date with the user before calling; this moves
+    ledger cash.
+
+    Args:
+        amount: Amount paid; must be > 0.
+        currency: Currency of the cash debited.
+        kind: "fee" (default) or "tax".
+        symbol: Related ticker (optional).
+        trade_date: YYYY-MM-DD it was charged (default today).
+        note: Free-text note.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
+
+    Returns:
+        Cash debited and new balance, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().record_fee(amount, currency, symbol=symbol, kind=kind, trade_date=trade_date, note=note,
+                                source="mcp", idempotency_key=idempotency_key)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@_tool(annotations=_MONEY)
+def record_split(
+    symbol: Annotated[str, Field(description="yfinance ticker that split (must be held now or appear in the ledger).")],
+    ratio: Annotated[float, Field(description="New shares per old share: a 10-for-1 split is 10, a 1-for-10 reverse split is 0.1. Must be > 0 and not 1.", gt=0)],
+    trade_date: Annotated[Optional[str], Field(description="Ex-date of the split, YYYY-MM-DD (default: today). Pass the real ex-date when back-filling: account performance uses it to restate earlier trades.")] = None,
+    note: Annotated[Optional[str], Field(description="Free-text note stored with the ledger row.")] = None,
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
+) -> Dict[str, Any]:
+    """Record a stock split / reverse split: units x ratio, average cost / ratio,
+    cash unchanged (market value is unchanged). Call it once per split — a
+    second call multiplies the position again; use an idempotency_key if
+    unsure whether an earlier attempt landed.
+
+    Confirm symbol, ratio, and ex-date with the user before calling; this
+    rewrites the position's units and average cost.
+
+    Args:
+        symbol: Ticker that split.
+        ratio: New / old shares (10-for-1 = 10; 1-for-10 reverse = 0.1).
+        trade_date: Ex-date YYYY-MM-DD (default today).
+        note: Free-text note.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
+
+    Returns:
+        New units / average cost, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().record_split(symbol, ratio, trade_date=trade_date, note=note, source="mcp",
+                                  idempotency_key=idempotency_key)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+
+@_tool(annotations=_MONEY)
+def record_return_of_capital(
+    symbol: Annotated[str, Field(description="yfinance ticker of an existing holding.")],
+    amount: Annotated[float, Field(description="Cash received as return of capital; must be > 0.", gt=0)],
+    currency: Annotated[str, Field(description="Currency received; must equal the holding's cost currency.")],
+    trade_date: Annotated[Optional[str], _DATE_FIELD] = None,
+    note: Annotated[Optional[str], Field(description="Free-text note stored with the ledger row.")] = None,
+    idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
+) -> Dict[str, Any]:
+    """Record a return of capital (some ETF / REIT distributions): credits ledger
+    cash, lowers the holding's average cost by amount / units (a cost
+    reduction, not income), units unchanged. Cost floors at 0; any excess is
+    reported as excess_over_cost (treat as a capital gain).
+
+    Confirm symbol, amount, and date with the user before calling; this moves
+    ledger cash and changes average cost.
+
+    Args:
+        symbol: Held ticker.
+        amount: Cash received; must be > 0.
+        currency: Currency of the cash (must match the holding's cost currency).
+        trade_date: YYYY-MM-DD received (default today).
+        note: Free-text note.
+        idempotency_key: Reuse the same key when retrying this exact call; recorded once.
+
+    Returns:
+        New average cost, or {"status": "error", "error": ...}.
+    """
+    _check_advisory()
+    try:
+        return _pm().record_return_of_capital(symbol, amount, currency, trade_date=trade_date, note=note,
+                                              source="mcp", idempotency_key=idempotency_key)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
 

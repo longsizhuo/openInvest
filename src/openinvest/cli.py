@@ -276,6 +276,46 @@ def build_parser() -> argparse.ArgumentParser:
     _add_idempotency_key(p)
     p.set_defaults(func=cmd_sell)
 
+    def _activity_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--trade-date", default=None, metavar="YYYY-MM-DD",
+                       help="发生日（分红到账日 / 除权日…），缺省今天；账户业绩按它入账，补记历史请传真实日期")
+        p.add_argument("--note", default=None, help="备注")
+        _add_idempotency_key(p)
+
+    p = sub.add_parser("record_dividend",
+        help="记分红（现金 +税后净额，持仓不变；--reinvest = DRIP 再买入）或利息（--kind interest）。内部流，不算外部现金流")
+    p.add_argument("--kind", choices=["dividend", "interest"], default="dividend", help="dividend（默认）或 interest（货币基金 / 现金利息）")
+    p.add_argument("--symbol", default=None, help="标的（分红必填；利息可空 = 账户级）")
+    p.add_argument("--amount", "-a", type=float, required=True, help="税前总额（利息 = 到账金额），> 0")
+    p.add_argument("--currency", "-c", required=True, help="现金到账币种")
+    p.add_argument("--tax-withheld", type=float, default=0.0, help="已被预扣的税（现金只记 amount − 此值），默认 0")
+    p.add_argument("--reinvest", action="store_true", help="DRIP：把净额再买入该标的（追加一条 source=drip 的 buy）")
+    p.add_argument("--reinvest-price", type=float, default=None,
+                   help="再投资单价；不填取行情库当日原始收盘价（需先 backfill_raw_close）")
+    _activity_flags(p)
+    p.set_defaults(func=cmd_record_dividend)
+
+    p = sub.add_parser("record_fee", help="记费用（--kind fee）或税（--kind tax）：现金 −金额，账户成本，不算外部现金流")
+    p.add_argument("--kind", choices=["fee", "tax"], default="fee", help="fee（默认）或 tax（红利税补缴等）")
+    p.add_argument("--symbol", default=None, help="可空 = 账户级")
+    p.add_argument("--amount", "-a", type=float, required=True, help="金额（正数），> 0")
+    p.add_argument("--currency", "-c", required=True, help="币种")
+    _activity_flags(p)
+    p.set_defaults(func=cmd_record_fee)
+
+    p = sub.add_parser("record_split", help="记拆股 / 并股：units × ratio、avg_cost ÷ ratio，现金不变")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--ratio", type=float, required=True, help="新 / 旧：10 拆 1 → 10；10 合 1 → 0.1")
+    _activity_flags(p)
+    p.set_defaults(func=cmd_record_split)
+
+    p = sub.add_parser("record_return_of_capital", help="记退回本金：现金 +金额，avg_cost 降低 金额/持仓量（不是收益）")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--amount", "-a", type=float, required=True, help="金额，> 0")
+    p.add_argument("--currency", "-c", required=True, help="币种（须同持仓计价币种）")
+    _activity_flags(p)
+    p.set_defaults(func=cmd_record_return_of_capital)
+
     p = sub.add_parser("delete_holding", help="删除持仓行（units 必须 0 或加 --force）")
     p.add_argument("--symbol", required=True)
     p.add_argument("--force", action="store_true", help="units > 0 也强删")

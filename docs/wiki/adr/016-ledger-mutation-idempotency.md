@@ -120,6 +120,11 @@ superseded_by: []
 | `DELETE /api/holdings/{symbol}` | HTTP DELETE | remove | 第二次 → 404 | ✅ |
 | napcat `/deposit /withdraw /gold*` | QQ 私聊 | 累加 | 单 WS 连接内事件串行处理、无重放 | ✅（直接用户动作）|
 | `deposit_cash / withdraw_cash / buy / sell` | CLI `--idempotency-key` / MCP `idempotency_key`（含 `record_existing_position`）/ `/api/skill/buy\|sell\|deposit\|withdraw`（body `idempotency_key` 或 `Idempotency-Key` header）| 累加 | 可选幂等键：`PortfolioManager._ledger_tx` 把 key 记进 portfolio 文档自身的 `ledger_idempotency_keys`（同 `synced_trade_ids`），check+append 与 cash/holdings 同一把锁、同一次 atomic write；重复 key 返回 `{"status": "duplicate"}` 不提交事务；失败 / 中断时 key 与账本一起不落盘。远端 CLI 不传 key 自动生成 uuid4，网络失败回显供重试复用 | ✅ PR #432（`tests/test_ledger_idempotency.py` 20 线程同 key 恰好 1 次入账）|
+| `record_dividend`（含 `--reinvest` DRIP）| CLI `record_dividend` / MCP `record_dividend`（`kind=dividend`）| 累加（现金 +净额；DRIP 再 +units、更新 avg_cost）| 同上 `PortfolioManager._ledger_tx` 幂等键（ADR-027 PR2）：key 与 cash / holdings 同一次 atomic write；DRIP 的第二条流水行（`buy`，`source=drip`）在同一事务之后追加，键为 `<key>#drip`，重放整笔返回 `duplicate` 两条流水都不重复；流水行都在事务提交**之后**追加（与 buy / sell 同一约定）——进程恰在两步之间被杀 = 快照已变、流水缺行，业绩的 `unreconciled` 会显示差额 | ✅ `tests/test_ledger_activities.py`（含 20 线程同 key 恰好 1 次）|
+| `record_interest`（`record_dividend --kind interest`）| CLI / MCP `record_dividend`（`kind=interest`）| 累加（现金 +）| 同上 | ✅ |
+| `record_fee`（`--kind fee\|tax`）| CLI `record_fee` / MCP `record_fee` | 累加（现金 −）| 同上；余额不足在锁内校验、不烧 key | ✅ |
+| `record_split` | CLI `record_split` / MCP `record_split` | **乘法**（units × ratio、avg_cost ÷ ratio）——重放最危险：第二次会再乘一遍 | 同上；强烈建议调用方总带 key（MCP 工具描述里写明） | ✅（带 key）；不带 key 的重复调用 = 再拆一次，与 buy 同一"不传 key 行为不变"约定 |
+| `record_return_of_capital` | CLI / MCP `record_return_of_capital` | 累加（现金 +，avg_cost −）| 同上 | ✅ |
 | `delete_holding` | CLI / MCP / `/api/skill/delete_holding` | remove | 第二次 → "不在持仓" ValueError | ✅（天然幂等）|
 | ~~退役 GUI 端点 `/api/deposit` `/api/withdraw` `/api/gold/buy\|sell\|set\|offset`（`routers/write.py`）~~ | HTTP POST | 累加 | 无去重键 | ✅ 已删除（#236）：与 `cash_write.py` / `/api/skill/*` 重复、无消费者 |
 | 退役 GUI 端点 `/api/cash/{ccy}/deposit\|withdraw`（`cash_write.py`）| HTTP POST | 累加 | 无去重键 | ⚠ GUI 2026-07-05 退役、Web API 已 deprecated，无现存客户端；随 Web API 退场一并删，不再加键 |

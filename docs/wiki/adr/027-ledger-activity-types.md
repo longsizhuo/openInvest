@@ -25,7 +25,9 @@ documents:
 # ADR-027：账本活动类型
 
 - 状态：🟡 提议（2026-10-18；按 PR #472 评审修订：有状态回放、在途对全部估值方可见、确认 CAS 幂等、按类型的确认延迟、`schema_version` 命名、复权价核实），评审通过后实现（评审路线 C7）；
-  **PR1 已实现（#479）**：Activity schema + `calc/ledger_replay.py:replay_ledger` + 消费方切换 + 回放不变量 + 复权价核实（见 D3/D4 的 PR1 注）
+  **PR1 已实现（#479）**：Activity schema + `calc/ledger_replay.py:replay_ledger` + 消费方切换 + 回放不变量 + 复权价核实（见 D3/D4 的 PR1 注）；
+  **PR2 已实现（#482）**：dividend / interest / fee / tax / split / return_of_capital 写入 + MCP/CLI + status 近 30 天分红利息 + `daily_prices.close_raw`
+  与估值价格口径（见 D4 的 PR2 注）
 - 背景：2026-10-17 全面评审对照 Wealthfolio / Ghostfolio / Portfolio Performance / Sharesight：它们都有
   分红 / 利息 / 费用 / 税 / 拆股 / 退回本金 的活动类型；openInvest 的账本只有买卖存取，
   `grep dividend|tax` 在 src/ 零命中，场外基金按"下单即成交"记账（实际 T+1 按当日净值确认）。
@@ -115,12 +117,19 @@ status / `pnl_snapshot` / `holdings_digest` / `rebalance_plan` / 集中度 在 T
 正确做法是回放全程用拆股后的数量口径（等价于 原始 units × 未复权价）。PR1 必须先确认价格口径并写进
 `calc/ledger_replay.py` 的 docstring；两种口径各有测试。
 
-> **PR1 核实结论**：`daily_prices.close` **是复权价，且拆股与分红都复权**（全仓只用 `yf.Ticker().history(period=...)`，yfinance 1.7.0
+> **PR1 核实结论**（PR2 补充：Yahoo 的 `Close` 本身已按拆股复权、只有 `Adj Close` 才含分红复权，所以 `close_raw` 是"拆股后口径、未含分红"，不是拆股前原始价）：`daily_prices.close` **是复权价，且拆股与分红都复权**（全仓只用 `yf.Ticker().history(period=...)`，yfinance 1.7.0
 > 默认 `auto_adjust=True`，无任何调用传 `auto_adjust=False`；生产库实测 NVDA 2024-06-07 收盘 120.68 = 拆股后口径）。精确的回放规则因此是：
 > ① **split**：价格序列已按拆股后口径连续，回放的数量必须在**所有历史日期**用拆股后口径（拆股前数量 ×ratio 重述）；上一段
 > "不得再按 split_ratio 缩放历史 units"指的是不能在拆股日才 ×ratio——否则拆股前"拆股前数量 × 复权价"低估 ratio 倍、拆股日 NAV 凭空跳变。
 > ② **分红**：复权价路径已把分红当再投资算进收益，PR2 若再把 `dividend` 现金记进 NAV，该标的 TWR 会把同一笔分红算两次——
 > PR2 须二选一（有分红活动的标的改读未复权价，或分红只做现金流分类不入 NAV）。
+
+> **PR2 落地（对上面"二选一"的决定）**：分红必须记真实现金，所以历史估值**不能**用复权价——`daily_prices` 加可空列 `close_raw`
+> （yfinance `Close`，`history(auto_adjust=False)`；`close` 仍是 `Adj Close`，逐位不变，regime / 指标 / forward_return 零影响）。
+> 账户业绩 / 持仓归因按 symbol 选口径：所需日期范围内 `close_raw` 全有 → 原始价，缺一天 → 整只复权价，不混用，返回 `price_basis`。
+> 复权价回退的标的，收入类活动（dividend / return_of_capital / DRIP 买入）不进回放（价格已含，不双计）。split 不论哪种口径都用拆股后
+> 数量（`later_split_factors`）。场外基金（只有前复权净值）与黄金克价代理（期货 × 外汇无分红）不回填，恒为 `adjusted`。
+> 回填：`openinvest backfill_raw_close`。持仓归因的"今日涨跌"不计入当日分红（除息日原始价会下跌，分红现金不在这一段）——另议。
 
 ### D5 场外基金两段式 + 自动确认
 

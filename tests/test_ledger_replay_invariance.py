@@ -211,7 +211,8 @@ def test_events_equal_oracle_on_synthetic_ledger():
 
 def _random_records(rng: random.Random, n: int) -> List[Dict[str, Any]]:
     actions = ["buy", "bought", "sell", "sold", "deposit", "withdraw", "gift", "manual_override", "delete_holding",
-               "dca_reconcile_backfill", "dca_reconcile_reverse", "BUY", "Sold", "dividend", "", None, "weird"]
+               "dca_reconcile_backfill", "dca_reconcile_reverse", "BUY", "Sold", "frobnicate", "", None, "weird"]
+    # "dividend" 不再放这里当"未知动作"样本：PR2 起它是一等活动（tests/test_ledger_activities.py 守），oracle 只冻结旧动作的解释
     out = []
     for i in range(n):
         r: Dict[str, Any] = {"ts": f"2026-02-{rng.randint(1, 20):02d}T0{rng.randint(0, 9)}:00:00"}

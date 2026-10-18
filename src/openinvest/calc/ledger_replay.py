@@ -21,8 +21,15 @@
 ``deposit`` / ``withdraw``      同名        ``±|金额|``                 True
 ``manual_override``             correction  0（无现金对手）             False，``units_effect`` = 新-旧
 ``delete_holding``              同名        0                           False，``units_effect`` = -旧
+``dividend``                    同名        ``amount - tax_withheld``   False（内部流：进 NAV 不进 TWR 分母）
+``interest`` / ``return_of_capital``  同名  ``+amount``                 False
+``fee`` / ``tax``               同名        ``-amount``                 False
+``split``                       同名        0                           False，``units_effect`` = 拆股增量，``split_ratio`` = 新/旧
 其余 / 没有可用日期             unknown     0（保留、计数、不进回放）
 ==============================  ==========  ==========================  ============================
+
+新写入的记录（PR2 起，``schema_version == 2``）由写入方算好 ``cash_effect`` / ``units_effect`` / ``external``，
+读方**只认这三个字段**（ADR-027 D2）：上表是缺这些字段时的推导口径。DRIP 的那条 buy 也是 v2 记录。
 
 数值字段（units / price / total_amount / net_amount / fee）解析不了的行：``action`` 分类照旧、``unparsed=True``、
 效果全 0，不进回放、计入 ``LedgerState.unknown``——一行脏数据不能让整个读方崩（旧 ``history_as_trades`` 从不转数字，
@@ -36,23 +43,18 @@
 ``LedgerState`` 只用于回放（从零开始累计，**不是**当前快照，也不写回快照）：账本早于系统上线的部分没有记录，
 所以它的 units/cash 与 ``portfolio.md`` 的差额正是 ``account_performance`` 的 ``unreconciled``。
 
-价格口径核实（ADR-027 D4，决定 PR2 的 split / 分红回放怎么写；本 PR 不处理 split / 分红）
-------------------------------------------------------------------------------
-``db/market_data.db`` 的 ``daily_prices.close`` 存的是 **yfinance 复权价（auto_adjust=True：拆股 + 分红都复权）**：
+价格口径与 split / 分红（ADR-027 D4；PR1 核实，PR2 落地）
+------------------------------------------------------------
+``db/market_data.db`` 的 ``daily_prices.close`` 是 **yfinance 复权价（Adj Close：拆股 + 分红都复权）**；
+PR2 起同表另有 ``close_raw`` = yfinance 的 ``Close``，**只按拆股复权、不含分红复权**（实测 AAPL 2020-08-28：
+Close 124.81 = 原始价 499.23 ÷ 4，Adj Close 120.96 = 再被分红复权压低）。所以不管读哪一列，价格都已经是**拆股后口径**：
 
-- 抓取处全是 ``yf.Ticker(sym).history(period=...)``（``utils/exchange_fee.get_history_data`` 增量 5d / 全量 2y、
-  ``scripts/backfill_history`` 的 ``period="max"``），全仓**没有**任何调用传 ``auto_adjust=False`` / ``actions``；
-  yfinance 1.7.0 的 ``history()`` 默认 ``auto_adjust=True``。``exchange_fee`` 里的"复权拼接哨兵"注释也写明
-  分红/拆股后 yfinance 会**全历史回溯重新复权**。场外基金走东方财富前复权净值（同口径，分红再投资）。
-- 实测生产库（只读拷贝）：NVDA 2024-06-07 收盘 120.68（拆股前原始价约 1209，已 ÷10）、AAPL 2020-08-28 收盘 121.06
-  （原始价 499.23 ÷4 = 124.81，再被分红复权压低到 121.06）——拆股和分红都已体现在历史价里。
-
-对 PR2 的含义：
-1. **split**：价格序列已按拆股后口径连续，所以回放的数量也必须在**所有历史日期**用拆股后口径（拆股前的数量 ×ratio
-   重述）。不能在拆股日才把 ``units`` ×ratio —— 那样拆股前用"拆股前数量 × 复权价"低估 ratio 倍，拆股日 NAV 凭空跳 ×ratio。
-2. **分红**：复权价路径本身已把分红当作再投资算进了收益；若 PR2 再把 ``dividend`` 的现金记进 NAV，该标的的
-   TWR 会把同一笔分红算两次。PR2 必须二选一（对有分红活动的标的改读未复权价，或分红只做现金流分类、不再入 NAV），
-   不能两头都入。
+1. **split**：回放里的数量必须在所有历史日期用拆股后口径——拆股前的买卖数量 × 此后所有 split 的 ratio 之积
+   （:func:`later_split_factors`）；split 事件本身在这个口径下是空操作（市值不变）。不能在拆股日才把 ``units`` ×ratio：
+   那样拆股前"拆股前数量 × 拆股后价"低估 ratio 倍，拆股日 NAV 凭空跳变。
+2. **分红**：账本记的是真实现金。复权价已把分红当再投资折进了历史价，再把 ``dividend`` 现金记进 NAV 就是算两次；
+   所以估值读 ``close_raw``（services/account_performance 的 ``price_basis``：全有 → raw，缺一天 → 整只复权价）。
+   raw 基准下分红是除息日价格下跌 + 账本里的现金流入，两者抵消，TWR 连续。
 """
 from __future__ import annotations
 
@@ -67,6 +69,10 @@ _BUY_LIKE = {"buy": "buy", "bought": "buy", "dca_reconcile_backfill": "buy", "dc
 _RECONCILE = frozenset({"dca_reconcile_backfill", "dca_reconcile_reverse"})
 _SELL_LIKE = frozenset({"sell", "sold"})
 _CASH_ACTIONS = frozenset({"deposit", "withdraw"})
+# PR2 新活动：dividend / interest / fee / tax / return_of_capital 只动现金（symbol 只是归属，不是持仓变动）
+_INCOME_ACTIONS = frozenset({"dividend", "interest", "return_of_capital"})
+_COST_ACTIONS = frozenset({"fee", "tax"})
+_CASH_ONLY = _CASH_ACTIONS | _INCOME_ACTIONS | _COST_ACTIONS
 _EPS = 1e-9
 
 
@@ -96,7 +102,8 @@ def _opt_f(v: Any) -> Optional[float]:
 
 # 老 action → Activity.action（不在表里 = unknown）
 _ACTION = {**_BUY_LIKE, "gift": "gift", "sell": "sell", "sold": "sell", "deposit": "deposit", "withdraw": "withdraw",
-           "manual_override": "correction", "delete_holding": "delete_holding"}
+           "manual_override": "correction", "delete_holding": "delete_holding",
+           **{a: a for a in _CASH_ONLY - _CASH_ACTIONS}, "split": "split"}
 
 
 def _effects(raw_action: str, r: Mapping[str, Any], sym: str, held: Mapping[str, float]) -> Dict[str, Any]:
@@ -123,6 +130,16 @@ def _effects(raw_action: str, r: Mapping[str, Any], sym: str, held: Mapping[str,
         return dict(action=raw_action, amount=abs(units), external=True, cash_effect=sign * abs(units))
     if raw_action == "manual_override":
         return dict(trade, action="correction", correction=True, units_effect=units - held.get(sym, 0.0))
+    if raw_action in _INCOME_ACTIONS | _COST_ACTIONS:   # 缺 cash_effect 时的推导；v2 记录会被 _activity 用记录值覆盖
+        amount = abs(float(r.get("amount") or 0))
+        tax = float(r.get("tax_withheld") or 0)
+        cash = {"dividend": amount - tax, "interest": amount, "return_of_capital": amount}.get(raw_action, -amount)
+        return dict(action=raw_action, amount=amount, tax_withheld=tax or None, cash_effect=cash)
+    if raw_action == "split":
+        ratio = float(r.get("split_ratio"))   # 缺 / 不是数 → TypeError / ValueError → unparsed
+        if not ratio > 0:
+            raise ValueError(f"split_ratio 必须 > 0: {ratio}")
+        return dict(action="split", split_ratio=ratio, units_effect=held.get(sym, 0.0) * (ratio - 1))
     return dict(action="delete_holding", correction=True, units_effect=-held.get(sym, 0.0))
 
 
@@ -142,6 +159,12 @@ def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mappi
     )
     try:
         f.update(_effects(raw_action, r, sym, held))
+        if f["action"] != "unknown" and r.get("schema_version") == 2:   # 新记录：写入方算好的效果为准（ADR-027 D2）
+            for k in ("cash_effect", "units_effect"):
+                if r.get(k) is not None:
+                    f[k] = float(r[k])
+            if r.get("external") is not None:
+                f["external"] = bool(r["external"])
     except (TypeError, ValueError):
         f.update(action=_ACTION.get(raw_action, "unknown"), unparsed=True)
     return Activity(**f)
@@ -149,13 +172,19 @@ def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mappi
 
 def _apply(state: LedgerState, a: Activity) -> None:
     state.cash[a.currency] = state.cash.get(a.currency, 0.0) + a.cash_effect
-    if a.action in _CASH_ACTIONS:
-        return
     sym = a.symbol or ""
+    if a.action in _CASH_ONLY:
+        # return_of_capital 降成本：avg_cost -= amount / 持仓量（降到 0 为止，超出部分是资本利得不是负成本）
+        if a.action == "return_of_capital" and sym in state.avg_cost and state.units.get(sym, 0.0) > _EPS:
+            state.avg_cost[sym] = max(state.avg_cost[sym] - (a.amount or 0.0) / state.units[sym], 0.0)
+        return
     before = state.units.get(sym, 0.0)
     after = before + a.units_effect
     state.units[sym] = after
-    if a.action in ("buy", "gift") and a.units_effect > 0:
+    if a.action == "split":
+        if sym in state.avg_cost and a.split_ratio:
+            state.avg_cost[sym] /= a.split_ratio
+    elif a.action in ("buy", "gift") and a.units_effect > 0:
         cost = a.amount or 0.0
         state.avg_cost[sym] = (state.avg_cost.get(sym, 0.0) * before + cost) / after if before > _EPS else cost / a.units_effect
     elif after <= _EPS:
@@ -194,4 +223,32 @@ def external_flow(a: Activity) -> float:
     return (1.0 if a.units_effect >= 0 else -1.0) * (a.amount or 0.0)
 
 
-__all__ = ["LedgerState", "external_flow", "replay_ledger"]
+def later_split_factors(activities: List[Activity]) -> Dict[int, float]:
+    """``{seq: 该活动之后（回放序）同标的所有 split 的 ratio 之积}``——把活动的数量换算成拆股后口径（模块 docstring 第 1 点）。
+    没有后续拆股 = 不出现在结果里（读方 ``.get(seq, 1.0)``）；只含能回放且有 symbol 的活动。``activities`` 须是
+    :func:`replay_ledger` 的输出（日期升序，同日保持文件顺序）。"""
+    running: Dict[str, float] = {}
+    out: Dict[int, float] = {}
+    for a in reversed(activities):
+        if not a.replayable or not a.symbol:
+            continue
+        f = running.get(a.symbol, 1.0)
+        if f != 1.0 and a.action != "split":   # split 自己在拆股后口径下是空操作，不需要换算
+            out[a.seq] = f
+        if a.action == "split" and a.split_ratio:
+            running[a.symbol] = f * a.split_ratio
+    return out
+
+
+def recent_income(activities: List[Activity], since: str) -> Dict[str, Dict[str, float]]:
+    """``{action: {币种: 现金合计}}``：``trade_date >= since``（YYYY-MM-DD）的 dividend（税后净额）与 interest。
+    status 的"最近 30 天分红 / 利息"一行用；没有则返回空 dict。"""
+    out: Dict[str, Dict[str, float]] = {}
+    for a in activities:
+        if a.replayable and a.action in ("dividend", "interest") and (a.trade_date or "") >= since:
+            by_ccy = out.setdefault(a.action, {})
+            by_ccy[a.currency] = by_ccy.get(a.currency, 0.0) + a.cash_effect
+    return out
+
+
+__all__ = ["LedgerState", "external_flow", "later_split_factors", "recent_income", "replay_ledger"]

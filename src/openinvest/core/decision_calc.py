@@ -27,7 +27,7 @@ _HISTORY_DIRECTION = {"buy": "BUY", "sell": "SELL"}
 # 66 笔买入里 64 笔是它——若算作执行了同标的的 ACCUMULATE，采纳率会虚高；dca_reconcile 是对账脚本
 # 补/冲的定投行（replay_ledger 把 dca_reconcile_backfill/reverse 归一成 buy/sell 并标 source=dca_reconcile，
 # 旧版它们因 action 不在映射里被跳过）。CommSec 邮件回灌（source 为空 / commsec）是用户在券商真下的单，保留。
-_AUTO_SOURCES = frozenset({"dca_daily", "dca_reconcile"})
+_AUTO_SOURCES = frozenset({"dca_daily", "dca_reconcile", "drip"})   # drip = 分红再投资（ADR-027），不是"执行了决议"
 
 
 def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -35,7 +35,7 @@ def history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     MCP / CLI 的 buy/sell 只写 portfolio_history.jsonl、从不写 trades.db——不做这一步，
     "7 天内同标的同向成交自动匹配"只对 REST /api/trades/record 成立，agent 路径永远匹配不上。
-    补录已有持仓（source 带 ':existing_position'）和自动定投等 _AUTO_SOURCES 不是"执行了决议"，
+    补录已有持仓（source 带 ':existing_position'）和自动定投 / 分红再投资等 _AUTO_SOURCES 不是"执行了决议"，
     跳过。id 用 "history:<行号>" 与 trades.db 的整数 id 区分。
     """
     out: List[Dict[str, Any]] = []

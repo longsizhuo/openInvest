@@ -281,3 +281,17 @@ class MarketStore:
                     missing += 1
             self.conn.commit()
         return updated, missing
+
+    def get_raw_close_on(self, symbol, day, max_age_days=7):
+        """``day`` 当天或之前最近一根有 close_raw 的原始收盘价（最多往前 ``max_age_days`` 天）；没有 → None。
+        DRIP 再投资价（record_dividend reinvest）用——必须是原始价：复权价不是你能买到的价格。"""
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT close_raw FROM daily_prices WHERE symbol = ? AND date <= ? "
+                "AND date >= date(?, ?) AND close_raw IS NOT NULL ORDER BY date DESC LIMIT 1",
+                (symbol, day, day, f"-{int(max_age_days)} day"),
+            )
+            row = cursor.fetchone()
+            self.conn.rollback()  # #104
+            return float(row[0]) if row else None
