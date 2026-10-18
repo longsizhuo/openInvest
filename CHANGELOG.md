@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.1](https://github.com/longsizhuo/openInvest/compare/v0.53.0...v0.53.1) (2026-10-18)
+
+
+### Docs
+
+* **adr:** ADR-027 账本活动类型（分红/利息/费用/税/拆股/场外基金两段式确认）——设计提案 ([#472](https://github.com/longsizhuo/openInvest/issues/472)) ([101ea98](https://github.com/longsizhuo/openInvest/commit/101ea9881fadb1b27c72cbe69642632d52f37907))
+
 ## [0.53.0](https://github.com/longsizhuo/openInvest/compare/v0.52.0...v0.53.0) (2026-10-18)
 
 
