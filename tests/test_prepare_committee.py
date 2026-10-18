@@ -199,3 +199,22 @@ def test_prepare_committee_event_brief_empty_store_graceful(_mock_world, monkeyp
     out = cr.prepare_committee_brief("TEST.AX")
     assert out["event_brief"] == ""
     assert out["sentiment_brief"] == SENT
+
+
+def test_prepare_committee_quant_prompts_name_no_tools(_mock_world, capfd):
+    """B3 的 Coordinator 路径对照：subagent 拿到的 Quant prompt 同样不得命令它调工具
+    （Direct 路径钉在 tests/test_quant_prompt_no_phantom_tools.py；两条路径共用 build_quant_prompt，
+    这里防以后 prompt 分叉）。market_data 以 `# 市场数据` 标题贴给 Quant，prompt 指向的就是它。"""
+    from openinvest.capabilities.tools import TOOL_IMPL
+    from openinvest.cli import cmd_prepare_committee
+
+    cmd_prepare_committee(argparse.Namespace(symbol="TEST.AX"))
+    raw = capfd.readouterr().out
+    out = json.loads(raw[raw.index("{"):])
+
+    for key in ("quant_round1", "quant_round2_after_risk"):
+        prompt = out["prompts"][key]
+        for tool in TOOL_IMPL:
+            assert f"{tool}(" not in prompt, f"prompts.{key} 不得写调用 {tool}(...)"
+    assert "# 市场数据" in out["prompts"]["quant_round1"]
+    assert "# 市场数据:" in out["instructions"]   # 协议确实把 market_data 贴在这个标题下
