@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.30.0...invest-skill-v0.31.0) (2026-10-18)
+
+
+### Features
+
+* **events:** agent mode — queue model work for the host agent ([#505](https://github.com/longsizhuo/openInvest/issues/505)) ([ed8727c](https://github.com/longsizhuo/openInvest/commit/ed8727ce4e00a6c0faff28237c597864b00580ef))
+* **review:** split scorecard by model era (Sonnet 5.5 vs DeepSeek) + Coordinator records model ([#497](https://github.com/longsizhuo/openInvest/issues/497)) ([be74cd7](https://github.com/longsizhuo/openInvest/commit/be74cd7317002addb32993345ab6344bcd64b872))
+
 ## [0.30.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.29.0...invest-skill-v0.30.0) (2026-10-18)
 
 
