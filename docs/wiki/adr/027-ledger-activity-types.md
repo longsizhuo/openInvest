@@ -1,11 +1,12 @@
 ---
 type: adr
+status: proposed
 title: "ADR-027：账本活动类型——分红 / 利息 / 费用 / 税 / 拆股 / 场外基金两段式确认"
 tags: [ledger, portfolio_history, activities, dividend, split, fund, t+1, idempotency]
 intent: 把 portfolio_history.jsonl 从"买卖存取"扩成完整活动账本，不改 portfolio.md v2 快照 schema
 schema_source:
-  - src/openinvest/core/portfolio_manager.py:PortfolioManager.buy
-  - src/openinvest/core/memory_store.py:MemoryStore.append_history
+  - src/openinvest/core/portfolio_manager.py:PortfolioManager
+  - src/openinvest/core/memory_store.py:MemoryStore
   - src/openinvest/services/account_performance.py:_ledger_events
 documents:
   endpoints: []
