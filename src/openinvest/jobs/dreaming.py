@@ -91,73 +91,9 @@ def _get_dreaming_config():
 # 代码经 get_locked() 读。原同名模块常量（MIN_SCORE / CAUTION_*）是迁移前死副本：MIN_SCORE
 # 全仓没人读、CAUTION_* 旁路了 locked（改 locked 不生效），已删以消除"两处定义"漂移。
 
-# 旧（v1 写死 2 个 symbol，fork 用户持 AAPL/510300/BTC-USD 时 outcomes 完全空）：
-#   ASSET_PRICE_SYMBOL = {"GOLD-CNY": "GC=F", "NDQ.AX": "NDQ.AX"}
-# 新：从 holding.symbol → yfinance ticker 动态查
-#   - 优先看 holding 自己的 yfinance_proxy 字段（黄金 GOLD-CNY → GC=F 这种 proxy）
-#   - 否则 holding.symbol 直接当 yfinance ticker（510300.SS / AAPL / BTC-USD 都直接能用）
-
-def _resolve_price_symbol(symbol: str, store: MemoryStore) -> Optional[str]:
-    """把 trade.symbol 解析成 yfinance ticker。
-
-    Light Sleep 给每笔历史交易补市场表现时调。fork 用户持任意 symbol 都不再
-    被静默跳过——只要 portfolio.md 里有这条 holding（就算 strategy.target_assets
-    里没列），也能拿到 outcomes。
-    """
-    if not symbol:
-        return None
-    # 1) 在 portfolio holdings / strategy target_assets 里找 yfinance_proxy
-    portfolio = store.read("portfolio") or {}
-    strategy = store.read("strategy") or {}
-    candidates: List[Dict[str, Any]] = []
-    candidates.extend(portfolio.get("holdings") or [])
-    candidates.extend(strategy.get("target_assets") or [])
-    for h in candidates:
-        if str(h.get("symbol", "")) == symbol:
-            proxy = str(h.get("yfinance_proxy") or "").strip()
-            if proxy:
-                return proxy
-            return symbol  # 没 proxy 就直接当 yfinance ticker
-    # 2) 没找到也 fallback 直接当 ticker —— yfinance 返回空时 _market_outcome 会
-    #    自然返回 None，不会报错
-    return symbol
-
-# 上下文指标符号（每笔交易都拉一遍）
-CONTEXT_SYMBOLS = {
-    "vix": "^VIX",
-    "tnx": "^TNX",
-    "usdcny": "USDCNY=X",
-}
-
-
 # ----------------------------------------------------------------------
 # Light Sleep — 摄入交易 + 同期市场上下文
 # ----------------------------------------------------------------------
-
-def _safe_close(df: pd.DataFrame, on_or_before: str) -> Optional[float]:
-    """返回 <= 指定日期的最后一行 Close；没有则 None"""
-    if df.empty:
-        return None
-    cutoff = pd.to_datetime(on_or_before)
-    sub = df[df.index <= cutoff]
-    if sub.empty:
-        return None
-    return float(sub["Close"].iloc[-1])
-
-
-def _market_outcome(symbol: str, trade_date: str, days_ahead: int) -> Optional[float]:
-    """交易日 close 到 N 天后 close 的涨跌幅（百分比）"""
-    df = get_history_data(symbol, "2y")
-    base = _safe_close(df, trade_date)
-    if base is None or base <= 0:
-        return None
-    end_date = (datetime.strptime(trade_date[:10], "%Y-%m-%d")
-                + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-    end = _safe_close(df, end_date)
-    if end is None:
-        return None
-    return (end / base - 1) * 100
-
 
 def _decision_regime(asset: str, decision_date: str) -> Optional[str]:
     """决议日的市场 regime（committee 同款 core.regime.classify_regime）。
