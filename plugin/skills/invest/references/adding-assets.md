@@ -104,8 +104,11 @@ yfinance and must NOT get a `.SS` / `.SZ` suffix. Use `FUND:<6-digit code>` with
 <skill-dir>/scripts/run.sh buy --symbol FUND:123456 --units 5000 --price 2.0 -c CNY --kind fund --unit-label 份 --existing-position
 ```
 
-(Skip it if `status` already lists the fund. Drop `--existing-position` only for a new purchase
-paid from the recorded cash.)
+(Skip it if `status` already lists the fund. For a **new purchase the user just placed** don't use
+`buy` — a fund order is confirmed a day or more later at the pricing day's NAV, and `buy` would book it
+as instantly filled: use `place_fund_order --symbol FUND:123456 --amount 2000` (cash goes out now, the
+order stays "in transit" at face value, the `fund_confirm` job turns it into shares when the NAV is
+published) — see the off-exchange fund bullet in SKILL.md.)
 
 They are valued at the latest confirmed unit NAV from Eastmoney (not the intraday estimate), so
 `status` / P&L / the committee's portfolio summary all include them. The committee can also run *on*

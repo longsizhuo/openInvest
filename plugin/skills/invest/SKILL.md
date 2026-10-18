@@ -123,6 +123,16 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
                                                         the position twice); never use deposit/withdraw
                                                         for these (that would book them as new money
                                                         instead of return)
+   "I bought / subscribed an off-exchange fund (FUND:xxxxxx)
+    today / 申购了场外基金 / 基金份额确认了吗"          → run.sh place_fund_order (MCP tool of the same
+                                                        name) when the order was just placed: cash goes
+                                                        out now, the order is "in transit" and total
+                                                        assets do not dip; shares arrive when the
+                                                        pricing-day NAV is published (the fund_confirm
+                                                        job confirms nightly; confirm_fund_order only to
+                                                        give a NAV / fee yourself, cancel_fund_order if
+                                                        the order never went through). Status shows
+                                                        pending_fund_orders. Don't use buy for these
    "should I buy/sell X / analyze X / 该不该买卖X"    → committee protocol ↓
    "track AAPL / I want to watch TSLA / 跟踪苹果"     → see references/adding-assets.md
    "alert me if gold falls below 900 / tell me when
@@ -250,7 +260,7 @@ same shape as local**, decision tree applies as usual):
 | `prepare/save_committee` | Via hub RPC — the Coordinator protocol (spawn 4 subagents) is **completely unchanged** |
 | `buy/sell/deposit/...` write ops | Land in the hub ledger (history `source: skill_remote`) |
 | `buy --existing-position` | **Refused** (the REST endpoint can't carry it, and forwarding would deduct hub cash) — run it on the hub, or use the remote MCP tool `record_existing_position` |
-| `record_dividend/record_fee/record_split/record_return_of_capital`, `backfill_raw_close` | **Refused** (no REST endpoint, by design) — run them on the hub, or use the remote MCP tools of the same name |
+| `record_dividend/record_fee/record_split/record_return_of_capital`, `place_fund_order/confirm_fund_order/cancel_fund_order`, `backfill_raw_close` | **Refused** (no REST endpoint, by design) — run them on the hub, or use the remote MCP tools of the same name |
 | `event_check` | Forwards the hub's manual scan; `--live` / `--recall` disabled (hub cron already covers them) |
 
 **Discipline**: in remote mode this machine has no `memory/`, so "reading/writing memory
@@ -264,6 +274,7 @@ add `Authorization: Bearer $INVEST_API_TOKEN` when curling.
 history / live_prices / what_if / rebalance_plan / discipline / decisions / explain_decision /
 record_execution / ingest_event / buy / record_existing_position / sell / deposit / withdraw /
 record_dividend / record_fee / record_split / record_return_of_capital /
+place_fund_order / confirm_fund_order / cancel_fund_order /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
 run_committee — schemas auto-discovered; call them directly, no table lookup needed.
 `track_asset` takes an optional `target_pct` (0–1 share of total assets, read by `rebalance_plan`) and
@@ -381,6 +392,16 @@ a signal worth recording.
   `adjusted` symbol a recorded dividend is deliberately left out of the NAV (the adjusted price already
   contains it; `data_quality.income_in_adjusted_price` says so); `data_quality.price_basis_gaps` lists symbols
   that fell back to `adjusted` because some days lack `close_raw` (run `backfill_raw_close`). `status.income_30d` totals the last 30 days.
+- **Off-exchange China mutual funds (`FUND:<6 digits>`) are a two-step purchase**: `place_fund_order` deducts the cash now and
+  records the order as in transit (`status.pending_fund_orders` + a one-line `pending_fund_orders_line`; `total_assets_cny` already
+  counts it at face value, so total assets don't dip between order day and confirmation). Orders placed before 15:00 Beijing time on a
+  trading day are priced at that day's NAV (`nav_date`), later ones at the next trading day's; shares arrive when that NAV is
+  published — the `fund_confirm` job confirms automatically every weekday evening (QDII / FOF NAVs can take a day or two longer),
+  or call `confirm_fund_order` (it is safe to repeat: an already-confirmed order returns `already_confirmed`; unpublished NAV returns
+  `pending_nav` and changes nothing). Pass `--nav` / `--fee` there only to supply the real NAV or subscription fee (the job assumes fee 0).
+  `cancel_fund_order` is only for orders still in transit. The expected confirm date is an **estimate** (Monday–Friday calendar, no
+  China holiday table; `lag_source=default` means the fund type couldn't be fetched) — say "expected", not "will". `buy` still works
+  for these funds but books them as instantly filled and warns; use it only for back-filling a purchase that is already confirmed.
 - **Gold (`GC=F`) is booked per gram in CNY only**: `buy` / `record_existing_position` with
   `units` = grams, `price` = CNY/gram, `currency=CNY`, `kind=metal`, `unit_label=克`. A USD/ounce booking
   is rejected (the error shows the correct form) — convert the quote first (USD/oz ÷ 31.1035 × USDCNY),
