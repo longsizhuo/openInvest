@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Dict, List
@@ -151,6 +152,27 @@ def test_long_event_title_gets_ellipsis(tmp_path):
     assert "…（Reuters" in line and len(line) < 200
 
 
+def test_stale_fx_series_is_flagged_not_shown_as_flat(tmp_path, monkeypatch):
+    """评审 #1：AUDCNY 行情停在 D8（D9 没有 bar、前值填充）→ 汇率影响不是真实 0.00%，要标 n/a + 备注。"""
+    table = {**TABLE, "AUDCNY=X": {"2026-01-07": 4.0, D8: 4.0}}
+    monkeypatch.setattr(hd, "MarketStore", lambda: _FakeStore(table))
+    d = _build(tmp_path)
+    ndq, aaa = _row(d, "NDQ.AX"), _row(d, "AAA")
+    assert ndq["fx_stale"] is True and ndq["fx_contribution_pct"] == 0        # 数字按 0 算
+    assert aaa["fx_stale"] is False and _row(d, "GC=F")["fx_stale"] is False   # 本币持仓不受影响
+    email, chat = hd.render_digest_md(d, "email"), hd.render_digest_md(d, "chat")
+    assert "| 纳指ETF | 71.4% | +2.00% | +1.43pp | n/a |" in email
+    assert "汇率 n/a" in chat
+    for md in (email, chat):
+        assert "纳指ETF 的汇率行情今天没更新，汇率影响未计入（按 0，不是真实值）" in md
+    # 汇率有当天 bar（即使数值没变）= 真实平盘，不标
+    table = {**TABLE, "AUDCNY=X": {D8: 4.0, D9: 4.0}}
+    monkeypatch.setattr(hd, "MarketStore", lambda: _FakeStore(table))
+    d = _build(tmp_path)
+    assert _row(d, "NDQ.AX")["fx_stale"] is False
+    assert "汇率行情今天没更新" not in hd.render_digest_md(d, "email")
+
+
 def test_no_benchmark_still_renders_without_comparison(tmp_path, monkeypatch):
     monkeypatch.setattr(hd, "_benchmark_symbol", lambda: "")
     d = _build(tmp_path)
@@ -217,7 +239,20 @@ def test_no_usable_prices_is_insufficient_and_never_touches_benchmark(tmp_path, 
     monkeypatch.setattr(hd, "_benchmark_closes", lambda *a: called.append(a) or {})
     d = _build(tmp_path)
     assert d["status"] == "insufficient_data" and called == []            # 没东西可归因 → 不去刷基准（联网）
-    assert "不足 2 根收盘价，暂无法归因" in hd.render_digest_md(d, "email")
+    md = hd.render_digest_md(d, "email")
+    assert "暂无法归因：" in md and "AAA（行情库里不足 2 根收盘价）" in md and "GC=F（行情库里不足 2 根收盘价）" in md
+
+
+def test_all_holdings_stale_says_stale_not_missing(tmp_path, monkeypatch):
+    """评审 #2：全部因数据过旧被跳过时，别说成"不足 2 根"。"""
+    old = {"2025-11-03": 5.0, "2025-11-04": 6.0}
+    monkeypatch.setattr(hd, "MarketStore", lambda: _FakeStore({"AAA": old, "NDQ.AX": old, "AUDCNY=X": old}))
+    d = _build(tmp_path, holdings=HOLDINGS[:2])
+    assert d["status"] == "insufficient_data"
+    for target in ("email", "chat"):
+        md = hd.render_digest_md(d, target)
+        assert "AAA（行情已停在 2025-11-04，太旧）" in md and "NDQ.AX（行情已停在 2025-11-04，太旧）" in md
+        assert "不足 2 根" not in md
 
 
 def test_no_holdings_renders_nothing(tmp_path):
@@ -292,10 +327,19 @@ def test_calendar_only_stocks_window_and_no_source(tmp_path):
 def test_calendar_timeout_marks_na_without_blocking(tmp_path, monkeypatch):
     monkeypatch.setattr(hd, "CALENDAR_TIMEOUT_SEC", 0.05)
     release = threading.Event()
+    started = time.monotonic()
     d = _build(tmp_path, calendar_fn=lambda s: release.wait(5) or {})
+    elapsed = time.monotonic() - started
     release.set()
-    assert d["status"] == "ok" and d["calendar"]["AAA"]["status"] == "n/a"
+    assert elapsed < 2 and d["status"] == "ok" and d["calendar"]["AAA"]["status"] == "n/a"
     assert "- 无数据源：阿尔法" in hd.render_digest_md(d, "email")
+
+
+def test_calendar_workers_are_daemon_threads(tmp_path):
+    """评审 #3：卡住的 yfinance 请求不能拖住进程退出——工作线程必须是守护线程（ThreadPoolExecutor 的会在退出时被 join）。"""
+    seen = []
+    _build(tmp_path, calendar_fn=lambda s: seen.append(threading.current_thread().daemon) or {})
+    assert seen == [True]
 
 
 def test_calendar_section_when_no_single_stocks(tmp_path):

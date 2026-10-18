@@ -601,7 +601,8 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
     render_target = "email" if send_email else "chat"
 
     # 今日持仓归因（每持仓涨跌 / 对组合贡献 / 汇率 / 对比基准 + 近 7 天事件 + 未来 7 天财报·除息；
-    # 行情库只读，仅日历联网；零 LLM；失败不阻断报告，子步骤失败在段内降级为 n/a）
+    # 持仓行情 / 汇率 / 事件只读本地库，联网仅日历与基准刷新（后者每天一次、通常账户业绩段已刷过）；
+    # 零 LLM；失败不阻断报告，子步骤失败在段内降级为 n/a）
     try:
         from openinvest.services.holdings_digest import build_holdings_digest, render_digest_md
         holdings_digest_md = render_digest_md(build_holdings_digest(pm, today=today), render_target)

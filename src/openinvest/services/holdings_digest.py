@@ -3,14 +3,16 @@
 2026 年 Robinhood Digests / Schwab Portfolio Insights / Google Finance 的默认交付物：
 今天每个持仓涨跌多少、谁拖累了组合、和基准比如何、接下来 7 天有什么事。
 
-数据源（全部只读本地库，**行情不走网络**）：
+数据源（行情 / 汇率 / 事件只读本地库；联网只有下面两处，都有退路）：
 - ``core.portfolio_manager``——当前持仓（跳过 tracking-only）
 - ``db/market_data.db``——每个持仓**自己**最近两根收盘（休市 / 不同交易所日历不同，不强行对齐
   到同一天；与基准比较的窗口也是各自最近两根，日期标在表里）、汇率；取价 / 汇率口径复用
   ``services.account_performance``（黄金克价 / 场外基金 / 汇率反向·交叉对），保证和账户业绩同口径
 - ``db/events.db``——symbols 命中持仓（含 ETF→指数代理）且 created_at 最近 7 天的事件，每持仓最多 2 条
 - yfinance ``Ticker.calendar``——个股未来 7 天财报 / 除息日；取不到（异常 / 超时 / 空）写"无数据源"。
-  这是唯一联网的一步，整体 15 秒硬墙钟，超时的标的记 n/a
+  整体 15 秒硬墙钟（守护线程，超时不 join、不拖进程退出），超时的标的记 n/a
+- 基准行情：经 ``account_performance._benchmark_closes``，每进程每天最多刷新一次（日报里"账户业绩"段通常已刷过，
+  这里只读库）；失败用库里已有的，库里也没有就不比较。没有可归因的持仓时不碰基准
 
 任何子步骤失败只让对应一列降级为 n/a，不阻断日报。events.db 里是**已发生**的近期事件（入库时刻
 近 7 天），不是前瞻日历；前瞻部分只有上面的财报 / 除息。
@@ -18,9 +20,11 @@
 from __future__ import annotations
 
 import logging
+import queue
 import re
+import threading
+import time
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, timedelta
 from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional
@@ -94,26 +98,42 @@ def _calendar_items(cal: dict, today: str, horizon: str) -> Optional[List[Dict[s
 def _fetch_calendars(symbols: List[str], today: str,
                      calendar_fn: Callable[[str], dict]) -> Dict[str, Dict[str, Any]]:
     """{symbol: {status: ok|none|no_source|n/a, items}}：ok=窗口内有日期，none=有日历但窗口内没有，
-    no_source=取不到 / 空，n/a=超时没等到。整体 CALENDAR_TIMEOUT_SEC 墙钟（线程里跑，超时不 join）。"""
+    no_source=取不到 / 空，n/a=超时没等到。整体 CALENDAR_TIMEOUT_SEC 硬墙钟：工作线程是**守护线程**，
+    超时直接放弃它（不 join；ThreadPoolExecutor 的线程解释器退出时会被 join，卡住的 yfinance 请求会拖住 cron 进程退出）。"""
     horizon = (date.fromisoformat(today) + timedelta(days=CALENDAR_HORIZON_DAYS)).isoformat()
-    out: Dict[str, Dict[str, Any]] = {s: {"status": "n/a", "items": []} for s in symbols}
-    if not symbols:
-        return out
-    pool = ThreadPoolExecutor(max_workers=4)
-    try:
-        futs = {pool.submit(calendar_fn, s): s for s in symbols}
-        done, _ = wait(futs, timeout=CALENDAR_TIMEOUT_SEC)
-        for f in done:
-            sym = futs[f]
+    todo: "queue.Queue[str]" = queue.Queue()
+    for s in symbols:
+        todo.put(s)
+    raw: Dict[str, dict] = {}
+
+    def work() -> None:
+        while True:
             try:
-                items = _calendar_items(f.result() or {}, today, horizon)
+                sym = todo.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                raw[sym] = calendar_fn(sym) or {}
             except Exception as e:  # noqa: BLE001  单标的失败 = 该标的无数据源
                 log.warning("holdings_digest: %s 日历取不到: %s", sym, e)
-                items = None
-            out[sym] = ({"status": "no_source", "items": []} if items is None
-                        else {"status": "ok" if items else "none", "items": items})
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+                raw[sym] = {}
+
+    # ponytail: 最多 4 个并发工作线程，持仓个股数上百才需要换成真线程池
+    threads = [threading.Thread(target=work, daemon=True) for _ in range(min(4, len(symbols)))]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + CALENDAR_TIMEOUT_SEC
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()))
+    got = dict(raw)   # 快照：超时后迟到的线程再写 raw 也不影响已返回的结果
+    out: Dict[str, Dict[str, Any]] = {}
+    for sym in symbols:
+        if sym not in got:
+            out[sym] = {"status": "n/a", "items": []}
+            continue
+        items = _calendar_items(got[sym], today, horizon)
+        out[sym] = ({"status": "no_source", "items": []} if items is None
+                    else {"status": "ok" if items else "none", "items": items})
     return out
 
 
@@ -185,10 +205,15 @@ def build_holdings_digest(pm: Optional[PortfolioManager] = None, *, today: Optio
             continue
         if ccy not in fx_cache:
             fx_cache[ccy] = _fx_series(store, ccy, base)
+        fx0, fx1, fx_stale = 1.0, 1.0, False
+        if ccy != base:
+            fx0 = _at(fx_cache[ccy], d0)[0]
+            fx1, filled = _at(fx_cache[ccy], d1)
+            # d1 当天没有汇率 bar（前值填充）且和 d0 同值 = 汇率行情没更新；此时"汇率影响 0.00%"是缺数据，不是真实平盘
+            fx_stale = bool(filled and fx1 is not None and fx1 == fx0)
         rows.append({"symbol": sym, "name": h.get("display_name") or targets.get(sym, {}).get("display_name") or sym,
                      "units": float(h["units"]), "currency": ccy, "prev_close": p0, "close": p1,
-                     "fx_prev": 1.0 if ccy == base else _at(fx_cache[ccy], d0)[0],
-                     "fx": 1.0 if ccy == base else _at(fx_cache[ccy], d1)[0], "prev_date": d0, "date": d1})
+                     "fx_prev": fx0, "fx": fx1, "fx_stale": fx_stale, "prev_date": d0, "date": d1})
 
     out: Dict[str, Any] = {"base_currency": base, "today": today}
     benchmark = _benchmark_window(store, today) if rows else None   # 没有可归因的持仓就不去碰基准（网络）
@@ -259,6 +284,10 @@ def _md(d: str) -> str:
     return d[5:] if len(d) == 10 else d
 
 
+def _skip_why(reason: str) -> str:
+    return f"行情已停在 {reason[6:]}，太旧" if reason.startswith("stale:") else _SKIP_WHY.get(reason, reason)
+
+
 def _headline(attr: Dict[str, Any], bench_sym: str, label: Dict[str, str]) -> str:
     """一行人话结论，确定性生成：组合涨跌 → 对比基准 → 主要拖累 / 拉动。"""
     port = attr["portfolio"]["return_pct"]
@@ -292,7 +321,9 @@ def render_digest_md(d: Dict[str, Any], render_target: str = "email") -> str:
     if d.get("status") == "no_holdings":
         return ""
     if d.get("status") != "ok":
-        return "## 今日持仓归因\n- 持仓行情库里不足 2 根收盘价，暂无法归因"
+        why = "；".join(f"{_esc(s['symbol'], render_target)}（{_skip_why(s['reason'])}）"
+                       for s in d.get("attribution", {}).get("skipped", []))
+        return "## 今日持仓归因\n- 暂无法归因：" + (why or "没有可用的持仓行情")
     chat = render_target == "chat"
     e = lambda x: _esc(x, render_target)  # noqa: E731
     attr, base = d["attribution"], d["base_currency"]
@@ -312,6 +343,8 @@ def render_digest_md(d: Dict[str, Any], render_target: str = "email") -> str:
         return label[r["symbol"]] + (f"（{_md(r['date'])}）" if r["date"] != as_of else "")
 
     def fx_cell(r: Dict[str, Any]) -> str:
+        if r.get("fx_stale"):
+            return "n/a"
         return "—" if r["currency"] == base else _pct(r["fx_contribution_pct"])
 
     if chat:
@@ -339,9 +372,10 @@ def render_digest_md(d: Dict[str, Any], render_target: str = "email") -> str:
     if not bench:
         notes.append("基准：未配置或行情库里不足 2 根收盘价，不比较")
     for s in attr["skipped"]:
-        why = (f"行情已停在 {s['reason'][6:]}，太旧" if s["reason"].startswith("stale:")
-               else _SKIP_WHY.get(s["reason"], s["reason"]))
-        notes.append(f"{e(s['symbol'])} 未计入归因（{why}）")
+        notes.append(f"{e(s['symbol'])} 未计入归因（{_skip_why(s['reason'])}）")
+    stale_fx = [label[r["symbol"]] for r in rows if r.get("fx_stale")]
+    if stale_fx:
+        notes.append(f"{'、'.join(stale_fx)} 的汇率行情今天没更新，汇率影响未计入（按 0，不是真实值）")
     if notes:
         out += ["_" + "；".join(notes) + "_", ""]
 
