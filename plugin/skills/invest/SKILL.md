@@ -358,7 +358,7 @@ a signal worth recording.
 ## Where to look when something breaks
 
 Read the `doctor` JSON output carefully. Every check has a `hint` field telling you how to fix it;
-checks marked `optional_*` are not faults, they only say which path/feature (Direct, e-mail) is unavailable.
+checks marked `optional_*` are not faults, they only say which path/feature (Direct, e-mail) is unavailable; a `warning` check (e.g. `gold_booking`: a GC=F row not booked in CNY per gram) means a data fix is due, not that onboarding is unfinished — follow its hint with the user, do not switch to `invest-setup`.
 If doctor is all green but a subcommand still fails, read `references/troubleshooting.md`.
 
 Common Direct-path errors:
