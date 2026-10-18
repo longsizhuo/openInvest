@@ -417,7 +417,7 @@ HOLD 比横盘占比高约 10pp，且一次 BUY / SELL 都没有——与主张 
 
 局限：相邻交易日的 30d 窗口高度重叠，真实独立样本远少于 n，CI 比表里更宽；HOLD（命中 = 市场横盘）占样本 80%，
 整体校准主要是 HOLD 的校准，HOLD 与方向性裁决的"命中"含义不同，分开看要等方向性样本 ≥30（ACCUMULATE 30 条边缘、TRIM 18 条）；
-自报分是 CIO 的一次采样，方差见 `experiments/verdict_variance/`（A4）。公开 JSON 的 calibration 受"互补抑制"约束：
+自报分本身也只是 CIO 的一次采样——A4 在同一输入上重跑 90 次（`experiments/verdict_variance/`）：自报分 90/90 全是 0.62（标准差 0），方向翻转率 26.7%（8/30 条，只对应 4 个标的），其中一个标的就是 11 次 ACCUMULATE / 10 次 HOLD 的抛硬币；而生产里 2026-09-16 起的 84 条里已有 89% 自报恰好 0.62（其中只有 3 条 30d 已成熟，还没进上面的表）——等它们成熟，校准表会被一个常量档主导。公开 JSON 的 calibration 受"互补抑制"约束：
 `base_rate_brier = p̄(1−p̄)` 一步还原整体命中率，所以只要窗口的 `direction_hit_rate` 被抑制（有方向桶 n<30，当前 TRIM 18 条），
 该窗口校准数字也置 null；被校准排除的行数 `n_excluded = sample_size − n`（不管原因：confidence 缺失 / 非数字 / 恰为 0.0）落在 (0, 30) 时同理（校准排除了那几行而 `direction_hit_rate` 含它们，p̄ 与 n 的差能逆算这几行的命中）——当前只有 30d 窗口出数字。
 
