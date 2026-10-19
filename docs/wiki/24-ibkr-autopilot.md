@@ -86,8 +86,11 @@ reconcile：`idempotency_key=ibkr-<execId>` / `ibkr-fee-<execId>`，重跑只会
   **二次验证设备必须是 IBKR Mobile 的 IB Key（推送批准）**：网关是无头的，Passkey（要在发起登录的设备上做生物识别）和 Mobile Authenticator app（要往网关窗口里输 6 位码）都过不去；
   账户绑了多种设备时用 `TWOFA_DEVICE` 指定，值要和登录窗口列表里的写法一字不差（`IB Key`）。
 - 下单只认网关明确回执（`PreSubmitted` / `Submitted` / `Filled`，最多等 10 秒）：被拒（权限 / 预防性检查 / 碎股）→ `rejected`，等不到回执 → `unconfirmed`，都终局跳过、保留 claim 不重下（真成交了 reconcile 照样记账），原因进当日邮件。compose 写 `BYPASS_WARNING=no`，网关的 API 下单预防性检查保持开启。
-- 账户内换汇：USD 不够下最小单而 AUD ≥ 50 时，submit 先把 AUD（留 5 零头，单日 ≤ 1000）换成 USD：`Forex('AUDUSD')` 可成交限价单
-  （参考汇率 −1%；小额单盈透自动走 IDEAL odd lot，每笔最低佣金约 USD 2.5），每天最多一次（claim + orderRef）；reconcile 把换汇成交按两腿记账。钱不出账户。
+- 换汇：**submit 不再先自己换**。现金账户买 USD 股票时，盈透会从基础币种（AUD）自动换汇（实测免佣金）；先自己换会因为换来的 USD
+  还没结算（T+1/T+2）而被盈透再换一次，叠加出非基础币种透支（2026-10-20 实测 AUD 变 −146）。买入额度 = 盈透 `AvailableFunds`（基础币种）折 USD。
+  需要调整币种结构（例如把多出来的 USD 换回 AUD 抹平透支）时用 `ibkr_autopilot convert --from USD --to AUD --amount N`：
+  `Forex` 可成交限价单（参考汇率 ±1%，取 4 位小数、数量取整；货币对两个方向都会去找），同一笔当天只做一次，dry_run 只 whatIf。
+- 对账按券商实际记账：券商已确认的成交 / 换汇 / 佣金允许把账本现金记成负数（`allow_negative`，只给对账用），不会因「余额不足」误停手。
 - 依赖：`ib_async`（`pip install openinvest[ibkr]`；git clone 形态 `uv sync` 的 dev 组已带）。
 - 首次上线：home 的 `memory/.state/config_overrides.json` 写 `ibkr.enabled=true`、`ibkr.account=<U…>`（**不写 dry_run**），先跑一次 `submit` 看 whatIfOrder 结果（合约 / 碎股权限 / 佣金），再在 cron 行加 `INVEST_IBKR_DRY_RUN=false` 切真单。账本起点 = 券商 USD 现金（`openinvest deposit -c USD …`）。
 

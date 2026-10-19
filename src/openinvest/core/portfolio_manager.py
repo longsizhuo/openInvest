@@ -467,10 +467,11 @@ class PortfolioManager:
 
     def withdraw_cash(
         self, currency: str, amount: float, *, source: str = "skill_cli",
-        idempotency_key: Optional[str] = None,
+        idempotency_key: Optional[str] = None, allow_negative: bool = False,
     ) -> Dict[str, Any]:
         """取出现金（任意币种）。余额不足抛 ValueError（余额检查在 fcntl 锁内，防 TOCTOU）。
-        idempotency_key 语义同 deposit_cash。"""
+        idempotency_key 语义同 deposit_cash。allow_negative=True 只给「券商已确认的结算回灌」用
+        （如盈透现金账户自动换汇把非基础币种扣成负数）：券商那边已经是负的，账本照实记。"""
         ccy = currency.upper()
         amount = float(amount)
         if not math.isfinite(amount):
@@ -481,7 +482,7 @@ class PortfolioManager:
             with self._ledger_tx(idempotency_key) as p:
                 cash = dict(p.get("cash") or {})
                 current = float(cash.get(ccy, 0) or 0)
-                if current < amount:
+                if current < amount and not allow_negative:
                     raise ValueError(f"{ccy} 余额 {current} < 取出 {amount}")
                 cash[ccy] = round(current - amount, 2)
                 p["cash"] = cash
@@ -533,6 +534,7 @@ class PortfolioManager:
         source: str = "skill_cli",
         source_type: str = "cash_deduct",
         idempotency_key: Optional[str] = None,
+        allow_negative: bool = False,
     ) -> Dict[str, Any]:
         """加仓（已有 symbol 增加 units + 加权平均成本；新 symbol 直接建仓）
 
@@ -608,7 +610,8 @@ class PortfolioManager:
                     # 锁内校验防 TOCTOU）。钱不来自子弹池的合法场景走 source_type=
                     # 'external_funding'（不动 cash）。存储层仍容忍负现金——那是给
                     # record_external_trade 券商真实结算回灌用的，与主动 buy 无关。
-                    if current < cost_cny:
+                    # allow_negative：券商已确认的成交回灌（jobs/ibkr_autopilot reconcile）——券商那边已扣，账本照实记
+                    if current < cost_cny and not allow_negative:
                         raise ValueError(
                             f"{ccy} 现金 {current} < 买入成本 {cost_cny}"
                             f"（子弹不足；外部新钱建仓请用 source_type='external_funding'）"
@@ -830,6 +833,7 @@ class PortfolioManager:
         *,
         source: str = "skill_cli",
         idempotency_key: Optional[str] = None,
+        allow_negative: bool = False,
     ) -> Dict[str, Any]:
         """记一笔费用（kind="fee"：账户管理费 / 汇款费 / 单独收的佣金）或税（kind="tax"：红利税补缴等）：
         现金 −amount，内部流（是账户的成本，进 NAV）。symbol 可空（账户级）。
@@ -845,7 +849,7 @@ class PortfolioManager:
             with self._ledger_tx(idempotency_key) as p:
                 cash = dict(p.get("cash") or {})
                 current = float(cash.get(ccy, 0) or 0)
-                if current < amount:
+                if current < amount and not allow_negative:
                     raise ValueError(f"{ccy} 现金 {current} < {kind} {amount}（先 deposit 补足现金，或核对金额）")
                 cash[ccy] = round(current - amount, 2)
                 p["cash"] = cash
