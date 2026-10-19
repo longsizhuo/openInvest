@@ -105,7 +105,6 @@ _PORT = 4001            # docker compose 把网关 live API 映到 127.0.0.1:400
 _CLIENT_ID = 17
 _STATUS_CLIENT_ID = 18  # status 只读查询用另一个 clientId，和 cron 里的 submit / reconcile 同时连也不撞
 _NEWS_CLIENT_ID = 19    # news / news_check / brief 也是只读，再错开一个
-_FX_BAND = 0.01         # 换汇限价 = 参考汇率 ±1%（市价换汇单可能被拒，用可成交的限价）
 _UNSET = 1e300          # ib_async 的「未设置」浮点（UNSET_DOUBLE ≈ 1.8e308）
 _ACK_OK = ("PreSubmitted", "Submitted", "Filled")
 _ACK_REJECT = ("Cancelled", "ApiCancelled", "Inactive")
@@ -244,35 +243,6 @@ class _IbGateway:
 
     def place(self, conid: int, side: str, qty: float, lmt: float, ref: str) -> Dict[str, Any]:
         return self._send(self._contracts[conid], self._limit(side, qty, lmt, ref))
-
-    def convert(self, src: str, dst: str, amount_src: float, ref: str, dry_run: bool) -> Dict[str, Any]:
-        """账户内换汇（钱不出账户）：卖 amount_src 的 src 换 dst。小额单盈透自动走 IDEAL odd lot；可成交限价。"""
-        from ib_async import Forex
-        from openinvest.utils.fx import get_fx_rate
-        rate = get_fx_rate(src, dst)
-        if not rate or rate <= 0:
-            raise _Skip("no_fx_rate")
-        pair = None
-        for name in (f"{src}{dst}", f"{dst}{src}"):   # 盈透只挂一个方向（AUD.USD），USD→AUD 也要找得到
-            q = self.ib.qualifyContracts(Forex(name))
-            if q and q[0] is not None and not isinstance(q[0], list):
-                pair = q[0]
-                break
-        if pair is None:
-            raise _Skip(f"no_fx_pair_{src}_{dst}", terminal=True)
-        # 价位：IDEALPRO 的 minTick 0.00005 → 取 4 位小数（0.0001 是它的整数倍）；数量取整（外汇单通常要整数）
-        if pair.symbol == src:   # AUD.USD：卖 base（AUD），数量以 AUD 计
-            side, qty, lmt = "SELL", float(math.floor(amount_src)), round(rate * (1 - _FX_BAND), 4)
-        else:                    # USD.AUD：买 base（USD）
-            side, qty, lmt = "BUY", float(math.floor(amount_src * rate)), round(1 / rate * (1 + _FX_BAND), 4)
-        order = self._limit(side, qty, lmt, ref)
-        if dry_run:
-            w = self._whatif_result(self.ib.whatIfOrder(pair, order))
-            if w.get("error"):
-                raise _Skip(f"whatif_error: {w['error']}", terminal=True)
-            return {"dry_run": True, "pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt, **w}
-        return {"pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt, **self._send(pair, order)}
-
 
     def news(self, symbol: str, days: int = 2, limit: int = 8) -> List[Dict[str, Any]]:
         """盈透免费新闻源（Briefing.com / Dow Jones，账户自带）里这个标的近 days 天的标题。"""
@@ -784,53 +754,6 @@ def _submit(b, today: str, cfg, batch: int = 1) -> Dict[str, Any]:
     return out
 
 
-# ---------------------------------------------------------------- convert（显式换汇，交易员调币种用）
-
-
-def convert(src: str, dst: str, amount: float, today: Optional[str] = None, *, broker=None) -> Dict[str, Any]:
-    """账户内换汇（钱不出账户）：卖 amount 的 src 换 dst。买股票不需要先换（盈透现金账户会自动从基础币种换）；
-    这个阶段给交易员调整币种结构用，比如把自动换汇多出来的 USD 换回 AUD 抹平透支。同一天同一笔（币种对 + 金额）只做一次。"""
-    cfg = load_config(_force_reload=True).ibkr
-    if not cfg.enabled:
-        return {"status": "skipped", "reason": "ibkr_disabled"}
-    if _stop_file().exists():
-        return {"status": "halted", "reason": _stop_file().read_text(encoding="utf-8").strip()}
-    src, dst = src.strip().upper(), dst.strip().upper()
-    try:
-        amount = float(amount)
-    except (TypeError, ValueError):
-        amount = float("nan")
-    if not math.isfinite(amount) or amount <= 0 or src == dst or not (src.isalpha() and dst.isalpha()):
-        return {"status": "error", "reason": f"bad_conversion: {src}->{dst} {amount}"}
-    today = today or _today()
-    acct = cfg.account
-    b = broker or _connect(acct)
-    try:
-        if not acct or acct not in b.accounts():
-            return {"status": "error", "reason": f"account_mismatch: 配置 {acct!r}，会话 {b.accounts()}"}
-        ref = f"{_REF}fx:{today}/{src}{dst}/{amount:g}"
-        _, _, refs = _used_today(b, b.fills(days=1))
-        if ref in refs:
-            return {"status": "skipped", "reason": "already_at_broker", "ref": ref}
-        pm = PortfolioManager()
-        key = f"{today}:fx:{src}{dst}:{amount:g}"
-        if not cfg.dry_run and not pm.store.state_claim(_SRC, key):
-            return {"status": "skipped", "reason": "already_done_today", "ref": ref}
-        try:
-            res = b.convert(src, dst, amount, ref, cfg.dry_run)
-        except _Skip as s:
-            return {"status": "skipped", "reason": s.reason, "ref": ref}
-        except Exception as e:  # noqa: BLE001 — 已发出或被拒：留 claim（终局），原因上报
-            return {"status": "error", "reason": f"rejected: {e}", "ref": ref}
-        res = dict(res)
-        res["order_status"] = res.pop("status", None)   # 券商回报的状态，别覆盖本阶段的 status
-        _notify(f"{'🧪 盈透换汇试算' if cfg.dry_run else '💱 盈透换汇'} {today}", [f"{src} → {dst}：{amount:g} {src}（{res}）"])
-        return {"status": "ok", "dry_run": cfg.dry_run, "ref": ref, **res}
-    finally:
-        if broker is None:
-            b.close()
-
-
 # ---------------------------------------------------------------- reconcile
 
 
@@ -1024,7 +947,7 @@ def notify_failure(phase: str, problems: Dict[str, Any]) -> None:
 
 def run(phase: str = "submit", **kw) -> Dict[str, Any]:
     return {"pick": pick, "decide": decide, "submit": submit, "reconcile": reconcile, "status": status,
-            "news": news, "news_check": news_check, "brief": brief, "convert": convert}[phase](**kw)
+            "news": news, "news_check": news_check, "brief": brief}[phase](**kw)
 
 
 if __name__ == "__main__":

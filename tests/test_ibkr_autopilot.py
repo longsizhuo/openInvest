@@ -36,12 +36,12 @@ class _FakeTradesDB:
 
 
 class FakeBroker:
-    """_WebApi 的同名方法。placed / whatifs / converts 记录调用；reject=True 时 place 抛错（=盈透拒单 / 确认问题不在白名单）。"""
+    """_IbGateway 的同名方法（没有 convert：submit 一调就 AttributeError）。placed / whatifs 记录调用；reject=True 时 place 抛错（=盈透拒单 / 确认问题不在白名单）。"""
 
     def __init__(self, cash=300.0, positions=None, fills=None, reject=False, unknown=(), extra_cash=None):
         self._cash = {"USD": cash, **(extra_cash or {})}
         self.pos, self._fills, self.reject = dict(positions or {}), list(fills or []), reject
-        self.unknown, self.placed, self.whatifs, self.converts, self.open, self.closed = set(unknown), [], [], [], [], 0
+        self.unknown, self.placed, self.whatifs, self.open, self.closed = set(unknown), [], [], [], 0
 
     def accounts(self):
         return [ACCT]
@@ -76,14 +76,6 @@ class FakeBroker:
         self.placed.append({"symbol": sym, "side": side, "qty": qty, "lmt": lmt, "ref": ref})
         self.open.append({"ref": ref, "side": side, "symbol": sym, "left": qty, "lmt": lmt, "status": "PreSubmitted"})
         return {"order_id": str(100 + len(self.placed)), "status": "PreSubmitted"}
-
-    def convert(self, src, dst, amount_src, ref, dry_run):
-        self.converts.append({"src": src, "dst": dst, "amount": amount_src, "ref": ref, "dry_run": dry_run})
-        if not dry_run:
-            self._cash[src] -= amount_src
-            self._cash[dst] = self._cash.get(dst, 0.0) + amount_src * 0.7
-            return {"order_id": "fx1", "status": "Filled"}
-        return {"dry_run": True, "warning": None, "error": None}
 
     def news(self, symbol, days=2, limit=8):
         return [dict(h) for h in getattr(self, "headlines", {}).get(symbol, [])]
@@ -209,7 +201,7 @@ def test_disabled_is_noop(home):
     assert ia.reconcile(broker=b)["reason"] == "ibkr_disabled"
     assert ia.pick(TODAY, agent=object())["reason"] == "ibkr_disabled"
     assert ia.decide(TODAY, agent=object())["reason"] == "ibkr_disabled"
-    assert b.placed == [] and b.whatifs == [] and b.converts == []
+    assert b.placed == [] and b.whatifs == []
 
 
 def test_stop_file_and_account_mismatch(home, monkeypatch, tmp_path):
@@ -439,25 +431,8 @@ def test_buying_power_counts_base_currency_and_submit_never_pre_converts(home, m
     b = FakeBroker(cash=0.0, extra_cash={"AUD": 500.0})
     b.bp = 348.0                                             # AvailableFunds AUD 500 折 USD：盈透下单时自动换汇
     out = ia.submit(TODAY, broker=b)
-    assert b.converts == [] and [o["qty"] for o in b.placed] == [2.0]   # 不先自己换汇（10-20 叠加透支的教训）
+    assert [o["qty"] for o in b.placed] == [2.0]   # 不先自己换汇（10-20 叠加透支的教训）
     assert "fx" not in out
-
-
-def test_convert_phase_dry_live_and_once_a_day(home, monkeypatch):
-    _enable(monkeypatch, dry_run=True)
-    _seed(home)
-    b = FakeBroker(cash=133.0, extra_cash={"AUD": -146.0})
-    out = ia.convert("USD", "AUD", 103, TODAY, broker=b)
-    assert out["status"] == "ok" and out["dry_run"] is True and b.converts[-1]["dry_run"] is True
-    assert b.converts[-1]["ref"] == f"oi:fx:{TODAY}/USDAUD/103"
-    monkeypatch.setenv("INVEST_IBKR_DRY_RUN", "false")
-    reset_config()
-    assert ia.convert("USD", "AUD", 103, TODAY, broker=b)["status"] == "ok" and b.converts[-1]["dry_run"] is False
-    assert ia.convert("USD", "AUD", 103, TODAY, broker=b)["reason"] == "already_done_today"   # 同一笔当天只做一次
-    assert ia.convert("USD", "USD", 1, TODAY, broker=b)["reason"].startswith("bad_conversion")
-    assert ia.convert("USD", "AUD", float("nan"), TODAY, broker=b)["reason"].startswith("bad_conversion")
-    (home.root.parent / "STOP").write_text("x\n")
-    assert ia.convert("USD", "AUD", 50, TODAY, broker=b)["status"] == "halted"
 
 
 # ---------------- reconcile ----------------
@@ -663,27 +638,6 @@ def test_gateway_orders_whatif_and_rejection():
         g.place(cid, "BUY", 0.1, 202.0, "oi:u")
     g.close()
     assert ib.calls[-1] == "disconnect"
-
-
-def test_gateway_fx_conversion(monkeypatch):
-    monkeypatch.setattr("openinvest.utils.fx.get_fx_rate", lambda a, b="CNY", as_of_date=None: 0.7)
-    ib = FakeIB()
-    g = ia._IbGateway(ib, "U1")
-    out = g.convert("AUD", "USD", 495.0, "oi:fx", dry_run=True)
-    _, pair, o = ib.calls[-1]
-    assert out["dry_run"] is True and pair.localSymbol == "AUD.USD"
-    assert (o.action, o.totalQuantity, o.orderType, o.lmtPrice, o.orderRef) == ("SELL", 495.0, "LMT", 0.693, "oi:fx")   # 可成交限价
-    assert round(o.lmtPrice / 0.00005, 6) == int(round(o.lmtPrice / 0.00005))   # 符合 IDEALPRO minTick 0.00005
-    ib.whatif_state = OrderState()                            # 换汇试算被拒：要报出来，不能当成功
-    with pytest.raises(ia._Skip, match="whatif_error"):
-        g.convert("AUD", "USD", 495.7, "oi:fx", dry_run=True)
-    ib.whatif_state = OrderState(commission=2.88, warningText="")
-    g.convert("AUD", "USD", 495.7, "oi:fx", dry_run=True)
-    assert ib.calls[-1][2].totalQuantity == 495.0               # 数量取整
-    out = g.convert("AUD", "USD", 495.0, "oi:fx", dry_run=False)
-    assert ib.calls[-1][0] == "placeOrder" and out["status"] == "PreSubmitted" and out["pair"] == "AUD.USD"
-    with pytest.raises(ia._Skip):
-        g.convert("JPY", "USD", 1.0, "oi:fx", dry_run=False)
 
 
 class _Agent:
@@ -987,12 +941,7 @@ def test_reconcile_books_broker_confirmed_negative_cash_without_halting(home, mo
     assert pm.find_holding("SCHD")["units"] == 3.0 and out["cash_drift"] == {}
 
 
-def test_gateway_buying_power_and_reverse_pair(monkeypatch):
+def test_gateway_buying_power(monkeypatch):
     monkeypatch.setattr("openinvest.utils.fx.get_fx_rate", lambda a, b="CNY", as_of_date=None: 0.7 if (a, b) == ("AUD", "USD") else 1 / 0.7)
-    ib = FakeIB()
-    g = ia._IbGateway(ib, "U1")
+    g = ia._IbGateway(FakeIB(), "U1")
     assert g.buying_power_usd() == pytest.approx(500 * 0.7)    # AvailableFunds AUD 500 → USD
-    out = g.convert("USD", "AUD", 103.0, "oi:fx-back", dry_run=True)   # 盈透只挂 AUD.USD：反方向也要找得到
-    _, pair, o = ib.calls[-1]
-    assert pair.localSymbol == "AUD.USD" and (o.action, o.totalQuantity) == ("BUY", float(int(103 / 0.7)))
-    assert round(o.lmtPrice / 0.00005, 6) == int(round(o.lmtPrice / 0.00005)) and out["side"] == "BUY"

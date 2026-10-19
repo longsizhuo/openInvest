@@ -260,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
              "给独立盈透 INVEST_HOME 的 cron 用；输出 JSON。",
     )
     p.add_argument("phase", choices=["pick", "decide", "submit", "reconcile", "daily", "committee", "status",
-                                      "news", "news_check", "brief", "convert"])
+                                      "news", "news_check", "brief"])
     p.add_argument("--force", action="store_true", help="pick 不等周一，现在就重选名单")
     p.add_argument("--picks", help='pick：常驻会话自己写的名单 JSON {"picks":[{"symbol","why"}],"note"}（不调 LLM）')
     p.add_argument("--orders", help='decide：常驻会话自己写的订单 JSON {"orders":[{"symbol","side","usd","why"}],"note"}（不调 LLM）')
@@ -271,9 +271,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--symbols", help="news：逗号分隔的标的（默认名单 + 持仓 + SPY）")
     p.add_argument("--days", type=int, default=2, help="news：回看天数")
     p.add_argument("--article", help="news：PROVIDER:ID 取一篇正文")
-    p.add_argument("--from", dest="from_ccy", help="convert：卖出的币种（如 USD）")
-    p.add_argument("--to", dest="to_ccy", help="convert：买入的币种（如 AUD）")
-    p.add_argument("--amount", type=float, help="convert：卖出币种的金额")
     p.set_defaults(func=cmd_ibkr_autopilot)
 
     # ============ 写操作子命令（Agent 用） ============

@@ -96,7 +96,6 @@ def cmd_ibkr_autopilot(args: argparse.Namespace) -> None:
         "news": [("news", lambda: ibkr_autopilot.news(syms, days=args.days, article=args.article))],
         "news_check": [("news_check", ibkr_autopilot.news_check)],
         "brief": [("brief", lambda: ibkr_autopilot.brief(args.kind))],
-        "convert": [("convert", lambda: ibkr_autopilot.convert(args.from_ccy or "", args.to_ccy or "", args.amount))],
     }
     if args.phase in ("daily", "committee"):
         from openinvest.jobs import daily_report, verdict_review
