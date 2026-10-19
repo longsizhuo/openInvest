@@ -266,7 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--orders", help='decide：常驻会话自己写的订单 JSON {"orders":[{"symbol","side","usd","why"}],"note"}（不调 LLM）')
     p.add_argument("--orders-file", help="decide：从文件读订单 JSON（常驻会话推荐，免 shell 引号）")
     p.add_argument("--picks-file", help="pick：从文件读名单 JSON")
-    p.add_argument("--batch", type=int, default=1, help="decide / submit 批次：1=开盘前，2–4=盘中追加（每天最多 4 批）")
+    p.add_argument("--batch", type=int, default=1, help="decide / submit 批次：1=当天第一批，2,3…=追加（上限 ibkr.max_batches_per_day，默认 4）")
     p.add_argument("--kind", choices=["decide", "pick"], default="decide", help="brief：看哪一步的上下文")
     p.add_argument("--symbols", help="news：逗号分隔的标的（默认名单 + 持仓 + SPY）")
     p.add_argument("--days", type=int, default=2, help="news：回看天数")

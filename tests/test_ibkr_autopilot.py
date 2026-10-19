@@ -874,11 +874,11 @@ def test_session_orders_json_and_intraday_batch(home, monkeypatch):
     assert ia.decide(TODAY, batch=2, orders_json='{"orders": []}')["reason"] == "already_decided"
 
 
-def test_session_picks_json(home, monkeypatch):
+def test_session_picks_json_any_day(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home, targets=("GLDM",))
     monkeypatch.setattr(ia, "_ticker_info", lambda s: _INFO[s])
-    out = ia.pick(TODAY, picks_json=json.dumps({"picks": [{"symbol": "VGSH", "why": "会话自己选的"}], "note": "x"}))
+    out = ia.pick("2026-10-21", picks_json=json.dumps({"picks": [{"symbol": "VGSH", "why": "会话自己选的"}], "note": "x"}))   # 周三也能换
     assert out["status"] == "ok" and [a["symbol"] for a in out["picks"]] == ["VGSH"]
 
 
@@ -926,6 +926,11 @@ def test_batch_limit_and_orders_file_cli(home, monkeypatch, tmp_path, capfd):
     _enable(monkeypatch)
     _seed(home)
     assert ia.decide(TODAY, batch=5, orders_json='{"orders": []}')["reason"].startswith("batch_over_limit")
+    monkeypatch.setenv("INVEST_IBKR_MAX_BATCHES_PER_DAY", "10")              # 运营者可调高
+    reset_config()
+    assert ia.decide(TODAY, batch=5, orders_json='{"orders": []}')["status"] == "ok"
+    monkeypatch.setenv("INVEST_IBKR_MAX_BATCHES_PER_DAY", "4")
+    reset_config()
     assert ia.submit(TODAY, broker=FakeBroker(), batch=0)["reason"].startswith("batch_over_limit")
     f = tmp_path / "orders.json"
     f.write_text(json.dumps({"orders": [{"symbol": "QQQM", "side": "BUY", "usd": 50, "why": "文件交单"}]}), encoding="utf-8")

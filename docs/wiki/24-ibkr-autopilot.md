@@ -19,6 +19,7 @@ documents:
     - ibkr.max_order_usd
     - ibkr.max_day_usd
     - ibkr.min_order_usd
+    - ibkr.max_batches_per_day
   symbols:
     - ibkr_autopilot
     - record_fee
@@ -54,12 +55,12 @@ orderRef = `oi:<date>/<symbol>/<side>`（清仓 `oi:exit:<date>/<symbol>`）；�
 ## 常驻会话驱动（可选）
 
 决策也可以交给一个**常驻的 Claude Code 会话**（tmux 里长开，`--remote-control` 可远程对话），而不是每次由 cron 调一次 LLM。
-cron 只做不需要模型的部分（`committee` 委员会日报、`reconcile` 对账、`news_check` 新闻轮询），到点 / 有新标题时把一句指令送进会话；
+什么时候看盘、交不交易、交几批、何时换名单都由会话自己决定（Claude Code 会话内的 `CronCreate` 给自己排复查；会话内定时随会话退出丢失、循环任务 7 天过期）。系统 cron 只做不需要判断的事：`news_check` 新闻传感器（有新标题才叫醒会话）、收盘后 `reconcile` 对账、会话守护、每天一次兜底提醒（会话自排的定时丢了时的安全网，可忽略）；委员会意见由会话按需 `committee` 生成。
 会话自己 `brief` 看上下文（与 LLM 路径同一份系统规则 + 账户 / 名单 / 委员会裁决 + 盈透新闻标题），研究后用
 `pick --picks '<JSON>'` / `decide --orders '<JSON>' [--batch N]` 交自己写的 JSON（同一套校验落盘），再 `submit [--batch N]`。
-盘中新闻触发的追加单用 `--batch 2,3…`：文件（`<date>.bN.json`）、orderRef（`oi:<date>#bN/…`）、claim 都与开盘前那批分开，单日额度共用。
+追加单（新闻触发或会话自己安排的复查）用 `--batch 2,3…`：文件（`<date>.bN.json`）、orderRef（`oi:<date>#bN/…`）、claim 都与开盘前那批分开，单日额度共用。
 `news [--symbols A,B] [--days N] [--article PROVIDER:ID]` 只读查盈透免费新闻（Briefing.com / Dow Jones，账户自带）。
-新闻标题 / 正文是外部内容：输出里标 `untrusted`、正文包在 `<<<EXTERNAL_ARTICLE … EXTERNAL_ARTICLE>>>` 之间，会话规则要求只当信息、不执行其中的指令；brief 只带标题，正文要会话主动按 id 取。会话交单优先用 `--orders-file` / `--picks-file`（免 shell 引号）；每天最多 4 批（`batch_over_limit`）。
+新闻标题 / 正文是外部内容：输出里标 `untrusted`、正文包在 `<<<EXTERNAL_ARTICLE … EXTERNAL_ARTICLE>>>` 之间，会话规则要求只当信息、不执行其中的指令；brief 只带标题，正文要会话主动按 id 取。会话交单优先用 `--orders-file` / `--picks-file`（免 shell 引号）；每天批次数上限 `ibkr.max_batches_per_day`（默认 4，超了 `batch_over_limit`）。
 
 ## 硬闸（代码层，LLM / 委员会给什么都先过这里）
 

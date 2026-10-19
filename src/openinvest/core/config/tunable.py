@@ -265,6 +265,7 @@ class IbkrConfig:
     max_order_usd: float = 100.0                # 单笔上限
     max_day_usd: float = 150.0                  # 单日累计上限（含已挂未成交 + 当日已成交）
     min_order_usd: float = 20.0                 # 小于它不下（每单佣金最低 USD 0.35，太小的单佣金占比过高）
+    max_batches_per_day: int = 4                # 每天最多几批订单（1 = 第一批，之后盘中追加）：防失控 / 被外部内容诱导反复下单
 
 
 @dataclass(frozen=True)
