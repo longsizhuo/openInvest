@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.32.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.31.0...invest-skill-v0.32.0) (2026-10-19)
+
+
+### Features
+
+* **autopilot:** IBKR live autopilot — LLM picks and trades US stocks/ETFs via Web API OAuth under hard caps ([#522](https://github.com/longsizhuo/openInvest/issues/522)) ([348998e](https://github.com/longsizhuo/openInvest/commit/348998e3a85d2c3675355333b5b42268c8d9513e))
+* **autopilot:** IBKR via IB Gateway — whole shares, resident-session driver, IBKR news ([#526](https://github.com/longsizhuo/openInvest/issues/526)) ([b719dc2](https://github.com/longsizhuo/openInvest/commit/b719dc2787a5dae254749ce123c0483c35f91aae))
+
+
+### Bug Fixes
+
+* **autopilot:** IBKR cash-account FX — no pre-conversion, broker-confirmed negative cash ([#530](https://github.com/longsizhuo/openInvest/issues/530)) ([f714453](https://github.com/longsizhuo/openInvest/commit/f714453dd82d05d2d800f3ebcb841ece1ef8aae0))
+
 ## [0.31.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.30.0...invest-skill-v0.31.0) (2026-10-19)
 
 
