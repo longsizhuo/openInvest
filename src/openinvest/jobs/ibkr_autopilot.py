@@ -310,8 +310,9 @@ def _store_dir(name: str):
 
 def _check_tradable(symbol: str, info: Dict[str, Any]) -> Optional[str]:
     """None = 可以；否则返回拒绝原因。info = yfinance Ticker.info。"""
-    if not re.fullmatch(r"[A-Z]{1,5}(\.[A-Z])?", symbol):
-        return "not_us_ticker"
+    if not re.fullmatch(r"[A-Z]{1,5}", symbol):
+        # 分级股 BRK.B：盈透侧代码写作 "BRK B"，持仓 / 对账 key 对不上会被当成名单外持仓清仓 → 直接不收
+        return "dotted_ticker_unsupported" if re.fullmatch(r"[A-Z]{1,5}\.[A-Z]", symbol) else "not_us_ticker"
     if str(info.get("quoteType") or "").upper() not in ("EQUITY", "ETF"):
         return "not_stock_or_etf"
     if str(info.get("currency") or "").upper() != "USD":
@@ -373,7 +374,10 @@ def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dic
     ok: List[Dict[str, Any]] = []
     rejected: List[Dict[str, str]] = []
     for p in data["picks"]:
-        sym = str((p or {}).get("symbol") or "").strip().upper()
+        p = {"symbol": p} if isinstance(p, str) else p   # LLM 偶尔只给代码列表
+        if not isinstance(p, dict):
+            continue
+        sym = str(p.get("symbol") or "").strip().upper()
         if not sym or any(a["symbol"] == sym for a in ok):
             continue
         if len(ok) >= _MAX_PICKS:
@@ -637,6 +641,7 @@ def _submit(b, today: str, cfg) -> Dict[str, Any]:
         if not cfg.dry_run and not pm.store.state_claim(_SRC, key):
             skipped.append({"symbol": sym, "reason": "already_done_today"})
             continue
+        sent = False   # 单一旦发出，之后任何异常都不 unclaim（ADR-016：下单后不 unclaim）
         try:
             ref = _ref_price(pm, sym, today)
             qty, lmt = _size(a, ref, usd_cash, positions.get(sym, 0.0),
@@ -652,12 +657,13 @@ def _submit(b, today: str, cfg) -> Dict[str, Any]:
                     raise _Skip(f"whatif_error: {w['error']}", terminal=True)
                 row.update(dry_run=True, commission=w.get("commission"), warning=w.get("warning"))
             else:
+                sent = True
                 try:
                     r = b.place(conid, a["side"], qty, lmt, a["ref"])
                 except Exception as e:  # noqa: BLE001 — 被拒 / 确认问题不在白名单：单没下，终局
                     raise _Skip(f"rejected: {e}", terminal=True) from e
                 row.update(status=r.get("status"), order_id=r.get("order_id"))
-            used += qty * (lmt if a["side"] == "BUY" else ref)
+            used += qty * lmt   # 与 _used_today 对挂单的口径一致（按限价）
             if a["side"] == "BUY":
                 usd_cash -= qty * lmt
             placed.append(row)
@@ -666,11 +672,11 @@ def _submit(b, today: str, cfg) -> Dict[str, Any]:
             if not s.terminal and not cfg.dry_run:
                 pm.store.state_unclaim(_SRC, key)
             skipped.append({"symbol": sym, "reason": s.reason})
-        except Exception as e:  # noqa: BLE001 — 下单前失败 → 没下 → unclaim 可重试
-            if not cfg.dry_run:
+        except Exception as e:  # noqa: BLE001 — 下单前失败 → 没下 → unclaim 可重试；已发出 → 留 claim
+            if not cfg.dry_run and not sent:
                 pm.store.state_unclaim(_SRC, key)
-            skipped.append({"symbol": sym, "reason": f"error: {e}"})
-            log.warning(f"[ibkr] {sym} 失败: {e}")
+            skipped.append({"symbol": sym, "reason": f"{'error_after_send' if sent else 'error'}: {e}"})
+            log.warning(f"[ibkr] {sym} 失败（{'已发出，保留 claim' if sent else '未发出'}）: {e}")
 
     out = {"status": "ok", "date": today, "dry_run": cfg.dry_run, "fx": fx, "placed": placed, "skipped": skipped,
            "used_usd": round(used, 2)}
@@ -800,6 +806,12 @@ def status(*, broker=None) -> Dict[str, Any]:
     finally:
         if broker is None:
             b.close()
+
+
+def notify_failure(phase: str, problems: Dict[str, Any]) -> None:
+    """CLI 用：某段返回 error / halted 或抛异常时发邮件——cron 只看退出码，没人盯日志。"""
+    _notify(f"⚠️ 盈透 autopilot {phase} 没跑成",
+            [f"{k}: {json.dumps(v, ensure_ascii=False, default=str)[:500]}" for k, v in problems.items()])
 
 
 def run(phase: str = "submit", **kw) -> Dict[str, Any]:

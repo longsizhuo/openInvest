@@ -46,6 +46,8 @@ documents:
 
 随时查当前情况：`INVEST_HOME=<盈透 home> openinvest ibkr_autopilot status`（只读，不下单不记账；盈透连不上也返回本地账本 / 名单 / 当日订单 / STOP）。
 
+任一段返回 `error` / `halted` 或抛异常 → CLI 发邮件并以退出码 1 结束（cron 不会静默失败）；单子一旦发出，之后出任何异常都保留 claim 不重下。
+
 `openinvest ibkr_autopilot daily` = pick → `daily_report`（不发邮件）→ decide → submit → `verdict_review`，各段隔离失败。参考价用 yfinance 最近收盘（≤5 个自然日，不能是兜底陈旧价）。
 orderRef = `oi:<date>/<symbol>/<side>`（清仓 `oi:exit:<date>/<symbol>`）；下单邮件逐单附 LLM 的理由。
 
@@ -53,7 +55,7 @@ orderRef = `oi:<date>/<symbol>/<side>`（清仓 `oi:exit:<date>/<symbol>`）；�
 
 - `ibkr.enabled` 关 → no-op；金额键不合法 → 一单不下；`INVEST_HOME/STOP` 存在 → submit 不下单（人看过删掉才恢复；reconcile 照常记账）
 - OAuth 会话的账户列表（`portfolio_accounts`）里没有 `ibkr.account` → 什么都不做
-- 只交易 target_assets 里的标的（清仓例外：卖的是券商已有持仓）；选股校验：美股代码、`EQUITY/ETF`、USD、美国交易所、股价 ≥ $5、3 个月日均成交额 ≥ $2000 万、名字不含杠杆 / 反向关键词
+- 只交易 target_assets 里的标的（清仓例外：卖的是券商已有持仓）；选股校验：美股代码、`EQUITY/ETF`、USD、美国交易所、股价 ≥ $5、3 个月日均成交额 ≥ $2000 万、名字不含杠杆 / 反向关键词、不收带点号的分级股（`BRK.B` 在盈透侧写作 `BRK B`，持仓 key 会对不上）
 - 单笔 ≤ `ibkr.max_order_usd`；当日累计（本程序已挂未成交 + 当日已成交，按 orderRef `oi:` 前缀识别）≤ `ibkr.max_day_usd`；< `ibkr.min_order_usd` 不下（整笔清仓例外）
 - 只挂限价单；买入 ≤ 券商 USD 现金 − 已挂买单 − 1（留佣金）；卖出 ≤ 券商持仓（现金账户本身不能融资 / 做空）；碎股按 4 位小数向下取整
 - 合约查不到 / 有歧义 → `not_tradable_at_ibkr`；被券商拒（`Inactive` / `Cancelled`）→ 终局跳过，原因进当日邮件

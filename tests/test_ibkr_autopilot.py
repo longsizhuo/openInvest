@@ -288,6 +288,21 @@ def test_live_buy_capped_limit_order_and_idempotent(home, monkeypatch):
     assert len(b.placed) == 1
 
 
+def test_exception_after_send_keeps_claim(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _orders(home, [("QQQM", "BUY", 60)])
+    _prices(monkeypatch, {"QQQM": 200.0})
+    b = FakeBroker()
+    real_place = b.place
+    monkeypatch.setattr(b, "place", lambda *a: (real_place(*a), None)[1])   # 单发出去了，回包是 None → 后续 .get 抛错
+    out = ia.submit(TODAY, broker=b)
+    assert out["skipped"][0]["reason"].startswith("error_after_send") and len(b.placed) == 1
+    b.open.clear()
+    assert ia.submit(TODAY, broker=b)["skipped"] == [{"symbol": "QQQM", "reason": "already_done_today"}]
+    assert len(b.placed) == 1                                # 没有因为 unclaim 二次下单
+
+
 def test_day_cap_shrinks_later_orders(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
@@ -603,6 +618,7 @@ def test_check_tradable_rules():
     assert ia._check_tradable("PENY", _INFO["PENY"]) == "price_below_min"
     assert ia._check_tradable("TINY", _INFO["TINY"]) == "illiquid"
     assert ia._check_tradable("600519.SS", {}) == "not_us_ticker"
+    assert ia._check_tradable("BRK.B", {**_INFO["QQQM"]}) == "dotted_ticker_unsupported"
     assert ia._check_tradable("BHP", {**_INFO["QQQM"], "exchange": "ASX"}) == "not_us_listed"
     assert ia._check_tradable("SHOP", {**_INFO["QQQM"], "currency": "CAD"}) == "not_usd"
     assert ia._check_tradable("BTC", {**_INFO["QQQM"], "quoteType": "CRYPTOCURRENCY"}) == "not_stock_or_etf"
@@ -626,6 +642,14 @@ def test_pick_validates_and_replaces_targets(home, monkeypatch):
     assert "_why" not in targets[0]
     assert json.loads((home.root / ".ibkr" / "picks" / f"{TODAY}.json").read_text())["previous"] == ["GLDM"]
     assert "账户背景：测试" in agent.prompts[0] and "USD 300.00" in agent.prompts[0]
+
+
+def test_pick_accepts_bare_symbol_list_and_skips_junk(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, targets=("GLDM",))
+    monkeypatch.setattr(ia, "_ticker_info", lambda s: _INFO[s])
+    out = ia.pick(TODAY, agent=_Agent('{"picks": ["QQQM", 5, null, {"symbol": "VGSH", "why": "x"}]}'))
+    assert out["status"] == "ok" and [a["symbol"] for a in out["picks"]] == ["QQQM", "VGSH"]
 
 
 def test_pick_all_invalid_keeps_targets(home, monkeypatch):
@@ -708,6 +732,8 @@ def test_cli_daily_runs_stages_in_order_and_isolates_failure(monkeypatch, capfd)
     monkeypatch.setattr(ia, "decide", lambda: calls.append(("decide",)) or {"status": "ok"})
     monkeypatch.setattr(ia, "submit", lambda: (_ for _ in ()).throw(ConnectionRefusedError("gateway down")))
     monkeypatch.setattr(vr, "run", lambda **kw: calls.append(("verdict_review",)) or {"status": "ok"})
+    alerts = []
+    monkeypatch.setattr(ia, "notify_failure", lambda phase, problems: alerts.append((phase, sorted(problems))))
     monkeypatch.setattr(sys, "stdout", sys.stdout)
     monkeypatch.setattr(sys, "argv", ["openinvest", "ibkr_autopilot", "daily"])
     with pytest.raises(SystemExit) as e:
@@ -716,6 +742,22 @@ def test_cli_daily_runs_stages_in_order_and_isolates_failure(monkeypatch, capfd)
     assert calls == [("pick", False), ("daily_report", False), ("decide",), ("verdict_review",)]   # 日报绝不发邮件
     out = json.loads(capfd.readouterr().out)
     assert out["submit"]["status"] == "error" and "gateway down" in out["submit"]["error"]
+    assert alerts == [("daily", ["submit"])]
+
+
+def test_cli_alerts_on_error_status_without_exception(monkeypatch, capfd):
+    alerts = []
+    monkeypatch.setattr(ia, "notify_failure", lambda phase, problems: alerts.append((phase, sorted(problems))))
+    monkeypatch.setattr(ia, "reconcile", lambda: {"status": "error", "reason": "account_mismatch: 配置 'U1'，会话 ['U9']"})
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "argv", ["openinvest", "ibkr_autopilot", "reconcile"])
+    with pytest.raises(SystemExit) as e:
+        cli.main()
+    assert e.value.code == 1 and alerts == [("reconcile", ["reconcile"])]   # 不再静默退出 0
+    monkeypatch.setattr(ia, "reconcile", lambda: {"status": "ok"})
+    alerts.clear()
+    cli.main()                                                # 正常结束不报警、不退出
+    assert alerts == []
 
 
 def test_validate_orders_rejects_bad_amounts():
