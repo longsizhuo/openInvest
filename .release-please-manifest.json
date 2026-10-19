@@ -3,5 +3,6 @@
   "plugin/skills/invest": "0.31.0",
   "plugin/skills/invest-setup": "0.5.4",
   "skills/okf-frontmatter": "0.3.0",
-  "plugin/skills/invest-backup": "0.3.0"
+  "plugin/skills/invest-backup": "0.3.0",
+  "plugin/skills/invest-ibkr": "0.1.0"
 }

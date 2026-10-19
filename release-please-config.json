@@ -126,6 +126,17 @@
           "path": "SKILL.md"
         }
       ]
+    },
+    "plugin/skills/invest-ibkr": {
+      "release-type": "simple",
+      "component": "invest-ibkr-skill",
+      "package-name": "invest-ibkr-skill",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "SKILL.md"
+        }
+      ]
     }
   },
   "bump-minor-pre-major": true,
