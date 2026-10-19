@@ -48,6 +48,7 @@ documents:
 随时查当前情况：`INVEST_HOME=<盈透 home> openinvest ibkr_autopilot status`（只读，不下单不记账；盈透连不上也返回本地账本 / 名单 / 当日订单 / STOP）。
 
 任一段返回 `error` / `halted` 或抛异常 → CLI 发邮件并以退出码 1 结束（cron 不会静默失败）；单子一旦发出，之后出任何异常都保留 claim 不重下。
+文中的「邮件」都是默认通道：设了 `ibkr.notify_cmd`（如 `hermes send --to discord:<你> --quiet`）就改走那条命令（标题 + 正文从 stdin 进），命令失败才退回邮件。
 
 `openinvest ibkr_autopilot daily` = pick → `daily_report`（不发邮件）→ decide → submit → `verdict_review`，各段隔离失败。参考价用 yfinance 最近收盘（≤5 个自然日，不能是兜底陈旧价）。
 orderRef = `oi:<date>/<symbol>/<side>`（清仓 `oi:exit:<date>/<symbol>`）；下单邮件逐单附 LLM 的理由。

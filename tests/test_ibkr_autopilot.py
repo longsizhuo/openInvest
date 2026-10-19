@@ -193,6 +193,20 @@ def test_notify_escapes_html(monkeypatch):
     assert sent["plain_body"] == '<img src=x onerror=alert(1)> & "x"'
 
 
+def test_notify_cmd_gets_stdin_and_falls_back_to_email(monkeypatch, tmp_path):
+    sent = {}
+    monkeypatch.setattr("openinvest.services.notifier.send_email_html", lambda **kw: sent.update(kw))
+    out = tmp_path / "msg"
+    monkeypatch.setenv("INVEST_IBKR_NOTIFY_CMD", f"tee {out}")
+    reset_config()
+    ia._notify("标题", ["$(touch pwned); `id`"])
+    assert out.read_text() == "标题\n\n$(touch pwned); `id`" and sent == {}   # stdin 进，不经 shell
+    monkeypatch.setenv("INVEST_IBKR_NOTIFY_CMD", "false")
+    reset_config()
+    ia._notify("停手", ["x"])
+    assert sent["subject"] == "停手"                                         # 推送失败退回邮件
+
+
 def test_disabled_is_noop(home):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])

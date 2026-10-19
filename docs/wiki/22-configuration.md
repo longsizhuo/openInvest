@@ -24,6 +24,7 @@ documents:
     - ibkr.max_day_usd
     - ibkr.min_order_usd
     - ibkr.max_batches_per_day
+    - ibkr.notify_cmd
     - fund.confirm_lag_days
   symbols: []
 ---
@@ -77,6 +78,7 @@ LLM_MODEL=glm-4-flash
 | `ibkr.max_day_usd` | `float` (`150.0`) | 当日累计（已挂 + 已成交）硬上限（USD） |
 | `ibkr.min_order_usd` | `float` (`20.0`) | 小于它的单不下（整笔清仓例外；每单佣金最低约 USD 0.35） |
 | `ibkr.max_batches_per_day` | `int` (`4`) | 每天最多几批订单（第 1 批之后都是追加）：防失控 / 被外部内容诱导反复下单的刹车，运营者可调高；<1 → submit 一单不下 |
+| `ibkr.notify_cmd` | `str` (`""`) | 通知（名单 / 下单 / 停手 / 对不上 / 失败）改走这条命令：按空格切词直接执行（不经 shell），标题 + 空行 + 正文从 stdin 进，60 秒超时。例：`hermes send --to discord:<你> --quiet`（Hermes 会把消息同步进该私聊会话，可直接回复追问）。空，或命令失败 / 超时 → 照旧发邮件 |
 | `fund.confirm_lag_days` | `dict` (`{default: 1, qdii: 2, fof: 2}`) | 场外基金两段式（`place_fund_order`）下单后第几个交易日确认份额：预计确认日 = 定价日 T + lag，按基金类型取（QDII / FOF 从东方财富基金概况推断，取不到按 `default` 并在订单里标 `lag_source=default`）。改 `core/config/defaults.yaml` 的 `fund:` 段，只写想改的键（与内置默认深合并，如 `fund: {confirm_lag_days: {qdii: 3}}`）；dict 型，暂不进 API 白名单（ADR-017）、env 无效。见 [ADR-027](adr/027-ledger-activity-types.md) D5 |
 
 ### 运行时覆盖示例（以关闭集中度 Lens 为例）

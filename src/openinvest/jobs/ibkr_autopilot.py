@@ -31,6 +31,8 @@ import json
 import logging
 import math
 import re
+import shlex
+import subprocess
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -82,9 +84,17 @@ def _halt(reason: str) -> None:
 
 
 def _notify(subject: str, lines: List[str]) -> None:
+    body = "\n".join(lines)   # 含 LLM 写的理由 / 券商回的拒单文本 → 只走 stdin / 转义，不进 shell、不进裸 HTML
+    cmd = load_config().ibkr.notify_cmd
+    if cmd:
+        try:
+            subprocess.run(shlex.split(cmd), input=f"{subject}\n\n{body}", text=True, capture_output=True,
+                           timeout=60, check=True)
+            return
+        except Exception as e:  # noqa: BLE001 — 推送失败退回邮件，停手提醒不能丢
+            log.warning(f"[ibkr] notify_cmd 失败，改发邮件: {e}")
     try:
         from openinvest.services.notifier import send_email_html
-        body = "\n".join(lines)   # 含 LLM 写的理由 / 券商回的拒单文本 → HTML 版必须转义
         send_email_html(subject=subject, plain_body=body, html_body=f"<pre>{html.escape(body)}</pre>")
     except Exception as e:  # noqa: BLE001 — 通知失败不影响账本
         log.warning(f"[ibkr] 邮件发送失败: {e}")
