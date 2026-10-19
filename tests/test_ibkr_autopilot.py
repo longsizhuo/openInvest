@@ -481,7 +481,7 @@ def test_reconcile_books_fx_conversion_both_legs(home, monkeypatch):
     _seed(home, cash=0.0)
     store = home
     store.write("portfolio", "state", {"cash": {"USD": 0.0, "AUD": 500.0}, "holdings": [], "schema_version": 2}, "")
-    fx = _fill("AUD.USD", "SLD", 495.0, 0.7, "fx-1", fee=2.0, ref=f"oi:fx:{TODAY}/AUDUSD", sec="CASH")
+    fx = {**_fill("AUD.USD", "SLD", 495.0, 0.7, "fx-1", fee=2.0, ref=f"oi:fx:{TODAY}/AUDUSD", sec="CASH"), "commission_ccy": "USD"}
     b = FakeBroker(cash=round(495 * 0.7 - 2.0, 2), extra_cash={"AUD": 5.0}, fills=[fx])
     out = ia.reconcile(broker=b)
     assert out["status"] == "ok" and out["booked"][0]["fx"] == "AUD.USD"
@@ -552,6 +552,9 @@ class FakeIB:
         pos = lambda sym, sec, q: SimpleNamespace(contract=SimpleNamespace(symbol=sym, secType=sec), position=q)  # noqa: E731
         return [pos("QQQM", "STK", 0.495), pos("X", "OPT", 1), pos("ZERO", "STK", 0)]
 
+    def reqAllOpenOrders(self):
+        return self.openTrades()
+
     def openTrades(self):
         mk = lambda acct: Trade(contract=Stock("QQQM", "SMART", "USD"),  # noqa: E731
                                 order=Order(orderRef="oi:a", action="BUY", totalQuantity=0.5, lmtPrice=202.0, account=acct),
@@ -569,7 +572,7 @@ class FakeIB:
             Fill(Stock("QQQM", "SMART", "USD"), Execution(execId="e1", acctNumber="U1", side="BOT", shares=0.495,
                  price=201.5, orderRef="oi:a", time=t), CommissionReport(commission=0.35), t),
             Fill(fx, Execution(execId="e2", acctNumber="U1", side="SLD", shares=495, price=0.7, time=t),
-                 CommissionReport(commission=UNSET), t),
+                 CommissionReport(commission=2.88, currency="AUD"), t),
             Fill(Stock("SPY", "SMART", "USD"), Execution(execId="e3", acctNumber="U9", side="BOT", shares=1, price=1,
                  time=t), CommissionReport(), t)]
 
@@ -628,7 +631,8 @@ def test_gateway_read_mappings():
     assert [x["exec_id"] for x in f] == ["e1", "e2"]          # 别的账户的成交不要
     assert (f[0]["symbol"], f[0]["side"], f[0]["qty"], f[0]["commission"], f[0]["sec_type"], f[0]["date"]) == \
         ("QQQM", "BOT", 0.495, 0.35, "STK", "2026-10-20")
-    assert (f[1]["symbol"], f[1]["side"], f[1]["sec_type"], f[1]["commission"]) == ("AUD.USD", "SLD", "CASH", 0.0)   # 未设置佣金按 0
+    assert (f[1]["symbol"], f[1]["side"], f[1]["sec_type"], f[1]["commission"], f[1]["commission_ccy"]) == \
+        ("AUD.USD", "SLD", "CASH", 2.88, "AUD")                # 换汇佣金按券商回报的币种（AUD）
 
 
 def test_gateway_orders_whatif_and_rejection():
@@ -644,6 +648,9 @@ def test_gateway_orders_whatif_and_rejection():
         ("BUY", 0.495, "LMT", 202.0, "DAY", "U1", "oi:r", False)
     ib.whatif_state = OrderState()                            # 网关没回结果（被拒）
     assert g.whatif(cid, "BUY", 0.495, 202.0, "oi:r")["error"]
+    ib.whatif_state = OrderState(minCommission=1.0, maxCommission=1.2)   # 只给 min / max 佣金：也算成功
+    assert g.whatif(cid, "BUY", 1, 202.0, "oi:r")["error"] is None
+    ib.whatif_state = OrderState(commission=0.35, warningText="")
     assert g.place(cid, "SELL", 0.3, 89.1, "oi:s") == {"order_id": 123, "status": "PreSubmitted"}
     ib.status = "Inactive"
     with pytest.raises(RuntimeError, match="rejected Inactive No trading permissions"):
@@ -663,6 +670,13 @@ def test_gateway_fx_conversion(monkeypatch):
     _, pair, o = ib.calls[-1]
     assert out["dry_run"] is True and pair.localSymbol == "AUD.USD"
     assert (o.action, o.totalQuantity, o.orderType, o.lmtPrice, o.orderRef) == ("SELL", 495.0, "LMT", 0.693, "oi:fx")   # 可成交限价
+    assert round(o.lmtPrice / 0.00005, 6) == int(round(o.lmtPrice / 0.00005))   # 符合 IDEALPRO minTick 0.00005
+    ib.whatif_state = OrderState()                            # 换汇试算被拒：要报出来，不能当成功
+    with pytest.raises(ia._Skip, match="whatif_error"):
+        g.convert("AUD", "USD", 495.7, "oi:fx", dry_run=True)
+    ib.whatif_state = OrderState(commission=2.88, warningText="")
+    g.convert("AUD", "USD", 495.7, "oi:fx", dry_run=True)
+    assert ib.calls[-1][2].totalQuantity == 495.0               # 数量取整
     out = g.convert("AUD", "USD", 495.0, "oi:fx", dry_run=False)
     assert ib.calls[-1][0] == "placeOrder" and out["status"] == "PreSubmitted" and out["pair"] == "AUD.USD"
     with pytest.raises(ia._Skip):
@@ -940,3 +954,14 @@ def test_batch_limit_and_orders_file_cli(home, monkeypatch, tmp_path, capfd):
     cli.main()
     out = json.loads(capfd.readouterr().out)["decide"]
     assert out["batch"] == 2 and out["orders"][0]["why"] == "文件交单"
+
+
+def test_reconcile_books_commission_in_its_own_currency(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, cash=0.0)
+    home.write("portfolio", "state", {"cash": {"USD": 0.0, "AUD": 500.0}, "holdings": [], "schema_version": 2}, "")
+    fx = {**_fill("AUD.USD", "SLD", 495.0, 0.7, "fx-2", fee=2.88, sec="CASH"), "commission_ccy": "AUD"}
+    b = FakeBroker(cash=346.5, extra_cash={"AUD": round(5.0 - 2.88, 2)}, fills=[fx])
+    assert ia.reconcile(broker=b)["cash_drift"] == {}          # 换汇佣金扣在 AUD 上，不是 USD
+    pm = PortfolioManager(home)
+    assert pm.cash_amount("AUD") == pytest.approx(2.12) and pm.cash_amount("USD") == pytest.approx(346.5)

@@ -134,6 +134,7 @@ class _IbGateway:
     def connect(cls, acct: str, client_id: int = _CLIENT_ID) -> "_IbGateway":
         from ib_async import IB
         ib = IB()
+        ib.RequestTimeout = 30   # 默认 0 = 不设上限：网关半登录 / 等 IB Key 时 whatIf / qualify 会一直挂住 cron
         ib.connect("127.0.0.1", _PORT, clientId=client_id, timeout=20)
         return cls(ib, acct)
 
@@ -156,8 +157,9 @@ class _IbGateway:
                 if p.contract.secType == "STK" and float(p.position)}
 
     def open_orders(self) -> List[Dict[str, Any]]:
+        # reqAllOpenOrders：所有 clientId（含 TWS / 手机下的单）——status 用的 clientId 18 也要看得到 submit（17）挂的单
         out = []
-        for t in self.ib.openTrades():
+        for t in (self.ib.reqAllOpenOrders() or []):
             o = t.order
             if o.account and o.account != self.acct:
                 continue
@@ -179,7 +181,9 @@ class _IbGateway:
             out.append({"exec_id": e.execId, "sec_type": c.secType,
                         "symbol": c.localSymbol if c.secType == "CASH" else c.symbol,   # 换汇：AUD.USD
                         "side": "BOT" if e.side == "BOT" else "SLD", "qty": float(e.shares), "price": float(e.price),
-                        "commission": _finite(getattr(cr, "commission", 0)) or 0.0, "ref": str(e.orderRef or ""),
+                        "commission": _finite(getattr(cr, "commission", 0)) or 0.0,
+                        "commission_ccy": str(getattr(cr, "currency", "") or "USD").upper(),   # 换汇佣金是 AUD（实测）
+                        "ref": str(e.orderRef or ""),
                         "date": e.time.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")})
         return out
 
@@ -196,11 +200,20 @@ class _IbGateway:
         from ib_async import LimitOrder
         return LimitOrder(side, qty, lmt, tif="DAY", account=self.acct, orderRef=ref, outsideRth=False)
 
+    @staticmethod
+    def _whatif_result(st) -> Dict[str, Any]:
+        """whatIfOrder 被拒时 ib_async 回 [] / 空 OrderState；有时只给 min / max 佣金不给精确值，也算成功。"""
+        from ib_async import OrderState
+        fields = ("commission", "minCommission", "maxCommission")
+        got = isinstance(st, OrderState) and (any(_finite(getattr(st, k, None)) is not None for k in fields)
+                                             or str(getattr(st, "initMarginChange", "") or "") not in ("", str(1.7976931348623157e308)))
+        if not got:
+            return {"error": "whatIfOrder 没有回结果（权限 / 合约 / 碎股 / 价位被拒，看网关日志）"}
+        return {"commission": _finite(st.commission) or _finite(st.maxCommission), "warning": st.warningText or None,
+                "error": None}
+
     def whatif(self, conid: int, side: str, qty: float, lmt: float, ref: str) -> Dict[str, Any]:
-        st = self.ib.whatIfOrder(self._contracts[conid], self._limit(side, qty, lmt, ref))
-        if not st or (_finite(getattr(st, "commission", None)) is None and not getattr(st, "warningText", "")):
-            return {"error": "whatIfOrder 没有回结果（权限 / 合约 / 碎股被拒，看网关日志）"}
-        return {"commission": _finite(st.commission), "warning": st.warningText or None, "error": None}
+        return self._whatif_result(self.ib.whatIfOrder(self._contracts[conid], self._limit(side, qty, lmt, ref)))
 
     def _send(self, contract, order) -> Dict[str, Any]:
         """只有网关明确回执（PreSubmitted / Submitted / Filled）才算下单成功；被拒或等不到明确状态都抛错。
@@ -233,15 +246,17 @@ class _IbGateway:
         pair = q[0] if q else None
         if pair is None or isinstance(pair, list):
             raise _Skip(f"no_fx_pair_{src}_{dst}", terminal=True)
+        # 价位：IDEALPRO 的 minTick 0.00005 → 取 4 位小数（0.0001 是它的整数倍）；数量取整（外汇单通常要整数）
         if pair.symbol == src:   # AUD.USD：卖 base（AUD），数量以 AUD 计
-            side, qty, lmt = "SELL", round(amount_src, 2), round(rate * (1 - _FX_BAND), 5)
+            side, qty, lmt = "SELL", float(math.floor(amount_src)), round(rate * (1 - _FX_BAND), 4)
         else:                    # USD.AUD：买 base（USD）
-            side, qty, lmt = "BUY", round(amount_src * rate, 2), round(1 / rate * (1 + _FX_BAND), 5)
+            side, qty, lmt = "BUY", float(math.floor(amount_src * rate)), round(1 / rate * (1 + _FX_BAND), 4)
         order = self._limit(side, qty, lmt, ref)
         if dry_run:
-            st = self.ib.whatIfOrder(pair, order)
-            return {"dry_run": True, "pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt,
-                    "warning": getattr(st, "warningText", "") or None}
+            w = self._whatif_result(self.ib.whatIfOrder(pair, order))
+            if w.get("error"):
+                raise _Skip(f"whatif_error: {w['error']}", terminal=True)
+            return {"dry_run": True, "pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt, **w}
         return {"pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt, **self._send(pair, order)}
 
 
@@ -842,7 +857,7 @@ def _reconcile(b) -> Dict[str, Any]:
         fee = f["commission"]
         if 0 < fee < 1e6:
             try:
-                pm.record_fee(round(fee, 4), "USD", sym, trade_date=f["date"], source=_SRC,
+                pm.record_fee(round(fee, 4), f.get("commission_ccy") or "USD", sym, trade_date=f["date"], source=_SRC,
                               note="IBKR commission", idempotency_key=f"ibkr-fee-{f['exec_id']}")
             except Exception as ex:  # noqa: BLE001
                 problems.append(f"{sym} 佣金记账失败: {ex}")
