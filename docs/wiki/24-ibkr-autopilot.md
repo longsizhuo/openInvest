@@ -55,9 +55,9 @@ orderRef = `oi:<date>/<symbol>/<side>`（清仓 `oi:exit:<date>/<symbol>`）；�
 
 - `ibkr.enabled` 关 → no-op；金额键不合法 → 一单不下；`INVEST_HOME/STOP` 存在 → submit 不下单（人看过删掉才恢复；reconcile 照常记账）
 - 网关 `managedAccounts()` 里没有 `ibkr.account` → 什么都不做
-- 只交易 target_assets 里的标的（清仓例外：卖的是券商已有持仓）；选股校验：美股代码、`EQUITY/ETF`、USD、美国交易所、股价 ≥ $5、3 个月日均成交额 ≥ $2000 万、名字不含杠杆 / 反向关键词、不收带点号的分级股（`BRK.B` 在盈透侧写作 `BRK B`，持仓 key 会对不上）
+- 只交易 target_assets 里的标的（清仓例外：卖的是券商已有持仓）；选股校验：美股代码、`EQUITY/ETF`、USD、美国交易所、股价 ≥ $5 且 ≤ 单笔上限（只能整股，一股贵过上限就买不了：`price_above_order_cap`）、3 个月日均成交额 ≥ $2000 万、名字不含杠杆 / 反向关键词、不收带点号的分级股（`BRK.B` 在盈透侧写作 `BRK B`，持仓 key 会对不上）
 - 单笔 ≤ `ibkr.max_order_usd`；当日累计（本程序已挂未成交 + 当日已成交，按 orderRef `oi:` 前缀识别）≤ `ibkr.max_day_usd`；< `ibkr.min_order_usd` 不下（整笔清仓例外）
-- 只挂限价单；买入 ≤ 券商 USD 现金 − 已挂买单 − 1（留佣金）；卖出 ≤ 券商持仓（现金账户本身不能融资 / 做空）；碎股按 4 位小数向下取整
+- 只挂限价单；买入 ≤ 券商 USD 现金 − 已挂买单 − 1（留佣金）；卖出 ≤ 券商持仓（现金账户本身不能融资 / 做空）；**只下整股**——盈透 TWS API 不收碎股单（实测 error 10243 "Fractional-sized order cannot be placed via API"），数量向下取整，凑不够一股不下（`share_price_above_cap` / `too_small`）；卖出至少能卖 1 股，即使这一股已涨过单笔上限（卖出只降风险，不能让持仓卖不掉）
 - 合约查不到 / 有歧义 → `not_tradable_at_ibkr`；被券商拒（`Inactive` / `Cancelled`）→ 终局跳过，原因进当日邮件
 
 ## 幂等（ADR-016）

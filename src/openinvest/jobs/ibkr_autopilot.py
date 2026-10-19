@@ -144,8 +144,9 @@ class _IbGateway:
         return list(self.ib.managedAccounts())
 
     def cash(self) -> Dict[str, float]:
+        # 分币种现金：TWS 账户更新给 "CashBalance"，网关的账户汇总合并进来的是 "$LEDGER-CashBalance"（实测 10.50）
         return {v.currency.upper(): _num(v.value) for v in self.ib.accountValues(self.acct)
-                if v.tag == "CashBalance" and v.currency and v.currency.upper() != "BASE"}
+                if v.tag in ("CashBalance", "$LEDGER-CashBalance") and v.currency and v.currency.upper() != "BASE"}
 
     def positions(self) -> Dict[str, float]:
         return {p.contract.symbol: float(p.position) for p in self.ib.positions(self.acct)
@@ -315,8 +316,8 @@ def _store_dir(name: str):
 # ---------------------------------------------------------------- pick
 
 
-def _check_tradable(symbol: str, info: Dict[str, Any]) -> Optional[str]:
-    """None = 可以；否则返回拒绝原因。info = yfinance Ticker.info。"""
+def _check_tradable(symbol: str, info: Dict[str, Any], max_price: Optional[float] = None) -> Optional[str]:
+    """None = 可以；否则返回拒绝原因。info = yfinance Ticker.info；max_price = 单笔上限（只能整股，一股贵过它就买不了）。"""
     if not re.fullmatch(r"[A-Z]{1,5}", symbol):
         # 分级股 BRK.B：盈透侧代码写作 "BRK B"，持仓 / 对账 key 对不上会被当成名单外持仓清仓 → 直接不收
         return "dotted_ticker_unsupported" if re.fullmatch(r"[A-Z]{1,5}\.[A-Z]", symbol) else "not_us_ticker"
@@ -332,6 +333,8 @@ def _check_tradable(symbol: str, info: Dict[str, Any]) -> Optional[str]:
     price = float(info.get("regularMarketPrice") or info.get("previousClose") or 0)
     if price < _MIN_PRICE:
         return "price_below_min"
+    if max_price is not None and price > max_price:
+        return "price_above_order_cap"
     vol = float(info.get("averageDailyVolume3Month") or info.get("averageVolume") or 0)
     if price * vol < _MIN_DOLLAR_VOL:
         return "illiquid"
@@ -349,7 +352,8 @@ _PICK_SYSTEM = """你在管理一个盈透（Interactive Brokers）实盘现金�
 硬限制（代码会逐条校验，不满足的直接丢掉，不要浪费名额）：
 - 最多 5 只；美股上市的普通股或 ETF，USD 计价，股价 ≥ $5，3 个月日均成交额 ≥ $2000 万
 - 不要杠杆 / 反向 / 做空类 ETF
-- 现金账户：不能融资、不能做空；单笔 ≤ USD {max_order}，单日 ≤ USD {max_day}；支持碎股；每单佣金最低约 USD 0.35
+- **只能整股**（盈透 API 不收碎股单）：股价必须 ≤ USD {max_order}，否则一股都买不了——优先选单价低的宽基 / 行业 ETF
+- 现金账户：不能融资、不能做空；单笔 ≤ USD {max_order}，单日 ≤ USD {max_day}；每单佣金约 USD 1
 
 你可以调用工具查历史行情、多周期技术面和宏观快照。只输出一个 JSON，不要别的文字：
 {{"picks": [{{"symbol": "代码", "why": "一句话理由"}}], "note": "本周整体思路，一两句"}}"""
@@ -395,7 +399,7 @@ def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dic
         except Exception as e:  # noqa: BLE001
             rejected.append({"symbol": sym, "reason": f"no_info: {e}"})
             continue
-        why = _check_tradable(sym, info)
+        why = _check_tradable(sym, info, cfg.max_order_usd)
         if why:
             rejected.append({"symbol": sym, "reason": why})
             continue
@@ -437,7 +441,7 @@ _DECIDE_SYSTEM = """你在管理一个盈透（Interactive Brokers）实盘现�
 - 投资委员会（同一个模型按宏观 / 量化 / 风控 / CIO 四个角色出裁决，规则偏保守）给了今天的意见，**只是参考**，你可以不同意
 - 硬限制（代码会再钳一遍）：单笔 ≤ USD {max_order}，当天合计 ≤ USD {max_day}，单笔 < USD {min_order} 不下；
   现金账户不能融资 / 做空，卖出不超过持仓
-- 每单佣金最低约 USD 0.35，别为了动而动；没有把握就不下单（orders 留空）
+- 只能整股（盈透 API 不收碎股单，金额会向下取整到整股，凑不够一股就不下）；每单佣金约 USD 1，别为了动而动；没有把握就不下单（orders 留空）
 - 订单是当日限价单（买 = 昨收 +1%，卖 = 昨收 −1%），开盘跳空超过就不成交
 
 你可以调用工具查历史行情、多周期技术面和宏观快照。只输出一个 JSON，不要别的文字：
@@ -541,22 +545,26 @@ def _ref_price(pm: PortfolioManager, symbol: str, today: str) -> float:
 
 
 def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, room: float, cfg) -> tuple[float, float]:
-    """(qty, lmt)。room = min(单笔上限, 当日剩余额度)。"""
-    if room < cfg.min_order_usd:
-        raise _Skip("day_cap_reached", terminal=True)
+    """(qty, lmt)，**整股**（盈透 API 不收碎股单：error 10243）。room = min(单笔上限, 当日剩余额度)。
+    卖出至少能卖 1 股——哪怕这 1 股已涨过单笔上限：现金账户卖出只会降风险，不能让持仓永远卖不掉。"""
     if a["side"] == "BUY":
+        if room < cfg.min_order_usd:
+            raise _Skip("day_cap_reached", terminal=True)
         lmt = round(ref * (1 + _BAND), 2)
         usd = min(a["usd"], room, cash - 1.0)   # 留 1 美元给佣金，现金账户不能透支
-        qty = round_down_units(usd / lmt, None)
-        if qty * lmt < cfg.min_order_usd:
-            raise _Skip("no_cash" if cash - 1.0 < cfg.min_order_usd else "too_small", terminal=True)
+        qty = round_down_units(usd / lmt, 1)
+        if qty <= 0 or qty * lmt < cfg.min_order_usd:
+            if cash - 1.0 < max(cfg.min_order_usd, lmt):
+                raise _Skip("no_cash", terminal=True)
+            raise _Skip("too_small" if lmt <= min(a["usd"], room) else "share_price_above_cap", terminal=True)
         return qty, lmt
+    pos = round_down_units(pos, 1)
     if pos <= 0:
         raise _Skip("no_position", terminal=True)
     lmt = round(ref * (1 - _BAND), 2)
-    want = pos if a["full"] else min(round_down_units(a["usd"] / ref, None), pos)
-    qty = min(want, round_down_units(room / ref, None))
-    if qty <= 0 or (qty * ref < cfg.min_order_usd and qty < pos - 1e-9):
+    want = pos if a["full"] else min(max(round_down_units(a["usd"] / ref, 1), 1.0), pos)
+    qty = min(want, max(round_down_units(max(room, 0.0) / ref, 1), 1.0))
+    if qty * ref < cfg.min_order_usd and qty < pos:
         raise _Skip("too_small", terminal=True)
     return qty, lmt
 
