@@ -86,14 +86,15 @@ def _halt(reason: str) -> None:
 def _notify(subject: str, lines: List[str]) -> None:
     body = "\n".join(lines)   # 含 LLM 写的理由 / 券商回的拒单文本 → 只走 stdin / 转义，不进 shell、不进裸 HTML
     cmd = load_config().ibkr.notify_cmd
-    if cmd:
+    if cmd and len(body) < 15000:   # ponytail: hermes→Discord 最多拆 8×2000 字，更长的直接走邮件免得被截
         try:
             subprocess.run(shlex.split(cmd), input=f"{subject}\n\n{body}", text=True, capture_output=True,
                            timeout=60, check=True)
             return
         except Exception as e:  # noqa: BLE001 — 推送失败退回邮件，停手提醒不能丢
             # 只记类型 + 退出码：异常文本含整条命令行，命令里可能带 webhook token
-            log.warning(f"[ibkr] notify_cmd 失败（{type(e).__name__} rc={getattr(e, 'returncode', None)}），改发邮件")
+            log.warning(f"[ibkr] notify_cmd 失败（{type(e).__name__} rc={getattr(e, 'returncode', None)}）："
+                        f"{(getattr(e, 'stderr', None) or '')[:300]}，改发邮件")
     try:
         from openinvest.services.notifier import send_email_html
         send_email_html(subject=subject, plain_body=body, html_body=f"<pre>{html.escape(body)}</pre>")
