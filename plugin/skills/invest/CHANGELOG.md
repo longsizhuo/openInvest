@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.31.0...invest-skill-v0.32.0) (2026-10-19)
+
+
+### Features
+
+* **autopilot:** IBKR live autopilot — LLM picks and trades US stocks/ETFs via Web API OAuth under hard caps ([#522](https://github.com/longsizhuo/openInvest/issues/522)) ([348998e](https://github.com/longsizhuo/openInvest/commit/348998e3a85d2c3675355333b5b42268c8d9513e))
+
 ## [0.31.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.30.0...invest-skill-v0.31.0) (2026-10-19)
 
 
