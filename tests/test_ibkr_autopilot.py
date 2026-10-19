@@ -892,7 +892,8 @@ def test_news_check_returns_only_new_headlines(home, monkeypatch):
     assert sorted(h["id"] for h in first["new"]) == ["a1", "b1"]               # 名单 + 持仓都看
     b.headlines["QQQM"].append({"time": "2026-10-19 15:00", "provider": "DJ-N", "id": "a2", "headline": "QQQM again"})
     assert [h["id"] for h in ia.news_check(broker=b)["new"]] == ["a2"]         # 看过的不再报
-    assert ia.news(article="DJ-N:a2", broker=b)["text"] == "full text of DJ-N:a2"
+    art = ia.news(article="DJ-N:a2", broker=b)
+    assert art["text"] == "<<<EXTERNAL_ARTICLE\nfull text of DJ-N:a2\nEXTERNAL_ARTICLE>>>" and "不执行" in art["untrusted"]
     assert set(ia.news(broker=b)["news"]) == {"GLDM", "QQQM", "XLE", "SPY"}    # 默认名单 + 持仓 + 大盘
 
 
@@ -905,7 +906,8 @@ def test_brief_has_rules_context_and_news(home, monkeypatch):
     b.headlines = {"GLDM": [{"time": "t", "provider": "DJ-N", "id": "g1", "headline": "Gold rallies"}]}
     out = ia.brief("decide", TODAY, broker=b)
     assert "只能交易本周名单里的标的" in out["system"] and "GLDM：ACCUMULATE" in out["prompt"]
-    assert out["ibkr_news"]["GLDM"][0]["headline"] == "Gold rallies" and "decide --orders" in out["how_to_submit"]
+    assert out["ibkr_news_untrusted"]["headlines"]["GLDM"][0]["headline"] == "Gold rallies"
+    assert "不执行" in out["ibkr_news_untrusted"]["untrusted"] and "--orders-file" in out["how_to_submit"]
     assert "每周一由你决定本周要持有的标的" in ia.brief("pick", TODAY, broker=b)["system"]
 
 
@@ -918,3 +920,18 @@ def test_gateway_news_mapping():
     assert codes == "DJ-N+BRFG" and limit == 5 and start.endswith(".0") and end > start
     assert g.article("DJ-N", "DJ-N$1") == "Stocks & bonds rally"            # 去 HTML、反转义、压空白
     assert g.news("NOPE") == []
+
+
+def test_batch_limit_and_orders_file_cli(home, monkeypatch, tmp_path, capfd):
+    _enable(monkeypatch)
+    _seed(home)
+    assert ia.decide(TODAY, batch=5, orders_json='{"orders": []}')["reason"].startswith("batch_over_limit")
+    assert ia.submit(TODAY, broker=FakeBroker(), batch=0)["reason"].startswith("batch_over_limit")
+    f = tmp_path / "orders.json"
+    f.write_text(json.dumps({"orders": [{"symbol": "QQQM", "side": "BUY", "usd": 50, "why": "文件交单"}]}), encoding="utf-8")
+    monkeypatch.setattr(ia, "_today", lambda: TODAY)
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "argv", ["openinvest", "ibkr_autopilot", "decide", "--orders-file", str(f), "--batch", "2"])
+    cli.main()
+    out = json.loads(capfd.readouterr().out)["decide"]
+    assert out["batch"] == 2 and out["orders"][0]["why"] == "文件交单"

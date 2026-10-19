@@ -82,6 +82,11 @@ def cmd_ibkr_autopilot(args: argparse.Namespace) -> None:
     from openinvest.jobs import ibkr_autopilot
 
     syms = [x.strip().upper() for x in (args.symbols or "").split(",") if x.strip()] or None
+    # 常驻会话交 JSON：优先读文件（--orders-file / --picks-file），免得在 shell 里拼引号
+    if args.orders_file:
+        args.orders = Path(args.orders_file).read_text(encoding="utf-8")
+    if args.picks_file:
+        args.picks = Path(args.picks_file).read_text(encoding="utf-8")
     stages = {
         "pick": [("pick", lambda: ibkr_autopilot.pick(force=args.force, picks_json=args.picks))],
         "decide": [("decide", lambda: ibkr_autopilot.decide(orders_json=args.orders, batch=args.batch))],
