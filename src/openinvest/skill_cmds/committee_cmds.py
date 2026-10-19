@@ -26,6 +26,7 @@ ROOT = INVEST_ROOT
 __all__ = [
     "cmd_autopilot_daily",
     "cmd_daily_report",
+    "cmd_ibkr_autopilot",
     "cmd_prepare_committee",
     "cmd_run_committee",
     "cmd_save_committee",
@@ -62,6 +63,35 @@ def cmd_autopilot_daily(_: argparse.Namespace) -> None:
     for name, fn in (("daily_report", lambda: daily_report.run(send_email=False)),
                      ("paper_autopilot", paper_autopilot.run),
                      ("verdict_review", verdict_review.run)):
+        try:
+            out[name] = fn()
+        except Exception as e:  # noqa: BLE001
+            out[name] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+            failed = True
+    _print_json(out)
+    if failed:
+        sys.exit(1)
+
+
+def cmd_ibkr_autopilot(args: argparse.Namespace) -> None:
+    """盈透实盘 autopilot（jobs/ibkr_autopilot.py，**下真单**；ibkr.enabled 关着时全是 no-op，dry_run 时只试算）。
+    phase=pick / submit / reconcile 单跑一段；daily = pick（周一或名单为空）→ daily_report（不发邮件）→ submit
+    → verdict_review，各段隔离失败。输出 JSON；有任何一段抛异常则退出码 1。"""
+    from openinvest.jobs import ibkr_autopilot
+
+    stages = {
+        "pick": [("pick", lambda: ibkr_autopilot.pick(force=args.force))],
+        "submit": [("submit", ibkr_autopilot.submit)],
+        "reconcile": [("reconcile", ibkr_autopilot.reconcile)],
+    }
+    if args.phase == "daily":
+        from openinvest.jobs import daily_report, verdict_review
+        stages["daily"] = [("pick", lambda: ibkr_autopilot.pick(force=args.force)),
+                           ("daily_report", lambda: daily_report.run(send_email=False)),
+                           ("submit", ibkr_autopilot.submit),
+                           ("verdict_review", verdict_review.run)]
+    out, failed = {}, False
+    for name, fn in stages[args.phase]:
         try:
             out[name] = fn()
         except Exception as e:  # noqa: BLE001

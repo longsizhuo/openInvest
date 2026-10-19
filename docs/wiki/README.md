@@ -83,6 +83,7 @@ documents:
 | 21 | [情报哨兵](21-intel-sentinel.md) | 三层情报架构 + 标准哨兵 prompt 模板 + 各平台接法 + 防注入纪律 |
 | 22 | [配置参考](22-configuration.md) | LLM provider `.env` 契约 + ADR-017 runtime overrides 全表（从 README 迁入）|
 | 23 | [模拟账户 autopilot](23-paper-autopilot.md) | opt-in 执行层：独立 INVEST_HOME 里按确定性规则成交当日裁决，对照「人执行」|
+| 24 | [盈透实盘 autopilot](24-ibkr-autopilot.md) | opt-in **真单**执行层：LLM 每周选美股标的、委员会每天定买卖、代码硬闸兜底，按券商成交记账 |
 
 ## 架构决策记录 (ADR)
 

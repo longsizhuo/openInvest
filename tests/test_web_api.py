@@ -1353,6 +1353,8 @@ def test_config_endpoints_roundtrip(client):
         "verdict.gold_defense_dca_enabled", "dreaming.llm_verify_enabled",
         "dca.auto_dca_enabled", "dca.auto_dca_amount_cny",
         "autopilot.enabled", "autopilot.commission_bps", "autopilot.min_order_cny",  # 模拟账户 autopilot
+        "ibkr.enabled", "ibkr.dry_run", "ibkr.account", "ibkr.max_order_usd", "ibkr.max_day_usd",
+        "ibkr.min_order_usd",  # 盈透实盘 autopilot
         # ADR-017: event RAG + staleness 阈值也进 config API 白名单(558d9e9)
         "event.enabled", "event.min_severity", "event.max_rounds",
         "event.max_per_source", "event.rag_top_k", "event.rag_window_days",

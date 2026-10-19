@@ -250,6 +250,17 @@ def build_parser() -> argparse.ArgumentParser:
              "需 autopilot.enabled) → verdict_review。给独立 INVEST_HOME 的 cron 用；输出 JSON。",
     ).set_defaults(func=cmd_autopilot_daily)
 
+    p = sub.add_parser(
+        "ibkr_autopilot",
+        help="盈透实盘 autopilot（**下真单**，需 ibkr.enabled；ibkr.dry_run 默认只试算）。"
+             "pick=LLM 选 ≤5 只美股/ETF 写进 target_assets（周一）；submit=按当日裁决挂限价单；"
+             "reconcile=收盘后按成交记账 + 对账；daily=pick→daily_report(不发邮件)→submit→verdict_review。"
+             "给独立盈透 INVEST_HOME 的 cron 用；输出 JSON。",
+    )
+    p.add_argument("phase", choices=["pick", "submit", "reconcile", "daily"])
+    p.add_argument("--force", action="store_true", help="pick 不等周一，现在就重选名单")
+    p.set_defaults(func=cmd_ibkr_autopilot)
+
     # ============ 写操作子命令（Agent 用） ============
     p = sub.add_parser("deposit", help="存入现金（任意币种）")
     p.add_argument("--currency", "-c", required=True, help="币种 (CNY/AUD/USD/HKD/...)")

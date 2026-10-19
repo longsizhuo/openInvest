@@ -237,6 +237,21 @@ def remove_target_asset(
     return _response(final_meta, f"已删除 {symbol}")
 
 
+def replace_target_assets(
+    assets: List[Dict[str, Any]], *, store: Optional[MemoryStore] = None
+) -> Dict[str, Any]:
+    """整表替换 target_assets（一个 transaction，schema 校验不过整体回滚）。
+    给 jobs/ibkr_autopilot 的每周选股用：逐个 add/remove 会在中途撞「至少剩 1 个」。"""
+    if not assets:
+        raise ValueError("target_assets 不能为空")
+    with _store(store).transaction("strategy") as tx:
+        before = _targets(tx.metadata)
+        tx["target_assets"] = [dict(a) for a in assets]
+        _validate_or_raise(dict(tx.metadata), before)
+        final_meta = dict(tx.metadata)
+    return _response(final_meta, f"target_assets → {', '.join(a['symbol'] for a in assets)}")
+
+
 def upsert_target_asset(
     symbol: str,
     fields: Dict[str, Any],

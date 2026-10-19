@@ -43,6 +43,9 @@ dependencies = [
     "nh3>=0.3.7,<1",  # 邮件 / /view 渲染期 HTML 白名单（ammonia 绑定，见 services/notifier.md_to_safe_html）
 ]
 
+[project.optional-dependencies]
+ibkr = ["ib_async>=2.1.0,<3"]  # jobs/ibkr_autopilot 连盈透网关下真单；不开盈透 autopilot 的用户不用装
+
 [project.urls]
 Homepage = "https://github.com/longsizhuo/openInvest"
 Documentation = "https://github.com/longsizhuo/openInvest/tree/main/docs/wiki"
@@ -71,6 +74,7 @@ dev = [
     "pytest>=9.0.3",
     "httpx>=0.27",
     "import-linter>=2.0",   # 防 entry 层直调 core 原语漂移（见 ADR / CLAUDE.md "分层契约"）
+    "ib_async>=2.1.0,<3",   # tests/test_ibkr_autopilot 用真 Order / Contract 类；生产 deploy 的 uv sync 也靠它装上
 ]
 
 # ============================================================================

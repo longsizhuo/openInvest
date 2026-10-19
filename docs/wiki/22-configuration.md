@@ -17,6 +17,12 @@ documents:
     - autopilot.enabled
     - autopilot.commission_bps
     - autopilot.min_order_cny
+    - ibkr.enabled
+    - ibkr.dry_run
+    - ibkr.account
+    - ibkr.max_order_usd
+    - ibkr.max_day_usd
+    - ibkr.min_order_usd
     - fund.confirm_lag_days
   symbols: []
 ---
@@ -63,6 +69,12 @@ LLM_MODEL=glm-4-flash
 | `autopilot.enabled` | `bool` (`false`) | 全自动模拟账户总开关（`jobs/paper_autopilot`）。开启后该 INVEST_HOME 的每条 ACCUMULATE / BUY / TRIM / SELL 裁决按当日收盘价自动记账成交；不下真单。**只应在独立的模拟 INVEST_HOME 开**，见 [23-paper-autopilot.md](23-paper-autopilot.md) |
 | `autopilot.commission_bps` | `float` (`3.0`) | 模拟成交的买卖双边手续费，万分之几；作为 `fee` 活动另记一行 |
 | `autopilot.min_order_cny` | `float` (`500.0`) | 折算后小于它的模拟单不下（记 `skip too_small`）；SELL 清仓不受限 |
+| `ibkr.enabled` | `bool` (`false`) | 盈透实盘 autopilot 总开关（`jobs/ibkr_autopilot`）。**下真单**；只应在独立的盈透 INVEST_HOME 开，见 [24-ibkr-autopilot.md](24-ibkr-autopilot.md) |
+| `ibkr.dry_run` | `bool` (`true`) | true = 只 `whatIfOrder` 试算（盈透校验合约 / 权限 / 佣金），不下单、不记执行 |
+| `ibkr.account` | `str` (`""`) | 盈透账户号（`U…` 实盘 / `DU…` 模拟）；网关上连的不是它就什么都不做 |
+| `ibkr.max_order_usd` | `float` (`100.0`) | 单笔订单金额硬上限（USD） |
+| `ibkr.max_day_usd` | `float` (`150.0`) | 当日累计（已挂 + 已成交）硬上限（USD） |
+| `ibkr.min_order_usd` | `float` (`20.0`) | 小于它的单不下（整笔清仓例外；每单佣金最低约 USD 0.35） |
 | `fund.confirm_lag_days` | `dict` (`{default: 1, qdii: 2, fof: 2}`) | 场外基金两段式（`place_fund_order`）下单后第几个交易日确认份额：预计确认日 = 定价日 T + lag，按基金类型取（QDII / FOF 从东方财富基金概况推断，取不到按 `default` 并在订单里标 `lag_source=default`）。改 `core/config/defaults.yaml` 的 `fund:` 段，只写想改的键（与内置默认深合并，如 `fund: {confirm_lag_days: {qdii: 3}}`）；dict 型，暂不进 API 白名单（ADR-017）、env 无效。见 [ADR-027](adr/027-ledger-activity-types.md) D5 |
 
 ### 运行时覆盖示例（以关闭集中度 Lens 为例）

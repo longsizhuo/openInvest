@@ -250,6 +250,22 @@ class AutopilotConfig:
 
 
 @dataclass(frozen=True)
+class IbkrConfig:
+    """盈透实盘 autopilot（jobs/ibkr_autopilot.py）——**下真单**。
+
+    只应在独立 INVEST_HOME 开（该 home 的 target_assets = 盈透账户里交易的 USD 标的）。
+    dataclass 默认=禁用 + 试算：fork 用户 / 生产 hub 零影响；打开后默认也只 whatIfOrder 不下单。
+    金额上限全按 USD，是硬闸（委员会给多少都先钳到这里）。
+    """
+    enabled: bool = False                       # 总开关（默认关）
+    dry_run: bool = True                        # True=只 whatIfOrder 试算，不下单
+    account: str = ""                           # 盈透账户号（U… 实盘 / DU… 模拟）；连上的账户不符就不动
+    max_order_usd: float = 100.0                # 单笔上限
+    max_day_usd: float = 150.0                  # 单日累计上限（含已挂未成交 + 当日已成交）
+    min_order_usd: float = 20.0                 # 小于它不下（每单佣金最低 USD 0.35，太小的单佣金占比过高）
+
+
+@dataclass(frozen=True)
 class EventConfig:
     """事件感知与向量召回（Event RAG & Event Watcher）参数
     
@@ -351,6 +367,7 @@ class TunableConfig:
     reward: RewardConfig = field(default_factory=RewardConfig)
     dca: DCAConfig = field(default_factory=DCAConfig)
     autopilot: AutopilotConfig = field(default_factory=AutopilotConfig)
+    ibkr: IbkrConfig = field(default_factory=IbkrConfig)
     event: EventConfig = field(default_factory=EventConfig)
     staleness: StalenessConfig = field(default_factory=StalenessConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
