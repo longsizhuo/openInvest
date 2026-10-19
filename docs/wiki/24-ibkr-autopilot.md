@@ -72,6 +72,8 @@ reconcile：`idempotency_key=ibkr-<execId>` / `ibkr-fee-<execId>`，重跑只会
   `TRADING_MODE=live` 必须显式写（compose 默认值因镜像版本而异）。每天自动重启不需要 2FA；**盈透对个人账户强制每周一次 IB Key 确认**
   （网关重新认证时手机收到推送，点批准）——OAuth 1.0a 只开放给机构客户，个人账户绕不开这一步。主账号登录会和手机 / 网页撞会话，
   `EXISTING_SESSION_DETECTED_ACTION=primary` 让网关优先（下单 / 对账不漏）。cron 每次连网关、跑完 `disconnect()`；`status` 用另一个 clientId。
+  **二次验证设备必须是 IBKR Mobile 的 IB Key（推送批准）**：网关是无头的，Passkey（要在发起登录的设备上做生物识别）和 Mobile Authenticator app（要往网关窗口里输 6 位码）都过不去；
+  账户绑了多种设备时用 `TWOFA_DEVICE` 指定，值要和登录窗口列表里的写法一字不差（`IB Key`）。
 - 下单只认网关明确回执（`PreSubmitted` / `Submitted` / `Filled`，最多等 10 秒）：被拒（权限 / 预防性检查 / 碎股）→ `rejected`，等不到回执 → `unconfirmed`，都终局跳过、保留 claim 不重下（真成交了 reconcile 照样记账），原因进当日邮件。compose 写 `BYPASS_WARNING=no`，网关的 API 下单预防性检查保持开启。
 - 账户内换汇：USD 不够下最小单而 AUD ≥ 50 时，submit 先把 AUD（留 5 零头，单日 ≤ 1000）换成 USD：`Forex('AUDUSD')` 可成交限价单
   （参考汇率 −1%；小额单盈透自动走 IDEAL odd lot，每笔最低佣金约 USD 2.5），每天最多一次（claim + orderRef）；reconcile 把换汇成交按两腿记账。钱不出账户。
