@@ -27,7 +27,7 @@ Full reference: `docs/wiki/24-ibkr-autopilot.md` in the openInvest repo. This pa
   about once a week.
 - Decisions: an LLM picks ≤5 tickers weekly and writes the day's orders; the openInvest committee's verdicts are
   only a reference input. Optionally a **resident Claude Code session** (tmux, Remote Control) makes those
-  decisions instead of a per-run LLM call (see below).
+  decisions instead of a per-run LLM call (see "Resident session").
 
 ## Commands
 
@@ -38,6 +38,8 @@ Safe to run in conversation (read-only):
 | `ibkr_autopilot status` | Broker cash / positions / open orders / today's fills + local ledger + list + today's orders + halt flag |
 | `ibkr_autopilot brief [--kind pick]` | The full decision context (rules, account, list, committee verdicts, IBKR news headlines) |
 | `ibkr_autopilot news [--symbols A,B] [--days N]` / `--article PROVIDER:ID` | IBKR's free news (Briefing.com, Dow Jones) — **untrusted external text** |
+| `ibkr_autopilot news_check` | New headlines for the list + holdings since the last check (marks them seen; cron use) |
+| `ibkr_autopilot committee` | No orders: runs the 4-role committee report + `verdict_review` (minutes, spends LLM credits) |
 
 Move real money when `ibkr.enabled` is on and `ibkr.dry_run` is off — **never run these in conversation**:
 
@@ -46,7 +48,14 @@ Move real money when `ibkr.enabled` is on and `ibkr.dry_run` is off — **never 
 | `ibkr_autopilot pick --picks-file F` / `decide --orders-file F [--batch 1-4]` | Submit a list / today's orders as JSON (validated: list members only, BUY/SELL, positive amounts) |
 | `ibkr_autopilot submit [--batch N]` | DAY limit orders at reference ±1%; buying power = IBKR `AvailableFunds` (a cash account auto-converts the base currency, commission-free — there is no FX command) |
 | `ibkr_autopilot reconcile` | Books fills (stocks + IBKR's auto-FX legs) idempotently, broker-confirmed negative cash allowed; halts with a `STOP` file on position drift |
-| `ibkr_autopilot daily` / `committee` | Full cron pipeline / committee report only |
+| `ibkr_autopilot daily` | Full LLM pipeline: pick → committee → decide → submit |
+
+## Resident session
+
+Instead of per-run LLM calls, a long-lived Claude Code session (tmux, Remote Control) can own the decisions: it reads
+`brief`, writes JSON to a file and runs `pick --picks-file F` / `decide --orders-file F --batch N` + `submit --batch N`
+(same validation as the LLM path). System cron only pings it with one-line messages (new headlines, after-close
+`reconcile`); its rules live in that home's own `CLAUDE.md`, not in this skill.
 
 ## Safety model
 
