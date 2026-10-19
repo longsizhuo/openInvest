@@ -82,6 +82,12 @@ class FakeBroker:
             return {"order_id": "fx1", "status": "Filled"}
         return {"dry_run": True, "warning": None, "error": None}
 
+    def news(self, symbol, days=2, limit=8):
+        return [dict(h) for h in getattr(self, "headlines", {}).get(symbol, [])]
+
+    def article(self, provider, article_id):
+        return f"full text of {provider}:{article_id}"
+
     def close(self):
         self.closed += 1
 
@@ -591,6 +597,19 @@ class FakeIB:
         log = [SimpleNamespace(message="No trading permissions for this contract")] if self.status == "Inactive" else []
         return SimpleNamespace(orderStatus=SimpleNamespace(status=self.status), log=log)
 
+    def reqNewsProviders(self):
+        return [SimpleNamespace(code="DJ-N"), SimpleNamespace(code="BRFG")]
+
+    def reqHistoricalNews(self, con_id, codes, start, end, limit):
+        self.calls.append(("news", codes, start, end, limit))
+        fresh = datetime.now(timezone.utc)
+        return [SimpleNamespace(time=fresh, providerCode="DJ-N", articleId="DJ-N$1", headline="{A:800015:L:en}QQQM Climbs"),
+                SimpleNamespace(time=datetime(2026, 8, 1, tzinfo=timezone.utc), providerCode="DJ-N", articleId="old",
+                                headline="{A:1}Old item")]
+
+    def reqNewsArticle(self, provider, article_id):
+        return SimpleNamespace(articleType=0, articleText="<p>&#10;  Stocks &amp; bonds</p><p>rally</p>")
+
     def disconnect(self):
         self.calls.append("disconnect")
 
@@ -830,3 +849,72 @@ def test_validate_orders_rejects_bad_amounts():
          "not-a-dict"], {"QQQM", "GLDM", "XLV", "VEA"})
     assert [(o["symbol"], o["full"]) for o in ok] == [("VEA", True)]   # 只有 SELL 能写 all
     assert [r["reason"] for r in rejected] == ["bad_amount", "bad_amount", "bad_amount", "not_in_list"]
+
+
+# ---------------- 常驻会话：自己交 JSON / 盘中批次 / 新闻 / brief ----------------
+
+def test_session_orders_json_and_intraday_batch(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _prices(monkeypatch, {"QQQM": 40.0, "GLDM": 30.0})
+    out = ia.decide(TODAY, orders_json='{"orders": [{"symbol": "QQQM", "side": "BUY", "usd": 90, "why": "早盘"}]}')
+    assert out["status"] == "ok" and out["batch"] == 1 and out["orders"][0]["symbol"] == "QQQM"
+    b = FakeBroker()
+    ia.submit(TODAY, broker=b)
+    assert [o["ref"] for o in b.placed] == [f"oi:{TODAY}/QQQM/BUY"]          # 90 → 2 股 = 80.8
+    # 盘中新闻触发：第 2 批。文件、orderRef、claim 都和第 1 批分开；单日额度共用
+    second = json.dumps({"orders": [{"symbol": "QQQM", "side": "BUY", "usd": 90},
+                                    {"symbol": "AAPL", "side": "BUY", "usd": 50}]})
+    out = ia.decide(TODAY, batch=2, orders_json=second)
+    assert out["batch"] == 2 and [o["symbol"] for o in out["orders"]] == ["QQQM"]   # 名单外照样拒
+    assert (home.root / ".ibkr" / "decisions" / f"{TODAY}.b2.json").exists()
+    res = ia.submit(TODAY, broker=b, batch=2)
+    assert b.placed[-1]["ref"] == f"oi:{TODAY}#b2/QQQM/BUY" and b.placed[-1]["qty"] == 1.0   # 剩 150 − 80.8 = 69.2 → 1 股
+    assert res["used_usd"] == pytest.approx(121.2)
+    assert ia.decide(TODAY, batch=2, orders_json='{"orders": []}')["reason"] == "already_decided"
+
+
+def test_session_picks_json(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, targets=("GLDM",))
+    monkeypatch.setattr(ia, "_ticker_info", lambda s: _INFO[s])
+    out = ia.pick(TODAY, picks_json=json.dumps({"picks": [{"symbol": "VGSH", "why": "会话自己选的"}], "note": "x"}))
+    assert out["status"] == "ok" and [a["symbol"] for a in out["picks"]] == ["VGSH"]
+
+
+def test_news_check_returns_only_new_headlines(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    b = FakeBroker(positions={"XLE": 1})
+    b.headlines = {"QQQM": [{"time": "2026-10-19 13:00", "provider": "DJ-N", "id": "a1", "headline": "QQQM up"}],
+                   "XLE": [{"time": "2026-10-19 14:00", "provider": "BRFG", "id": "b1", "headline": "Oil falls"}]}
+    first = ia.news_check(broker=b)
+    assert sorted(h["id"] for h in first["new"]) == ["a1", "b1"]               # 名单 + 持仓都看
+    b.headlines["QQQM"].append({"time": "2026-10-19 15:00", "provider": "DJ-N", "id": "a2", "headline": "QQQM again"})
+    assert [h["id"] for h in ia.news_check(broker=b)["new"]] == ["a2"]         # 看过的不再报
+    assert ia.news(article="DJ-N:a2", broker=b)["text"] == "full text of DJ-N:a2"
+    assert set(ia.news(broker=b)["news"]) == {"GLDM", "QQQM", "XLE", "SPY"}    # 默认名单 + 持仓 + 大盘
+
+
+def test_brief_has_rules_context_and_news(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _verdict(home, "GLDM", "ACCUMULATE", 80)
+    _prices(monkeypatch, {"QQQM": 40.0, "GLDM": 30.0})
+    b = FakeBroker()
+    b.headlines = {"GLDM": [{"time": "t", "provider": "DJ-N", "id": "g1", "headline": "Gold rallies"}]}
+    out = ia.brief("decide", TODAY, broker=b)
+    assert "只能交易本周名单里的标的" in out["system"] and "GLDM：ACCUMULATE" in out["prompt"]
+    assert out["ibkr_news"]["GLDM"][0]["headline"] == "Gold rallies" and "decide --orders" in out["how_to_submit"]
+    assert "每周一由你决定本周要持有的标的" in ia.brief("pick", TODAY, broker=b)["system"]
+
+
+def test_gateway_news_mapping():
+    ib = FakeIB()
+    g = ia._IbGateway(ib, "U1")
+    rows = g.news("QQQM", days=2, limit=5)
+    assert [(r["provider"], r["id"], r["headline"]) for r in rows] == [("DJ-N", "DJ-N$1", "QQQM Climbs")]   # 去掉 {…} 前缀、丢掉范围外旧条目
+    (_, codes, start, end, limit), = [c for c in ib.calls if c[0] == "news"]
+    assert codes == "DJ-N+BRFG" and limit == 5 and start.endswith(".0") and end > start
+    assert g.article("DJ-N", "DJ-N$1") == "Stocks & bonds rally"            # 去 HTML、反转义、压空白
+    assert g.news("NOPE") == []

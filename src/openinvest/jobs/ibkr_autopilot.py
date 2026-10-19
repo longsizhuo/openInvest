@@ -107,6 +107,7 @@ def _num(v: Any) -> float:
 _PORT = 4001            # docker compose 把网关 live API 映到 127.0.0.1:4001
 _CLIENT_ID = 17
 _STATUS_CLIENT_ID = 18  # status 只读查询用另一个 clientId，和 cron 里的 submit / reconcile 同时连也不撞
+_NEWS_CLIENT_ID = 19    # news / news_check / brief 也是只读，再错开一个
 _FX_BAND = 0.01         # 换汇限价 = 参考汇率 ±1%（市价换汇单可能被拒，用可成交的限价）
 _UNSET = 1e300          # ib_async 的「未设置」浮点（UNSET_DOUBLE ≈ 1.8e308）
 _ACK_OK = ("PreSubmitted", "Submitted", "Filled")
@@ -126,6 +127,7 @@ class _IbGateway:
     def __init__(self, ib, acct: str):
         self.ib, self.acct = ib, acct
         self._contracts: Dict[int, Any] = {}
+        self._providers: Optional[str] = None
 
     @classmethod
     def connect(cls, acct: str, client_id: int = _CLIENT_ID) -> "_IbGateway":
@@ -242,6 +244,36 @@ class _IbGateway:
         return {"pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt, **self._send(pair, order)}
 
 
+    def news(self, symbol: str, days: int = 2, limit: int = 8) -> List[Dict[str, Any]]:
+        """盈透免费新闻源（Briefing.com / Dow Jones，账户自带）里这个标的近 days 天的标题。"""
+        from ib_async import Stock
+        if self._providers is None:
+            self._providers = "+".join(p.code for p in self.ib.reqNewsProviders())
+        if not self._providers:
+            return []
+        q = self.ib.qualifyContracts(Stock(symbol, "SMART", "USD"))
+        c = q[0] if q else None
+        if c is None or isinstance(c, list):
+            return []
+        end = datetime.now(ZoneInfo("UTC"))
+        start = end - timedelta(days=days)
+        fmt = "%Y-%m-%d %H:%M:%S.0"
+        rows = self.ib.reqHistoricalNews(c.conId, self._providers, start.strftime(fmt), end.strftime(fmt), limit) or []
+        out = []
+        for h in rows:
+            t = h.time if isinstance(h.time, datetime) else None
+            if t is not None and (t if t.tzinfo else t.replace(tzinfo=ZoneInfo("UTC"))) < start:
+                continue   # 网关会回范围外的旧条目（ETF 新闻稀疏时）
+            out.append({"time": str(h.time)[:16], "provider": h.providerCode, "id": h.articleId,
+                        "headline": re.sub(r"^\{[^}]*\}", "", h.headline or "").strip()})
+        return out
+
+    def article(self, provider: str, article_id: str) -> str:
+        a = self.ib.reqNewsArticle(provider, article_id)
+        text = html.unescape(re.sub(r"<[^>]+>", " ", getattr(a, "articleText", "") or ""))
+        return re.sub(r"\s+", " ", text).strip()
+
+
 def _connect(acct: str, client_id: int = _CLIENT_ID):
     return _IbGateway.connect(acct, client_id)
 
@@ -276,6 +308,16 @@ def _agent(system_prompt: str):
         raise RuntimeError("LLM_API_KEY 缺失")
     return SDKAgent(system_prompt=system_prompt, model=model, api_key=api_key, base_url=base_url,
                     temperature=0.3, enable_tools=True, max_tool_iterations=8, provider=provider)
+
+
+class _StaticAgent:
+    """常驻会话（tmux 里的 Claude Code）自己写好 JSON，经 CLI --picks / --orders 传进来，走和 LLM 输出同一套校验。"""
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def run(self, prompt: str) -> str:
+        return self.text
 
 
 def _parse_json(raw: str, key: str) -> Dict[str, Any]:
@@ -369,7 +411,7 @@ def _pick_prompt(pm: PortfolioManager, today: str) -> str:
     return "\n".join([*_account_lines(pm, today), f"上周名单：{targets}", *_background()])
 
 
-def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dict[str, Any]:
+def pick(today: Optional[str] = None, *, force: bool = False, agent=None, picks_json: Optional[str] = None) -> Dict[str, Any]:
     cfg = load_config(_force_reload=True).ibkr
     if not cfg.enabled:
         return {"status": "skipped", "reason": "ibkr_disabled"}
@@ -379,6 +421,8 @@ def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dic
     if not force and current and datetime.strptime(today, "%Y-%m-%d").weekday() != 0:
         return {"status": "skipped", "reason": "not_pick_day"}
 
+    if picks_json is not None:
+        agent = _StaticAgent(picks_json)
     agent = agent or _agent(_PICK_SYSTEM.format(max_order=f"{cfg.max_order_usd:g}", max_day=f"{cfg.max_day_usd:g}"))
     data = _parse_json(agent.run(_pick_prompt(pm, today)), "picks")
 
@@ -507,21 +551,32 @@ def _validate_orders(orders: list, targets: set) -> tuple[list, list]:
     return ok, rejected
 
 
-def decide(today: Optional[str] = None, *, agent=None) -> Dict[str, Any]:
+def _decisions_path(today: str, batch: int = 1):
+    """第 1 批 = 当天开盘前的单；第 2 批起 = 盘中（新闻触发）追加的单，各自一个文件。"""
+    return _store_dir("decisions") / (f"{today}.json" if batch == 1 else f"{today}.b{batch}.json")
+
+
+def _batch_tag(today: str, batch: int) -> str:
+    return today if batch == 1 else f"{today}#b{batch}"
+
+
+def decide(today: Optional[str] = None, *, agent=None, orders_json: Optional[str] = None, batch: int = 1) -> Dict[str, Any]:
     cfg = load_config(_force_reload=True).ibkr
     if not cfg.enabled:
         return {"status": "skipped", "reason": "ibkr_disabled"}
     today = today or _today()
-    path = _store_dir("decisions") / f"{today}.json"
-    if path.exists():   # 当天已决定：重跑不再问 LLM，免得同一天换一套单
+    path = _decisions_path(today, batch)
+    if path.exists():   # 这一批已决定：重跑不再问 LLM，免得同一批换一套单（盘中追加用 batch=2,3…）
         return {"status": "skipped", "reason": "already_decided", **json.loads(path.read_text(encoding="utf-8"))}
     pm = PortfolioManager()
     targets = [t["symbol"] for t in pm.strategy.get("target_assets") or []]
+    if orders_json is not None:
+        agent = _StaticAgent(orders_json)
     agent = agent or _agent(_DECIDE_SYSTEM.format(max_order=f"{cfg.max_order_usd:g}", max_day=f"{cfg.max_day_usd:g}",
                                                   min_order=f"{cfg.min_order_usd:g}"))
     data = _parse_json(agent.run(_decide_prompt(pm, targets, today)), "orders")
     ok, rejected = _validate_orders(data["orders"], set(targets))
-    record = {"date": today, "orders": ok, "rejected": rejected, "note": data.get("note")}
+    record = {"date": today, "batch": batch, "orders": ok, "rejected": rejected, "note": data.get("note")}
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"status": "ok", **record}
 
@@ -581,17 +636,17 @@ def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, used: float, c
     return qty, lmt
 
 
-def _actions(pm: PortfolioManager, positions: Dict[str, float], today: str) -> List[Dict[str, Any]]:
+def _actions(pm: PortfolioManager, positions: Dict[str, float], today: str, batch: int = 1) -> List[Dict[str, Any]]:
     """当日要做的事：先清仓（不在名单里的持仓），再 decide 写的当日订单；卖在买前（回款当天可再买）。"""
     targets = {t["symbol"] for t in pm.strategy.get("target_assets") or []}
     out = [{"symbol": s, "side": "SELL", "full": True, "usd": 0.0, "exit": True, "why": "已不在本周名单",
             "ref": f"{_REF}exit:{today}/{s}"} for s in sorted(positions) if s not in targets]
-    path = _store_dir("decisions") / f"{today}.json"
+    path = _decisions_path(today, batch)
     orders = json.loads(path.read_text(encoding="utf-8")).get("orders") or [] if path.exists() else []
     for o in orders:
         if o["symbol"] not in targets:
             continue   # 只交易名单里的标的（白名单；decide 之后名单又被改过也挡得住）
-        out.append({**o, "exit": False, "ref": f"{_REF}{today}/{o['symbol']}/{o['side']}"})
+        out.append({**o, "exit": False, "ref": f"{_REF}{_batch_tag(today, batch)}/{o['symbol']}/{o['side']}"})
     return sorted(out, key=lambda a: (a["side"] == "BUY", a["symbol"]))
 
 
@@ -626,7 +681,7 @@ def _maybe_convert(b, pm: PortfolioManager, cash: Dict[str, float], refs: set, t
     return {"from": _FX_FROM, "to": "USD", "amount": round(amount, 2), **res}
 
 
-def submit(today: Optional[str] = None, *, broker=None) -> Dict[str, Any]:
+def submit(today: Optional[str] = None, *, broker=None, batch: int = 1) -> Dict[str, Any]:
     cfg = load_config(_force_reload=True).ibkr
     if not cfg.enabled:
         return {"status": "skipped", "reason": "ibkr_disabled"}
@@ -641,13 +696,13 @@ def submit(today: Optional[str] = None, *, broker=None) -> Dict[str, Any]:
     try:
         if not acct or acct not in b.accounts():
             return {"status": "error", "reason": f"account_mismatch: 配置 {acct!r}，会话 {b.accounts()}"}
-        return _submit(b, today, cfg)
+        return _submit(b, today, cfg, batch)
     finally:
         if broker is None:
             b.close()
 
 
-def _submit(b, today: str, cfg) -> Dict[str, Any]:
+def _submit(b, today: str, cfg, batch: int = 1) -> Dict[str, Any]:
     pm = PortfolioManager()
     positions = b.positions()
     cash = b.cash()
@@ -659,12 +714,12 @@ def _submit(b, today: str, cfg) -> Dict[str, Any]:
     placed: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
 
-    for a in _actions(pm, positions, today):
+    for a in _actions(pm, positions, today, batch):
         sym = a["symbol"]
         if a["ref"] in refs:
             skipped.append({"symbol": sym, "reason": "already_at_broker"})
             continue
-        key = f"{today}:{sym}:{a['side'].lower()}"
+        key = f"{_batch_tag(today, batch) if not a['exit'] else today}:{sym}:{a['side'].lower()}"
         if not cfg.dry_run and not pm.store.state_claim(_SRC, key):
             skipped.append({"symbol": sym, "reason": "already_done_today"})
             continue
@@ -837,6 +892,69 @@ def status(*, broker=None) -> Dict[str, Any]:
             b.close()
 
 
+# ---------------------------------------------------------------- 常驻会话用（只读）
+
+
+def _watchlist(pm: PortfolioManager, b) -> List[str]:
+    return sorted({t["symbol"] for t in pm.strategy.get("target_assets") or []} | set(b.positions()))
+
+
+def news(symbols: Optional[List[str]] = None, *, days: int = 2, limit: int = 8, article: Optional[str] = None,
+         broker=None) -> Dict[str, Any]:
+    """盈透新闻（只读）。article="PROVIDER:ID" 取正文；否则按标的列标题（默认名单 + 持仓 + SPY 大盘）。"""
+    cfg = load_config(_force_reload=True).ibkr
+    b = broker or _connect(cfg.account, _NEWS_CLIENT_ID)
+    try:
+        if article:
+            provider, _, aid = article.partition(":")
+            return {"article": article, "text": b.article(provider, aid)[:20000]}
+        syms = symbols or [*_watchlist(PortfolioManager(), b), "SPY"]
+        return {"days": days, "news": {s: b.news(s, days=days, limit=limit) for s in syms}}
+    finally:
+        if broker is None:
+            b.close()
+
+
+def news_check(*, broker=None) -> Dict[str, Any]:
+    """cron 轮询用：名单 + 持仓近 1 天的新标题（按 article id 去重，记在 memory/.ibkr/news_seen.json）。"""
+    cfg = load_config(_force_reload=True).ibkr
+    b = broker or _connect(cfg.account, _NEWS_CLIENT_ID)
+    try:
+        path = _store_dir("state") / "news_seen.json"
+        seen = set(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else set()
+        fresh = []
+        for s in _watchlist(PortfolioManager(), b):
+            for h in b.news(s, days=1, limit=10):
+                if h["id"] not in seen:
+                    seen.add(h["id"])
+                    fresh.append({"symbol": s, **h})
+        path.write_text(json.dumps(sorted(seen)[-3000:]), encoding="utf-8")   # ponytail: 只留最近 3000 个 id
+        return {"status": "ok", "new": fresh}
+    finally:
+        if broker is None:
+            b.close()
+
+
+def brief(kind: str = "decide", today: Optional[str] = None, *, broker=None) -> Dict[str, Any]:
+    """常驻会话做决定前要看的完整上下文：和 LLM 路径同一份系统规则 + 账户 / 名单 / 委员会裁决 + 盈透新闻标题。"""
+    cfg = load_config(_force_reload=True).ibkr
+    today = today or _today()
+    pm = PortfolioManager()
+    targets = [t["symbol"] for t in pm.strategy.get("target_assets") or []]
+    caps = dict(max_order=f"{cfg.max_order_usd:g}", max_day=f"{cfg.max_day_usd:g}", min_order=f"{cfg.min_order_usd:g}")
+    if kind == "pick":
+        system, prompt = _PICK_SYSTEM.format(**caps), _pick_prompt(pm, today)
+    else:
+        system, prompt = _DECIDE_SYSTEM.format(**caps), _decide_prompt(pm, targets, today)
+    try:
+        digest = news(broker=broker)["news"]
+    except Exception as e:  # noqa: BLE001 — 新闻拿不到不挡决策
+        digest = {"error": f"{type(e).__name__}: {e}"}
+    return {"kind": kind, "date": today, "system": system, "prompt": prompt, "ibkr_news": digest,
+            "how_to_submit": ("ibkr.sh pick --picks '<JSON>'" if kind == "pick"
+                              else "ibkr.sh decide --orders '<JSON>' [--batch N] && ibkr.sh submit [--batch N]")}
+
+
 def notify_failure(phase: str, problems: Dict[str, Any]) -> None:
     """CLI 用：某段返回 error / halted 或抛异常时发邮件——cron 只看退出码，没人盯日志。"""
     _notify(f"⚠️ 盈透 autopilot {phase} 没跑成",
@@ -844,7 +962,8 @@ def notify_failure(phase: str, problems: Dict[str, Any]) -> None:
 
 
 def run(phase: str = "submit", **kw) -> Dict[str, Any]:
-    return {"pick": pick, "decide": decide, "submit": submit, "reconcile": reconcile, "status": status}[phase](**kw)
+    return {"pick": pick, "decide": decide, "submit": submit, "reconcile": reconcile, "status": status,
+            "news": news, "news_check": news_check, "brief": brief}[phase](**kw)
 
 
 if __name__ == "__main__":

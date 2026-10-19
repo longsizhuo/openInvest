@@ -75,20 +75,27 @@ def cmd_autopilot_daily(_: argparse.Namespace) -> None:
 
 def cmd_ibkr_autopilot(args: argparse.Namespace) -> None:
     """盈透实盘 autopilot（jobs/ibkr_autopilot.py，**下真单**；ibkr.enabled 关着时全是 no-op，dry_run 时只试算）。
-    phase=pick / decide / submit / reconcile 单跑一段，status 只读查当前情况（不下单）；daily = pick（周一或名单为空）→ daily_report（委员会，
-    不发邮件，裁决只给 decide 当参考）→ decide（LLM 定当日订单）→ submit → verdict_review，各段隔离失败。
-    输出 JSON；有任何一段抛异常则退出码 1。"""
+    phase=pick / decide / submit / reconcile 单跑一段；status / news / brief 只读；committee = daily_report（不发邮件）→
+    verdict_review；daily = pick（周一或名单为空）→ daily_report → decide（LLM）→ submit → verdict_review。
+    常驻会话驱动时用 brief 看上下文、pick --picks / decide --orders 交自己写的 JSON（同一套校验），--batch 给盘中追加批次。
+    输出 JSON；任一段 error / halted 或抛异常 → 邮件 + 退出码 1。"""
     from openinvest.jobs import ibkr_autopilot
 
+    syms = [x.strip().upper() for x in (args.symbols or "").split(",") if x.strip()] or None
     stages = {
-        "pick": [("pick", lambda: ibkr_autopilot.pick(force=args.force))],
-        "decide": [("decide", ibkr_autopilot.decide)],
-        "submit": [("submit", ibkr_autopilot.submit)],
+        "pick": [("pick", lambda: ibkr_autopilot.pick(force=args.force, picks_json=args.picks))],
+        "decide": [("decide", lambda: ibkr_autopilot.decide(orders_json=args.orders, batch=args.batch))],
+        "submit": [("submit", lambda: ibkr_autopilot.submit(batch=args.batch))],
         "reconcile": [("reconcile", ibkr_autopilot.reconcile)],
         "status": [("status", ibkr_autopilot.status)],
+        "news": [("news", lambda: ibkr_autopilot.news(syms, days=args.days, article=args.article))],
+        "news_check": [("news_check", ibkr_autopilot.news_check)],
+        "brief": [("brief", lambda: ibkr_autopilot.brief(args.kind))],
     }
-    if args.phase == "daily":
+    if args.phase in ("daily", "committee"):
         from openinvest.jobs import daily_report, verdict_review
+        stages["committee"] = [("daily_report", lambda: daily_report.run(send_email=False)),
+                               ("verdict_review", verdict_review.run)]
         stages["daily"] = [("pick", lambda: ibkr_autopilot.pick(force=args.force)),
                            ("daily_report", lambda: daily_report.run(send_email=False)),
                            ("decide", ibkr_autopilot.decide),

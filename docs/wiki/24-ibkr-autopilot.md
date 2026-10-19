@@ -51,6 +51,15 @@ documents:
 `openinvest ibkr_autopilot daily` = pick → `daily_report`（不发邮件）→ decide → submit → `verdict_review`，各段隔离失败。参考价用 yfinance 最近收盘（≤5 个自然日，不能是兜底陈旧价）。
 orderRef = `oi:<date>/<symbol>/<side>`（清仓 `oi:exit:<date>/<symbol>`）；下单邮件逐单附 LLM 的理由。
 
+## 常驻会话驱动（可选）
+
+决策也可以交给一个**常驻的 Claude Code 会话**（tmux 里长开，`--remote-control` 可远程对话），而不是每次由 cron 调一次 LLM。
+cron 只做不需要模型的部分（`committee` 委员会日报、`reconcile` 对账、`news_check` 新闻轮询），到点 / 有新标题时把一句指令送进会话；
+会话自己 `brief` 看上下文（与 LLM 路径同一份系统规则 + 账户 / 名单 / 委员会裁决 + 盈透新闻标题），研究后用
+`pick --picks '<JSON>'` / `decide --orders '<JSON>' [--batch N]` 交自己写的 JSON（同一套校验落盘），再 `submit [--batch N]`。
+盘中新闻触发的追加单用 `--batch 2,3…`：文件（`<date>.bN.json`）、orderRef（`oi:<date>#bN/…`）、claim 都与开盘前那批分开，单日额度共用。
+`news [--symbols A,B] [--days N] [--article PROVIDER:ID]` 只读查盈透免费新闻（Briefing.com / Dow Jones，账户自带）。
+
 ## 硬闸（代码层，LLM / 委员会给什么都先过这里）
 
 - `ibkr.enabled` 关 → no-op；金额键不合法 → 一单不下；`INVEST_HOME/STOP` 存在 → submit 不下单（人看过删掉才恢复；reconcile 照常记账）

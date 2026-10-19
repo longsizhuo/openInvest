@@ -255,11 +255,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="盈透实盘 autopilot（**下真单**，需 ibkr.enabled；ibkr.dry_run 默认只试算）。"
              "pick=LLM 选 ≤5 只美股/ETF 写进 target_assets（周一）；decide=LLM 参考委员会裁决定当日订单；"
              "submit=按当日订单挂限价单；reconcile=收盘后按成交记账 + 对账；"
-             "daily=pick→daily_report(不发邮件)→decide→submit→verdict_review；status=只读查券商现金/持仓/挂单/成交。"
+             "daily=pick→daily_report(不发邮件)→decide→submit→verdict_review；committee=只跑委员会日报；"
+             "status/news/brief=只读（常驻会话用 brief 看上下文，pick --picks / decide --orders 交自己写的 JSON）。"
              "给独立盈透 INVEST_HOME 的 cron 用；输出 JSON。",
     )
-    p.add_argument("phase", choices=["pick", "decide", "submit", "reconcile", "daily", "status"])
+    p.add_argument("phase", choices=["pick", "decide", "submit", "reconcile", "daily", "committee", "status",
+                                      "news", "news_check", "brief"])
     p.add_argument("--force", action="store_true", help="pick 不等周一，现在就重选名单")
+    p.add_argument("--picks", help='pick：常驻会话自己写的名单 JSON {"picks":[{"symbol","why"}],"note"}（不调 LLM）')
+    p.add_argument("--orders", help='decide：常驻会话自己写的订单 JSON {"orders":[{"symbol","side","usd","why"}],"note"}（不调 LLM）')
+    p.add_argument("--batch", type=int, default=1, help="decide / submit 批次：1=开盘前，2,3…=盘中追加")
+    p.add_argument("--kind", choices=["decide", "pick"], default="decide", help="brief：看哪一步的上下文")
+    p.add_argument("--symbols", help="news：逗号分隔的标的（默认名单 + 持仓 + SPY）")
+    p.add_argument("--days", type=int, default=2, help="news：回看天数")
+    p.add_argument("--article", help="news：PROVIDER:ID 取一篇正文")
     p.set_defaults(func=cmd_ibkr_autopilot)
 
     # ============ 写操作子命令（Agent 用） ============
