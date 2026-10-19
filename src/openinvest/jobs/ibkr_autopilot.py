@@ -544,9 +544,12 @@ def _ref_price(pm: PortfolioManager, symbol: str, today: str) -> float:
     return float(snap.price)
 
 
-def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, room: float, cfg) -> tuple[float, float]:
-    """(qty, lmt)，**整股**（盈透 API 不收碎股单：error 10243）。room = min(单笔上限, 当日剩余额度)。
-    卖出至少能卖 1 股——哪怕这 1 股已涨过单笔上限：现金账户卖出只会降风险，不能让持仓永远卖不掉。"""
+def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, used: float, cfg) -> tuple[float, float]:
+    """(qty, lmt)，**整股**（盈透 API 不收碎股单：error 10243）。used = 当日已用额度。
+    单笔 ≤ max_order_usd、当日累计 ≤ max_day_usd，买卖都受限（fail closed）。唯一例外：**整笔清仓**时一股已涨过单笔上限，
+    允许单独卖 1 股——但这一股必须放得进当日剩余额度；放不进就不卖，记 exit_blocked_by_caps 并邮件提醒人。"""
+    day_left = cfg.max_day_usd - used
+    room = min(cfg.max_order_usd, day_left)
     if a["side"] == "BUY":
         if room < cfg.min_order_usd:
             raise _Skip("day_cap_reached", terminal=True)
@@ -558,12 +561,21 @@ def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, room: float, c
                 raise _Skip("no_cash", terminal=True)
             raise _Skip("too_small" if lmt <= min(a["usd"], room) else "share_price_above_cap", terminal=True)
         return qty, lmt
+    if day_left <= 0:
+        raise _Skip("day_cap_reached", terminal=True)
     pos = round_down_units(pos, 1)
     if pos <= 0:
         raise _Skip("no_position", terminal=True)
     lmt = round(ref * (1 - _BAND), 2)
-    want = pos if a["full"] else min(max(round_down_units(a["usd"] / ref, 1), 1.0), pos)
-    qty = min(want, max(round_down_units(max(room, 0.0) / ref, 1), 1.0))
+    want = pos if a["full"] else min(round_down_units(a["usd"] / ref, 1), pos)
+    qty = min(want, round_down_units(room / ref, 1))
+    if qty < 1:
+        if a["full"] and ref <= day_left:
+            qty = 1.0   # 清仓例外：一股贵过单笔上限，单独卖 1 股（仍在当日额度内）
+        elif a["full"]:
+            raise _Skip("exit_blocked_by_caps", terminal=True)
+        else:
+            raise _Skip("share_price_above_cap" if want >= 1 or a["usd"] >= ref else "too_small", terminal=True)
     if qty * ref < cfg.min_order_usd and qty < pos:
         raise _Skip("too_small", terminal=True)
     return qty, lmt
@@ -659,8 +671,7 @@ def _submit(b, today: str, cfg) -> Dict[str, Any]:
         sent = False   # 单一旦发出，之后任何异常都不 unclaim（ADR-016：下单后不 unclaim）
         try:
             ref = _ref_price(pm, sym, today)
-            qty, lmt = _size(a, ref, usd_cash, positions.get(sym, 0.0),
-                             min(cfg.max_order_usd, cfg.max_day_usd - used), cfg)
+            qty, lmt = _size(a, ref, usd_cash, positions.get(sym, 0.0), used, cfg)
             conid = b.conid(sym)
             if conid is None:
                 raise _Skip("not_tradable_at_ibkr", terminal=True)
@@ -695,12 +706,15 @@ def _submit(b, today: str, cfg) -> Dict[str, Any]:
 
     out = {"status": "ok", "date": today, "dry_run": cfg.dry_run, "fx": fx, "placed": placed, "skipped": skipped,
            "used_usd": round(used, 2)}
-    if placed or (fx and not fx.get("skipped")):
+    blocked = [x for x in skipped if x["reason"] == "exit_blocked_by_caps"]
+    if placed or blocked or (fx and not fx.get("skipped")):
         _notify(f"{'🧪 盈透试算' if cfg.dry_run else '📨 盈透下单'} {today}",
                 ([f"换汇 {fx['amount']} {fx['from']} → {fx['to']}"] if fx and not fx.get("skipped") else [])
                 + [f"{r['side']} {r['symbol']} {r['qty']:g} @ {'≤' if r['side'] == 'BUY' else '≥'}{r['lmt']}"
                    f"（≈USD {r['max_usd']}）— {r['why']}" for r in placed]
-                + [f"跳过 {s['symbol']}: {s['reason']}" for s in skipped])
+                + [f"跳过 {s['symbol']}: {s['reason']}" for s in skipped]
+                + ([f"⚠️ {', '.join(x['symbol'] for x in blocked)} 一股已贵过当日上限 USD {cfg.max_day_usd:g}，清仓卖不出去："
+                    "要么人工卖，要么调高 ibkr.max_day_usd"] if blocked else []))
     return out
 
 

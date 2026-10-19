@@ -342,12 +342,35 @@ def test_sell_capped_and_no_short(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
     _orders(home, [("QQQM", "SELL", "all"), ("GLDM", "SELL", 50)])
-    _prices(monkeypatch, {"QQQM": 200.0, "GLDM": 50.0})
+    _prices(monkeypatch, {"QQQM": 120.0, "GLDM": 50.0})
     b = FakeBroker(positions={"QQQM": 3.0})                  # GLDM 没仓位
     out = ia.submit(TODAY, broker=b)
     (o,) = b.placed
-    assert (o["symbol"], o["side"], o["qty"]) == ("QQQM", "SELL", 1.0)   # 一股 200 已超单笔上限 100：仍能卖 1 股
+    assert (o["symbol"], o["side"], o["qty"]) == ("QQQM", "SELL", 1.0)   # 清仓：一股 120 > 单笔 100 但 ≤ 当日 150 → 卖 1 股
     assert {"symbol": "GLDM", "reason": "no_position"} in out["skipped"]
+
+
+def test_exit_exception_respects_day_cap_and_partial_sells_stay_capped(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _orders(home, [("QQQM", "SELL", "all"), ("GLDM", "SELL", 130)])
+    _prices(monkeypatch, {"QQQM": 200.0, "GLDM": 120.0})
+    b = FakeBroker(positions={"QQQM": 3.0, "GLDM": 2.0})
+    out = ia.submit(TODAY, broker=b)
+    reasons = {x["symbol"]: x["reason"] for x in out["skipped"]}
+    assert b.placed == []
+    assert reasons["QQQM"] == "exit_blocked_by_caps"          # 一股 200 > 当日上限 150：清仓也不卖，报警
+    assert reasons["GLDM"] == "share_price_above_cap"         # 部分减仓不享受 1 股例外
+    assert home.sent and "清仓卖不出去" in home.sent[-1][1][-1]
+
+
+def test_sells_stop_when_day_budget_used(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _orders(home, [("QQQM", "SELL", "all")])
+    _prices(monkeypatch, {"QQQM": 40.0})
+    b = FakeBroker(positions={"QQQM": 3.0}, fills=[_fill("GLDM", "BOT", 3.0, 50.0, "e1", ref=f"oi:{TODAY}/GLDM/BUY")])
+    assert ia.submit(TODAY, broker=b)["skipped"] == [{"symbol": "QQQM", "reason": "day_cap_reached"}] and b.placed == []
 
 
 def test_share_price_above_cap_is_reported(home, monkeypatch):
