@@ -44,8 +44,8 @@ Move real money when `ibkr.enabled` is on and `ibkr.dry_run` is off — **never 
 | Command | What |
 |---|---|
 | `ibkr_autopilot pick --picks-file F` / `decide --orders-file F [--batch 1-4]` | Submit a list / today's orders as JSON (validated: list members only, BUY/SELL, positive amounts) |
-| `ibkr_autopilot submit [--batch N]` | DAY limit orders at reference ±1%; converts AUD→USD inside the account first if USD is short |
-| `ibkr_autopilot reconcile` | Books fills (stocks + FX legs) idempotently; halts with a `STOP` file on position drift |
+| `ibkr_autopilot submit [--batch N]` | DAY limit orders at reference ±1%; buying power = IBKR `AvailableFunds` (a cash account auto-converts the base currency, commission-free — there is no FX command) |
+| `ibkr_autopilot reconcile` | Books fills (stocks + IBKR's auto-FX legs) idempotently, broker-confirmed negative cash allowed; halts with a `STOP` file on position drift |
 | `ibkr_autopilot daily` / `committee` | Full cron pipeline / committee report only |
 
 ## Safety model
@@ -71,4 +71,6 @@ raise them for their own home, which removes that brake.
 - The gateway's per-currency cash may arrive as `$LEDGER-CashBalance` rather than `CashBalance` (both are read).
 - Executions are fetched with a 7-day time filter, but a gateway may only return today's; a missed reconcile then
   halts with `STOP` and needs a manual ledger fix.
-- Dividends, withholding tax and new deposits are not booked automatically (a cash-drift email asks the operator).
+- Dividends, withholding tax and new deposits are not booked automatically (a cash-drift notice asks the operator).
+- Notices go by email unless `ibkr.notify_cmd` names a command (e.g. `hermes send --to discord:<you> --quiet`); a failed send falls back to email.
+- Commissions dominate a small account: IBKR Fixed pricing is USD 1 minimum per order (capped at 1% of value), so a USD 100 round trip costs ~2%.
