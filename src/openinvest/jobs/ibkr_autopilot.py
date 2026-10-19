@@ -109,6 +109,9 @@ _CLIENT_ID = 17
 _STATUS_CLIENT_ID = 18  # status 只读查询用另一个 clientId，和 cron 里的 submit / reconcile 同时连也不撞
 _FX_BAND = 0.01         # 换汇限价 = 参考汇率 ±1%（市价换汇单可能被拒，用可成交的限价）
 _UNSET = 1e300          # ib_async 的「未设置」浮点（UNSET_DOUBLE ≈ 1.8e308）
+_ACK_OK = ("PreSubmitted", "Submitted", "Filled")
+_ACK_REJECT = ("Cancelled", "ApiCancelled", "Inactive")
+_SEND_POLLS = 20        # 下单后最多等 20 × 0.5s 网关回执
 
 
 def _finite(v: Any) -> Optional[float]:
@@ -196,12 +199,21 @@ class _IbGateway:
         return {"commission": _finite(st.commission), "warning": st.warningText or None, "error": None}
 
     def _send(self, contract, order) -> Dict[str, Any]:
+        """只有网关明确回执（PreSubmitted / Submitted / Filled）才算下单成功；被拒或等不到明确状态都抛错。
+        抛错时单可能已在网关里——submit 那边 sent=True 留 claim、不重下，真成交了 reconcile 照样记账。
+        网关的下单预防性检查由 compose 的 BYPASS_WARNING=no 保持开启（超限单被网关拒，不会弹窗等人点）。"""
         trade = self.ib.placeOrder(contract, order)
-        self.ib.sleep(2)
-        status = trade.orderStatus.status
-        if status in ("Cancelled", "ApiCancelled", "Inactive"):
-            raise RuntimeError(f"{status} {'; '.join(x.message for x in trade.log if x.message)}".strip())
-        return {"order_id": order.orderId, "status": status}
+        status = ""
+        for _ in range(_SEND_POLLS):
+            self.ib.sleep(0.5)
+            status = trade.orderStatus.status
+            if status in _ACK_OK or status in _ACK_REJECT:
+                break
+        if status in _ACK_OK:
+            return {"order_id": order.orderId, "status": status}
+        msg = "; ".join(x.message for x in trade.log if x.message)
+        kind = "rejected" if status in _ACK_REJECT else "unconfirmed"
+        raise RuntimeError(f"{kind} {status or 'no_status'} {msg}".strip())
 
     def place(self, conid: int, side: str, qty: float, lmt: float, ref: str) -> Dict[str, Any]:
         return self._send(self._contracts[conid], self._limit(side, qty, lmt, ref))

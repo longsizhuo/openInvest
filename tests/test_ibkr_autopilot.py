@@ -594,8 +594,11 @@ def test_gateway_orders_whatif_and_rejection():
     assert g.whatif(cid, "BUY", 0.495, 202.0, "oi:r")["error"]
     assert g.place(cid, "SELL", 0.3, 89.1, "oi:s") == {"order_id": 123, "status": "PreSubmitted"}
     ib.status = "Inactive"
-    with pytest.raises(RuntimeError, match="No trading permissions"):
+    with pytest.raises(RuntimeError, match="rejected Inactive No trading permissions"):
         g.place(cid, "BUY", 0.1, 202.0, "oi:t")
+    ib.status = "PendingSubmit"                               # 等不到明确回执：不当成功
+    with pytest.raises(RuntimeError, match="unconfirmed PendingSubmit"):
+        g.place(cid, "BUY", 0.1, 202.0, "oi:u")
     g.close()
     assert ib.calls[-1] == "disconnect"
 
