@@ -251,11 +251,11 @@ class AutopilotConfig:
 
 @dataclass(frozen=True)
 class IbkrConfig:
-    """盈透实盘 autopilot（jobs/ibkr_autopilot.py）——**下真单**。
+    """盈透实盘 autopilot（jobs/ibkr_autopilot.py：LLM 选标的 + LLM 定当日订单）——**下真单**。
 
     只应在独立 INVEST_HOME 开（该 home 的 target_assets = 盈透账户里交易的 USD 标的）。
     dataclass 默认=禁用 + 试算：fork 用户 / 生产 hub 零影响；打开后默认也只 whatIfOrder 不下单。
-    金额上限全按 USD，是硬闸（委员会给多少都先钳到这里）。
+    金额上限全按 USD，是硬闸（LLM 给多少都先钳到这里）。
     **故意不进 API_SETTABLE**：MCP / web API / agent 的 config set 改不了它——只能由运营者用
     INVEST_IBKR_* 环境变量（cron 行）或该 home 的 memory/.state/config_overrides.json 设。
     """

@@ -17,7 +17,7 @@
 | `pnl_snapshot` | **是** | 工作日 9-23 点每 2h | `0 9-23/2 * * mon-fri` | `jobs.pnl_snapshot:run` |
 | `dca_daily` | **是**（真正开关是 config `dca.auto_dca_enabled`，默认 no-op） | 工作日 15:30 / 18:30 / 21:30 | `30 15,18,21 * * mon-fri` | `jobs.dca_daily:run` |
 | `paper_autopilot` | **是**（真正开关是 config `autopilot.enabled`，默认 no-op；只给独立模拟 INVEST_HOME 用） | 工作日 16:35 | `35 16 * * mon-fri` | `jobs.paper_autopilot:run` |
-| `ibkr_autopilot` | 否（不进 scheduler：独立盈透 INVEST_HOME 的系统 cron 跑 `openinvest ibkr_autopilot daily` / `reconcile`；开关 config `ibkr.enabled`，**下真单**） | 工作日 UTC 12:45 / 21:30 | — | `jobs.ibkr_autopilot:submit` / `:reconcile` |
+| `ibkr_autopilot` | 否（不进 scheduler：独立盈透 INVEST_HOME 的系统 cron 跑 `openinvest ibkr_autopilot daily` / `reconcile`；开关 config `ibkr.enabled`，**下真单**） | 工作日 UTC 12:45 / 21:30 | — | `jobs.ibkr_autopilot:pick` / `:decide` / `:submit` / `:reconcile` |
 | `path_review` | **是** | 周日 11:30 | `30 11 * * sun` | `jobs.path_review:run` |
 | `daily_report` | 否（2026-07-12 停用，改由宿主 agent 侧 cron 经 MCP 触发） | 每天 10:00 | `0 10 * * *` | `jobs.daily_report:run` |
 | `dreaming` | 否（P3 完成后再启用） | 每天 03:00 | `0 3 * * *` | `jobs.dreaming:run` |

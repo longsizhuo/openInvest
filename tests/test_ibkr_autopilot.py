@@ -1,6 +1,7 @@
-"""jobs/ibkr_autopilot.py 测试：盈透实盘 autopilot（默认关 / 试算 / 金额硬闸 / 清仓 / 幂等 / STOP / 对账 / 选股校验）。
+"""jobs/ibkr_autopilot.py 测试：盈透实盘 autopilot（默认关 / 试算 / 金额硬闸 / 清仓 / 幂等 / STOP / 对账 /
+选股校验 / LLM 当日订单 decide——委员会裁决只当参考，不触发下单、不被记执行）。
 
-tmp INVEST_HOME 里造持仓 + 当日裁决 md；盈透网关用 FakeIB（只实现本模块调用的方法），Order / Stock 用 ib_async 真类；
+tmp INVEST_HOME 里造持仓 + 当日裁决 md + 当日订单 json；盈透网关用 FakeIB（只实现本模块调用的方法），Order / Stock 用 ib_async 真类；
 行情 / 汇率 / yfinance info / LLM 全 monkeypatch，不联网、不连网关。
 """
 from __future__ import annotations
@@ -72,7 +73,7 @@ class FakeIB:
     def placeOrder(self, c, o):
         o.orderId = 100 + len(self.placed)
         log = [SimpleNamespace(message="No trading permissions")] if self.status == "Inactive" else []
-        t = SimpleNamespace(order=o, orderStatus=SimpleNamespace(status=self.status, filled=0.0), log=log)
+        t = SimpleNamespace(order=o, contract=c, orderStatus=SimpleNamespace(status=self.status, filled=0.0), log=log)
         self.placed.append((c.symbol, o))
         self.open.append(t)
         return t
@@ -135,6 +136,16 @@ def _enable(monkeypatch, dry_run=False):
     reset_config()
 
 
+def _orders(store, orders, note="", date=TODAY):
+    """直接写 decide 的产物（memory/.ibkr/decisions/<date>.json），submit 读它。"""
+    d = store.root / ".ibkr" / "decisions"
+    d.mkdir(parents=True, exist_ok=True)
+    norm = [{"symbol": o[0], "side": o[1], "full": o[2] == "all", "usd": 0.0 if o[2] == "all" else float(o[2]),
+             "why": f"why-{o[0]}"} for o in orders]
+    (d / f"{date}.json").write_text(json.dumps({"date": date, "orders": norm, "rejected": [], "note": note}),
+                                    encoding="utf-8")
+
+
 def _decision(sym):
     return next(d for d in list_decisions(days=3) if d["decision_id"] == f"{TODAY}/{sym}")
 
@@ -162,7 +173,7 @@ def test_bad_caps_fail_closed(home, monkeypatch, env):
         monkeypatch.setenv(k, v)
     reset_config()
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
     ib = FakeIB()
     out = ia.submit(TODAY, ib=ib)
@@ -179,18 +190,19 @@ def test_notify_escapes_html(monkeypatch):
 
 def test_disabled_is_noop(home):
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _orders(home, [("QQQM", "BUY", 500)])
     ib = FakeIB()
     assert ia.submit(TODAY, ib=ib)["reason"] == "ibkr_disabled"
     assert ia.reconcile(ib=ib)["reason"] == "ibkr_disabled"
     assert ia.pick(TODAY, agent=object())["reason"] == "ibkr_disabled"
+    assert ia.decide(TODAY, agent=object())["reason"] == "ibkr_disabled"
     assert ib.placed == [] and ib.whatifs == []
 
 
 def test_stop_file_and_account_mismatch(home, monkeypatch, tmp_path):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
     (tmp_path / "STOP").write_text("manual\n")
     ib = FakeIB()
@@ -203,17 +215,29 @@ def test_stop_file_and_account_mismatch(home, monkeypatch, tmp_path):
 
 # ---------------- submit ----------------
 
+def test_committee_verdict_alone_places_nothing_and_is_not_marked_executed(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _verdict(home, "QQQM", "ACCUMULATE", 500)                # 委员会说买，但 LLM 当天没下单
+    _prices(monkeypatch, {"QQQM": 200.0})
+    ib = FakeIB()
+    assert ia.submit(TODAY, ib=ib)["placed"] == [] and ib.placed == []
+    _orders(home, [("QQQM", "BUY", 50)])
+    ia.submit(TODAY, ib=ib)
+    assert len(ib.placed) == 1
+    assert _decision("QQQM")["execution"] is None            # 执行的是 LLM 的单，委员会裁决不记执行
+
+
 def test_dry_run_only_whatif(home, monkeypatch):
     _enable(monkeypatch, dry_run=True)
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
     ib = FakeIB()
     out = ia.submit(TODAY, ib=ib)
     assert ib.placed == [] and len(ib.whatifs) == 1
     row = out["placed"][0]
     assert (row["qty"], row["lmt"], row["dry_run"], row["commission"]) == (0.495, 202.0, True, 0.35)
-    assert _decision("QQQM")["execution"] is None          # 试算不记执行
     ia.submit(TODAY, ib=ib)
     assert len(ib.whatifs) == 2                              # 试算不占 claim，可反复跑
 
@@ -221,33 +245,19 @@ def test_dry_run_only_whatif(home, monkeypatch):
 def test_live_buy_capped_limit_order_and_idempotent(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)                # 委员会要 500，单笔闸钳到 100
+    _orders(home, [("QQQM", "BUY", 500)])                    # LLM 要 500，单笔闸钳到 100
     _prices(monkeypatch, {"QQQM": 200.0})
     ib = FakeIB()
     out = ia.submit(TODAY, ib=ib)
     (sym, o), = ib.placed
     assert (sym, o.action, o.totalQuantity, o.lmtPrice, o.tif, o.account, o.outsideRth) == \
         ("QQQM", "BUY", 0.495, 202.0, "DAY", ACCT, False)
-    assert o.orderRef == f"oi:{TODAY}/QQQM" and o.orderType == "LMT"
+    assert o.orderRef == f"oi:{TODAY}/QQQM/BUY" and o.orderType == "LMT"
     assert out["placed"][0]["max_usd"] == pytest.approx(99.99)
-    ex = _decision("QQQM")["execution"]
-    assert ex["executed"] is True and ex["reason"] == "ibkr:PreSubmitted:100"
-    assert home.sent and "下单" in home.sent[-1][0]
+    assert home.sent and "下单" in home.sent[-1][0] and "why-QQQM" in home.sent[-1][1][0]
     ia.submit(TODAY, ib=ib)                                  # 重跑：盈透已有同 orderRef → 不二次下单
     assert len(ib.placed) == 1
-    ib.open.clear()                                          # 网关重启丢了挂单视图：已记执行的裁决不再出现
-    assert ia.submit(TODAY, ib=ib)["placed"] == [] and len(ib.placed) == 1
-
-
-def test_claim_blocks_second_order_when_execution_write_failed(home, monkeypatch):
-    _enable(monkeypatch)
-    _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
-    _prices(monkeypatch, {"QQQM": 200.0})
-    monkeypatch.setattr(ia, "record_execution", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
-    ib = FakeIB()
-    ia.submit(TODAY, ib=ib)
-    ib.open.clear()
+    ib.open.clear()                                          # 网关重启丢了挂单视图：claim 兜底
     assert ia.submit(TODAY, ib=ib)["skipped"] == [{"symbol": "QQQM", "reason": "already_done_today"}]
     assert len(ib.placed) == 1
 
@@ -255,13 +265,12 @@ def test_claim_blocks_second_order_when_execution_write_failed(home, monkeypatch
 def test_day_cap_shrinks_later_orders(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "GLDM", "ACCUMULATE", 500)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _orders(home, [("QQQM", "BUY", 500), ("GLDM", "BUY", 500)])
     _prices(monkeypatch, {"GLDM": 50.0, "QQQM": 200.0})
     ib = FakeIB()
     out = ia.submit(TODAY, ib=ib)
     (s1, o1), (s2, o2) = ib.placed
-    assert (s1, o1.totalQuantity) == ("GLDM", 1.9801)        # 100 / 50.5
+    assert (s1, o1.totalQuantity) == ("GLDM", 1.9801)        # 100 / 50.5（按代码排序，先 GLDM）
     assert (s2, o2.totalQuantity) == ("QQQM", 0.2475)        # 剩 150 − 99.995 ≈ 50.005 → /202
     assert out["used_usd"] <= 150.0
 
@@ -269,9 +278,9 @@ def test_day_cap_shrinks_later_orders(home, monkeypatch):
 def test_open_orders_and_todays_fills_count_toward_day_cap(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB(fills=[_fill("GLDM", "BOT", 2.0, 50.0, "e1", ref="oi:2026-10-19/GLDM")])   # 已成交 100
+    ib = FakeIB(fills=[_fill("GLDM", "BOT", 2.0, 50.0, "e1", ref=f"oi:{TODAY}/GLDM/BUY")])   # 已成交 100
     ia.submit(TODAY, ib=ib)
     (_, o), = ib.placed
     assert o.totalQuantity == round(int(50 / 202 * 1e4) / 1e4, 4)
@@ -291,48 +300,44 @@ def test_exit_sells_position_not_in_targets(home, monkeypatch):
 def test_sell_capped_and_no_short(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "QQQM", "SELL")
-    _verdict(home, "GLDM", "TRIM", 50)
+    _orders(home, [("QQQM", "SELL", "all"), ("GLDM", "SELL", 50)])
     _prices(monkeypatch, {"QQQM": 200.0, "GLDM": 50.0})
     ib = FakeIB(positions={"QQQM": 1.0})                     # GLDM 没仓位
     out = ia.submit(TODAY, ib=ib)
     (sym, o), = ib.placed
     assert (sym, o.action, o.totalQuantity) == ("QQQM", "SELL", 0.5)   # 清仓 200 被单笔闸钳到 100
     assert {"symbol": "GLDM", "reason": "no_position"} in out["skipped"]
-    assert _decision("GLDM")["execution"]["executed"] is False
 
 
-def test_skips_non_target_tiny_and_unknown(home, monkeypatch):
+def test_skips_orders_outside_list_and_no_cash(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home, cash=15.0)
-    _verdict(home, "AAPL", "ACCUMULATE", 80)                 # 不在名单 → 不碰
-    _verdict(home, "QQQM", "ACCUMULATE", 80)                 # 现金 15 → no_cash
-    _verdict(home, "GLDM", "HOLD")
+    _orders(home, [("AAPL", "BUY", 80), ("QQQM", "BUY", 80)])   # 名单在 decide 之后被改过 → AAPL 挡住
     _prices(monkeypatch, {"QQQM": 200.0, "AAPL": 200.0})
     ib = FakeIB(cash=15.0)
     out = ia.submit(TODAY, ib=ib)
     assert ib.placed == [] and out["skipped"] == [{"symbol": "QQQM", "reason": "no_cash"}]
-    assert _decision("AAPL")["execution"] is None
 
 
 def test_unknown_contract_and_rejection_are_terminal(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "GLDM", "ACCUMULATE", 60)
-    _verdict(home, "QQQM", "ACCUMULATE", 60)
+    _orders(home, [("GLDM", "BUY", 60), ("QQQM", "BUY", 60)])
     _prices(monkeypatch, {"GLDM": 50.0, "QQQM": 200.0})
     ib = FakeIB(unknown={"GLDM"}, status="Inactive")
     out = ia.submit(TODAY, ib=ib)
     reasons = {s["symbol"]: s["reason"] for s in out["skipped"]}
     assert reasons["GLDM"] == "not_tradable_at_ibkr"
     assert reasons["QQQM"].startswith("rejected: Inactive No trading permissions")
-    assert _decision("QQQM")["execution"]["executed"] is False
+    ib.status = "PreSubmitted"
+    ia.submit(TODAY, ib=ib)                                  # 终局：claim 留着，不重试
+    assert len(ib.placed) == 1
 
 
 def test_stale_quote_unclaims_for_retry(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 60)
+    _orders(home, [("QQQM", "BUY", 60)])
     _prices(monkeypatch, {"QQQM": 200.0}, bar="2026-10-01")
     ib = FakeIB()
     assert ia.submit(TODAY, ib=ib)["skipped"] == [{"symbol": "QQQM", "reason": "stale_quote"}]
@@ -446,6 +451,81 @@ def test_pick_only_on_monday_unless_forced(home, monkeypatch):
     assert ia.pick("2026-10-20", agent=agent, force=True)["status"] == "ok"
 
 
+# ---------------- decide ----------------
+
+def test_decide_prompt_validation_and_file(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, holdings=[{"symbol": "QQQM", "kind": "etf", "units": 0.5, "avg_cost": 180.0, "unit_label": "股",
+                           "cost_currency": "USD", "proxy_kind": "direct"}])
+    _verdict(home, "QQQM", "HOLD")
+    _verdict(home, "GLDM", "ACCUMULATE", 80)
+    _prices(monkeypatch, {"QQQM": 200.0, "GLDM": 50.0})
+    picks = home.root / ".ibkr" / "picks"
+    picks.mkdir(parents=True)
+    (picks / "2026-10-19.json").write_text(json.dumps({"picks": [{"symbol": "GLDM", "_why": "对冲仓位"}]}))
+    reply = json.dumps({"orders": [
+        {"symbol": "gldm", "side": "buy", "usd": 40, "why": "委员会也看多"},
+        {"symbol": "QQQM", "side": "SELL", "usd": "all", "why": "止盈"},
+        {"symbol": "AAPL", "side": "BUY", "usd": 50},           # 不在名单
+        {"symbol": "GLDM", "side": "SELL", "usd": 10},          # 一个标的一单
+        {"symbol": "QQQM", "side": "HOLD", "usd": 10},          # 方向非法（但同标的已有单，按先到先拒）
+        {"symbol": "GLDM", "side": "BUY", "usd": "nan"}], "note": "偏谨慎"})
+    agent = _Agent(f"```json\n{reply}\n```")
+    out = ia.decide(TODAY, agent=agent)
+    assert out["status"] == "ok"
+    assert [(o["symbol"], o["side"], o["full"], o["usd"]) for o in out["orders"]] == \
+        [("GLDM", "BUY", False, 40.0), ("QQQM", "SELL", True, 0.0)]
+    assert {r["symbol"]: r["reason"] for r in out["rejected"]}["AAPL"] == "not_in_list"
+    prompt = agent.prompts[0]
+    assert "GLDM：ACCUMULATE（置信度 0.70，建议 USD 80）" in prompt and "QQQM：HOLD" in prompt
+    assert "GLDM：对冲仓位" in prompt and "浮盈 +11.1%" in prompt and "账户背景：测试" in prompt
+    saved = json.loads((home.root / ".ibkr" / "decisions" / f"{TODAY}.json").read_text())
+    assert saved["orders"] == out["orders"] and saved["note"] == "偏谨慎"
+
+
+def test_decide_reuses_todays_file_and_llm_error_writes_nothing(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _prices(monkeypatch, {"QQQM": 200.0, "GLDM": 50.0})
+
+    class Boom:
+        def run(self, prompt):
+            raise TimeoutError("llm timeout")
+    with pytest.raises(TimeoutError):
+        ia.decide(TODAY, agent=Boom())
+    assert not (home.root / ".ibkr" / "decisions" / f"{TODAY}.json").exists()   # 下次重跑还能问
+    first = _Agent('{"orders": [{"symbol": "QQQM", "side": "BUY", "usd": 30}]}')
+    assert ia.decide(TODAY, agent=first)["status"] == "ok"
+    second = _Agent('{"orders": [{"symbol": "GLDM", "side": "BUY", "usd": 99}]}')
+    again = ia.decide(TODAY, agent=second)
+    assert again["reason"] == "already_decided" and second.prompts == []
+    assert [o["symbol"] for o in again["orders"]] == ["QQQM"]
+
+
+# ---------------- status ----------------
+
+def test_status_is_readonly_snapshot(home, monkeypatch, tmp_path):
+    _enable(monkeypatch)
+    _seed(home)
+    _orders(home, [("QQQM", "BUY", 60)])
+    _prices(monkeypatch, {"QQQM": 200.0})
+    ib = FakeIB(positions={"GLDM": 1.5}, fills=[_fill("GLDM", "BOT", 1.5, 50.0, "e9")])
+    ia.submit(TODAY, ib=ib)                                  # 造一张挂单
+    monkeypatch.setattr(ia, "_today", lambda: TODAY)
+    out = ia.status(ib=ib)
+    assert len(ib.placed) == 1 and ib.whatifs == []          # status 本身不下单
+    b = out["broker"]
+    assert b["cash_usd"] == 300.0 and b["positions"] == {"GLDM": 1.5}
+    assert b["open_orders"] == [{"symbol": "QQQM", "side": "BUY", "qty": 0.297, "lmt": 202.0, "status": "PreSubmitted"}]
+    assert b["fills_today"] == [{"symbol": "GLDM", "side": "BOT", "qty": 1.5, "price": 50.0}]
+    assert out["targets"] == ["GLDM", "QQQM"] and out["today_orders"][0]["symbol"] == "QQQM"
+    assert out["ledger"]["cash"] == {"USD": 300.0} and out["halted"] is None
+    (tmp_path / "STOP").write_text("drift\n")
+    monkeypatch.setattr(ia, "_connect", lambda client_id=17: (_ for _ in ()).throw(ConnectionRefusedError("down")))
+    out = ia.status()
+    assert out["halted"].endswith("drift") and out["broker"]["error"].startswith("gateway_unreachable")
+
+
 # ---------------- CLI ----------------
 
 def test_cli_daily_runs_stages_in_order_and_isolates_failure(monkeypatch, capfd):
@@ -454,6 +534,7 @@ def test_cli_daily_runs_stages_in_order_and_isolates_failure(monkeypatch, capfd)
     calls = []
     monkeypatch.setattr(ia, "pick", lambda force=False: calls.append(("pick", force)) or {"status": "skipped"})
     monkeypatch.setattr(dr, "run", lambda send_email=True, include_report=False: calls.append(("daily_report", send_email)) or {})
+    monkeypatch.setattr(ia, "decide", lambda: calls.append(("decide",)) or {"status": "ok"})
     monkeypatch.setattr(ia, "submit", lambda: (_ for _ in ()).throw(ConnectionRefusedError("gateway down")))
     monkeypatch.setattr(vr, "run", lambda **kw: calls.append(("verdict_review",)) or {"status": "ok"})
     monkeypatch.setattr(sys, "stdout", sys.stdout)
@@ -461,6 +542,15 @@ def test_cli_daily_runs_stages_in_order_and_isolates_failure(monkeypatch, capfd)
     with pytest.raises(SystemExit) as e:
         cli.main()
     assert e.value.code == 1
-    assert calls == [("pick", False), ("daily_report", False), ("verdict_review",)]   # 日报绝不发邮件
+    assert calls == [("pick", False), ("daily_report", False), ("decide",), ("verdict_review",)]   # 日报绝不发邮件
     out = json.loads(capfd.readouterr().out)
     assert out["submit"]["status"] == "error" and "gateway down" in out["submit"]["error"]
+
+
+def test_validate_orders_rejects_bad_amounts():
+    ok, rejected = ia._validate_orders(
+        [{"symbol": "QQQM", "side": "BUY", "usd": "nan"}, {"symbol": "GLDM", "side": "BUY", "usd": -5},
+         {"symbol": "XLV", "side": "BUY", "usd": "all"}, {"symbol": "VEA", "side": "SELL", "usd": "ALL"},
+         "not-a-dict"], {"QQQM", "GLDM", "XLV", "VEA"})
+    assert [(o["symbol"], o["full"]) for o in ok] == [("VEA", True)]   # 只有 SELL 能写 all
+    assert [r["reason"] for r in rejected] == ["bad_amount", "bad_amount", "bad_amount", "not_in_list"]

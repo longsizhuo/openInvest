@@ -75,19 +75,23 @@ def cmd_autopilot_daily(_: argparse.Namespace) -> None:
 
 def cmd_ibkr_autopilot(args: argparse.Namespace) -> None:
     """盈透实盘 autopilot（jobs/ibkr_autopilot.py，**下真单**；ibkr.enabled 关着时全是 no-op，dry_run 时只试算）。
-    phase=pick / submit / reconcile 单跑一段；daily = pick（周一或名单为空）→ daily_report（不发邮件）→ submit
-    → verdict_review，各段隔离失败。输出 JSON；有任何一段抛异常则退出码 1。"""
+    phase=pick / decide / submit / reconcile 单跑一段，status 只读查当前情况（不下单）；daily = pick（周一或名单为空）→ daily_report（委员会，
+    不发邮件，裁决只给 decide 当参考）→ decide（LLM 定当日订单）→ submit → verdict_review，各段隔离失败。
+    输出 JSON；有任何一段抛异常则退出码 1。"""
     from openinvest.jobs import ibkr_autopilot
 
     stages = {
         "pick": [("pick", lambda: ibkr_autopilot.pick(force=args.force))],
+        "decide": [("decide", ibkr_autopilot.decide)],
         "submit": [("submit", ibkr_autopilot.submit)],
         "reconcile": [("reconcile", ibkr_autopilot.reconcile)],
+        "status": [("status", ibkr_autopilot.status)],
     }
     if args.phase == "daily":
         from openinvest.jobs import daily_report, verdict_review
         stages["daily"] = [("pick", lambda: ibkr_autopilot.pick(force=args.force)),
                            ("daily_report", lambda: daily_report.run(send_email=False)),
+                           ("decide", ibkr_autopilot.decide),
                            ("submit", ibkr_autopilot.submit),
                            ("verdict_review", verdict_review.run)]
     out, failed = {}, False

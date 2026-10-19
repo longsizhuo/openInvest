@@ -1,12 +1,15 @@
-"""盈透（IBKR）实盘 autopilot —— Claude 选标的、委员会定买卖、本模块下**真单**。opt-in，只应在独立 INVEST_HOME 开。
+"""盈透（IBKR）实盘 autopilot —— LLM 选标的、LLM 定买卖（委员会裁决只当参考输入）、本模块下**真单**。
+opt-in，只应在独立 INVEST_HOME 开。
 
-三段（cron 按美股时段跑；日期一律北京日期，与 .committee/<date>/ 同口径）：
+四段（cron 按美股时段跑；日期一律北京日期，与 .committee/<date>/ 同口径）：
   pick       每周一（或 target_assets 为空）：LLM 在硬限制内选 ≤5 只美股 / 美股 ETF，整表替换本 home 的
              target_assets。LLM 输出必须过 _check_tradable（美股上市、USD、股价、流动性、非杠杆 / 反向），不过的丢掉。
-  submit     美股开盘前：①持有但已不在 target_assets 的 → 清仓；②当日委员会 ACCUMULATE/BUY/TRIM/SELL 裁决 →
-             DAY 限价单（参考价 ±1%，开盘跳空超过就不成交、收盘作废）。下单成功即 record_execution(True)
-             （程序照做了；成没成交以 reconcile 记的真实成交为准）。
+  decide     美股开盘前、委员会日报之后：LLM 看账户 + 本周名单 + 当日委员会裁决（参考，不必照做），写当日订单
+             memory/.ibkr/decisions/<date>.json。文件已存在就不再问 LLM（重跑不会换一套单）。
+  submit     ①持有但已不在 target_assets 的 → 清仓；②当日订单 → DAY 限价单（参考价 ±1%，开盘跳空超过就不成交、
+             收盘作废）。委员会裁决的 execution 记录一概不写——执行的是 LLM 的单，不是委员会的裁决。
   reconcile  美股收盘后：拉当日成交，按 execId 幂等记账（buy/sell + 佣金 fee）；持仓和券商对不上 → 写 STOP 停手。
+另有 status：只读快照（券商现金 / 持仓 / 挂单 / 当日成交 + 账本 + 名单 + 当日订单 + STOP），不下单、不记账。
 
 硬闸（代码层，LLM / 委员会给什么都先过这里）——金额全按 USD：
   ibkr.enabled 默认关；INVEST_HOME/STOP 存在就不下单；连上的账户 ≠ ibkr.account 就什么都不做；
@@ -30,12 +33,13 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from openinvest.core.config import load_config
-from openinvest.core.decision_ledger import list_decisions, record_execution
+from openinvest.core.decision_ledger import parse_committee_file
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.portfolio_manager import PortfolioManager, _guess_kind_from_symbol
-from openinvest.jobs.paper_autopilot import _BUY, _SELL, _holding_for, round_down_units
+from openinvest.jobs.paper_autopilot import _holding_for, round_down_units
 from openinvest.paths import INVEST_ROOT
 from openinvest.utils.quotes import get_quote
+from openinvest.utils.symbols import safe_symbol
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +47,7 @@ _SRC = "ibkr_autopilot"
 _REF = "oi:"            # orderRef 前缀：只把带它的挂单 / 成交算进本程序的当日额度
 _PORT = 4001            # docker compose 把网关 live API 映到 127.0.0.1:4001
 _CLIENT_ID = 17
+_STATUS_CLIENT_ID = 18  # status 只读查询用另一个 clientId，和 cron 里的 submit / reconcile 同时连也不撞
 _BAND = 0.01            # 限价 = 参考价 ±1%
 _MAX_PICKS = 5
 _MIN_PRICE = 5.0
@@ -62,10 +67,6 @@ class _Skip(Exception):
 
 def _today() -> str:
     return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
-
-
-def _floor_cent(x: float) -> float:
-    return math.floor(x * 100 + 1e-9) / 100
 
 
 def _stop_file():
@@ -91,10 +92,10 @@ def _notify(subject: str, lines: List[str]) -> None:
 # ---------------------------------------------------------------- broker 读
 
 
-def _connect():
+def _connect(client_id: int = _CLIENT_ID):
     from ib_async import IB
     ib = IB()
-    ib.connect("127.0.0.1", _PORT, clientId=_CLIENT_ID, timeout=20)
+    ib.connect("127.0.0.1", _PORT, clientId=client_id, timeout=20)
     return ib
 
 
@@ -136,6 +137,54 @@ def _used_today(ib, acct: str, fills: list) -> tuple[float, float, set]:
     return used, reserved, refs
 
 
+# ---------------------------------------------------------------- LLM（pick / decide 共用）
+
+
+def _agent(system_prompt: str):
+    from openinvest.capabilities.sdk_agent import SDKAgent
+    from openinvest.utils.llm import get_llm_config_safe
+    api_key, base_url, model, provider = get_llm_config_safe()
+    if not api_key:
+        raise RuntimeError("LLM_API_KEY 缺失")
+    return SDKAgent(system_prompt=system_prompt, model=model, api_key=api_key, base_url=base_url,
+                    temperature=0.3, enable_tools=True, max_tool_iterations=8, provider=provider)
+
+
+def _parse_json(raw: str, key: str) -> Dict[str, Any]:
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        raise ValueError("LLM 没输出 JSON")
+    data = json.loads(m.group(0))
+    if not isinstance(data.get(key), list):
+        raise ValueError(f"JSON 缺 {key} 列表")
+    return data
+
+
+def _account_lines(pm: PortfolioManager, today: str) -> List[str]:
+    held = []
+    for h in pm.holdings:
+        if float(h.get("units") or 0) <= 0:
+            continue
+        snap = get_quote(dict(h))
+        cost = float(h.get("avg_cost") or 0)
+        if snap and snap.price:
+            pnl = f"，浮盈 {(snap.price / cost - 1) * 100:+.1f}%" if cost else ""
+            px = f"{snap.price:.2f}{pnl}"
+        else:
+            px = "?"
+        held.append(f"- {h['symbol']}: {float(h['units']):g} 股，成本 {cost:.2f}，现价 {px}")
+    others = {k: v for k, v in pm.cash.items() if k != "USD" and v}
+    note = f"；另有 {others}，不是 USD 不能直接下单（换汇要人手做）" if others else ""
+    return [f"今天 {today}。可下单现金 USD {pm.cash_amount('USD'):.2f}{note}。",
+            "当前持仓：", *(held or ["（空仓）"])]
+
+
+def _store_dir(name: str):
+    d = MemoryStore().root / ".ibkr" / name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 # ---------------------------------------------------------------- pick
 
 
@@ -166,18 +215,8 @@ def _ticker_info(symbol: str) -> Dict[str, Any]:
     return dict(yf.Ticker(symbol).info or {})
 
 
-def _pick_agent(system_prompt: str):
-    from openinvest.capabilities.sdk_agent import SDKAgent
-    from openinvest.utils.llm import get_llm_config_safe
-    api_key, base_url, model, provider = get_llm_config_safe()
-    if not api_key:
-        raise RuntimeError("LLM_API_KEY 缺失")
-    return SDKAgent(system_prompt=system_prompt, model=model, api_key=api_key, base_url=base_url,
-                    temperature=0.3, enable_tools=True, max_tool_iterations=8, provider=provider)
-
-
 _PICK_SYSTEM = """你在管理一个盈透（Interactive Brokers）实盘现金账户，钱是用户的真钱。每周一由你决定本周要持有的标的。
-选中的标的之后每个交易日由投资委员会决定买卖时机和金额；**不在你名单里的现有持仓会被清仓**。
+选中的标的之后每个交易日由你决定买卖（投资委员会的裁决只当参考）；**不在你名单里的现有持仓会被清仓**。
 
 硬限制（代码会逐条校验，不满足的直接丢掉，不要浪费名额）：
 - 最多 5 只；美股上市的普通股或 ETF，USD 计价，股价 ≥ $5，3 个月日均成交额 ≥ $2000 万
@@ -188,33 +227,14 @@ _PICK_SYSTEM = """你在管理一个盈透（Interactive Brokers）实盘现金�
 {{"picks": [{{"symbol": "代码", "why": "一句话理由"}}], "note": "本周整体思路，一两句"}}"""
 
 
-def _pick_prompt(pm: PortfolioManager) -> str:
-    held = []
-    for h in pm.holdings:
-        if float(h.get("units") or 0) <= 0:
-            continue
-        snap = get_quote(dict(h))
-        px = f"{snap.price:.2f}" if snap and snap.price else "?"
-        held.append(f"- {h['symbol']}: {float(h['units']):g} 股，成本 {float(h.get('avg_cost') or 0):.2f}，现价 {px}")
-    targets = ", ".join(t["symbol"] for t in pm.strategy.get("target_assets") or []) or "（无）"
+def _background() -> List[str]:
     body = (MemoryStore().read("strategy").body or "").strip()
-    return "\n".join([
-        f"今天 {_today()}。账户现金 USD {pm.cash_amount('USD'):.2f}。",
-        "当前持仓：", *(held or ["（空仓）"]),
-        f"上周名单：{targets}",
-        "", "账户 / 用户背景（strategy.md 正文）：", body or "（无）",
-    ])
+    return ["", "账户 / 用户背景（strategy.md 正文）：", body or "（无）"]
 
 
-def _parse_picks(raw: str) -> Dict[str, Any]:
-    m = re.search(r"\{.*\}", raw or "", re.S)
-    if not m:
-        raise ValueError("LLM 没输出 JSON")
-    data = json.loads(m.group(0))
-    picks = data.get("picks")
-    if not isinstance(picks, list):
-        raise ValueError("JSON 缺 picks 列表")
-    return data
+def _pick_prompt(pm: PortfolioManager, today: str) -> str:
+    targets = ", ".join(t["symbol"] for t in pm.strategy.get("target_assets") or []) or "（无）"
+    return "\n".join([*_account_lines(pm, today), f"上周名单：{targets}", *_background()])
 
 
 def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dict[str, Any]:
@@ -227,8 +247,8 @@ def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dic
     if not force and current and datetime.strptime(today, "%Y-%m-%d").weekday() != 0:
         return {"status": "skipped", "reason": "not_pick_day"}
 
-    agent = agent or _pick_agent(_PICK_SYSTEM.format(max_order=f"{cfg.max_order_usd:g}", max_day=f"{cfg.max_day_usd:g}"))
-    data = _parse_picks(agent.run(_pick_prompt(pm)))
+    agent = agent or _agent(_PICK_SYSTEM.format(max_order=f"{cfg.max_order_usd:g}", max_day=f"{cfg.max_day_usd:g}"))
+    data = _parse_json(agent.run(_pick_prompt(pm, today)), "picks")
 
     ok: List[Dict[str, Any]] = []
     rejected: List[Dict[str, str]] = []
@@ -252,12 +272,10 @@ def pick(today: Optional[str] = None, *, force: bool = False, agent=None) -> Dic
                    "channel": "IBKR", "max_single_invest_cny": _cap_cny(cfg.max_order_usd),
                    "_why": str(p.get("why") or "")[:200]})
 
-    log_dir = MemoryStore().root / ".ibkr" / "picks"
-    log_dir.mkdir(parents=True, exist_ok=True)
     record = {"date": today, "picks": ok, "rejected": rejected, "note": data.get("note"),
               "previous": [t["symbol"] for t in current]}
-    (log_dir / f"{today}.json").write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
-                                           encoding="utf-8")
+    (_store_dir("picks") / f"{today}.json").write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+                                                       encoding="utf-8")
     if not ok:   # LLM 全选错时别把名单清空（会触发全仓清仓）
         return {"status": "error", "reason": "no_valid_picks", **record}
 
@@ -279,6 +297,100 @@ def _cap_cny(usd: float) -> int:
         return 0
 
 
+# ---------------------------------------------------------------- decide
+
+
+_DECIDE_SYSTEM = """你在管理一个盈透（Interactive Brokers）实盘现金账户，钱是用户的真钱。现在是美股开盘前，由你决定今天的买卖。
+
+- 只能交易本周名单里的标的（名单外的持仓程序会自动清仓，不用你管）
+- 投资委员会（同一个模型按宏观 / 量化 / 风控 / CIO 四个角色出裁决，规则偏保守）给了今天的意见，**只是参考**，你可以不同意
+- 硬限制（代码会再钳一遍）：单笔 ≤ USD {max_order}，当天合计 ≤ USD {max_day}，单笔 < USD {min_order} 不下；
+  现金账户不能融资 / 做空，卖出不超过持仓
+- 每单佣金最低约 USD 0.35，别为了动而动；没有把握就不下单（orders 留空）
+- 订单是当日限价单（买 = 昨收 +1%，卖 = 昨收 −1%），开盘跳空超过就不成交
+
+你可以调用工具查历史行情、多周期技术面和宏观快照。只输出一个 JSON，不要别的文字：
+{{"orders": [{{"symbol": "代码", "side": "BUY 或 SELL", "usd": 金额数字（SELL 全部卖出写 "all"）, "why": "一句话理由"}}], "note": "今天整体判断，一两句"}}"""
+
+
+def _latest_pick_reasons() -> Dict[str, str]:
+    files = sorted(_store_dir("picks").glob("*.json"))
+    if not files:
+        return {}
+    data = json.loads(files[-1].read_text(encoding="utf-8"))
+    return {p["symbol"]: p.get("_why") or "" for p in data.get("picks") or []}
+
+
+def _committee_lines(targets: List[str], today: str) -> List[str]:
+    out = []
+    for s in targets:
+        v = parse_committee_file(MemoryStore().root / ".committee" / today / f"{safe_symbol(s)}.md")
+        if not v:
+            out.append(f"- {s}：今天没有裁决")
+            continue
+        alloc = f"，建议 {v['alloc_currency'] or ''} {v['alloc_cny']:g}" if v.get("alloc_cny") else ""
+        memo = " ".join((v.get("cio_memo") or "").split())[:400]
+        out.append(f"- {s}：{v['verdict']}（置信度 {v['confidence']:.2f}{alloc}）{memo}")
+    return out
+
+
+def _decide_prompt(pm: PortfolioManager, targets: List[str], today: str) -> str:
+    why = _latest_pick_reasons()
+    return "\n".join([*_account_lines(pm, today),
+                      "本周名单：", *(f"- {s}：{why.get(s, '')}" for s in targets),
+                      "", "今天委员会的裁决（参考）：", *_committee_lines(targets, today), *_background()])
+
+
+def _validate_orders(orders: list, targets: set) -> tuple[list, list]:
+    ok: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, str]] = []
+    for o in orders:
+        o = o if isinstance(o, dict) else {}
+        sym = str(o.get("symbol") or "").strip().upper()
+        side = str(o.get("side") or "").strip().upper()
+        usd = o.get("usd")
+        full = side == "SELL" and str(usd).strip().lower() == "all"
+        reason = None
+        if sym not in targets:
+            reason = "not_in_list"
+        elif side not in ("BUY", "SELL"):
+            reason = "bad_side"
+        elif any(a["symbol"] == sym for a in ok):
+            reason = "one_order_per_symbol"
+        elif not full:
+            try:
+                usd = float(usd)
+            except (TypeError, ValueError):
+                usd = float("nan")
+            if not math.isfinite(usd) or usd <= 0:
+                reason = "bad_amount"
+        if reason:
+            rejected.append({"symbol": sym, "side": side, "reason": reason})
+            continue
+        ok.append({"symbol": sym, "side": side, "full": full, "usd": 0.0 if full else usd,
+                   "why": str(o.get("why") or "")[:200]})
+    return ok, rejected
+
+
+def decide(today: Optional[str] = None, *, agent=None) -> Dict[str, Any]:
+    cfg = load_config(_force_reload=True).ibkr
+    if not cfg.enabled:
+        return {"status": "skipped", "reason": "ibkr_disabled"}
+    today = today or _today()
+    path = _store_dir("decisions") / f"{today}.json"
+    if path.exists():   # 当天已决定：重跑不再问 LLM，免得同一天换一套单
+        return {"status": "skipped", "reason": "already_decided", **json.loads(path.read_text(encoding="utf-8"))}
+    pm = PortfolioManager()
+    targets = [t["symbol"] for t in pm.strategy.get("target_assets") or []]
+    agent = agent or _agent(_DECIDE_SYSTEM.format(max_order=f"{cfg.max_order_usd:g}", max_day=f"{cfg.max_day_usd:g}",
+                                                  min_order=f"{cfg.min_order_usd:g}"))
+    data = _parse_json(agent.run(_decide_prompt(pm, targets, today)), "orders")
+    ok, rejected = _validate_orders(data["orders"], set(targets))
+    record = {"date": today, "orders": ok, "rejected": rejected, "note": data.get("note")}
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {"status": "ok", **record}
+
+
 # ---------------------------------------------------------------- submit
 
 
@@ -295,18 +407,6 @@ def _ref_price(pm: PortfolioManager, symbol: str, today: str) -> float:
         if age > _QUOTE_MAX_AGE_DAYS:
             raise _Skip("stale_quote")
     return float(snap.price)
-
-
-def _alloc_usd(d: Dict[str, Any]) -> float:
-    amt = abs(float(d.get("alloc_cny") or 0))
-    ccy = str(d.get("alloc_currency") or "USD").upper()
-    if not amt or ccy == "USD":
-        return amt
-    from openinvest.utils.fx import get_fx_rate
-    r = get_fx_rate(ccy, "USD")
-    if not r or r <= 0:
-        raise _Skip("no_fx")
-    return amt * float(r)
 
 
 def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, room: float, cfg) -> tuple[float, float]:
@@ -331,18 +431,16 @@ def _size(a: Dict[str, Any], ref: float, cash: float, pos: float, room: float, c
 
 
 def _actions(pm: PortfolioManager, positions: Dict[str, float], today: str) -> List[Dict[str, Any]]:
-    """当日要做的事：先清仓（不在名单里的持仓），再委员会裁决；卖在买前（回款当天可再买）。"""
+    """当日要做的事：先清仓（不在名单里的持仓），再 decide 写的当日订单；卖在买前（回款当天可再买）。"""
     targets = {t["symbol"] for t in pm.strategy.get("target_assets") or []}
-    out = [{"symbol": s, "side": "SELL", "full": True, "usd": 0.0, "decision": None,
+    out = [{"symbol": s, "side": "SELL", "full": True, "usd": 0.0, "exit": True, "why": "已不在本周名单",
             "ref": f"{_REF}exit:{today}/{s}"} for s in sorted(positions) if s not in targets]
-    for d in list_decisions(days=3):
-        if d["date"] != today or d["execution"] is not None or d["verdict"] not in _BUY + _SELL:
-            continue
-        if d["symbol"] not in targets:
-            continue   # 只交易名单里的标的（白名单）
-        out.append({"symbol": d["symbol"], "side": "BUY" if d["verdict"] in _BUY else "SELL",
-                    "full": d["verdict"] == "SELL", "usd": None, "decision": d,
-                    "ref": f"{_REF}{d['decision_id']}"})
+    path = _store_dir("decisions") / f"{today}.json"
+    orders = json.loads(path.read_text(encoding="utf-8")).get("orders") or [] if path.exists() else []
+    for o in orders:
+        if o["symbol"] not in targets:
+            continue   # 只交易名单里的标的（白名单；decide 之后名单又被改过也挡得住）
+        out.append({**o, "exit": False, "ref": f"{_REF}{today}/{o['symbol']}/{o['side']}"})
     return sorted(out, key=lambda a: (a["side"] == "BUY", a["symbol"]))
 
 
@@ -381,10 +479,7 @@ def submit(today: Optional[str] = None, *, ib=None) -> Dict[str, Any]:
     skipped: List[Dict[str, str]] = []
 
     for a in _actions(pm, positions, today):
-        sym, d = a["symbol"], a["decision"]
-        if d is not None and d["verdict"] in _BUY + ("TRIM",) and not abs(float(d.get("alloc_cny") or 0)):
-            skipped.append({"symbol": sym, "reason": "no_alloc"})   # 和 HOLD 一样没事做
-            continue
+        sym = a["symbol"]
         if a["ref"] in refs:
             skipped.append({"symbol": sym, "reason": "already_at_broker"})
             continue
@@ -393,8 +488,6 @@ def submit(today: Optional[str] = None, *, ib=None) -> Dict[str, Any]:
             skipped.append({"symbol": sym, "reason": "already_done_today"})
             continue
         try:
-            if d is not None:
-                a["usd"] = _alloc_usd(d)
             ref = _ref_price(pm, sym, today)
             qty, lmt = _size(a, ref, cash, positions.get(sym, 0.0),
                              min(cfg.max_order_usd, cfg.max_day_usd - used), cfg)
@@ -405,7 +498,7 @@ def submit(today: Optional[str] = None, *, ib=None) -> Dict[str, Any]:
             order = LimitOrder(a["side"], qty, lmt, tif="DAY", account=acct, orderRef=a["ref"],
                                outsideRth=False)
             row = {"symbol": sym, "side": a["side"], "qty": qty, "lmt": lmt, "ref_price": ref,
-                   "max_usd": round(qty * lmt, 2), "exit": d is None}
+                   "max_usd": round(qty * lmt, 2), "exit": a["exit"], "why": a.get("why") or ""}
             if cfg.dry_run:
                 st = ib.whatIfOrder(contract, order)
                 row.update(dry_run=True, commission=getattr(st, "commission", None),
@@ -418,24 +511,13 @@ def submit(today: Optional[str] = None, *, ib=None) -> Dict[str, Any]:
                     msg = "; ".join(e.message for e in trade.log if e.message)
                     raise _Skip(f"rejected: {status} {msg}".strip(), terminal=True)
                 row.update(status=status, order_id=order.orderId)
-                if d is not None:
-                    try:
-                        record_execution(d["decision_id"], True, reason=f"ibkr:{status}:{order.orderId}")
-                    except Exception as e:  # noqa: BLE001 — 单已下，记账失败只告警
-                        log.warning(f"[ibkr] {sym} record_execution 失败（已下单）: {e}")
             used += qty * (lmt if a["side"] == "BUY" else ref)
             if a["side"] == "BUY":
                 cash -= qty * lmt
             placed.append(row)
             log.info(f"📨 [ibkr] {row}")
         except _Skip as s:
-            if s.terminal and not cfg.dry_run:
-                if d is not None:
-                    try:
-                        record_execution(d["decision_id"], False, reason=f"ibkr:{s.reason}")
-                    except Exception as e:  # noqa: BLE001
-                        log.warning(f"[ibkr] {sym} 记 skip 失败: {e}")
-            elif not cfg.dry_run:
+            if not s.terminal and not cfg.dry_run:
                 pm.store.state_unclaim(_SRC, key)
             skipped.append({"symbol": sym, "reason": s.reason})
         except Exception as e:  # noqa: BLE001 — 下单前失败 → 没下 → unclaim 可重试
@@ -448,8 +530,8 @@ def submit(today: Optional[str] = None, *, ib=None) -> Dict[str, Any]:
            "used_usd": round(used, 2)}
     if placed:
         _notify(f"{'🧪 盈透试算' if cfg.dry_run else '📨 盈透下单'} {today}",
-                [f"{r['side']} {r['symbol']} {r['qty']:g} @ ≤{r['lmt']}（≈USD {r['max_usd']}）"
-                 + ("（清仓：已不在名单）" if r["exit"] else "") for r in placed]
+                [f"{r['side']} {r['symbol']} {r['qty']:g} @ {'≤' if r['side'] == 'BUY' else '≥'}{r['lmt']}"
+                 f"（≈USD {r['max_usd']}）— {r['why']}" for r in placed]
                 + [f"跳过 {s['symbol']}: {s['reason']}" for s in skipped])
     return out
 
@@ -511,8 +593,46 @@ def reconcile(*, ib=None) -> Dict[str, Any]:
             "position_drift": pos_drift, "cash_drift_usd": cash_drift, "problems": problems}
 
 
+# ---------------------------------------------------------------- status（只读）
+
+
+def status(*, ib=None) -> Dict[str, Any]:
+    """随时问「盈透那边现在什么情况」用：不下单、不记账、不看 ibkr.enabled。网关连不上也照样返回本地部分。"""
+    cfg = load_config(_force_reload=True).ibkr
+    today = _today()
+    pm = PortfolioManager()
+    path = _store_dir("decisions") / f"{today}.json"
+    out: Dict[str, Any] = {
+        "date": today, "enabled": cfg.enabled, "dry_run": cfg.dry_run, "account": cfg.account,
+        "halted": _stop_file().read_text(encoding="utf-8").strip() if _stop_file().exists() else None,
+        "targets": [t["symbol"] for t in pm.strategy.get("target_assets") or []],
+        "today_orders": json.loads(path.read_text(encoding="utf-8")).get("orders") if path.exists() else None,
+        "ledger": {"cash": pm.cash, "holdings": {h["symbol"]: float(h["units"]) for h in pm.holdings
+                                                 if float(h.get("units") or 0)}},
+    }
+    try:
+        ib = ib or _connect(_STATUS_CLIENT_ID)
+    except Exception as e:  # noqa: BLE001
+        out["broker"] = {"error": f"gateway_unreachable: {e}"}
+        return out
+    acct = cfg.account
+    if not acct or acct not in ib.managedAccounts():
+        out["broker"] = {"error": f"account_mismatch: 配置 {acct!r}，网关 {ib.managedAccounts()}"}
+        return out
+    out["broker"] = {
+        "cash_usd": _broker_cash(ib, acct),
+        "positions": _broker_positions(ib, acct),
+        "open_orders": [{"symbol": t.contract.symbol, "side": t.order.action, "qty": float(t.order.totalQuantity),
+                         "lmt": float(t.order.lmtPrice), "status": t.orderStatus.status}
+                        for t in ib.openTrades() if not t.order.account or t.order.account == acct],
+        "fills_today": [{"symbol": f.contract.symbol, "side": f.execution.side, "qty": float(f.execution.shares),
+                         "price": float(f.execution.price)} for f in _fills(ib, acct) if f.contract.secType == "STK"],
+    }
+    return out
+
+
 def run(phase: str = "submit", **kw) -> Dict[str, Any]:
-    return {"pick": pick, "submit": submit, "reconcile": reconcile}[phase](**kw)
+    return {"pick": pick, "decide": decide, "submit": submit, "reconcile": reconcile, "status": status}[phase](**kw)
 
 
 if __name__ == "__main__":
