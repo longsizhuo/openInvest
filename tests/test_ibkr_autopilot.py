@@ -1,14 +1,14 @@
 """jobs/ibkr_autopilot.py 测试：盈透实盘 autopilot（默认关 / 试算 / 金额硬闸 / 清仓 / 幂等 / STOP / 对账 /
-选股校验 / LLM 当日订单 decide——委员会裁决只当参考，不触发下单、不被记执行）。
+换汇 / 选股校验 / LLM 当日订单 decide——委员会裁决只当参考，不触发下单、不被记执行）+ Web API 适配层的字段映射。
 
-tmp INVEST_HOME 里造持仓 + 当日裁决 md + 当日订单 json；盈透网关用 FakeIB（只实现本模块调用的方法），Order / Stock 用 ib_async 真类；
-行情 / 汇率 / yfinance info / LLM 全 monkeypatch，不联网、不连网关。
+tmp INVEST_HOME 里造持仓 + 当日裁决 md + 当日订单 json；券商用 FakeBroker（_WebApi 的同名方法），
+适配层本身用 FakeClient（ibind IbkrClient 的同名方法，返回 .data）测；行情 / 汇率 / yfinance info / LLM 全 monkeypatch，
+不联网、不连盈透。
 """
 from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -35,56 +35,60 @@ class _FakeTradesDB:
         return []
 
 
-class FakeIB:
-    def __init__(self, cash=300.0, positions=None, fills=None, status="PreSubmitted", unknown=()):
-        self.cash, self.pos, self._fills, self.status = cash, dict(positions or {}), list(fills or []), status
-        self.unknown, self.placed, self.whatifs, self.open = set(unknown), [], [], []
+class FakeBroker:
+    """_WebApi 的同名方法。placed / whatifs / converts 记录调用；reject=True 时 place 抛错（=盈透拒单 / 确认问题不在白名单）。"""
 
-    def managedAccounts(self):
+    def __init__(self, cash=300.0, positions=None, fills=None, reject=False, unknown=(), extra_cash=None):
+        self._cash = {"USD": cash, **(extra_cash or {})}
+        self.pos, self._fills, self.reject = dict(positions or {}), list(fills or []), reject
+        self.unknown, self.placed, self.whatifs, self.converts, self.open, self.closed = set(unknown), [], [], [], [], 0
+
+    def accounts(self):
         return [ACCT]
 
-    def accountValues(self, account=""):
-        return [SimpleNamespace(tag="CashBalance", currency="USD", value=str(self.cash), account=ACCT),
-                SimpleNamespace(tag="CashBalance", currency="AUD", value="999", account=ACCT)]
+    def cash(self):
+        return dict(self._cash)
 
-    def positions(self, account=""):
-        return [SimpleNamespace(contract=SimpleNamespace(symbol=s, secType="STK"), position=q)
-                for s, q in self.pos.items()]
+    def positions(self):
+        return dict(self.pos)
 
-    def reqExecutions(self):
-        return []
+    def open_orders(self):
+        return list(self.open)
 
-    def fills(self):
-        return self._fills
+    def fills(self, days=1):
+        return list(self._fills)
 
-    def sleep(self, s):
-        pass
+    def conid(self, symbol):
+        return None if symbol in self.unknown else 1000 + len(symbol)
 
-    def openTrades(self):
-        return self.open
+    def whatif(self, conid, side, qty, lmt, ref):
+        self.whatifs.append({"symbol": ref.split("/")[-2] if ref.count("/") >= 2 else ref, "side": side, "qty": qty,
+                             "lmt": lmt, "ref": ref})
+        return {"commission": 0.35, "warning": None, "error": None}
 
-    def qualifyContracts(self, c):
-        return [None] if c.symbol in self.unknown else [c]
+    def place(self, conid, side, qty, lmt, ref):
+        if self.reject:
+            raise RuntimeError("A question was not given a positive reply: No trading permissions")
+        sym = ref.split("/")[-2] if ref.count("/") >= 2 else ref.split("/")[-1]
+        self.placed.append({"symbol": sym, "side": side, "qty": qty, "lmt": lmt, "ref": ref})
+        self.open.append({"ref": ref, "side": side, "symbol": sym, "left": qty, "lmt": lmt, "status": "PreSubmitted"})
+        return {"order_id": str(100 + len(self.placed)), "status": "PreSubmitted"}
 
-    def whatIfOrder(self, c, o):
-        self.whatifs.append((c.symbol, o))
-        return SimpleNamespace(commission=0.35, warningText="")
+    def convert(self, src, dst, amount_src, ref, dry_run):
+        self.converts.append({"src": src, "dst": dst, "amount": amount_src, "ref": ref, "dry_run": dry_run})
+        if not dry_run:
+            self._cash[src] -= amount_src
+            self._cash[dst] = self._cash.get(dst, 0.0) + amount_src * 0.7
+            return {"order_id": "fx1", "status": "Filled"}
+        return {"dry_run": True, "warning": None, "error": None}
 
-    def placeOrder(self, c, o):
-        o.orderId = 100 + len(self.placed)
-        log = [SimpleNamespace(message="No trading permissions")] if self.status == "Inactive" else []
-        t = SimpleNamespace(order=o, contract=c, orderStatus=SimpleNamespace(status=self.status, filled=0.0), log=log)
-        self.placed.append((c.symbol, o))
-        self.open.append(t)
-        return t
+    def close(self):
+        self.closed += 1
 
 
 def _fill(sym, side, qty, px, exec_id, fee=0.35, ref="oi:x", sec="STK"):
-    return SimpleNamespace(
-        contract=SimpleNamespace(symbol=sym, secType=sec, currency="USD"),
-        execution=SimpleNamespace(execId=exec_id, acctNumber=ACCT, side=side, shares=qty, price=px, orderRef=ref,
-                                  time=datetime(2026, 10, 19, 14, 0, tzinfo=timezone.utc)),
-        commissionReport=SimpleNamespace(commission=fee, currency="USD"))
+    return {"exec_id": exec_id, "symbol": sym, "side": side, "qty": qty, "price": px, "commission": fee,
+            "ref": ref, "sec_type": sec, "date": TODAY}
 
 
 @pytest.fixture
@@ -175,9 +179,9 @@ def test_bad_caps_fail_closed(home, monkeypatch, env):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB()
-    out = ia.submit(TODAY, ib=ib)
-    assert out["status"] == "error" and out["reason"].startswith("caps_") and ib.placed == []
+    b = FakeBroker()
+    out = ia.submit(TODAY, broker=b)
+    assert out["status"] == "error" and out["reason"].startswith("caps_") and b.placed == []
 
 
 def test_notify_escapes_html(monkeypatch):
@@ -191,12 +195,12 @@ def test_notify_escapes_html(monkeypatch):
 def test_disabled_is_noop(home):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])
-    ib = FakeIB()
-    assert ia.submit(TODAY, ib=ib)["reason"] == "ibkr_disabled"
-    assert ia.reconcile(ib=ib)["reason"] == "ibkr_disabled"
+    b = FakeBroker()
+    assert ia.submit(TODAY, broker=b)["reason"] == "ibkr_disabled"
+    assert ia.reconcile(broker=b)["reason"] == "ibkr_disabled"
     assert ia.pick(TODAY, agent=object())["reason"] == "ibkr_disabled"
     assert ia.decide(TODAY, agent=object())["reason"] == "ibkr_disabled"
-    assert ib.placed == [] and ib.whatifs == []
+    assert b.placed == [] and b.whatifs == [] and b.converts == []
 
 
 def test_stop_file_and_account_mismatch(home, monkeypatch, tmp_path):
@@ -205,12 +209,25 @@ def test_stop_file_and_account_mismatch(home, monkeypatch, tmp_path):
     _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
     (tmp_path / "STOP").write_text("manual\n")
-    ib = FakeIB()
-    assert ia.submit(TODAY, ib=ib)["status"] == "halted" and ib.placed == []
+    b = FakeBroker()
+    assert ia.submit(TODAY, broker=b)["status"] == "halted" and b.placed == []
     (tmp_path / "STOP").unlink()
     monkeypatch.setenv("INVEST_IBKR_ACCOUNT", "U999")
     reset_config()
-    assert ia.submit(TODAY, ib=ib)["reason"].startswith("account_mismatch") and ib.placed == []
+    assert ia.submit(TODAY, broker=b)["reason"].startswith("account_mismatch") and b.placed == []
+
+
+def test_own_connection_is_closed(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    b = FakeBroker()
+    monkeypatch.setattr(ia, "_connect", lambda acct: b)
+    ia.submit(TODAY)
+    ia.reconcile()
+    ia.status()
+    assert b.closed == 3                                     # 自己开的会话自己关
+    ia.submit(TODAY, broker=b)
+    assert b.closed == 3                                     # 调用方传进来的不归我们关
 
 
 # ---------------- submit ----------------
@@ -220,11 +237,11 @@ def test_committee_verdict_alone_places_nothing_and_is_not_marked_executed(home,
     _seed(home)
     _verdict(home, "QQQM", "ACCUMULATE", 500)                # 委员会说买，但 LLM 当天没下单
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB()
-    assert ia.submit(TODAY, ib=ib)["placed"] == [] and ib.placed == []
+    b = FakeBroker()
+    assert ia.submit(TODAY, broker=b)["placed"] == [] and b.placed == []
     _orders(home, [("QQQM", "BUY", 50)])
-    ia.submit(TODAY, ib=ib)
-    assert len(ib.placed) == 1
+    ia.submit(TODAY, broker=b)
+    assert len(b.placed) == 1
     assert _decision("QQQM")["execution"] is None            # 执行的是 LLM 的单，委员会裁决不记执行
 
 
@@ -233,13 +250,24 @@ def test_dry_run_only_whatif(home, monkeypatch):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB()
-    out = ia.submit(TODAY, ib=ib)
-    assert ib.placed == [] and len(ib.whatifs) == 1
+    b = FakeBroker()
+    out = ia.submit(TODAY, broker=b)
+    assert b.placed == [] and len(b.whatifs) == 1
     row = out["placed"][0]
     assert (row["qty"], row["lmt"], row["dry_run"], row["commission"]) == (0.495, 202.0, True, 0.35)
-    ia.submit(TODAY, ib=ib)
-    assert len(ib.whatifs) == 2                              # 试算不占 claim，可反复跑
+    ia.submit(TODAY, broker=b)
+    assert len(b.whatifs) == 2                               # 试算不占 claim，可反复跑
+
+
+def test_whatif_error_is_reported_not_placed(home, monkeypatch):
+    _enable(monkeypatch, dry_run=True)
+    _seed(home)
+    _orders(home, [("QQQM", "BUY", 60)])
+    _prices(monkeypatch, {"QQQM": 200.0})
+    b = FakeBroker()
+    monkeypatch.setattr(b, "whatif", lambda *a: {"error": "Fractional trading not permitted"})
+    out = ia.submit(TODAY, broker=b)
+    assert out["placed"] == [] and out["skipped"][0]["reason"] == "whatif_error: Fractional trading not permitted"
 
 
 def test_live_buy_capped_limit_order_and_idempotent(home, monkeypatch):
@@ -247,19 +275,17 @@ def test_live_buy_capped_limit_order_and_idempotent(home, monkeypatch):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])                    # LLM 要 500，单笔闸钳到 100
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB()
-    out = ia.submit(TODAY, ib=ib)
-    (sym, o), = ib.placed
-    assert (sym, o.action, o.totalQuantity, o.lmtPrice, o.tif, o.account, o.outsideRth) == \
-        ("QQQM", "BUY", 0.495, 202.0, "DAY", ACCT, False)
-    assert o.orderRef == f"oi:{TODAY}/QQQM/BUY" and o.orderType == "LMT"
+    b = FakeBroker()
+    out = ia.submit(TODAY, broker=b)
+    (o,) = b.placed
+    assert (o["symbol"], o["side"], o["qty"], o["lmt"], o["ref"]) == ("QQQM", "BUY", 0.495, 202.0, f"oi:{TODAY}/QQQM/BUY")
     assert out["placed"][0]["max_usd"] == pytest.approx(99.99)
     assert home.sent and "下单" in home.sent[-1][0] and "why-QQQM" in home.sent[-1][1][0]
-    ia.submit(TODAY, ib=ib)                                  # 重跑：盈透已有同 orderRef → 不二次下单
-    assert len(ib.placed) == 1
-    ib.open.clear()                                          # 网关重启丢了挂单视图：claim 兜底
-    assert ia.submit(TODAY, ib=ib)["skipped"] == [{"symbol": "QQQM", "reason": "already_done_today"}]
-    assert len(ib.placed) == 1
+    ia.submit(TODAY, broker=b)                               # 重跑：盈透已有同 ref 挂单 → 不二次下单
+    assert len(b.placed) == 1
+    b.open.clear()                                           # 挂单视图丢了：claim 兜底
+    assert ia.submit(TODAY, broker=b)["skipped"] == [{"symbol": "QQQM", "reason": "already_done_today"}]
+    assert len(b.placed) == 1
 
 
 def test_day_cap_shrinks_later_orders(home, monkeypatch):
@@ -267,11 +293,11 @@ def test_day_cap_shrinks_later_orders(home, monkeypatch):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500), ("GLDM", "BUY", 500)])
     _prices(monkeypatch, {"GLDM": 50.0, "QQQM": 200.0})
-    ib = FakeIB()
-    out = ia.submit(TODAY, ib=ib)
-    (s1, o1), (s2, o2) = ib.placed
-    assert (s1, o1.totalQuantity) == ("GLDM", 1.9801)        # 100 / 50.5（按代码排序，先 GLDM）
-    assert (s2, o2.totalQuantity) == ("QQQM", 0.2475)        # 剩 150 − 99.995 ≈ 50.005 → /202
+    b = FakeBroker()
+    out = ia.submit(TODAY, broker=b)
+    o1, o2 = b.placed
+    assert (o1["symbol"], o1["qty"]) == ("GLDM", 1.9801)     # 100 / 50.5（按代码排序，先 GLDM）
+    assert (o2["symbol"], o2["qty"]) == ("QQQM", 0.2475)     # 剩 150 − 99.995 ≈ 50.005 → /202
     assert out["used_usd"] <= 150.0
 
 
@@ -280,20 +306,20 @@ def test_open_orders_and_todays_fills_count_toward_day_cap(home, monkeypatch):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB(fills=[_fill("GLDM", "BOT", 2.0, 50.0, "e1", ref=f"oi:{TODAY}/GLDM/BUY")])   # 已成交 100
-    ia.submit(TODAY, ib=ib)
-    (_, o), = ib.placed
-    assert o.totalQuantity == round(int(50 / 202 * 1e4) / 1e4, 4)
+    b = FakeBroker(fills=[_fill("GLDM", "BOT", 2.0, 50.0, "e1", ref=f"oi:{TODAY}/GLDM/BUY")])   # 已成交 100
+    ia.submit(TODAY, broker=b)
+    (o,) = b.placed
+    assert o["qty"] == round(int(50 / 202 * 1e4) / 1e4, 4)
 
 
 def test_exit_sells_position_not_in_targets(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
     _prices(monkeypatch, {"XLE": 90.0})
-    ib = FakeIB(positions={"XLE": 0.3})
-    out = ia.submit(TODAY, ib=ib)
-    (sym, o), = ib.placed
-    assert (sym, o.action, o.totalQuantity, o.lmtPrice, o.orderRef) == ("XLE", "SELL", 0.3, 89.1, f"oi:exit:{TODAY}/XLE")
+    b = FakeBroker(positions={"XLE": 0.3})
+    out = ia.submit(TODAY, broker=b)
+    (o,) = b.placed
+    assert (o["side"], o["qty"], o["lmt"], o["ref"]) == ("SELL", 0.3, 89.1, f"oi:exit:{TODAY}/XLE")
     assert out["placed"][0]["exit"] is True
 
 
@@ -302,10 +328,10 @@ def test_sell_capped_and_no_short(home, monkeypatch):
     _seed(home)
     _orders(home, [("QQQM", "SELL", "all"), ("GLDM", "SELL", 50)])
     _prices(monkeypatch, {"QQQM": 200.0, "GLDM": 50.0})
-    ib = FakeIB(positions={"QQQM": 1.0})                     # GLDM 没仓位
-    out = ia.submit(TODAY, ib=ib)
-    (sym, o), = ib.placed
-    assert (sym, o.action, o.totalQuantity) == ("QQQM", "SELL", 0.5)   # 清仓 200 被单笔闸钳到 100
+    b = FakeBroker(positions={"QQQM": 1.0})                  # GLDM 没仓位
+    out = ia.submit(TODAY, broker=b)
+    (o,) = b.placed
+    assert (o["symbol"], o["side"], o["qty"]) == ("QQQM", "SELL", 0.5)   # 清仓 200 被单笔闸钳到 100
     assert {"symbol": "GLDM", "reason": "no_position"} in out["skipped"]
 
 
@@ -314,9 +340,9 @@ def test_skips_orders_outside_list_and_no_cash(home, monkeypatch):
     _seed(home, cash=15.0)
     _orders(home, [("AAPL", "BUY", 80), ("QQQM", "BUY", 80)])   # 名单在 decide 之后被改过 → AAPL 挡住
     _prices(monkeypatch, {"QQQM": 200.0, "AAPL": 200.0})
-    ib = FakeIB(cash=15.0)
-    out = ia.submit(TODAY, ib=ib)
-    assert ib.placed == [] and out["skipped"] == [{"symbol": "QQQM", "reason": "no_cash"}]
+    b = FakeBroker(cash=15.0)
+    out = ia.submit(TODAY, broker=b)
+    assert b.placed == [] and out["skipped"] == [{"symbol": "QQQM", "reason": "no_cash"}]
 
 
 def test_unknown_contract_and_rejection_are_terminal(home, monkeypatch):
@@ -324,14 +350,14 @@ def test_unknown_contract_and_rejection_are_terminal(home, monkeypatch):
     _seed(home)
     _orders(home, [("GLDM", "BUY", 60), ("QQQM", "BUY", 60)])
     _prices(monkeypatch, {"GLDM": 50.0, "QQQM": 200.0})
-    ib = FakeIB(unknown={"GLDM"}, status="Inactive")
-    out = ia.submit(TODAY, ib=ib)
+    b = FakeBroker(unknown={"GLDM"}, reject=True)
+    out = ia.submit(TODAY, broker=b)
     reasons = {s["symbol"]: s["reason"] for s in out["skipped"]}
     assert reasons["GLDM"] == "not_tradable_at_ibkr"
-    assert reasons["QQQM"].startswith("rejected: Inactive No trading permissions")
-    ib.status = "PreSubmitted"
-    ia.submit(TODAY, ib=ib)                                  # 终局：claim 留着，不重试
-    assert len(ib.placed) == 1
+    assert reasons["QQQM"].startswith("rejected: A question was not given a positive reply")
+    b.reject = False
+    ia.submit(TODAY, broker=b)                               # 终局：claim 留着，不重试
+    assert b.placed == []
 
 
 def test_stale_quote_unclaims_for_retry(home, monkeypatch):
@@ -339,11 +365,43 @@ def test_stale_quote_unclaims_for_retry(home, monkeypatch):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 60)])
     _prices(monkeypatch, {"QQQM": 200.0}, bar="2026-10-01")
-    ib = FakeIB()
-    assert ia.submit(TODAY, ib=ib)["skipped"] == [{"symbol": "QQQM", "reason": "stale_quote"}]
+    b = FakeBroker()
+    assert ia.submit(TODAY, broker=b)["skipped"] == [{"symbol": "QQQM", "reason": "stale_quote"}]
     _prices(monkeypatch, {"QQQM": 200.0})
-    ia.submit(TODAY, ib=ib)
-    assert len(ib.placed) == 1
+    ia.submit(TODAY, broker=b)
+    assert len(b.placed) == 1
+
+
+# ---------------- 换汇 ----------------
+
+def test_converts_aud_when_usd_short_then_buys(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, cash=0.0)
+    _orders(home, [("QQQM", "BUY", 60)])
+    _prices(monkeypatch, {"QQQM": 200.0})
+    b = FakeBroker(cash=0.0, extra_cash={"AUD": 500.0})
+    out = ia.submit(TODAY, broker=b)
+    (c,) = b.converts
+    assert (c["src"], c["dst"], c["amount"], c["ref"], c["dry_run"]) == ("AUD", "USD", 495.0, f"oi:fx:{TODAY}/AUDUSD", False)
+    assert out["fx"]["order_id"] == "fx1" and len(b.placed) == 1      # 换完重读 USD，当天就能买
+    assert "换汇 495.0 AUD → USD" in home.sent[-1][1][0]
+    ia.submit(TODAY, broker=FakeBroker(cash=0.0, extra_cash={"AUD": 500.0}))
+    assert len(b.converts) == 1                              # 每天最多换一次（claim）
+
+
+def test_no_conversion_when_usd_enough_or_aud_tiny_and_dry_run_only_whatifs(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    b = FakeBroker(cash=300.0, extra_cash={"AUD": 500.0})
+    assert ia.submit(TODAY, broker=b)["fx"] is None
+    b = FakeBroker(cash=0.0, extra_cash={"AUD": 40.0})
+    assert ia.submit(TODAY, broker=b)["fx"] is None and b.converts == []
+    monkeypatch.setenv("INVEST_IBKR_DRY_RUN", "true")
+    reset_config()
+    b = FakeBroker(cash=0.0, extra_cash={"AUD": 2000.0})
+    out = ia.submit(TODAY, broker=b)
+    assert b.converts[0]["dry_run"] is True and b.converts[0]["amount"] == 1000.0   # 单日上限 AUD 1000
+    assert out["fx"]["dry_run"] is True
 
 
 # ---------------- reconcile ----------------
@@ -351,32 +409,169 @@ def test_stale_quote_unclaims_for_retry(home, monkeypatch):
 def test_reconcile_books_fill_and_fee_idempotently(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
-    f = _fill("QQQM", "BOT", 0.495, 201.5, "0001.01")
-    ib = FakeIB(positions={"QQQM": 0.495}, fills=[f, _fill("AUD.USD", "BOT", 1, 0.65, "fx1", sec="CASH")])
-    ib.cash = round(300 - 0.495 * 201.5 - 0.35, 2)
-    out = ia.reconcile(ib=ib)
-    assert out["status"] == "ok" and [b["exec_id"] for b in out["booked"]] == ["0001.01"]
+    b = FakeBroker(positions={"QQQM": 0.495}, fills=[_fill("QQQM", "BOT", 0.495, 201.5, "0001.01")])
+    b._cash["USD"] = round(300 - 0.495 * 201.5 - 0.35, 2)
+    out = ia.reconcile(broker=b)
+    assert out["status"] == "ok" and [x["exec_id"] for x in out["booked"]] == ["0001.01"]
     pm = PortfolioManager(home)
     assert pm.find_holding("QQQM")["units"] == pytest.approx(0.495)
     assert pm.cash_amount("USD") == pytest.approx(300 - 0.495 * 201.5 - 0.35, abs=0.01)   # 账本按分取整
-    assert out["cash_drift_usd"] == pytest.approx(0, abs=0.01)
-    again = ia.reconcile(ib=ib)
+    assert out["cash_drift"] == {}
+    again = ia.reconcile(broker=b)
     assert again["booked"] == [] and PortfolioManager(home).find_holding("QQQM")["units"] == pytest.approx(0.495)
     assert [h["action"] for h in home.read_history()] == ["buy", "fee"]
+
+
+def test_reconcile_books_fx_conversion_both_legs(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, cash=0.0)
+    store = home
+    store.write("portfolio", "state", {"cash": {"USD": 0.0, "AUD": 500.0}, "holdings": [], "schema_version": 2}, "")
+    fx = _fill("AUD.USD", "SLD", 495.0, 0.7, "fx-1", fee=2.0, ref=f"oi:fx:{TODAY}/AUDUSD", sec="CASH")
+    b = FakeBroker(cash=round(495 * 0.7 - 2.0, 2), extra_cash={"AUD": 5.0}, fills=[fx])
+    out = ia.reconcile(broker=b)
+    assert out["status"] == "ok" and out["booked"][0]["fx"] == "AUD.USD"
+    pm = PortfolioManager(home)
+    assert pm.cash_amount("AUD") == pytest.approx(5.0) and pm.cash_amount("USD") == pytest.approx(495 * 0.7 - 2.0)
+    assert out["cash_drift"] == {}
+    assert ia.reconcile(broker=b)["booked"] == []            # 幂等
 
 
 def test_reconcile_position_drift_halts(home, monkeypatch, tmp_path):
     _enable(monkeypatch)
     _seed(home)
-    _verdict(home, "QQQM", "ACCUMULATE", 60)
+    _orders(home, [("QQQM", "BUY", 60)])
     _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB(positions={"QQQM": 1.0})                     # 券商有、账本没有 → 有人在账户里动了手
-    out = ia.reconcile(ib=ib)
+    b = FakeBroker(positions={"QQQM": 1.0})                  # 券商有、账本没有 → 有人在账户里动了手
+    out = ia.reconcile(broker=b)
     assert out["status"] == "halted" and (tmp_path / "STOP").exists()
-    assert ia.submit(TODAY, ib=ib)["status"] == "halted" and ib.placed == []
+    assert ia.submit(TODAY, broker=b)["status"] == "halted" and b.placed == []
 
 
-# ---------------- pick ----------------
+# ---------------- status ----------------
+
+def test_status_is_readonly_snapshot(home, monkeypatch, tmp_path):
+    _enable(monkeypatch)
+    _seed(home)
+    _orders(home, [("QQQM", "BUY", 60)])
+    _prices(monkeypatch, {"QQQM": 200.0})
+    b = FakeBroker(positions={"GLDM": 1.5}, fills=[_fill("GLDM", "BOT", 1.5, 50.0, "e9")])
+    ia.submit(TODAY, broker=b)                               # 造一张挂单
+    monkeypatch.setattr(ia, "_today", lambda: TODAY)
+    out = ia.status(broker=b)
+    assert len(b.placed) == 1 and b.whatifs == []            # status 本身不下单
+    br = out["broker"]
+    assert br["cash"]["USD"] == 300.0 and br["positions"] == {"GLDM": 1.5}
+    assert br["open_orders"][0]["ref"] == f"oi:{TODAY}/QQQM/BUY"
+    assert br["fills_today"][0]["exec_id"] == "e9"
+    assert out["targets"] == ["GLDM", "QQQM"] and out["today_orders"][0]["symbol"] == "QQQM"
+    assert out["ledger"]["cash"] == {"USD": 300.0} and out["halted"] is None
+    (tmp_path / "STOP").write_text("drift\n")
+    monkeypatch.setattr(ia, "_connect", lambda acct: (_ for _ in ()).throw(ConnectionRefusedError("down")))
+    out = ia.status()
+    assert out["halted"].endswith("drift") and out["broker"]["error"].startswith("unreachable")
+
+
+# ---------------- _WebApi 字段映射（假的 ibind 客户端）----------------
+
+class FakeClient:
+    def __init__(self):
+        self.calls = []
+
+    def _r(self, data):
+        return SimpleNamespace(data=data)
+
+    def portfolio_accounts(self):
+        return self._r([{"id": "U1", "accountId": "U1"}])
+
+    def get_ledger(self, acct):
+        return self._r({"USD": {"cashbalance": "312.5"}, "AUD": {"cashbalance": 5}, "BASE": {"cashbalance": 999}})
+
+    def invalidate_backend_portfolio_cache(self, acct):
+        self.calls.append("invalidate")
+
+    def positions(self, acct, page=0):
+        if page == 0:
+            return self._r([{"ticker": "QQQM", "assetClass": "STK", "position": 0.495}] +
+                           [{"ticker": f"X{i}", "assetClass": "OPT", "position": 1} for i in range(99)])
+        return self._r([{"contractDesc": "VEA ARCA", "assetClass": "STK", "position": "1.5"},
+                        {"ticker": "ZERO", "assetClass": "STK", "position": 0}])
+
+    def live_orders(self, account_id=None):
+        return self._r({"orders": [
+            {"order_ref": "oi:a", "side": "BUY", "ticker": "QQQM", "remainingQuantity": "0.4", "price": "202",
+             "status": "PreSubmitted"},
+            {"order_ref": "oi:b", "side": "SELL", "ticker": "VEA", "remainingQuantity": 0, "price": 70,
+             "status": "Filled"}]})
+
+    def trades(self, days=None, account_id=None):
+        self.calls.append(("trades", days))
+        return self._r([
+            {"execution_id": "e1", "symbol": "QQQM", "side": "B", "size": "0.495", "price": "201.5",
+             "commission": "0.35", "order_ref": "oi:a", "account": "U1", "sec_type": "STK",
+             "trade_time_r": 1792461600000},
+            {"execution_id": "e2", "symbol": "AUD.USD", "side": "S", "size": "495", "price": "0.7",
+             "commission": "2", "order_ref": "oi:fx", "account": "U1", "sec_type": "CASH"},
+            {"execution_id": "e3", "symbol": "SPY", "side": "B", "size": 1, "price": 1, "account": "U9"}])
+
+    def stock_conid_by_symbol(self, symbol):
+        if symbol == "NOPE":
+            raise RuntimeError("no match")
+        return self._r({symbol: 756733})
+
+    def whatif_order(self, req, acct):
+        self.calls.append(("whatif", req))
+        return self._r({"amount": {"commission": "0.35"}, "warn": None, "error": None})
+
+    def place_order(self, req, answers, acct):
+        self.calls.append(("place", req, answers))
+        return self._r([{"order_id": "123", "order_status": "PreSubmitted"}])
+
+    def currency_pairs(self, dst):
+        return self._r({dst: [{"symbol": "EUR.USD", "conid": 1}, {"symbol": "AUD.USD", "conid": 14433401}]})
+
+    def close(self):
+        self.calls.append("close")
+
+
+def test_webapi_read_mappings():
+    c = FakeClient()
+    w = ia._WebApi(c, "U1")
+    assert w.accounts() == ["U1"]
+    assert w.cash() == {"USD": 312.5, "AUD": 5.0}            # BASE 汇总行不算一个币种
+    assert w.positions() == {"QQQM": 0.495, "VEA": 1.5} and c.calls[0] == "invalidate"   # 翻页 + 只要 STK
+    assert w.open_orders() == [{"ref": "oi:a", "side": "BUY", "symbol": "QQQM", "left": 0.4, "lmt": 202.0,
+                                "status": "PreSubmitted"}]
+    f = w.fills(days=7)
+    assert ("trades", "7") in c.calls and [x["exec_id"] for x in f] == ["e1", "e2"]   # 别的账户不要
+    assert (f[0]["side"], f[0]["qty"], f[0]["price"], f[0]["commission"], f[0]["sec_type"]) == ("BOT", 0.495, 201.5, 0.35, "STK")
+    assert f[0]["date"] == "2026-10-20" and (f[1]["side"], f[1]["sec_type"]) == ("SLD", "CASH")
+    assert w.conid("QQQM") == 756733 and w.conid("NOPE") is None
+
+
+def test_webapi_order_requests_and_answers():
+    from ibind import QuestionType as Q
+    c = FakeClient()
+    w = ia._WebApi(c, "U1")
+    assert w.whatif(756733, "BUY", 0.495, 202.0, "oi:r")["commission"] == "0.35"
+    _, req = c.calls[-1]
+    assert (req.conid, req.side, req.quantity, req.order_type, req.price, req.tif, req.coid, req.acct_id,
+            req.outside_rth, req.manual_indicator) == (756733, "BUY", 0.495, "LMT", 202.0, "DAY", "oi:r", "U1", False, False)
+    assert w.place(756733, "SELL", 0.3, 89.1, "oi:s") == {"order_id": "123", "status": "PreSubmitted"}
+    _, req, answers = c.calls[-1]
+    assert req.side == "SELL" and answers[Q.MISSING_MARKET_DATA] is True
+    assert answers[Q.PRICE_PERCENTAGE_CONSTRAINT] is False and answers[Q.MARKET_ORDER_CONFIRMATION] is False
+    w.convert("AUD", "USD", 495.0, "oi:fx", dry_run=False)
+    _, req, answers = c.calls[-1]
+    assert (req.conid, req.side, req.order_type, req.is_ccy_conv, req.fx_qty) == (14433401, "SELL", "MKT", True, 495.0)
+    assert answers[Q.MARKET_ORDER_CONFIRMATION] is True       # 只有换汇放行市价确认
+    assert w.convert("AUD", "USD", 495.0, "oi:fx", dry_run=True)["dry_run"] is True
+    assert c.calls[-1][0] == "whatif"
+    with pytest.raises(ia._Skip):
+        w.convert("JPY", "USD", 1.0, "oi:fx", dry_run=False)
+    w.close()
+    assert c.calls[-1] == "close"
+
 
 class _Agent:
     def __init__(self, reply):
@@ -500,30 +695,6 @@ def test_decide_reuses_todays_file_and_llm_error_writes_nothing(home, monkeypatc
     again = ia.decide(TODAY, agent=second)
     assert again["reason"] == "already_decided" and second.prompts == []
     assert [o["symbol"] for o in again["orders"]] == ["QQQM"]
-
-
-# ---------------- status ----------------
-
-def test_status_is_readonly_snapshot(home, monkeypatch, tmp_path):
-    _enable(monkeypatch)
-    _seed(home)
-    _orders(home, [("QQQM", "BUY", 60)])
-    _prices(monkeypatch, {"QQQM": 200.0})
-    ib = FakeIB(positions={"GLDM": 1.5}, fills=[_fill("GLDM", "BOT", 1.5, 50.0, "e9")])
-    ia.submit(TODAY, ib=ib)                                  # 造一张挂单
-    monkeypatch.setattr(ia, "_today", lambda: TODAY)
-    out = ia.status(ib=ib)
-    assert len(ib.placed) == 1 and ib.whatifs == []          # status 本身不下单
-    b = out["broker"]
-    assert b["cash_usd"] == 300.0 and b["positions"] == {"GLDM": 1.5}
-    assert b["open_orders"] == [{"symbol": "QQQM", "side": "BUY", "qty": 0.297, "lmt": 202.0, "status": "PreSubmitted"}]
-    assert b["fills_today"] == [{"symbol": "GLDM", "side": "BOT", "qty": 1.5, "price": 50.0}]
-    assert out["targets"] == ["GLDM", "QQQM"] and out["today_orders"][0]["symbol"] == "QQQM"
-    assert out["ledger"]["cash"] == {"USD": 300.0} and out["halted"] is None
-    (tmp_path / "STOP").write_text("drift\n")
-    monkeypatch.setattr(ia, "_connect", lambda client_id=17: (_ for _ in ()).throw(ConnectionRefusedError("down")))
-    out = ia.status()
-    assert out["halted"].endswith("drift") and out["broker"]["error"].startswith("gateway_unreachable")
 
 
 # ---------------- CLI ----------------

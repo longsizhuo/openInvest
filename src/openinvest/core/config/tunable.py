@@ -254,13 +254,13 @@ class IbkrConfig:
     """盈透实盘 autopilot（jobs/ibkr_autopilot.py：LLM 选标的 + LLM 定当日订单）——**下真单**。
 
     只应在独立 INVEST_HOME 开（该 home 的 target_assets = 盈透账户里交易的 USD 标的）。
-    dataclass 默认=禁用 + 试算：fork 用户 / 生产 hub 零影响；打开后默认也只 whatIfOrder 不下单。
+    dataclass 默认=禁用 + 试算：fork 用户 / 生产 hub 零影响；打开后默认也只 whatif 试算不下单。
     金额上限全按 USD，是硬闸（LLM 给多少都先钳到这里）。
     **故意不进 API_SETTABLE**：MCP / web API / agent 的 config set 改不了它——只能由运营者用
     INVEST_IBKR_* 环境变量（cron 行）或该 home 的 memory/.state/config_overrides.json 设。
     """
     enabled: bool = False                       # 总开关（默认关）
-    dry_run: bool = True                        # True=只 whatIfOrder 试算，不下单
+    dry_run: bool = True                        # True=只 whatif 试算，不下单、不换汇
     account: str = ""                           # 盈透账户号（U… 实盘 / DU… 模拟）；连上的账户不符就不动
     max_order_usd: float = 100.0                # 单笔上限
     max_day_usd: float = 150.0                  # 单日累计上限（含已挂未成交 + 当日已成交）
