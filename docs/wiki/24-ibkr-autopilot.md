@@ -46,7 +46,7 @@ documents:
 
 ## 硬闸（代码层，LLM / 委员会给什么都先过这里）
 
-- `ibkr.enabled` 关 → no-op；`INVEST_HOME/STOP` 存在 → submit 不下单（人看过删掉才恢复；reconcile 照常记账）
+- `ibkr.enabled` 关 → no-op；金额键不合法 → 一单不下；`INVEST_HOME/STOP` 存在 → submit 不下单（人看过删掉才恢复；reconcile 照常记账）
 - 网关 `managedAccounts()` 里没有 `ibkr.account` → 什么都不做
 - 只交易 target_assets 里的标的（清仓例外：卖的是券商已有持仓）；选股校验：美股代码、`EQUITY/ETF`、USD、美国交易所、股价 ≥ $5、3 个月日均成交额 ≥ $2000 万、名字不含杠杆 / 反向关键词
 - 单笔 ≤ `ibkr.max_order_usd`；当日累计（本程序已挂未成交 + 当日已成交，按 orderRef `oi:` 前缀识别）≤ `ibkr.max_day_usd`；< `ibkr.min_order_usd` 不下（整笔清仓例外）
@@ -63,11 +63,12 @@ reconcile：`idempotency_key=ibkr-<execId>` / `ibkr-fee-<execId>`，重跑只会
 
 - 网关：`gnzsnz/ib-gateway`（arm64 / amd64，内置 IBC 自动登录），`TRADING_MODE=live` 必须显式写（compose 默认值因版本而异），API 只映射 `127.0.0.1:4001`。实盘账户每周日要在 IB Key 上确认一次 2FA；建议给程序单独建一个「只交易、无出入金权限」的用户——同一用户名同时只能有一个会话，手机一登录会把网关踢下线。
 - 依赖：`ib_async`（`pip install openinvest[ibkr]`；git clone 形态 `uv sync` 的 dev 组已带）。
-- 首次上线：`ibkr.enabled=true`、`ibkr.account=<U…>`、`ibkr.dry_run=true` 先跑一次 `submit` 看 whatIf 结果（合约 / 碎股权限 / 佣金），再 `ibkr.dry_run=false`。账本起点 = 券商 USD 现金（`openinvest deposit -c USD …`）。
+- 首次上线：home 的 `memory/.state/config_overrides.json` 写 `ibkr.enabled=true`、`ibkr.account=<U…>`（**不写 dry_run**），先跑一次 `submit` 看 whatIf 结果（合约 / 碎股权限 / 佣金），再在 cron 行加 `INVEST_IBKR_DRY_RUN=false` 切真单。账本起点 = 券商 USD 现金（`openinvest deposit -c USD …`）。
 
 ## 配置
 
 见 [22-configuration.md](22-configuration.md)：`ibkr.enabled` / `ibkr.dry_run` / `ibkr.account` / `ibkr.max_order_usd` / `ibkr.max_day_usd` / `ibkr.min_order_usd`。
+**全部不进 API 白名单**——MCP / web API / agent 的 `config set` 打不开真单；只认 `INVEST_IBKR_*` 环境变量或 home 自己的 override 文件。金额键不合法（NaN / inf / ≤0 / 最小单 > 单笔上限）→ submit 整体拒单。
 
 ## 局限
 

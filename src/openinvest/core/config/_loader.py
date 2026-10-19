@@ -5,6 +5,7 @@ locked 参数不经过这里。
 """
 from __future__ import annotations
 
+import math
 import os
 from copy import deepcopy
 from dataclasses import asdict, fields
@@ -136,7 +137,7 @@ def _read_env_overrides() -> dict[str, Any]:
             converted: Any = float(val)
             if converted == int(converted):
                 converted = int(converted)
-        except ValueError:
+        except (ValueError, OverflowError):   # "nan" / "inf"：int() 抛错 → 当字符串，下游类型校验拦
             if val.lower() in ("true", "false"):
                 converted = val.lower() == "true"
             elif "," in val:
@@ -417,36 +418,6 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "模拟最小单(CNY)",
         "help": "autopilot 折算后小于该金额的单不下，记 skip too_small（默认 500）",
     },
-    "ibkr.enabled": {
-        "type": "bool",
-        "label": "盈透实盘 autopilot",
-        "help": "开启=jobs/ibkr_autopilot 把当日委员会裁决下成盈透**真实**限价单（ibkr.dry_run 关掉才真下）；只应在独立的盈透 INVEST_HOME 开；默认关",
-    },
-    "ibkr.dry_run": {
-        "type": "bool",
-        "label": "盈透只试算",
-        "help": "True=只 whatIfOrder 试算（盈透校验合约/权限/佣金），不下单、不记执行；默认 True",
-    },
-    "ibkr.account": {
-        "type": "str",
-        "label": "盈透账户号",
-        "help": "U… 实盘 / DU… 模拟；连上网关的账户不是它就什么都不做",
-    },
-    "ibkr.max_order_usd": {
-        "type": "float",
-        "label": "盈透单笔上限(USD)",
-        "help": "单笔订单金额硬上限（默认 100）",
-    },
-    "ibkr.max_day_usd": {
-        "type": "float",
-        "label": "盈透单日上限(USD)",
-        "help": "当日累计（已挂 + 已成交）硬上限（默认 150）",
-    },
-    "ibkr.min_order_usd": {
-        "type": "float",
-        "label": "盈透最小单(USD)",
-        "help": "小于该金额的单不下（默认 20；每单佣金最低 USD 0.35）",
-    },
     "event.enabled": {
         "type": "bool",
         "label": "事件感知层 (Event RAG)",
@@ -558,8 +529,8 @@ def _coerce_and_validate(key: str, value: Any) -> Any:
             f = float(value)
         except (TypeError, ValueError):
             raise ValueError(f"{key} 需 float，得到 {value!r}")
-        if f < 0:
-            raise ValueError(f"{key} 不能为负，得到 {f}")
+        if not math.isfinite(f) or f < 0:   # NaN 过得了 f < 0 的比较，得单独拦
+            raise ValueError(f"{key} 需非负有限数，得到 {f}")
         return f
     if t == "int":
         try:
@@ -569,10 +540,6 @@ def _coerce_and_validate(key: str, value: Any) -> Any:
         if val_int < 0:
             raise ValueError(f"{key} 不能为负，得到 {val_int}")
         return val_int
-    if t == "str":
-        if not isinstance(value, str):
-            raise ValueError(f"{key} 需字符串，得到 {value!r}")
-        return value.strip()
     if t == "cron":
         # crontab 字符串（如 event.watch_schedule）。用 scheduler 注册时同一个解析入口
         # （scheduler/cron.py，标准 crontab 星期编号）校验，保证"能写进 config 的一定能被

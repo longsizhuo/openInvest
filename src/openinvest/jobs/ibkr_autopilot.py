@@ -20,6 +20,7 @@ ibkr.dry_run=True（默认）：whatIfOrder 试算——盈透校验合约 / 权
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 import math
@@ -81,8 +82,8 @@ def _halt(reason: str) -> None:
 def _notify(subject: str, lines: List[str]) -> None:
     try:
         from openinvest.services.notifier import send_email_html
-        body = "\n".join(lines)
-        send_email_html(subject=subject, plain_body=body, html_body=f"<pre>{body}</pre>")
+        body = "\n".join(lines)   # 含 LLM 写的理由 / 券商回的拒单文本 → HTML 版必须转义
+        send_email_html(subject=subject, plain_body=body, html_body=f"<pre>{html.escape(body)}</pre>")
     except Exception as e:  # noqa: BLE001 — 通知失败不影响账本
         log.warning(f"[ibkr] 邮件发送失败: {e}")
 
@@ -345,10 +346,23 @@ def _actions(pm: PortfolioManager, positions: Dict[str, float], today: str) -> L
     return sorted(out, key=lambda a: (a["side"] == "BUY", a["symbol"]))
 
 
+def _caps_error(cfg) -> Optional[str]:
+    """金额闸本身不合法（NaN / inf / ≤0 / 最小单大于单笔上限）→ 一单都不下（fail closed）。"""
+    caps = (cfg.max_order_usd, cfg.max_day_usd, cfg.min_order_usd)
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in caps):
+        return f"caps_not_finite: {caps}"
+    if cfg.max_order_usd <= 0 or cfg.max_day_usd <= 0 or cfg.min_order_usd < 0 or cfg.min_order_usd > cfg.max_order_usd:
+        return f"caps_invalid: {caps}"
+    return None
+
+
 def submit(today: Optional[str] = None, *, ib=None) -> Dict[str, Any]:
     cfg = load_config(_force_reload=True).ibkr
     if not cfg.enabled:
         return {"status": "skipped", "reason": "ibkr_disabled"}
+    bad = _caps_error(cfg)
+    if bad:
+        return {"status": "error", "reason": bad}
     if _stop_file().exists():
         return {"status": "halted", "reason": _stop_file().read_text(encoding="utf-8").strip()}
     today = today or _today()

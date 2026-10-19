@@ -69,7 +69,7 @@ LLM_MODEL=glm-4-flash
 | `autopilot.enabled` | `bool` (`false`) | 全自动模拟账户总开关（`jobs/paper_autopilot`）。开启后该 INVEST_HOME 的每条 ACCUMULATE / BUY / TRIM / SELL 裁决按当日收盘价自动记账成交；不下真单。**只应在独立的模拟 INVEST_HOME 开**，见 [23-paper-autopilot.md](23-paper-autopilot.md) |
 | `autopilot.commission_bps` | `float` (`3.0`) | 模拟成交的买卖双边手续费，万分之几；作为 `fee` 活动另记一行 |
 | `autopilot.min_order_cny` | `float` (`500.0`) | 折算后小于它的模拟单不下（记 `skip too_small`）；SELL 清仓不受限 |
-| `ibkr.enabled` | `bool` (`false`) | 盈透实盘 autopilot 总开关（`jobs/ibkr_autopilot`）。**下真单**；只应在独立的盈透 INVEST_HOME 开，见 [24-ibkr-autopilot.md](24-ibkr-autopilot.md) |
+| `ibkr.enabled` | `bool` (`false`) | 盈透实盘 autopilot 总开关（`jobs/ibkr_autopilot`）。**下真单**；只应在独立的盈透 INVEST_HOME 开，见 [24-ibkr-autopilot.md](24-ibkr-autopilot.md)。**`ibkr.*` 全部故意不进 API 白名单**（MCP / web API / agent 的 config set 改不了真单开关）：只认 `INVEST_IBKR_*` 环境变量（如 cron 行里 `INVEST_IBKR_DRY_RUN=false`）或该 home 的 `memory/.state/config_overrides.json`（优先级高于 env）。金额键非有限 / ≤0 / 最小单大于单笔上限 → submit 一单不下 |
 | `ibkr.dry_run` | `bool` (`true`) | true = 只 `whatIfOrder` 试算（盈透校验合约 / 权限 / 佣金），不下单、不记执行 |
 | `ibkr.account` | `str` (`""`) | 盈透账户号（`U…` 实盘 / `DU…` 模拟）；网关上连的不是它就什么都不做 |
 | `ibkr.max_order_usd` | `float` (`100.0`) | 单笔订单金额硬上限（USD） |

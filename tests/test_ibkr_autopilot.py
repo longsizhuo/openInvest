@@ -146,8 +146,35 @@ def test_config_defaults_and_whitelist():
     assert (c.enabled, c.dry_run, c.account, c.max_order_usd, c.max_day_usd, c.min_order_usd) == \
         (False, True, "", 100.0, 150.0, 20.0)
     assert load_config().ibkr == c
-    assert API_SETTABLE["ibkr.account"]["type"] == "str"
-    assert set_persisted_override("ibkr.account", " U1 ").ibkr.account == "U1"
+    # 真单开关不许经 MCP / web API / agent 的 config set 改（只认 env / home 自己的 override 文件）
+    assert not [k for k in API_SETTABLE if k.startswith("ibkr.")]
+    with pytest.raises(ValueError):
+        set_persisted_override("ibkr.dry_run", False)
+    with pytest.raises(ValueError, match="非负有限数"):
+        set_persisted_override("autopilot.min_order_cny", float("nan"))   # NaN 曾能过 f < 0
+
+
+@pytest.mark.parametrize("env", [{"INVEST_IBKR_MAX_ORDER_USD": "nan"}, {"INVEST_IBKR_MAX_DAY_USD": "inf"},
+                                 {"INVEST_IBKR_MAX_ORDER_USD": "0"}, {"INVEST_IBKR_MIN_ORDER_USD": "500"}])
+def test_bad_caps_fail_closed(home, monkeypatch, env):
+    _enable(monkeypatch)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    reset_config()
+    _seed(home)
+    _verdict(home, "QQQM", "ACCUMULATE", 500)
+    _prices(monkeypatch, {"QQQM": 200.0})
+    ib = FakeIB()
+    out = ia.submit(TODAY, ib=ib)
+    assert out["status"] == "error" and out["reason"].startswith("caps_") and ib.placed == []
+
+
+def test_notify_escapes_html(monkeypatch):
+    sent = {}
+    monkeypatch.setattr("openinvest.services.notifier.send_email_html", lambda **kw: sent.update(kw))
+    ia._notify("s", ['<img src=x onerror=alert(1)> & "x"'])
+    assert "<img" not in sent["html_body"] and "&lt;img" in sent["html_body"]
+    assert sent["plain_body"] == '<img src=x onerror=alert(1)> & "x"'
 
 
 def test_disabled_is_noop(home):
