@@ -92,7 +92,8 @@ def _notify(subject: str, lines: List[str]) -> None:
                            timeout=60, check=True)
             return
         except Exception as e:  # noqa: BLE001 — 推送失败退回邮件，停手提醒不能丢
-            log.warning(f"[ibkr] notify_cmd 失败，改发邮件: {e}")
+            # 只记类型 + 退出码：异常文本含整条命令行，命令里可能带 webhook token
+            log.warning(f"[ibkr] notify_cmd 失败（{type(e).__name__} rc={getattr(e, 'returncode', None)}），改发邮件")
     try:
         from openinvest.services.notifier import send_email_html
         send_email_html(subject=subject, plain_body=body, html_body=f"<pre>{html.escape(body)}</pre>")
