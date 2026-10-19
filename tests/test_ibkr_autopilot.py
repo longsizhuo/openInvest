@@ -1,8 +1,8 @@
 """jobs/ibkr_autopilot.py 测试：盈透实盘 autopilot（默认关 / 试算 / 金额硬闸 / 清仓 / 幂等 / STOP / 对账 /
-换汇 / 选股校验 / LLM 当日订单 decide——委员会裁决只当参考，不触发下单、不被记执行）+ Web API 适配层的字段映射。
+换汇 / 选股校验 / LLM 当日订单 decide——委员会裁决只当参考，不触发下单、不被记执行）+ IB Gateway 适配层的字段映射。
 
 tmp INVEST_HOME 里造持仓 + 当日裁决 md + 当日订单 json；券商用 FakeBroker（_WebApi 的同名方法），
-适配层本身用 FakeClient（ibind IbkrClient 的同名方法，返回 .data）测；行情 / 汇率 / yfinance info / LLM 全 monkeypatch，
+适配层本身用 FakeIB（ib_async IB 的同名方法）测；行情 / 汇率 / yfinance info / LLM 全 monkeypatch，
 不联网、不连盈透。
 """
 from __future__ import annotations
@@ -221,7 +221,7 @@ def test_own_connection_is_closed(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home)
     b = FakeBroker()
-    monkeypatch.setattr(ia, "_connect", lambda acct: b)
+    monkeypatch.setattr(ia, "_connect", lambda acct, client_id=17: b)
     ia.submit(TODAY)
     ia.reconcile()
     ia.status()
@@ -482,110 +482,136 @@ def test_status_is_readonly_snapshot(home, monkeypatch, tmp_path):
     assert out["targets"] == ["GLDM", "QQQM"] and out["today_orders"][0]["symbol"] == "QQQM"
     assert out["ledger"]["cash"] == {"USD": 300.0} and out["halted"] is None
     (tmp_path / "STOP").write_text("drift\n")
-    monkeypatch.setattr(ia, "_connect", lambda acct: (_ for _ in ()).throw(ConnectionRefusedError("down")))
+    monkeypatch.setattr(ia, "_connect", lambda acct, client_id=17: (_ for _ in ()).throw(ConnectionRefusedError("down")))
     out = ia.status()
     assert out["halted"].endswith("drift") and out["broker"]["error"].startswith("unreachable")
 
 
-# ---------------- _WebApi 字段映射（假的 ibind 客户端）----------------
+# ---------------- _IbGateway 字段映射（假的 ib_async IB）----------------
 
-class FakeClient:
-    def __init__(self):
-        self.calls = []
+from datetime import datetime, timezone  # noqa: E402
 
-    def _r(self, data):
-        return SimpleNamespace(data=data)
+from ib_async import CommissionReport, Execution, Fill, Order, OrderState, OrderStatus, Stock, Trade  # noqa: E402
+from ib_async import Forex as _Forex  # noqa: E402
 
-    def portfolio_accounts(self):
-        return self._r([{"id": "U1", "accountId": "U1"}])
-
-    def get_ledger(self, acct):
-        return self._r({"USD": {"cashbalance": "312.5"}, "AUD": {"cashbalance": 5}, "BASE": {"cashbalance": 999}})
-
-    def invalidate_backend_portfolio_cache(self, acct):
-        self.calls.append("invalidate")
-
-    def positions(self, acct, page=0):
-        if page == 0:
-            return self._r([{"ticker": "QQQM", "assetClass": "STK", "position": 0.495}] +
-                           [{"ticker": f"X{i}", "assetClass": "OPT", "position": 1} for i in range(99)])
-        return self._r([{"contractDesc": "VEA ARCA", "assetClass": "STK", "position": "1.5"},
-                        {"ticker": "ZERO", "assetClass": "STK", "position": 0}])
-
-    def live_orders(self, account_id=None):
-        return self._r({"orders": [
-            {"order_ref": "oi:a", "side": "BUY", "ticker": "QQQM", "remainingQuantity": "0.4", "price": "202",
-             "status": "PreSubmitted"},
-            {"order_ref": "oi:b", "side": "SELL", "ticker": "VEA", "remainingQuantity": 0, "price": 70,
-             "status": "Filled"}]})
-
-    def trades(self, days=None, account_id=None):
-        self.calls.append(("trades", days))
-        return self._r([
-            {"execution_id": "e1", "symbol": "QQQM", "side": "B", "size": "0.495", "price": "201.5",
-             "commission": "0.35", "order_ref": "oi:a", "account": "U1", "sec_type": "STK",
-             "trade_time_r": 1792461600000},
-            {"execution_id": "e2", "symbol": "AUD.USD", "side": "S", "size": "495", "price": "0.7",
-             "commission": "2", "order_ref": "oi:fx", "account": "U1", "sec_type": "CASH"},
-            {"execution_id": "e3", "symbol": "SPY", "side": "B", "size": 1, "price": 1, "account": "U9"}])
-
-    def stock_conid_by_symbol(self, symbol):
-        if symbol == "NOPE":
-            raise RuntimeError("no match")
-        return self._r({symbol: 756733})
-
-    def whatif_order(self, req, acct):
-        self.calls.append(("whatif", req))
-        return self._r({"amount": {"commission": "0.35"}, "warn": None, "error": None})
-
-    def place_order(self, req, answers, acct):
-        self.calls.append(("place", req, answers))
-        return self._r([{"order_id": "123", "order_status": "PreSubmitted"}])
-
-    def currency_pairs(self, dst):
-        return self._r({dst: [{"symbol": "EUR.USD", "conid": 1}, {"symbol": "AUD.USD", "conid": 14433401}]})
-
-    def close(self):
-        self.calls.append("close")
+UNSET = 1.7976931348623157e308
 
 
-def test_webapi_read_mappings():
-    c = FakeClient()
-    w = ia._WebApi(c, "U1")
-    assert w.accounts() == ["U1"]
-    assert w.cash() == {"USD": 312.5, "AUD": 5.0}            # BASE 汇总行不算一个币种
-    assert w.positions() == {"QQQM": 0.495, "VEA": 1.5} and c.calls[0] == "invalidate"   # 翻页 + 只要 STK
-    assert w.open_orders() == [{"ref": "oi:a", "side": "BUY", "symbol": "QQQM", "left": 0.4, "lmt": 202.0,
-                                "status": "PreSubmitted"}]
-    f = w.fills(days=7)
-    assert ("trades", "7") in c.calls and [x["exec_id"] for x in f] == ["e1", "e2"]   # 别的账户不要
-    assert (f[0]["side"], f[0]["qty"], f[0]["price"], f[0]["commission"], f[0]["sec_type"]) == ("BOT", 0.495, 201.5, 0.35, "STK")
-    assert f[0]["date"] == "2026-10-20" and (f[1]["side"], f[1]["sec_type"]) == ("SLD", "CASH")
-    assert w.conid("QQQM") == 756733 and w.conid("NOPE") is None
+class FakeIB:
+    def __init__(self, status="PreSubmitted"):
+        self.status, self.calls, self.whatif_state = status, [], OrderState(commission=0.35, warningText="")
+
+    def managedAccounts(self):
+        return ["U1"]
+
+    def accountValues(self, acct=""):
+        av = lambda tag, ccy, v: SimpleNamespace(tag=tag, currency=ccy, value=v, account="U1")  # noqa: E731
+        return [av("CashBalance", "USD", "312.5"), av("CashBalance", "BASE", "999"), av("CashBalance", "AUD", "5"),
+                av("NetLiquidation", "USD", "1")]
+
+    def positions(self, acct=""):
+        pos = lambda sym, sec, q: SimpleNamespace(contract=SimpleNamespace(symbol=sym, secType=sec), position=q)  # noqa: E731
+        return [pos("QQQM", "STK", 0.495), pos("X", "OPT", 1), pos("ZERO", "STK", 0)]
+
+    def openTrades(self):
+        mk = lambda acct: Trade(contract=Stock("QQQM", "SMART", "USD"),  # noqa: E731
+                                order=Order(orderRef="oi:a", action="BUY", totalQuantity=0.5, lmtPrice=202.0, account=acct),
+                                orderStatus=OrderStatus(status="PreSubmitted", filled=0.1))
+        return [mk("U1"), mk("U9")]
+
+    def reqExecutions(self, flt=None):
+        self.calls.append(("reqExecutions", flt))
+
+    def fills(self):
+        t = datetime(2026, 10, 20, 2, 0, tzinfo=timezone.utc)   # 北京 10-20 10:00
+        fx = _Forex("AUDUSD")
+        fx.localSymbol = "AUD.USD"
+        return [
+            Fill(Stock("QQQM", "SMART", "USD"), Execution(execId="e1", acctNumber="U1", side="BOT", shares=0.495,
+                 price=201.5, orderRef="oi:a", time=t), CommissionReport(commission=0.35), t),
+            Fill(fx, Execution(execId="e2", acctNumber="U1", side="SLD", shares=495, price=0.7, time=t),
+                 CommissionReport(commission=UNSET), t),
+            Fill(Stock("SPY", "SMART", "USD"), Execution(execId="e3", acctNumber="U9", side="BOT", shares=1, price=1,
+                 time=t), CommissionReport(), t)]
+
+    def sleep(self, s):
+        pass
+
+    def qualifyContracts(self, c):
+        if getattr(c, "secType", "") == "CASH":
+            if c.symbol != "AUD":
+                return [None]
+            c.localSymbol, c.conId = "AUD.USD", 14433401
+            return [c]
+        if c.symbol == "NOPE":
+            return [None]
+        c.conId = 756733
+        return [c]
+
+    def whatIfOrder(self, contract, order):
+        self.calls.append(("whatIfOrder", contract, order))
+        return self.whatif_state
+
+    def placeOrder(self, contract, order):
+        order.orderId = 123
+        self.calls.append(("placeOrder", contract, order))
+        log = [SimpleNamespace(message="No trading permissions for this contract")] if self.status == "Inactive" else []
+        return SimpleNamespace(orderStatus=SimpleNamespace(status=self.status), log=log)
+
+    def disconnect(self):
+        self.calls.append("disconnect")
 
 
-def test_webapi_order_requests_and_answers():
-    from ibind import QuestionType as Q
-    c = FakeClient()
-    w = ia._WebApi(c, "U1")
-    assert w.whatif(756733, "BUY", 0.495, 202.0, "oi:r")["commission"] == "0.35"
-    _, req = c.calls[-1]
-    assert (req.conid, req.side, req.quantity, req.order_type, req.price, req.tif, req.coid, req.acct_id,
-            req.outside_rth, req.manual_indicator) == (756733, "BUY", 0.495, "LMT", 202.0, "DAY", "oi:r", "U1", False, False)
-    assert w.place(756733, "SELL", 0.3, 89.1, "oi:s") == {"order_id": "123", "status": "PreSubmitted"}
-    _, req, answers = c.calls[-1]
-    assert req.side == "SELL" and answers[Q.MISSING_MARKET_DATA] is True
-    assert answers[Q.PRICE_PERCENTAGE_CONSTRAINT] is False and answers[Q.MARKET_ORDER_CONFIRMATION] is False
-    w.convert("AUD", "USD", 495.0, "oi:fx", dry_run=False)
-    _, req, answers = c.calls[-1]
-    assert (req.conid, req.side, req.order_type, req.is_ccy_conv, req.fx_qty) == (14433401, "SELL", "MKT", True, 495.0)
-    assert answers[Q.MARKET_ORDER_CONFIRMATION] is True       # 只有换汇放行市价确认
-    assert w.convert("AUD", "USD", 495.0, "oi:fx", dry_run=True)["dry_run"] is True
-    assert c.calls[-1][0] == "whatif"
+def test_gateway_read_mappings():
+    ib = FakeIB()
+    g = ia._IbGateway(ib, "U1")
+    assert g.accounts() == ["U1"]
+    assert g.cash() == {"USD": 312.5, "AUD": 5.0}            # 只要 CashBalance，BASE 汇总行不算一个币种
+    assert g.positions() == {"QQQM": 0.495}                  # 只要非零 STK
+    assert g.open_orders() == [{"ref": "oi:a", "side": "BUY", "symbol": "QQQM", "left": pytest.approx(0.4),
+                                "lmt": 202.0, "status": "PreSubmitted"}]   # 别的账户的挂单不要
+    f = g.fills(days=7)
+    (_, flt), = [c for c in ib.calls if c[0] == "reqExecutions"]
+    assert flt.acctCode == "U1" and len(flt.time) == len("20261013-00:00:00")   # 按时间回看，不只当日
+    assert [x["exec_id"] for x in f] == ["e1", "e2"]          # 别的账户的成交不要
+    assert (f[0]["symbol"], f[0]["side"], f[0]["qty"], f[0]["commission"], f[0]["sec_type"], f[0]["date"]) == \
+        ("QQQM", "BOT", 0.495, 0.35, "STK", "2026-10-20")
+    assert (f[1]["symbol"], f[1]["side"], f[1]["sec_type"], f[1]["commission"]) == ("AUD.USD", "SLD", "CASH", 0.0)   # 未设置佣金按 0
+
+
+def test_gateway_orders_whatif_and_rejection():
+    ib = FakeIB()
+    g = ia._IbGateway(ib, "U1")
+    assert g.conid("NOPE") is None
+    cid = g.conid("QQQM")
+    assert cid == 756733
+    assert g.whatif(cid, "BUY", 0.495, 202.0, "oi:r") == {"commission": 0.35, "warning": None, "error": None}
+    _, contract, o = ib.calls[-1]
+    assert contract.symbol == "QQQM"
+    assert (o.action, o.totalQuantity, o.orderType, o.lmtPrice, o.tif, o.account, o.orderRef, o.outsideRth) == \
+        ("BUY", 0.495, "LMT", 202.0, "DAY", "U1", "oi:r", False)
+    ib.whatif_state = OrderState()                            # 网关没回结果（被拒）
+    assert g.whatif(cid, "BUY", 0.495, 202.0, "oi:r")["error"]
+    assert g.place(cid, "SELL", 0.3, 89.1, "oi:s") == {"order_id": 123, "status": "PreSubmitted"}
+    ib.status = "Inactive"
+    with pytest.raises(RuntimeError, match="No trading permissions"):
+        g.place(cid, "BUY", 0.1, 202.0, "oi:t")
+    g.close()
+    assert ib.calls[-1] == "disconnect"
+
+
+def test_gateway_fx_conversion(monkeypatch):
+    monkeypatch.setattr("openinvest.utils.fx.get_fx_rate", lambda a, b="CNY", as_of_date=None: 0.7)
+    ib = FakeIB()
+    g = ia._IbGateway(ib, "U1")
+    out = g.convert("AUD", "USD", 495.0, "oi:fx", dry_run=True)
+    _, pair, o = ib.calls[-1]
+    assert out["dry_run"] is True and pair.localSymbol == "AUD.USD"
+    assert (o.action, o.totalQuantity, o.orderType, o.lmtPrice, o.orderRef) == ("SELL", 495.0, "LMT", 0.693, "oi:fx")   # 可成交限价
+    out = g.convert("AUD", "USD", 495.0, "oi:fx", dry_run=False)
+    assert ib.calls[-1][0] == "placeOrder" and out["status"] == "PreSubmitted" and out["pair"] == "AUD.USD"
     with pytest.raises(ia._Skip):
-        w.convert("JPY", "USD", 1.0, "oi:fx", dry_run=False)
-    w.close()
-    assert c.calls[-1] == "close"
+        g.convert("JPY", "USD", 1.0, "oi:fx", dry_run=False)
 
 
 class _Agent:

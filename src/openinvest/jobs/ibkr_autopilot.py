@@ -1,6 +1,6 @@
 """盈透（IBKR）实盘 autopilot —— LLM 选标的、LLM 定买卖（委员会裁决只当参考输入）、本模块下**真单**。
-opt-in，只应在独立 INVEST_HOME 开。券商走盈透 Client Portal Web API + First Party OAuth 1.0a（ibind）：
-一次性在盈透 OAuth 页登记密钥 / 生成令牌后无人值守，不需要网关进程、不需要每周 IB Key。
+opt-in，只应在独立 INVEST_HOME 开。券商走本机 IB Gateway（TWS API，ib_async）：网关用运营者的账号密码自动登录、
+每天自动重启；盈透对个人账户强制每周一次 IB Key 确认（OAuth 1.0a 只开放给机构客户）。
 
 四段（cron 按美股时段跑；日期一律北京日期，与 .committee/<date>/ 同口径）：
   pick       每周一（或 target_assets 为空）：LLM 在硬限制内选 ≤5 只美股 / 美股 ETF，整表替换本 home 的
@@ -10,19 +10,19 @@ opt-in，只应在独立 INVEST_HOME 开。券商走盈透 Client Portal Web API
   submit     ①USD 不够下最小单而 AUD 够 → 账户内 AUD→USD 换汇（每天最多一次，钱不出账户）；②持有但已不在
              target_assets 的 → 清仓；③当日订单 → DAY 限价单（参考价 ±1%，开盘跳空超过就不成交、收盘作废）。
              委员会裁决的 execution 一概不写——执行的是 LLM 的单，不是委员会的裁决。
-  reconcile  美股收盘后：拉近 7 天成交，按 execution_id 幂等记账（股票 buy/sell、换汇两腿、佣金 fee）；
+  reconcile  美股收盘后：按时间过滤拉近 7 天成交（网关若只回当日也无妨），按 execId 幂等记账（股票 buy/sell、换汇两腿、佣金 fee）；
              持仓和券商对不上 → 写 STOP 停手。
 另有 status：只读快照（券商现金 / 持仓 / 挂单 / 当日成交 + 账本 + 名单 + 当日订单 + STOP），不下单、不记账。
 
 硬闸（代码层，LLM 给什么都先过这里）——金额全按 USD：
-  ibkr.enabled 默认关；INVEST_HOME/STOP 存在就不下单；OAuth 会话的账户里没有 ibkr.account 就什么都不做；
+  ibkr.enabled 默认关；INVEST_HOME/STOP 存在就不下单；网关登录的账户里没有 ibkr.account 就什么都不做；
   只交易 target_assets 里的标的（清仓例外：卖的是券商里已有的持仓）；单笔 ≤ max_order_usd；当日累计
   （已挂未成交 + 当日已成交）≤ max_day_usd；< min_order_usd 不下（整笔清仓例外）；只挂限价单；
-  卖出量 ≤ 券商持仓（现金账户本身不能融资 / 做空）；下单时盈透弹的确认问题只认白名单（_ANSWERS），其余一律不下。
+  卖出量 ≤ 券商持仓（现金账户本身不能融资 / 做空）；下单被网关拒（权限 / 预防性设置 / 碎股）→ 终局跳过，原因进邮件。
 ibkr.dry_run=True（默认）：whatif 试算——盈透校验合约 / 权限 / 碎股 / 佣金，不下单、不换汇、不占 claim。
 
-幂等（ADR-016）：submit 每个 (date, symbol, side) 一把 state_claim，下单后不 unclaim；订单 cOID = 我们的 orderRef
-（盈透侧对重复 cOID 拒单），已有同 ref 的挂单 / 成交也跳过。reconcile 每笔成交带 idempotency_key=ibkr-<execution_id>。
+幂等（ADR-016）：submit 每个 (date, symbol, side) 一把 state_claim，下单后不 unclaim；网关里已有同 orderRef 的挂单 /
+成交也跳过。reconcile 每笔成交带 idempotency_key=ibkr-<execId>。
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ import json
 import logging
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -47,7 +47,7 @@ from openinvest.utils.symbols import safe_symbol
 log = logging.getLogger(__name__)
 
 _SRC = "ibkr_autopilot"
-_REF = "oi:"            # orderRef / cOID 前缀：只把带它的挂单 / 成交算进本程序的当日额度
+_REF = "oi:"            # orderRef 前缀：只把带它的挂单 / 成交算进本程序的当日额度
 _BAND = 0.01            # 限价 = 参考价 ±1%
 _MAX_PICKS = 5
 _MIN_PRICE = 5.0
@@ -94,7 +94,7 @@ def _notify(subject: str, lines: List[str]) -> None:
 
 
 def _num(v: Any) -> float:
-    """Web API 的数字常是字符串（"1,234.5"）或缺失；转不了按 0。"""
+    """券商回来的数字可能是字符串（"1,234.5"）、缺失或非有限；转不了按 0。"""
     try:
         f = float(str(v).replace(",", "")) if v not in (None, "") else 0.0
     except ValueError:
@@ -102,140 +102,135 @@ def _num(v: Any) -> float:
     return f if math.isfinite(f) else 0.0
 
 
-# ---------------------------------------------------------------- broker（盈透 Web API）
+# ---------------------------------------------------------------- broker（本机 IB Gateway，TWS API）
+
+_PORT = 4001            # docker compose 把网关 live API 映到 127.0.0.1:4001
+_CLIENT_ID = 17
+_STATUS_CLIENT_ID = 18  # status 只读查询用另一个 clientId，和 cron 里的 submit / reconcile 同时连也不撞
+_FX_BAND = 0.01         # 换汇限价 = 参考汇率 ±1%（市价换汇单可能被拒，用可成交的限价）
+_UNSET = 1e300          # ib_async 的「未设置」浮点（UNSET_DOUBLE ≈ 1.8e308）
 
 
-def _answers(conversion: bool = False) -> dict:
-    """下单时盈透弹的确认问题：只认这几个（我们自己的参考价 + 限价兜底），其余 → ibind 抛错 → 不下单。"""
-    from ibind import QuestionType as Q
-    a = {Q.MISSING_MARKET_DATA: True, Q.TRIGGER_AND_FILL: True, Q.MANDATORY_CAP_PRICE: True,
-         Q.DISRUPTIVE_ORDERS: True, Q.PRICE_PERCENTAGE_CONSTRAINT: False, Q.ORDER_SIZE_LIMIT: False,
-         Q.ORDER_VALUE_LIMIT: False, Q.TICK_SIZE_LIMIT: False, Q.CLOSE_POSITION: False,
-         Q.MULTIPLE_ACCOUNTS: False, Q.CASH_QUANTITY: False, Q.CASH_QUANTITY_ORDER: False,
-         Q.MARKET_ORDER_CONFIRMATION: conversion}   # 只有换汇用市价单
-    return a
+def _finite(v: Any) -> Optional[float]:
+    f = _num(v)
+    return f if 0 <= abs(f) < _UNSET else None
 
 
-class _WebApi:
-    """盈透 Client Portal Web API（OAuth 1.0a，ibind）的最小适配层——本模块只用这几个调用，字段映射集中在这里。
-    字段名照 IBKR Web API v1 文档；首次连上先 dry_run（whatif）核对。测试用同名方法的 Fake 替换。"""
+class _IbGateway:
+    """本机 IB Gateway（ib_async / TWS API）的最小适配层——本模块只用这几个调用，字段映射集中在这里。
+    测试用同名方法的 Fake 替换；首次连上先 dry_run（whatIfOrder）核对。"""
 
-    def __init__(self, client, acct: str):
-        self.c, self.acct = client, acct
+    def __init__(self, ib, acct: str):
+        self.ib, self.acct = ib, acct
+        self._contracts: Dict[int, Any] = {}
 
     @classmethod
-    def connect(cls, acct: str) -> "_WebApi":
-        from ibind import IbkrClient
-        # OAuth 参数全从 IBIND_OAUTH1A_* 环境变量读（运营者的 oauth.env）；cron 短跑，不起保活线程
-        c = IbkrClient(account_id=acct, use_oauth=True)
-        c.receive_brokerage_accounts()   # /iserver/accounts 必须先调，/iserver/* 端点才可用
-        return cls(c, acct)
+    def connect(cls, acct: str, client_id: int = _CLIENT_ID) -> "_IbGateway":
+        from ib_async import IB
+        ib = IB()
+        ib.connect("127.0.0.1", _PORT, clientId=client_id, timeout=20)
+        return cls(ib, acct)
 
     def close(self) -> None:
         try:
-            self.c.close()
+            self.ib.disconnect()
         except Exception as e:  # noqa: BLE001
-            log.warning(f"[ibkr] 关闭会话失败: {e}")
+            log.warning(f"[ibkr] 断开网关失败: {e}")
 
     def accounts(self) -> List[str]:
-        return [str(a.get("accountId") or a.get("id") or "") for a in (self.c.portfolio_accounts().data or [])]
+        return list(self.ib.managedAccounts())
 
     def cash(self) -> Dict[str, float]:
-        led = self.c.get_ledger(self.acct).data or {}
-        return {k.upper(): _num(v.get("cashbalance")) for k, v in led.items()
-                if isinstance(v, dict) and k.upper() != "BASE"}
+        return {v.currency.upper(): _num(v.value) for v in self.ib.accountValues(self.acct)
+                if v.tag == "CashBalance" and v.currency and v.currency.upper() != "BASE"}
 
     def positions(self) -> Dict[str, float]:
-        self.c.invalidate_backend_portfolio_cache(self.acct)   # portfolio 端点有缓存，对账前先刷
-        out: Dict[str, float] = {}
-        page = 0
-        while True:
-            rows = self.c.positions(self.acct, page=page).data or []
-            for r in rows:
-                qty = _num(r.get("position"))
-                if str(r.get("assetClass") or "").upper() == "STK" and qty:
-                    out[str(r.get("ticker") or r.get("contractDesc") or "").split()[0]] = qty
-            if len(rows) < 100:   # 每页 100 条
-                return out
-            page += 1
+        return {p.contract.symbol: float(p.position) for p in self.ib.positions(self.acct)
+                if p.contract.secType == "STK" and float(p.position)}
 
     def open_orders(self) -> List[Dict[str, Any]]:
-        rows = (self.c.live_orders(account_id=self.acct).data or {}).get("orders") or []
-        return [{"ref": str(r.get("order_ref") or ""), "side": str(r.get("side") or "").upper(),
-                 "symbol": str(r.get("ticker") or ""), "left": _num(r.get("remainingQuantity")),
-                 "lmt": _num(r.get("price")), "status": str(r.get("status") or "")}
-                for r in rows if str(r.get("status") or "") not in ("Filled", "Cancelled", "Inactive")]
+        out = []
+        for t in self.ib.openTrades():
+            o = t.order
+            if o.account and o.account != self.acct:
+                continue
+            out.append({"ref": str(o.orderRef or ""), "side": str(o.action or "").upper(),
+                        "symbol": t.contract.symbol, "left": float(o.totalQuantity) - float(t.orderStatus.filled or 0),
+                        "lmt": _finite(o.lmtPrice) or 0.0, "status": t.orderStatus.status})
+        return out
 
     def fills(self, days: int = 1) -> List[Dict[str, Any]]:
-        rows = self.c.trades(days=str(days), account_id=self.acct).data or []
+        from ib_async import ExecutionFilter
+        since = (datetime.now(ZoneInfo("UTC")) - timedelta(days=days)).strftime("%Y%m%d-%H:%M:%S")
+        self.ib.reqExecutions(ExecutionFilter(acctCode=self.acct, time=since))
+        self.ib.sleep(2)   # 佣金报告在成交回报之后到，等一下再读 ib.fills()
         out = []
-        for r in rows:
-            acct = r.get("account") or r.get("accountCode")
-            if acct and acct != self.acct:
+        for f in self.ib.fills():
+            e, c, cr = f.execution, f.contract, f.commissionReport
+            if e.acctNumber != self.acct:
                 continue
-            ms = r.get("trade_time_r")
-            out.append({"exec_id": str(r.get("execution_id") or ""), "symbol": str(r.get("symbol") or ""),
-                        "side": "BOT" if str(r.get("side") or "").upper() in ("B", "BUY", "BOT") else "SLD",
-                        "qty": _num(r.get("size")), "price": _num(r.get("price")),
-                        "commission": _num(r.get("commission")), "ref": str(r.get("order_ref") or ""),
-                        "sec_type": str(r.get("sec_type") or "STK").upper(),
-                        "date": (datetime.fromtimestamp(int(ms) / 1000, ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
-                                 if ms else _today())})
+            out.append({"exec_id": e.execId, "sec_type": c.secType,
+                        "symbol": c.localSymbol if c.secType == "CASH" else c.symbol,   # 换汇：AUD.USD
+                        "side": "BOT" if e.side == "BOT" else "SLD", "qty": float(e.shares), "price": float(e.price),
+                        "commission": _finite(getattr(cr, "commission", 0)) or 0.0, "ref": str(e.orderRef or ""),
+                        "date": e.time.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")})
         return out
 
     def conid(self, symbol: str) -> Optional[int]:
-        try:
-            data = self.c.stock_conid_by_symbol(symbol).data
-        except Exception as e:  # noqa: BLE001 — 查不到 / 有歧义都当不可交易
-            log.warning(f"[ibkr] {symbol} conid 查询失败: {e}")
+        from ib_async import Stock
+        q = self.ib.qualifyContracts(Stock(symbol, "SMART", "USD"))
+        c = q[0] if q else None   # 查不到 / 有歧义时该位置是 None 或候选 list
+        if c is None or isinstance(c, list) or not c.conId:
             return None
-        v = data.get(symbol) if isinstance(data, dict) else None
-        return int(v) if isinstance(v, (int, str)) and str(v).isdigit() else None
+        self._contracts[c.conId] = c
+        return c.conId
 
-    def _order(self, conid: int, side: str, qty: float, lmt: float, ref: str):
-        from ibind import OrderRequest
-        return OrderRequest(conid=conid, side=side, quantity=qty, order_type="LMT", price=lmt, acct_id=self.acct,
-                            coid=ref, tif="DAY", outside_rth=False, manual_indicator=False)
+    def _limit(self, side: str, qty: float, lmt: float, ref: str):
+        from ib_async import LimitOrder
+        return LimitOrder(side, qty, lmt, tif="DAY", account=self.acct, orderRef=ref, outsideRth=False)
 
     def whatif(self, conid: int, side: str, qty: float, lmt: float, ref: str) -> Dict[str, Any]:
-        d = self.c.whatif_order(self._order(conid, side, qty, lmt, ref), self.acct).data or {}
-        return {"commission": (d.get("amount") or {}).get("commission"), "warning": d.get("warn") or None,
-                "error": d.get("error") or None}
+        st = self.ib.whatIfOrder(self._contracts[conid], self._limit(side, qty, lmt, ref))
+        if not st or (_finite(getattr(st, "commission", None)) is None and not getattr(st, "warningText", "")):
+            return {"error": "whatIfOrder 没有回结果（权限 / 合约 / 碎股被拒，看网关日志）"}
+        return {"commission": _finite(st.commission), "warning": st.warningText or None, "error": None}
+
+    def _send(self, contract, order) -> Dict[str, Any]:
+        trade = self.ib.placeOrder(contract, order)
+        self.ib.sleep(2)
+        status = trade.orderStatus.status
+        if status in ("Cancelled", "ApiCancelled", "Inactive"):
+            raise RuntimeError(f"{status} {'; '.join(x.message for x in trade.log if x.message)}".strip())
+        return {"order_id": order.orderId, "status": status}
 
     def place(self, conid: int, side: str, qty: float, lmt: float, ref: str) -> Dict[str, Any]:
-        data = self.c.place_order(self._order(conid, side, qty, lmt, ref), _answers(), self.acct).data
-        r = data[0] if isinstance(data, list) and data else (data or {})
-        return {"order_id": r.get("order_id"), "status": r.get("order_status") or "Submitted"}
-
-    def fx_pair(self, src: str, dst: str) -> Optional[Dict[str, Any]]:
-        """(conid, base) of the src/dst 货币对，如 AUD.USD → base=AUD。"""
-        data = self.c.currency_pairs(dst).data or {}
-        for p in data.get(dst) or []:
-            sym = str(p.get("symbol") or "")
-            if sym in (f"{src}.{dst}", f"{dst}.{src}") and str(p.get("conid") or "").isdigit():
-                return {"conid": int(p["conid"]), "base": sym.split(".")[0]}
-        return None
+        return self._send(self._contracts[conid], self._limit(side, qty, lmt, ref))
 
     def convert(self, src: str, dst: str, amount_src: float, ref: str, dry_run: bool) -> Dict[str, Any]:
-        """账户内换汇（钱不出账户）：卖 amount_src 的 src 换 dst。市价，isCcyConv。"""
-        from ibind import OrderRequest
-        pair = self.fx_pair(src, dst)
-        if pair is None:
+        """账户内换汇（钱不出账户）：卖 amount_src 的 src 换 dst。小额单盈透自动走 IDEAL odd lot；可成交限价。"""
+        from ib_async import Forex
+        from openinvest.utils.fx import get_fx_rate
+        rate = get_fx_rate(src, dst)
+        if not rate or rate <= 0:
+            raise _Skip("no_fx_rate")
+        q = self.ib.qualifyContracts(Forex(f"{src}{dst}"))
+        pair = q[0] if q else None
+        if pair is None or isinstance(pair, list):
             raise _Skip(f"no_fx_pair_{src}_{dst}", terminal=True)
-        side = "SELL" if pair["base"] == src else "BUY"   # 以 base 计：卖 src / 买 dst
-        req = OrderRequest(conid=pair["conid"], side=side, quantity=0, order_type="MKT", acct_id=self.acct,
-                           coid=ref, tif="DAY", is_ccy_conv=True, fx_qty=round(amount_src, 2),
-                           manual_indicator=False)
+        if pair.symbol == src:   # AUD.USD：卖 base（AUD），数量以 AUD 计
+            side, qty, lmt = "SELL", round(amount_src, 2), round(rate * (1 - _FX_BAND), 5)
+        else:                    # USD.AUD：买 base（USD）
+            side, qty, lmt = "BUY", round(amount_src * rate, 2), round(1 / rate * (1 + _FX_BAND), 5)
+        order = self._limit(side, qty, lmt, ref)
         if dry_run:
-            d = self.c.whatif_order(req, self.acct).data or {}
-            return {"dry_run": True, "warning": d.get("warn") or None, "error": d.get("error") or None}
-        data = self.c.place_order(req, _answers(conversion=True), self.acct).data
-        r = data[0] if isinstance(data, list) and data else (data or {})
-        return {"order_id": r.get("order_id"), "status": r.get("order_status") or "Submitted"}
+            st = self.ib.whatIfOrder(pair, order)
+            return {"dry_run": True, "pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt,
+                    "warning": getattr(st, "warningText", "") or None}
+        return {"pair": pair.localSymbol, "side": side, "qty": qty, "lmt": lmt, **self._send(pair, order)}
 
 
-def _connect(acct: str):
-    return _WebApi.connect(acct)
+def _connect(acct: str, client_id: int = _CLIENT_ID):
+    return _IbGateway.connect(acct, client_id)
 
 
 def _used_today(b, fills: list) -> tuple[float, float, set]:
@@ -579,7 +574,7 @@ def _caps_error(cfg) -> Optional[str]:
 
 
 def _maybe_convert(b, pm: PortfolioManager, cash: Dict[str, float], refs: set, today: str, cfg) -> Optional[Dict]:
-    """USD 不够下最小单、而 AUD 够 → 把 AUD（留零头）换成 USD。每天最多一次（claim + cOID 双闸）。"""
+    """USD 不够下最小单、而 AUD 够 → 把 AUD（留零头）换成 USD。每天最多一次（claim + orderRef 双闸）。"""
     usd, src = cash.get("USD", 0.0), cash.get(_FX_FROM, 0.0)
     amount = min(src - _FX_KEEP, _FX_MAX)
     if usd >= cfg.min_order_usd or amount < _FX_MIN:
@@ -792,7 +787,7 @@ def status(*, broker=None) -> Dict[str, Any]:
                                                  if float(h.get("units") or 0)}},
     }
     try:
-        b = broker or _connect(cfg.account)
+        b = broker or _connect(cfg.account, _STATUS_CLIENT_ID)
     except Exception as e:  # noqa: BLE001
         out["broker"] = {"error": f"unreachable: {e}"}
         return out

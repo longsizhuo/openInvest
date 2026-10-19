@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ibkr = ["ibind[oauth]>=0.2.1,<0.3"]  # jobs/ibkr_autopilot 经盈透 Web API（OAuth 1.0a）下真单；不开盈透 autopilot 的用户不用装
+ibkr = ["ib_async>=2.1.0,<3"]  # jobs/ibkr_autopilot 经本机 IB Gateway（TWS API）下真单；不开盈透 autopilot 的用户不用装
 
 [project.urls]
 Homepage = "https://github.com/longsizhuo/openInvest"
@@ -74,7 +74,7 @@ dev = [
     "pytest>=9.0.3",
     "httpx>=0.27",
     "import-linter>=2.0",   # 防 entry 层直调 core 原语漂移（见 ADR / CLAUDE.md "分层契约"）
-    "ibind[oauth]>=0.2.1,<0.3",   # jobs/ibkr_autopilot 的盈透 Web API 客户端；生产 deploy 的 uv sync 也靠它装上
+    "ib_async>=2.1.0,<3",   # jobs/ibkr_autopilot 的 IB Gateway 客户端；测试用真 Order / Contract 类，生产 deploy 的 uv sync 也靠它装上
 ]
 
 # ============================================================================
