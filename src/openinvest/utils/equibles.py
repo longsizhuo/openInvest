@@ -1,4 +1,4 @@
-"""Equibles 可选数据源：A 股 / 港股的最近一期利润表
+"""Equibles 可选数据源：A 股 / 港股的最近一期利润表 + Yahoo 拿不到时的日线兜底
 
 Yahoo Finance 仍是默认。只有设了 EQUIBLES_API_KEY 才启用——每个用户自己去
 https://equibles.com/dashboard/apikeys 免费注册拿 key（免费档 100 次/天，REST 与 MCP
@@ -20,6 +20,7 @@ import os
 import re
 from typing import Optional
 
+import pandas as pd
 import requests
 
 log = logging.getLogger(__name__)
@@ -106,4 +107,33 @@ def build_fundamentals_brief(symbol: str) -> str:
     return f"{header}\n<{_TAG}>\n{text}\n</{_TAG}>\n{ATTRIBUTION}"
 
 
-__all__ = ["build_fundamentals_brief", "call_tool", "to_mic"]
+def fetch_daily_prices(symbol: str, start: str) -> Optional[pd.DataFrame]:
+    """A 股 / 港股个股日线，给 Yahoo 拿不到时兜底（接线点 exchange_fee._equibles_fallback）。
+
+    返回与 yfinance ``history(auto_adjust=False)`` 同列同口径的帧：Close 只按拆股复权、
+    Adj Close 含分红复权（2026-10 实测 600519.SS / 0700.HK 与 yfinance 逐位相同）。
+    单次最多 500 行（≈2 年）。无 key / 非 A 港股 / 没覆盖（ETF 回 "not found"）/ 失败 → None。
+    """
+    api_key = os.getenv("EQUIBLES_API_KEY", "").strip()
+    mic = to_mic(symbol)
+    if not api_key or not mic:
+        return None
+    try:
+        text = call_tool("GetStockPrices", {"ticker": mic, "startDate": start, "maxResults": 500}, api_key)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"equibles GetStockPrices {mic} 失败: {type(e).__name__}: {e}")
+        return None
+    # markdown 表：表头 | 分隔线 | 数据行（旧→新）；千分位逗号去掉
+    rows = [[c.strip() for c in ln.strip().strip("|").split("|")]
+            for ln in text.splitlines() if ln.lstrip().startswith("|")]
+    if len(rows) < 3 or rows[0][0] != "Date":
+        return None
+    header, data = rows[0], rows[2:]
+    df = pd.DataFrame(
+        [[pd.to_numeric(v.replace(",", ""), errors="coerce") for v in r[1:]] for r in data],
+        columns=header[1:], index=pd.to_datetime([r[0] for r in data]),
+    )
+    return df.sort_index()
+
+
+__all__ = ["build_fundamentals_brief", "call_tool", "fetch_daily_prices", "to_mic"]

@@ -58,9 +58,12 @@ LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v1
 LLM_MODEL=glm-4-flash
 ```
 
-## 可选数据源：Equibles（A 股 / 港股基本面）
+## 可选数据源：Equibles（A 股 / 港股基本面 + 行情兜底）
 
-行情和估值默认走 Yahoo Finance（yfinance），不用配置。持有 A 股 / 港股个股时，可以另接 [Equibles](https://equibles.com)，给委员会的估值事实块补上**最近一期利润表**（交易所 / 监管披露口径，带报告期和披露日期）。它不依赖 Yahoo，所以 Yahoo 限流（429）时这部分照样能拿到。
+行情和估值默认走 Yahoo Finance（yfinance），不用配置。持有 A 股 / 港股个股时，可以另接 [Equibles](https://equibles.com)，它不依赖 Yahoo，管两件事：
+
+- **估值事实块补最近一期利润表**（交易所 / 监管披露口径，带报告期和披露日期）。
+- **Yahoo 拿不到行情时补日线**。部署在大陆服务器上 Yahoo 常年 429，新装的库里又没有历史价，委员会会直接报「无行情数据」；配了 key 后改从 Equibles 补近 2 年日线，和 Yahoo 的复权口径逐位相同，Yahoo 恢复后无缝接回。Equibles 的日线比 Yahoo 晚 1~2 个交易日，这期间价格会标成「陈旧」。
 
 1. 去 [equibles.com](https://equibles.com/dashboard/apikeys) 免费注册，在控制台建一个 API key（免费档每天 100 次请求，00:00 UTC 重置）。
 2. 写进 `.env`：
@@ -69,9 +72,9 @@ LLM_MODEL=glm-4-flash
 EQUIBLES_API_KEY=eq_xxxxxxxxxxxxxxxx
 ```
 
-- 只对 `.HK` / `.SS` / `.SZ` 代码生效（自动换成 Equibles 的 `XHKG:00700` / `XSHG:600519` / `XSHE:000001` 写法），每个标的每次委员会用 1 次请求；美股、ETF 基金、黄金等不受影响。
+- 只对 `.HK` / `.SS` / `.SZ` 代码生效（自动换成 Equibles 的 `XHKG:00700` / `XSHG:600519` / `XSHE:000001` 写法），每个标的每次委员会用 1 次请求；行情兜底只在 Yahoo 失败时触发，每个标的最多 6 小时 1 次。美股、ETF（如 `510300.SS`，Equibles 不覆盖）、场外基金、黄金等不受影响。
 - 每个用户用自己的 key，不要共用：开源项目里每人各有一份免费额度。
-- 没配 key、额度用完或网络不通时，这一段直接跳过，委员会照常运行。
+- 没配 key、额度用完或网络不通时，这两件事都直接跳过，行为和没接 Equibles 时一样。
 - 数据旁边会带 `Data: Equibles - https://equibles.com` 署名（Equibles 条款要求），转述这些数字时请保留来源。
 
 ## Tunable Runtime Overrides（运行时可调参数）
