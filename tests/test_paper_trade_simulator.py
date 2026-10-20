@@ -226,23 +226,6 @@ def test_evaluate_strategy_full():
     assert metrics["vs_benchmarks"]["沪深300"]["alpha_pct"] == 20.0
 
 
-def test_sortino_doesnt_explode():
-    """回归：之前 Sortino 在 downside 样本少时 1e15 爆掉"""
-    from openinvest.core.strategy_metrics import sortino_ratio
-    # 60 天 54 天涨 + 6 天跌，downside 样本 = 6 个
-    daily = []
-    val = 100000.0
-    import datetime as dt
-    d = dt.date(2024, 1, 2)
-    for i in range(60):
-        val *= (1.005 if i < 54 else 0.983)
-        daily.append((d.isoformat(), val))
-        d += dt.timedelta(days=1)
-    s = sortino_ratio(daily)
-    # 应是合理范围（< 100 by clip）
-    assert abs(s) < 100
-
-
 def test_gold_price_includes_usdcny_leg(mock_market):
     """回归（issue #179 P1-A①）：GC=F 报价是 USD/oz，但模拟器把黄金计价当 CNY
     （用户持积存金）。_get_price 必须补 USDCNY 腿，否则窗口收益漏掉人民币汇率漂移。
@@ -301,9 +284,11 @@ def test_sortino_repo_own_case_not_zero():
     assert sortino_ratio(daily) == pytest.approx(8.09, abs=0.01)
 
 
-def test_sortino_keeps_guard_for_no_or_few_loss_days():
-    """边界 #539：没亏过 / 亏损日不足 5 天时仍返回 0.0（"不可计算"），保护不变。"""
+def test_sortino_no_loss_days_zero_few_loss_days_real():
+    """边界 #539：没亏过仍返 0.0（"不可计算"）；亏损日少（1~4 天）要给真实值，不再被下限压成 0。
+    原 test_sortino_doesnt_explode 防的「小样本 1e15 爆掉」也由这里守：1 个亏损日不爆、不过剪裁线。"""
     from openinvest.core.strategy_metrics import sortino_ratio
 
     assert sortino_ratio(_curve_daily([0.01] * 60)) == 0.0
-    assert sortino_ratio(_curve_daily([0.01] * 56 + [-0.02] * 4)) == 0.0
+    assert sortino_ratio(_curve_daily([0.01] * 56 + [-0.02] * 4)) == pytest.approx(24.37, abs=0.01)
+    assert sortino_ratio(_curve_daily([0.005] * 59 + [-0.03])) == pytest.approx(17.86, abs=0.01)
