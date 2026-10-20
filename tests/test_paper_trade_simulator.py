@@ -284,11 +284,14 @@ def test_sortino_repo_own_case_not_zero():
     assert sortino_ratio(daily) == pytest.approx(8.09, abs=0.01)
 
 
-def test_sortino_no_loss_days_zero_few_loss_days_real():
-    """边界 #539：没亏过仍返 0.0（"不可计算"）；亏损日少（1~4 天）要给真实值，不再被下限压成 0。
-    原 test_sortino_doesnt_explode 防的「小样本 1e15 爆掉」也由这里守：1 个亏损日不爆、不过剪裁线。"""
+def test_sortino_few_loss_days_monotonic():
+    """边界 #539：亏损日少（1~4 天）给真实值，不再被下限压成 0；超剪裁线截到 100 而不是返 0，
+    亏得越少 Sortino 越高（单调）。原 test_sortino_doesnt_explode 防的「小样本 1e15 爆掉」也由这里守。"""
     from openinvest.core.strategy_metrics import sortino_ratio
 
-    assert sortino_ratio(_curve_daily([0.01] * 60)) == 0.0
     assert sortino_ratio(_curve_daily([0.01] * 56 + [-0.02] * 4)) == pytest.approx(24.37, abs=0.01)
-    assert sortino_ratio(_curve_daily([0.005] * 59 + [-0.03])) == pytest.approx(17.86, abs=0.01)
+    by_loss = [sortino_ratio(_curve_daily([0.005] * 59 + [-x])) for x in (0.03, 0.01, 0.005, 0.001)]
+    assert by_loss[0] == pytest.approx(17.86, abs=0.01)
+    assert by_loss == sorted(by_loss)
+    assert by_loss[-1] == 100.0
+    assert sortino_ratio(_curve_daily([0.01] * 60)) == 100.0  # 没亏过 = 无穷大 → 上限

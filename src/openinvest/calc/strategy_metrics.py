@@ -102,18 +102,14 @@ def sortino_ratio(
     excess = rets - daily_rf
     downside = np.minimum(excess, 0.0)
     if not downside.any():
-        return 0.0  # 没亏过，Sortino 无穷大；返 0 表示"不可计算"
+        return 100.0  # 没亏过，Sortino 无穷大 → 给剪裁上限（返 0 会比「亏一点」还差，不单调）
     # 下行偏差 = 相对 MAR(0) 的均方根。不能对亏损日求 std：
     # std 会减掉亏损日的均值，跌幅相近时会退化成 0（#539）。
     # 均方根不会因亏损日少而失稳，原「亏损日 < 5 返 0」下限已删——它会把 1~4 个亏损日的真实值压成 0
     downside_dev = math.sqrt(float(np.mean(downside ** 2)))
-    if downside_dev < 1e-6:
-        return 0.0
     sortino = np.mean(excess) / downside_dev * math.sqrt(trading_days_per_year)
-    # 保护性 clip：理论上 Sortino > 10 都极罕见
-    if abs(sortino) > 100:
-        return 0.0
-    return round(float(sortino), 4)
+    # 截到 ±100 而不是返 0：亏损日少且浅时 Sortino 很大，压成 0 会让「几乎不亏」排在「亏得多」后面
+    return round(float(np.clip(sortino, -100.0, 100.0)), 4)
 
 
 def vs_benchmark(daily_values: DailyValues, benchmark_curve: DailyValues) -> Dict[str, float]:
