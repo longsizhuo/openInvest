@@ -106,7 +106,9 @@ def sortino_ratio(
     # downside 样本太少 (< 5) 时 std 不稳定，会导致 Sortino 爆炸
     if len(downside) < 5:
         return 0.0
-    downside_dev = np.std(downside, ddof=1)
+    # 下行偏差 = 相对 MAR(0) 的均方根。不能对亏损日求 std：
+    # std 会减掉亏损日的均值，跌幅相近时会退化成 0（#539）
+    downside_dev = math.sqrt(float(np.mean(np.minimum(excess, 0.0) ** 2)))
     if downside_dev < 1e-6:
         return 0.0
     sortino = np.mean(excess) / downside_dev * math.sqrt(trading_days_per_year)

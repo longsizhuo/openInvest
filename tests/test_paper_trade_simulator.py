@@ -266,3 +266,44 @@ def test_buy_converts_non_cny_alloc_currency(mock_market):
                                "alloc_currency": "AUD"})
     assert abs(sim.account.cash["CNY"] - (100000 - 4700)) < 0.01
     assert abs(tx.units - 20.0) < 0.01       # 1000 AUD / 50
+
+
+def _curve_daily(returns: list[float], start: float = 100000.0) -> list[tuple[str, float]]:
+    """把日收益率序列摊成 daily_values，省得每个用例重复写日期循环。"""
+    import datetime as dt
+
+    out: list[tuple[str, float]] = []
+    val = start
+    d = dt.date(2024, 1, 2)
+    out.append((d.isoformat(), val))
+    for r in returns:
+        val *= 1 + r
+        d += dt.timedelta(days=1)
+        out.append((d.isoformat(), val))
+    return out
+
+
+def test_sortino_constant_loss_days_not_zero():
+    """回归 #539：跌幅恒定时旧实现的分母是 0（对亏损日取 std），整条曲线退化成 0.0。"""
+    from openinvest.core.strategy_metrics import sortino_ratio
+
+    daily = _curve_daily([0.01] * 50 + [-0.005] * 10)
+    s = sortino_ratio(daily)
+    assert s != 0.0, "跌幅相同时分母仍为 0，说明下行偏差还在对负收益子集求 std"
+    assert s == pytest.approx(57.33, abs=0.01)
+
+
+def test_sortino_repo_own_case_not_zero():
+    """回归 #539：仓库自带的 54 涨 / 6 跌 场景，旧实现同样返回 0.0。"""
+    from openinvest.core.strategy_metrics import sortino_ratio
+
+    daily = _curve_daily([0.005] * 54 + [-0.017] * 6)
+    assert sortino_ratio(daily) == pytest.approx(8.09, abs=0.01)
+
+
+def test_sortino_keeps_guard_for_no_or_few_loss_days():
+    """边界 #539：没亏过 / 亏损日不足 5 天时仍返回 0.0（"不可计算"），保护不变。"""
+    from openinvest.core.strategy_metrics import sortino_ratio
+
+    assert sortino_ratio(_curve_daily([0.01] * 60)) == 0.0
+    assert sortino_ratio(_curve_daily([0.01] * 56 + [-0.02] * 4)) == 0.0
