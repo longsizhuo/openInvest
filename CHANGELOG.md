@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.0](https://github.com/longsizhuo/openInvest/compare/v0.66.0...v0.67.0) (2026-10-20)
+
+
+### Features
+
+* **prices:** Equibles daily-price fallback for A-share / HK when Yahoo fails ([#548](https://github.com/longsizhuo/openInvest/issues/548)) ([e44d522](https://github.com/longsizhuo/openInvest/commit/e44d522c16add54492c11d0c3f18f13985f9230c))
+
 ## [0.66.0](https://github.com/longsizhuo/openInvest/compare/v0.65.0...v0.66.0) (2026-10-20)
 
 
