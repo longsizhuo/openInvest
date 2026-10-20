@@ -227,6 +227,7 @@ INVEST_HOME=~/openInvest uvx openinvest status
 
 ## 开源致谢
 
+* [Equibles](https://equibles.com) — 可选数据源，提供 A 股 / 港股的财报数据。默认仍用 Yahoo Finance；填上你自己免费申请的 `EQUIBLES_API_KEY` 即可启用（[配置说明](docs/wiki/22-configuration.md)）。
 * [MiMo](https://mimo.mi.com/) — 感谢 MiMo 量化实验室提供的生产级高性能推理算力赞助（支持 `mimo-v2.5-pro` 长期并发回测）。
 * [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — 系统三阶段记忆固化与蒸馏架构的基础理论来源。
 

@@ -188,6 +188,10 @@ CIO's EXPECTED_PATH is made up out of thin air; INDEP_DEFENSE_FLAG
 never reaches the transcript → `save_committee`'s deterministic defense downgrade
 (crash sentinel) breaks entirely.
 
+If `valuation_brief` contains an `EQUIBLES_FUNDAMENTALS` block (A-share / HK stock with
+`EQUIBLES_API_KEY` set), keep its `Data: Equibles - https://equibles.com` line, and name
+Equibles as the source whenever you repeat those figures to the user.
+
 ## Direct path details (any agent)
 
 ```bash
