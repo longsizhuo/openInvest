@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.65.0](https://github.com/longsizhuo/openInvest/compare/v0.64.0...v0.65.0) (2026-10-20)
+
+
+### Features
+
+* **ibkr:** configurable gateway port (ibkr.port) for a parallel paper account ([#545](https://github.com/longsizhuo/openInvest/issues/545)) ([e40370a](https://github.com/longsizhuo/openInvest/commit/e40370a889c609f51da093a9e9e23ac1309376e1))
+
+
+### Bug Fixes
+
+* **metrics:** sortino 下行偏差改用相对 MAR 的均方根 ([#544](https://github.com/longsizhuo/openInvest/issues/544)) ([09e90f2](https://github.com/longsizhuo/openInvest/commit/09e90f278321cd4b210f0e41c5dc659758bbae56))
+
 ## [0.64.0](https://github.com/longsizhuo/openInvest/compare/v0.63.0...v0.64.0) (2026-10-19)
 
 
