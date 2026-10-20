@@ -28,10 +28,10 @@ MCP_URL = "https://mcp.equibles.com/mcp"
 TIMEOUT_S = 15
 MAX_CHARS = 3000  # 单个工具输出上限，防 prompt 膨胀
 ATTRIBUTION = "Data: Equibles - https://equibles.com"
-# 工具文本是第三方数据（电话会摘要转述的是公司管理层原话），进 prompt 前包标签 +
-# 删掉文本里伪造的同名标签，防止提前闭合逃出数据块（同 event_normalizer 的 <news_items>）
+# 工具文本是第三方数据（电话会摘要转述的是公司管理层原话），进 prompt 前包标签；
+# 文本里的 < > 全换成 ‹ ›，拼不出任何标签，也就没法提前闭合逃出数据块
+# （只删同名标签会被嵌套写法绕过：</equi</equibles_data>bles_data>）
 _TAG = "equibles_data"
-_TAG_RE = re.compile(rf"<\s*/?\s*{_TAG}\s*>", re.I)
 
 # yfinance 后缀 → ISO 10383 MIC。北交所（.BJ）MIC 未实测，暂不映射。
 _SUFFIX_MIC = {"HK": "XHKG", "SS": "XSHG", "SZ": "XSHE"}
@@ -94,7 +94,7 @@ def build_fundamentals_brief(symbol: str) -> str:
         except Exception as e:  # noqa: BLE001
             log.warning(f"equibles {name} {mic} graceful 跳过: {type(e).__name__}: {e}")
             continue
-        text = _TAG_RE.sub("", text).strip()
+        text = text.replace("<", "‹").replace(">", "›")
         if text:
             parts.append(text[:MAX_CHARS])
     if not parts:
