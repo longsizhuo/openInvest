@@ -20,6 +20,8 @@ documents:
     - ibkr.max_day_usd
     - ibkr.min_order_usd
     - ibkr.max_batches_per_day
+    - ibkr.port
+    - ibkr.notify_cmd
   symbols:
     - ibkr_autopilot
     - record_fee

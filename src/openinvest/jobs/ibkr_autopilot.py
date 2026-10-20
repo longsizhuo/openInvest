@@ -140,7 +140,10 @@ class _IbGateway:
         from ib_async import IB
         ib = IB()
         ib.RequestTimeout = 30   # 默认 0 = 不设上限：网关半登录 / 等 IB Key 时 whatIf / qualify 会一直挂住 cron
-        ib.connect("127.0.0.1", load_config().ibkr.port, clientId=client_id, timeout=20)
+        port = load_config().ibkr.port   # override 文件手写、不经类型校验："4002" / true / 越界直接不连
+        if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+            raise ValueError(f"ibkr.port 不合法：{port!r}")
+        ib.connect("127.0.0.1", port, clientId=client_id, timeout=20)
         return cls(ib, acct)
 
     def close(self) -> None:
