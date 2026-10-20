@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SRC_ROOT="$REPO_ROOT/src"
 export INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
-SPEC="${OPENINVEST_SPEC:-openinvest==0.66.0}"  # x-release-please-version
+SPEC="${OPENINVEST_SPEC:-openinvest==0.67.0}"  # x-release-please-version
 DEV_MODE="${OPENINVEST_DEV_MODE:-0}"
 
 if ! command -v uvx >/dev/null 2>&1; then
