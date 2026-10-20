@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.32.0...invest-skill-v0.33.0) (2026-10-20)
+
+
+### Features
+
+* **valuation:** optional Equibles provider for A-share / HK fundamentals ([#547](https://github.com/longsizhuo/openInvest/issues/547)) ([31bf5ea](https://github.com/longsizhuo/openInvest/commit/31bf5ea8fbb4d89f49b9acd9d66ae535cae412ad))
+
 ## [0.32.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.31.0...invest-skill-v0.32.0) (2026-10-20)
 
 
