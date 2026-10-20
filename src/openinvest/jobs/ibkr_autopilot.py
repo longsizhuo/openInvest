@@ -112,7 +112,6 @@ def _num(v: Any) -> float:
 
 # ---------------------------------------------------------------- broker（本机 IB Gateway，TWS API）
 
-_PORT = 4001            # docker compose 把网关 live API 映到 127.0.0.1:4001
 _CLIENT_ID = 17
 _STATUS_CLIENT_ID = 18  # status 只读查询用另一个 clientId，和 cron 里的 submit / reconcile 同时连也不撞
 _NEWS_CLIENT_ID = 19    # news / news_check / brief 也是只读，再错开一个
@@ -141,7 +140,7 @@ class _IbGateway:
         from ib_async import IB
         ib = IB()
         ib.RequestTimeout = 30   # 默认 0 = 不设上限：网关半登录 / 等 IB Key 时 whatIf / qualify 会一直挂住 cron
-        ib.connect("127.0.0.1", _PORT, clientId=client_id, timeout=20)
+        ib.connect("127.0.0.1", load_config().ibkr.port, clientId=client_id, timeout=20)
         return cls(ib, acct)
 
     def close(self) -> None:
