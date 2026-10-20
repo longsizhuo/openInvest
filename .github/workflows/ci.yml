@@ -131,6 +131,7 @@ jobs:
           uv run python -c "from openinvest.utils.exchange_fee import adjusted_with_raw, history_with_raw"
           uv run python -c "from openinvest.utils.eastmoney_fund import fetch_fund_nav, fetch_fund_nav_history, fetch_fund_profile, canonical_fund_symbol"
           uv run python -c "from openinvest.utils.advisory import is_advisory_mode"
+          uv run python -c "from openinvest.utils.equibles import build_fundamentals_brief, to_mic"
           uv run python -c "from openinvest.utils.market_metrics import TRADING_DAYS_2Y, _calc_price_quantile"
           uv run python -c "from openinvest.connectors.web_api import app"
           uv run python -c "from openinvest.jobs.path_review import run, realized_path, score_one"

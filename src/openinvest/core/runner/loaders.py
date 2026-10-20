@@ -90,10 +90,14 @@ def load_valuation_brief(
     """估值 shared loader（确定性：trailing PE + 价格分位，仅权益类，per-asset）。
 
     黄金/商品类返回 ""（它们的"基本面"=货币因素走 Macro）。任何失败 graceful 退化 ""。
+    A 股 / 港股且配了 EQUIBLES_API_KEY 时追加 Equibles 财报 + 电话会摘要；它不依赖
+    yfinance，Yahoo 429 时照样能出。
     """
     try:
+        from openinvest.utils.equibles import build_fundamentals_brief
         from openinvest.utils.valuation import build_valuation_brief
-        return build_valuation_brief(symbol, price_quantile_2y)
+        parts = (build_valuation_brief(symbol, price_quantile_2y), build_fundamentals_brief(symbol))
+        return "\n".join(p for p in parts if p)
     except Exception as e:  # noqa: BLE001
         log.warning(f"load_valuation_brief graceful 退化 '': {type(e).__name__}: {e}")
         return ""

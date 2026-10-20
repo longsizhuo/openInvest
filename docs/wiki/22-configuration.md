@@ -9,6 +9,7 @@ documents:
     - LLM_API_KEY
     - LLM_BASE_URL
     - LLM_MODEL
+    - EQUIBLES_API_KEY
     - verdict.concentration_lens_enabled
     - verdict.risk_profile
     - verdict.gold_defense_dca_enabled
@@ -56,6 +57,23 @@ LLM_API_KEY=xxxxxxxxxxxxxxxx.xxxxxxxxx
 LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v1
 LLM_MODEL=glm-4-flash
 ```
+
+## 可选数据源：Equibles（A 股 / 港股基本面）
+
+行情和估值默认走 Yahoo Finance（yfinance），不用配置。持有 A 股 / 港股个股时，可以另接 [Equibles](https://equibles.com)，给委员会的估值事实块补上**最近一期利润表**和**最近一次业绩电话会摘要**。它不依赖 Yahoo，所以 Yahoo 限流（429）时这部分照样能拿到。
+
+1. 去 [equibles.com](https://equibles.com/dashboard/apikeys) 免费注册，在控制台建一个 API key（免费档每天 100 次请求，00:00 UTC 重置）。
+2. 写进 `.env`：
+
+```env
+EQUIBLES_API_KEY=eq_xxxxxxxxxxxxxxxx
+```
+
+- 只对 `.HK` / `.SS` / `.SZ` 代码生效（自动换成 Equibles 的 `XHKG:00700` / `XSHG:600519` / `XSHE:000001` 写法），每个标的每次委员会用 2 次请求；美股、ETF 基金、黄金等不受影响。
+- 每个用户用自己的 key，不要共用：开源项目里每人各有一份免费额度。
+- 没配 key、额度用完或网络不通时，这一段直接跳过，委员会照常运行。
+- 电话会摘要是 Equibles 生成的 AI 摘要，委员会会把它当成观点，不当成事实。
+- 数据旁边会带 `Data: Equibles - https://equibles.com` 署名（Equibles 条款要求），转述这些数字时请保留来源。
 
 ## Tunable Runtime Overrides（运行时可调参数）
 

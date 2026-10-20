@@ -227,6 +227,7 @@ The system defaults to DeepSeek endpoints and supports any standard OpenAI-compa
 
 ## Acknowledgments
 
+*   [Equibles](https://equibles.com) — Optional data provider for A-share and Hong Kong fundamentals and earnings-call briefs. Yahoo Finance stays the default; set your own free `EQUIBLES_API_KEY` to turn it on ([setup](docs/wiki/22-configuration.md)).
 *   [MiMo](https://mimo.mi.com/) — Special thanks to MiMo Quantitative Lab for sponsoring production-grade high-performance LLM inference (powering `mimo-v2.5-pro` long-horizon sweeps).
 *   [OpenClaw Dreaming Guide](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e) — Theoretical foundation for the three-phase sleep-cycle memory distillation framework.
 
