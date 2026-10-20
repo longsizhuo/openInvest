@@ -90,7 +90,7 @@ def load_valuation_brief(
     """估值 shared loader（确定性：trailing PE + 价格分位，仅权益类，per-asset）。
 
     黄金/商品类返回 ""（它们的"基本面"=货币因素走 Macro）。任何失败 graceful 退化 ""。
-    A 股 / 港股且配了 EQUIBLES_API_KEY 时追加 Equibles 财报 + 电话会摘要；它不依赖
+    A 股 / 港股且配了 EQUIBLES_API_KEY 时追加 Equibles 最近一期利润表；它不依赖
     yfinance，Yahoo 429 时照样能出。
     """
     try:

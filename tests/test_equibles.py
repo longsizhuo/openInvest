@@ -60,20 +60,22 @@ def test_brief_parses_sse_and_attributes(monkeypatch):
 
     def fake_post(url, json, headers, timeout):
         calls.append((json["params"]["name"], json["params"]["arguments"], headers["Authorization"]))
-        if json["params"]["name"] == "GetFinancialStatement":
-            return _Resp(_ok("Income Statement for XHKG:00005 | Revenue | 100"))
-        return _Resp({"jsonrpc": "2.0", "id": 1,
-                      "result": {"isError": True, "content": [{"type": "text", "text": "no brief"}]}})
+        return _Resp(_ok("Income Statement for XHKG:00005 | Revenue | 100"))
 
     monkeypatch.setattr(equibles.requests, "post", fake_post)
     brief = equibles.build_fundamentals_brief("0005.HK")
 
-    assert [c[0] for c in calls] == ["GetFinancialStatement", "GetEarningsBrief"]
-    assert all(c[1]["ticker"] == "XHKG:00005" and c[2] == "Bearer eq_test" for c in calls)
+    assert calls == [("GetFinancialStatement", {"ticker": "XHKG:00005", "statement": "income"}, "Bearer eq_test")]
     assert "EQUIBLES_FUNDAMENTALS (XHKG:00005)" in brief
     assert "Revenue | 100" in brief
-    assert "no brief" not in brief                      # isError 的工具被跳过
     assert brief.endswith(equibles.ATTRIBUTION)
+
+
+def test_tool_is_error_returns_empty(monkeypatch):
+    monkeypatch.setenv("EQUIBLES_API_KEY", "eq_test")
+    monkeypatch.setattr(equibles.requests, "post", lambda *a, **k: _Resp(
+        {"jsonrpc": "2.0", "id": 1, "result": {"isError": True, "content": [{"type": "text", "text": "nope"}]}}))
+    assert equibles.build_fundamentals_brief("0005.HK") == ""
 
 
 def test_forged_closing_tag_cannot_escape_data_block(monkeypatch):
