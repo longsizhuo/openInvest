@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.66.0](https://github.com/longsizhuo/openInvest/compare/v0.65.0...v0.66.0) (2026-10-20)
+
+
+### Features
+
+* **valuation:** optional Equibles provider for A-share / HK fundamentals ([#547](https://github.com/longsizhuo/openInvest/issues/547)) ([31bf5ea](https://github.com/longsizhuo/openInvest/commit/31bf5ea8fbb4d89f49b9acd9d66ae535cae412ad))
+
+
+### Bug Fixes
+
+* **metrics:** sortino 删除「亏损日 &lt; 5 返 0」下限，少亏损日给真实值 ([46ba1ea](https://github.com/longsizhuo/openInvest/commit/46ba1eaff8091fceb788cac6fdbc997f9c12bbfc))
+* **metrics:** sortino 超剪裁线截到 ±100、没亏过给 100，不再返 0 ([1427b8c](https://github.com/longsizhuo/openInvest/commit/1427b8c95c959956e4cbff7fb5d4c6de6cc35e5a))
+
 ## [0.65.0](https://github.com/longsizhuo/openInvest/compare/v0.64.0...v0.65.0) (2026-10-20)
 
 
