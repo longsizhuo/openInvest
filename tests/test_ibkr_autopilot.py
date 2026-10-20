@@ -211,6 +211,36 @@ def test_notify_cmd_gets_stdin_and_falls_back_to_email(monkeypatch, tmp_path):
     assert sent["subject"] == "长"                                           # 超长不走推送（会被截）
 
 
+def test_connect_uses_configured_port(monkeypatch):
+    seen = {}
+
+    class _IB:
+        def connect(self, host, port, clientId, timeout):
+            seen.update(host=host, port=port)
+
+    monkeypatch.setattr("ib_async.IB", _IB)
+    monkeypatch.setenv("INVEST_IBKR_PORT", "4002")
+    reset_config()
+    ia._IbGateway.connect("DU1")
+    assert seen == {"host": "127.0.0.1", "port": 4002}   # 模拟盘网关另一个端口，只连本机
+
+
+@pytest.mark.parametrize("port,ok", [(4003, True), ("4002", False), (True, False), (70000, False)])
+def test_connect_port_from_override_file(home, monkeypatch, port, ok):
+    class _IB:
+        def connect(self, host, port, clientId, timeout):
+            self.port = port
+
+    monkeypatch.setattr("ib_async.IB", _IB)
+    ms.MemoryStore().state_set("config_overrides", {"ibkr": {"port": port}})   # 模拟盘 home 推荐的配法
+    reset_config()
+    if ok:
+        assert ia._IbGateway.connect("DU1").ib.port == port
+    else:
+        with pytest.raises(ValueError, match="ibkr.port"):
+            ia._IbGateway.connect("DU1")
+
+
 def test_disabled_is_noop(home):
     _seed(home)
     _orders(home, [("QQQM", "BUY", 500)])

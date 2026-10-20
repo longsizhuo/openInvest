@@ -266,6 +266,7 @@ class IbkrConfig:
     max_day_usd: float = 150.0                  # 单日累计上限（含已挂未成交 + 当日已成交）
     min_order_usd: float = 20.0                 # 小于它不下（每单佣金最低 USD 0.35，太小的单佣金占比过高）
     max_batches_per_day: int = 4                # 每天最多几批订单（1 = 第一批，之后盘中追加）：防失控 / 被外部内容诱导反复下单
+    port: int = 4001                            # 本机网关 API 端口（实盘 4001；同机再跑一个模拟盘网关时用别的端口）
     notify_cmd: str = ""                        # 通知改走这条命令（标题+正文从 stdin 进，如 `hermes send --to discord:me --quiet`）；空 / 失败 = 发邮件
 
 

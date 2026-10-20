@@ -20,6 +20,8 @@ documents:
     - ibkr.max_day_usd
     - ibkr.min_order_usd
     - ibkr.max_batches_per_day
+    - ibkr.port
+    - ibkr.notify_cmd
   symbols:
     - ibkr_autopilot
     - record_fee
@@ -92,6 +94,7 @@ reconcile：`idempotency_key=ibkr-<execId>` / `ibkr-fee-<execId>`，重跑只会
   自动换汇佣金 0、只吃点差；显式换汇单每笔最低 USD 2（小账户≈2%），所以**没有换汇阶段**——币种结构交给盈透自动处理。
   买入额度 = 盈透 `AvailableFunds`（基础币种）折 USD。
 - 对账按券商实际记账：券商已确认的成交 / 换汇 / 佣金允许把账本现金记成负数（`allow_negative`，只给对账用），不会因「余额不足」误停手。
+- 模拟盘并行：盈透 Paper Trading 账户（`DU…`，有自己的用户名，登录不需要 IB Key）可以和实盘同时跑——再起一个 `TRADING_MODE=paper` 的网关容器，映射到 `127.0.0.1:4002`，给模拟盘单独一个 INVEST_HOME，设 `ibkr.port=4002`、`ibkr.account=DU…`。两边的账本、名单、STOP 各自独立。
 - 依赖：`ib_async`（`pip install openinvest[ibkr]`；git clone 形态 `uv sync` 的 dev 组已带）。
 - 首次上线：home 的 `memory/.state/config_overrides.json` 写 `ibkr.enabled=true`、`ibkr.account=<U…>`（**不写 dry_run**），先跑一次 `submit` 看 whatIfOrder 结果（合约 / 碎股权限 / 佣金），再在 cron 行加 `INVEST_IBKR_DRY_RUN=false` 切真单。账本起点 = 券商 USD 现金（`openinvest deposit -c USD …`）。
 
