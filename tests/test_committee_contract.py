@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -252,6 +253,52 @@ def test_run_committee_session_continues_on_single_asset_error(
         "其他资产应正常返回 verdict，session 不能因单资产失败阻断"
     )
     assert "GOOD.AX" not in result["errors"]
+
+
+def test_no_data_error_teaches_six_digit_code_format():
+    """裸六位代码拿不到行情时，报错里带上写全的格式，agent 才能自己改对重试（群聊里传裸 110011 后直接放弃）。"""
+    from openinvest.core.runner.session import no_data_error
+
+    hint = "（六位代码请写全：沪市 110011.SS / 深市 110011.SZ（股票、ETF），场外基金 FUND:110011）"
+    assert no_data_error("110011") == "无 110011 行情数据" + hint
+    assert no_data_error("110011.SZ").endswith(hint)  # 场外基金误标成交易所后缀，同样提示
+    assert no_data_error("FUND:110011") == "无 FUND:110011 行情数据"  # 已经是基金写法：没有可教的
+    assert no_data_error("AAPL") == "无 AAPL 行情数据"
+
+
+def test_run_committee_for_symbol_empty_history_returns_format_hint(monkeypatch, tmp_path):
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+    monkeypatch.setattr("openinvest.core.runner.session.is_advisory_mode", lambda: True)  # 跳过 target_assets 校验
+    monkeypatch.setattr("openinvest.core.runner.session.get_history_data", lambda *a, **kw: pd.DataFrame())
+
+    from openinvest.core.runner.session import run_committee_for_symbol
+    result = run_committee_for_symbol("110011", max_debate_rounds=1)
+
+    assert "FUND:110011" in result["error"] and "110011.SS" in result["error"]
+
+
+def test_run_committee_session_all_failed_keeps_format_hint(monkeypatch, tmp_path):
+    """全部资产失败时 RuntimeError 汇总每个错误——截短到 60 字会把格式提示截掉。"""
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    _seed_minimal_memory(memory_dir)
+    from openinvest.core import memory_store as ms
+    monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
+    monkeypatch.setattr("openinvest.core.runner.session.resolve_event_brief_multi", lambda syms: "")
+    monkeypatch.setattr("openinvest.core.runner.session.run_macro_view", lambda *a, **kw: "MOCK_MACRO")
+    monkeypatch.setattr("openinvest.core.runner.session.get_macro_data", lambda: "MOCK")
+
+    from openinvest.core.runner.session import no_data_error
+    monkeypatch.setattr("openinvest.core.runner.session.run_committee_for_symbol",
+                        lambda symbol, **kw: {"error": no_data_error(symbol)})
+
+    from openinvest.core.committee_runner import run_committee_session
+    with pytest.raises(RuntimeError, match="场外基金 FUND:110011"):
+        run_committee_session(symbols=["110011"], max_debate_rounds=1)
 
 
 def test_run_committee_session_event_brief_override_takes_priority(
