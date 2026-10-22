@@ -18,6 +18,7 @@ from openinvest.core.regime_probability import (
 )
 from openinvest.utils.advisory import is_advisory_mode
 from openinvest.utils.base_currency import single_invest_cap
+from openinvest.utils.eastmoney_fund import extract_fund_code
 from openinvest.utils.exchange_fee import (
     analyze_multi_timeframe, get_history_data, get_macro_data,
 )
@@ -61,6 +62,16 @@ def build_input_health_facts(
         empty.append("portfolio_summary")
     facts["empty_inputs"] = empty
     return facts
+
+
+def no_data_error(symbol: str) -> str:
+    """「无 X 行情数据」；X 是没带后缀/前缀的六位代码时顺带教调用方怎么写全——
+    群聊里 agent 传裸 110011 拿到这句就放弃了，带上格式它能自己改对重试。"""
+    msg = f"无 {symbol} 行情数据"
+    code = extract_fund_code(symbol)
+    if code and not str(symbol).strip().upper().startswith("FUND:"):
+        msg += f"（六位代码请写全：沪市 {code}.SS / 深市 {code}.SZ（股票、ETF），场外基金 FUND:{code}）"
+    return msg
 
 
 def run_committee_for_symbol(
@@ -131,8 +142,9 @@ def run_committee_for_symbol(
         emit("error", reason=f"行情拉取失败: {e}")
         return {"error": f"行情拉取失败: {e}"}
     if df is None or df.empty:
-        emit("error", reason=f"无 {symbol} 行情数据")
-        return {"error": f"无 {symbol} 行情数据"}
+        msg = no_data_error(symbol)
+        emit("error", reason=msg)
+        return {"error": msg}
 
     metrics = compute_metrics(df)
     market_data = analyze_multi_timeframe(
@@ -596,7 +608,7 @@ def run_committee_session(
     if errors and len(errors) == len(symbols):
         raise RuntimeError(
             f"session: 全部 {len(symbols)} 个资产都失败: "
-            + ", ".join(f"{s}={e[:60]}" for s, e in errors.items())
+            + ", ".join(f"{s}={e[:200]}" for s, e in errors.items())  # 60 会把 no_data_error 的格式提示截掉
         )
 
     ended_at = datetime.now(timezone.utc).isoformat(timespec="seconds")

@@ -1,7 +1,7 @@
 ---
 name: invest
 version: 0.33.0 # x-release-please-version
-description: openInvest multi-asset AI investment committee — **daily use**. Read portfolio / live prices / strategy / decision history / adjust positions / run a 4-role LLM committee for an investment verdict. Supports any yfinance symbol (A-share / HK / US / ETF / crypto / commodities) and any currency. **Two paths** — (1) Coordinator, Claude Code spawns 4 subagents, saves DeepSeek tokens; (2) Direct, any agent (Codex / Hermes / OpenClaw / Cursor / Cline / plain script) runs `run.sh run_committee <SYM>` for a one-shot verdict. **Trigger scenarios** — "show portfolio / 看看我的持仓", "how is my P&L / 我现在涨了多少", "should I buy/sell X / 该不该买卖X", "analyze X / 分析一下X", "run committee on X / 跑委员会", "track AAPL / 跟踪苹果", "add/trim a position, log a trade / 加仓减仓记一笔". **First-time install uses a separate skill `invest-setup`** (switch to it when `doctor` returns `needs_setup`). Backend — longsizhuo/openInvest.
+description: openInvest multi-asset AI investment committee — **daily use**. Read portfolio / live prices / strategy / decision history / adjust positions / run a 4-role LLM committee for an investment verdict. Supports any yfinance symbol (A-share `.SS`/`.SZ` / HK / US / ETF / crypto / commodities), China off-exchange funds (`FUND:<code>`) and any currency. **Two paths** — (1) Coordinator, Claude Code spawns 4 subagents, saves DeepSeek tokens; (2) Direct, any agent (Codex / Hermes / OpenClaw / Cursor / Cline / plain script) runs `run.sh run_committee <SYM>` for a one-shot verdict. **Trigger scenarios** — "show portfolio / 看看我的持仓", "how is my P&L / 我现在涨了多少", "should I buy/sell X / 该不该买卖X", "analyze X / 分析一下X", "run committee on X / 跑委员会", "track AAPL / 跟踪苹果", "add/trim a position, log a trade / 加仓减仓记一笔". **First-time install uses a separate skill `invest-setup`** (switch to it when `doctor` returns `needs_setup`). Backend — longsizhuo/openInvest.
 platforms: [linux, macos]
 metadata:
   hermes:
@@ -437,6 +437,11 @@ a signal worth recording.
   or you are setting up the daily cron. That path burns DeepSeek tokens. In conversation, single-asset `run_committee` is enough.
 - **Never fabricate live prices.** Always go through `run.sh status` or `live_prices`. yfinance may return
   stale data; watch the `is_stale` flag.
+- **Write symbols in full.** Listed assets are yfinance tickers: US `AAPL`, A-share `603083.SS` (Shanghai) /
+  `000001.SZ` (Shenzhen), HK `0700.HK`, exchange ETF `510300.SS`, crypto `BTC-USD`, futures `GC=F`. China
+  off-exchange (OTC) mutual funds are `FUND:<6-digit code>`, e.g. `FUND:110011`. A bare 6-digit code has no
+  data: when the user gives one, add the suffix or the `FUND:` prefix yourself; if `run_committee` answers
+  "无 X 行情数据（六位代码请写全…）", retry with the candidates it lists instead of giving up.
 - **Never write `memory/` directly.** All state changes go through CLI subcommands / MCP tools (atomic write +
   fcntl lock + audit trail). Direct editing causes schema drift + concurrent-write corruption.
 - **Do not rerun the committee for the same asset on the same day** — `run_committee` reads the cache by default;
