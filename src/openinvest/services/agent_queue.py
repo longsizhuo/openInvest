@@ -99,7 +99,7 @@ def _compact_news() -> None:
                     keep.append(line)
             except (ValueError, KeyError):
                 continue
-        path.write_text("".join(f"{line}\n" for line in keep), encoding="utf-8")
+        path.write_text("".join(f"{line}\n" for line in keep), encoding="utf-8", newline="\n")
 
 
 def pending_news_items(now: Optional[datetime] = None) -> List[Dict[str, Any]]:

@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from contextlib import contextmanager
@@ -19,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import frontmatter
 from openinvest.paths import INVEST_ROOT
+from openinvest.utils import oslock
 
 MEMORY_ROOT = INVEST_ROOT / "memory"
 
@@ -36,9 +36,9 @@ def _file_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
     while True:
-        lock_file = open(lock_path, "a")
+        lock_file = open(lock_path, "a", newline="\n")
         try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            oslock.flock(lock_file.fileno(), oslock.LOCK_EX)
             try:
                 if os.fstat(lock_file.fileno()).st_ino == os.stat(lock_path).st_ino:
                     break
@@ -51,10 +51,11 @@ def _file_lock(path: Path):
     try:
         yield
     finally:
-        try:
-            os.unlink(lock_path)  # 仍持锁；close 才释放
-        except FileNotFoundError:
-            pass
+        if oslock.CAN_UNLINK_OPEN:  # Windows 删不了打开中的文件：sidecar 留着复用（0 字节，每个数据文件一个）
+            try:
+                os.unlink(lock_path)  # 仍持锁；close 才释放
+            except FileNotFoundError:
+                pass
         lock_file.close()
 
 
@@ -68,7 +69,7 @@ def append_jsonl(path: Path, record: Dict[str, Any], *, default: Optional[Callab
     """
     line = json.dumps(record, ensure_ascii=False, default=default) + "\n"
     with _file_lock(path):
-        with open(path, "a", encoding="utf-8") as f:
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
             f.write(line)
 
 
@@ -85,7 +86,7 @@ def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Non
     # 用 pid 区分多进程并发，虽然外面有 fcntl 但保险一点
     tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
     try:
-        with open(tmp, "w", encoding=encoding) as f:
+        with open(tmp, "w", encoding=encoding, newline="\n") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
@@ -290,7 +291,7 @@ class MemoryStore:
         path = self.root / "daily" / f"{date}.md"
         with _file_lock(path):
             is_new = not path.exists()
-            with open(path, "a", encoding="utf-8") as f:
+            with open(path, "a", encoding="utf-8", newline="\n") as f:
                 if is_new:
                     f.write(f"---\nname: daily-{date}\ntype: log\ndate: {date}\n---\n\n")
                     f.write(f"# Daily Log {date}\n\n")

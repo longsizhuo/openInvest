@@ -107,6 +107,7 @@ jobs:
           uv run python -c "from openinvest.core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
           uv run python -c "from openinvest.core.config import effective_api_config, set_persisted_override, clear_persisted_override, API_SETTABLE, DCAConfig"
           uv run python -c "from openinvest.core.memory_store import MemoryStore, _atomic_write_text"
+          uv run python -c "from openinvest.utils.oslock import flock, LOCK_EX, LOCK_NB, LOCK_UN, pid_alive, CAN_UNLINK_OPEN"
           uv run python -c "from openinvest.core.portfolio_manager import PortfolioManager, _render_portfolio_body_v2"
           uv run python -c "from openinvest.jobs.pnl_snapshot import _is_trading_window, _redact_token_in, _outperform_events"
           uv run python -c "from openinvest.jobs.daily_report_builder import assemble_full_report, classify_asset_freshness, format_staleness_warning, portfolio_summary_text"

@@ -87,7 +87,7 @@ def write_committee_status(task_id: str, payload: Dict[str, Any]) -> None:
     with _get_status_lock(task_id):
         tmp.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+            encoding="utf-8", newline="\n"
         )
         tmp.replace(path)
 

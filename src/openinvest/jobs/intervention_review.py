@@ -165,7 +165,7 @@ def main() -> None:
           "每 rule 独立干预 <20 条前不下结论；正式判定只看 30/60/90d 结算窗。")
     if args.jsonl:
         p = MemoryStore().root / ".dreams" / "interventions_scored.jsonl"
-        with p.open("w", encoding="utf-8") as f:
+        with p.open("w", encoding="utf-8", newline="\n") as f:
             for r in scored:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         print(f"已写 {p}")

@@ -587,7 +587,7 @@ def _update_memory_index(store: MemoryStore, accepted: List[Dict[str, Any]]) -> 
         )
     else:
         existing = existing.rstrip() + "\n" + insight_block
-    index_path.write_text(existing, encoding="utf-8")
+    index_path.write_text(existing, encoding="utf-8", newline="\n")
 
 
 def _append_dreams_diary(store: MemoryStore, accepted: List[Dict[str, Any]]) -> None:
@@ -615,7 +615,7 @@ def _append_dreams_diary(store: MemoryStore, accepted: List[Dict[str, Any]]) -> 
                 f"(命中率 {c['hit_rate']*100:.0f}%, 评分 {c['score']:.2f})\n"
             )
 
-    with open(diary_path, "a", encoding="utf-8") as f:
+    with open(diary_path, "a", encoding="utf-8", newline="\n") as f:
         if is_new:
             f.write("# Dreams 梦日记\n\n这里记录 Dreaming Deep Sleep 每日的反思。\n")
         f.writelines(lines)

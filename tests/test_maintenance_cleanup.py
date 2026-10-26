@@ -1,7 +1,6 @@
 """D7：`openinvest maintenance cleanup`——*.bak.<ts> 保留策略 + 遗留 *.lock，默认 dry-run"""
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import time
@@ -12,6 +11,7 @@ import pytest
 from openinvest import cli
 from openinvest.remote_dispatch import maybe_dispatch_remote
 from openinvest.services import maintenance
+from openinvest.utils import oslock
 
 NOW = 1_790_000_000.0
 DAY = 86400
@@ -90,7 +90,7 @@ def test_stale_locks_removed_but_held_lock_and_backtest_dirs_untouched(mem):
     (mem / ".consolidate-lock").write_text("pid")  # 不是 *.lock，不碰
 
     fd = os.open(held, os.O_RDWR)
-    fcntl.flock(fd, fcntl.LOCK_EX)  # 模拟另一进程正持有
+    oslock.flock(fd, oslock.LOCK_EX)  # 模拟另一进程正持有
     try:
         dry = maintenance.cleanup(mem, apply=False, now=NOW)
         assert dry["lock"] == {"found": 4, "in_use": 1, "to_delete": 3}

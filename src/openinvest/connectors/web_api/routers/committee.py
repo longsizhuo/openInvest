@@ -137,7 +137,7 @@ def _run_committee_task(
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(
             json.dumps(audit_meta, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+            encoding="utf-8", newline="\n"
         )
     except Exception as e:  # noqa: BLE001 审计落盘失败不能阻断业务
         log.warning(f"audit meta.json 落盘失败 task_id={task_id}: {e}")

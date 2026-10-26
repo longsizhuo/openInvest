@@ -76,7 +76,7 @@ def _save_brief_facts(symbol: str, facts: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
             "symbol": symbol, "prepared_at": datetime.now().isoformat(timespec="seconds"), **facts,
-        }, ensure_ascii=False, default=str), encoding="utf-8")
+        }, ensure_ascii=False, default=str), encoding="utf-8", newline="\n")
     except Exception as e:  # noqa: BLE001  存不下 → 收卷退回从 transcript 解析，并在 Input Health 标出
         log.warning(f"prepare 事实快照落盘失败（submit 将退回从 transcript 解析）: {e}")
 
@@ -443,7 +443,7 @@ def save_committee_transcript(
     archived = _archive_previous_run(path)
     if archived is not None:
         log.info("save_committee: 同日重跑，旧 transcript 归档到 %s", archived)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     # 路径预测快照（path_review 闭环），与 Direct session 6.5 同一入口；顾问模式同样跳过
     from openinvest.utils.advisory import is_advisory_mode
     if not facts:
@@ -471,7 +471,7 @@ def save_committee_transcript(
             "path_profile": (facts or {}).get("path_profile"),
         # numpy 标量转回原生数（default=str 会把 confidence / alloc 存成字符串，日报格式化时炸）
         }, ensure_ascii=False, default=lambda o: o.item() if hasattr(o, "item") else str(o)),
-            encoding="utf-8")
+            encoding="utf-8", newline="\n")
     except Exception as e:  # noqa: BLE001  写不下 → 日报把该标的列为缺卷（响亮），不阻断收卷
         log.warning(f"save_committee 日报侧文件写入失败：{e}")
     record_intervention(symbol, regime or "", current_price, verdict, atr_defense_on)

@@ -211,7 +211,7 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
         archived = _archive_previous_run(path)
         if archived is not None:
             log.info("persist: 同日重跑，旧 transcript 归档到 %s", archived)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     store.dream_event({
         "phase": "committee_finished",
         "asset": report.asset.get("symbol"),

@@ -144,7 +144,7 @@ def _compute_snapshot(store: MemoryStore) -> Optional[Snapshot]:
 
 def _append_history(snap: Snapshot) -> None:
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(HISTORY_PATH, "a", encoding="utf-8") as f:
+    with open(HISTORY_PATH, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps({
             "ts": snap.ts,
             "equity_idx": snap.equity_idx,
@@ -328,7 +328,7 @@ def _auto_push_svg() -> Dict[str, Any]:
                     "# pnl-data branch\n\n"
                     "This orphan branch holds the auto-generated PnL chart only. "
                     "Do not commit code here. Updated hourly by `jobs/pnl_snapshot`.\n",
-                    encoding="utf-8",
+                    encoding="utf-8", newline="\n"
                 )
 
                 subprocess.run(["git", "add", "docs/pnl_chart.svg", "README.md"],
@@ -422,7 +422,7 @@ def _persist_outperform(events: List[Dict[str, Any]]) -> None:
         return
     out_path = SVG_PATH.parent / "outperform_events.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("a", encoding="utf-8") as f:
+    with out_path.open("a", encoding="utf-8", newline="\n") as f:
         for ev in events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
@@ -452,7 +452,7 @@ def run() -> Dict[str, Any]:
         SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
         svg_content = render_svg(history)
         tmp = SVG_PATH.with_suffix(".svg.tmp")
-        tmp.write_text(svg_content, encoding="utf-8")
+        tmp.write_text(svg_content, encoding="utf-8", newline="\n")
         tmp.replace(SVG_PATH)
 
     # 跑赢基准的"可分享瞬间"事件（PM-3 增长杠杆）
@@ -486,7 +486,7 @@ def render_only() -> Dict[str, Any]:
     SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
     svg_content = render_svg(history)
     tmp = SVG_PATH.with_suffix(".svg.tmp")
-    tmp.write_text(svg_content, encoding="utf-8")
+    tmp.write_text(svg_content, encoding="utf-8", newline="\n")
     tmp.replace(SVG_PATH)
     push_result = _auto_push_svg()
     return {
