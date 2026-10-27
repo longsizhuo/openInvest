@@ -293,6 +293,11 @@ INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
 | `invest-mcp.service` | `openinvest-mcp --http`（remote MCP）| `127.0.0.1:8766` | spoke agent 经 Caddy `/mcp` 直连；鉴权复用 `INVEST_API_TOKEN` |
 | `invest-scheduler.service` | `python -m openinvest.scheduler.runner` | 无 | 跑 `jobs/*.yml` 全部定时任务（event_watch / price_sentinel / pnl_snapshot / backup / fund_confirm / job_watchdog…）；**没有它 job 一个都不跑** |
 
+> **单机 / 插件用户不用手装这个**（2026-10）：stdio 的 `openinvest-mcp` 在没有调度器时会自己拉起一个内嵌子进程，
+> 跟着宿主 Agent 常驻、随宿主退出；要不依赖宿主、开机自启，跑 `openinvest service install`（systemd --user / launchd）。
+> 同一 `INVEST_HOME` 只会有一个调度器（`db/.scheduler.lock`）：daemon / 系统服务优先，起来时会请走内嵌实例。
+> hub 上已有 `invest-scheduler.service` 时，给本机 stdio MCP 设 `INVEST_EMBEDDED_SCHEDULER=0` 免得重启窗口里被内嵌实例抢先。
+
 ```bash
 # 三个一起装（User=ubuntu 先改成你的用户名；路径不是 ~/openInvest 的话改 INVEST_HOME 等 4 行）
 sudo cp systemd/invest-{web,mcp,scheduler}.service /etc/systemd/system/

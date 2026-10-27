@@ -38,6 +38,10 @@ DISABLED = {
         "本机 .env 只需要 INVEST_API_BASE（+ INVEST_API_TOKEN / CF service token），"
         "然后跑 `run.sh doctor` 验证连通。要重置数据去 hub 机器上跑 `run.sh init`。",
     ),
+    "service": (
+        "远端模式下 service 已禁用——调度器跟数据一起跑在 hub 上，客户端本机没有账本可盯",
+        "去 hub 机器上跑 `run.sh service install`（或 hub 已有的 invest-scheduler 服务）。",
+    ),
 }
 
 _POLL_INTERVAL_S = 2

@@ -2,7 +2,8 @@
 
 两种 transport：
 - **stdio（默认）**：Claude Code（或任意 MCP client）按 session spawn 本进程，
-  stdin/stdout 说 JSON-RPC，无端口无 daemon。
+  stdin/stdout 说 JSON-RPC，无端口。没有别的调度器在跑时顺带拉起一个调度器子进程
+  （`_start_embedded_scheduler`），随本进程退出。
 - **streamable-HTTP（`--http`，BETA）**：remote MCP——hub 上常驻，spoke 机器的 agent
   直连 `http://hub:8766/mcp`，替代旧的"CLI → REST 转发"（INVEST_API_BASE）路径。
   鉴权复用 INVEST_API_TOKEN（与 web_api 同一 bearer 语义），/health 豁免探活。
@@ -1528,6 +1529,52 @@ def _serve_http() -> None:
     uvicorn.run(app, host=host, port=port)
 
 
+EMBEDDED_CHECK_SECONDS = 300
+
+
+def _start_embedded_scheduler() -> None:
+    """stdio 模式兜底常驻：用户只装了插件、没装系统服务时，由本进程拉起一个调度器子进程。
+
+    插件用户原本没有任何东西在跑 jobs/*.yml——新闻队列、价格哨兵、净值快照、备份永远是空的
+    （2026-10-27 hermes-clone 实测）。宿主常驻（Hermes gateway）→ 调度器跟着常驻；宿主退出 →
+    子进程跟着退（runner --embedded-parent）。用子进程不用线程：job 的 print / 子进程输出碰不到
+    JSON-RPC 的 stdout，重活也不和工具调用抢 GIL。
+
+    不起的情况：已有调度器持锁（系统服务 / 生产 daemon / 另一个 MCP 拉起的）；
+    INVEST_EMBEDDED_SCHEDULER=0；顾问模式（群聊共享账本）；还没 onboarding（没东西可盯）；非 POSIX（锁是 fcntl）。
+    """
+    import os
+    import subprocess
+    import sys
+    import threading
+    import time
+
+    if (os.name != "posix" or is_advisory_mode()
+            or os.getenv("INVEST_EMBEDDED_SCHEDULER", "1").strip() == "0"):
+        return
+
+    def loop() -> None:
+        from openinvest.core import memory_store
+        from openinvest.scheduler.lock import holder
+
+        child = None
+        while True:
+            try:
+                if ((child is None or child.poll() is not None)
+                        and (memory_store.MEMORY_ROOT / "user.md").exists()
+                        and holder() is None):
+                    child = subprocess.Popen(
+                        [sys.executable, "-m", "openinvest.scheduler.runner",
+                         "--embedded-parent", str(os.getpid())],
+                        stdin=subprocess.DEVNULL, stdout=2,  # 子进程 stdout 也进 stderr，不碰 JSON-RPC
+                    )
+            except Exception as e:  # noqa: BLE001  兜底常驻失败不能拖垮 MCP 本身
+                print(f"[embedded-scheduler] 启动失败（{EMBEDDED_CHECK_SECONDS}s 后重试）: {e}", file=sys.stderr)
+            time.sleep(EMBEDDED_CHECK_SECONDS)
+
+    threading.Thread(target=loop, name="embedded-scheduler", daemon=True).start()
+
+
 def main() -> None:
     import argparse
 
@@ -1537,9 +1584,10 @@ def main() -> None:
         help="streamable-HTTP transport（remote MCP，INVEST_MCP_HOST/PORT，默认 stdio）",
     )
     if p.parse_args().http:
-        _serve_http()
+        _serve_http()  # hub 上常驻的服务：调度器由 hub 自己的 daemon 管，不内嵌
     else:
-        mcp.run()  # stdio transport（默认，行为不变）
+        _start_embedded_scheduler()
+        mcp.run()  # stdio transport
 
 
 if __name__ == "__main__":
