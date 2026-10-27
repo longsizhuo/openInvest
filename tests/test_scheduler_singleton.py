@@ -1,7 +1,7 @@
 """调度器常驻（2026-10-27 hermes-clone 实测：插件用户没有任何东西在跑 jobs/*.yml）。
 
 - 单实例锁：同一 INVEST_HOME 只能一个调度器；持有者退出（fd 关闭）即释放
-- daemon 优先：锁在内嵌实例手里时 SIGTERM 请它退场再接手；内嵌实例抢不到锁就退
+- daemon 优先：锁在内嵌实例手里时 SIGTERM 请它退场再接手（只在同一 pid 命名空间）；内嵌实例抢不到锁就退
 - openinvest-mcp（stdio）兜底拉起内嵌子进程的条件
 - doctor 的 scheduler 检查是 warning 级，不改变 ready
 - service install 生成的 systemd / launchd 单元
@@ -75,6 +75,48 @@ def test_daemon_evicts_embedded_holder(root, monkeypatch):
         holder_proc.kill()
 
 
+def _rewrite_body(f, **fields):
+    import json
+
+    f.seek(0)
+    body = json.loads(f.read())
+    body.update(fields)
+    f.seek(0)
+    f.truncate()
+    json.dump(body, f)
+    f.flush()
+
+
+@pytest.mark.parametrize("other_side", [False, True])
+def test_daemon_signals_embedded_holder_only_in_its_own_pid_namespace(root, monkeypatch, other_side):
+    """compose 把 db/ bind mount 进容器：锁里的 pid 是宿主机命名空间的，容器里对它发信号会打错进程。"""
+    from openinvest.scheduler import runner
+
+    held = lock.try_acquire("embedded")
+    _rewrite_body(held, pid=424242, **({"host": "the-docker-host"} if other_side else {}))
+    killed = []
+    monkeypatch.setattr(runner.os, "kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(runner.time, "sleep", lambda s: (_ for _ in ()).throw(_Stop()))
+    with pytest.raises(_Stop):                        # 抢不到锁，进入等待
+        runner._acquire_lock(embedded_parent=None)
+    assert killed == ([] if other_side else [424242])
+
+
+def test_embedded_lock_records_env_only_job_keys(root, monkeypatch):
+    """装成服务后宿主 MCP env: 里的 key 带不过去——内嵌实例把名字记在锁里，service install 据此提示。"""
+    for k in list(os.environ):
+        if k.startswith("INVEST_") or k in lock._JOB_ENV_KEYS:
+            monkeypatch.delenv(k)
+    (root / ".env").write_text("DEEPSEEK_API_KEY=from-file\n")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "from-file")         # .env 里有：服务读得到
+    monkeypatch.setenv("SEARXNG_URL", "http://searx.mcp-only.example")
+    monkeypatch.setenv("INVEST_EVENT_MIN_SEVERITY", "3")
+    monkeypatch.setenv("INVEST_EMBEDDED_SCHEDULER", "1")        # 只管本进程怎么起，不算
+    held = lock.try_acquire("embedded")                         # noqa: F841
+    assert lock.holder()["env_only"] == ["INVEST_EVENT_MIN_SEVERITY", "SEARXNG_URL"]
+    assert "mcp-only.example" not in lock.lock_path().read_text()     # 只记名字
+
+
 def test_embedded_gives_up_when_daemon_holds(root):
     from openinvest.scheduler import runner
 
@@ -98,10 +140,30 @@ def spawn(root, monkeypatch):
     from openinvest.connectors import mcp_server
     from openinvest.core import memory_store
 
-    calls = []
+    calls, children = [], []
+    state = {"left": 1, "between": None}
+
+    class Child:
+        rc = None
+
+        def poll(self):
+            return self.rc
+
+    def fake_popen(args, **kw):
+        calls.append(args)
+        children.append(Child())
+        return children[-1]
+
+    def fake_sleep(s):  # 每轮末尾 sleep 一次：跑满 rounds 轮就停，轮与轮之间可以改子进程状态
+        state["left"] -= 1
+        if state["left"] <= 0:
+            raise _Stop()
+        if state["between"]:
+            state["between"](len(calls), children)
+
     monkeypatch.setattr(memory_store, "MEMORY_ROOT", root / "memory")
-    monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: calls.append(args))
-    monkeypatch.setattr(time, "sleep", lambda s: (_ for _ in ()).throw(_Stop()))
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(time, "sleep", fake_sleep)
 
     class SyncThread:
         def __init__(self, target, **kw):
@@ -113,7 +175,8 @@ def spawn(root, monkeypatch):
 
     monkeypatch.setattr(threading, "Thread", SyncThread)
 
-    def run():
+    def run(rounds=1, between=None):
+        state.update(left=rounds, between=between)
         mcp_server._start_embedded_scheduler()
         return calls
     return run
@@ -131,7 +194,20 @@ def test_mcp_spawns_embedded_scheduler_when_nobody_runs_one(root, spawn):
     assert calls[0][1:] == ["-m", "openinvest.scheduler.runner", "--embedded-parent", str(os.getpid())]
 
 
-@pytest.mark.parametrize("why", ["not_onboarded", "lock_held", "advisory", "opt_out"])
+def test_mcp_respawns_only_after_child_exits(root, spawn):
+    _onboard(root)
+    seen = []
+
+    def between(n_spawned, children):
+        seen.append(n_spawned)
+        if len(seen) == 2:
+            children[0].rc = 0                        # 子进程退了（被 daemon 请走 / 崩了）
+    calls = spawn(rounds=3, between=between)
+    assert seen == [1, 1]                             # 子进程活着：第二轮不重复拉
+    assert len(calls) == 2                            # 退出后下一轮重新拉起
+
+
+@pytest.mark.parametrize("why", ["not_onboarded", "lock_held", "advisory", "opt_out", "remote"])
 def test_mcp_does_not_spawn(root, spawn, monkeypatch, why):
     _onboard(root)
     held = lock.try_acquire("daemon") if why == "lock_held" else None  # noqa: F841  持有到测试结束
@@ -139,6 +215,8 @@ def test_mcp_does_not_spawn(root, spawn, monkeypatch, why):
         (root / "memory" / "user.md").unlink()
     elif why == "advisory":
         monkeypatch.setenv("INVEST_ADVISORY_MODE", "1")
+    elif why == "remote":                             # 账本在 hub 上，本地 memory/ 是过期副本
+        monkeypatch.setenv("INVEST_API_BASE", "https://hub.example")
     else:
         monkeypatch.setenv("INVEST_EMBEDDED_SCHEDULER", "0")
     assert spawn() == []
@@ -242,6 +320,18 @@ def test_service_install_linux(root, monkeypatch, tmp_path, rc, status):
     assert r["status"] == status
     assert (tmp_path / "home" / ".config" / "systemd" / "user" / sc.UNIT).exists()
     assert ["systemctl", "--user", "enable", "--now", sc.UNIT] in ran
+
+
+def test_service_install_hints_keys_only_the_host_mcp_had(root, monkeypatch, tmp_path):
+    from openinvest.skill_cmds import service_cmds as sc
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(sc.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "yes", ""))
+    held = lock.try_acquire("embedded")
+    _rewrite_body(held, env_only=["SEARXNG_URL"])     # 内嵌实例从宿主 MCP env: 继承来的
+    r = sc._install()
+    assert r["status"] == "ok" and "SEARXNG_URL" in r["env_hint"]
 
 
 def test_service_disabled_in_remote_mode(capfd):

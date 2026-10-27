@@ -400,7 +400,7 @@ def _acquire_lock(embedded_parent: Optional[int]):
     优先级：daemon（系统服务 / 手动常驻）> embedded。daemon 发现锁在内嵌实例手里，
     SIGTERM 请它退场再接手——否则装了系统服务也要等宿主（Hermes gateway 可能常驻数天）退出才生效。
     """
-    from openinvest.scheduler.lock import holder, try_acquire
+    from openinvest.scheduler.lock import holder, same_pid_namespace, try_acquire
 
     if embedded_parent is not None:
         return try_acquire("embedded")
@@ -412,11 +412,15 @@ def _acquire_lock(embedded_parent: Optional[int]):
         h = holder() or {}
         pid = h.get("pid")
         if h.get("mode") == "embedded" and pid and pid != asked:
-            log.info(f"调度锁在内嵌实例（pid={pid}）手里，请它退出后接手")
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
+            if same_pid_namespace(h):
+                log.info(f"调度锁在内嵌实例（pid={pid}）手里，请它退出后接手")
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            else:  # 容器 ↔ 宿主共用 bind mount 的 db/：pid 不是我这边的，只能等它自己退
+                log.warning(f"调度锁在另一台主机 / 容器的内嵌实例（{h.get('host')} pid={pid}）手里，等它退出；"
+                            "宿主那边的 openinvest-mcp 设 INVEST_EMBEDDED_SCHEDULER=0 可避免")
             asked = pid
         elif asked is None:
             log.info(f"另一个调度器在跑（{h}），等它退出")

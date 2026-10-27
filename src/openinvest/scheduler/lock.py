@@ -13,9 +13,10 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import socket
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Dict, Optional
+from typing import IO, Any, Dict, List, Optional
 
 from openinvest.paths import INVEST_ROOT
 
@@ -27,6 +28,45 @@ def lock_path(root: Optional[Path] = None) -> Path:
 def _version() -> str:
     from openinvest import __version__
     return __version__
+
+
+def _pidns() -> Optional[str]:
+    try:
+        return os.readlink("/proc/self/ns/pid")
+    except OSError:  # macOS 没有 /proc
+        return None
+
+
+def same_pid_namespace(h: Dict[str, Any]) -> bool:
+    """持锁进程的 pid 在我这儿有没有意义。compose 把 db/ bind mount 进容器时，宿主机的内嵌实例
+    和容器里的 daemon 共用这把锁，但 pid 属于不同命名空间——对着它发信号要么 ESRCH，要么误杀同号进程。"""
+    return h.get("host") == socket.gethostname() and h.get("pidns") == _pidns()
+
+
+# 调度器 job 会读的变量。内嵌实例从宿主 MCP 配置的 env: 继承；系统服务只有 INVEST_HOME + .env，
+# 只配在宿主那边的 key 装成服务后就没了（发信 / LLM 归一化悄悄降级）
+_JOB_ENV_KEYS = (
+    "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
+    "EMAIL_SENDER", "EMAIL_PASSWORD", "DIGEST_EMAIL_TO", "SEARXNG_URL", "EQUIBLES_API_KEY",
+    "CHATBOT_ALERT_URL", "CHATBOT_INTERNAL_KEY", "GITHUB_TOKEN",
+)
+# INVEST_* 里只管本进程怎么起的那些，不用带进服务
+_PROCESS_LOCAL_KEYS = {"INVEST_HOME", "INVEST_EMBEDDED_SCHEDULER", "INVEST_MCP_SCOPE", "INVEST_ADVISORY_MODE",
+                       "INVEST_API_BASE", "INVEST_MCP_HOST", "INVEST_MCP_PORT"}
+
+
+def env_only_keys() -> List[str]:
+    """当前进程环境里有、INVEST_HOME/.env 里没有的 job 变量名（只有名字，不带值）。"""
+    try:
+        from dotenv import dotenv_values
+        in_file = set(dotenv_values(INVEST_ROOT / ".env"))
+    except ImportError:
+        in_file = set()
+    return sorted(
+        k for k, v in os.environ.items()
+        if v and k not in in_file and k not in _PROCESS_LOCAL_KEYS
+        and (k in _JOB_ENV_KEYS or k.startswith("INVEST_"))
+    )
 
 
 def try_acquire(mode: str) -> Optional[IO[str]]:
@@ -42,14 +82,19 @@ def try_acquire(mode: str) -> Optional[IO[str]]:
     except BlockingIOError:
         f.close()
         return None
-    f.seek(0)
-    f.truncate()
-    json.dump({
+    body: Dict[str, Any] = {
         "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "pidns": _pidns(),
         "mode": mode,
         "version": _version(),
         "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-    }, f)
+    }
+    if mode == "embedded":
+        body["env_only"] = env_only_keys()  # service install 读它提示用户把这些写进 .env
+    f.seek(0)
+    f.truncate()
+    json.dump(body, f)
     f.flush()
     return f
 

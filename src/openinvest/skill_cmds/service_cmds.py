@@ -91,6 +91,10 @@ def _run(cmd: List[str]) -> Dict[str, Any]:
 
 
 def _install() -> Dict[str, Any]:
+    from openinvest.scheduler.lock import env_only_keys, holder
+
+    # 先读：服务起来就会请走内嵌实例，它从宿主 MCP 配置继承的变量名记在锁里
+    env_only = sorted(set((holder() or {}).get("env_only") or []) | set(env_only_keys()))
     path = _unit_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     args = _exec_args()
@@ -104,6 +108,10 @@ def _install() -> Dict[str, Any]:
         steps = [_run(["systemctl", "--user", "daemon-reload"]),
                  _run(["systemctl", "--user", "enable", "--now", UNIT])]
     out: Dict[str, Any] = {"unit_path": str(path), "exec": shlex.join(args), "steps": steps}
+    if env_only:
+        out["env_hint"] = (f"这些变量只配在宿主 MCP / 当前 shell 里，服务读不到：{', '.join(env_only)}。"
+                           f"写进 {INVEST_ROOT / '.env'} 后重启服务（Linux：systemctl --user restart {UNIT}；"
+                           "macOS：再跑一次 service install）")
     if any(s["rc"] != 0 for s in steps):
         return {"status": "error", **out,
                 "error": "服务管理器拒绝了（容器 / WSL 里常见：没有可用的 systemd 用户实例）",

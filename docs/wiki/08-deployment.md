@@ -86,6 +86,7 @@ docker compose pull && docker compose up -d
 - **`INVEST_API_TOKEN` 必填**：容器内 `invest-web` 必须绑 `0.0.0.0`（宿主端口映射才进得来），而 `openinvest-web` 入口的守卫规定"非 loopback 绑定 + 无 token = 拒绝启动"。compose 在起进程前先查这个变量，缺了直接给提示退出（不再靠 `127.0.0.1:8765` 端口映射兜底一个无鉴权的 API）。在 `.env` 加 `INVEST_API_TOKEN=$(openssl rand -hex 32)` 的结果；设了之后 `/api/*` 都要带 `Authorization: Bearer <token>`（`/api/health` 探活豁免）。`docker compose run --rm invest-web openinvest init` 这类一次性命令会替换启动命令，不受影响。
 - **暴露到 LAN/公网**：把 `invest-web` 的 `ports` 改成 `"8765:8765"`（token 已是必填）；或保持 loopback、前面挂 Caddy + CF Access（见下文第 1–2 节）。
 - **数据持久化**：`memory/`（账本，必挂）/ `db/` / `cache_data/` / `logs/` 都 bind-mount 到宿主，容器重建不丢。
+- **宿主机别再起内嵌调度器**：`invest-agent` 已经在跑调度器。宿主机上指向同一个 clone 的 stdio `openinvest-mcp`（Claude Code / Hermes 插件）要设 `INVEST_EMBEDDED_SCHEDULER=0`。容器和宿主的 pid 不在一个命名空间，容器里的 daemon 请不走宿主的内嵌实例，只能等它退出。macOS Docker Desktop 经虚拟机 bind mount，两边的 flock 可能互相看不见，job 会跑两遍（未实测）。
 - **镜像可见性**：GHCR 包首发是 private——要 `docker compose pull` 匿名拉，须在 GitHub Packages 把它设为 Public（或 `docker login ghcr.io`）。
 
 ---
@@ -297,6 +298,8 @@ INVEST_VERDICT_CONCENTRATION_LENS_ENABLED=true
 > 跟着宿主 Agent 常驻、随宿主退出；要不依赖宿主、开机自启，跑 `openinvest service install`（systemd --user / launchd）。
 > 同一 `INVEST_HOME` 只会有一个调度器（`db/.scheduler.lock`）：daemon / 系统服务优先，起来时会请走内嵌实例。
 > hub 上已有 `invest-scheduler.service` 时，给本机 stdio MCP 设 `INVEST_EMBEDDED_SCHEDULER=0` 免得重启窗口里被内嵌实例抢先。
+> **从 0.67 及更早版本升级时，先重启已有的调度器**（`systemctl restart invest-scheduler` 或你自己起的 runner）。旧版本不认这把锁，新版 stdio MCP 看锁空着就会拉起内嵌实例，和旧 daemon 各跑一份：price_sentinel 告警和邮件会发两遍。
+> 内嵌实例从宿主 MCP 配置的 `env:` 继承变量，系统服务只读 `INVEST_HOME/.env`。`service install` 会列出只配在宿主那边的变量名，把它们写进 `.env`。
 
 ```bash
 # 三个一起装（User=ubuntu 先改成你的用户名；路径不是 ~/openInvest 的话改 INVEST_HOME 等 4 行）

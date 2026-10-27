@@ -1541,7 +1541,8 @@ def _start_embedded_scheduler() -> None:
     JSON-RPC 的 stdout，重活也不和工具调用抢 GIL。
 
     不起的情况：已有调度器持锁（系统服务 / 生产 daemon / 另一个 MCP 拉起的）；
-    INVEST_EMBEDDED_SCHEDULER=0；顾问模式（群聊共享账本）；还没 onboarding（没东西可盯）；非 POSIX（锁是 fcntl）。
+    INVEST_EMBEDDED_SCHEDULER=0；顾问模式（群聊共享账本）；远端模式（INVEST_API_BASE，账本和调度器在 hub 上，
+    本地残留的 memory/ 是过期副本）；还没 onboarding（没东西可盯）；非 POSIX（锁是 fcntl）。
     """
     import os
     import subprocess
@@ -1549,7 +1550,7 @@ def _start_embedded_scheduler() -> None:
     import threading
     import time
 
-    if (os.name != "posix" or is_advisory_mode()
+    if (os.name != "posix" or is_advisory_mode() or os.getenv("INVEST_API_BASE", "").strip()
             or os.getenv("INVEST_EMBEDDED_SCHEDULER", "1").strip() == "0"):
         return
 
