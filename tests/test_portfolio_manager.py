@@ -716,3 +716,41 @@ def test_disposable_counts_foreign_cash(tmp_path):
     _seed_docs(s, cash={"CNY": 10000.0, "AUD": 1000.0}, holdings=[], max_single_invest_cny=0)
     status = PortfolioManager(s).get_user_status(current_prices={}, exchange_rate=4.7)
     assert status.disposable_for_invest == pytest.approx(14700.0)
+
+
+# ============ A 股裸码规范化（buy 510300 不补 .SS 照样入账 → 行情查不到） ============
+
+class TestCanonicalSymbolBooking:
+
+    def test_buy_bare_code_books_suffix_and_sell_bare_code_works(self, pm):
+        out = pm.buy("510300", 100, 4.0)
+        assert out["symbol"] == "510300.SS" and "FUND:510300" in out["note"]
+        assert pm.find_holding("510300.SS")["units"] == 100
+        assert pm.find_holding("510300") is None
+        sold = pm.sell("510300", 40, 4.2)
+        assert sold["symbol"] == "510300.SS" and sold["remaining_units"] == 60
+        assert pm.find_holding("510300.SS")["units"] == 60
+
+    def test_legacy_bare_row_still_matched(self, tmp_path):
+        s = _make_store(tmp_path)
+        _seed_docs(s, holdings=[{"symbol": "510300", "kind": "etf", "units": 100, "avg_cost": 4.0,
+                                 "unit_label": "股", "cost_currency": "CNY"}])
+        pm2 = PortfolioManager(s)
+        assert pm2.sell("510300.SS", 10, 4.0)["symbol"] == "510300"   # 后缀写法也卖得到老行
+        pm2.buy("510300", 10, 4.0)                                    # 裸码加仓不新开第二行
+        assert [h["symbol"] for h in pm2.holdings] == ["510300"]
+        assert pm2.record_dividend("510300.SS", 5.0, "CNY")["symbol"] == "510300"
+
+    def test_legacy_bare_row_split_and_return_of_capital(self, tmp_path):
+        s = _make_store(tmp_path)
+        _seed_docs(s, holdings=[{"symbol": "510300", "kind": "etf", "units": 100, "avg_cost": 4.0,
+                                 "unit_label": "股", "cost_currency": "CNY"}])
+        pm2 = PortfolioManager(s)
+        assert pm2.record_split("510300.SS", 2)["symbol"] == "510300"
+        assert pm2.find_holding("510300")["units"] == 200
+        assert pm2.record_return_of_capital("510300.SS", 20.0, "CNY")["symbol"] == "510300"
+        assert pm2.find_holding("510300")["avg_cost"] == pytest.approx(1.9)
+        assert [h["symbol"] for h in pm2.holdings] == ["510300"]
+
+    def test_fund_kind_keeps_bare_code(self, pm):
+        assert pm.buy("000001", 100, 1.0, kind="fund", source_type="external_funding")["symbol"] == "000001"

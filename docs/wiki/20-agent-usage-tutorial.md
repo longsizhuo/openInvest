@@ -181,8 +181,9 @@ MCP 后端也可以声明式手动接（bundle 未生效或想显式控制 uvx �
 用户走 workspace `skills/` 拷贝：
 
 ```bash
-git clone https://github.com/longsizhuo/openInvest ~/openInvest
-cp -r ~/openInvest/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace 路径以你的配置为准
+# 别 clone 进 ~/openInvest：那是默认数据目录，init 会拒绝把账本写进 git checkout
+git clone --depth 1 https://github.com/longsizhuo/openInvest /tmp/openinvest-src
+cp -r /tmp/openinvest-src/plugin/skills/* ~/.openclaw/workspace/skills/   # workspace 路径以你的配置为准
 ```
 
 ### 每日日报 cron（宿主 agent 侧）

@@ -199,3 +199,43 @@ def test_recall_and_stance_match_adr_tagged_event(tmp_path):
     brief = "[2026-06-10T08:00:00+00:00] [risk/high] [BABA] (sources: r)\nadr event\n"
     assert event_stance_line_for_symbol(brief, "9988.HK") is not None
     assert event_stance_line_for_symbol(brief, "0700.HK") is None
+
+
+# ---------- canonical_symbol（入账写法：A 股裸码补后缀） ----------
+
+@pytest.mark.parametrize("raw,kind,want", [
+    ("510300", None, "510300.SS"),    # 沪场内基金
+    ("600519", None, "600519.SS"),    # 沪股票
+    ("900901", None, "900901.SS"),    # 沪 B 股
+    ("113050", None, "113050.SS"),    # 沪可转债（1 开头但在沪市）
+    ("159915", None, "159915.SZ"),    # 深场内基金
+    ("000001", None, "000001.SZ"),
+    ("300750", None, "300750.SZ"),
+    ("000001", "fund", "000001"),     # 东财场外基金用裸码
+    ("000001", "FUND", "000001"),
+    (" 510300 ", "equity", "510300.SS"),
+    ("510300.SS", None, "510300.SS"),
+    ("0700.HK", None, "0700.HK"),
+    ("700.hk", None, "0700.HK"),
+    ("NVDA", None, "NVDA"),
+    ("nvda", None, "NVDA"),
+    ("GC=F", None, "GC=F"),
+    ("FUND:000001", None, "FUND:000001"),
+    ("830799", None, "830799"),       # 北交所不补
+    ("12345", None, "12345"),
+    ("", None, ""),
+])
+def test_canonical_symbol(raw, kind, want):
+    from openinvest.services.symbol_map import canonical_symbol
+    assert canonical_symbol(raw, kind) == want
+
+
+def test_resolve_symbol_prefers_existing_spelling():
+    from openinvest.services.symbol_map import resolve_symbol
+    legacy = [{"symbol": "510300"}, {"symbol": "000001", "kind": "fund"}, {"symbol": "GC=F"}]
+    assert resolve_symbol("510300", legacy) == "510300"          # 老账本裸码原样命中
+    assert resolve_symbol("510300.SS", legacy) == "510300"       # 后缀写法也找到老行
+    assert resolve_symbol("gc=f", legacy) == "GC=F"
+    assert resolve_symbol("000001.SZ", legacy) == "000001.SZ"    # 场外基金裸码 ≠ 深市股票
+    assert resolve_symbol("159915", legacy) == "159915.SZ"       # 没有 → canonical
+    assert resolve_symbol("510300", [{"symbol": "510300.SS"}]) == "510300.SS"
