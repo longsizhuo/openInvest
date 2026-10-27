@@ -1579,8 +1579,27 @@ def _start_embedded_scheduler() -> None:
     threading.Thread(target=loop, name="embedded-scheduler", daemon=True).start()
 
 
+def _apply_scope(scope: str) -> None:
+    """INVEST_MCP_SCOPE：同一个 server 拆成两条宿主配置，按工具注解分（单一可信源，宿主配置里不写工具清单）。
+
+    - ``agent``：除 destructiveHint 以外的全部工具（读 + 新闻队列 / 委员会出题收卷 / 日报 / 策略）
+    - ``ledger``：只留 destructiveHint 的（动钱、删关注、删新闻源）
+
+    为什么要拆（2026-10-27 hermes-clone 实测）：Hermes 的 ``trust: untrusted`` 按 server 生效、每次调用都要人点
+    批准、没有"永久允许"——cron 里 pending_news / submit_committee 全被拦，交互里跑一次委员会要点好几次。
+    agent 那条给 full trust，ledger 那条保持 untrusted，动钱前照样先问。不设 = 全部工具（Claude Code 等）。
+    """
+    if scope not in ("agent", "ledger"):
+        return
+    for t in asyncio.run(mcp.list_tools()):
+        destructive = bool(t.annotations and t.annotations.destructiveHint)
+        if destructive != (scope == "ledger"):
+            mcp.remove_tool(t.name)
+
+
 def main() -> None:
     import argparse
+    import os
 
     p = argparse.ArgumentParser(prog="openinvest-mcp")
     p.add_argument(
@@ -1590,7 +1609,10 @@ def main() -> None:
     if p.parse_args().http:
         _serve_http()  # hub 上常驻的服务：调度器由 hub 自己的 daemon 管，不内嵌
     else:
-        _start_embedded_scheduler()
+        scope = os.getenv("INVEST_MCP_SCOPE", "").strip().lower()
+        _apply_scope(scope)
+        if scope != "ledger":  # 拆成两条时只让 agent 那条去拉调度器
+            _start_embedded_scheduler()
         mcp.run()  # stdio transport
 
 

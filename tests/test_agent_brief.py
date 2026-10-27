@@ -99,3 +99,22 @@ def test_brief_disabled_in_remote_mode(capfd):
     with pytest.raises(SystemExit):
         rd.maybe_dispatch_remote(Namespace(cmd="brief", text=True))
     assert "hub" in capfd.readouterr().out
+
+
+# ---------- INVEST_MCP_SCOPE：Hermes 拆两条配置（agent 受信 / ledger untrusted） ----------
+
+@pytest.mark.parametrize("scope", ["agent", "ledger"])
+def test_mcp_scope_splits_tools_by_destructive_hint(scope, monkeypatch):
+    import asyncio
+
+    from openinvest.connectors import mcp_server
+
+    mgr = mcp_server.mcp._tool_manager
+    monkeypatch.setattr(mgr, "_tools", dict(mgr._tools))  # 移除只动副本，测完还原（别 reload 模块：会换掉别的测试持有的单例）
+    before = asyncio.run(mcp_server.mcp.list_tools())
+    mcp_server._apply_scope(scope)
+    after = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    destructive = {t.name for t in before if t.annotations and t.annotations.destructiveHint}
+    assert after == (destructive if scope == "ledger" else {t.name for t in before} - destructive)
+    assert ("buy" in after) == (scope == "ledger")
+    assert ("pending_news" in after) == (scope == "agent") and ("submit_committee" in after) == (scope == "agent")
