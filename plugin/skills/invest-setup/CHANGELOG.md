@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.5.4...invest-setup-skill-v0.6.0) (2026-10-27)
+
+
+### Features
+
+* **plugin:** inject a ledger digest and wire up Hermes cron at onboarding ([#562](https://github.com/longsizhuo/openInvest/issues/562)) ([b4a3602](https://github.com/longsizhuo/openInvest/commit/b4a36022e7947ca0bf8055e7756f5c4c8e299614))
+
 ## [0.5.4](https://github.com/longsizhuo/openInvest/compare/invest-setup-skill-v0.5.3...invest-setup-skill-v0.5.4) (2026-10-13)
 
 
