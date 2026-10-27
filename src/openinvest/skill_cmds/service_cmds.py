@@ -16,16 +16,15 @@ import shlex
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any, Dict, List
 
 from openinvest.paths import INVEST_ROOT
+from openinvest.scheduler.service_unit import LABEL, UNIT
+from openinvest.scheduler.service_unit import unit_path as _unit_path
 from openinvest.skill_cmds._helpers import _print_json
 
 __all__ = ["cmd_service"]
 
-UNIT = "openinvest-scheduler.service"
-LABEL = "com.openinvest.scheduler"
 RUNNER = "openinvest.scheduler.runner"
 _NO_SERVICE_HINT = ("不装服务也行：openinvest-mcp 在宿主（Hermes / Claude Code 等）运行时会自动拉起内嵌调度器，"
                     "宿主退出时跟着停。")
@@ -73,12 +72,6 @@ def _launchd_plist(exec_args: List[str]) -> bytes:
         "StandardOutPath": log,
         "StandardErrorPath": log,
     })
-
-
-def _unit_path() -> Path:
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-    return Path.home() / ".config" / "systemd" / "user" / UNIT
 
 
 def _run(cmd: List[str]) -> Dict[str, Any]:

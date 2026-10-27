@@ -141,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="真实账户业绩：TWR 30d/YTD/成立以来 + XIRR + 最大回撤 + 年化波动 + vs 基准（status 里同一块）"
     ).set_defaults(func=cmd_performance)
     sub.add_parser("strategy").set_defaults(func=cmd_strategy)
+    p = sub.add_parser("brief", help="给宿主 Agent 的离线账本摘要（持仓 / 关注 / 今日裁决 / 待办 / 调度器），插件钩子注入用；不联网")
+    p.add_argument("--text", action="store_true", help="输出一段纯文本（钩子直接当上下文），默认 JSON")
+    p.set_defaults(func=cmd_brief)
     sub.add_parser("live_prices").set_defaults(func=cmd_live_prices)
     sub.add_parser("discipline", help="委员会纪律台账(不作为率+拦冲动+反事实损益)").set_defaults(func=cmd_discipline)
 
