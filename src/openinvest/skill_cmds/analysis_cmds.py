@@ -261,17 +261,22 @@ def cmd_correlate(args: argparse.Namespace) -> None:
 def cmd_brief(args: argparse.Namespace) -> None:
     """给宿主 Agent 的离线账本摘要（插件钩子注入用）：持仓 / 关注 / 今日裁决 / 待办 / 调度器。不联网。
 
-    --text 输出一段纯文本（钩子直接拿 stdout 当上下文），默认 JSON。
+    --text 输出一段纯文本（钩子直接拿 stdout 当上下文），默认 JSON。--text 读失败时退化成只有路由规则的
+    一句、仍 exit 0——钩子拿 stdout 当上下文，不能注入一段 traceback。
     """
-    from openinvest.services.agent_brief import build_brief, render_brief_text
+    from openinvest.services import agent_brief
 
-    b = build_brief(ROOT)
-    if args.text:
-        real_stdout = getattr(sys, "__stdout__", sys.stdout)
-        real_stdout.write(render_brief_text(b) + "\n")
-        real_stdout.flush()
-    else:
-        _print_json(b)
+    if not args.text:
+        _print_json(agent_brief.build_brief(ROOT))
+        return
+    try:
+        text = agent_brief.render_brief_text(agent_brief.build_brief(ROOT))
+    except Exception as e:  # noqa: BLE001
+        print(f"[brief] 读账本失败，只输出路由规则: {type(e).__name__}: {e}", file=sys.stderr)
+        text = agent_brief.render_fallback_text()
+    real_stdout = getattr(sys, "__stdout__", sys.stdout)
+    real_stdout.write(text + "\n")
+    real_stdout.flush()
 
 
 # ---------- live_prices ----------

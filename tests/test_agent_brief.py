@@ -34,6 +34,7 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(yfinance, "download", boom)
     monkeypatch.setattr("openinvest.db.event_store.EventStore", _Store)
     monkeypatch.setattr("openinvest.scheduler.lock.INVEST_ROOT", tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))     # 系统服务单元按 ~ 找：默认没装
 
 
 def _seed():
@@ -66,8 +67,54 @@ def test_brief_lists_ledger_and_pending_without_draining(tmp_path):
 
     text = render_brief_text(b)
     assert "NVDA (英伟达)" in text and "510300.SS" in text and "GC=F HOLD" in text
-    assert "1 news item(s)" in text and "scheduler is not running" in text
+    assert "1 news item(s)" in text
+    assert "not running" not in text                       # 没装服务：内嵌调度器还没被 MCP 拉起是常态，不报
     assert len(text) < 1200
+
+
+def _install_service(tmp_path):
+    from openinvest.scheduler.service_unit import unit_path
+
+    unit_path().parent.mkdir(parents=True)
+    unit_path().write_text("[Unit]\n")
+
+
+def test_brief_flags_installed_service_that_is_not_running(tmp_path):
+    from openinvest.scheduler import lock
+
+    _seed()
+    _install_service(tmp_path)
+    assert "installed but not running" in render_brief_text(build_brief(tmp_path))
+    held = lock.try_acquire("daemon")                       # noqa: F841  服务在跑
+    b = build_brief(tmp_path)
+    assert b["scheduler"] == "daemon" and "not running" not in render_brief_text(b)
+
+
+def test_brief_counts_lock_without_body_as_running(tmp_path):
+    from openinvest.scheduler import lock
+
+    _seed()
+    _install_service(tmp_path)
+    held = lock.try_acquire("daemon")
+    held.seek(0)
+    held.truncate()                                         # 持有者刚抢到、还没写完正文
+    held.flush()
+    b = build_brief(tmp_path)
+    assert b["scheduler"] == "unknown" and "not running" not in render_brief_text(b)
+
+
+def test_brief_truncates_long_symbol_lists():
+    text = render_brief_text({"status": "ok", "holdings": [{"symbol": f"S{i}"} for i in range(20)]})
+    assert "S14 (+5 more)." in text and "S15" not in text
+
+
+def test_empty_news_queue_does_not_open_event_store(monkeypatch):
+    class Boom:
+        def __init__(self, *a, **kw):
+            raise AssertionError("events.db must not be created for an empty queue")
+
+    monkeypatch.setattr("openinvest.db.event_store.EventStore", Boom)
+    assert agent_queue.pending_news_items() == []
 
 
 def test_brief_needs_setup(tmp_path):
@@ -91,6 +138,21 @@ def test_cli_brief_text_goes_to_real_stdout(capfd):
     cli.cmd_brief(Namespace(text=True))
     out = capfd.readouterr().out
     assert out.startswith("[openInvest]") and "NVDA" in out
+
+
+def test_cli_brief_text_falls_back_to_routing_rule_on_error(capfd, monkeypatch):
+    """钩子直接拿 stdout 当上下文：账本读坏了也只能注入路由规则，不能是 traceback，退出码 0。"""
+    from openinvest import cli
+    from openinvest.services import agent_brief
+
+    def broken(root):
+        raise ValueError("portfolio.md: bad frontmatter")
+
+    monkeypatch.setattr(agent_brief, "build_brief", broken)
+    cli.cmd_brief(Namespace(text=True))
+    out, err = capfd.readouterr()
+    assert out.startswith("[openInvest]") and "openinvest tools first" in out
+    assert "bad frontmatter" in err
 
 
 def test_brief_disabled_in_remote_mode(capfd):

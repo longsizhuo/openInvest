@@ -19,12 +19,18 @@ from typing import Any, Dict, List
 from openinvest.utils.advisory import is_advisory_mode
 
 MAX_SYMBOLS = 15
+# 群聊里 "the user" 指谁说不清（Hermes 群会话也注入，#562 评审）——写成 Agent 的主人
+HEADER = "[openInvest] This agent's owner keeps their investment ledger in openInvest (MCP server `openinvest`)."
+ROUTING = ("For any question about stocks, funds, ETFs, gold, crypto, markets, macro, buying or selling, "
+           "or the owner's money: call the openinvest tools first (status / live_prices / committee), "
+           "then add web search if needed.")
 
 
 def build_brief(root: Path) -> Dict[str, Any]:
     from openinvest.core.decision_ledger import parse_committee_file
     from openinvest.core.portfolio_manager import MemoryNotInitialized, PortfolioManager
     from openinvest.scheduler.lock import holder
+    from openinvest.scheduler.service_unit import unit_path
     from openinvest.services import agent_queue
 
     if is_advisory_mode():
@@ -55,7 +61,9 @@ def build_brief(root: Path) -> Dict[str, Any]:
         "verdicts_today": verdicts,
         "pending": {"news": len(agent_queue.pending_news_items()),
                     "committees": len(agent_queue.pending_committee_items())},
-        "scheduler": sched.get("mode") if sched else None,
+        # {} = 持有者刚抢到锁、还没写完正文：也算在跑
+        "scheduler": (sched.get("mode") or "unknown") if sched is not None else None,
+        "service_installed": unit_path().exists(),
     }
 
 
@@ -69,7 +77,7 @@ def render_brief_text(b: Dict[str, Any]) -> str:
     if b.get("status") == "needs_setup":
         return ("[openInvest] Installed but not set up yet. When the user talks about investing, "
                 "use the openinvest:invest-setup skill to onboard them.")
-    lines = ["[openInvest] The user's investment ledger lives in openInvest (MCP server `openinvest`)."]
+    lines = [HEADER]
     if not b.get("advisory"):
         if b.get("holdings"):
             lines.append("Holdings: " + _symbols(
@@ -84,10 +92,15 @@ def render_brief_text(b: Dict[str, Any]) -> str:
             lines.append(f"Waiting for you: {p.get('news', 0)} news item(s) to judge, "
                          f"{p.get('committees', 0)} committee run(s) — see the openinvest:invest skill "
                          "(pending_news / pending_committees).")
-        if not b.get("scheduler"):
-            lines.append("Background scheduler is not running, so news and prices are not being collected "
-                         "(run doctor for the fix).")
-    lines.append("For any question about stocks, funds, ETFs, gold, crypto, markets, macro, buying or selling, "
-                 "or the user's money: call the openinvest tools first (status / live_prices / committee), "
-                 "then add web search if needed.")
+        # 只靠内嵌调度器时不报：会话开头钩子多半跑在 MCP 进程（和它拉起的调度器）之前，报了是误报。
+        # 装了系统服务却没人持锁才是真故障
+        if b.get("service_installed") and not b.get("scheduler"):
+            lines.append("The openInvest background service is installed but not running, so news and prices "
+                         "are not being collected (run doctor for the fix).")
+    lines.append(ROUTING)
     return " ".join(lines)
+
+
+def render_fallback_text() -> str:
+    """摘要读失败（账本解析出错 / events.db 被锁）时钩子仍拿到的最小提示：不列账本，只给路由规则。"""
+    return f"{HEADER} {ROUTING}"
