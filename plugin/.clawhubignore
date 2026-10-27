@@ -1,0 +1,6 @@
+# ClawHub 一个包只收一种 bundle 清单（2026-10 起服务端校验：同时有 .codex-plugin 和 .claude-plugin
+# 就拒绝 "Plugin packages require exactly one supported bundle manifest format"）。
+# 0.33.0 及以前登记的格式是 codex（CLI 按 codex > claude 顺序取第一个），继续发 codex；
+# .claude-plugin 只给 Claude Code marketplace 用，不进 ClawHub 包。
+.claude-plugin/
+.clawhubignore
