@@ -15,6 +15,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from openinvest.core.portfolio_manager import gold_booking
+from openinvest.services.symbol_map import canonical_symbol, resolve_symbol
 
 _HOLDINGS_PARSE_SYSTEM_PROMPT = """你是金融数据解析助手。把用户的自然语言持仓描述解析成严格 JSON。
 
@@ -207,6 +208,8 @@ def _normalize_holding(h: Dict[str, Any]) -> Dict[str, Any]:
     if kind == "fund":
         from openinvest.utils.eastmoney_fund import canonical_fund_symbol
         sym = canonical_fund_symbol(sym)
+    else:
+        sym = canonical_symbol(sym)   # A 股裸码补 .SS / .SZ，否则入账后行情查不到
     return {
         "symbol": sym,
         "kind": kind,
@@ -243,7 +246,7 @@ def commit_parsed(pm: Any, parsed: Dict[str, Any]) -> Dict[str, Any]:
             norm = _normalize_holding(h)
             if not norm["symbol"]:
                 continue
-            if norm["symbol"] in existing:
+            if resolve_symbol(norm["symbol"], holdings, norm["kind"]) in existing:   # 老账本的裸码 510300 也算已有
                 skipped.append(norm["symbol"])
                 continue
             try:

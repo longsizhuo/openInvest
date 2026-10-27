@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from openinvest.core.memory_store import MemoryStore, _DocTx
 from openinvest.core.schemas import validate_portfolio
+from openinvest.services.symbol_map import resolve_symbol
 
 log = logging.getLogger(__name__)
 
@@ -558,6 +559,7 @@ class PortfolioManager:
         idempotency_key：同 key 第二次返回 {"status": "duplicate"} 不动账本（ADR-016，
         远端 HTTP 超时重发 / agent 重跑同一笔）。record_existing_position 也经此路径。
         """
+        raw_symbol = (symbol or "").strip()
         if not (math.isfinite(units) and math.isfinite(price)):
             raise ValueError("units / price 必须是有限数")
         if units <= 0 or price <= 0:
@@ -566,13 +568,13 @@ class PortfolioManager:
             raise ValueError(
                 f"非法 source_type {source_type!r}（只接受 cash_deduct / external_funding）"
             )
-        if symbol.strip().upper() == _GOLD_SYMBOL:
-            symbol = _GOLD_SYMBOL   # 'gc=f' 与已有 'GC=F' 行是同一个标的：别因大小写新建出第二行
         cost_cny = units * price  # 金额单位 = ccy（字段名是历史遗留）
         fund_warning = _fund_buy_warning(self, symbol, kind) if source_type == "cash_deduct" else None
         try:
             with self._ledger_tx(idempotency_key) as p:
                 holdings = list(p.get("holdings") or [])
+                # 'gc=f' / '510300' 与已有 'GC=F' / '510300.SS' 行是同一个标的：别因写法新建出第二行
+                symbol = resolve_symbol(symbol, holdings, kind)
                 existing = next((h for h in holdings if h.get("symbol") == symbol), None)
                 held = str(existing.get("cost_currency") or "CNY").upper() if existing else None
                 ccy = (currency or held or "CNY").upper()
@@ -634,6 +636,9 @@ class PortfolioManager:
         if fund_warning:
             log.warning(fund_warning)
             out["warning"] = fund_warning
+        if raw_symbol.isdigit() and symbol != raw_symbol:
+            # 裸 6 位码也可能是场外基金（110011 等）：补了后缀就告诉 agent，记错了它能自己纠正
+            out["note"] = f"{raw_symbol} 按场内代码记成 {symbol}；如果是场外基金，应写 FUND:{raw_symbol}（或 kind=fund）"
         return out
 
     def sell(
@@ -657,6 +662,7 @@ class PortfolioManager:
         try:
             with self._ledger_tx(idempotency_key) as p:
                 holdings = list(p.get("holdings") or [])
+                symbol = resolve_symbol(symbol, holdings)
                 target = next((h for h in holdings if h.get("symbol") == symbol), None)
                 if target is None:
                     raise ValueError(f"symbol {symbol} 不在持仓里")
@@ -690,13 +696,17 @@ class PortfolioManager:
     # 在事务里落下，流水行（schema_version=2，cash_effect / units_effect / external 写入方算好）在事务后追加。
     # 效果表见 docs/wiki/adr/027-ledger-activity-types.md D4；读方只认流水里的 cash_effect / units_effect / external。
 
-    def _require_known_symbol(self, symbol: str) -> bool:
+    def _require_known_symbol(self, symbol: str) -> Tuple[str, bool]:
         """symbol 必须是当前持仓，或流水里出现过（卖光 / 删行的标的合法）；都不是 → ValueError（拦手滑写错的 symbol：
-        账本是追加式的，写错的分红 / 拆股没有"撤销"）。返回当前是否还持有。"""
-        if self.find_holding(symbol) is not None:
-            return True
-        if any(str(r.get("symbol") or "") == symbol for r in self.store.read_history()):
-            return False
+        账本是追加式的，写错的分红 / 拆股没有"撤销"）。返回 (账本里的写法, 当前是否还持有)——写法按
+        resolve_symbol（510300 / 510300.SS 互相找得到），持仓优先于流水。"""
+        held = resolve_symbol(symbol, self.holdings)
+        if self.find_holding(held) is not None:
+            return held, True
+        history = self.store.read_history()
+        seen = resolve_symbol(symbol, history)
+        if any(str(r.get("symbol") or "") == seen for r in history):
+            return seen, False
         raise ValueError(f"{symbol} 既不在当前持仓、账本里也没有它的记录；请核对 symbol（大小写 / 后缀）")
 
     def record_dividend(
@@ -725,7 +735,7 @@ class PortfolioManager:
         symbol = (symbol or "").strip()
         if not symbol:
             raise ValueError("symbol 必填")
-        still_held = self._require_known_symbol(symbol)
+        symbol, still_held = self._require_known_symbol(symbol)
         ccy = _clean_ccy(currency)
         gross, tax = float(gross), float(tax_withheld or 0)
         if not gross > 0:
@@ -885,7 +895,7 @@ class PortfolioManager:
         symbol = (symbol or "").strip()
         if not symbol:
             raise ValueError("symbol 必填")
-        self._require_known_symbol(symbol)
+        symbol, _ = self._require_known_symbol(symbol)
         ratio = float(ratio)
         if not ratio > 0 or ratio == 1:
             raise ValueError("ratio 必须 > 0 且 ≠ 1（新 / 旧：10 拆 1 写 10，10 合 1 写 0.1）")
@@ -968,6 +978,7 @@ class PortfolioManager:
         try:
             with self._ledger_tx(idempotency_key) as p:
                 holdings = list(p.get("holdings") or [])
+                symbol = resolve_symbol(symbol, holdings)
                 held = next((h for h in holdings if h.get("symbol") == symbol), None)
                 units = float(held.get("units", 0) or 0) if held else 0.0
                 if held is None or units <= 0:

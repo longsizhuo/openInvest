@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.portfolio_manager import gold_booking
+from openinvest.services.symbol_map import canonical_symbol
 
 from openinvest.services.skill_views import INIT_PAYLOAD_SHAPE
 from openinvest.skill_cmds._helpers import _print_json
@@ -111,7 +112,7 @@ def _write_v2_portfolio(
     }
     rejected: Dict[str, str] = {}
     for h in holdings:
-        sym = str(h.get("symbol") or "").strip()
+        sym = canonical_symbol(str(h.get("symbol") or ""), h.get("kind"))   # A 股裸码补 .SS / .SZ
         if not sym:
             continue  # 跳过 LLM 漏 symbol 的脏行
         row = {

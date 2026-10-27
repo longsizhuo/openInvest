@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.schemas import validate_strategy
+from openinvest.services.symbol_map import resolve_symbol
 
 
 class StrategyConflict(ValueError):
@@ -192,9 +193,10 @@ def add_target_asset(
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+        symbol = resolve_symbol(symbol, existing)   # 510300 → 510300.SS；已有同一标的的另一种写法也算重复
         if any(a.get("symbol") == symbol for a in existing):
             raise StrategyConflict(f"symbol {symbol} 已存在，请用 update 或先 remove")
-        existing.append(dict(asset))
+        existing.append({**asset, "symbol": symbol})
         tx["target_assets"] = existing
         _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
@@ -277,6 +279,7 @@ def upsert_target_asset(
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+        symbol = resolve_symbol(symbol, existing)   # 510300 → 510300.SS；老条目的裸码照样命中
         target = next((a for a in existing if a.get("symbol") == symbol), None)
         if target is None:
             msg = f"已新增资产 {symbol}"
