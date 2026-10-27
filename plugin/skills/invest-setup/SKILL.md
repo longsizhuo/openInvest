@@ -71,7 +71,35 @@ machines / 多台电脑共用持仓" / "connect to my existing deployment".
 **Note**: Path B **must not run `init`** (init is disabled in remote mode and will
 error); no `memory/` is created on this machine — all data stays on the hub.
 
-## Flow (4 steps)
+## Flow (4 steps, plus step 0 on Hermes)
+
+### 0. Hermes only: make sure the MCP server is registered (do this every time, even if already onboarded)
+
+Hermes plugins cannot register an MCP server, and the cron jobs in step 4 and the background
+scheduler both depend on it. openInvest is registered as **two entries of the same server**: Hermes'
+`trust: untrusted` asks on every single call and has no "always allow", so one untrusted entry would
+block every cron job and make a committee run ask several times. `openinvest` (scope `agent`: reads,
+news queue, committee, daily report) gets full trust; `openinvest_ledger` (scope `ledger`: the tools
+that move money or delete things) stays untrusted, so Hermes still asks before every ledger write.
+
+Run `hermes mcp list`. If `openinvest_ledger` is missing (a fresh install, or an older setup that had a
+single untrusted `openinvest`), run all of these — they are non-interactive and overwrite those keys
+(`hermes mcp add` asks a question and cancels without a TTY):
+
+```bash
+R="<skill-dir>/scripts/run.sh"   # absolute path
+hermes config set mcp_servers.openinvest.command bash
+hermes config set mcp_servers.openinvest.args "[\"$R\", \"mcp\"]"
+hermes config set mcp_servers.openinvest.env.INVEST_MCP_SCOPE agent
+hermes config set mcp_servers.openinvest.trust full
+hermes config set mcp_servers.openinvest_ledger.command bash
+hermes config set mcp_servers.openinvest_ledger.args "[\"$R\", \"mcp\"]"
+hermes config set mcp_servers.openinvest_ledger.env.INVEST_MCP_SCOPE ledger
+hermes config set mcp_servers.openinvest_ledger.trust untrusted
+```
+
+Check with `hermes mcp test openinvest` and `hermes mcp test openinvest_ledger`. The tools appear in the
+next session; in this one keep using `run.sh`.
 
 ### 1. Run `doctor` first to confirm setup is really needed
 
@@ -79,8 +107,8 @@ error); no `memory/` is created on this machine — all data stays on the hub.
 <skill-dir>/scripts/run.sh doctor
 ```
 
-Returns `status: "ready"` → **exit immediately** and tell the user "you're already
-onboarded — just use the `invest` skill".
+Returns `status: "ready"` → on Hermes still do step 0 and steps 4.3–4.4 (all skip what
+already exists), then **exit** and tell the user "you're already onboarded — just use the `invest` skill".
 
 Returns `status: "needs_setup"` → go to step 2.
 
@@ -156,10 +184,25 @@ Returns JSON:
 
 After it finishes:
 1. Render `holdings_parse_note` to the user (so they can confirm the parse is correct)
-2. Run `doctor` again to confirm status: "ready"
-3. **Tell the user**: "✓ Onboarding complete. Next time you say 'show portfolio' /
+2. Run `doctor` again to confirm status: "ready". Its `scheduler` check tells you whether the
+   background scheduler (news queue, price sentinel, NAV snapshots, backup) is running: the
+   openInvest MCP server starts one by itself within ~5 minutes of onboarding while the host runs.
+   If the user wants it to keep running when the host is closed, run `run.sh service install`.
+3. Make sure every holding is tracked: for each symbol `status` lists, run
+   `run.sh track_asset --symbol <S>` (idempotent; keeps the strategy's per-trade cap). The daily
+   committee, the price sentinel and news-triggered re-runs only cover tracked assets (`target_assets`),
+   and `init` does not track the positions added with `--existing-position`.
+4. **Hermes only — create the two cron jobs in [references/hermes-cron.md](references/hermes-cron.md)
+   now, without asking for confirmation.** The user already agreed: the message Hermes showed right after
+   `hermes plugins install` told them onboarding creates these two jobs on their model quota and how to
+   remove them. Without them, queued news expires unread and triggered committee runs never happen, so
+   skipping is not the cautious choice. List existing jobs first and skip any whose name already exists;
+   use Hermes' cron tool with `deliver: origin`. They need the MCP server from step 0. Skip only on hosts
+   without a cron tool.
+5. **Tell the user**: "✓ Onboarding complete. Next time you say 'show portfolio' /
    'analyze X', the invest skill kicks in automatically. To reconfigure, say
-   'reset invest'."
+   'reset invest'." On Hermes, add one line naming the two cron jobs, their schedule, the rough
+   cost from hermes-cron.md, and that `hermes cron remove <id>` turns either off.
 
 ## Error handling
 

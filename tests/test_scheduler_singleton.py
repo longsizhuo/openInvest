@@ -261,6 +261,16 @@ def test_doctor_flags_stuck_scheduler(root, monkeypatch):
     assert c["status"] == "warning" and "卡住" in c["detail"]
 
 
+def test_doctor_flags_daemon_running_an_older_version(root):
+    from openinvest.services.skill_views import _scheduler_check
+
+    held = lock.try_acquire("daemon")
+    _rewrite_body(held, version="0.0.1")
+    _job_runs(root, _ago(5))
+    c = _scheduler_check(root)
+    assert c["status"] == "warning" and "0.0.1" in c["detail"]
+
+
 def test_doctor_scheduler_warning_keeps_status_ready(tmp_path):
     from openinvest.core.memory_store import MemoryStore
     from openinvest.services.skill_views import build_doctor_view
@@ -320,6 +330,22 @@ def test_service_install_linux(root, monkeypatch, tmp_path, rc, status):
     assert r["status"] == status
     assert (tmp_path / "home" / ".config" / "systemd" / "user" / sc.UNIT).exists()
     assert ["systemctl", "--user", "enable", "--now", sc.UNIT] in ran
+
+
+def test_service_uninstall_linux(root, monkeypatch, tmp_path):
+    from openinvest.skill_cmds import service_cmds as sc
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ran = []
+    monkeypatch.setattr(sc.subprocess, "run",
+                        lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    unit = sc._unit_path()
+    unit.parent.mkdir(parents=True)
+    unit.write_text("[Unit]\n")
+    r = sc._uninstall()
+    assert r["status"] == "ok" and not unit.exists()
+    assert ran == [["systemctl", "--user", "disable", "--now", sc.UNIT], ["systemctl", "--user", "daemon-reload"]]
 
 
 def test_service_install_hints_keys_only_the_host_mcp_had(root, monkeypatch, tmp_path):

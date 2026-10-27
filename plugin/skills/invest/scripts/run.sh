@@ -20,6 +20,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SRC_ROOT="$REPO_ROOT/src"
 export INVEST_HOME="${INVEST_HOME:-$HOME/openInvest}"
 SPEC="${OPENINVEST_SPEC:-openinvest==0.67.0}"  # x-release-please-version
+export OPENINVEST_SPEC="$SPEC"  # 后端 `service install` 让系统服务跑和这里同一个 spec
 DEV_MODE="${OPENINVEST_DEV_MODE:-0}"
 
 if ! command -v uvx >/dev/null 2>&1; then

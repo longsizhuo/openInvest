@@ -1,0 +1,16 @@
+{
+  "description": "Inject an offline openInvest ledger digest (holdings, today's verdicts, pending queues) at session start, so questions about held tickers go to openInvest instead of web search.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/skills/invest/scripts/run.sh\" brief --text",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

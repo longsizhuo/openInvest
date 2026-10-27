@@ -37,21 +37,35 @@ pinned commit), and the backend version that `run.sh` pins comes with it — so 
 catalog install can lag `main` in both skills and MCP tools. For the newest commit
 on `main` instead, install by repo path:
 `hermes plugins install longsizhuo/openInvest/plugin --enable`.
-For the MCP tools, add this to `~/.hermes/config.yaml`. It runs the plugin's own
-`run.sh`, which pins the backend to the version this plugin release was built with
-(the plugin is installed in `$HERMES_HOME/plugins/openinvest`; replace `YOU`, and
-adjust the path if `HERMES_HOME` is not `~/.hermes`). `trust: untrusted` makes Hermes ask before the tools that write
-to your local ledger.
+For the MCP tools, add this to `~/.hermes/config.yaml` (or run the commands Hermes shows right after
+install; onboarding also adds it when missing). It runs the plugin's own `run.sh`, which pins the backend
+to the version this plugin release was built with (the plugin is installed in
+`$HERMES_HOME/plugins/openinvest`; replace `YOU`, and adjust the path if `HERMES_HOME` is not `~/.hermes`).
+The server is registered twice because Hermes' `trust: untrusted` asks on every call: the `agent` scope
+(reads, news queue, committee, daily report) runs with full trust so cron jobs work, and the `ledger`
+scope (tools that move money) stays untrusted, so Hermes asks before each ledger write.
 ```yaml
 mcp_servers:
   openinvest:
     command: bash
     args: ["/home/YOU/.hermes/plugins/openinvest/skills/invest/scripts/run.sh", "mcp"]
+    env: {INVEST_MCP_SCOPE: agent}
+  openinvest_ledger:
+    command: bash
+    args: ["/home/YOU/.hermes/plugins/openinvest/skills/invest/scripts/run.sh", "mcp"]
+    env: {INVEST_MCP_SCOPE: ledger}
     trust: untrusted
 ```
 
 Then in chat say **"set up invest" / 帮我初始化 invest** — a short
-onboarding (name, risk tolerance, current holdings) writes your config.
+onboarding (name, risk tolerance, current holdings) writes your config. On Hermes it also
+creates two cron jobs (`openinvest-daily` committee report, `openinvest-sentinel` news triage;
+they run on your model quota, `hermes cron remove <id>` turns them off), and the plugin injects a
+one-paragraph ledger digest at session start so questions about your tickers reach openInvest.
+The digest goes into group chats as well (anyone in the group can read your ticker list);
+`plugins.entries.openinvest.settings.inject_digest: false` keeps only the routing rule.
+While the host runs, the MCP server keeps a background scheduler alive (news queue, price sentinel,
+NAV snapshots, daily backup); `run.sh service install` keeps it running when the host is closed.
 API keys never go through the chat: add `LLM_API_KEY` (and optional `EMAIL_*`)
 to `~/openInvest/.env` yourself; the Coordinator path needs no key at all. After that just ask things like *"show my portfolio"*,
 *"how's my P&L"*, *"should I buy AAPL"*, or *"run committee on gold"*.

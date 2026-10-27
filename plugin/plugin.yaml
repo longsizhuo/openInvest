@@ -8,3 +8,6 @@ author: longsizhuo
 # The backend runs in its own uvx environment; keep Hermes from merging the repo's pyproject
 # (needed when installed from the repo root, where pyproject.toml sits next to this file).
 python_runtime: external
+# pre_llm_call injects `run.sh brief --text` (offline ledger digest) on a session's first turn / when it changes.
+provides_hooks:
+  - pre_llm_call
