@@ -1,6 +1,7 @@
 # Hermes 官方插件目录钉的是一个 40 位 SHA，每次 invest-skill 发版都要手动开 SHA-bump PR 到 NousResearch/hermes-agent。
 # 2026-10-27 实测：目录停在 0b9268b（后端 0.44.1）而 main 已到 0.67，没人发现——目录用户一直用旧版。
-# 每周一查一次：最新 invest-skill tag 不在目录钉的提交里、且已发布超过 7 天 → 在本仓库开 / 更新一个 issue 提醒。
+# 每周一查一次：目录钉的提交之后第一个没收进去的 invest-skill tag 已发布超过 7 天（= 落后持续了一周）→ 在本仓库开 / 更新一个 issue 提醒。
+# 不看「最新 tag 的年龄」：invest-skill 几乎每天发版，最新 tag 永远不满 7 天，落后再多也不会触发（#563 评审实测）。
 # 只在本仓库写 issue，不往外部仓库发任何东西（bump PR 仍由人开）。
 name: hermes-catalog-lag
 
@@ -29,15 +30,29 @@ jobs:
             | jq -r '.entries[]? | select(.name == "openinvest") | .sha' | head -1)
           [ -n "$pinned" ] || { echo "::warning::openinvest not found in the Hermes catalog"; exit 0; }
           tag=$(git tag -l 'invest-skill-v*' --sort=-v:refname | head -1)
-          tag_sha=$(git rev-list -n1 "$tag")
-          if git merge-base --is-ancestor "$tag_sha" "$pinned" 2>/dev/null; then
-            echo "catalog pin ${pinned:0:7} already contains $tag"; exit 0
-          fi
-          age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct "$tag_sha") ) / 86400 ))
-          if [ "$age_days" -lt 7 ]; then echo "$tag is only $age_days days old"; exit 0; fi
-          behind=$(git rev-list --count "$pinned..$tag_sha" -- plugin/ 2>/dev/null || echo "?")
-          title="Hermes 官方目录落后：openinvest 仍钉在 ${pinned:0:7}"
-          body="Hermes 官方插件目录里的 openinvest 钉在 \`$pinned\`，不包含最新的 \`$tag\`（发布已 $age_days 天，plugin/ 落后 $behind 个提交）。目录用户装到的是旧插件和它钉的旧后端。
+          [ -n "$tag" ] || { echo "no invest-skill tags in this repository"; exit 0; }
+          title_prefix="Hermes 官方目录落后"
+          if ! git cat-file -e "${pinned}^{commit}" 2>/dev/null; then
+            echo "::warning::catalog pins ${pinned:0:7}, which is not in this repository's history"
+            body="Hermes 官方插件目录里的 openinvest 钉在 \`$pinned\`，这个提交不在本仓库历史里（目录改钉了 fork，或提交被重写），没法判断落后多少。核对 \`plugin-catalog/openinvest.yaml\` 后，按最新的 \`$tag\` 开 SHA-bump PR。"
+          else
+            # --no-merged：tag 指向的提交不在 pinned 的祖先里 = 目录还没收进去的版本；最老那个的年龄 = 落后持续了多久
+            oldest_missing=$(git tag -l 'invest-skill-v*' --no-merged "$pinned" --sort=v:refname | head -1)
+            [ -n "$oldest_missing" ] || { echo "catalog pin ${pinned:0:7} contains all invest-skill tags"; exit 0; }
+            age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct "$oldest_missing") ) / 86400 ))
+            if [ "$age_days" -lt 7 ]; then echo "$oldest_missing is the first release missing from the catalog, only $age_days days old"; exit 0; fi
+            behind=$(git rev-list --count "$pinned..$tag" -- plugin/)
+            body="Hermes 官方插件目录里的 openinvest 钉在 \`$pinned\`，从 \`$oldest_missing\` 起就没收进去（已 $age_days 天），最新是 \`$tag\`，plugin/ 落后 $behind 个提交。目录用户装到的是旧插件和它钉的旧后端。
           给 NousResearch/hermes-agent 开 SHA-bump PR：只改 \`plugin-catalog/openinvest.yaml\` 的 sha 和 version，一次推完；description 若描述了 MCP 配置要同步。"
-          existing=$(gh issue list --state open --search "in:title Hermes 官方目录落后" --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then gh issue comment "$existing" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
+          fi
+          title="$title_prefix：openinvest 仍钉在 ${pinned:0:7}"
+          # 本地按标题前缀找，不走 GitHub search（中文分词不可靠，匹配不到就会每周新开一个）
+          existing=$(gh issue list --state open --limit 200 --json number,title \
+            --jq "map(select(.title | startswith(\"$title_prefix\")))[0].number // empty")
+          if [ -z "$existing" ]; then gh issue create --title "$title" --body "$body"; exit 0; fi
+          # 钉点和最新 tag 都没变就不再追加同样的 comment
+          last=$(gh issue view "$existing" --json body,comments --jq '([.body] + [.comments[].body]) | last')
+          if printf '%s' "$last" | grep -qF "$pinned" && printf '%s' "$last" | grep -qF "\`$tag\`"; then
+            echo "issue #$existing already reports ${pinned:0:7} vs $tag"; exit 0
+          fi
+          gh issue comment "$existing" --body "$body"
