@@ -1,0 +1,43 @@
+# Hermes 官方插件目录钉的是一个 40 位 SHA，每次 invest-skill 发版都要手动开 SHA-bump PR 到 NousResearch/hermes-agent。
+# 2026-10-27 实测：目录停在 0b9268b（后端 0.44.1）而 main 已到 0.67，没人发现——目录用户一直用旧版。
+# 每周一查一次：最新 invest-skill tag 不在目录钉的提交里、且已发布超过 7 天 → 在本仓库开 / 更新一个 issue 提醒。
+# 只在本仓库写 issue，不往外部仓库发任何东西（bump PR 仍由人开）。
+name: hermes-catalog-lag
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare catalog pin with the newest invest-skill release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pinned=$(curl -fsSL https://hermes-agent.nousresearch.com/docs/api/plugin-catalog.json \
+            | jq -r '.entries[]? | select(.name == "openinvest") | .sha' | head -1)
+          [ -n "$pinned" ] || { echo "::warning::openinvest not found in the Hermes catalog"; exit 0; }
+          tag=$(git tag -l 'invest-skill-v*' --sort=-v:refname | head -1)
+          tag_sha=$(git rev-list -n1 "$tag")
+          if git merge-base --is-ancestor "$tag_sha" "$pinned" 2>/dev/null; then
+            echo "catalog pin ${pinned:0:7} already contains $tag"; exit 0
+          fi
+          age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct "$tag_sha") ) / 86400 ))
+          if [ "$age_days" -lt 7 ]; then echo "$tag is only $age_days days old"; exit 0; fi
+          behind=$(git rev-list --count "$pinned..$tag_sha" -- plugin/ 2>/dev/null || echo "?")
+          title="Hermes 官方目录落后：openinvest 仍钉在 ${pinned:0:7}"
+          body="Hermes 官方插件目录里的 openinvest 钉在 \`$pinned\`，不包含最新的 \`$tag\`（发布已 $age_days 天，plugin/ 落后 $behind 个提交）。目录用户装到的是旧插件和它钉的旧后端。
+          给 NousResearch/hermes-agent 开 SHA-bump PR：只改 \`plugin-catalog/openinvest.yaml\` 的 sha 和 version，一次推完；description 若描述了 MCP 配置要同步。"
+          existing=$(gh issue list --state open --search "in:title Hermes 官方目录落后" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then gh issue comment "$existing" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
