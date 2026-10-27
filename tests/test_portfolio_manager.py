@@ -741,5 +741,16 @@ class TestCanonicalSymbolBooking:
         assert [h["symbol"] for h in pm2.holdings] == ["510300"]
         assert pm2.record_dividend("510300.SS", 5.0, "CNY")["symbol"] == "510300"
 
+    def test_legacy_bare_row_split_and_return_of_capital(self, tmp_path):
+        s = _make_store(tmp_path)
+        _seed_docs(s, holdings=[{"symbol": "510300", "kind": "etf", "units": 100, "avg_cost": 4.0,
+                                 "unit_label": "股", "cost_currency": "CNY"}])
+        pm2 = PortfolioManager(s)
+        assert pm2.record_split("510300.SS", 2)["symbol"] == "510300"
+        assert pm2.find_holding("510300")["units"] == 200
+        assert pm2.record_return_of_capital("510300.SS", 20.0, "CNY")["symbol"] == "510300"
+        assert pm2.find_holding("510300")["avg_cost"] == pytest.approx(1.9)
+        assert [h["symbol"] for h in pm2.holdings] == ["510300"]
+
     def test_fund_kind_keeps_bare_code(self, pm):
         assert pm.buy("000001", 100, 1.0, kind="fund", source_type="external_funding")["symbol"] == "000001"
