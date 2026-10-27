@@ -56,6 +56,11 @@ def _file_lock(path: Path):
                 os.unlink(lock_path)  # 仍持锁；close 才释放
             except FileNotFoundError:
                 pass
+        else:  # 先解锁再关：关句柄时系统何时释放字节锁不确定，非阻塞探测方（maintenance）会误判在用
+            try:
+                oslock.flock(lock_file.fileno(), oslock.LOCK_UN)
+            except OSError:
+                pass
         lock_file.close()
 
 
@@ -90,7 +95,7 @@ def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Non
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        oslock.replace(tmp, path)
     except Exception:
         # 出错把 tmp 清掉，避免 *.tmp.<pid> 文件堆积
         try:

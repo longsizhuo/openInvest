@@ -83,6 +83,7 @@ from openinvest.jobs.pnl_render import _is_trading_window as _is_trading_window_
 from openinvest.jobs.pnl_render import _outperform_events as _outperform_events_pure
 from openinvest.jobs.pnl_render import render_svg as _render_svg_pure
 from openinvest.paths import INVEST_ROOT
+from openinvest.utils import oslock
 
 ROOT = INVEST_ROOT
 HISTORY_PATH = ROOT / "memory" / ".state" / "pnl_history.jsonl"
@@ -453,7 +454,7 @@ def run() -> Dict[str, Any]:
         svg_content = render_svg(history)
         tmp = SVG_PATH.with_suffix(".svg.tmp")
         tmp.write_text(svg_content, encoding="utf-8", newline="\n")
-        tmp.replace(SVG_PATH)
+        oslock.replace(tmp, SVG_PATH)
 
     # 跑赢基准的"可分享瞬间"事件（PM-3 增长杠杆）
     events = _outperform_events(snap)
@@ -487,7 +488,7 @@ def render_only() -> Dict[str, Any]:
     svg_content = render_svg(history)
     tmp = SVG_PATH.with_suffix(".svg.tmp")
     tmp.write_text(svg_content, encoding="utf-8", newline="\n")
-    tmp.replace(SVG_PATH)
+    oslock.replace(tmp, SVG_PATH)
     push_result = _auto_push_svg()
     return {
         "status": "ok_render_only",

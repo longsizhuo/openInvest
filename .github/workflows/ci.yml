@@ -12,6 +12,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows:
+    # oslock 的 msvcrt 分支 / CAN_UNLINK_OPEN=False 分支只在 Windows 上走得到；全量套件仍只在 Linux 跑
+    runs-on: windows-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install deps
+        run: uv sync --frozen
+
+      - name: Windows 兼容测试（锁 / LF / 进程探活 / 原子替换）
+        run: uv run pytest tests/test_windows_compat.py tests/test_file_lock_and_jsonl.py tests/test_maintenance_cleanup.py -v --tb=short
+        env:
+          DEEPSEEK_API_KEY: test-fake-key
+
   test:
     runs-on: ubuntu-latest
     # 跳过 [skip ci] 标记的 commit（我们的 pnl-bot autocommit 会带这个）
