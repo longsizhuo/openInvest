@@ -26,6 +26,7 @@ from openinvest.paths import INVEST_ROOT
 ROOT = INVEST_ROOT
 
 __all__ = [
+    "cmd_brief",
     "cmd_status",
     "cmd_performance",
     "cmd_strategy",
@@ -253,6 +254,24 @@ def cmd_correlate(args: argparse.Namespace) -> None:
                 out["llm_summary"] = f"(LLM 失败: {e})"
 
     _print_json(out)
+
+
+# ---------- brief ----------
+
+def cmd_brief(args: argparse.Namespace) -> None:
+    """给宿主 Agent 的离线账本摘要（插件钩子注入用）：持仓 / 关注 / 今日裁决 / 待办 / 调度器。不联网。
+
+    --text 输出一段纯文本（钩子直接拿 stdout 当上下文），默认 JSON。
+    """
+    from openinvest.services.agent_brief import build_brief, render_brief_text
+
+    b = build_brief(ROOT)
+    if args.text:
+        real_stdout = getattr(sys, "__stdout__", sys.stdout)
+        real_stdout.write(render_brief_text(b) + "\n")
+        real_stdout.flush()
+    else:
+        _print_json(b)
 
 
 # ---------- live_prices ----------
