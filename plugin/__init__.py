@@ -12,52 +12,84 @@ server's `instructions` into the prompt, so the agent only reached for openInves
 - a fixed routing rule in the system prompt (cache-safe, survives compression), and
 - a `pre_llm_call` hook that injects `run.sh brief --text` (offline ledger digest: holdings, today's
   verdicts, pending queues) on a session's first turn and again only when the digest changes.
+The digest goes into every session, group chats included (owner's choice); set the plugin setting
+`inject_digest: false` to keep only the routing rule.
 """
 import logging
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 RUN_SH = Path(__file__).resolve().parent / "skills" / "invest" / "scripts" / "run.sh"
+# "owner", not "user": the rule also lands in group chats, where "the user" is whoever is talking
 ROUTING_RULE = (
-    "openInvest is installed: the user's own investment ledger, live prices and a 4-role committee. "
+    "openInvest is installed: the owner's own investment ledger, live prices and a 4-role committee. "
     "For any question about stocks, funds, ETFs, gold, crypto, markets, macro, buying or selling, or the "
-    "user's money, call the openinvest tools first (status / live_prices; the symbol may already be a holding) "
+    "owner's money, call the openinvest tools first (status / live_prices; the symbol may already be a holding) "
     "and only then add web search. Load the openinvest:invest skill before running a committee."
 )
 BRIEF_TTL_SECONDS = 300
 BRIEF_TIMEOUT_SECONDS = 15
+# After a failed brief (first install still downloading the backend via uvx, older backend without
+# `brief`) wait this long before trying again, so a turn does not stall up to 15s every 5 minutes.
+BRIEF_RETRY_SECONDS = 1800
 SKIP_PLATFORMS = {"subagent", "cron"}  # our own cron prompts call the tools explicitly; children inherit context
 
-_brief_cache = {"at": float("-inf"), "text": None}
+_brief_cache = {"at": float("-inf"), "text": None, "ttl": 0.0}
+_refreshing = threading.Lock()
 # ponytail: per-session "last injected" lives in this process; a gateway restart re-injects once per session
 _last_injected: dict = {}
 
 
-def _brief_text(invest_home):
-    """`run.sh brief --text`, cached for BRIEF_TTL_SECONDS. None on any failure (older backend, timeout)."""
-    now = time.monotonic()
-    if now - _brief_cache["at"] < BRIEF_TTL_SECONDS:
-        return _brief_cache["text"]
+def _spawn(fn):
+    threading.Thread(target=fn, name="openinvest-brief", daemon=True).start()
+
+
+def _fetch_brief(invest_home):
+    """`run.sh brief --text`; None on any failure (older backend, timeout)."""
     env = dict(os.environ)
     if invest_home:
         env["INVEST_HOME"] = os.path.expanduser(str(invest_home))
-    text = None
     try:
         r = subprocess.run(["bash", str(RUN_SH), "brief", "--text"], capture_output=True, text=True,
                            timeout=BRIEF_TIMEOUT_SECONDS, env=env)
-        out = r.stdout.strip()
-        if r.returncode == 0 and out.startswith("[openInvest]"):
-            text = out
-        else:
-            log.info("[openinvest] brief unavailable (rc=%s): %s", r.returncode, (out or r.stderr)[-200:])
     except (OSError, subprocess.TimeoutExpired) as e:
         log.info("[openinvest] brief unavailable: %s", e)
-    _brief_cache.update(at=now, text=text)
-    return text
+        return None
+    out = r.stdout.strip()
+    if r.returncode == 0 and out.startswith("[openInvest]"):
+        return out
+    log.info("[openinvest] brief unavailable (rc=%s): %s", r.returncode, (out or r.stderr)[-200:])
+    return None
+
+
+def _refresh(invest_home):
+    if not _refreshing.acquire(blocking=False):  # another turn is already fetching
+        return
+    try:
+        text = _fetch_brief(invest_home)
+        if text:
+            _brief_cache.update(at=time.monotonic(), text=text, ttl=BRIEF_TTL_SECONDS)
+        else:  # keep the last good digest; retry later
+            _brief_cache.update(at=time.monotonic(), ttl=BRIEF_RETRY_SECONDS)
+    finally:
+        _refreshing.release()
+
+
+def _brief_text(invest_home):
+    """The digest, cached for BRIEF_TTL_SECONDS. Hermes runs this hook on the session's worker thread, so
+    only a fetch with nothing cached yet blocks the turn; afterwards the previous digest is served while a
+    background thread refreshes it."""
+    if time.monotonic() - _brief_cache["at"] >= _brief_cache["ttl"]:
+        if _brief_cache["text"] is None:
+            _refresh(invest_home)
+        else:
+            _spawn(lambda: _refresh(invest_home))
+    return _brief_cache["text"]
 
 
 def _make_pre_llm_call(invest_home):
@@ -65,7 +97,11 @@ def _make_pre_llm_call(invest_home):
         if platform in SKIP_PLATFORMS:
             return None
         text = _brief_text(invest_home)
-        if not text or _last_injected.get(session_id) == text:
+        if not text:
+            return None
+        if session_id is None:  # Hermes always passes one; without it there is nothing to dedupe on
+            return {"context": text}
+        if _last_injected.get(session_id) == text:
             return None
         if len(_last_injected) > 1000:  # ponytail: long-lived gateway, bound the map instead of tracking session ends
             _last_injected.clear()
@@ -83,10 +119,12 @@ def register(ctx):
             log.info(f"[openinvest] registered skill: {child.name}")
 
     # Older Hermes builds lack these APIs; skills + MCP keep working without them.
-    invest_home = None
+    invest_home, inject_digest = None, True
     if hasattr(ctx, "get_config"):
         try:
             invest_home = ctx.get_config("invest_home")
+            # `hermes config set ... false` may store the string "false"
+            inject_digest = str(ctx.get_config("inject_digest", True)).strip().lower() not in ("false", "0", "no", "off")
         except Exception:  # noqa: BLE001  config read must never break plugin load
             invest_home = None
     if hasattr(ctx, "register_system_prompt_section"):
@@ -94,7 +132,7 @@ def register(ctx):
             ctx.register_system_prompt_section("openinvest.routing", ROUTING_RULE)
         except (TypeError, ValueError) as e:
             log.info("[openinvest] system prompt section not registered: %s", e)
-    if hasattr(ctx, "register_hook"):
+    if hasattr(ctx, "register_hook") and inject_digest:
         ctx.register_hook("pre_llm_call", _make_pre_llm_call(invest_home))
 
     # MCP 走本插件自带的 run.sh：它把后端钉在 release-please 盖章的版本（不跑 PyPI 上最新的），

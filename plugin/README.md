@@ -62,6 +62,8 @@ onboarding (name, risk tolerance, current holdings) writes your config. On Herme
 creates two cron jobs (`openinvest-daily` committee report, `openinvest-sentinel` news triage;
 they run on your model quota, `hermes cron remove <id>` turns them off), and the plugin injects a
 one-paragraph ledger digest at session start so questions about your tickers reach openInvest.
+The digest goes into group chats as well (anyone in the group can read your ticker list);
+`plugins.entries.openinvest.settings.inject_digest: false` keeps only the routing rule.
 While the host runs, the MCP server keeps a background scheduler alive (news queue, price sentinel,
 NAV snapshots, daily backup); `run.sh service install` keeps it running when the host is closed.
 API keys never go through the chat: add `LLM_API_KEY` (and optional `EMAIL_*`)

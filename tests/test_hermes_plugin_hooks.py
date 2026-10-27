@@ -72,6 +72,7 @@ def test_old_hermes_without_new_apis_still_loads(plugin):
 
 def test_injects_on_first_turn_and_only_when_digest_changes(plugin, monkeypatch):
     calls = []
+    monkeypatch.setattr(plugin, "_spawn", lambda fn: fn())                # 后台刷新改成同步，好断言
     monkeypatch.setattr(plugin.subprocess, "run", _fake_run(
         ["[openInvest] Holdings: NVDA.", "[openInvest] Holdings: NVDA.", "[openInvest] Holdings: NVDA, GC=F."], calls))
     ctx = _Ctx({"invest_home": "/data/invest"})
@@ -88,6 +89,58 @@ def test_injects_on_first_turn_and_only_when_digest_changes(plugin, monkeypatch)
     clock[0] += plugin.BRIEF_TTL_SECONDS + 1
     assert hook(session_id="s1", platform="discord")["context"].endswith("GC=F.")  # 账本变了
     assert calls == ["/data/invest"] * 3                                 # 只在缓存过期时调 run.sh
+
+
+def test_stale_digest_is_served_while_refreshing_in_background(plugin, monkeypatch):
+    """只有什么都没缓存的第一次要等 run.sh；之后过期了先给旧摘要，后台刷新，不卡这一轮。"""
+    calls, spawned = [], []
+    monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: NVDA."], calls))
+    monkeypatch.setattr(plugin, "_spawn", spawned.append)
+    clock = [1000.0]
+    monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
+    ctx = _Ctx()
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(session_id="s1", platform="discord")["context"].endswith("NVDA.")
+    clock[0] += plugin.BRIEF_TTL_SECONDS + 1
+    assert hook(session_id="s2", platform="discord")["context"].endswith("NVDA.")
+    assert len(calls) == 1 and len(spawned) == 1                          # 刷新交给了后台线程
+
+
+def test_failed_brief_backs_off_instead_of_retrying_every_ttl(plugin, monkeypatch):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        raise subprocess.TimeoutExpired("bash", 15)                     # 首装 uvx 还在下依赖
+
+    monkeypatch.setattr(plugin.subprocess, "run", run)
+    clock = [1000.0]
+    monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
+    ctx = _Ctx()
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(session_id="s", platform="cli") is None
+    clock[0] += plugin.BRIEF_TTL_SECONDS + 1
+    assert hook(session_id="s", platform="cli") is None and len(calls) == 1
+    clock[0] += plugin.BRIEF_RETRY_SECONDS
+    hook(session_id="s", platform="cli")
+    assert len(calls) == 2
+
+
+def test_without_session_id_injects_every_turn(plugin, monkeypatch):
+    monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: NVDA."], []))
+    ctx = _Ctx()
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(platform="discord") and hook(platform="discord")          # 没法去重：不能只给第一个会话
+
+
+@pytest.mark.parametrize("value", [False, "false"])
+def test_inject_digest_off_keeps_only_the_routing_rule(plugin, value):
+    ctx = _Ctx({"inject_digest": value})
+    plugin.register(ctx)
+    assert "pre_llm_call" not in ctx.hooks and "openinvest.routing" in ctx.sections
 
 
 @pytest.mark.parametrize("platform", ["subagent", "cron"])

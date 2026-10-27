@@ -19,4 +19,6 @@ The skills are registered. Two steps are left:
 
 2. Start a new chat and say **"set up openInvest"** (帮我初始化 openInvest). Onboarding asks for your name, risk tolerance and current holdings, then sets up a daily committee report and a news sentinel as Hermes cron jobs (they run on your model quota; remove them with `hermes cron remove <id>`).
 
+Each chat session also gets a one-paragraph digest of your ledger (holdings, today's verdicts, pending news) so the agent reaches for openInvest. Group chats get it too, so people in a group with this agent can read your ticker list. To keep only the routing rule, run `hermes config set plugins.entries.openinvest.settings.inject_digest false`.
+
 While Hermes runs, the openInvest MCP server also keeps a background scheduler alive (news queue, price sentinel, NAV snapshots, daily backup). To keep it running when Hermes is closed, ask the agent to run `run.sh service install`.
