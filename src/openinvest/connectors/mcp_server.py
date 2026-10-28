@@ -1281,7 +1281,11 @@ _COMMITTEE_LOCK = asyncio.Lock()
 
 @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 async def run_committee(
-    symbol: Annotated[str, Field(description="Any yfinance ticker (US / HK / A-share / ETF / crypto / commodities), e.g. 'AAPL', 'GC=F', '510300.SS'.")],
+    symbol: Annotated[str, Field(description=(
+        "Symbol to analyze. Listed assets use yfinance tickers: US 'AAPL', A-share '603083.SS' (Shanghai) / "
+        "'000001.SZ' (Shenzhen), HK '0700.HK', exchange ETF '510300.SS', crypto 'BTC-USD', futures 'GC=F'. "
+        "China off-exchange (OTC) mutual funds use 'FUND:<6-digit code>', e.g. 'FUND:110011'. "
+        "A bare 6-digit code is rejected — add the suffix or the FUND: prefix."))],
     force: Annotated[bool, Field(description="Re-run even if a verdict already exists for today.")] = False,
     max_rounds: Annotated[int, Field(description="Cross-challenge debate rounds.", ge=1)] = 1,
     ctx: Optional[Context] = None,
@@ -1298,8 +1302,12 @@ async def run_committee(
     support only — the human always executes.
 
     Args:
-        symbol: Any yfinance ticker (US / HK / A-share / ETF / crypto /
-            commodities), e.g. "AAPL", "GC=F", "510300.SS".
+        symbol: Symbol to analyze. Listed assets use yfinance tickers: US
+            "AAPL", A-share "603083.SS" (Shanghai) / "000001.SZ" (Shenzhen),
+            HK "0700.HK", exchange ETF "510300.SS", crypto "BTC-USD", futures
+            "GC=F". China off-exchange (OTC) mutual funds use
+            "FUND:<6-digit code>", e.g. "FUND:110011". A bare 6-digit code is
+            rejected — add the suffix or the FUND: prefix.
         force: Re-run even if a verdict already exists for today.
         max_rounds: Cross-challenge debate rounds (default 1).
 
