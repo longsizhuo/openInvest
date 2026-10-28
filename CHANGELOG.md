@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.68.1](https://github.com/longsizhuo/openInvest/compare/v0.68.0...v0.68.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **committee:** spell out symbol formats so agents can fix bare 6-digit codes ([#556](https://github.com/longsizhuo/openInvest/issues/556)) ([8f2c988](https://github.com/longsizhuo/openInvest/commit/8f2c988af6890ec1bcbea2845fd610f7c1efcb8d))
+* **core:** run natively on Windows with byte-identical output ([#557](https://github.com/longsizhuo/openInvest/issues/557)) ([f36e97e](https://github.com/longsizhuo/openInvest/commit/f36e97e1bca9174bf08ddd3f1c06466da7fa9645))
+
 ## [0.68.0](https://github.com/longsizhuo/openInvest/compare/v0.67.0...v0.68.0) (2026-10-27)
 
 
