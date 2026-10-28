@@ -9,6 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 import openinvest.jobs.daily_report as dr
+from openinvest.calc.gold import GoldPriceSnapshot
+
+# 金价不能真去 yfinance 拉（conftest 已断网）：拿不到就整块跳过 GC=F，断言里的 GC=F 交卷就验不到
+_GOLD = GoldPriceSnapshot(gold_usd_per_oz=2400.0, usdcny_rate=7.2, spot_cny_per_gram=555.6,
+                          bank_cny_per_gram=563.9, offset_pct=0.015)
 
 
 def test_agent_mode_reads_submissions_and_flags_missing(monkeypatch):
@@ -34,6 +39,7 @@ def test_agent_mode_reads_submissions_and_flags_missing(monkeypatch):
     pm.get_user_status.return_value = SimpleNamespace(cash_cny=0.0, disposable_for_invest=0.0)
     monkeypatch.setattr(dr, "PortfolioManager", lambda: pm)
     monkeypatch.setattr(dr, "_get_last_close", lambda s, label: (100.0, 0))
+    monkeypatch.setattr(dr, "get_gold_snapshot", lambda **k: _GOLD)
     monkeypatch.setattr(dr, "_portfolio_summary", lambda *a: "PS")
     monkeypatch.setattr(dr, "get_macro_data", lambda: "MD")
     monkeypatch.setattr(dr, "_run_gemini_cli_review", lambda p: pytest.fail("agent 模式不该发起 Gemini 第二意见"))
@@ -59,6 +65,7 @@ def _wire(monkeypatch, targets):
     pm.get_user_status.return_value = SimpleNamespace(cash_cny=0.0, disposable_for_invest=0.0)
     monkeypatch.setattr(dr, "PortfolioManager", lambda: pm)
     monkeypatch.setattr(dr, "_get_last_close", lambda s, label: (100.0, 0))
+    monkeypatch.setattr(dr, "get_gold_snapshot", lambda **k: _GOLD)
     monkeypatch.setattr(dr, "_portfolio_summary", lambda *a: "PS")
     monkeypatch.setattr(dr, "get_macro_data", lambda: "MD")
     monkeypatch.setattr(dr, "_run_gemini_cli_review", lambda p: pytest.fail("agent 模式不该发起 Gemini 第二意见"))
