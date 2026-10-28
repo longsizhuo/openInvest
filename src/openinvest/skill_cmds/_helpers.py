@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -20,6 +21,8 @@ __all__ = ["_safe_close", "_print_json"]
 def _print_json(obj: Any) -> None:
     """直接写到原始 stdout，避免被 utils/* 的 print noise 污染"""
     real_stdout = getattr(sys, "__stdout__", sys.stdout)
+    if os.name == "nt" and hasattr(real_stdout, "reconfigure"):
+        real_stdout.reconfigure(encoding="utf-8", newline="\n")
     real_stdout.write(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
     real_stdout.write("\n")
     real_stdout.flush()

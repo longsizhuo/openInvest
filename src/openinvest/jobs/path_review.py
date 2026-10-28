@@ -244,7 +244,7 @@ def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
     store = MemoryStore()
     jl = store.root / ".dreams" / f"path_review{suffix}.jsonl"
     jl.parent.mkdir(parents=True, exist_ok=True)
-    with jl.open("w", encoding="utf-8") as f:
+    with jl.open("w", encoding="utf-8", newline="\n") as f:
         for r in reviews:
             f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
     md = ROOT / "docs" / f"path_calibration{suffix}.md"
@@ -264,7 +264,7 @@ def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
     lines += ["", "| regime | n | 90d 带覆盖 |", "|---|---|---|"]
     for rg, x in summ["by_regime"].items():
         lines.append(f"| {rg} | {x['n']} | {x['band_coverage_90d']:.0%} |")
-    md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    md.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return jl, md
 
 

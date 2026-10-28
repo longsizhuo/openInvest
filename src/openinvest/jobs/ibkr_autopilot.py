@@ -78,7 +78,7 @@ def _stop_file():
 
 def _halt(reason: str) -> None:
     """写 STOP（之后 submit 一律不下单，人看过删掉才恢复）+ 发邮件。"""
-    _stop_file().write_text(f"{datetime.now().isoformat(timespec='seconds')} {reason}\n", encoding="utf-8")
+    _stop_file().write_text(f"{datetime.now().isoformat(timespec='seconds')} {reason}\n", encoding="utf-8", newline="\n")
     log.error(f"[ibkr] HALT: {reason}")
     _notify("⛔ 盈透 autopilot 已停手", [reason, f"处理完删掉 {_stop_file()} 才会恢复下单。"])
 
@@ -467,7 +467,7 @@ def pick(today: Optional[str] = None, *, force: bool = False, agent=None, picks_
     record = {"date": today, "picks": ok, "rejected": rejected, "note": data.get("note"),
               "previous": [t["symbol"] for t in current]}
     (_store_dir("picks") / f"{today}.json").write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
-                                                       encoding="utf-8")
+                                                       encoding="utf-8", newline="\n")
     if not ok:   # LLM 全选错时别把名单清空（会触发全仓清仓）
         return {"status": "error", "reason": "no_valid_picks", **record}
 
@@ -592,7 +592,7 @@ def decide(today: Optional[str] = None, *, agent=None, orders_json: Optional[str
     data = _parse_json(agent.run(_decide_prompt(pm, targets, today)), "orders")
     ok, rejected = _validate_orders(data["orders"], set(targets))
     record = {"date": today, "batch": batch, "orders": ok, "rejected": rejected, "note": data.get("note")}
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return {"status": "ok", **record}
 
 
@@ -923,7 +923,7 @@ def news_check(*, broker=None) -> Dict[str, Any]:
                 if h["id"] not in seen:
                     seen.add(h["id"])
                     fresh.append({"symbol": s, **h})
-        path.write_text(json.dumps(sorted(seen)[-3000:]), encoding="utf-8")   # ponytail: 只留最近 3000 个 id
+        path.write_text(json.dumps(sorted(seen)[-3000:]), encoding="utf-8", newline="\n")   # ponytail: 只留最近 3000 个 id
         return {"status": "ok", "new": fresh}
     finally:
         if broker is None:

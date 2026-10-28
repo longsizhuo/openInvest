@@ -24,6 +24,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Optional
 from openinvest.paths import INVEST_ROOT
+from openinvest.utils import oslock
 
 log = logging.getLogger("state_bus")
 
@@ -87,9 +88,9 @@ def write_committee_status(task_id: str, payload: Dict[str, Any]) -> None:
     with _get_status_lock(task_id):
         tmp.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+            encoding="utf-8", newline="\n"
         )
-        tmp.replace(path)
+        oslock.replace(tmp, path)
 
 
 def read_committee_status(task_id: str) -> Optional[Dict[str, Any]]:

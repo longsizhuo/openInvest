@@ -67,6 +67,67 @@ def _isolate_market_fetch_log(monkeypatch):
                         lambda symbol: time.time() - log[symbol] if symbol in log else float("inf"))
 
 
+_LOOPBACK_HOSTS = {None, "", "localhost", "127.0.0.1", "::1", "testserver"}
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """测试一律不联网。2026-10-19 test_committee_run_error_path 在 CI 偶发红：session 里
+    load_sentiment_brief 真去拉 ^VIX（yfinance）+ CNN 恐贪（urllib，超时 4s），网慢就吃光测试的
+    5s 截止时间。全套断网普查同类漏 mock 十几处（sentiment / fx / gold_price / valuation …），
+    所以在出口统一挡，不逐个补。
+
+    挡两层：yfinance 走 curl_cffi（libcurl 自己解析和建连，patch socket 挡不住）；其余
+    urllib / requests / smtplib 都要经 socket.getaddrinfo。被挡时抛连接错误，生产代码的
+    graceful 退化路径照常走；要测网络出口的测试照常 monkeypatch 上层函数。"""
+    import socket
+
+    import ipaddress
+
+    def allowed(host):
+        if isinstance(host, bytes):
+            host = host.decode("ascii", errors="replace")
+        if host in _LOOPBACK_HOSTS:
+            return True
+        try:
+            address = ipaddress.ip_address(host)
+            return address.is_loopback or address.is_unspecified
+        except ValueError:
+            return False
+
+    real_getaddrinfo = socket.getaddrinfo
+
+    def _getaddrinfo(host, *args, **kwargs):
+        if not allowed(host):
+            raise socket.gaierror(f"tests are offline (conftest._no_network): {host}")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    def _curl_request(self, method, url, *args, **kwargs):
+        raise curl_requests.exceptions.ConnectionError(f"tests are offline (conftest._no_network): {url}")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
+    for method in ("connect", "connect_ex"):
+        real = getattr(socket.socket, method)
+
+        def guarded(sock, address, _real=real):
+            if sock.family in (socket.AF_INET, socket.AF_INET6) and not allowed(address[0]):
+                raise OSError("tests are offline (direct socket)")
+            return _real(sock, address)
+
+        monkeypatch.setattr(socket.socket, method, guarded)
+
+    try:
+        from curl_cffi import requests as curl_requests
+    except ImportError:
+        return  # optional transport; stdlib guard remains active
+    monkeypatch.setattr(curl_requests.Session, "request", _curl_request)
+
+    async def _async_request(self, method, url, *args, **kwargs):
+        raise curl_requests.exceptions.ConnectionError("tests are offline (async curl)")
+
+    monkeypatch.setattr(curl_requests.AsyncSession, "request", _async_request)
+
+
 @pytest.fixture(autouse=True)
 def _no_digest_calendar_network(monkeypatch):
     """日报"今日持仓归因"的财报 / 除息日历是该段联网的一步（yfinance Ticker.calendar；基准刷新另走 account_performance）。

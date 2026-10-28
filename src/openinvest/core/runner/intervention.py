@@ -112,7 +112,7 @@ def _log_intervention(record: Dict[str, Any], path: Optional[Path] = None) -> No
                     continue  # 坏行不挡写入
                 if (r.get("date"), r.get("asset"), r.get("rule")) == key:
                     return  # 同日同资产同规则已记，幂等跳过
-    with path.open("a", encoding="utf-8") as f:
+    with path.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
@@ -295,7 +295,7 @@ def _save_path_snapshot(
         "current_price": current_price,
         "atr_pct": atr_pct,
         "profile": path_profile,
-    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    }, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
 
 __all__ = [
     "_extract_regime_label",

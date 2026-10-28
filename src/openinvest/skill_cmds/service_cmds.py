@@ -97,7 +97,7 @@ def _install() -> Dict[str, Any]:
         _run(["launchctl", "bootout", f"{domain}/{LABEL}"])  # 重装：先卸旧的，没装过会报错，忽略
         steps = [_run(["launchctl", "bootstrap", domain, str(path)])]
     else:
-        path.write_text(_systemd_unit(args), encoding="utf-8")
+        path.write_text(_systemd_unit(args), encoding="utf-8", newline="\n")
         steps = [_run(["systemctl", "--user", "daemon-reload"]),
                  _run(["systemctl", "--user", "enable", "--now", UNIT])]
     out: Dict[str, Any] = {"unit_path": str(path), "exec": shlex.join(args), "steps": steps}

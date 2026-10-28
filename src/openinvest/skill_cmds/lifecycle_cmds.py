@@ -264,7 +264,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         sys.exit(0)
     profile_path.write_text(
         json.dumps(profile, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+        encoding="utf-8", newline="\n"
     )
 
     # 2) 写 .env（合并已存在的，不覆盖未提供字段）
@@ -280,7 +280,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     ]
     for k, v in merged_env.items():
         env_lines.append(f"{k}={v}")
-    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8", newline="\n")
     # 之后的判断（解析 Q4 用的 key / base_url、"缺 key"降级、凭据是否齐全）都按落盘后的 .env 看：
     # 密钥不经对话，用户自己写进 .env、agent 的 payload 不带 env 时也要用上
     env_data = merged_env

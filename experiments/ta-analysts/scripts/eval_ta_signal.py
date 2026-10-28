@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import math
 import sys
@@ -26,19 +28,32 @@ import pandas as pd
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.ta_data import CACHE, hist  # noqa: E402
-
 import os as _os
-REPORTS = CACHE / _os.getenv("INVEST_TA_OUT", "phase_a_reports.jsonl")
+REPORTS = ROOT / _os.getenv("INVEST_TA_OUT", "data/2022_mimo-flash.jsonl")
 HORIZONS = (30, 60)
+_PRICES = {}
+
+
+def load_prices(path: Path) -> None:
+    """Frozen long-form closes; never download or read a personal market DB."""
+    df = pd.read_csv(path)
+    if not {"date", "symbol", "close"}.issubset(df.columns):
+        raise ValueError("prices CSV requires date,symbol,close columns")
+    df["date"] = pd.to_datetime(df["date"], errors="raise")
+    df["close"] = pd.to_numeric(df["close"], errors="raise")
+    if df.duplicated(["date", "symbol"]).any():
+        raise ValueError("duplicate (date,symbol) prices")
+    if not np.isfinite(df["close"]).all() or (df["close"] <= 0).any():
+        raise ValueError("prices must be finite and positive")
+    _PRICES.clear()
+    for symbol, sub in df.groupby("symbol"):
+        _PRICES[symbol] = sub.set_index("date")["close"].sort_index()
 
 
 def _fwd_return(symbol: str, date: str, days: int) -> Optional[float]:
-    df = hist(symbol)
-    s = df["Close"]
-    if isinstance(s, pd.DataFrame):
-        s = s.iloc[:, 0]
-    s = s.dropna()
+    if symbol not in _PRICES:
+        raise ValueError(f"prices CSV missing required symbol: {symbol}")
+    s = _PRICES[symbol]
     idx = s.index
     ts = pd.Timestamp(date)
     i = idx.searchsorted(ts, side="right") - 1   # 决策日当天或之前最近收盘
@@ -69,13 +84,33 @@ def _hit(stance: str, fwd: float) -> Optional[bool]:
 
 
 def main() -> None:
-    rows = [json.loads(l) for l in REPORTS.open() if l.strip()]
+    parser = argparse.ArgumentParser(description="Frozen TA Gate replay (no LLM / personal DB)")
+    parser.add_argument("--reports", type=Path, default=REPORTS)
+    parser.add_argument("--prices", type=Path, required=True,
+                        help="frozen CSV: date,symbol,close; same adjustment convention as original")
+    args = parser.parse_args()
+    try:
+        load_prices(args.prices)
+        rows = [json.loads(l) for l in args.reports.open() if l.strip()]
+        if not rows:
+            raise ValueError("empty report file")
+        required = {"key", "date", "symbol", "analyst", "stance", "det_stance"}
+        if any(not required.issubset(r) for r in rows):
+            raise ValueError("report missing required fields")
+        if any(r["stance"] not in ("bullish", "bearish", "neutral", None) for r in rows):
+            raise ValueError("invalid stance")
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    for path in (args.reports, args.prices):
+        print(f"input {path.name} sha256={hashlib.sha256(path.read_bytes()).hexdigest()}")
     # key 去重（断点续跑/补漏并发的双写护栏，首条为准）
     seen, uniq = set(), []
     for r in rows:
         if r["key"] not in seen:
             seen.add(r["key"])
             uniq.append(r)
+        elif next(x for x in uniq if x["key"] == r["key"]) != r:
+            raise ValueError(f"conflicting duplicate report key: {r['key']}")
     rows = uniq
     df = pd.DataFrame(rows)
     print(f"报告 {len(df)} 条，缺 STANCE {int(df['stance'].isna().sum())} 条")
@@ -95,7 +130,8 @@ def main() -> None:
         # ①方向基率：在分析师自己表态的子集上算（同分母 paired 才公平）
         if len(act):
             up_share = float((act["fwd_30"] > 0).mean())
-            base1 = max(up_share, 1 - up_share)
+            down_share = float((act["fwd_30"] < 0).mean())
+            base1 = max(up_share, down_share)
         else:
             base1 = float("nan")
         hits = [_hit(r.stance, r.fwd_30) for r in act.itertuples()]
@@ -126,9 +162,9 @@ def main() -> None:
 
         bar = max(b for b in (base1, base3) if not math.isnan(b)) if n else float("nan")
         ok = (not math.isnan(lo)) and lo > bar
-        verdicts[analyst] = "PASS" if ok else "FAIL"
+        verdicts[analyst] = ("PASS" if ok else "FAIL") if n else "INSUFFICIENT_DATA"
         lines.append(
-            f"| {analyst} | {n}/{n_all} ({n/n_all:.0%}) | {hr:.1%} "
+            f"| {analyst} | {n}/{n_all} ({n/n_all if n_all else 0:.0%}) | {hr:.1%} "
             f"[{lo:.1%},{hi_:.1%}] | {hr60:.1%} | {base1:.1%} | {base3_label} "
             f"| {agree if not math.isnan(agree) else float('nan'):.0%} | **{verdicts[analyst]}** |"
         )
@@ -147,6 +183,8 @@ def main() -> None:
     for l in lines:
         print(l)
     print("\n预注册 Gate：CI 下界 > max(①同子集基率, ③机械映射) → PASS")
+    print("注意：coverage=表态比例，不是预测区间覆盖率；Wilson 未修正重叠窗口。")
+    print("③沿用原 Gate 的自身表态子集，非共同样本检验；不据此声称统计显著。")
     print("Gate 结果:", verdicts)
     n_pass = sum(1 for v in verdicts.values() if v == "PASS")
     print(f"\n=> {'进入 Phase B（只集成 PASS 的分析师）' if n_pass else '不跑 Phase B，结论落文档'}")

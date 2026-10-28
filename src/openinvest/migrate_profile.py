@@ -46,7 +46,7 @@ def _refuse_if_already_migrated(store: MemoryStore, force: bool) -> None:
             src = store.root / f"{name}.md"
             if src.exists():
                 backup = store.root / f"{name}.md.bak.{ts}"
-                backup.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+                backup.write_text(src.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
                 print(f"  已备份 {name}.md -> {backup.name}")
         return
     raise RuntimeError(
@@ -179,7 +179,7 @@ def main(force: bool = False):
 - `insights/*.md` — 每个一条 Deep Sleep 通过阈值门的洞察
 - `DREAMS.md` — 人类可读的叙事性梦日记
 """
-    (store.root / "MEMORY.md").write_text(index_body, encoding="utf-8")
+    (store.root / "MEMORY.md").write_text(index_body, encoding="utf-8", newline="\n")
     print(f"✓ memory/MEMORY.md 已写入")
 
     # --- 7. 备份原文件 ---

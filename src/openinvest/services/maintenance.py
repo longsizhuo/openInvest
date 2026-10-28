@@ -20,12 +20,13 @@
 """
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from openinvest.utils import oslock
 
 BAK_KEEP = 20
 BAK_DAYS = 7
@@ -70,25 +71,33 @@ def _walk_locks(root: Path) -> List[Path]:
 
 
 def _remove_if_unheld(lock: Path, apply: bool) -> bool:
-    """True = 当前无人持有（apply 时已删除）。持有中 / 已不存在 → False。"""
+    """True = 当前无人持有（apply 时已删除）。持有中 / 已不存在 / Windows 上没删掉 → False。"""
     try:
         fd = os.open(lock, os.O_RDWR)
     except OSError:
         return False
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslock.flock(fd, oslock.LOCK_EX | oslock.LOCK_NB)
         except BlockingIOError:
             return False  # 正被持有 = 在用
-        if apply:
+        if apply and oslock.CAN_UNLINK_OPEN:
             try:
                 if os.fstat(fd).st_ino == os.stat(lock).st_ino:
                     os.unlink(lock)
             except FileNotFoundError:
                 pass
-        return True
+        elif not oslock.CAN_UNLINK_OPEN:
+            oslock.flock(fd, oslock.LOCK_UN)  # 关句柄时释放字节锁的时机不确定，显式解锁
     finally:
         os.close(fd)  # 关 fd 才释放 flock
+    if apply and not oslock.CAN_UNLINK_OPEN:
+        # Windows 不许删打开中的文件：关掉再删。期间若有进程重新打开了它，unlink 会失败 → 留着，互斥不破
+        try:
+            os.unlink(lock)
+        except OSError:
+            return False  # 没删掉就别计进 deleted
+    return True
 
 
 def cleanup(root: Path, *, apply: bool = False, keep: int = BAK_KEEP, days: int = BAK_DAYS,

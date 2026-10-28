@@ -4,13 +4,13 @@
 （`python -m openinvest.scheduler.runner`）、MCP 进程拉起的内嵌子进程（embedded）。
 没有它，两个进程会把 price_sentinel / event_watch 等每个 job 跑两遍（只有部分 job 有 state_claim 幂等闸）。
 
-fcntl.flock 持有到进程退出，进程死了内核自动释放——不存在"pid 文件残留要判僵尸"的问题
+oslock.flock 持有到进程退出，进程死了内核自动释放——不存在"pid 文件残留要判僵尸"的问题
 （对比 core/consolidation_lock.py 的 pid + stale 判据）。锁文件正文是持有者信息（JSON），
 给 doctor / `service status` 读，也让系统服务启动时认出并请走内嵌实例。
 """
 from __future__ import annotations
 
-import fcntl
+from openinvest.utils import oslock
 import json
 import os
 import socket
@@ -76,9 +76,9 @@ def try_acquire(mode: str) -> Optional[IO[str]]:
     """
     path = lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    f = open(path, "a+", encoding="utf-8")
+    f = open(path, "a+", encoding="utf-8", newline="\n")
     try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oslock.flock(f, oslock.LOCK_EX | oslock.LOCK_NB)
     except BlockingIOError:
         f.close()
         return None
@@ -104,13 +104,13 @@ def holder(root: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     path = lock_path(root)
     if not path.exists():
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r+" if os.name == "nt" else "r", encoding="utf-8", newline="\n") as f:
         try:
-            fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            oslock.flock(f, oslock.LOCK_SH | oslock.LOCK_NB)
         except BlockingIOError:
             try:
                 return json.loads(f.read() or "{}")
             except ValueError:
                 return {}  # 持有者刚抢到、还没写完正文
-        fcntl.flock(f, fcntl.LOCK_UN)
+        oslock.flock(f, oslock.LOCK_UN)
         return None
