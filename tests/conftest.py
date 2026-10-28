@@ -90,7 +90,8 @@ def _no_network(monkeypatch):
         if host in _LOOPBACK_HOSTS:
             return True
         try:
-            return ipaddress.ip_address(host).is_loopback
+            address = ipaddress.ip_address(host)
+            return address.is_loopback or address.is_unspecified
         except ValueError:
             return False
 
