@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.34.0...invest-skill-v0.34.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **committee:** spell out symbol formats so agents can fix bare 6-digit codes ([#556](https://github.com/longsizhuo/openInvest/issues/556)) ([8f2c988](https://github.com/longsizhuo/openInvest/commit/8f2c988af6890ec1bcbea2845fd610f7c1efcb8d))
+
 ## [0.34.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.33.0...invest-skill-v0.34.0) (2026-10-27)
 
 
