@@ -18,7 +18,7 @@ from openinvest.core.regime_probability import (
 )
 from openinvest.utils.advisory import is_advisory_mode
 from openinvest.utils.base_currency import single_invest_cap
-from openinvest.utils.eastmoney_fund import extract_fund_code
+from openinvest.utils.symbols import symbol_format_hint
 from openinvest.utils.exchange_fee import (
     analyze_multi_timeframe, get_history_data, get_macro_data,
 )
@@ -67,11 +67,7 @@ def build_input_health_facts(
 def no_data_error(symbol: str) -> str:
     """「无 X 行情数据」；X 是没带后缀/前缀的六位代码时顺带教调用方怎么写全——
     群聊里 agent 传裸 110011 拿到这句就放弃了，带上格式它能自己改对重试。"""
-    msg = f"无 {symbol} 行情数据"
-    code = extract_fund_code(symbol)
-    if code and not str(symbol).strip().upper().startswith("FUND:"):
-        msg += f"（六位代码请写全：沪市 {code}.SS / 深市 {code}.SZ（股票、ETF），场外基金 FUND:{code}）"
-    return msg
+    return f"无 {symbol} 行情数据" + symbol_format_hint(symbol)
 
 
 def run_committee_for_symbol(
@@ -132,8 +128,9 @@ def run_committee_for_symbol(
             None,
         )
         if target is None:
-            emit("error", reason=f"asset {symbol} not in strategy.target_assets")
-            return {"error": f"asset {symbol} not in strategy.target_assets"}
+            msg = f"asset {symbol} not in strategy.target_assets" + symbol_format_hint(symbol)
+            emit("error", reason=msg)
+            return {"error": msg}
 
     # 2. 行情 + 指标 + regime
     try:

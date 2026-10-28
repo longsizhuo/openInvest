@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.34.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.33.0...invest-skill-v0.34.0) (2026-10-27)
+
+
+### Features
+
+* **cli:** offline ledger brief for host-agent hooks ([#560](https://github.com/longsizhuo/openInvest/issues/560)) ([d0da6ff](https://github.com/longsizhuo/openInvest/commit/d0da6ff2726027e86c29baa270c9d45c3f1dd943))
+* **plugin:** inject a ledger digest and wire up Hermes cron at onboarding ([#562](https://github.com/longsizhuo/openInvest/issues/562)) ([b4a3602](https://github.com/longsizhuo/openInvest/commit/b4a36022e7947ca0bf8055e7756f5c4c8e299614))
+* **scheduler:** keep the scheduler running for plugin installs ([#559](https://github.com/longsizhuo/openInvest/issues/559)) ([086abde](https://github.com/longsizhuo/openInvest/commit/086abde21e74ef7895685ad5704cd281a2beed6a))
+
 ## [0.33.0](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.32.0...invest-skill-v0.33.0) (2026-10-21)
 
 

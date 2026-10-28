@@ -52,6 +52,33 @@ def normalize_symbol(symbol: str) -> str:
     return f"{digits.zfill(4) if len(digits) < 4 else digits}.HK"
 
 
+def canonical_symbol(symbol: str, kind: Optional[str] = None) -> str:
+    """入账用的 canonical 写法：A 股裸 6 位码补交易所后缀（裸码 yfinance 查不到行情），其余同 normalize_symbol。
+
+    沪 .SS：5 场内基金 / 6 股票 / 9 B 股 / 11 可转债（同 calc.rebalance._CONVERTIBLE）；
+    深 .SZ：其余 0 / 1 / 2 / 3 开头（含 12 可转债、15–18 场内基金，同下方 _A_SHARE_NON_STOCK）。
+    kind="fund" 保留裸码：东财场外基金就用裸 6 位码（utils.eastmoney_fund._FUND_CODE_RE）。
+    ponytail: 4 / 8 开头（北交所）不补，yfinance 覆盖存疑；有人用再加 .BJ。"""
+    s = normalize_symbol(symbol)
+    if str(kind or "").lower() == "fund" or not (len(s) == 6 and s.isdigit()):
+        return s
+    if s[0] in "569" or s.startswith("11"):
+        return f"{s}.SS"
+    return f"{s}.SZ" if s[0] in "0123" else s
+
+
+def resolve_symbol(symbol: str, rows: Iterable[Dict], kind: Optional[str] = None) -> str:
+    """调用方写法 → 已有记录里该标的的写法。rows = 持仓 / 流水 / target_assets 行（dict，可带 kind）。
+    先精确匹配（老账本里存成裸码的 510300 原样命中），再按 canonical_symbol 比较（510300 ↔ 510300.SS、
+    gc=f ↔ GC=F 互相找得到）；都没有 → canonical 写法（新建用；其余调用方照常报"找不到"）。"""
+    s = str(symbol or "").strip()
+    rows = [r for r in rows if r.get("symbol")]
+    if any(str(r["symbol"]) == s for r in rows):
+        return s
+    want = canonical_symbol(s, kind)
+    return next((str(r["symbol"]) for r in rows if canonical_symbol(str(r["symbol"]), r.get("kind")) == want), want)
+
+
 # 同一家公司的跨市场代码：港股上市 ↔ 美股 ADR / OTC。LLM 归一化器常用美股/OTC 代码给
 # 港股公司打标（打标 OTC 代码的事件对持港股的用户召回 / 触发 / EVENT_STANCE 全不可见）。
 # 通用金融知识批量表，准入标准同 TRACKING_WHITELIST：任何用户持有该 ticker 都成立。
@@ -171,9 +198,11 @@ __all__ = [
     "ENTITY_CANONICAL_PATTERNS",
     "HK_CROSS_LISTINGS",
     "TRACKING_WHITELIST",
+    "canonical_symbol",
     "canonical_symbols_for_entities",
     "is_single_stock",
     "listing_aliases",
     "normalize_symbol",
     "proxy_symbols_for",
+    "resolve_symbol",
 ]

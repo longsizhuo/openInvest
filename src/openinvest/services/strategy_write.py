@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.schemas import validate_strategy
+from openinvest.services.symbol_map import resolve_symbol
 
 
 class StrategyConflict(ValueError):
@@ -125,6 +126,17 @@ def _store(store: Optional[MemoryStore]) -> MemoryStore:
     return store if store is not None else MemoryStore()
 
 
+def _resolve_new(symbol: str, existing: List[Dict[str, Any]], store: MemoryStore) -> str:
+    """track / add 用的写法：已有 target 的写法 > 持仓里的写法 > canonical_symbol。
+    持仓行带 kind：老账本裸码 510300、场外基金 110011（kind=fund）原样沿用，不被补成 .SS——
+    holdings_digest 等按精确 symbol 把 target 和持仓连起来，写法不一致就对不上（#561 评审第 1 条）。"""
+    s = resolve_symbol(symbol, existing)
+    if any(a.get("symbol") == s for a in existing):
+        return s
+    doc = store.read("portfolio")
+    return resolve_symbol(symbol, (doc.get("holdings") if doc else None) or [])
+
+
 def set_allocations(
     target_allocation_stock: Optional[float] = None,
     target_allocation_cash: Optional[float] = None,
@@ -154,7 +166,7 @@ def set_allocations(
             assets: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
 
             def _asset(sym: str, what: str) -> Dict[str, Any]:
-                a = next((x for x in assets if x.get("symbol") == sym), None)
+                a = next((x for x in assets if x.get("symbol") == resolve_symbol(sym, assets)), None)
                 if a is None:
                     raise StrategyNotFound(f"symbol {sym} 不在 target_assets（先 track_asset 跟踪它再设 {what}）")
                 return a
@@ -189,12 +201,14 @@ def add_target_asset(
     symbol = str(asset.get("symbol") or "").strip()
     if not symbol:
         raise ValueError("asset 必须含非空 symbol")
-    with _store(store).transaction("strategy") as tx:
+    store = _store(store)
+    with store.transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+        symbol = _resolve_new(symbol, existing, store)   # 510300 → 510300.SS；已有同一标的的另一种写法也算重复
         if any(a.get("symbol") == symbol for a in existing):
             raise StrategyConflict(f"symbol {symbol} 已存在，请用 update 或先 remove")
-        existing.append(dict(asset))
+        existing.append({**asset, "symbol": symbol})
         tx["target_assets"] = existing
         _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
@@ -211,6 +225,7 @@ def patch_target_asset(
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+        symbol = resolve_symbol(symbol, existing)
         target = next((a for a in existing if a.get("symbol") == symbol), None)
         if target is None:
             raise StrategyNotFound(f"symbol {symbol} 不存在")
@@ -229,6 +244,7 @@ def remove_target_asset(
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+        symbol = resolve_symbol(symbol, existing)   # track 510300 存成 510300.SS 后，untrack 510300 照样删得到
         if not any(a.get("symbol") == symbol for a in existing):
             raise StrategyNotFound(f"symbol {symbol} 不存在")
         tx["target_assets"] = [a for a in existing if a.get("symbol") != symbol]
@@ -274,9 +290,11 @@ def upsert_target_asset(
         raise ValueError("symbol 不能为空")
     fields = {k: v for k, v in fields.items() if v is not None}
     alerts = fields.pop("alerts", None)  # 嵌套对象，走 _merge_alerts（合并 / null 清键），不能整块 update 覆盖
-    with _store(store).transaction("strategy") as tx:
+    store = _store(store)
+    with store.transaction("strategy") as tx:
         before = _targets(tx.metadata)
         existing: List[Dict[str, Any]] = list(tx.get("target_assets", []) or [])
+        symbol = _resolve_new(symbol, existing, store)   # 510300 → 510300.SS；老条目 / 持仓的裸码照样沿用
         target = next((a for a in existing if a.get("symbol") == symbol), None)
         if target is None:
             msg = f"已新增资产 {symbol}"

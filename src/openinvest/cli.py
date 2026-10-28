@@ -69,6 +69,7 @@ from openinvest.skill_cmds.strategy_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.lifecycle_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.config_cmds import *  # noqa: E402,F401,F403
 from openinvest.skill_cmds.maintenance_cmds import *  # noqa: E402,F401,F403
+from openinvest.skill_cmds.service_cmds import *  # noqa: E402,F401,F403
 
 
 # ---------- main ----------
@@ -140,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="真实账户业绩：TWR 30d/YTD/成立以来 + XIRR + 最大回撤 + 年化波动 + vs 基准（status 里同一块）"
     ).set_defaults(func=cmd_performance)
     sub.add_parser("strategy").set_defaults(func=cmd_strategy)
+    p = sub.add_parser("brief", help="给宿主 Agent 的离线账本摘要（持仓 / 关注 / 今日裁决 / 待办 / 调度器），插件钩子注入用；不联网")
+    p.add_argument("--text", action="store_true", help="输出一段纯文本（钩子直接当上下文），默认 JSON")
+    p.set_defaults(func=cmd_brief)
     sub.add_parser("live_prices").set_defaults(func=cmd_live_prices)
     sub.add_parser("discipline", help="委员会纪律台账(不作为率+拦冲动+反事实损益)").set_defaults(func=cmd_discipline)
 
@@ -516,6 +520,17 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--keep", type=int, default=20, help="每个 family 至少保留最新 N 份（默认 20）")
     c.add_argument("--days", type=int, default=7, help="mtime 在 N 天内的一律保留（默认 7）；与 --keep 取并集")
     c.set_defaults(func=cmd_maintenance)
+
+    p = sub.add_parser(
+        "service",
+        help="把后台调度器（新闻 / 价格哨兵 / 净值快照 / 备份）装成开机自启的用户级服务（systemd --user / launchd）。"
+             "不装也行：openinvest-mcp 在宿主运行时会自动拉起内嵌调度器",
+    )
+    ssub = p.add_subparsers(dest="service_cmd", required=True)
+    for name, desc in (("install", "写单元文件并启动（重跑 = 更新到当前版本）"),
+                       ("uninstall", "停掉并删除单元文件"),
+                       ("status", "是否已装 / 谁在跑调度器（daemon 还是 embedded）/ 版本是否一致")):
+        ssub.add_parser(name, help=desc).set_defaults(func=cmd_service)
 
     p = sub.add_parser(
         "backfill_raw_close",

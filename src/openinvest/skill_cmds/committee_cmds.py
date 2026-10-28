@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from openinvest.utils.symbols import safe_symbol
+from openinvest.utils.symbols import safe_symbol, symbol_format_hint
 from openinvest.skill_cmds._helpers import _print_json
 from openinvest.paths import INVEST_ROOT
 
@@ -164,7 +164,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     if target is None:
         _print_json({
             "status": "error",
-            "error": f"asset {args.symbol} not in strategy.target_assets",
+            "error": f"asset {args.symbol} not in strategy.target_assets" + symbol_format_hint(args.symbol),
             "hint": "先把 symbol 加进 strategy.md target_assets，见 references/adding-assets.md",
         })
         sys.exit(1)

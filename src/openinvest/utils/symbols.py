@@ -4,3 +4,16 @@
 monkeypatch 请钉 openinvest.calc.symbols.* 实现命名空间，patch 本模块属性打不到实现。
 """
 from openinvest.calc.symbols import *  # noqa: F401,F403
+
+
+def symbol_format_hint(symbol: str) -> str:
+    """Show alternative explicit six-digit formats without resolving the asset."""
+    from openinvest.utils.eastmoney_fund import extract_fund_code
+
+    original = str(symbol).strip().upper()
+    code = extract_fund_code(original)
+    if not code or original.startswith("FUND:"):
+        return ""
+    candidates = [f"{code}.SS", f"{code}.SZ", f"FUND:{code}"]
+    alternatives = " / ".join(x for x in candidates if x != original)
+    return f"（六位代码请确认格式：{alternatives}；交易所股票/ETF 用 .SS/.SZ，场外基金用 FUND:）"

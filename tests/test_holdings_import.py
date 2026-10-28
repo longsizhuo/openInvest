@@ -141,6 +141,15 @@ def test_commit_non_destructive():
     assert pm.reloaded
 
 
+def test_commit_skips_legacy_bare_code_and_suffixes_new_rows():
+    # 老账本裸码 510300 再导入 510300 → 已有，跳过；新的裸码补交易所后缀
+    pm = FakePM({"holdings": [{"symbol": "510300", "kind": "etf", "units": 100}], "cash": {}})
+    s = commit_parsed(pm, {"holdings": [{"symbol": "510300", "kind": "etf", "units": 999},
+                                        {"symbol": "159915", "kind": "etf", "units": 10}]})
+    assert s["skipped_holdings"] == ["510300.SS"] and s["added_holdings"] == ["159915.SZ"]
+    assert [(h["symbol"], h["units"]) for h in pm.state["holdings"]][0] == ("510300", 100)
+
+
 def test_commit_rejects_usd_ounce_gold_but_keeps_other_rows():
     """#462：黄金按 USD/盎司解析 → 与 buy 同一道 gold_booking 闸拒收；整批不失败，其他行照常入账。"""
     pm = FakePM({"holdings": [], "cash": {}})
