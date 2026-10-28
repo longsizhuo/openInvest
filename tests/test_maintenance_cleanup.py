@@ -59,7 +59,7 @@ def test_dry_run_deletes_nothing_apply_deletes_exactly_the_planned(mem):
     for i in range(1, 31):
         _bak(mem, "portfolio.md", i, age_days=30)
     (mem / "portfolio.md").write_text("live")
-    (mem / "portfolio.md.bak").write_text("无时间戳后缀，不是本工具管的")
+    (mem / "portfolio.md.bak").write_text("无时间戳后缀，不是本工具管的", encoding="utf-8")
     (mem / "foo.bak.notatimestamp").write_text("x")
 
     dry = maintenance.cleanup(mem, apply=False, now=NOW)

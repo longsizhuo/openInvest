@@ -104,13 +104,16 @@ def _compact_news() -> None:
 
 def pending_news_items(now: Optional[datetime] = None) -> List[Dict[str, Any]]:
     """未入库、未 dismiss、未过期的新闻（按 url 去重，先进先出）。纯读，不记 last_drain。"""
+    rows = _read("news.jsonl")
+    if not rows:  # 空队列不碰 EventStore：它会顺手建 db/events.db，调度器写锁时还要等 5s（brief 每个会话都调）
+        return []
     now = now or _now()
     dismissed = {r.get("url") for r in _read("news_dismissed.jsonl")}
     from openinvest.db.event_store import EventStore
     from openinvest.services.embeddings import DEFAULT_DIM
     store = EventStore(embedding_dim=DEFAULT_DIM)
     seen, out = set(), []
-    for rec in _read("news.jsonl"):
+    for rec in rows:
         url = rec.get("url")
         if not url or url in seen or url in dismissed:
             continue

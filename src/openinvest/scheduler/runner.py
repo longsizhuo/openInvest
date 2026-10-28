@@ -13,6 +13,9 @@ daemon 以 `python -m` 启动，本模块在进程里叫 __main__：job 里 `imp
 每个 job 有墙钟超时（jobs/*.yml `timeout_minutes`，默认 30）；外部心跳 `scheduler.heartbeat_url`
 每 5 分钟 GET 一次（dead-man switch）。两者的设计取舍见 `_wrap_job` / `_heartbeat` 注释。
 
+同一 INVEST_HOME 只跑一个调度器（scheduler/lock.py）：daemon 阻塞等锁，并请走内嵌实例；
+`--embedded-parent` 是 openinvest-mcp 拉起的内嵌子进程，锁被占就退、父进程没了就跟着退。
+
 使用：
     python -m openinvest.scheduler.runner               # 后台跑所有 enabled job
     python -m openinvest.scheduler.runner --once daily_report
@@ -391,7 +394,45 @@ def cmd_once(job_name: str) -> int:
     return 0 if status == "success" else 1
 
 
-def cmd_daemon() -> int:
+def _acquire_lock(embedded_parent: Optional[int]):
+    """daemon 阻塞等锁；内嵌子进程抢不到就退（别人在跑，MCP 端过会儿再看）。
+
+    优先级：daemon（系统服务 / 手动常驻）> embedded。daemon 发现锁在内嵌实例手里，
+    SIGTERM 请它退场再接手——否则装了系统服务也要等宿主（Hermes gateway 可能常驻数天）退出才生效。
+    """
+    from openinvest.scheduler.lock import holder, same_pid_namespace, try_acquire
+
+    if embedded_parent is not None:
+        return try_acquire("embedded")
+    asked = None
+    while True:
+        f = try_acquire("daemon")
+        if f is not None:
+            return f
+        h = holder() or {}
+        pid = h.get("pid")
+        if h.get("mode") == "embedded" and pid and pid != asked:
+            if same_pid_namespace(h):
+                log.info(f"调度锁在内嵌实例（pid={pid}）手里，请它退出后接手")
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            else:  # 容器 ↔ 宿主共用 bind mount 的 db/：pid 不是我这边的，只能等它自己退
+                log.warning(f"调度锁在另一台主机 / 容器的内嵌实例（{h.get('host')} pid={pid}）手里，等它退出；"
+                            "宿主那边的 openinvest-mcp 设 INVEST_EMBEDDED_SCHEDULER=0 可避免")
+            asked = pid
+        elif asked is None:
+            log.info(f"另一个调度器在跑（{h}），等它退出")
+            asked = pid or -1
+        time.sleep(5)
+
+
+def cmd_daemon(embedded_parent: Optional[int] = None) -> int:
+    lock = _acquire_lock(embedded_parent)  # noqa: F841  持有到进程退出，内核自动释放
+    if lock is None:
+        log.info("另一个调度器在跑，内嵌实例不启动")
+        return 0
     _ensure_run_log_table()
     sched = build_scheduler()
     register_jobs(sched)
@@ -423,6 +464,10 @@ def cmd_daemon() -> int:
 
     try:
         while not stopping["flag"]:
+            # 内嵌：拉起我的 MCP 进程没了（被重新挂到 init / subreaper 下）就跟着退，不留孤儿
+            if embedded_parent is not None and os.getppid() != embedded_parent:
+                log.info("MCP 父进程已退出，内嵌调度器随之关闭")
+                break
             time.sleep(1)
     finally:
         sched.shutdown(wait=True)
@@ -434,6 +479,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="invest scheduler runner")
     parser.add_argument("--list", action="store_true", help="列出所有 job")
     parser.add_argument("--once", metavar="JOB_NAME", help="单次执行某个 job")
+    parser.add_argument("--embedded-parent", type=int, metavar="PID",
+                        help="内部用：由 openinvest-mcp 拉起；锁被占就退，父进程退出就跟着退")
     args = parser.parse_args()
 
     if args.list:
@@ -441,7 +488,7 @@ def main() -> int:
         return 0
     if args.once:
         return cmd_once(args.once)
-    return cmd_daemon()
+    return cmd_daemon(args.embedded_parent)
 
 
 if __name__ == "__main__":

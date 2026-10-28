@@ -17,15 +17,16 @@ import time
 CAN_UNLINK_OPEN = os.name != "nt"
 
 try:
-    from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock  # noqa: F401
+    from fcntl import LOCK_EX, LOCK_SH, LOCK_NB, LOCK_UN, flock  # noqa: F401
 except ImportError:  # Windows
     import msvcrt
 
-    LOCK_EX, LOCK_NB, LOCK_UN = 2, 4, 8
+    LOCK_SH, LOCK_EX, LOCK_NB, LOCK_UN = 1, 2, 4, 8
     # Windows 字节锁是强制锁：锁第 0 字节会让别的句柄读数据文件报 EACCES（flock 是建议锁，不挡读）。
     # 锁远在 EOF 之外的一个字节 → 只在加锁者之间互斥，不影响任何读写。
     _WIN_LOCK_OFFSET = 1 << 40
 
+    # Shared probes conservatively use the same exclusive byte lock on Windows.
     def flock(fd, op: int) -> None:  # type: ignore[misc]
         """fd 可以是 int 或带 fileno() 的文件对象；读写位置调用前后不变。"""
         fd = fd if isinstance(fd, int) else fd.fileno()

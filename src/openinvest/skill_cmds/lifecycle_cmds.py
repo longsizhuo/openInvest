@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.portfolio_manager import gold_booking
+from openinvest.services.symbol_map import canonical_symbol
 
 from openinvest.services.skill_views import INIT_PAYLOAD_SHAPE
 from openinvest.skill_cmds._helpers import _print_json
@@ -111,7 +112,7 @@ def _write_v2_portfolio(
     }
     rejected: Dict[str, str] = {}
     for h in holdings:
-        sym = str(h.get("symbol") or "").strip()
+        sym = canonical_symbol(str(h.get("symbol") or ""), h.get("kind"))   # A 股裸码补 .SS / .SZ
         if not sym:
             continue  # 跳过 LLM 漏 symbol 的脏行
         row = {
@@ -173,6 +174,27 @@ def _untouched_init_fallback() -> bool:
         return False
 
 
+def _checkout_collision(root: Path) -> Optional[Dict[str, Any]]:
+    """新用户的数据目录是一个 git checkout → 错误 JSON，否则 None。典型：agent 把仓库 clone 进了默认数据目录
+    ~/openInvest，账本会写进 git 工作区。INVEST_HOME 显式指向别处 / 已有 memory/user.md（老用户拿 clone 当
+    数据目录）/ OPENINVEST_DEV_MODE=1 都放行。INVEST_HOME 等于默认 ~/openInvest 不算显式：run.sh 和安装文档
+    都会自动填这个默认值，进程里分不出是不是用户自己设的。"""
+    import os
+    from openinvest.paths import DEFAULT_HOME, is_repo_checkout
+    env = os.getenv("INVEST_HOME", "").strip()
+    explicit = bool(env) and Path(env).expanduser().resolve() != DEFAULT_HOME.resolve()
+    if (explicit or os.getenv("OPENINVEST_DEV_MODE", "").strip() == "1"
+            or (root / "memory" / "user.md").exists() or not is_repo_checkout(root)):
+        return None
+    return {
+        "status": "error",
+        "error": f"数据目录 {root} 是一个 openInvest 代码仓库（git clone），账本会写进代码目录",
+        "hint": "使用 openInvest 不需要 clone 仓库。设置 INVEST_HOME 指向独立数据目录（例如 ~/openinvest-data），"
+                "或把 clone 放到别处（不要放进 ~/openInvest）；确实要拿这个 clone 当数据目录（开发）"
+                "就加 OPENINVEST_DEV_MODE=1 再跑 init",
+    }
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """交互式 / 半交互式 onboarding 入口。
 
@@ -204,6 +226,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     import os
     import shutil
     import subprocess
+
+    collision = _checkout_collision(ROOT)
+    if collision:
+        _print_json(collision)
+        sys.exit(1)
 
     if args.from_stdin:
         try:

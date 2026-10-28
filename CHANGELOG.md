@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.68.0](https://github.com/longsizhuo/openInvest/compare/v0.67.0...v0.68.0) (2026-10-27)
+
+
+### Features
+
+* **cli:** offline ledger brief for host-agent hooks ([#560](https://github.com/longsizhuo/openInvest/issues/560)) ([d0da6ff](https://github.com/longsizhuo/openInvest/commit/d0da6ff2726027e86c29baa270c9d45c3f1dd943))
+* **plugin:** inject a ledger digest and wire up Hermes cron at onboarding ([#562](https://github.com/longsizhuo/openInvest/issues/562)) ([b4a3602](https://github.com/longsizhuo/openInvest/commit/b4a36022e7947ca0bf8055e7756f5c4c8e299614))
+* **scheduler:** keep the scheduler running for plugin installs ([#559](https://github.com/longsizhuo/openInvest/issues/559)) ([086abde](https://github.com/longsizhuo/openInvest/commit/086abde21e74ef7895685ad5704cd281a2beed6a))
+
+
+### Bug Fixes
+
+* **portfolio:** A 股裸码入账自动补 .SS / .SZ 后缀 ([#561](https://github.com/longsizhuo/openInvest/issues/561)) ([237bea1](https://github.com/longsizhuo/openInvest/commit/237bea1b05e32de3112b75feb3161b9bf39ab30d))
+
 ## [0.67.0](https://github.com/longsizhuo/openInvest/compare/v0.66.0...v0.67.0) (2026-10-20)
 
 

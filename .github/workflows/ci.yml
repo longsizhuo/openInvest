@@ -138,6 +138,7 @@ jobs:
           uv run python -c "from openinvest.jobs.paper_autopilot import run"
           uv run python -c "from openinvest.jobs.ibkr_autopilot import run, pick, decide, submit, reconcile"
           uv run python -c "from openinvest.scheduler.cron import crontab_trigger, crontab_dow_to_names"
+          uv run python -c "from openinvest.scheduler.lock import try_acquire, holder; from openinvest.skill_cmds.service_cmds import cmd_service; from openinvest.scheduler.service_unit import unit_path; from openinvest.services.agent_brief import build_brief, render_brief_text"
           uv run python -c "from openinvest.core.benchmarks import BENCHMARKS, get_all_series"
           uv run python -c "from openinvest.utils.fx import get_fx_rate, cash_total_in_base"
           uv run python -c "from openinvest.calc.account_metrics import account_metrics, xirr, twr_windows"

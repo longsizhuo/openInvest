@@ -3,6 +3,10 @@
 Everything ships on PyPI; no cloning, no venv setup. Only prerequisite: [`uv`](https://docs.astral.sh/uv/)
 (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
+**Do not clone the repository to use openInvest.** If you clone it for development, do not put the clone
+in `~/openInvest`: that is the default data directory, and `init` refuses to write a new ledger into a git
+checkout. Keep the clone elsewhere, or point `INVEST_HOME` at a separate data directory.
+
 ## Install as MCP server (recommended)
 
 Register the stdio MCP server with the user's data directory:

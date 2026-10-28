@@ -1,6 +1,6 @@
 ---
 name: invest
-version: 0.33.0 # x-release-please-version
+version: 0.34.0 # x-release-please-version
 description: openInvest multi-asset AI investment committee — **daily use**. Read portfolio / live prices / strategy / decision history / adjust positions / run a 4-role LLM committee for an investment verdict. Supports any yfinance symbol (A-share / HK / US / ETF / crypto / commodities) and any currency. **Two paths** — (1) Coordinator, Claude Code spawns 4 subagents, saves DeepSeek tokens; (2) Direct, any agent (Codex / Hermes / OpenClaw / Cursor / Cline / plain script) runs `run.sh run_committee <SYM>` for a one-shot verdict. **Trigger scenarios** — "show portfolio / 看看我的持仓", "how is my P&L / 我现在涨了多少", "should I buy/sell X / 该不该买卖X", "analyze X / 分析一下X", "run committee on X / 跑委员会", "track AAPL / 跟踪苹果", "add/trim a position, log a trade / 加仓减仓记一笔". **First-time install uses a separate skill `invest-setup`** (switch to it when `doctor` returns `needs_setup`). Backend — longsizhuo/openInvest.
 platforms: [linux, macos]
 metadata:
@@ -229,9 +229,11 @@ translator + discipline ledger); stdout emits markdown identical to the email bo
 backend). On a circuit-breaker trip / unconfigured target_assets, stdout is a structured
 JSON error. Rerunning reruns the entire committee (burns tokens).
 
-**Prerequisite**: `.env` has `DEEPSEEK_API_KEY`. If the calling agent runs on the user's
-machine but has no key, tell the user to run `run.sh init` to configure it first.
-(**Remote-mode exception**: the key lives on the hub, not needed locally — see next section.)
+**Prerequisite**: with an LLM key in `.env` (backend mode) this runs the committee itself. Without
+one (agent mode, the default for plugin installs) it only assembles the report from verdicts you
+already submitted today — submit every target asset first (see "Keyless backend" below); the
+Hermes cron template `openinvest-daily` in the invest-setup skill's `references/hermes-cron.md` does exactly that.
+(**Remote-mode exception**: the hub runs it, not needed locally — see next section.)
 
 ## Remote mode (hub-and-spoke, multiple devices sharing one dataset)
 
@@ -292,6 +294,9 @@ defense / regime rules and rejects a CIO section with no parseable verdict (fix 
 **Keyless backend (agent mode):** the backend queues work it would otherwise send to a model. `pending_news` lists
 fetched news — `ingest_event` the relevant items with `one_line_claim` / `stance` / `severity` / `affected_symbols`,
 pass the rest as `dismiss_urls`. `pending_committees` lists triggered re-runs — prepare, run, submit each.
+The plugin hooks inject a one-paragraph `[openInvest]` digest (`run.sh brief --text`) at session start; when it says
+items are waiting and the conversation is about investing, clear them before or after answering (news expires
+after 48 h, committee requests after 24 h) unless a cron job (`openinvest-sentinel`) already does it.
 Daily report in agent mode: submit a verdict for every target asset first, then `daily_report` returns the
 report Markdown to deliver; anything in `missing_verdicts` is a failure to report, never something to skip.
 Do the submissions and the `daily_report` call in the same run (it reads today's local date — splitting them

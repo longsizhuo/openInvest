@@ -72,6 +72,46 @@ def test_upsert_track_semantics(store):
     assert out["status"] == "ok"
 
 
+def test_bare_a_share_code_suffixed_and_deduped(store):
+    svc.upsert_target_asset("510300", {"max_single_invest_cny": 1000}, store=store)
+    assert "510300.SS" in _symbols(store) and "510300" not in _symbols(store)
+    # 同一标的的另一种写法：更新原条目，不新建；add 视为重复；untrack / target_pct 用裸码也找得到
+    svc.upsert_target_asset("510300.ss", {"sell_fee_pct": 0.001}, store=store)
+    assert _symbols(store).count("510300.SS") == 1
+    with pytest.raises(svc.StrategyConflict):
+        svc.add_target_asset({"symbol": "510300", "max_single_invest_cny": 1}, store=store)
+    svc.set_allocations(target_pcts={"510300": 0.1}, store=store)
+    svc.remove_target_asset("510300", store=store)
+    assert "510300.SS" not in _symbols(store)
+    svc.add_target_asset({"symbol": "159915", "max_single_invest_cny": 1000}, store=store)
+    assert "159915.SZ" in _symbols(store)
+
+
+def test_legacy_bare_target_matched_by_suffixed_spelling(store):
+    meta = store.read("strategy").metadata
+    store.write("strategy", "strategy", {**meta, "target_assets": [
+        *meta["target_assets"], {"symbol": "510300", "max_single_invest_cny": 1000}]}, "")
+    svc.upsert_target_asset("510300.SS", {"sell_fee_pct": 0.001}, store=store)
+    assert "510300.SS" not in _symbols(store)
+    assert next(a for a in store.read("strategy").metadata["target_assets"]
+                if a["symbol"] == "510300")["sell_fee_pct"] == 0.001
+
+
+@pytest.mark.parametrize("held, track", [
+    ({"symbol": "510300", "kind": "etf"}, "510300"),      # 老账本裸码：target 沿用持仓写法，holdings_digest 连得上
+    ({"symbol": "510300", "kind": "etf"}, "510300.SS"),
+    ({"symbol": "110011", "kind": "fund"}, "110011"),     # 场外基金：不能补成 110011.SS（沪市可转债）
+])
+def test_new_target_follows_holding_spelling(store, held, track):
+    store.write("portfolio", "portfolio", {"schema_version": 2, "cash": {},
+                                           "holdings": [{**held, "units": 100, "avg_cost": 1.0}]}, "")
+    svc.upsert_target_asset(track, {"max_single_invest_cny": 1000}, store=store)
+    assert held["symbol"] in _symbols(store) and f"{held['symbol']}.SS" not in _symbols(store)
+    svc.remove_target_asset(held["symbol"], store=store)
+    svc.add_target_asset({"symbol": track, "max_single_invest_cny": 1000}, store=store)
+    assert held["symbol"] in _symbols(store)
+
+
 def test_upsert_new_symbol_defaults_cap_from_strategy(store):
     """2026-10-11：CLI `track_asset` 不带 --max-single-invest-cny 时直接甩 pydantic 原文。
     新建没给单笔上限 → 沿用策略顶层的单次入场上限，并在消息里写明。"""

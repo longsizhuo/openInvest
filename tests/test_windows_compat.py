@@ -124,3 +124,19 @@ zipfile.open(p, "w")
 """
     assert _unpinned_text_writes(caught) == list(range(2, 10))
     assert _unpinned_text_writes(ok) == []
+
+
+def test_json_output_on_legacy_windows_codepage(monkeypatch):
+    import io
+    from types import SimpleNamespace
+    from openinvest.skill_cmds import _helpers
+
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="cp1252")
+    monkeypatch.setattr(_helpers, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(_helpers.sys, "__stdout__", stream)
+    _helpers._print_json({"error": "六位代码"})
+    assert buffer.getvalue().decode("utf-8").endswith("\n")
+    assert b"\r\n" not in buffer.getvalue()
+    assert "六位代码" in buffer.getvalue().decode("utf-8")
+    stream.detach()
