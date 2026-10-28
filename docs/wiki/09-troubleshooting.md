@@ -152,6 +152,7 @@ curl -N http://127.0.0.1:8765/api/committee/live/<task_id>
 |------|------|------|
 | status.json 一直 queued | asyncio.create_task 没起 | 检查 journal 是否有 traceback；restart 后端 |
 | LLM 一直没 200 | DeepSeek API key 错 / 限速 / 余额不足 | `.env` 检查 / `journal` 看 401 / 429 |
+| A 股 / 港股委员会报「无 XXX 行情数据」，日志有 `yfinance sync failed ... 429` | Yahoo 限流（大陆服务器常见），库里又没有历史价 | 配 `EQUIBLES_API_KEY` 走行情兜底，见 [22-configuration.md](22-configuration.md)（ETF 不覆盖）|
 | status.json 跳到 done 但 SSE 消费方没收到 | SSE 连接被 CF Access 5min idle 切了 | 检查代码 keepalive 是否在跑（25s 一次）|
 | running 但 LLM 一直没调 | 被锁住（其他 task 占了 fcntl 锁）| `lsof memory/portfolio.md.lock` 找出占用方 |
 

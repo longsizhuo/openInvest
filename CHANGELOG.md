@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.68.0](https://github.com/longsizhuo/openInvest/compare/v0.67.0...v0.68.0) (2026-10-27)
+
+
+### Features
+
+* **cli:** offline ledger brief for host-agent hooks ([#560](https://github.com/longsizhuo/openInvest/issues/560)) ([d0da6ff](https://github.com/longsizhuo/openInvest/commit/d0da6ff2726027e86c29baa270c9d45c3f1dd943))
+* **plugin:** inject a ledger digest and wire up Hermes cron at onboarding ([#562](https://github.com/longsizhuo/openInvest/issues/562)) ([b4a3602](https://github.com/longsizhuo/openInvest/commit/b4a36022e7947ca0bf8055e7756f5c4c8e299614))
+* **scheduler:** keep the scheduler running for plugin installs ([#559](https://github.com/longsizhuo/openInvest/issues/559)) ([086abde](https://github.com/longsizhuo/openInvest/commit/086abde21e74ef7895685ad5704cd281a2beed6a))
+
+
+### Bug Fixes
+
+* **portfolio:** A 股裸码入账自动补 .SS / .SZ 后缀 ([#561](https://github.com/longsizhuo/openInvest/issues/561)) ([237bea1](https://github.com/longsizhuo/openInvest/commit/237bea1b05e32de3112b75feb3161b9bf39ab30d))
+
+## [0.67.0](https://github.com/longsizhuo/openInvest/compare/v0.66.0...v0.67.0) (2026-10-20)
+
+
+### Features
+
+* **prices:** Equibles daily-price fallback for A-share / HK when Yahoo fails ([#548](https://github.com/longsizhuo/openInvest/issues/548)) ([e44d522](https://github.com/longsizhuo/openInvest/commit/e44d522c16add54492c11d0c3f18f13985f9230c))
+
+## [0.66.0](https://github.com/longsizhuo/openInvest/compare/v0.65.0...v0.66.0) (2026-10-20)
+
+
+### Features
+
+* **valuation:** optional Equibles provider for A-share / HK fundamentals ([#547](https://github.com/longsizhuo/openInvest/issues/547)) ([31bf5ea](https://github.com/longsizhuo/openInvest/commit/31bf5ea8fbb4d89f49b9acd9d66ae535cae412ad))
+
+
+### Bug Fixes
+
+* **metrics:** sortino 删除「亏损日 &lt; 5 返 0」下限，少亏损日给真实值 ([46ba1ea](https://github.com/longsizhuo/openInvest/commit/46ba1eaff8091fceb788cac6fdbc997f9c12bbfc))
+* **metrics:** sortino 超剪裁线截到 ±100、没亏过给 100，不再返 0 ([1427b8c](https://github.com/longsizhuo/openInvest/commit/1427b8c95c959956e4cbff7fb5d4c6de6cc35e5a))
+
+## [0.65.0](https://github.com/longsizhuo/openInvest/compare/v0.64.0...v0.65.0) (2026-10-20)
+
+
+### Features
+
+* **ibkr:** configurable gateway port (ibkr.port) for a parallel paper account ([#545](https://github.com/longsizhuo/openInvest/issues/545)) ([e40370a](https://github.com/longsizhuo/openInvest/commit/e40370a889c609f51da093a9e9e23ac1309376e1))
+
+
+### Bug Fixes
+
+* **metrics:** sortino 下行偏差改用相对 MAR 的均方根 ([#544](https://github.com/longsizhuo/openInvest/issues/544)) ([09e90f2](https://github.com/longsizhuo/openInvest/commit/09e90f278321cd4b210f0e41c5dc659758bbae56))
+
 ## [0.64.0](https://github.com/longsizhuo/openInvest/compare/v0.63.0...v0.64.0) (2026-10-19)
 
 

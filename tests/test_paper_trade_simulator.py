@@ -226,23 +226,6 @@ def test_evaluate_strategy_full():
     assert metrics["vs_benchmarks"]["沪深300"]["alpha_pct"] == 20.0
 
 
-def test_sortino_doesnt_explode():
-    """回归：之前 Sortino 在 downside 样本少时 1e15 爆掉"""
-    from openinvest.core.strategy_metrics import sortino_ratio
-    # 60 天 54 天涨 + 6 天跌，downside 样本 = 6 个
-    daily = []
-    val = 100000.0
-    import datetime as dt
-    d = dt.date(2024, 1, 2)
-    for i in range(60):
-        val *= (1.005 if i < 54 else 0.983)
-        daily.append((d.isoformat(), val))
-        d += dt.timedelta(days=1)
-    s = sortino_ratio(daily)
-    # 应是合理范围（< 100 by clip）
-    assert abs(s) < 100
-
-
 def test_gold_price_includes_usdcny_leg(mock_market):
     """回归（issue #179 P1-A①）：GC=F 报价是 USD/oz，但模拟器把黄金计价当 CNY
     （用户持积存金）。_get_price 必须补 USDCNY 腿，否则窗口收益漏掉人民币汇率漂移。
@@ -266,3 +249,49 @@ def test_buy_converts_non_cny_alloc_currency(mock_market):
                                "alloc_currency": "AUD"})
     assert abs(sim.account.cash["CNY"] - (100000 - 4700)) < 0.01
     assert abs(tx.units - 20.0) < 0.01       # 1000 AUD / 50
+
+
+def _curve_daily(returns: list[float], start: float = 100000.0) -> list[tuple[str, float]]:
+    """把日收益率序列摊成 daily_values，省得每个用例重复写日期循环。"""
+    import datetime as dt
+
+    out: list[tuple[str, float]] = []
+    val = start
+    d = dt.date(2024, 1, 2)
+    out.append((d.isoformat(), val))
+    for r in returns:
+        val *= 1 + r
+        d += dt.timedelta(days=1)
+        out.append((d.isoformat(), val))
+    return out
+
+
+def test_sortino_constant_loss_days_not_zero():
+    """回归 #539：跌幅恒定时旧实现的分母是 0（对亏损日取 std），整条曲线退化成 0.0。"""
+    from openinvest.core.strategy_metrics import sortino_ratio
+
+    daily = _curve_daily([0.01] * 50 + [-0.005] * 10)
+    s = sortino_ratio(daily)
+    assert s != 0.0, "跌幅相同时分母仍为 0，说明下行偏差还在对负收益子集求 std"
+    assert s == pytest.approx(57.33, abs=0.01)
+
+
+def test_sortino_repo_own_case_not_zero():
+    """回归 #539：仓库自带的 54 涨 / 6 跌 场景，旧实现同样返回 0.0。"""
+    from openinvest.core.strategy_metrics import sortino_ratio
+
+    daily = _curve_daily([0.005] * 54 + [-0.017] * 6)
+    assert sortino_ratio(daily) == pytest.approx(8.09, abs=0.01)
+
+
+def test_sortino_few_loss_days_monotonic():
+    """边界 #539：亏损日少（1~4 天）给真实值，不再被下限压成 0；超剪裁线截到 100 而不是返 0，
+    亏得越少 Sortino 越高（单调）。原 test_sortino_doesnt_explode 防的「小样本 1e15 爆掉」也由这里守。"""
+    from openinvest.core.strategy_metrics import sortino_ratio
+
+    assert sortino_ratio(_curve_daily([0.01] * 56 + [-0.02] * 4)) == pytest.approx(24.37, abs=0.01)
+    by_loss = [sortino_ratio(_curve_daily([0.005] * 59 + [-x])) for x in (0.03, 0.01, 0.005, 0.001)]
+    assert by_loss[0] == pytest.approx(17.86, abs=0.01)
+    assert by_loss == sorted(by_loss)
+    assert by_loss[-1] == 100.0
+    assert sortino_ratio(_curve_daily([0.01] * 60)) == 100.0  # 没亏过 = 无穷大 → 上限

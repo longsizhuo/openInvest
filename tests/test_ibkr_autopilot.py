@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,10 +17,12 @@ import pytest
 import openinvest.cli as cli
 import openinvest.db.trades_db as trades_db_mod
 import openinvest.jobs.ibkr_autopilot as ia
+from openinvest.core import decision_ledger
 from openinvest.core import memory_store as ms
 from openinvest.core.config import API_SETTABLE, IbkrConfig, load_config, reset_config, set_persisted_override
 from openinvest.core.decision_ledger import list_decisions
 from openinvest.core.memory_store import MemoryStore
+import openinvest.core.portfolio_manager as pm_mod
 from openinvest.core.portfolio_manager import PortfolioManager
 from openinvest.utils.quotes import QuoteSnapshot
 
@@ -92,11 +95,23 @@ def _fill(sym, side, qty, px, exec_id, fee=0.35, ref="oi:x", sec="STK"):
             "ref": ref, "sec_type": sec, "date": TODAY}
 
 
+def _freeze_ledger_clock(monkeypatch):
+    """list_decisions 的 days 窗口 / 7 天匹配窗、portfolio_history 的成交 ts 都按真实时钟算；
+    TODAY 写死 → 钉到 TODAY 收盘后，否则过几天就找不到裁决 / 成交匹配不上"""
+    class _FakeDT(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromisoformat(f"{TODAY}T18:00:00").replace(tzinfo=tz)
+    for mod in (decision_ledger, pm_mod):
+        monkeypatch.setattr(mod, "datetime", _FakeDT)
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     mem = tmp_path / "memory"
     monkeypatch.setattr(ms, "MEMORY_ROOT", mem)
     monkeypatch.setattr(trades_db_mod, "TradesDB", _FakeTradesDB)
+    _freeze_ledger_clock(monkeypatch)
     monkeypatch.setattr(ia, "INVEST_ROOT", tmp_path)
     monkeypatch.setattr("openinvest.utils.fx.get_fx_rate",
                         lambda quote, base="CNY", as_of_date=None: {("USD", "CNY"): 7.1}.get((quote, base)))

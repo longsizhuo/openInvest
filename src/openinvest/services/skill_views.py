@@ -521,6 +521,57 @@ INIT_PAYLOAD_SHAPE: Dict[str, Any] = {
 }
 
 
+SCHEDULER_STALE_MINUTES = 90  # job_watchdog 每小时 :07 必跑；夜里哨兵/新闻停摆时它是唯一的心跳
+
+
+def _scheduler_check(root: Path) -> Dict[str, Any]:
+    """后台调度器在不在跑（新闻 / 价格哨兵 / 净值快照 / 备份都靠它）。warning 级：不拦 onboarding。"""
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    from openinvest import __version__
+    from openinvest.scheduler.lock import holder
+
+    h = holder(root)
+    if h is None:
+        return {
+            "name": "scheduler", "status": "warning",
+            "detail": "后台调度器没在跑：新闻队列、价格哨兵、净值快照、自动备份都不会更新",
+            "hint": "openinvest-mcp（stdio）运行时会自动拉起内嵌调度器（INVEST_EMBEDDED_SCHEDULER=0 时不拉）；"
+                    "要不依赖宿主、开机自启：`run.sh service install`",
+        }
+    last = None
+    runs_db = root / "db" / "jobs.sqlite"
+    if runs_db.exists():  # connect 会顺手建空库，doctor 不该在用户目录里留东西
+        try:
+            conn = sqlite3.connect(runs_db)
+            try:
+                last = conn.execute("SELECT MAX(started_at) FROM job_runs").fetchone()[0]
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            pass
+    who = f"{h.get('mode', '?')} pid={h.get('pid')} v{h.get('version', '?')}"
+    now, limit = datetime.now().astimezone(), timedelta(minutes=SCHEDULER_STALE_MINUTES)
+
+    def _older_than_limit(ts: Any) -> bool:
+        try:
+            return now - datetime.fromisoformat(ts) > limit
+        except (TypeError, ValueError):  # 缺失 / 老格式（无时区）都按"久"算
+            return True
+
+    # 刚起来的调度器还没轮到任何 job，不算卡
+    if _older_than_limit(last) and _older_than_limit(h.get("started_at")):
+        return {"name": "scheduler", "status": "warning",
+                "detail": f"调度器在跑（{who}）但 {SCHEDULER_STALE_MINUTES} 分钟没有任务记录（最后一次 {last}），可能卡住",
+                "hint": "看 logs/invest.log；内嵌实例重启宿主即可，系统服务用 systemctl --user restart openinvest-scheduler"}
+    if h.get("mode") == "daemon" and h.get("version") not in (None, __version__):
+        return {"name": "scheduler", "status": "warning",
+                "detail": f"调度器服务跑的是旧版本（{who}），当前是 {__version__}",
+                "hint": "重跑 `run.sh service install` 更新服务（生产 checkout 部署的话重启 invest-scheduler）"}
+    return {"name": "scheduler", "status": "ok", "detail": f"{who}，最后一次任务 {last}", "hint": None}
+
+
 def build_doctor_view(root: Path) -> Dict[str, Any]:
     """健康自检：onboarding 是否完成？所有外部依赖可达？
 
@@ -708,6 +759,8 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         ),
         "hint": None,
     })
+
+    checks.append(_scheduler_check(root))
 
     # 4) Python venv：git clone 形态的遗留项（跑到这里就证明 venv ok，只报告版本）。
     # uvx / wheel 形态下数据目录里没有 pyproject.toml + skills/（同 paths._detect_root 的 clone 判据），没有 venv 可言 → 跳过

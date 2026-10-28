@@ -94,26 +94,22 @@ def sortino_ratio(
     risk_free_annual: float = 0.013,
     trading_days_per_year: int = 252,
 ) -> float:
-    """Sortino = (年化收益 - 无风险) / 年化下行波动率（只算亏的日子）"""
+    """Sortino = (年化收益 - 无风险) / 年化下行偏差（跑输无风险的日子按全样本 N 取均方根）"""
     rets = _to_returns(daily_values)
     if len(rets) < 2:
         return 0.0
     daily_rf = risk_free_annual / trading_days_per_year
     excess = rets - daily_rf
-    downside = excess[excess < 0]
-    if len(downside) == 0:
-        return 0.0  # 没亏过，Sortino 无穷大；返 0 表示"不可计算"
-    # downside 样本太少 (< 5) 时 std 不稳定，会导致 Sortino 爆炸
-    if len(downside) < 5:
-        return 0.0
-    downside_dev = np.std(downside, ddof=1)
-    if downside_dev < 1e-6:
-        return 0.0
+    downside = np.minimum(excess, 0.0)
+    if not downside.any():
+        return 100.0  # 没亏过，Sortino 无穷大 → 给剪裁上限（返 0 会比「亏一点」还差，不单调）
+    # 下行偏差 = 相对 MAR(0) 的均方根。不能对亏损日求 std：
+    # std 会减掉亏损日的均值，跌幅相近时会退化成 0（#539）。
+    # 均方根不会因亏损日少而失稳，原「亏损日 < 5 返 0」下限已删——它会把 1~4 个亏损日的真实值压成 0
+    downside_dev = math.sqrt(float(np.mean(downside ** 2)))
     sortino = np.mean(excess) / downside_dev * math.sqrt(trading_days_per_year)
-    # 保护性 clip：理论上 Sortino > 10 都极罕见
-    if abs(sortino) > 100:
-        return 0.0
-    return round(float(sortino), 4)
+    # 截到 ±100 而不是返 0：亏损日少且浅时 Sortino 很大，压成 0 会让「几乎不亏」排在「亏得多」后面
+    return round(float(np.clip(sortino, -100.0, 100.0)), 4)
 
 
 def vs_benchmark(daily_values: DailyValues, benchmark_curve: DailyValues) -> Dict[str, float]:

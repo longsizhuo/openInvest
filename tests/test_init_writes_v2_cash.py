@@ -411,3 +411,13 @@ def test_force_reonboarding_updates_profile_only(tmp_path):
     r = _json(_run_init(tmp_path, {"profile": {"name": "X", "risk_tolerance": "high"}, "env": {}}, "--force"))
     assert (mem / "user.md").read_bytes() == before
     assert "user.md unchanged" in r["profile_note"]
+
+
+def test_write_v2_portfolio_suffixes_bare_a_share_codes():
+    # init 的 holdings 落盘同 buy：A 股裸码补后缀，kind=fund 保留裸码（进程内调，conftest 已隔离 MEMORY_ROOT）
+    from openinvest.skill_cmds.lifecycle_cmds import _write_v2_portfolio
+    _write_v2_portfolio({"CNY": 1000}, [
+        {"symbol": "510300", "kind": "etf", "units": 100, "avg_cost": 4.0},
+        {"symbol": "000001", "kind": "fund", "units": 50, "avg_cost": 1.0},
+    ], fresh=True)
+    assert [h["symbol"] for h in MemoryStore().read("portfolio").get("holdings")] == ["510300.SS", "000001"]

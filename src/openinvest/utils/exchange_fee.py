@@ -1,7 +1,7 @@
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import numpy as np
@@ -60,6 +60,75 @@ def _betashares_fallback(symbol: str) -> bool:
     except Exception:
         pass  # ponytail: 兜底的兜底不存在——抓不到就退回原"无数据"行为
     return False
+
+
+# Equibles 兜底每 symbol 至少隔这么久才再调（跨进程走 fetch_log）。它的日线一天更新一次、免费档
+# 100 次/天，而 Yahoo 挂着时每次 get_history_data 都会走到兜底分支（价格哨兵 10 分钟一轮）。
+_EQUIBLES_RETRY_S = 6 * 3600
+
+
+def _equibles_fallback(symbol: str, df_db: pd.DataFrame, today_str: str) -> bool:
+    """yfinance 失败时从 Equibles 补 A 股 / 港股个股日线（需 EQUIBLES_API_KEY）。成功返回 True。
+
+    Equibles 的 Close / Adj Close 与 yfinance ``auto_adjust=False`` 逐位相同，过 adjusted_with_raw
+    落库后和 yfinance 路径同口径、能直接拼接。库里够深 → 只拉最后一根往前 7 天；不够 → 拉 2 年。
+    增量的重叠日复权基准变了（分红 / 拆股后全历史重算）→ 同 splice 哨兵，改拉 2 年重写。
+    ETF 不在 Equibles 覆盖内（如 510300.SS）。它的数据比 Yahoo 晚 1~2 个交易日，调用方照样标陈旧。
+    """
+    from openinvest.utils.equibles import fetch_daily_prices, to_mic
+
+    if not to_mic(symbol) or not os.getenv("EQUIBLES_API_KEY", "").strip():
+        return False
+    log_key = f"EQUIBLES:{symbol}"
+    if _STORE.seconds_since_fetch(log_key) < _EQUIBLES_RETRY_S:
+        return False
+    _STORE.mark_fetched(log_key)  # 先记：没覆盖 / 调用失败也不会每次都烧一次额度
+
+    two_years_ago = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+    deep = len(df_db) >= _MIN_HISTORY_ROWS
+    start = (df_db.index[-1] - timedelta(days=7)).strftime("%Y-%m-%d") if deep else two_years_ago
+    df = adjusted_with_raw(fetch_daily_prices(symbol, start))
+    if deep and df is not None and len(_splice_mismatch_days(df, df_db, today_str)) >= 2:
+        print(f"⚠️ [equibles_fallback] {symbol} 重叠日复权基准变化，改拉 2 年重写")
+        df = adjusted_with_raw(fetch_daily_prices(symbol, two_years_ago))
+    if df is None or df.empty:
+        return False
+    for idx, row in df.iterrows():
+        close = _nan_to_none(row.get("Close"))
+        if close is None:
+            continue
+        _STORE.save_generic_price(
+            symbol, idx.strftime("%Y-%m-%d"), close, source="equibles",
+            high=_nan_to_none(row.get("High")),
+            low=_nan_to_none(row.get("Low")),
+            volume=_nan_to_none(row.get("Volume")),
+            close_raw=_nan_to_none(row.get("CloseRaw")),
+        )
+    print(f"🛟 [equibles_fallback] {symbol} {len(df)} 根日线（yfinance unavailable，Data: Equibles）")
+    return True
+
+
+def _splice_mismatch_days(df_new: pd.DataFrame, df_db: pd.DataFrame, today_str: str) -> list[str]:
+    """复权拼接哨兵（issue #179 P1-A④）：新拉的帧和库里重叠日 close 偏移 >1% 的日子。
+
+    分红 / 拆股后数据源会**全历史回溯**重新复权，增量只更新最近几行，旧复权基准与新增行在缝合点
+    断裂（ATR/RSI/regime 全被假跳变污染）。复权变化会让**所有**重叠日同时偏移，单日偏移多半是
+    BetaShares NAV 兜底混写——调用方按 ≥2 天判定。今天这根是盘中临时值，不参与。
+    """
+    # 只建重叠段（df_db 是全历史，^GSPC 2.5 万行逐行 strftime 会拖慢每次增量刷新）
+    db_close = {
+        ts.strftime("%Y-%m-%d"): _nan_to_none(c)
+        for ts, c in df_db["Close"].tail(len(df_new) + 10).items()
+    }
+    mismatched = []
+    for idx, row in df_new.iterrows():
+        day = idx.strftime("%Y-%m-%d")
+        if day == today_str:
+            continue
+        new_c, old_c = _nan_to_none(row.get("Close")), db_close.get(day)
+        if new_c and old_c and abs(new_c / old_c - 1) > 0.01:
+            mismatched.append(day)
+    return mismatched
 
 # 历史行数低于此阈值 → 视为深度不足，触发 2y 全量回填。取 250 = 最长指标 MA250 的窗口，
 # 保证 RSI/MA120/MA250/regime 全部算得出（仅 60 会让 60~249 根的 symbol 仍缺 MA120/MA250
@@ -241,26 +310,10 @@ def get_history_data(
             print(f"🔄 [yfinance] Refreshing {symbol} (period={fetch_period})...")
             ticker = yf.Ticker(symbol)
             df_yf = history_with_raw(ticker, period=fetch_period)
-            # 复权拼接哨兵（issue #179 P1-A④）：yfinance auto_adjust 在分红/拆股后
-            # 会**全历史回溯**重新复权，而 5d 增量只更新最近几行——DB 里旧复权基准
-            # 与新增行在缝合点断裂（ATR/RSI/regime 全被假跳变污染）。重叠日期的
-            # close 本应逐字节一致；复权变化会让**所有**重叠日同时偏移，而单日
-            # 偏移多半是 BetaShares NAV 兜底混写（本轮 5d 落库就会覆盖自愈）——
-            # 所以 ≥2 个重叠日差 >1% 才判定复权基准变化，升级 2y 全量重取。
+            # 复权拼接哨兵（见 _splice_mismatch_days）：≥2 个重叠日差 >1% 才判定复权基准
+            # 变化，升级 2y 全量重取（单日偏移多半是 BetaShares 兜底混写，本轮落库自愈）。
             if fetch_period == "5d" and not df_yf.empty and not df_db.empty:
-                # 只建重叠段（df_db 现为全历史，^GSPC 2.5 万行逐行 strftime 会拖慢每次 5d 刷新）
-                db_close = {
-                    ts.strftime("%Y-%m-%d"): _nan_to_none(c)
-                    for ts, c in df_db["Close"].tail(len(df_yf) + 10).items()
-                }
-                mismatched = []
-                for idx, row in df_yf.iterrows():
-                    day = idx.strftime("%Y-%m-%d")
-                    if day == today_str:  # 今天这根是盘中临时值，盘中刷新本就会变，不参与复权判断
-                        continue
-                    new_c, old_c = _nan_to_none(row.get("Close")), db_close.get(day)
-                    if new_c and old_c and abs(new_c / old_c - 1) > 0.01:
-                        mismatched.append(day)
+                mismatched = _splice_mismatch_days(df_yf, df_db, today_str)
                 if len(mismatched) >= 2:
                     print(
                         f"⚠️ [splice-sentinel] {symbol} 重叠日 {mismatched} close "
@@ -302,7 +355,10 @@ def get_history_data(
         # 只在实盘路径（as_of_date=None）触发：scraper 只有"现在"这一个点，
         # 对历史 cutoff 无意义。只补 H/L 那次刷失败：库里今天的 close 本就是新的
         # → 不兜底、不标 stale。
-        if not yf_got_data and needs_update and as_of_date is None and _betashares_fallback(symbol):
+        # A 股 / 港股个股再走 Equibles 日线（配了 EQUIBLES_API_KEY 才有）。
+        if not yf_got_data and needs_update and as_of_date is None and (
+            _betashares_fallback(symbol) or _equibles_fallback(symbol, df_db, today_str)
+        ):
             df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
         yf_fetch_failed = needs_update and not yf_got_data
 

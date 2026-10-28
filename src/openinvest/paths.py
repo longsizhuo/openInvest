@@ -19,15 +19,23 @@ import os
 from pathlib import Path
 
 
+DEFAULT_HOME = Path.home() / "openInvest"
+
+
+def is_repo_checkout(path: Path) -> bool:
+    """仓库标记（git clone 形态）：pyproject.toml + skills/。"""
+    return (path / "pyproject.toml").exists() and (path / "skills").is_dir()
+
+
 def _detect_root() -> Path:
     env = os.getenv("INVEST_HOME", "").strip()
     if env:
         return Path(env).expanduser()
     here = Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / "pyproject.toml").exists() and (parent / "skills").is_dir():
+        if is_repo_checkout(parent):
             return parent
-    return Path.home() / "openInvest"
+    return DEFAULT_HOME
 
 
 INVEST_ROOT = _detect_root()
