@@ -20,11 +20,12 @@
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 import time
 from pathlib import Path
 from typing import Optional
+
+from openinvest.utils import oslock
 
 LOCK_FILE = ".consolidate-lock"
 LOCK_FCNTL_FILE = ".consolidate-lock.flock"  # 配对的 fcntl mutex（audit algo C3）
@@ -37,13 +38,7 @@ def _is_process_running(pid: int) -> bool:
     EPERM = 进程存在但无权限发信号 → 算活着（issue #179 P1-D②：旧实现把
     OSError 一律当死，root/他人进程持锁会被误判僵尸而被抢锁）。
     """
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError as e:
-        return e.errno == errno.EPERM
-    return True
+    return oslock.pid_alive(pid)  # Windows 上 os.kill(pid, 0) 会杀进程，探活统一走 oslock
 
 
 def _lock_path(memory_root: Path) -> Path:
@@ -73,7 +68,7 @@ def try_acquire_consolidation_lock(memory_root: Path) -> Optional[float]:
         flock_fd = os.open(str(flock_path), os.O_CREAT | os.O_RDWR, 0o644)
         try:
             # 非阻塞 LOCK_EX：拿不到立刻失败，让 caller 知道"另一进程正在认领"
-            fcntl.flock(flock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslock.flock(flock_fd, oslock.LOCK_EX | oslock.LOCK_NB)
         except OSError as e:
             if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
                 print("[autoDream] 另一进程正在认领锁，跳过")
@@ -104,13 +99,13 @@ def try_acquire_consolidation_lock(memory_root: Path) -> Optional[float]:
                 return None
 
         # 写入自己的 PID + 更新 mtime（仍在 fcntl 互斥下）
-        path.write_text(str(os.getpid()))
+        path.write_text(str(os.getpid()), newline="\n")
         return mtime_ms or 0.0
     finally:
         # 写完即释放 fcntl mutex；PID file 本身仍在，作为长生命周期的"持有者标识"
         if flock_fd is not None:
             try:
-                fcntl.flock(flock_fd, fcntl.LOCK_UN)
+                oslock.flock(flock_fd, oslock.LOCK_UN)
                 os.close(flock_fd)
             except OSError:
                 pass
@@ -123,7 +118,7 @@ def rollback_consolidation_lock(memory_root: Path, prior_mtime: float) -> None:
         if prior_mtime == 0:
             path.unlink(missing_ok=True)
             return
-        path.write_text("")
+        path.write_text("", newline="\n")
         secs = prior_mtime / 1000
         os.utime(path, (secs, secs))
     except OSError as e:

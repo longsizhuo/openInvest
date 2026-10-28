@@ -578,7 +578,7 @@ def write_report(reviews: List[VerdictReview], summary: Dict[str, Any]) -> Path:
     lines.append("- contaminated 桶决议日落在 LLM 训练窗口内，是记忆回放不是预测，**不可作为业绩证据**")
     lines.append("- 这些限制让 holdout 结果是 LLM 能力的**下限**估计，实盘可能更好（也可能更差）")
 
-    out.write_text("\n".join(lines), encoding="utf-8")
+    out.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     return out
 
 
@@ -587,7 +587,7 @@ def write_jsonl(reviews: List[VerdictReview]) -> Path:
     store = MemoryStore()
     out = store.root / ".dreams" / "verdict_review.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
         for r in reviews:
             f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
     return out
@@ -689,7 +689,7 @@ def write_arm_jsonl(arm: List[VerdictReview], name: str = SEALED_ARM_NAME) -> Pa
     所有 live 读方都是精确路径读，读不到它。"""
     out = MemoryStore().root / ".dreams" / f"verdict_review_{name}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
         for r in arm:
             f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
     return out
@@ -704,7 +704,7 @@ def write_arms_report(arms: Dict[str, List[VerdictReview]], control: List[Verdic
             f"\n*Generated: {datetime.now().isoformat(timespec='seconds')}*\n",
             "> 🧪 **实验臂，不是 live**：本页和 `.dreams/verdict_review_<臂>.jsonl` 只服务 A/B 判读，"
             "不进 live 命中率页 / 公开 JSON / confidence_lookup / 纪律台账。\n"]
-    out.write_text("\n".join(head + arms_report_lines(arms, control)), encoding="utf-8")
+    out.write_text("\n".join(head + arms_report_lines(arms, control)), encoding="utf-8", newline="\n")
     return out
 
 

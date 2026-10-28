@@ -12,6 +12,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows:
+    # oslock 的 msvcrt 分支 / CAN_UNLINK_OPEN=False 分支只在 Windows 上走得到；全量套件仍只在 Linux 跑
+    runs-on: windows-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install deps
+        run: uv sync --frozen
+
+      - name: Windows 兼容测试（锁 / LF / 进程探活 / 原子替换）
+        run: uv run pytest tests/test_windows_compat.py tests/test_file_lock_and_jsonl.py tests/test_maintenance_cleanup.py -v --tb=short
+        env:
+          DEEPSEEK_API_KEY: test-fake-key
+
   test:
     runs-on: ubuntu-latest
     # 跳过 [skip ci] 标记的 commit（我们的 pnl-bot autocommit 会带这个）
@@ -107,6 +130,7 @@ jobs:
           uv run python -c "from openinvest.core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
           uv run python -c "from openinvest.core.config import effective_api_config, set_persisted_override, clear_persisted_override, API_SETTABLE, DCAConfig"
           uv run python -c "from openinvest.core.memory_store import MemoryStore, _atomic_write_text"
+          uv run python -c "from openinvest.utils.oslock import flock, LOCK_EX, LOCK_NB, LOCK_UN, pid_alive, CAN_UNLINK_OPEN"
           uv run python -c "from openinvest.core.portfolio_manager import PortfolioManager, _render_portfolio_body_v2"
           uv run python -c "from openinvest.jobs.pnl_snapshot import _is_trading_window, _redact_token_in, _outperform_events"
           uv run python -c "from openinvest.jobs.daily_report_builder import assemble_full_report, classify_asset_freshness, format_staleness_warning, portfolio_summary_text"

@@ -18,6 +18,7 @@ from pathlib import Path
 from openinvest.core import llm_telemetry
 from openinvest.core.decision_ledger import record_execution
 from openinvest.core.memory_store import MemoryStore, _file_lock, append_jsonl
+from openinvest.utils import oslock
 
 # 子进程脚本：对计数文件做 N 次 read-modify-write（不加锁的话必丢更新）
 _RMW = """
@@ -42,6 +43,8 @@ for i in range(n):
 
 
 def _leftover_locks(d: Path):
+    if not oslock.CAN_UNLINK_OPEN:
+        return []  # Windows 删不了打开中的文件，sidecar 按设计留着复用（见 oslock 模块说明）
     return sorted(x.name for x in d.rglob("*.lock"))
 
 
@@ -179,13 +182,12 @@ def test_record_execution_idempotent_under_concurrency_and_leaves_no_lock(tmp_pa
 def test_record_execution_still_excludes_old_version_process_flocking_data_file(tmp_path):
     """过渡期：旧版本进程只 flock 数据文件本身（不认 sidecar）。新版本必须也拿数据文件锁，
     否则混跑期间 ADR-016 的幂等闸在新旧进程之间不互斥 → 重复记账。"""
-    import fcntl
     import time
 
     p = tmp_path / ".dreams" / "executions.jsonl"
     p.parent.mkdir(parents=True)
     old = open(p, "a+", encoding="utf-8")        # "旧进程"：直接 flock 数据文件
-    fcntl.flock(old, fcntl.LOCK_EX)
+    oslock.flock(old, oslock.LOCK_EX)
     done = threading.Event()
 
     def new_process():
@@ -199,7 +201,7 @@ def test_record_execution_still_excludes_old_version_process_flocking_data_file(
         assert not done.is_set()                  # 旧进程还持着数据文件锁 → 新进程必须等
         assert p.read_text(encoding="utf-8") == ""
     finally:
-        fcntl.flock(old, fcntl.LOCK_UN)
+        oslock.flock(old, oslock.LOCK_UN)
         old.close()
     t.join(10)
     assert done.is_set() and len(p.read_text(encoding="utf-8").splitlines()) == 1

@@ -42,6 +42,7 @@ from zoneinfo import ZoneInfo
 
 from openinvest.db.wal import checkpoint_file
 from openinvest.paths import INVEST_ROOT
+from openinvest.utils import oslock
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
                     n += 1
                 except FileNotFoundError:  # 遍历后被删（别的进程的原子写/清理），不算失败
                     log.info("[backup] 跳过已消失的文件 %s", arc)
-        os.replace(tmp, dest)
+        oslock.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
 

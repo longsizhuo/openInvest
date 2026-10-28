@@ -174,7 +174,7 @@ def refresh_benchmark(key: str, start: str, end: str) -> Optional[Dict[str, Any]
         "prices": prices,  # {YYYY-MM-DD: nav_or_close}
     }
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(_cache_path(key), "w", encoding="utf-8") as f:
+    with open(_cache_path(key), "w", encoding="utf-8", newline="\n") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     return payload
 
