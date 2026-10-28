@@ -2,7 +2,7 @@
 
 > **一句话**：给 LLM 投资委员会加 TradingAgents 式分析师 agent（基本面/情绪/新闻），
 > 在方向预测上**是否赢过同一份输入数据的机械 if-else 基线**？预注册答案：**否**
-> （2 窗口 × 2 厂商 3 模型 × 单独/ensemble/联合，全部不过 Gate）。
+> （跨模型未达到 2/3 门槛；单格存在 1 PASS，见下表）。
 
 这是 openInvest ADR-009 实验的去 PII 复现包。无任何个人持仓/财务数据——只有
 GC=F / NDQ.AX 的公开市场分析。完整结论叙事见 openInvest `docs/wiki/16-ta-analysts-experiment.md`。
@@ -33,23 +33,33 @@ GC=F / NDQ.AX 的公开市场分析。完整结论叙事见 openInvest `docs/wik
 机制：bullish 表态≈基率复读；bearish 逆 regime 大势即反指标；ensemble 共识强度
 与正确率不单调；联合阅读三源不涌现反而稀释。详见 SCHEMA.md + wiki 16 §5b。
 
-## 复现
+## 离线评分复现（无需 LLM）
+
+从仓库根运行：
 
 ```bash
-pip install pandas numpy openai     # 或 uv sync（在 openInvest 仓内）
-export LLM_API_KEY=... LLM_BASE_URL=... LLM_MODEL=mimo-v2.5-pro
-
-# 1. 拉数据源（COT 已缓存在 inputs/；GDELT 头条会限流，已缓存）
-# 2. 跑 Phase A（断点续跑，INVEST_TA_OUT 指定输出文件）
-INVEST_TA_DATES=inputs/decision_dates_2022.json \
-INVEST_TA_OUT=my_run.jsonl python scripts/ta_phase_a.py --analysts fundamental,sentiment,news
-
-# 3. 预注册 Gate 判定
-INVEST_TA_OUT=my_run.jsonl python scripts/eval_ta_signal.py
+pip install pandas numpy
+python experiments/ta-analysts/scripts/eval_ta_signal.py \
+  --reports experiments/ta-analysts/data/2022_mimo-flash.jsonl \
+  --prices /path/to/frozen_closes.csv
 ```
 
-`data/` 下已有全部原始结果——直接 `eval_ta_signal.py` 指向它们即可复算 Gate，
-无需重跑 LLM。
+`frozen_closes.csv` 必须含 `date,symbol,close`，覆盖报告涉及的资产与决策日及之后
+60 个日历天；日期唯一、价格为正数，复权/期货连续合约口径必须与原实验相同。
+脚本打印两个输入的 SHA256，不自动下载行情，不读取个人数据库。
+**本包目前没有评分所用的完整冻结行情/标签，因此仅凭已提交文件尚不能复算
+14 FAIL / 1 PASS。** `inputs/xauusd_daily_1966_2026.csv` 不能替代 GC=F 与 NDQ.AX
+原始标签。结果矩阵是历史记录，尚未通过本次独立重算。
+
+Phase A 的历史脚本仍依赖 openInvest 安装、本地 MarketStore、dotenv 与生产 LLM
+配置，以及 `memory/.ta_experiment/` 缓存；不是只安装三个库即可重跑的独立包。
+新采样应在隔离研究目录进行，记录模型版本、prompt、采样参数与输入哈希。
+
+`coverage` 在 TA 评分中仅指非 neutral 表态比例；与 P10–P90 预测区间覆盖率不同。
+原 Gate 的机械基线在自身非 neutral 子集上计算，与 LLM 不一定同分母；共同子集
+仅报告一致率。保留该历史 Gate，不把它改写成配对显著性检验。周频 30/60 日标签
+重叠，Wilson 区间未作相关性修正。零收益不属于 bullish 或 bearish 命中。
+投稿证据审计与待补清单见 [submission-audit](../submission-audit/README.md)。
 
 ## 局限（投稿前须知）
 

@@ -192,7 +192,8 @@ live A/B（同日双跑，事件 brief 有/无），届时回填本页。
 ## 7. 复现
 
 **已冻结的去 PII 复现包在 main**：`experiments/ta-analysts/`（数据+脚本+基线+
-SCHEMA，2540 条报告可直接 `eval_ta_signal.py` 复算 Gate，不用重跑 LLM）。
+SCHEMA，2540 条报告；评分还需原实验完整冻结行情/标签，目前未随包公开。
+无需重跑 LLM，但仅凭本包尚不能独立复算 Gate。离线评分入口见包内 README）。
 数据三角色约定见 `experiments/README.md`。
 
 从零重跑（需实验**活代码**，仍在 test_ta 分支）：
