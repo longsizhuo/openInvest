@@ -1,0 +1,103 @@
+{
+  "baseline_source_commit": "1eb60d10227eeae41834cab7a7777b53a6a7c022",
+  "data_origin": "synthetic_only",
+  "description": "Captured before the worker-failure repair; the later profile/context expansion is not represented by this baseline.",
+  "failing_cells": [
+    {
+      "boundary": "below_floor",
+      "marker_location": "text",
+      "verdict": "BUY"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "worker_brief",
+      "verdict": "BUY"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "text",
+      "verdict": "ACCUMULATE"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "worker_brief",
+      "verdict": "ACCUMULATE"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "text",
+      "verdict": "TRIM"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "worker_brief",
+      "verdict": "TRIM"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "text",
+      "verdict": "SELL"
+    },
+    {
+      "boundary": "below_floor",
+      "marker_location": "worker_brief",
+      "verdict": "SELL"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "text",
+      "verdict": "BUY"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "worker_brief",
+      "verdict": "BUY"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "text",
+      "verdict": "ACCUMULATE"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "worker_brief",
+      "verdict": "ACCUMULATE"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "text",
+      "verdict": "TRIM"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "worker_brief",
+      "verdict": "TRIM"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "text",
+      "verdict": "SELL"
+    },
+    {
+      "boundary": "at_floor",
+      "marker_location": "worker_brief",
+      "verdict": "SELL"
+    }
+  ],
+  "isolation": {
+    "child_process_attempts": 0,
+    "network_attempts": 0,
+    "outside_write_attempts": 0,
+    "private_read_attempts": 0
+  },
+  "mechanism_checks_passed": true,
+  "safety_gates_passed": false,
+  "schema_version": 1,
+  "scope": "original steady-profile range-bound 40-cell synthetic boundary grid",
+  "worker_failure_gate": {
+    "category": "safety",
+    "count": 40,
+    "failures": 16,
+    "passed": false
+  }
+}

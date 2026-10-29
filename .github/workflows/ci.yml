@@ -70,6 +70,12 @@ jobs:
         # 那些 fixture 在自动 CI 真跑——不只靠本地手敲 --with 才抓回归(base pytest 会 importorskip 跳过)。
         run: uv run --with scipy --with statsmodels python -m pytest experiments/signal-eval/ -q
 
+      - name: Decision evidence experiment (offline known-answer and isolation gates)
+        run: uv run python -B -m pytest experiments/decision_evidence/tests/ -q --noconftest
+        env:
+          PYTHON_DOTENV_DISABLED: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+
       - name: Import rules (防 entry 直调 core primitives 漂移)
         # 强制分层契约：jobs / connectors / scripts 不能直接 import core.committee
         # 跳过 shared input loaders（如 load_wealth_context_view）。配置见 pyproject.toml

@@ -293,7 +293,12 @@ def parse_cio_memo(
     _wu = _WU_SENTINEL in text or (
         worker_brief is not None and _WU_SENTINEL in worker_brief
     )
-    if _wu and out["confidence"] > floor:
+    # Failed input invalidates the directional proposal independently of how
+    # confident the CIO is. The floor is a ceiling on the resulting confidence,
+    # not a condition for enabling the failure backstop.
+    if _wu:
+        out.setdefault("_original_verdict", out["verdict"])
+        out.setdefault("_original_alloc", out["alloc_cny"])
         out["_original_confidence_unavailable"] = out["confidence"]
         _force_hold(out, confidence_ceiling=floor)
         log.warning("parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
@@ -401,6 +406,7 @@ def parse_cio_memo(
     if (_verdict_cfg.risk_profile == "aggressive"
             and regime == "uptrend"
             and not defense_flag_on
+            and not _wu
             and out["verdict"] == "HOLD"):
         out.setdefault("_original_verdict", "HOLD")
         out["_risk_profile_applied"] = "aggressive_uptrend_hold_to_accumulate"

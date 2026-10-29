@@ -20,6 +20,8 @@
 现有子包：`ta-analysts/`（TA 分析师消融，ADR-009）、`verdict_variance/`（同输入重跑 90 次的裁决方差，A4）、
 `sealed_vote/`（B4 四臂 A/B：对照 / 密封投票 / 辩论 / macro-soft 的设计、成本、判据；产物在 `memory/.backtest_{sealed,debate,macrosoft}/`，不进仓库）。
 
+- [`decision_evidence/`](decision_evidence/README.md)：离线证据链、显式事件评分和固定输入敏感性验证；公开数据仅为合成控制，真实历史留在忽略目录。设计与偏离见 [wiki 25](../docs/wiki/25-decision-evidence-experiment.md)。
+
 ## 文件清单
 
 ```
