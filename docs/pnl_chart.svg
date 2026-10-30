@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 558" role="img" aria-label="PnL chart with benchmark bars">
+  <style>
+    .label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .title { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; font-weight: bold; }
+  </style>
+  <rect width="800" height="558" fill="#0d1117"/>
+
+  <!-- ===== 上半：折线图（总权益单线）===== -->
+  <text x="50" y="20" fill="#c9d1d9" class="title">📈 总权益曲线（基准币种，起点 = 100，最近 30 天）</text>
+  <line x1="50" y1="55.0" x2="770" y2="55.0"
+        stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="44" y="59.0" text-anchor="end" fill="#6e7681" class="label">100</text>
+  <text x="44" y="40" text-anchor="end" fill="#3fb950" class="label">+</text>
+  <text x="44" y="208" text-anchor="end" fill="#f85149" class="label">−</text>
+  <text x="50" y="228" fill="#6e7681" class="label">30 天前</text>
+  <text x="770" y="228" text-anchor="end" fill="#6e7681" class="label">今天</text>
+
+  <polyline points="50.0,55.0 59.1,55.3 68.2,50.8 77.3,51.7 86.5,53.7 95.6,58.8 104.7,58.5 113.8,58.2 122.9,62.0 132.0,64.0 141.1,67.5 150.3,70.4 159.4,73.6 168.5,77.2 177.6,74.3 186.7,67.5 195.8,64.0 204.9,66.9 214.1,73.6 223.2,74.9 232.3,73.0 241.4,72.3 250.5,71.1 259.6,72.0 268.7,79.7 277.8,91.3 287.0,103.9 296.1,103.9 305.2,104.9 314.3,106.5 323.4,108.4 332.5,113.9 341.6,137.7 350.8,137.7 359.9,145.1 369.0,133.8 378.1,129.7 387.2,129.3 396.3,127.7 405.4,135.8 414.6,137.7 423.7,144.5 432.8,135.8 441.9,137.7 451.0,134.2 460.1,138.0 469.2,135.8 478.4,137.1 487.5,124.5 496.6,129.0 505.7,132.2 514.8,138.0 523.9,139.0 533.0,135.8 542.2,130.6 551.3,125.2 560.4,106.8 569.5,111.0 578.6,108.7 587.7,118.4 596.8,107.4 605.9,110.7 615.1,110.7 624.2,113.9 633.3,117.1 642.4,125.2 651.5,127.1 660.6,130.6 669.7,134.8 678.9,134.8 688.0,135.8 697.1,134.2 706.2,150.6 715.3,159.9 724.4,159.3 733.5,165.4 742.7,166.0 751.8,169.3 760.9,174.7 770.0,189.2" fill="none" stroke="#d29922" stroke-width="2.5"/>
+  <text x="760" y="48" text-anchor="end" fill="#f85149" font-size="22" font-weight="bold">▼</text>
+
+  <!-- 折线图图例 -->
+  <g transform="translate(58, 42)" class="label">
+    <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
+    <text x="20" y="4" fill="#c9d1d9" font-weight="bold">总权益（时间加权，剔除存取款）</text>
+  </g>
+
+  <!-- ===== 分隔线 ===== -->
+  <line x1="50" y1="250" x2="770" y2="250"
+        stroke="#21262d" stroke-width="1"/>
+
+  <!-- ===== 下半：横向柱状图（vs N 基准 + 用户实盘）===== -->
+  <text x="50" y="278" fill="#c9d1d9" class="title">🏆 vs 9 基准 · 截至今日累计涨幅 (30 天，sample size 较小不构成 alpha 证据)</text>
+
+  <line x1="668.3" y1="285" x2="668.3" y2="515" stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/><text x="668.3" y="282" text-anchor="middle" fill="#6e7681" class="label">0%</text>
+  <text x="192" y="305.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">Wealthfront (年化 6.2%)</text>
+<rect x="668.3" y="293" width="18.8" height="16" fill="#58a6ff" opacity="0.7" rx="2"/>
+<text x="693.1" y="305.0" text-anchor="start" fill="#58a6ff" class="label" font-weight="normal">+0.18%</text>
+<text x="192" y="327.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">Betterment (年化 6.1%)</text>
+<rect x="668.3" y="315" width="18.5" height="16" fill="#79c0ff" opacity="0.7" rx="2"/>
+<text x="692.8" y="327.0" text-anchor="start" fill="#79c0ff" class="label" font-weight="normal">+0.18%</text>
+<text x="192" y="349.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">蚂蚁帮你投 (年化 5.16%)</text>
+<rect x="668.3" y="337" width="15.7" height="16" fill="#bc8cff" opacity="0.7" rx="2"/>
+<text x="690.0" y="349.0" text-anchor="start" fill="#bc8cff" class="label" font-weight="normal">+0.15%</text>
+<text x="192" y="371.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">1 年定存 (1.5%)</text>
+<rect x="668.3" y="359" width="4.6" height="16" fill="#6e7681" opacity="0.7" rx="2"/>
+<text x="678.9" y="371.0" text-anchor="start" fill="#6e7681" class="label" font-weight="normal">+0.04%</text>
+<text x="192" y="393.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">余额宝 (1.3%)</text>
+<rect x="668.3" y="381" width="4.0" height="16" fill="#7d8590" opacity="0.7" rx="2"/>
+<text x="678.3" y="393.0" text-anchor="start" fill="#7d8590" class="label" font-weight="normal">+0.04%</text>
+<text x="192" y="415.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">沪深300</text>
+<rect x="668.3" y="403" width="0.0" height="16" fill="#e3b341" opacity="0.7" rx="2"/>
+<text x="674.3" y="415.0" text-anchor="start" fill="#e3b341" class="label" font-weight="normal">+0.00%</text>
+<text x="192" y="437.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">招商白酒 161725</text>
+<rect x="544.8" y="425" width="123.5" height="16" fill="#2ea043" opacity="0.7" rx="2"/>
+<text x="538.8" y="437.0" text-anchor="end" fill="#2ea043" class="label" font-weight="normal">-1.19%</text>
+<text x="192" y="459.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">易方达蓝筹 005827</text>
+<rect x="277.2" y="447" width="391.1" height="16" fill="#3fb950" opacity="0.7" rx="2"/>
+<text x="271.2" y="459.0" text-anchor="end" fill="#3fb950" class="label" font-weight="normal">-3.78%</text>
+<text x="192" y="481.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">兴全合宜 163417</text>
+<rect x="228.8" y="469" width="439.5" height="16" fill="#56d364" opacity="0.7" rx="2"/>
+<text x="234.8" y="481.0" text-anchor="start" fill="#f0f6fc" class="label" font-weight="normal">-4.25%</text>
+<text x="192" y="503.0" text-anchor="end" fill="#d29922" class="label" font-weight="bold">★ 我的实盘</text>
+<rect x="200.0" y="491" width="468.3" height="16" fill="#d29922" opacity="1" rx="2"/>
+<text x="206.0" y="503.0" text-anchor="start" fill="#0d1117" class="label" font-weight="bold">-4.53%</text>
+
+  <!-- 口径脚注：两侧统计口径不同，不可直接比大小（issue #179 P1-A③）-->
+  <text x="50" y="548" fill="#6e7681" class="label">口径：★ 实盘 = 总权益时间加权收益（剔除存取款，含现金）；基准 = 窗口首日满仓一次性买入。口径不同，只看方向不比大小。</text>
+</svg>
