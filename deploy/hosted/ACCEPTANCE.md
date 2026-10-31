@@ -1,6 +1,6 @@
 # Implementation and acceptance record
 
-Updated: 2026-10-31. Acceptance uses synthetic data only. The Oracle gateway is running with registration closed. Auth0 tenant/application/API/Action configuration is installed; production social-provider credentials, COS and end-to-end user authorization remain incomplete.
+Updated: 2026-10-31. Acceptance uses synthetic data only. The Oracle gateway is running with registration closed. Auth0 tenant/application/API/Action configuration and the operator's existing social-provider credentials are installed; provider callback registration, COS and end-to-end user authorization remain incomplete.
 
 ## Delivered
 
@@ -61,9 +61,13 @@ Operator instructions and commands: [README.md](README.md).
 - API: RS256, exact canonical `/mcp` audience, three scopes, user access through grants, M2M denied. Default third-party user grant created for exactly those scopes; first-party API `allow_all` alone was insufficient for a strict DCR client.
 - Dynamic registration and resource compatibility configured. Discovery advertises `/oidc/register` and S256.
 - Post-login Action deployed on Node 22, all four named secrets present, attached to the login trigger.
-- Google connection enabled for the portal and at domain level. It still uses Auth0 development keys. GitHub OAuth credentials are not configured.
+- Google and GitHub connections are enabled for the portal and at domain level. With explicit operator authorization, both reuse the existing involutionhell production provider credentials; those values are not copied into this repository. No existing provider application callback was replaced.
+- Provider authorization URLs were checked against the existing client IDs. Google reaches `redirect_uri_mismatch`: its existing OAuth application must add the new Auth0 callback. GitHub reaches its login screen; completed authorization/callback acceptance remains unverified. Provider settings must retain the original site's callback URLs.
 - A real synthetic public client registered through DCR (HTTP 201). Its `resource` + S256 authorization request now reaches Google's authorization endpoint (HTTP 302). This is not evidence of completed user login, returned token scopes or a real ChatGPT connection.
 - The actual gateway login endpoint produces the correct tenant, canonical callback and S256 challenge. Gateway health is 200, anonymous account access is 401, and protected-resource discovery contains the exact audience/issuer.
 - Default httpx, curl and ChatGPT-style user agents reach the origin. Cloudflare Browser Integrity Check rejects Python-urllib; no zone-wide security setting was changed. Public streaming/client acceptance remains required.
 
-Next configuration steps: [Auth0 checklist](AUTH0_SETUP_zh.md). Dedicated Google/GitHub OAuth credentials, actual login, public connector acceptance, COS recovery and the 24-hour soak remain release gates.
+- The production website now proxies to the gateway. Two synthetic accounts passed official MCP SDK initialization, queries, same-key repeated writes and independent exact-balance checks through the public endpoint using PATs. Their accounts, containers, volumes and the temporary DCR client were removed. Research remained off; the queue is empty. This does not replace real user OAuth acceptance.
+- Live browser testing detected Cloudflare's automatic analytics injection on the connection page. The companion website fix adds `Cache-Control: no-store, no-transform` to private connection pages (site PR #13); the approved homepage UI is unchanged.
+
+Next configuration steps: [Auth0 checklist](AUTH0_SETUP_zh.md). Add provider callback URLs, complete actual login/public OAuth, COS recovery and the 24-hour soak before opening registration.
