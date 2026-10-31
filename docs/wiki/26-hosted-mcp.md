@@ -1,4 +1,5 @@
 ---
+type: wiki-chapter
 title: 26 — 官方托管 MCP 与决策研究数据
 tags: [mcp, hosted, privacy]
 intent: 远程接入、数据边界与运维

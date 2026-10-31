@@ -224,6 +224,23 @@ def test_training_exact_amounts_quarantined_text_and_versioned_export(environmen
         env.research.mark_used(manifest["dataset_version"])
 
 
+def test_sensitive_text_screening_handles_long_non_email_runs():
+    import subprocess
+    import sys
+    from openinvest.hosted.research import PII
+    for email in ("test@example.com", "first.last+tag@sub.example.co.uk", "a-b_c@domain.test"):
+        text = "Evidence from " + email + "."
+        assert PII.search(text).group() == email
+        assert email not in PII.sub("[REDACTED]", text)
+    # Run potentially hostile input outside pytest so a regression has a hard
+    # deadline rather than wedging the whole suite or gateway research thread.
+    subprocess.run([sys.executable, "-c", "from openinvest.hosted.research import PII; "
+                    "assert not PII.search('+'*32000); "
+                    "assert not PII.search('a'*32000); "
+                    "assert not PII.search('x@' + 'a.'*16000)"],
+                   check=True, capture_output=True, timeout=5)
+
+
 def test_unreviewed_samples_are_not_training_data(environment, tmp_path):
     env = environment
     env.research.capture(env.accounts[0][0], "status", {}, {"amount": 300}, 1)

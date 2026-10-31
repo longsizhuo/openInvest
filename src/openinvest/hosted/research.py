@@ -25,7 +25,9 @@ CONTAINERS = {"cash", "holdings", "asset", "assets", "verdict", "result", "data"
 STRINGS = {"symbol", "currency", "cost_currency", "alloc_currency", "base_currency", "kind", "action",
            "verdict", "original_verdict", "final_verdict", "_original_verdict", "_original_trim_reason", "status", "rule", "rules", "provider", "model",
            "regime_label", "algorithm_version", "as_of", "data_date", "round", "source", "rule_version", "backend_version", "tool_version", "prompt_version", "client_version", "client_name", "snapshot_hash", "facts_source"}
-PII = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:Bearer\s+|sk-|oi_|ws_)[A-Za-z0-9_-]{8,}|https?://|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b\d{15,19}\b", re.I)
+# Bound the start of an email candidate and consume labels without backtracking.
+# Otherwise a long run of '+' without '@' is retried from every character.
+PII = re.compile(r"(?<![\w.+-])[\w.+-]++@(?:[\w-]++\.(?=[\w-]))++[A-Za-z]{2,}+|(?:Bearer\s+|sk-|oi_|ws_)[A-Za-z0-9_-]{8,}|https?://|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b\d{15,19}\b", re.I)
 
 
 def structured(value, parent=""):

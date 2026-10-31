@@ -2,6 +2,10 @@
 
 目标站点：`https://openinvest.involutionhell.com`。配置期间保持服务器的 `HOSTED_REGISTRATION_OPEN=0`。
 
+## 套餐
+
+先选 Free。2026-10-31 的[官方定价](https://auth0.com/pricing)为 $0/月、最高 25,000 月活用户，包含社交登录。首发约 10 名用户的基础登录需求在该额度内。使用租户默认域名即可；无需为本次接入购买套餐。MCP 开关与授权流程仍须在实际租户上验证，遇到功能限制先核对原因。
+
 ## 1. 创建租户和网页应用
 
 在 [Auth0 Dashboard](https://manage.auth0.com/) 创建独立租户。记录实际 Domain，不需要购买自定义登录域名。
