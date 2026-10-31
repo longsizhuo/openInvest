@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from functools import partial, wraps
 from inspect import iscoroutinefunction
 from typing import Annotated, Any, Dict, List, Literal, Optional
@@ -52,9 +53,18 @@ _IDEM_FIELD = Field(description=(
     "is compared, not the arguments — a different order (other symbol/units/price/amount) "
     "needs a new key, or it is silently treated as the retry."))
 
+if os.getenv("INVEST_HOSTED_WORKER") == "1":
+    _IDEM_FIELD = Field(description="Required client-generated retry key. Reuse the same key and arguments for retries; changed arguments are rejected.")
+
 mcp = FastMCP(
     "openinvest",
     instructions=(
+        "openInvest personal investment ledger. Use status/live_prices before investment analysis. "
+        "Run committee analysis with prepare_committee, reason in your Agent, and submit_committee "
+        "with the returned analysis_id. Pass explicit currencies and client-generated idempotency_key "
+        "for ledger writes; reuse the same key and arguments when retrying. "
+        "This is decision support: never place real orders."
+        if os.getenv("INVEST_HOSTED_WORKER") == "1" else (
         "openInvest — an investment decision runtime built for AI agents. "
         "Read/write portfolio, live prices, and the decision ledger; run a 4-role LLM "
         "investment committee (Direct path). Default currency for amounts is CNY. "
@@ -64,8 +74,9 @@ mcp = FastMCP(
         "When the user declines a committee recommendation, ask why in one sentence, "
         "then call record_execution — reason capture is the host agent's job. "
         "Never place real orders: this runtime is decision support only; the human executes."
-    ),
+    )),
 )
+
 
 
 def _tool(**options):
@@ -76,6 +87,20 @@ def _tool(**options):
     callers. Ledger writes still use the service layer's transaction locks.
     """
     def register(fn):
+        import os
+        if os.getenv("INVEST_HOSTED_WORKER") == "1":
+            from openinvest.hosted.policy import ALLOWED, MONEY
+            if fn.__name__ not in ALLOWED:
+                return fn
+            import inspect
+            # The resource boundary requires client-owned retry keys only in hosted mode.
+            required = {"idempotency_key"} if fn.__name__ in MONEY else {"analysis_id"} if fn.__name__ == "submit_committee" else set()
+            if required:
+                signature = inspect.signature(fn, eval_str=True)
+                fn.__signature__ = signature.replace(parameters=[
+                    p.replace(default=inspect.Parameter.empty, kind=inspect.Parameter.KEYWORD_ONLY)
+                    if p.name in required else p for p in signature.parameters.values()
+                ])
         if iscoroutinefunction(fn):
             mcp.tool(**options)(fn)
         else:
@@ -182,6 +207,10 @@ def doctor() -> Dict[str, Any]:
     _check_advisory()
     from openinvest.paths import INVEST_ROOT
     from openinvest.services.skill_views import build_doctor_view
+    import os
+    if os.getenv("INVEST_HOSTED_WORKER") == "1":
+        from importlib.metadata import version
+        return {"status": "ready", "version": version("openinvest"), "coordinator_ready": True, "direct_ready": False}
     return build_doctor_view(INVEST_ROOT)
 
 
@@ -1226,7 +1255,12 @@ def prepare_committee(
     _check_advisory()
     from mcp.server.fastmcp.exceptions import ToolError
     from openinvest.core.committee_runner import prepare_committee_brief
-    out = prepare_committee_brief(symbol)
+    import os
+    if os.getenv("INVEST_HOSTED_WORKER") == "1":
+        from openinvest.hosted.analysis import prepare
+        out = prepare(prepare_committee_brief, symbol)
+    else:
+        out = prepare_committee_brief(symbol)
     if out.get("status") == "error":
         raise ToolError(f"{out.get('error')} {out.get('hint', '')}".strip())
     return json.loads(json.dumps(out, ensure_ascii=False, default=str))
@@ -1239,6 +1273,7 @@ def submit_committee(
     transcript: Annotated[str, Field(description="All sections, each starting with its separator line: === MACRO ===, === QUANT_R1 ===, === RISK_R1 ===, === QUANT_R2 ===, === RISK_R2 ===, === CIO ===.")],
     provider: Annotated[str, Field(description="Which agent played the roles, e.g. 'hermes', 'claude', 'codex'.")] = "agent",
     model: Annotated[str, Field(description="Model that actually played the roles, e.g. 'claude-sonnet-5-5'; omitted -> recorded as 'unknown'. The scorecard buckets verdicts by provider:model.")] = "",
+    analysis_id: Annotated[Optional[str], Field(description="Business analysis identifier returned by prepare_committee; required by hosted servers.")] = None,
 ) -> Dict[str, Any]:
     """Step 2 of the agent-run committee: hand in the transcript you produced
     from `prepare_committee`. The backend parses the CIO memo, applies the same
@@ -1254,6 +1289,15 @@ def submit_committee(
         "transcript" = no recent prepare found, facts were read from your text).
     """
     _check_advisory()
+    import os
+    if os.getenv("INVEST_HOSTED_WORKER") == "1":
+        from openinvest.hosted.analysis import submit
+        return submit(_submit_committee_result, symbol, transcript, provider, model, analysis_id)
+    return _submit_committee_result(symbol, transcript, provider, model)
+
+
+def _submit_committee_result(symbol, transcript, provider, model):
+    """Shared local/hosted coordinator adapter; never changes process configuration."""
     from datetime import datetime
 
     from mcp.server.fastmcp.exceptions import ToolError

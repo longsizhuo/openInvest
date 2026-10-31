@@ -44,6 +44,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hosted = ["authlib>=1.6,<2", "PyJWT[crypto]>=2.10,<3", "httpx>=0.28,<1", "docker>=7.1,<8", "cos-python-sdk-v5>=1.9,<2", "cryptography>=45,<49", "itsdangerous>=2.2,<3"]
 ibkr = ["ib_async>=2.1.0,<3"]  # jobs/ibkr_autopilot 经本机 IB Gateway（TWS API）下真单；不开盈透 autopilot 的用户不用装
 
 [project.urls]
@@ -57,6 +58,7 @@ Changelog = "https://github.com/longsizhuo/openInvest/blob/main/CHANGELOG.md"
 openinvest = "openinvest.cli:main"
 openinvest-mcp = "openinvest.connectors.mcp_server:main"
 openinvest-web = "openinvest.connectors.web_api.__main__:main"
+openinvest-hosted = "openinvest.hosted.cli:main"
 
 [build-system]
 requires = ["hatchling"]
