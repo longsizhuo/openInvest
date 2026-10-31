@@ -1,0 +1,14 @@
+[Unit]
+Description=Consistent encrypted openInvest hosted backup
+After=openinvest-hosted.service
+StartLimitIntervalSec=7200
+StartLimitBurst=12
+
+[Service]
+Type=oneshot
+Restart=on-failure
+RestartSec=300
+User=openinvest-hosted
+EnvironmentFile=/etc/openinvest-hosted.env
+ExecStart=/opt/openinvest-hosted/.venv/bin/openinvest-hosted backup
+UMask=0077

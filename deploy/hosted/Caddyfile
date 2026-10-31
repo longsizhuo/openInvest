@@ -1,0 +1,11 @@
+{$HOSTED_HOSTNAME} {
+    # No access logger: callback URLs may carry short-lived authorization handoffs.
+    @operator path /operator/*
+    respond @operator 404
+    reverse_proxy 127.0.0.1:8768 {
+        flush_interval -1
+        transport http {
+            read_timeout 21m
+        }
+    }
+}

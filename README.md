@@ -159,6 +159,14 @@ Run the committee automatically via GitHub Actions and receive daily digest emai
 
 ---
 
+## Remote MCP and data
+
+Local installations keep the ledger on your machine; private remote installations keep it on your chosen host. Neither automatically sends decision data to the official research service.
+
+The optional official hosted service provides a separate ledger per account, Google/GitHub login, OAuth and personal access tokens. After the web notice, research recording defaults on and can be disabled on the web without losing ledger features. De-identified research retains precise amounts/currencies and submitted decisions for research and future training; unused samples have a separate deletion control. Data is retained long term, with encrypted backups retained for 30 days. Model providers independently process the context your Agent sends them.
+
+Hosted registration stays closed until deployment and acceptance. See the [data and connection guide](docs/wiki/26-hosted-mcp.md) and [deployment runbook](deploy/hosted/README.md).
+
 ## Architecture & Multi-Agent Orchestration
 
 openInvest does not run a mock debate in a single LLM session. The system enforces an **Information Isolation Contract** at the `core/committee/` layer, orchestrating 4 independent LLM processes in a directed acyclic graph (DAG):
