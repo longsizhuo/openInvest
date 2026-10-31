@@ -1,6 +1,6 @@
 # Implementation and acceptance record
 
-Updated: 2026-10-31. Acceptance uses synthetic data only. The Oracle program, dedicated service account and disabled systemd units are installed; Auth0/COS configuration and public deployment remain incomplete.
+Updated: 2026-10-31. Acceptance uses synthetic data only. The Oracle gateway is running with registration closed. Auth0 tenant/application/API/Action configuration is installed; production social-provider credentials, COS and end-to-end user authorization remain incomplete.
 
 ## Delivered
 
@@ -17,8 +17,8 @@ Updated: 2026-10-31. Acceptance uses synthetic data only. The Oracle program, de
 
 | Check | Result |
 |---|---|
-| Full backend suite | **2397 passed, 3 skipped** (opt-in Docker/long-stream tests below) |
-| Focused hosted control-plane suite | **23 passed** |
+| Full backend suite | **2398 passed, 3 skipped** (opt-in Docker/long-stream tests below) |
+| Focused hosted control-plane suite | **24 passed** |
 | Real Docker acceptance | **4 passed**: ten isolated accounts, same-key writes, eviction/persistence, two-worker gate, user archive restore, official MCP SDK through actual gateway and worker |
 | TCP + local Caddy 130-second SSE, second-user query | **1 passed**, 132 seconds total test runtime |
 | Import contracts | **3 kept, 0 broken** |
@@ -49,10 +49,21 @@ Operator instructions and commands: [README.md](README.md).
 - Program: `/opt/openinvest-hosted`, Python 3.13, hosted dependencies installed. Hosted module imports succeed as the dedicated `openinvest-hosted` user.
 - Data directory: `/srv/openinvest-hosted`, mode 700, initially empty. No author ledger or earlier research records imported.
 - Environment: `/etc/openinvest-hosted.env`, root-owned mode 600. Independent encryption/session/Action/admin secrets generated locally; no values copied to this repository.
-- Gateway/backup units installed and checked with `systemd-analyze verify`. Gateway and backup timer remain disabled and inactive.
-- `check-config` run through systemd with the service identity reports exactly three missing startup fields: `HOSTED_AUTH0_ISSUER`, `HOSTED_AUTH0_CLIENT_ID`, `HOSTED_AUTH0_CLIENT_SECRET`. COS remains unconfigured; it is required before public registration.
-- No gateway DNS/TLS route or Pages origin binding activated. Public `/api/me` still returns the existing service-not-ready response.
+- Gateway/backup units installed and checked with `systemd-analyze verify`. Gateway is enabled and running; the backup timer stays disabled until COS and restore acceptance.
+- `check-config` succeeds with the actual tenant and portal client credentials. COS remains unconfigured; it is required before public registration.
+- A proxied DNS/TLS origin serves health, account, OAuth, discovery and MCP routes. Operator and other paths return 404 at the public proxy. Access logging is not enabled for this route. The production Pages gateway binding points to this origin; preview bindings remain unchanged.
 - The full suite uses a temporary `INVEST_HOME`, disabled dotenv loading and a synthetic model key. This avoids local model overrides, event data and scheduler locks influencing compatibility tests. The three tests that failed under the developer environment pass in isolation and in the isolated full suite.
 - Added a non-mutating `check-config` operator command and aligned gateway-served page CSP with the Mantine portal: runtime style attributes allowed, inline scripts/style elements still blocked.
 
-Next configuration steps: [Auth0 checklist](AUTH0_SETUP_zh.md). Actual login, public connector acceptance, COS recovery and the 24-hour soak remain release gates.
+## Auth0 configuration acceptance — 2026-10-31
+
+- Actual portal application: Regular Web Application, canonical-site callback and web origin, authorization-code grant, client-secret Basic authentication. Secrets stored only in the root-only server environment and required Auth0 Action configuration.
+- API: RS256, exact canonical `/mcp` audience, three scopes, user access through grants, M2M denied. Default third-party user grant created for exactly those scopes; first-party API `allow_all` alone was insufficient for a strict DCR client.
+- Dynamic registration and resource compatibility configured. Discovery advertises `/oidc/register` and S256.
+- Post-login Action deployed on Node 22, all four named secrets present, attached to the login trigger.
+- Google connection enabled for the portal and at domain level. It still uses Auth0 development keys. GitHub OAuth credentials are not configured.
+- A real synthetic public client registered through DCR (HTTP 201). Its `resource` + S256 authorization request now reaches Google's authorization endpoint (HTTP 302). This is not evidence of completed user login, returned token scopes or a real ChatGPT connection.
+- The actual gateway login endpoint produces the correct tenant, canonical callback and S256 challenge. Gateway health is 200, anonymous account access is 401, and protected-resource discovery contains the exact audience/issuer.
+- Default httpx, curl and ChatGPT-style user agents reach the origin. Cloudflare Browser Integrity Check rejects Python-urllib; no zone-wide security setting was changed. Public streaming/client acceptance remains required.
+
+Next configuration steps: [Auth0 checklist](AUTH0_SETUP_zh.md). Dedicated Google/GitHub OAuth credentials, actual login, public connector acceptance, COS recovery and the 24-hour soak remain release gates.

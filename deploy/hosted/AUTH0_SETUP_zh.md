@@ -53,7 +53,22 @@ https://实际租户域名/login/callback
 | Signing Algorithm | RS256 |
 | Permissions | `invest:read`、`invest:write`、`invest:analyze` |
 
-首发不需要额外角色体系。若启用 RBAC，必须为测试用户分配上述权限，确认访问令牌的 `scope` 包含获准权限。允许第三方 MCP 应用请求此 API 的用户授权；保留用户授权流程，不配置全局跳过同意。
+首发不需要额外角色体系。若启用 RBAC，必须为测试用户分配上述权限，确认访问令牌的 `scope` 包含获准权限。保留用户授权流程，不配置全局跳过同意。
+
+API 的 User-Delegated Access 设为 **Per-app authorization**（`require_client_grant`），Client Access 设为 **Deny**（`deny_all`）。然后为第三方客户端建立默认的**用户授权** grant，scope 仅包含上面的三项权限。该默认 grant 不等于用户同意，也不赋予客户端访问其他账户的权限。
+
+通过 Management API 创建该 grant 的请求体为：
+
+```json
+{
+  "audience": "https://openinvest.involutionhell.com/mcp",
+  "subject_type": "user",
+  "default_for": "third_party_clients",
+  "scope": ["invest:read", "invest:write", "invest:analyze"]
+}
+```
+
+端点为 `POST /api/v2/client-grants`。不要填写 `client_id`，否则只会授权单个客户端。新租户的严格第三方客户端即使在 API User Access 为 `allow_all` 时也仍需要 grant；缺少这一步会出现 `Client is not authorized to access resource server`。
 
 在 **Settings → Advanced** 开启：
 
@@ -95,3 +110,4 @@ https://实际租户域名/login/callback
 - [Google Social Connection](https://developer.auth0.com/resources/labs/authentication/google-social-connection-to-login)
 - [GitHub Social Connection](https://developer.auth0.com/resources/labs/authentication/authenticate-using-github)
 - [MCP audience 排查](https://support.auth0.com/center/s/article/mcp-audience-error-with-auth0)
+- [API access policies 与默认第三方用户 grant](https://auth0.com/blog/developers-guide-api-access-policies-auth0/)
