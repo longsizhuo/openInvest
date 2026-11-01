@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew scoped openInvest R2 credentials every 15 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=15min
+Unit=openinvest-hosted-r2.service
+
+[Install]
+WantedBy=timers.target

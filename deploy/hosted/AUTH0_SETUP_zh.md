@@ -18,6 +18,10 @@
 | Allowed Logout URLs | `https://openinvest.involutionhell.com/connect/` |
 | Allowed Web Origins | `https://openinvest.involutionhell.com` |
 | Grant Types | Authorization Code；网页应用无需开启 Implicit 或 Password |
+| Advanced Settings → OAuth → OIDC Conformant | 开启 |
+| Advanced Settings → OAuth → JWT Signature Algorithm | RS256 |
+
+通过 Management API 创建或更新应用时，明确设置 `oidc_conformant: true` 和 `jwt_configuration: {"alg": "RS256"}`，再读取配置核对。API 创建的应用可能保留旧版默认值；仅看到控制台显示 RS256 不足以证明实际令牌采用该算法，见 [Auth0 已知问题](https://support.auth0.com/center/s/article/id-token-returns-incorrect-jwt-signature-algorithm)。
 
 将 Domain、Client ID、Client Secret 对应填入 Oracle 的 `/etc/openinvest-hosted.env`：
 
@@ -88,7 +92,7 @@ API 的 User-Delegated Access 设为 **Per-app authorization**（`require_client
 | `PORTAL_ORIGIN` | `https://openinvest.involutionhell.com` |
 | `HOSTED_ACTION_SECRET` | 服务器 `/etc/openinvest-hosted.env` 中同名值 |
 
-部署 Action 后，将其加入 Login 流程并应用。此 Action 将 MCP 首次授权带到网页初始化，再返回 Auth0 继续授权；普通网页登录不执行该重定向。
+部署 Action 后，将其加入 Login 流程并应用。此 Action 将 MCP 首次授权带到网页确认隐私与研究设置、授权客户端，再返回 Auth0 继续授权；账本由连接后的 Agent 建立；普通网页登录不执行该重定向。
 
 服务器的 Action Secret、会话密钥、管理员凭证和数据加密密钥独立生成，不使用网页应用的 Client Secret 替代。服务器配置不自动上传到 Auth0。
 
@@ -100,7 +104,7 @@ API 的 User-Delegated Access 设为 **Per-app authorization**（`require_client
 
 1. Google 和 GitHub 首次／重复登录，确认不同身份对应独立账本。
 2. ChatGPT 和至少一个终端客户端 OAuth、查询及幂等写入。
-3. 凭证撤销、研究开关、COS 归档／恢复，以及 24 小时稳定性验收。
+3. 凭证撤销、研究开关、R2／COS 归档与备份恢复，以及 24 小时稳定性验收。
 
 公开注册仍保持关闭，直到验收完成。配置检查只验证本地字段格式，不替代真实登录和令牌验证。
 

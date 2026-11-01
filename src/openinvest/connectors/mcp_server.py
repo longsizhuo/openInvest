@@ -59,7 +59,10 @@ if os.getenv("INVEST_HOSTED_WORKER") == "1":
 mcp = FastMCP(
     "openinvest",
     instructions=(
-        "openInvest personal investment ledger. Use status/live_prices before investment analysis. "
+        "openInvest personal investment ledger. Call doctor first; if it reports needs_setup, "
+        "confirm the user's base currency and call setup_ledger. Risk profile and tracked assets "
+        "are optional; do not infer a risk profile. Read ledger_settings before updating preferences. "
+        "Use status/live_prices before investment analysis. "
         "Run committee analysis with prepare_committee, reason in your Agent, and submit_committee "
         "with the returned analysis_id. Pass explicit currencies and client-generated idempotency_key "
         "for ledger writes; reuse the same key and arguments when retrying. "
@@ -112,6 +115,58 @@ def _tool(**options):
         return fn
 
     return register
+
+
+if os.getenv("INVEST_HOSTED_WORKER") == "1":
+    @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+    def setup_ledger(
+        currency: Annotated[str, Field(description="User-confirmed reporting currency, e.g. USD, CNY, AUD.", pattern=r"^[A-Z]{3}$")],
+        risk: Annotated[Optional[str], Field(description="Only set a user-confirmed preference; omitted means unspecified.", pattern=r"^(Conservative|Balanced|Aggressive)$")] = None,
+        symbols: Annotated[Optional[List[str]], Field(description="Optional explicit market tickers; an empty list is supported.")] = None,
+    ) -> Dict[str, Any]:
+        """Create the user's empty hosted ledger after confirming its base currency.
+
+        No positions or funds are required. Never reset an existing ledger;
+        use ledger_settings and update_ledger_settings to change preferences.
+        """
+        from openinvest.hosted.ledger import initialize, ledger_settings
+        initialize({"currency": currency, "risk": risk, "symbols": symbols or []})
+        return ledger_settings()
+
+    @_tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
+    def ledger_settings() -> Dict[str, Any]:
+        """Read setup state, reporting currency, risk preference and tracked tickers.
+
+        Returns a revision to pass when updating. An uninitialized account
+        returns initialized=false; use setup_ledger after confirming currency.
+        """
+        from openinvest.hosted.ledger import ledger_settings as read
+        return read()
+
+    @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+    def update_ledger_settings(
+        expected_revision: Annotated[str, Field(description="Current revision returned by ledger_settings; refresh after a conflict.", min_length=64, max_length=64)],
+        currency: Annotated[Optional[str], Field(description="Reporting currency; can change only before financial or decision history exists.", pattern=r"^[A-Z]{3}$")] = None,
+        risk: Annotated[Optional[str], Field(description="User-confirmed risk preference.", pattern=r"^(Conservative|Balanced|Aggressive)$")] = None,
+        clear_risk: Annotated[bool, Field(description="Set true to explicitly clear a recorded risk preference.")] = False,
+        symbols: Annotated[Optional[List[str]], Field(description="Replace the tracked ticker list; retained tickers preserve their limits/alerts. Empty removes all tracking, never holdings.")] = None,
+    ) -> Dict[str, Any]:
+        """Update the user's confirmed preferences, shared with the account website.
+
+        Omitted fields are unchanged. No holdings, cash amounts or historical
+        decisions are rewritten. Financial history locks reporting-currency changes.
+        """
+        from openinvest.hosted.ledger import update_ledger_settings as update
+        if clear_risk and risk is not None:
+            raise ValueError("Choose risk or clear_risk, not both")
+        changes = {"expected_revision": expected_revision}
+        if currency is not None:
+            changes["currency"] = currency
+        if risk is not None or clear_risk:
+            changes["risk"] = risk
+        if symbols is not None:
+            changes["symbols"] = symbols
+        return update(changes)
 
 
 def _pm():
@@ -210,6 +265,10 @@ def doctor() -> Dict[str, Any]:
     import os
     if os.getenv("INVEST_HOSTED_WORKER") == "1":
         from importlib.metadata import version
+        from openinvest.hosted.ledger import ledger_settings
+        if not ledger_settings()["initialized"]:
+            return {"status": "needs_setup", "version": version("openinvest"), "coordinator_ready": False,
+                    "direct_ready": False, "next_step": "Confirm the user's base currency, then call setup_ledger. Risk profile and tracked assets are optional."}
         return {"status": "ready", "version": version("openinvest"), "coordinator_ready": True, "direct_ready": False}
     return build_doctor_view(INVEST_ROOT)
 
@@ -766,7 +825,8 @@ def deposit(
     amount: Annotated[float, Field(description="Amount to add; must be > 0.", gt=0)],
     idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
-    """Record a cash deposit into the ledger, in any currency. Bookkeeping
+    """Record a cash deposit into the ledger, in any currency. Cash balances
+    are rounded to two decimal places; the returned balance reflects that rounding. Bookkeeping
     only — no real payment system is connected.
 
     Args:
@@ -790,7 +850,8 @@ def withdraw(
     amount: Annotated[float, Field(description="Amount to remove; must be > 0.", gt=0)],
     idempotency_key: Annotated[Optional[str], _IDEM_FIELD] = None,
 ) -> Dict[str, Any]:
-    """Record a cash withdrawal from the ledger, in any currency. Fails if
+    """Record a cash withdrawal from the ledger, in any currency. Cash balances
+    are rounded to two decimal places; the returned balance reflects that rounding. Fails if
     the balance is insufficient. Bookkeeping only — no real payment system
     is connected.
 
@@ -1212,8 +1273,9 @@ def untrack_asset(
     symbol: Annotated[str, Field(description="yfinance ticker currently in the tracked list.")],
 ) -> Dict[str, Any]:
     """Remove a symbol from the tracked-asset list — the committee and DCA
-    jobs stop covering it. Holdings and trade history are untouched; schema
-    validation guarantees at least one tracked asset remains.
+    jobs stop covering it. Holdings and trade history are untouched. Hosted
+    ledgers can have an empty tracked list; local strategies retain their
+    existing requirement unless explicitly configured to allow empty targets.
 
     Args:
         symbol: yfinance ticker currently in the tracked list.

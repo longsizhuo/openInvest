@@ -1,0 +1,19 @@
+[Unit]
+Description=Refresh bucket-scoped openInvest R2 credentials
+Wants=network-online.target
+After=network-online.target
+Before=openinvest-hosted.service
+
+[Service]
+Type=oneshot
+User=root
+Group=openinvest-hosted
+RuntimeDirectory=openinvest-hosted-r2
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/openinvest-hosted-r2
+ExecStart=/opt/openinvest-hosted/.venv/bin/python /usr/local/libexec/openinvest-hosted-r2-refresh /etc/openinvest-hosted-r2-issuer.json

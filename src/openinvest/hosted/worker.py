@@ -7,61 +7,12 @@ import os
 import tarfile
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
 
 
-class Initialization(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    currency: str = Field(default="CNY", pattern=r"^[A-Z]{3}$")
-    risk: str = Field(default="Balanced", pattern=r"^(Conservative|Balanced|Aggressive)$")
-    symbols: list[str] = Field(min_length=1, max_length=50)
-
-
-def initialize(data):
-    from openinvest.paths import INVEST_ROOT
-    from openinvest.core.memory_store import MemoryStore
-    from openinvest.core.schemas import validate_portfolio, validate_strategy
-    from openinvest.services.symbol_map import normalize_symbol
-    import re
-    import yaml
-    spec = Initialization.model_validate(data)
-    store = MemoryStore()
-    marker = INVEST_ROOT / ".hosted-initialization.json"
-    expected = spec.model_dump()
-    resuming = marker.exists() and json.loads(marker.read_text()) == expected
-    if not resuming and (marker.exists() or any(store.path_of(n).exists() for n in ("user", "strategy", "portfolio"))):
-        raise ValueError("Ledger already initialized; import/reset is not implicit")
-    symbols = [normalize_symbol(s) for s in spec.symbols]
-    if any(not re.fullmatch(r"[A-Z0-9^][A-Z0-9.^=:_-]{0,39}", s) or re.fullmatch(r"\d{6}", s) for s in symbols):
-        raise ValueError("Use explicit market symbols")
-    targets = [{"symbol": s, "max_single_invest_cny": 0} for s in symbols]
-    strategy = {"target_allocation_stock": .7, "target_allocation_cash": .3, "target_assets": targets}
-    portfolio = {"schema_version": 2, "cash": {spec.currency: 0.0}, "holdings": []}
-    validate_strategy(strategy)
-    validate_portfolio(portfolio)
-    # Validate every document before writing; no external model parses onboarding.
-    config = INVEST_ROOT / "config.yaml"
-    if config.exists() and not resuming:
-        raise ValueError("Existing configuration cannot be overwritten")
-    if not marker.exists():
-        from openinvest.core.memory_store import _atomic_write_text
-        _atomic_write_text(marker, json.dumps(expected))
-    # Retrying the same onboarding after interruption fills missing documents only.
-    if all(store.path_of(n).exists() for n in ("user", "strategy", "portfolio")) and config.exists():
-        return {"initialized": True}
-    config.write_text(yaml.safe_dump({"portfolio": {"base_currency": spec.currency}}), encoding="utf-8", newline="\n")
-    if not store.path_of("user").exists():
-        store.write("user", "user", {"display_name": "Investor", "risk_tolerance": spec.risk}, "")
-    if not store.path_of("strategy").exists():
-        store.write("strategy", "strategy", strategy, "")
-    if not store.path_of("portfolio").exists():
-        store.write("portfolio", "portfolio", portfolio, "")
-    from openinvest.core.config import reset_config
-    reset_config()
-    return {"initialized": True}
+from .ledger import Initialization, initialize, apply_base_currency as _apply_base_currency
 
 
 def snapshot():
@@ -93,6 +44,7 @@ def snapshot():
 def create_worker():
     if os.getenv("INVEST_HOSTED_WORKER") != "1" or not os.getenv("INVEST_API_TOKEN"):
         raise ValueError("Worker requires explicit isolated configuration")
+    _apply_base_currency()
     from openinvest.connectors.mcp_server import mcp, _configure_http_settings, _BearerAuthMiddleware
     # Middleware protects internal routes too; the public gateway never forwards paths/headers.
     _configure_http_settings("127.0.0.1", 8766)
@@ -111,6 +63,17 @@ def create_worker():
     async def export_route(_request):
         async with lock:
             return Response(await asyncio.to_thread(snapshot), media_type="application/gzip")
+
+    async def settings_route(request):
+        from .ledger import ledger_settings, update_ledger_settings
+        async with lock:
+            try:
+                result = await asyncio.to_thread(update_ledger_settings, await request.json()) if request.method == "POST" else await asyncio.to_thread(ledger_settings)
+                return JSONResponse(result)
+            except ValueError as error:
+                code = str(error)
+                allowed = {"settings_conflict", "currency_has_history", "ledger_not_initialized", "invalid_symbols", "invalid_currency"}
+                return JSONResponse({"error": code if code in allowed else "invalid_settings"}, status_code=409)
 
     async def cancel_route(_request):
         from openinvest.hosted.analysis import cancel
@@ -154,6 +117,7 @@ def create_worker():
                         target = INVEST_ROOT/member.name
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_bytes(archive.extractfile(member).read())
+                _apply_base_currency()
             except Exception:
                 return JSONResponse({"error": "Invalid backup"}, status_code=422)
             return JSONResponse({"restored": True})
@@ -164,6 +128,7 @@ def create_worker():
             yield
 
     app = Starlette(routes=[Route("/internal/initialize", initialize_route, methods=["POST"]),
+                            Route("/internal/settings", settings_route, methods=["GET", "POST"]),
                             Route("/internal/export", export_route),
                             Route("/internal/cancel", cancel_route, methods=["POST"]),
                             Route("/internal/restore", restore_route, methods=["POST"]),

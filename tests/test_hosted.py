@@ -21,6 +21,36 @@ from openinvest.hosted.research import Research
 from openinvest.hosted.store import Store, Conflict
 
 
+def test_preview_worker_discovery_cannot_adopt_production_containers(settings):
+    import docker
+    from unittest.mock import Mock
+    from openinvest.hosted.pool import DockerPool
+    client = SimpleNamespace(containers=SimpleNamespace(list=Mock(return_value=[]), get=Mock(side_effect=docker.errors.NotFound('synthetic missing worker'))))
+    pool = DockerPool(replace(settings, worker_namespace='test-owned-preview'), client=client)
+    asyncio.run(pool.recover())
+    client.containers.list.assert_called_once_with(all=True, filters={'label':'openinvest.hosted=test-owned-preview'})
+
+    client.containers.list.reset_mock()
+    client.containers.list.return_value = [object()] * settings.workers
+    with pytest.raises(Busy):
+        asyncio.run(pool._attach('0123456789abcdef0123456789abcdef'))
+    client.containers.list.assert_called_once_with(all=True, filters={'label':'openinvest.hosted=test-owned-preview'})
+
+
+def test_browser_login_lands_on_personal_home_and_mcp_handoff_stays_on_connect(environment, monkeypatch):
+    env = environment
+    async def token(_request):
+        return {'userinfo': {'sub': env.accounts[0][0]['subject']}}
+    monkeypatch.setattr(env.app.state.oauth.auth0, 'authorize_access_token', token)
+    response = env.client.get('/auth/callback', follow_redirects=False)
+    assert response.status_code == 303 and response.headers['location'] == '/account/'
+    account = env.accounts[0][0]
+    ticket = jwt.encode({'sub': account['subject'], 'client_id': 'synthetic-home-client', 'aud': env.settings.origin,
+                         'exp': int(time.time())+300, 'jti': 'synthetic-home-handoff'}, env.settings.action_secret, algorithm='HS256')
+    handoff = env.client.get('/auth/action', params={'state':'synthetic-state','session_token':ticket}, follow_redirects=False)
+    assert handoff.status_code == 303 and handoff.headers['location'] == '/connect'
+
+
 def test_config_check_does_not_expose_secrets_or_create_state(tmp_path, monkeypatch, capsys):
     from openinvest.hosted import cli
     from openinvest.hosted.config import REQUIRED_ENV
@@ -153,6 +183,120 @@ def test_owner_scoped_idempotency_and_replay_id(environment):
     assert changed.status_code == 409
     assert env.pool.balances[a["id"]] == 120.75
     assert b"120.75" not in env.store.path.read_bytes()  # receipts are encrypted
+
+
+def research_samples(env):
+    with env.research.db() as db:
+        return [env.research.unseal(row[0]) for row in db.execute("SELECT payload FROM samples WHERE payload IS NOT NULL ORDER BY created,id")]
+
+
+def test_research_orders_attempts_scopes_retry_links_and_survives_restart(environment):
+    env = environment
+    (a, first), (b, second) = env.accounts
+    arguments = {"amount": 12345.67, "currency": "AUD", "idempotency_key": "PRIVATE_RETRY_KEY"}
+    assert rpc(env, first, arguments=arguments, request_id="PRIVATE_RPC_ID").status_code == 200
+    assert rpc(env, first, arguments=arguments).status_code == 200
+    assert rpc(env, second, arguments=arguments).status_code == 200
+    samples = research_samples(env)
+    first_samples = [s for s in samples if s["participant"] == a["participant"]]
+    assert [s["trace"]["sequence"] for s in first_samples] == [1, 2]
+    assert [s["retry"] for s in first_samples] == [False, True]
+    assert all(s["trace"]["sequence_source"] == "received" and s["trace"]["received_at"] for s in samples)
+    assert len({s["trace"]["call_id"] for s in samples}) == 3
+    assert len({s["trace"]["operation_id"] for s in first_samples}) == 1
+    assert first_samples[0]["trace"]["operation_id"] != samples[2]["trace"]["operation_id"]
+    assert samples[2]["trace"]["sequence"] == 1
+    assert all(s["arguments"]["amount"] == 12345.67 and s["arguments"]["currency"] == "AUD" for s in samples)
+    serialized = json.dumps(samples)
+    for marker in ("PRIVATE_RETRY_KEY", "PRIVATE_RPC_ID", first, a["id"], a["subject"], second, b["id"]):
+        assert marker not in serialized
+    restarted = Research(env.settings, env.store)
+    assert restarted.begin(a, "status", {})["sequence"] == 3
+    assert all(s["schema_version"] == 2 for s in samples)
+
+
+@pytest.mark.parametrize("executed,expected", [(True, "accepted"), (False, "declined")])
+def test_execution_feedback_export_keeps_reported_fact_without_correctness_label(environment, tmp_path, executed, expected):
+    env = environment
+    _, token = env.accounts[0]
+    arguments = {"decision_id": "2026-11-01/NDQ.AX", "executed": executed,
+                 "reason": "PRIVATE_REASON test@example.com", "trade_ids": [12, 13]}
+    assert rpc(env, token, name="record_execution", arguments=arguments).status_code == 200
+    sample = research_samples(env)[0]
+    assert sample["arguments"]["executed"] is executed
+    assert sample["arguments"]["decision_id"] == "2026-11-01/NDQ.AX"
+    assert sample["arguments"]["trade_ids"] == [12, 13]
+    assert sample["reported_execution"] == expected
+    assert sample["execution_source"] == "client_reported"
+    assert sample["adoption"] == "unknown" and sample["correctness"] == "unverified"
+    env.research.review(sample["sample_id"], "accepted")
+    output = tmp_path/"feedback.jsonl"
+    env.research.export(output)
+    assert "PRIVATE_REASON" not in output.read_text()
+    assert "test@example.com" not in output.read_text()
+    assert json.loads(output.read_text())["reported_execution"] == expected
+
+
+@pytest.mark.parametrize("mode,expected", [("business", "tool_error"), ("rpc", "rpc_error"),
+                                          ("http", "upstream_http_error"), ("incomplete", "incomplete_response")])
+def test_mcp_failure_samples_are_not_successful_decisions(environment, mode, expected):
+    env = environment
+    _, token = env.accounts[0]
+    def response(request):
+        if mode == "http":
+            return httpx.Response(503, content=b"SECRET_UPSTREAM_ERROR")
+        if mode == "incomplete":
+            return httpx.Response(200, content=b": keepalive\n\n", headers={"Content-Type": "text/event-stream"})
+        message = json.loads(request.content)
+        content = {"error": {"code": -32603, "message": "SECRET_RPC_ERROR"}} if mode == "rpc" else {
+            "result": {"structuredContent": {"status": "error", "error": "SECRET_BUSINESS_ERROR"}}}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"], **content})
+    # Use a separate app to bind the synthetic error transport explicitly.
+    app = create_app(env.settings, store=env.store, pool=env.pool, transport=httpx.MockTransport(response))
+    with TestClient(app, base_url=env.settings.origin) as client:
+        result = client.post("/mcp", json={"jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{"name":"submit_committee", "arguments":{"analysis_id":"a"*32}}}, headers={"Authorization":"Bearer "+token})
+    assert result.status_code == (503 if mode == "http" else 200)
+    sample = research_samples(env)[0]
+    assert sample["error_kind"] == expected
+    assert sample["outcome"] == "error" and sample["sample_type"] == "tool_call"
+    assert sample["reported_execution"] == "unknown"
+    assert "SECRET_" not in json.dumps(sample)
+
+
+def test_interrupted_write_is_an_error_sample_and_is_never_replayed(environment):
+    env = environment
+    _, token = env.accounts[0]
+    class Interrupted(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b": keepalive\n\n"
+            raise httpx.ReadError("PRIVATE_TRANSPORT_EXCEPTION")
+    def response(_request):
+        return httpx.Response(200, stream=Interrupted(), headers={"Content-Type":"text/event-stream"})
+    app = create_app(env.settings, store=env.store, pool=env.pool, transport=httpx.MockTransport(response))
+    body = {"jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{"name":"deposit", "arguments":{"amount":77.25, "currency":"USD", "idempotency_key":"PRIVATE_PENDING_KEY"}}}
+    with TestClient(app, base_url=env.settings.origin) as client:
+        with pytest.raises(httpx.ReadError):
+            client.post("/mcp", json=body, headers={"Authorization":"Bearer "+token})
+        assert client.post("/mcp", json=body, headers={"Authorization":"Bearer "+token}).status_code == 409
+    samples = research_samples(env)
+    assert [s["error_kind"] for s in samples] == ["stream_interrupted", "idempotency_conflict"]
+    assert all(s["outcome"] == "error" and s["reported_execution"] == "unknown" for s in samples)
+    assert samples[0]["trace"]["operation_id"] == samples[1]["trace"]["operation_id"]
+    assert "PRIVATE_" not in json.dumps(samples)
+
+
+def test_research_inflight_trace_cannot_cross_optout_or_policy_change(environment):
+    env = environment
+    account, _ = env.accounts[0]
+    trace = env.research.begin(account, "status", {})
+    assert trace is not None
+    env.store.preferences(account["id"], False)
+    env.research.capture(account, "status", {}, {"amount": 200}, 10, trace=trace)
+    assert research_samples(env) == []
+    stale = env.store.preferences(account["id"], True, "obsolete-policy")
+    assert env.research.begin(stale, "status", {}) is None
+    env.research.capture(stale, "status", {}, {"amount": 200}, 10)
+    assert research_samples(env) == []
 
 
 def test_pending_after_restart_is_not_replayed(settings):
@@ -428,8 +572,39 @@ def test_ledger_reset_requires_setup_and_connection_revoke(environment):
     assert env.client.delete('/api/me/connections/client-a', headers=headers).status_code == 200
     assert not env.store.connect_oauth(account['id'],'client-a')
     assert env.client.delete('/api/me/ledger',headers=headers).status_code == 200
-    assert rpc(env,token).status_code == 403
+    assert rpc(env,token).status_code == 409
     assert not env.client.get('/api/me').json()['initialized']
+
+
+def test_consent_and_oauth_can_finish_before_agent_ledger_setup(environment):
+    env = environment
+    account = env.store.identity('google-oauth2|new-uninitialized-synthetic')
+    # An Auth0 handoff is required to bind the authorized client to this account.
+    ticket = jwt.encode({'sub': account['subject'], 'client_id': 'new-synthetic-client',
+                         'aud': env.settings.origin, 'exp': int(time.time())+300,
+                         'jti': 'owned-one-use-ticket'}, env.settings.action_secret, algorithm='HS256')
+    handoff = env.client.get('/auth/action', params={'state':'synthetic-state','session_token':ticket}, follow_redirects=False)
+    assert handoff.status_code == 303
+    me = env.client.get('/api/me').json()
+    headers = {'Origin':env.settings.origin,'X-CSRF-Token':me['csrf']}
+    assert me['provider'] == 'google' and me['account_id'] == account['id']
+    assert not me['initialized'] and not me['accepted']
+    assert env.client.post('/api/me/credentials', headers=headers).status_code == 409
+    consent = {'policy_version':env.settings.policy_version,'research_enabled':False}
+    assert env.client.post('/api/me/consent',json=consent).status_code == 403
+    assert env.client.post('/api/me/consent',json=consent,headers=headers).status_code == 200
+    assert not env.store.account(account['id'])['initialized']
+    authorized = env.client.post('/api/me/authorize', headers=headers)
+    assert authorized.status_code == 200
+    assert env.store.connect_oauth(account['id'],'new-synthetic-client')
+    pat = env.client.post('/api/me/credentials',headers=headers).json()['token']
+    assert rpc(env,pat,'status',{'unused':False}).status_code == 409
+    assert rpc(env,pat,'doctor',{'unused':False}).status_code == 200
+    assert env.client.get('/api/me/ledger/settings').json() == {'initialized':False}
+    assert env.client.patch('/api/me/research',json={'enabled':True},headers=headers).status_code == 200
+    assert env.client.patch('/api/me/research',json={'enabled':False},headers=headers).status_code == 200
+    assert env.client.delete('/api/me/credentials/'+env.store.credentials(account['id'])[0]['id'],headers=headers).status_code == 200
+    assert rpc(env,pat,'doctor',{'unused':False}).status_code == 401
 
 
 def test_full_restore_revokes_access_and_drops_untrained_candidates(environment, tmp_path):

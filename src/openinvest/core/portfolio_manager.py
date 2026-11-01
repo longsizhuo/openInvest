@@ -451,8 +451,8 @@ class PortfolioManager:
         try:
             with self._ledger_tx(idempotency_key) as p:
                 cash = dict(p.get("cash") or {})
-                new_balance = float(cash.get(ccy, 0) or 0) + amount
-                cash[ccy] = round(new_balance, 2)
+                new_balance = round(float(cash.get(ccy, 0) or 0) + amount, 2)
+                cash[ccy] = new_balance
                 p["cash"] = cash
         except _DuplicateKey:
             return _duplicate(idempotency_key)
@@ -485,7 +485,8 @@ class PortfolioManager:
                 current = float(cash.get(ccy, 0) or 0)
                 if current < amount and not allow_negative:
                     raise ValueError(f"{ccy} 余额 {current} < 取出 {amount}")
-                cash[ccy] = round(current - amount, 2)
+                new_balance = round(current - amount, 2)
+                cash[ccy] = new_balance
                 p["cash"] = cash
         except _DuplicateKey:
             return _duplicate(idempotency_key)
@@ -496,7 +497,7 @@ class PortfolioManager:
         })
         return {
             "status": "ok", "currency": ccy, "amount_withdrawn": amount,
-            "new_balance": current - amount, "cny_total": self.cash_amount("CNY"),
+            "new_balance": new_balance, "cny_total": self.cash_amount("CNY"),
         }
 
     def delete_holding(

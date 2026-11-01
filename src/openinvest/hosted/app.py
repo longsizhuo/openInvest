@@ -19,8 +19,9 @@ from starlette.staticfiles import StaticFiles
 from .auth import Authenticator, AuthenticationError, resource_metadata
 from .config import Settings
 from .policy import ALLOWED, MONEY, scope_for
-from .pool import DockerPool, Busy
-from .research import COSArchive, Research
+from .pool import DockerPool, Busy, WorkerRejected
+from .research import Research
+from .storage import configured_archive
 from .store import Store, Conflict
 
 log = logging.getLogger(__name__)
@@ -72,8 +73,8 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
     oauth.register("auth0", client_id=settings.client_id, client_secret=settings.client_secret,
                    server_metadata_url=settings.issuer+".well-known/openid-configuration",
                    client_kwargs={"scope": "openid profile", "code_challenge_method": "S256"})
-    if archive is None and settings.cos_bucket:
-        archive = COSArchive(settings)
+    if archive is None:
+        archive = configured_archive(settings)
     stopping = asyncio.Event()
 
     async def maintenance():
@@ -157,6 +158,10 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
     async def busy_error(_request, _error):
         return JSONResponse({"error": "Capacity busy; retry later"}, status_code=503, headers={"Retry-After": "5"})
 
+    @app.exception_handler(WorkerRejected)
+    async def worker_rejected(_request, error):
+        return JSONResponse({"error": str(error)}, status_code=409)
+
     def browser(request, *, mutation=False):
         credential = store.authenticate(request.cookies.get("oi_session", ""), "session")
         if not credential:
@@ -203,7 +208,7 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
             subject = token["userinfo"]["sub"]
         except Exception:
             raise HTTPException(401, "Login could not be verified") from None
-        return session_response(identity(subject))
+        return session_response(identity(subject), "/account/")
 
     @app.get("/auth/action")
     async def action(request: Request, session_token: str, state: str):
@@ -225,11 +230,62 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
     @app.get("/api/me")
     async def me(request: Request):
         account, credential = browser(request)
-        return {"initialized": bool(account["initialized"]), "policy_version": settings.policy_version,
+        provider = {"google-oauth2": "google", "github": "github"}.get(account["subject"].split("|", 1)[0], "other")
+        return {"account_id": account["id"], "provider": provider,
+                "initialized": bool(account["initialized"]), "policy_version": settings.policy_version,
                 "accepted": account["accepted"] == settings.policy_version, "research_enabled": bool(account["research"]) if account["accepted"] else True,
                 "csrf": credential["csrf"], "mcp_url": settings.origin+"/mcp",
                 "pending_authorization": request.session.get("pending", {}).get("owner") == account["id"],
                 "credentials": store.credentials(account["id"]), "connections": store.connections(account["id"])}
+
+    @app.post("/api/me/consent")
+    async def accept_policy(request: Request):
+        account, _credential = browser(request, mutation=True)
+        data = await request.json()
+        if data.get("policy_version") != settings.policy_version or not isinstance(data.get("research_enabled"), bool):
+            raise HTTPException(422, "Review the current account settings")
+        store.preferences(account["id"], data["research_enabled"], settings.policy_version)
+        if not data["research_enabled"]:
+            research.cancel_pending(account["participant"])
+        return {"accepted": True}
+
+    @app.get("/api/me/ledger/settings")
+    async def read_ledger_settings(request: Request):
+        account, _credential = browser(request)
+        if account["accepted"] != settings.policy_version:
+            raise HTTPException(403, "Review account settings first")
+        if not account["initialized"]:
+            return {"initialized": False}
+        return JSONResponse(json.loads(await pool.internal(account["id"], "settings")))
+
+    @app.post("/api/me/ledger")
+    async def setup_from_browser(request: Request):
+        account, _credential = browser(request, mutation=True)
+        if account["accepted"] != settings.policy_version:
+            raise HTTPException(403, "Review account settings first")
+        from .ledger import Initialization
+        try:
+            data = await request.json()
+            if not data.get("currency"):
+                raise ValueError()
+            spec = Initialization.model_validate(data)
+        except ValueError:
+            raise HTTPException(422, "Confirm ledger settings") from None
+        await pool.internal(account["id"], "initialize", spec.model_dump())
+        store.initialized(account["id"])
+        return JSONResponse(json.loads(await pool.internal(account["id"], "settings")))
+
+    @app.patch("/api/me/ledger/settings")
+    async def edit_ledger_settings(request: Request):
+        account, _credential = browser(request, mutation=True)
+        if not account["initialized"] or account["accepted"] != settings.policy_version:
+            raise HTTPException(409, "Complete ledger setup first")
+        from .ledger import LedgerUpdate
+        try:
+            spec = LedgerUpdate.model_validate(await request.json())
+        except ValueError:
+            raise HTTPException(422, "Invalid ledger settings") from None
+        return JSONResponse(json.loads(await pool.internal(account["id"], "settings", spec.model_dump(exclude_unset=True))))
 
     @app.post("/api/me/initialize")
     async def initialize_account(request: Request):
@@ -265,7 +321,7 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
     async def authorize(request: Request):
         account, _credential = browser(request, mutation=True)
         pending = request.session.get("pending", {})
-        if not account["initialized"] or account["accepted"] != settings.policy_version or pending.get("owner") != account["id"]:
+        if account["accepted"] != settings.policy_version or pending.get("owner") != account["id"]:
             raise HTTPException(409, "Complete account setup first")
         store.connect_oauth(account["id"], pending["client"], authorize=True)
         resume = jwt.encode({"sub": account["subject"], "client_id": pending["client"], "approved": True,
@@ -278,7 +334,7 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
     @app.post("/api/me/credentials")
     async def credentials(request: Request):
         account, _credential = browser(request, mutation=True)
-        if not account["initialized"] or account["accepted"] != settings.policy_version:
+        if account["accepted"] != settings.policy_version:
             raise HTTPException(409, "Complete account setup first")
         token, item = store.credential(account["id"])
         return {"id": item["id"], "token": token}
@@ -362,7 +418,8 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
                 "workers": len(pool.entries) if hasattr(pool, "entries") else 0,
                 "worker_resources": await pool.resources() if hasattr(pool, "resources") else [],
                 "http_error_rate": metrics.get("http_errors", 0)/max(1, metrics.get("http_requests", 0)),
-                "registration_open": settings.registration_open, "archive_configured": archive is not None}
+                "registration_open": settings.registration_open, "archive_configured": archive is not None,
+                "archive": archive.status() if hasattr(archive, "status") else {"kind": "cos", "off_host": True} if archive else None}
 
     @app.post("/operator/backup")
     async def backup(request: Request):
@@ -406,7 +463,7 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
             account, scopes = await asyncio.to_thread(auth.bearer, request.headers.get("authorization", ""))
         except AuthenticationError:
             return JSONResponse({"error": "Authentication required"}, status_code=401, headers=challenge)
-        if not account["initialized"] or account["accepted"] != settings.policy_version:
+        if account["accepted"] != settings.policy_version:
             return JSONResponse({"error": "Account setup required"}, status_code=403, headers=challenge)
         try:
             message = await request.json()
@@ -430,6 +487,8 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
                 raise ValueError()
             if name and (name not in ALLOWED or scope_for(name) not in scopes):
                 raise HTTPException(403, "Tool is unavailable or permission is missing")
+            if name and not account["initialized"] and name not in {"doctor", "ledger_settings", "setup_ledger"}:
+                raise HTTPException(409, "Ledger setup required; call doctor and setup_ledger first")
             if name and not store.rate(account["id"]):
                 return JSONResponse({"error": "Rate limit exceeded"}, status_code=429, headers={"Retry-After": "60"})
             key = arguments.get("idempotency_key") if name in MONEY else None
@@ -441,33 +500,58 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
             raise HTTPException(400, "Invalid MCP request") from None
 
         # Lease before reserving: capacity failures have no financial side effect.
+        started = time.perf_counter()
+        trace = await asyncio.to_thread(research.begin, account, name, arguments) if name else None
+
+        async def capture(result, *, failed=False, retry=False, error_kind=None, http_status=None):
+            if not name:
+                return
+            store.metric("mcp_tool_error" if failed else "mcp_tool_returned")
+            if retry:
+                store.metric("mcp_receipt_replayed")
+            await asyncio.to_thread(research.capture, account, name, arguments, result,
+                                    int((time.perf_counter()-started)*1000), failed=failed, retry=retry,
+                                    client_info=client_info, trace=trace, error_kind=error_kind, http_status=http_status)
+
         lease = pool.lease(account["id"])
-        item = await lease.__aenter__()
+        try:
+            item = await lease.__aenter__()
+        except Busy:
+            await capture({}, failed=True, error_kind="capacity_busy")
+            raise
+        except Exception:
+            await capture({}, failed=True, error_kind="transport_error")
+            raise
         client = httpx.AsyncClient(transport=transport, trust_env=False, timeout=httpx.Timeout(1200, connect=10))
         try:
             current = store.account(account["id"])
-            if not current or not current["initialized"] or current["accepted"] != settings.policy_version:
+            if not current or current["accepted"] != settings.policy_version:
                 raise HTTPException(403, "Account setup required")
+            if name and not current["initialized"] and name not in {"doctor", "ledger_settings", "setup_ledger"}:
+                raise HTTPException(409, "Ledger setup required; call doctor and setup_ledger first")
             if key:
                 cached = store.reserve(account["id"], key, name, arguments)
                 if cached is not None:
                     await client.aclose()
                     await lease.__aexit__(None, None, None)
-                    await asyncio.to_thread(research.capture, account, name, arguments, business_result(cached), 0,
-                                            failed=bool(cached.get("error")), retry=True, client_info=client_info)
+                    result = business_result(cached)
+                    cached_result = cached.get("result", {})
+                    failed = bool(cached.get("error") or (isinstance(cached_result, dict) and cached_result.get("isError")) or result.get("status") == "error")
+                    await capture(result, failed=failed, retry=True)
                     return JSONResponse({"jsonrpc": "2.0", "id": message.get("id"), **cached})
-            start = time.perf_counter()
             headers = {"Authorization": "Bearer "+item.token, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
             if request.headers.get("mcp-protocol-version"):
                 headers["MCP-Protocol-Version"] = request.headers["mcp-protocol-version"]
             upstream = await client.send(client.build_request("POST", item.origin+"/mcp", json=message, headers=headers), stream=True)
-        except BaseException:
+        except BaseException as error:
+            await capture({}, failed=True, error_kind="idempotency_conflict" if isinstance(error, Conflict) else "cancelled" if isinstance(error, asyncio.CancelledError) else "transport_error")
             await client.aclose()
             await lease.__aexit__(None, None, None)
             raise
 
         async def stream():
             buffer, oversized, final_chunk = bytearray(), False, None
+            captured = False
             try:
                 async for chunk in upstream.aiter_bytes():
                     if len(buffer)+len(chunk) <= MAX_BODY:
@@ -487,7 +571,10 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
                         store.complete(account["id"], key, {k: reply[k] for k in ("result", "error") if k in reply})
                     if name:
                         result = business_result(reply)
-                        failed = bool(reply.get("error") or reply.get("result", {}).get("isError"))
+                        rpc_result = reply.get("result", {})
+                        failed = bool(upstream.status_code >= 400 or reply.get("error") or (isinstance(rpc_result, dict) and rpc_result.get("isError")) or result.get("status") == "error")
+                        if name == "setup_ledger" and result.get("initialized") is True and not failed:
+                            store.initialized(account["id"])
                         if name in {"prepare_committee", "submit_committee"} and not failed:
                             analysis_id = result.get("analysis_id") or arguments.get("analysis_id")
                             if isinstance(analysis_id, str) and len(analysis_id) == 32:
@@ -497,13 +584,24 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
                                     result = {**result, "research_evidence": evidence_response.json()}
                                 except Exception:
                                     store.metric("research_evidence_unavailable")
-                        await asyncio.to_thread(research.capture, account, name, arguments, result,
-                                                int((time.perf_counter()-start)*1000), failed=failed, client_info=client_info)
+                        error_kind = "upstream_http_error" if upstream.status_code >= 400 else "rpc_error" if reply.get("error") else "tool_error" if failed else None
+                        await capture(result, failed=failed, error_kind=error_kind, http_status=upstream.status_code)
+                        captured = True
                 elif name:
                     store.metric("response_capture_incomplete")
+                    await capture({}, failed=True, error_kind="upstream_http_error" if upstream.status_code >= 400 else "incomplete_response", http_status=upstream.status_code)
+                    captured = True
+            except asyncio.CancelledError:
+                if name and not captured:
+                    await capture({}, failed=True, error_kind="cancelled", http_status=upstream.status_code)
+                    captured = True
+                raise
             except Exception:
                 store.metric("stream_failed")
                 log.warning("MCP stream interrupted; operation is not replayed")
+                if name and not captured:
+                    await capture({}, failed=True, error_kind="stream_interrupted", http_status=upstream.status_code)
+                    captured = True
                 raise
             finally:
                 await upstream.aclose()

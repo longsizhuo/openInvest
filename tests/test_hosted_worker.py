@@ -25,6 +25,13 @@ spec = {'currency':'USD','risk':'Balanced','symbols':['AAPL']}
 assert initialize(spec)['initialized']
 assert initialize(spec)['initialized']  # a lost initialization response is recoverable
 assert PortfolioManager().cash == {'USD':0}
+from openinvest.utils.base_currency import base_currency
+assert base_currency() == 'USD'
+import os
+os.environ['INVEST_PORTFOLIO_BASE_CURRENCY'] = 'CNY'
+from openinvest.hosted.worker import _apply_base_currency
+_apply_base_currency()  # a new worker rehydrates its own saved currency
+assert base_currency() == 'USD'
 try:
     initialize({**spec, 'currency':'AUD'})
     raise AssertionError('overwritten ledger')
@@ -53,6 +60,149 @@ with TestClient(create_worker()) as client:
     assert doctor.get('coordinator_ready') and not doctor['direct_ready'], doctor
     assert 'checks' not in doctor
 assert snapshot()
+''')
+
+
+def test_agent_setup_and_browser_preferences_share_one_ledger(tmp_path):
+    isolated(tmp_path, '''
+from starlette.testclient import TestClient
+from openinvest.hosted.worker import create_worker, _apply_base_currency
+from openinvest.hosted.app import rpc_message, business_result
+from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.core.memory_store import MemoryStore
+from openinvest.utils.base_currency import base_currency
+headers={'Authorization':'Bearer synthetic-private-token','Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-03-26'}
+with TestClient(create_worker()) as client:
+    def call(name, arguments={}):
+        r=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':arguments}})
+        assert r.status_code == 200
+        return rpc_message(r.content)
+    assert business_result(call('doctor'))['status']=='needs_setup'
+    assert business_result(call('ledger_settings')) == {'initialized':False}
+    settings=business_result(call('setup_ledger',{'currency':'USD'}))
+    assert settings['initialized'] and settings['risk'] is None and settings['symbols']==[]
+    assert business_result(call('doctor'))['status']=='ready'
+    assert PortfolioManager().cash=={'USD':0}
+    # Browser changes are immediately visible to the Agent.
+    r=client.post('/internal/settings',headers=headers,json={'expected_revision':settings['revision'],'risk':'Aggressive','symbols':['AAPL','0700.HK']})
+    assert r.status_code==200, r.text
+    after=business_result(call('ledger_settings'))
+    assert after['risk']=='Aggressive' and after['symbols']==['AAPL','0700.HK']
+    stale=call('update_ledger_settings',{'expected_revision':settings['revision'],'risk':'Conservative'})
+    assert stale['result']['isError']
+    assert business_result(call('ledger_settings'))==after
+    # Retained target metadata is preserved when the browser edits the ticker list.
+    call('track_asset',{'symbol':'AAPL','display_name':'Synthetic Apple','max_single_invest_cny':200})
+    after=business_result(call('ledger_settings'))
+    updated=business_result(call('update_ledger_settings',{'expected_revision':after['revision'],'currency':'AUD','clear_risk':True,'symbols':['AAPL']}))
+    assert updated['currency']=='AUD' and updated['risk'] is None
+    target=MemoryStore().read('strategy').metadata['target_assets'][0]
+    assert target['display_name']=='Synthetic Apple' and target['max_single_invest_cny']==200
+    _apply_base_currency()
+    assert base_currency()=='AUD'
+    # Returning cash to zero does not make its financial history disappear.
+    call('deposit',{'currency':'AUD','amount':10,'idempotency_key':'owned-deposit'})
+    call('withdraw',{'currency':'AUD','amount':10,'idempotency_key':'owned-withdraw'})
+    settings=business_result(call('ledger_settings'))
+    assert not settings['currency_editable']
+    r=client.post('/internal/settings',headers=headers,json={'expected_revision':settings['revision'],'currency':'CNY'})
+    assert r.status_code==409 and r.json()['error']=='currency_has_history'
+    r=client.post('/internal/settings',headers=headers,json={'expected_revision':settings['revision'],'risk':'Conservative','symbols':[]})
+    assert r.status_code==200, r.text
+    assert r.json()['symbols']==[] and r.json()['risk']=='Conservative'
+    assert PortfolioManager().cash=={'USD':0,'AUD':0}
+''')
+
+
+def test_empty_targets_require_explicit_strategy_support():
+    from openinvest.core.schemas import validate_strategy
+    data={'target_allocation_stock':0,'target_allocation_cash':1,'target_assets':[]}
+    with pytest.raises(ValueError):
+        validate_strategy(data)
+    assert validate_strategy({**data,'allow_empty_targets':True})['target_assets']==[]
+
+
+@pytest.mark.skipif(not os.getenv('HOSTED_PREVIEW_WORKER_IMAGE'), reason='Requires a separately built local preview image')
+def test_real_gateway_agent_setup_then_browser_preferences(tmp_path):
+    isolated(tmp_path, '''
+import asyncio, socket, threading, time, uuid, os
+from dataclasses import replace
+from datetime import timedelta
+import httpx, uvicorn
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from openinvest.hosted.app import create_app
+from openinvest.hosted.config import Settings
+from openinvest.hosted.pool import DockerPool
+from openinvest.hosted.store import Store
+from openinvest.paths import INVEST_ROOT
+settings=Settings(INVEST_ROOT/'gateway','https://synthetic.invalid','https://identity.invalid/','https://synthetic.invalid/mcp','test','test','s'*40,b'k'*32,image=os.environ['HOSTED_PREVIEW_WORKER_IMAGE'])
+from dataclasses import replace
+settings=replace(settings,worker_namespace="test-"+uuid.uuid4().hex)
+store=Store(settings.root,settings.encryption_key);pool=DockerPool(settings)
+account=store.identity('google-oauth2|'+uuid.uuid4().hex)
+other=store.identity('github|'+uuid.uuid4().hex)
+session,credential=store.credential(account['id'],'session',ttl=3600)
+headers={'Cookie':'oi_session='+session,'Origin':settings.origin,'X-CSRF-Token':credential['csrf']}
+with socket.socket() as sock:
+    sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+server=uvicorn.Server(uvicorn.Config(create_app(settings,store=store,pool=pool),host='127.0.0.1',port=port,access_log=False,log_level='error'))
+thread=threading.Thread(target=server.run,daemon=True);thread.start()
+while not server.started:
+    assert thread.is_alive();time.sleep(.05)
+base=f'http://127.0.0.1:{port}'
+async def main():
+    async with httpx.AsyncClient(base_url=base,headers=headers,trust_env=False,timeout=120) as web:
+        try:
+            r=await web.post('/api/me/consent',json={'policy_version':settings.policy_version,'research_enabled':False})
+            assert r.status_code==200,r.text
+            assert not (await web.get('/api/me')).json()['initialized']
+            pat=(await web.post('/api/me/credentials')).json()['token']
+            async with httpx.AsyncClient(headers={'Authorization':'Bearer '+pat},trust_env=False,timeout=120) as http:
+                async with streamable_http_client(base+'/mcp',http_client=http) as (read,write,_):
+                    async with ClientSession(read,write,read_timeout_seconds=timedelta(seconds=120)) as mcp:
+                        await mcp.initialize()
+                        tools=await mcp.list_tools()
+                        assert {'setup_ledger','ledger_settings','update_ledger_settings'} <= {t.name for t in tools.tools}
+                        def unpack(result):
+                            import json
+                            if result.structuredContent:
+                                value=result.structuredContent
+                                return value['result'] if set(value)=={'result'} else value
+                            return json.loads(result.content[0].text)
+                        assert unpack(await mcp.call_tool('doctor',{}))['status']=='needs_setup'
+                        setup=await mcp.call_tool('setup_ledger',{'currency':'USD'})
+                        assert not setup.isError,setup
+                        assert (await web.get('/api/me')).json()['initialized']
+                        current=(await web.get('/api/me/ledger/settings')).json()
+                        assert current['risk'] is None and current['symbols']==[]
+                        r=await web.patch('/api/me/ledger/settings',json={'expected_revision':current['revision'],'risk':'Conservative','symbols':['AAPL']})
+                        assert r.status_code==200,r.text
+                        shared=unpack(await mcp.call_tool('ledger_settings',{}))
+                        assert shared['risk']=='Conservative' and shared['symbols']==['AAPL']
+                        agent=await mcp.call_tool('update_ledger_settings',{'expected_revision':shared['revision'],'risk':'Aggressive','symbols':[]})
+                        assert not agent.isError,agent
+                        stale=await web.patch('/api/me/ledger/settings',json={'expected_revision':shared['revision'],'risk':'Conservative'})
+                        assert stale.status_code==409 and stale.json()['error']=='settings_conflict'
+                        visible=(await web.get('/api/me/ledger/settings')).json()
+                        assert visible['risk']=='Aggressive' and visible['symbols']==[]
+                        assert not store.account(other['id'])['initialized']
+                        assert not (await mcp.call_tool('deposit',{'currency':'USD','amount':1.25,'idempotency_key':'synthetic-same-key'})).isError
+                        visible=(await web.get('/api/me/ledger/settings')).json()
+                        assert not visible['currency_editable']
+                        r=await web.patch('/api/me/ledger/settings',json={'expected_revision':visible['revision'],'currency':'AUD'})
+                        assert r.status_code==409 and r.json()['error']=='currency_has_history'
+        finally:
+            deleted=await web.delete('/api/me');assert deleted.status_code==200,deleted.text
+try:asyncio.run(main())
+finally:
+    server.should_exit=True;thread.join(10)
+    import docker
+    engine=docker.from_env()
+    for owner in (account['id'],other['id']):
+        for c in engine.containers.list(all=True,filters={'label':'openinvest.owner='+owner}):c.remove(force=True)
+        try:engine.volumes.get(pool.name(owner)).remove(force=True)
+        except docker.errors.NotFound:pass
 ''')
 
 
@@ -109,6 +259,8 @@ from openinvest.hosted.pool import DockerPool, Busy
 from openinvest.hosted.app import rpc_message
 from openinvest.paths import INVEST_ROOT
 settings=Settings(INVEST_ROOT,'https://test.invalid','https://identity.invalid/','test','test','test','s'*40,b'k'*32)
+from dataclasses import replace
+settings=replace(settings,worker_namespace="test-"+uuid.uuid4().hex)
 pool=DockerPool(settings)
 owners=[uuid.uuid4().hex for _ in range(10)]
 async def main():
@@ -161,6 +313,8 @@ from openinvest.hosted.store import Store
 from openinvest.hosted.app import create_app
 from openinvest.paths import INVEST_ROOT
 settings=Settings(INVEST_ROOT/'gateway','https://synthetic.invalid','https://identity.invalid/','https://synthetic.invalid/mcp','test','test','s'*40,b'k'*32)
+from dataclasses import replace
+settings=replace(settings,worker_namespace="test-"+uuid.uuid4().hex)
 store=Store(settings.root,settings.encryption_key)
 pool=DockerPool(settings)
 accounts=[]

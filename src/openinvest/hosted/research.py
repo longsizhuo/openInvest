@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -25,6 +26,9 @@ CONTAINERS = {"cash", "holdings", "asset", "assets", "verdict", "result", "data"
 STRINGS = {"symbol", "currency", "cost_currency", "alloc_currency", "base_currency", "kind", "action",
            "verdict", "original_verdict", "final_verdict", "_original_verdict", "_original_trim_reason", "status", "rule", "rules", "provider", "model",
            "regime_label", "algorithm_version", "as_of", "data_date", "round", "source", "rule_version", "backend_version", "tool_version", "prompt_version", "client_version", "client_name", "snapshot_hash", "facts_source"}
+ERROR_KINDS = frozenset({"tool_error", "rpc_error", "upstream_http_error", "transport_error",
+                         "incomplete_response", "stream_interrupted", "cancelled", "capacity_busy",
+                         "idempotency_conflict"})
 # Bound the start of an email candidate and consume labels without backtracking.
 # Otherwise a long run of '+' without '@' is retried from every character.
 PII = re.compile(r"(?<![\w.+-])[\w.+-]++@(?:[\w-]++\.(?=[\w-]))++[A-Za-z]{2,}+|(?:Bearer\s+|sk-|oi_|ws_)[A-Za-z0-9_-]{8,}|https?://|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b\d{15,19}\b", re.I)
@@ -34,7 +38,13 @@ def structured(value, parent=""):
     if isinstance(value, dict):
         out = {}
         for key, item in value.items():
-            if key in NUMERIC and isinstance(item, (int, float)) and not isinstance(item, bool):
+            if key == "executed" and isinstance(item, bool):
+                out[key] = item
+            elif key == "decision_id" and isinstance(item, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}/[A-Za-z0-9.^=:_-]{1,40}", item):
+                out[key] = item
+            elif key == "trade_ids" and isinstance(item, list):
+                out[key] = [v for v in item[:1000] if isinstance(v, int) and not isinstance(v, bool) and v >= 0]
+            elif key in NUMERIC and isinstance(item, (int, float)) and not isinstance(item, bool):
                 if item == item and abs(item) < 1e100:
                     out[key] = item
             elif ((parent in {"cash", "all_currencies"} and re.fullmatch(r"[A-Z]{3}", key)) or (parent == "fx" and re.fullmatch(r"[a-z]{3}cny", key))) and isinstance(item, (int, float)):
@@ -86,6 +96,7 @@ class Research:
               label TEXT DEFAULT 'unverified', created REAL);
             CREATE TABLE IF NOT EXISTS reviews(id TEXT PRIMARY KEY, payload BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS datasets(id TEXT PRIMARY KEY, samples TEXT, used INTEGER DEFAULT 0, path TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS trace_sequences(participant TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
             """)
         self.path.chmod(0o600)
 
@@ -107,11 +118,41 @@ class Research:
     def unseal(self, data):
         return json.loads(self.cipher.decrypt(data[:12], data[12:], b"research-v1"))
 
-    def capture(self, account, tool, arguments, result, latency_ms, *, failed=False, retry=False, client_info=None):
+    def begin(self, account, tool, arguments, *, phase="received"):
+        """Reserve server ordering before dispatch; a trace never contains client IDs or raw keys."""
+        try:
+            current = self.store.account(account["id"])
+            if not current or current["accepted"] != self.settings.policy_version or not current["research"] or current["epoch"] != account["epoch"]:
+                return None
+            with self.db() as db:
+                row = db.execute("INSERT INTO trace_sequences VALUES(?,1) ON CONFLICT(participant) DO UPDATE SET sequence=sequence+1 RETURNING sequence",
+                                 (current["participant"],)).fetchone()
+            key = arguments.get("idempotency_key")
+            operation = None
+            analysis_id = arguments.get("analysis_id")
+            if tool == "submit_committee" and isinstance(analysis_id, str) and re.fullmatch(r"[0-9a-f]{32}", analysis_id):
+                key = "analysis:" + analysis_id
+            if isinstance(key, str) and 1 <= len(key) <= 128:
+                # Only a keyed, participant-scoped digest may leave business storage.
+                operation = hmac.new(self.settings.encryption_key,
+                    json.dumps(["research-operation-v1", current["participant"], tool, key]).encode(), hashlib.sha256).hexdigest()
+            return {"call_id": uuid.uuid4().hex, "sequence": row[0],
+                    "received_at": time.time() if phase == "received" else None,
+                    "sequence_source": phase, "operation_id": operation}
+        except Exception:
+            self.store.metric("research_trace_failed")
+            return None
+
+    def capture(self, account, tool, arguments, result, latency_ms, *, failed=False, retry=False, client_info=None,
+                trace=None, error_kind=None, http_status=None):
         try:
             # Read preferences at completion too: turning off collection cancels in-flight capture.
             current = self.store.account(account["id"])
-            if not current or not current["accepted"] or not current["research"] or current["epoch"] != account["epoch"]:
+            if not current or current["accepted"] != self.settings.policy_version or not current["research"] or current["epoch"] != account["epoch"]:
+                return
+            failed = failed or (isinstance(result, dict) and result.get("status") == "error")
+            trace = trace or self.begin(account, tool, arguments, phase="completion")
+            if trace is None:
                 return
             sample_id = uuid.uuid4().hex
             from importlib.metadata import version
@@ -123,16 +164,24 @@ class Research:
             parts = re.split(r"^===\s*(MACRO|QUANT_R1|RISK_R1|QUANT_R2|RISK_R2|CIO)\s*===\s*$", text, flags=re.M)
             roles = {parts[i] for i in range(1, len(parts)-1, 2) if parts[i+1].strip()}
             complete = roles == {"MACRO", "QUANT_R1", "RISK_R1", "QUANT_R2", "RISK_R2", "CIO"}
-            payload = {"schema_version": 1, "sample_id": sample_id, "tool": tool,
+            payload = {"schema_version": 2, "sample_id": sample_id, "tool": tool, "trace": trace,
                        "sample_type": "decision" if tool == "submit_committee" and complete and not failed else "tool_call",
                        "analysis_completeness": "complete" if complete else "partial_or_unavailable",
-                       "participant": current["participant"], "retry": retry, "client": structured(client_info or {}),
+                       "participant": current["participant"], "retry": retry,
+                       "retry_observation": "receipt_replay" if retry else "not_observed",
+                       "client": structured(client_info or {}),
                        "arguments": structured(arguments), "result": extracted,
                        "analysis_id": analysis_id,
                        "latency_ms": latency_ms, "outcome": "error" if failed else "tool_returned",
                        "task_goal": "unknown", "adoption": "unknown", "correctness": "unverified",
                        "runtime_version": version("openinvest"), "tool_version": self.tool_version, "client_model_source": "self_reported",
                        "policy_version": current["accepted"], "created": time.time()}
+            payload["error_kind"] = error_kind if error_kind in ERROR_KINDS else ("tool_error" if failed else None)
+            payload["http_status"] = http_status if isinstance(http_status, int) and 100 <= http_status < 600 else None
+            # Even reported execution is a user/Agent report, not verified broker activity.
+            execution = arguments.get("executed")
+            payload["reported_execution"] = ("accepted" if execution else "declined") if tool == "record_execution" and isinstance(execution, bool) and not failed else "unknown"
+            payload["execution_source"] = "client_reported" if payload["reported_execution"] != "unknown" else "unavailable"
             # Raw natural language is encrypted and quarantined, never auto-exported.
             texts = {k: v for k, v in arguments.items() if k in {"transcript", "reason", "description"} and isinstance(v, str)}
             if isinstance(result, dict):
@@ -192,7 +241,7 @@ class Research:
             try:
                 with self.store.db() as control:
                     account = control.execute("SELECT * FROM accounts WHERE participant=?", (row["participant"],)).fetchone()
-                if not account or not account["research"] or account["epoch"] != row["epoch"]:
+                if not account or account["accepted"] != self.settings.policy_version or not account["research"] or account["epoch"] != row["epoch"]:
                     self.cancel_pending(row["participant"])
                     continue
                 key = f"research/{row['participant']}/{row['id']}.aesgcm"

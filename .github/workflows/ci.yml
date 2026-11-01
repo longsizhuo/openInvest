@@ -127,7 +127,7 @@ jobs:
         # v2 重构（2026-05）：_render_portfolio_body → _render_portfolio_body_v2 (cash dict + holdings list)
         # Sprint 1+2 (2026-05) 新增：trades_db / state_bus / insights_db / daily_report_builder
         run: |
-          uv run --extra hosted python -c "from openinvest.hosted import app, auth, config, store, research, pool, worker, analysis, backup, cli, safelog"
+          uv run --extra hosted python -c "from openinvest.hosted import app, auth, config, store, research, storage, pool, worker, ledger, analysis, backup, cli, safelog"
           uv run --extra hosted python -c "from openinvest.core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
           uv run --extra hosted python -c "from openinvest.core.config import effective_api_config, set_persisted_override, clear_persisted_override, API_SETTABLE, DCAConfig"
           uv run --extra hosted python -c "from openinvest.core.memory_store import MemoryStore, _atomic_write_text"

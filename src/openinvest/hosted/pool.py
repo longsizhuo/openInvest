@@ -13,6 +13,11 @@ class Busy(RuntimeError):
     pass
 
 
+class WorkerRejected(ValueError):
+    """Sanitized domain error from a private worker, never its raw response."""
+    pass
+
+
 @dataclass
 class Worker:
     container: object
@@ -42,7 +47,7 @@ class DockerPool:
         try:
             container = await asyncio.to_thread(self.client.containers.get, name)
             await asyncio.to_thread(container.reload)
-            if container.labels.get("openinvest.owner") != owner or container.labels.get("openinvest.hosted") != "ledger":
+            if container.labels.get("openinvest.owner") != owner or container.labels.get("openinvest.hosted") != self.settings.worker_namespace:
                 raise Busy("Unexpected worker name collision")
             if container.status != "running":
                 await asyncio.to_thread(container.remove, force=True)
@@ -51,18 +56,19 @@ class DockerPool:
             token = env["INVEST_API_TOKEN"]
         except docker.errors.NotFound:
             # A failed/unattached container still counts toward the hard host limit.
-            existing = await asyncio.to_thread(self.client.containers.list, all=True, filters={"label": "openinvest.hosted=ledger"})
+            existing = await asyncio.to_thread(self.client.containers.list, all=True, filters={"label": "openinvest.hosted="+self.settings.worker_namespace})
             if len(existing) >= self.settings.workers:
                 raise Busy("Worker capacity requires inspection")
             token = secrets.token_urlsafe(32)
             container = await asyncio.to_thread(self.client.containers.run,
                 self.settings.image, name=name, detach=True, read_only=True,
+                network=self.settings.worker_network,
                 cap_drop=["ALL"], security_opt=["no-new-privileges:true"],
                 user="10001:10001", mem_limit="1g", nano_cpus=1_000_000_000, pids_limit=128,
                 ports={"8766/tcp": ("127.0.0.1", None)},
                 volumes={name: {"bind": "/data", "mode": "rw"}},
                 tmpfs={"/tmp": "rw,noexec,nosuid,size=64m"},
-                labels={"openinvest.hosted": "ledger", "openinvest.owner": owner},
+                labels={"openinvest.hosted": self.settings.worker_namespace, "openinvest.owner": owner},
                 environment={"INVEST_HOME": "/data", "INVEST_HOSTED_WORKER": "1", "INVEST_API_TOKEN": token,
                              "INVEST_REASONING_BY": "agent", "INVEST_EMBEDDED_SCHEDULER": "0",
                              "HOME": "/data", "XDG_CACHE_HOME": "/data/.cache", "PYTHONDONTWRITEBYTECODE": "1"})
@@ -102,7 +108,7 @@ class DockerPool:
         return True
 
     async def recover(self):
-        containers = await asyncio.to_thread(self.client.containers.list, all=True, filters={"label": "openinvest.hosted=ledger"})
+        containers = await asyncio.to_thread(self.client.containers.list, all=True, filters={"label": "openinvest.hosted="+self.settings.worker_namespace})
         if len(containers) > self.settings.workers:
             raise Busy("More workers exist than the configured limit; inspect before startup")
         for container in containers:
@@ -141,7 +147,12 @@ class DockerPool:
             result = await client.request("POST" if payload is not None or raw is not None else "GET", item.origin+"/internal/"+path,
                 json=payload, content=raw, headers={"Authorization": "Bearer "+item.token})
             if result.is_error:
-                raise ValueError("Worker operation rejected")
+                try:
+                    code = result.json().get("error")
+                except ValueError:
+                    code = None
+                allowed = {"settings_conflict", "currency_has_history", "ledger_not_initialized", "invalid_symbols", "invalid_currency"}
+                raise WorkerRejected(code if code in allowed else "worker_operation_rejected")
             return result.content
 
     async def destroy(self, owner):

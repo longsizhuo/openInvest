@@ -57,12 +57,13 @@ def main():
         from .app import create_app
         uvicorn.run(create_app(settings), host="127.0.0.1", port=args.port, access_log=False, log_config=None)
         return
-    from .research import COSArchive, Research
-    archive = COSArchive(settings) if settings.cos_bucket else None
+    from .research import Research
+    from .storage import configured_archive
+    archive = configured_archive(settings)
     if args.command == "restore-control":
         from .backup import restore_database
         if archive is None:
-            parser.error("Configure COS")
+            parser.error("Configure an archive backend")
         # The control plane must be stopped and the target directory empty.
         for name in ("control", "research", "receipts"):
             restore_database(settings, archive, name, args.backup)
@@ -91,7 +92,7 @@ def main():
             raise SystemExit("Unknown available sample")
         blob = row["payload"] or (archive.get(row["object_key"]) if archive else None)
         if not blob:
-            raise SystemExit("Configure COS to inspect an archived sample")
+            raise SystemExit("Configure remote object storage to inspect an archived sample")
         with args.destination.open("x", encoding="utf-8", newline="\n") as output:
             args.destination.chmod(0o600)
             output.write(json.dumps(sink.unseal(blob), ensure_ascii=False, indent=2))
