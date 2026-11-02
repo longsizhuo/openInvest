@@ -34,6 +34,11 @@ def _intervention_record(
     只动 confidence 不动 verdict/alloc 的不算干预。
     """
     v = verdict or {}
+    # Missing worker evidence invalidates the proposal, rather than identifying
+    # a forgone investment opportunity. Keep provenance in Input Health without
+    # contaminating the economic counterfactual ledger with failed-input trades.
+    if "_original_confidence_unavailable" in v:
+        return None
     orig_v = v.get("_original_verdict")
     if not orig_v:
         return None

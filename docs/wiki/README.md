@@ -49,6 +49,7 @@ documents:
 11. [19-telemetry-and-analytics.md](19-telemetry-and-analytics.md) —— 埋点与数据收集：匿名安装统计 / Opt-out / 隐私承诺
 12. [21-intel-sentinel.md](21-intel-sentinel.md) —— 情报哨兵：任意 agent 平台定时喂料 ingest_event 的标准配方
 13. [adr/](adr/) —— 架构决策记录（为什么不上 Claude Agent SDK 等）
+14. [25-decision-evidence-experiment.md](25-decision-evidence-experiment.md) —— 证据链、事件语义与固定输入实验的判据、偏离和解释边界
 
 ### 🎨 我是设计师 / 前端（GUI 已退役，以下为重做时的历史参考）
 1. [10-design-system.md](10-design-system.md) —— Token 三层 + 排版 + IA
@@ -83,6 +84,7 @@ documents:
 | 21 | [情报哨兵](21-intel-sentinel.md) | 三层情报架构 + 标准哨兵 prompt 模板 + 各平台接法 + 防注入纪律 |
 | 22 | [配置参考](22-configuration.md) | LLM provider `.env` 契约 + ADR-017 runtime overrides 全表（从 README 迁入）|
 | 23 | [模拟账户 autopilot](23-paper-autopilot.md) | opt-in 执行层：独立 INVEST_HOME 里按确定性规则成交当日裁决，对照「人执行」|
+| 25 | [决策证据实验](25-decision-evidence-experiment.md) | 离线验证证据分层、显式事件评分与规则通路；不以跑通代替策略有效 |
 | 24 | [盈透实盘 autopilot](24-ibkr-autopilot.md) | opt-in **真单**执行层：LLM 每周选美股标的、委员会每天定买卖、代码硬闸兜底，按券商成交记账 |
 
 ## 架构决策记录 (ADR)

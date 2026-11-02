@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "study": "decision_evidence_feasibility",
+  "designation": "exploratory_engineering_validation",
+  "source_base_commit": "1eb60d10227eeae41834cab7a7777b53a6a7c022",
+  "historical_cutoff": "2026-10-28",
+  "include": ["live_committee_date_directory_transcripts", "immediate_sidecars"],
+  "exclude": ["archived_runs", "backtests", "blinded_fleet_arms", "broker_and_account_mutations"],
+  "gates": ["isolation", "immutable_evidence", "honest_history_accounting", "event_semantics", "known_score_answers", "sensitivity_controls", "paired_date_statistics", "reproducible_public_demo"],
+  "probability_event": "terminal_return_positive",
+  "probability_horizon": "30_calendar_days",
+  "bootstrap": {"block_days": 30, "repetitions": 499, "seed": 291026},
+  "not_claimed": ["profitability", "forecast_alpha", "historical_rule_reproduction", "complete_historical_run_linkage", "strategy_adoption", "prospective_preregistration"]
+}
