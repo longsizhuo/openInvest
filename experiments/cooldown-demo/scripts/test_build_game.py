@@ -1,7 +1,9 @@
 """build_game：纪要解析与每周出题。纯函数，不碰行情和回测目录。"""
 from __future__ import annotations
 
-from build_game import WHY_MAX, parse_transcript, pick_turns
+import pytest
+
+from build_game import WHY_MAX, parse_transcript, pick_turns, validate_asset
 
 MEMO = """# Committee: QQQ
 
@@ -51,3 +53,33 @@ def test_week_without_decision_uses_first_trading_day_as_hold():
     days = ["2026-01-05", "2026-01-06", "2026-01-12"]
     turns = pick_turns(days, {}, "2026-01-01")
     assert turns == [{"i": 0, "v": None, "why": ""}]
+
+
+def test_question_bank_accepts_partial_coverage_with_twelve_complete_weeks():
+    from datetime import date, timedelta
+
+    days = [(date(2026, 1, 1) + timedelta(days=i)).isoformat() for i in range(100)]
+    turns = [{"i": 5 + 5 * i, "v": "HOLD" if i < 12 else None} for i in range(16)]
+    validate_asset(days, [100.0] * len(days), turns)
+
+    # 同样数量的记录，如果缺口打断了连续 12 周，就不能生成盲局。
+    turns[6]["v"] = None
+    with pytest.raises(ValueError, match="连续 12 周"):
+        validate_asset(days, [100.0] * len(days), turns)
+
+
+@pytest.mark.parametrize("bad_price", [float("nan"), float("inf"), 0, -1])
+def test_question_bank_rejects_invalid_prices(bad_price):
+    with pytest.raises(ValueError, match="有限正数"):
+        validate_asset(["2026-01-01"], [bad_price], [])
+
+
+def test_committed_question_bank_has_twelve_assets_and_no_original_memos():
+    import json
+    from pathlib import Path
+
+    data = json.loads((Path(__file__).resolve().parents[1] / "data/game_data.json").read_text())
+    assert len(data["assets"]) >= 12
+    for asset in data["assets"]:
+        validate_asset(asset["d"], asset["c"], asset["turns"])
+        assert all(set(t) == {"i", "v"} for t in asset["turns"])

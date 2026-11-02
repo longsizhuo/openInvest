@@ -8,11 +8,11 @@
   <section class="g-hero" id="v-home">
     <div class="g-copy">
       <h1 class="g-big"><span>你能跑赢</span><span>AI 吗？</span></h1>
-      <p class="g-lede">2026 年 1–9 月的真实行情，每周押一次仓位，AI 也押。打完 9 个月，看谁赚得多。</p>
+      <p class="g-lede">不知道是什么，也不知道是哪一年。只看走势，每周押一次仓位，和 AI 比一局。</p>
     </div>
     <div class="g-stage">
       <div class="g-tile t1" aria-hidden="true"><img id="hero-img" alt=""></div>
-      <div class="g-stage-top"><b id="hc-name">　</b><span id="hc-date"></span><button type="button" id="hc-dice">换一个</button><button type="button" data-go="pick">全部标的</button></div>
+      <div class="g-stage-top"><b id="hc-name">随机盲局</b><span id="hc-date"></span><button type="button" id="hc-dice">换一局</button><button type="button" data-go="pick">选时长</button></div>
       <svg id="hc-chart" role="img" aria-label="开局前三个月的走势，右边是还没发生的下一周"></svg>
     </div>
     <div class="g-play">
@@ -30,14 +30,14 @@
 
   <section class="wrap" id="v-pick" hidden>
     <div class="g-bar"><button type="button" class="g-back" data-go="home">← 返回</button></div>
-    <h2 class="g-h2">选个标的</h2>
-    <p class="g-sub">每个都是 2026 年 1–9 月的真实走势。</p>
+    <h2 class="g-h2">这局玩多久？</h2>
+    <p class="g-sub">随机抽取标的和开局，名称与日期在结局揭晓。</p>
     <p class="err" id="gm-err" role="alert" hidden></p>
     <div class="g-lv" id="gm-assets"></div>
   </section>
 
   <section class="wrap" id="v-play" hidden>
-    <div class="g-bar"><button type="button" class="g-back" data-go="pick">← 换标的</button><b id="gm-name"></b><span id="gm-week"></span></div>
+    <div class="g-bar"><button type="button" class="g-back" data-go="pick">← 换一局</button><b id="gm-name"></b><span id="gm-week"></span></div>
     <div class="g-prog" id="gm-prog" aria-hidden="true"></div>
     <div id="gm-live">
       <div class="g-board">
@@ -110,12 +110,14 @@
   <dialog id="rules" aria-labelledby="rules-h">
     <h2 id="rules-h">怎么玩</h2>
     <ul>
-      <li>选一个标的，按 2026 年 1–9 月的真实行情一周一周往下走。</li>
+      <li>从多个市场的历史行情中随机抽取标的和开局，玩 12、24 或 36 周。名称与真实日期在结局揭晓。</li>
+      <li>价格按开局 = 100 显示，横轴只表示进度。开局前约三个月的走势可供参考。</li>
       <li>每周押空仓、半仓或满仓。你和 AI 都从 10 万虚拟资金、半仓开始。</li>
       <li>AI 按委员会当周的回测决定调仓：加仓 +50%、减仓 −50%、清仓归零，其余不动。你选完它才亮牌。</li>
       <li>每次调仓按调动部分收 0.1% 成本。</li>
+      <li>你看匿名价格走势；AI 沿用当时包含标的与宏观信息的历史决策。双方掌握的信息不同，输赢不代表判断能力的严格测评。</li>
     </ul>
-    <p class="hint">历史复盘，不构成投资建议。AI 的每个决定都只用了当天之前的数据，所用模型的训练数据截止于 2025 年 5 月，没见过 2026 年的行情。表情包来自堆糖「永雏塔菲表情包」。</p>
+    <p class="hint">历史复盘，不构成投资建议。AI 的历史决策按当时可用的数据生成，对局中不展示可能透露标的或时期的原始理由。表情包来自堆糖「永雏塔菲表情包」。</p>
     <form method="dialog"><button>知道了</button></form>
   </dialog>
 </main>
