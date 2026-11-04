@@ -14,12 +14,30 @@ read the expected balance. The browser changed preferences after Agent setup,
 retained the research opt-out, downloaded an export, created and revoked a PAT,
 revoked the OAuth grant and deleted the owned test account. The revoked native
 client received an authentication challenge. Temporary test identities and
-clients are removed after acceptance.
+clients were removed after each run.
+
+A separate OAuth-first run started with an unaccepted, uninitialized account
+and no ledger form. Website notice acceptance, Auth0 permission consent, the
+native callback and Agent initialization completed. The browser read the same
+AUD ledger preferences, and revocation/account deletion blocked native access.
 
 This run used a dedicated Auth0 database connection. Google/GitHub social login
 and ChatGPT client acceptance still require their own current-session checks.
 Mac SSH is unavailable during this run. Earlier provider checks below retain
 their original dates and scope.
+
+The current public `/mcp` endpoint also passed a controlled long-request check
+through Cloudflare. A file lock on the owned synthetic ledger supplied a
+140-second wait. The analysis request completed in **141.988 seconds**, response
+headers arrived in **0.111 seconds**, and the longest frame gap was **15.102
+seconds**. A second account's concurrent query completed in **0.166 seconds**.
+Preparation and submission retained the same `analysis_id`; submission used a
+synthetic HOLD transcript and a self-reported synthetic model identifier. Both
+test accounts and volumes were removed. A test-runner Docker exec-handle error
+was corrected before this successful run.
+
+A replacement ten-account/two-worker 24-hour public soak began on 2026-11-04
+and remains in progress. Completed short intervals remain interim evidence.
 
 The earlier 24-hour run ended with 15,820 requests, two errors, ten busy
 responses, ten successful accounts and zero OOM events. It failed its acceptance
@@ -79,11 +97,13 @@ Updated: 2026-11-01 (Asia/Shanghai). Ledger acceptance uses synthetic data only.
 
 The official MCP SDK test uses synthetic personal access tokens. It is not evidence of a real ChatGPT/Codex/Claude OAuth authorization. No existing author ledger or pre-policy records were imported. Short-test ledger containers and volumes were removed. The current 24-hour run retains its own ten synthetic fixtures until automatic cleanup.
 
-## Remaining release gates
+## Remaining release gates — 2026-11-04
 
 - Complete actual ChatGPT web OAuth, query and ledger write. OAuth discovery succeeds in the operator's Pro browser, but creation is rejected with `Custom apps aren't allowed in this context. Check your workspace permissions or security settings`. The plugin settings page also reports `Couldn't load plugin settings`. No ChatGPT client OAuth/read/write success is claimed. Account/platform access must be resolved before retrying this gate.
 - Complete the running ten-account/two-worker **24-hour** public soak with no OOM and verified final balances. Initial successful requests do not establish a completed full-day result. Worker-stat sampling may overlap container eviction; these explicitly counted unavailable samples are separate from OOM events and monitor transport failures.
-- The operator explicitly requested opening registration for personal testing before these gates pass; `HOSTED_REGISTRATION_OPEN=1` is now deployed. This does not establish ChatGPT web compatibility or completion of the full-day soak. Auth0 social login, R2 archive/recovery, daily backup, terminal OAuth/read/write and public 130-second streaming have live evidence below. The notice/privacy updates are deployed on the existing website. Source changes remain uncommitted for review.
+- Recheck current-session Google and GitHub login after Mac SSH access is restored. The earlier provider tests retain their dated scope.
+
+Registration is open at the operator's request for personal testing. Current source is submitted in PR #577. R2 archive/recovery, backup/user restore, native terminal OAuth/read/write and public long-request evidence are recorded here. The notice/privacy updates are deployed on the existing website.
 
 No Tencent host was purchased. Coupon applicability and actual annual-payment price still require verification before any later purchase. Market caches remain private inside each worker; sharing public data is a future optimization.
 
