@@ -19,12 +19,22 @@ async def run(args):
         raise ValueError('Token file must have mode 600')
     semaphore = asyncio.Semaphore(2)
     started, errors, requests, busy = time.monotonic(), 0, 0, 0
+    error_types = {}
+    first_error_elapsed_seconds = None
     completed = set()
     last_success = {}
     run_id = uuid.uuid4().hex
+
+    def record_error(kind):
+        nonlocal errors, first_error_elapsed_seconds
+        errors += 1
+        error_types[kind] = error_types.get(kind, 0) + 1
+        if first_error_elapsed_seconds is None:
+            first_error_elapsed_seconds = round(time.monotonic() - started, 3)
+
     async with httpx.AsyncClient(trust_env=False, timeout=180) as client:
         async def call(i, token):
-            nonlocal errors, requests, busy
+            nonlocal requests, busy
             async with semaphore:
                 # One deposit per account per run; every later iteration retries
                 # the identical key/amount, so a full-day soak does not compound cash.
@@ -40,20 +50,30 @@ async def run(args):
                         busy += 1
                         return
                     result = rpc_message(response.content)
-                    if response.status_code != 200 or not result or result.get('error') or result.get('result',{}).get('isError'):
-                        errors += 1
+                    if response.status_code != 200:
+                        record_error(f'http_{response.status_code}')
+                    elif isinstance(result, dict) and result.get('error'):
+                        record_error('rpc_error')
+                    elif not isinstance(result, dict) or not isinstance(result.get('result'), dict):
+                        record_error('invalid_response')
+                    elif result['result'].get('isError'):
+                        record_error('tool_error')
                     elif args.synthetic_write and business_result(result).get('new_balance') != 1.25:
-                        errors += 1
+                        record_error('balance_mismatch')
                     else:
                         completed.add(i)
                         last_success[i] = time.monotonic()
+                except httpx.TimeoutException:
+                    record_error('timeout')
                 except httpx.HTTPError:
-                    errors += 1
+                    record_error('transport')
         while time.monotonic()-started < args.seconds:
             await asyncio.gather(*(call(i,t) for i,t in enumerate(tokens)))
             # Emits only counts; no tokens, account IDs, portfolio data or errors.
             print(json.dumps({'elapsed_seconds':int(time.monotonic()-started),'requests':requests,
-                              'errors':errors,'busy_responses':busy,'successful_accounts':len(completed)}),flush=True)
+                              'errors':errors,'error_types':error_types,
+                              'first_error_elapsed_seconds':first_error_elapsed_seconds,
+                              'busy_responses':busy,'successful_accounts':len(completed)}),flush=True)
             await asyncio.sleep(min(30,max(0,args.seconds-(time.monotonic()-started))))
     if errors or len(completed) != 10 or any(time.monotonic()-t > 300 for t in last_success.values()):
         raise SystemExit('Soak failed; inspect operator metrics without request bodies')

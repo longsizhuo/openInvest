@@ -1,5 +1,33 @@
 # Implementation and acceptance record
 
+## Registration repair and browser OAuth acceptance — 2026-11-04 (Asia/Shanghai)
+
+The Oracle gateway and worker run source `5baf1410`. A consistent encrypted
+backup preceded the update. The public consent endpoint now accepts the current
+portal contract, resolving the missing-route registration failure.
+
+Actual Auth0 browser sign-in, the website callback, notice acceptance and native
+Codex DCR/PKCE OAuth completed with an isolated database test identity. The
+native client discovered 31 tools, created an empty USD ledger, retried the same
+deposit without duplication, rejected changed arguments for the same key and
+read the expected balance. The browser changed preferences after Agent setup,
+retained the research opt-out, downloaded an export, created and revoked a PAT,
+revoked the OAuth grant and deleted the owned test account. The revoked native
+client received an authentication challenge. Temporary test identities and
+clients are removed after acceptance.
+
+This run used a dedicated Auth0 database connection. Google/GitHub social login
+and ChatGPT client acceptance still require their own current-session checks.
+Mac SSH is unavailable during this run. Earlier provider checks below retain
+their original dates and scope.
+
+The earlier 24-hour run ended with 15,820 requests, two errors, ten busy
+responses, ten successful accounts and zero OOM events. It failed its acceptance
+condition. Its logs contain no error categories, so their causes remain
+unverified. The soak runner now records bounded failure categories and the time
+of the first error without request bodies, credentials or raw exception text.
+Focused hosted/MCP tests pass with **70 passed, 4 skipped**.
+
 ## PR submission update — 2026-11-02 (Asia/Shanghai)
 
 The PR now includes R2/S3 archive support, shared browser/Agent ledger settings,
