@@ -33,6 +33,14 @@ intent: 远程接入、数据边界与运维
 
 全部非幂等金额写操作必须提供 `idempotency_key`。相同账户和键的重试返回原结果；不同参数拒绝。断流后结果不确定时不会自动重放，需先检查账本。键按账户隔离。
 
+在无桌面 Linux 上，若 Codex 删除文件中保存的 MCP OAuth 凭证时出现 keyring 错误，可显式选择文件存储后重试。以下方式已在 Codex CLI 0.165.0 验证，`openinvest` 需替换为已配置的 MCP 服务器名称。存储选项见 [Codex 配置说明](https://learn.chatgpt.com/docs/config-file/config-reference)。
+
+```sh
+codex mcp logout openinvest -c 'mcp_oauth_credentials_store="file"'
+```
+
+服务端访问权限可在「个人主页 → 连接 → 撤销授权」中撤销。
+
 ## 网页数据说明
 
 官方服务长期保存个人账本。研究记录默认开启，但仅在用户完成网页说明步骤后生效。研究数据用于研究、模型评估及未来训练，加密归档至 Cloudflare R2，存储位置采用服务商默认规则；没有自动训练或上线模型的任务。

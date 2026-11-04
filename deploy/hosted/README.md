@@ -40,6 +40,16 @@ Browser account settings and MCP share one ledger preferences service. Changes r
 
 Local/staging Docker tests must use a unique `Settings.worker_namespace` / `HOSTED_WORKER_NAMESPACE` and their own image tag. Container recovery and capacity checks are scoped to that namespace; keep the production default `ledger` unchanged. Never run synthetic pools against the production namespace.
 
+## Codex credential cleanup on headless Linux
+
+If logout reports a keyring error for MCP OAuth credentials saved in a file, select the file store explicitly. This was verified with Codex CLI 0.165.0. The available stores are documented in the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+```sh
+codex mcp logout openinvest -c 'mcp_oauth_credentials_store="file"'
+```
+
+Replace `openinvest` with the configured MCP server name. Server access can be revoked from My account → Connect → Revoke authorization.
+
 ## Web portal and TLS
 
 In the companion `openinvest-site` checkout:
