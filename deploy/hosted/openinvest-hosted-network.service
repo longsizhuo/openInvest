@@ -1,0 +1,13 @@
+[Unit]
+Description=Private openInvest worker bridge and metadata egress filter
+Requires=docker.service
+After=docker.service
+Before=openinvest-hosted.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/openinvest-hosted-network
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

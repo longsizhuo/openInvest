@@ -74,7 +74,7 @@ uvx openinvest buy --symbol AAPL --units 10 --price 210 --currency USD
 
 ## Disclaimer
 
-LLM-driven decision support — **not investment advice**. LLMs make mistakes and get overconfident. openInvest never auto-trades; its ledger is a local SQLite record with no connection to any brokerage or payment system. Past performance does not predict future returns.
+LLM-driven decision support — **not investment advice**. LLMs make mistakes and get overconfident. openInvest never auto-trades; its ledger is stored on the machine running it (your device, your private host, or an optional official hosted service), with no connection to any brokerage or payment system. Past performance does not predict future returns.
 
 ## Links
 
@@ -82,3 +82,5 @@ LLM-driven decision support — **not investment advice**. LLMs make mistakes an
 - [Wiki](https://github.com/longsizhuo/openInvest/tree/main/docs/wiki)
 - [RFC: Agent-Native Investment Runtime](https://github.com/longsizhuo/openInvest/issues/133)
 - License: MIT
+
+Local and private installations do not automatically contribute research data. Official hosted research settings, long-term retention and deletion controls are disclosed in the web connection flow. See the repository hosted MCP guide.

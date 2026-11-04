@@ -159,6 +159,14 @@ INVEST_HOME=~/openInvest uvx openinvest status
 
 ---
 
+## 远程 MCP 与数据
+
+本地部署的账本保存在用户机器；私有远程部署保存在用户指定主机。两者都不会自动向官方研究库发送决策数据。
+
+可选的官方托管服务提供独立账本、Google/GitHub 登录、OAuth 与个人访问凭证。完成网页说明后研究记录默认开启，可在网页关闭，账本功能照常使用。研究保留去标识化后的精确金额、币种与提交的决策，用于研究和后续训练；未训练样本提供单独删除入口。账本和研究数据长期保存，加密备份保留 30 天。用户 Agent 的模型服务商按自身规则处理收到的分析上下文。
+
+完成部署与验收前，公开注册保持关闭。详见[接入与数据说明](docs/wiki/26-hosted-mcp.md)及[部署手册](deploy/hosted/README.md)。
+
 ## 系统拓扑与多 Agent 编排机制
 
 `openInvest` 拒绝在单一 LLM Session 中通过多角色 Prompt 进行伪辩论。系统在 `core/committee/` 层强行实施**信息隔离契约（Information Isolation Contract）**，通过有向无环图（DAG）驱动 4 个完全独立的 LLM 进程进行多轮交叉质询：

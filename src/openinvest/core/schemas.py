@@ -69,7 +69,13 @@ class StrategyData(BaseModel):
 
     target_allocation_stock: float = Field(..., ge=0, le=1)
     target_allocation_cash: float = Field(..., ge=0, le=1)
-    target_assets: List[TargetAsset] = Field(..., min_length=1)
+    target_assets: List[TargetAsset]
+
+    @model_validator(mode="after")
+    def _require_targets_unless_explicitly_empty(self) -> "StrategyData":
+        if not self.target_assets and getattr(self, "allow_empty_targets", False) is not True:
+            raise ValueError("target_assets must contain at least one asset")
+        return self
 
     # 旧字段兼容（v1 单资产时代）
     max_single_invest_cny: Optional[float] = None

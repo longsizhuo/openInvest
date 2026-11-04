@@ -1,0 +1,16 @@
+[Unit]
+Description=openInvest hosted control plane
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+User=openinvest-hosted
+EnvironmentFile=/etc/openinvest-hosted.env
+ExecStart=/opt/openinvest-hosted/.venv/bin/openinvest-hosted serve
+WorkingDirectory=/opt/openinvest-hosted
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

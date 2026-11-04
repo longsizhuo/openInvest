@@ -84,6 +84,20 @@ def test_keys_are_shared_across_operations(tmp_path):
     assert pm.withdraw_cash("CNY", 1, idempotency_key="x")["status"] == "duplicate"
 
 
+@pytest.mark.parametrize("operation,initial,amount,expected", [
+    ("deposit_cash", 0.0, 42.125, 42.12),
+    ("withdraw_cash", 50.0, 1.125, 48.88),
+])
+def test_cash_response_matches_reopened_ledger_after_rounding(tmp_path, operation, initial, amount, expected):
+    pm = PortfolioManager(_store(tmp_path, cash=initial))
+    result = getattr(pm, operation)("CNY", amount, idempotency_key="rounded-cash")
+    reopened = PortfolioManager(MemoryStore(tmp_path))
+    assert result["new_balance"] == reopened.cash_amount("CNY") == expected
+    # An exact retry must preserve the persisted result, including its rounding.
+    assert getattr(pm, operation)("CNY", amount, idempotency_key="rounded-cash")["status"] == "duplicate"
+    assert PortfolioManager(MemoryStore(tmp_path)).cash_amount("CNY") == expected
+
+
 def test_failed_op_releases_key_for_retry(tmp_path):
     """业务失败（余额不足）不得烧掉 key——否则修好余额后重试同 key 会被当 duplicate 静默丢单。"""
     pm = PortfolioManager(_store(tmp_path, cash=50.0))
