@@ -259,3 +259,60 @@ def test_backup_job_registered_with_runner():
     assert cfg["enabled"] is True
     assert cfg["schedule"] == "30 3 * * *" and cfg["timezone"] == "Asia/Shanghai"
     assert runner._resolve_entry(cfg["entry"]) is backup.run
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_new_backup_files_are_private_with_permissive_umask(tmp_path, monkeypatch, manual):
+    """Both scheduler and manual entry points protect archives before publication."""
+    import os
+    import stat
+
+    root = tmp_path / "home"
+    (root / "memory").mkdir(parents=True)
+    (root / "memory/portfolio.md").write_text("fixture holdings")
+    (root / ".env").write_text("FAKE_KEY=fixture-only")
+    original_zip = zipfile.ZipFile
+
+    def private_zip(file, *args, **kwargs):
+        if args and args[0] == "w":
+            assert stat.S_IMODE(os.fstat(file.fileno()).st_mode) == 0o600
+        return original_zip(file, *args, **kwargs)
+
+    monkeypatch.setattr(backup.zipfile, "ZipFile", private_zip)
+    previous = os.umask(0o022)
+    try:
+        result = backup.run(root=root, now=T0, manual=manual)
+    finally:
+        os.umask(previous)
+    path = Path(result["path"])
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert not list(path.parent.glob("*.tmp"))
+    with original_zip(path) as archive:
+        assert archive.read("memory/portfolio.md") == b"fixture holdings"
+        if manual:
+            assert archive.read(".env") == b"FAKE_KEY=fixture-only"
+
+
+def test_backup_replaces_same_minute_archive_privately(tmp_path):
+    """Preserve same-minute replacement without reusing broad-permission staging."""
+    import os
+    import stat
+
+    root = tmp_path / "home"
+    (root / "memory").mkdir(parents=True)
+    portfolio = root / "memory/portfolio.md"
+    portfolio.write_text("old fixture")
+    first = backup.run(root=root, now=T0)
+    path = Path(first["path"])
+    path.chmod(0o644)
+    portfolio.write_text("new fixture")
+    previous = os.umask(0o022)
+    try:
+        second = backup.run(root=root, now=T0)
+    finally:
+        os.umask(previous)
+    assert second["path"] == first["path"]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    with zipfile.ZipFile(path) as archive:
+        assert archive.read("memory/portfolio.md") == b"new fixture"

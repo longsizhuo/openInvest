@@ -122,12 +122,17 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
         return {"status": "skipped", "reason": "memory/ 与 db/ 下没有可备份的文件"}
 
     out_dir = Path(output_dir) if output_dir is not None else root / ".backups"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     for stale in out_dir.glob("auto_*.zip.tmp"):  # 上次崩在写一半留下的
         stale.unlink(missing_ok=True)
     stamp = now.astimezone(timezone.utc).strftime("%Y%m%d_%H%M")
     dest = out_dir / (f"openinvest-backup-{stamp}-UTC.zip" if manual else f"auto_{stamp}{'_full' if include_backtest else ''}.zip")
-    tmp = dest.with_name(dest.name + ".tmp")  # 写完再 rename：半截 zip 不会被当成一份备份
+    # Unique owner-only staging file: credentials and holdings must never inherit
+    # a permissive umask, nor reuse a predictable existing file/symlink. Keep the
+    # final atomic replacement behavior for repeated runs in the same minute.
+    staged_archive = tempfile.NamedTemporaryFile(
+        mode="w+b", prefix=dest.name + ".", suffix=".tmp", dir=out_dir, delete=False)
+    tmp = Path(staged_archive.name)
     database_files = {arc for _, arc in files if Path(arc).suffix in (".db", ".sqlite", ".sqlite3")}
     n = 0
     # ponytail: checkpoint→读文件之间是毫秒窗口，trades.db 只有几十 KB；写入量大了改用
@@ -138,7 +143,7 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
     try:
         with tempfile.TemporaryDirectory(prefix="sqlite-backup-", dir=out_dir) as directory:
             verified = {}
-            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
+            with zipfile.ZipFile(staged_archive, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
                 for src, arc in files:
                     if arc.endswith("-wal") and arc[:-4] in database_files:
                         continue  # the online snapshot already includes committed WAL data
@@ -172,8 +177,10 @@ def run(*, root: Optional[Path] = None, keep: int = KEEP_AUTO,
                     "consistency": "per_database; financial reconciliation required before restoring writes",
                     "restore_rule": "retain newest exclusions; do not revive historical approvals or executions",
                 }, ensure_ascii=False))
+        staged_archive.close()
         oslock.replace(tmp, dest)
     finally:
+        staged_archive.close()
         tmp.unlink(missing_ok=True)
 
     pruned = [] if manual else _prune(out_dir, keep)

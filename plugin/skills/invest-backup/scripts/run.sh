@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+# Backups include credentials and holdings. Apply before creating directories,
+# archives or invoking either backend; never inherit a permissive caller umask.
+umask 077
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SPEC="${OPENINVEST_SPEC:-openinvest==0.68.3}"  # x-release-please-version
@@ -84,6 +88,7 @@ checkpoint_dbs() {
 cmd_backup() {
     local out_dir="${1:-$BACKUP_DIR}"
     mkdir -p "$out_dir"
+    out_dir="$(cd "$out_dir" && pwd)"
     # Current backends use online SQLite snapshots. Only a genuinely older
     # backend may take the explicitly unverified legacy path below.
     local backup_rc
@@ -117,11 +122,25 @@ print(json.dumps(result))
         exclude_args+=(-x "$g")
     done
 
-    (cd "$ROOT" && zip -r -q "$path" "${INCLUDE_PATHS[@]}" "${exclude_args[@]}" 2>/dev/null || true)
-    if [ ! -f "$path" ]; then
+    # Stage privately and publish without replacing an existing backup (including
+    # a same-second collision or symlink). Never let zip update an old archive.
+    local staging
+    staging="$(mktemp -d "$out_dir/.openinvest-backup.XXXXXX")"
+    local staged_path="$staging/archive.zip"
+    (cd "$ROOT" && zip -r -q "$staged_path" "${INCLUDE_PATHS[@]}" "${exclude_args[@]}" 2>/dev/null || true)
+    if [ ! -f "$staged_path" ]; then
+        rmdir "$staging"
         echo '{"status":"error","error":"zip 失败，检查 INCLUDE_PATHS 是否存在"}' >&2
         exit 1
     fi
+    if ! ln "$staged_path" "$path"; then
+        rm -f "$staged_path"
+        rmdir "$staging"
+        echo '{"status":"error","error":"backup destination already exists or cannot be created; no existing backup was changed"}' >&2
+        return 1
+    fi
+    rm -f "$staged_path"
+    rmdir "$staging"
     local size
     size="$(du -h "$path" | cut -f1)"
     echo "{\"status\":\"ok\",\"path\":\"$path\",\"size\":\"$size\"}"
