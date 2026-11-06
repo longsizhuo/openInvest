@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.3](https://github.com/longsizhuo/openInvest/compare/v0.68.2...v0.68.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **integrity:** validate review-plan units and exclude private state ([01ec3be](https://github.com/longsizhuo/openInvest/commit/01ec3be6ace44310535ba1de2d4e31388544dd7e))
+
 ## [0.68.2](https://github.com/longsizhuo/openInvest/compare/v0.68.1...v0.68.2) (2026-11-06)
 
 
