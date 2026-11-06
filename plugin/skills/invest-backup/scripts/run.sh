@@ -133,7 +133,27 @@ print(json.dumps(result))
         echo '{"status":"error","error":"zip 失败，检查 INCLUDE_PATHS 是否存在"}' >&2
         exit 1
     fi
-    if ! ln "$staged_path" "$path"; then
+    # Exact exclusive creation rejects files, directories and all symlinks. Do not
+    # use ln/mv directory-target semantics or require hardlink-capable filesystems.
+    if ! INVEST_BACKUP_STAGED="$staged_path" INVEST_BACKUP_DEST="$path" _py '
+import os, shutil
+from pathlib import Path
+source = Path(os.environ["INVEST_BACKUP_STAGED"])
+destination = Path(os.environ["INVEST_BACKUP_DEST"])
+with source.open("rb") as incoming:
+    with destination.open("xb") as outgoing:
+        identity = os.fstat(outgoing.fileno())
+        try:
+            shutil.copyfileobj(incoming, outgoing)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        except BaseException:
+            # Remove only the file we created, never a pre-existing/replaced path.
+            current = destination.lstat()
+            if (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+                destination.unlink()
+            raise
+'; then
         rm -f "$staged_path"
         rmdir "$staging"
         echo '{"status":"error","error":"backup destination already exists or cannot be created; no existing backup was changed"}' >&2

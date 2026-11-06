@@ -43,6 +43,8 @@ if "manual_backup" in code:
     with zipfile.ZipFile(dest, "w") as archive:
         archive.write(home / ".env", ".env")
     print(json.dumps({"status": "ok", "path": str(dest)}))
+elif "INVEST_BACKUP_STAGED" in code:
+    exec(compile(code, "<backup publication>", "exec"))
 elif "checkpoint_dbs" in code:
     sys.exit(1)
 elif "print(INVEST_ROOT)" in code:
@@ -95,3 +97,36 @@ else:
         self.assertEqual(path.parent, output)
         self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o755)
 
+
+    def test_directory_and_symlink_destinations_are_refused(self):
+        output = self.home / ".backups"
+        output.mkdir()
+        destination = output / "openinvest-backup-20000101-000000-UTC.zip"
+        directory = self.root / "existing-directory"
+        directory.mkdir()
+        missing = self.root / "missing-target"
+        for kind in ("directory", "directory_symlink", "dangling_symlink"):
+            with self.subTest(kind=kind):
+                if kind == "directory":
+                    destination.mkdir()
+                else:
+                    destination.symlink_to(directory if kind == "directory_symlink" else missing,
+                                           target_is_directory=kind == "directory_symlink")
+                result = self.run_backup()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('"status":"ok"', result.stdout)
+                self.assertFalse(list(output.glob(".openinvest-backup.*")))
+                self.assertEqual(list(directory.iterdir()), [])
+                self.assertFalse(missing.exists())
+                if kind == "directory":
+                    self.assertEqual(list(destination.iterdir()), [])
+                    destination.rmdir()
+                else:
+                    self.assertTrue(destination.is_symlink())
+                    destination.unlink()
+
+    def test_publication_does_not_require_hardlinks(self):
+        link = self.bin / "ln"
+        link.write_text("#!/bin/sh\nexit 99\n")
+        link.chmod(0o755)
+        self.assert_private_archive(self.run_backup())
