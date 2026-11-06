@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.2](https://github.com/longsizhuo/openInvest/compare/v0.68.1...v0.68.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **integrity:** prevent HOLD lock-in and unqualified evidence feedback ([897897d](https://github.com/longsizhuo/openInvest/commit/897897d2e15a9351149844ff023292a0bfceed5b))
+
 ## [0.68.1](https://github.com/longsizhuo/openInvest/compare/v0.68.0...v0.68.1) (2026-10-29)
 
 
