@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/longsizhuo/openInvest/compare/invest-backup-skill-v0.3.0...invest-backup-skill-v0.3.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **integrity:** prevent HOLD lock-in and unqualified evidence feedback ([897897d](https://github.com/longsizhuo/openInvest/commit/897897d2e15a9351149844ff023292a0bfceed5b))
+
 ## [0.3.0](https://github.com/longsizhuo/openInvest/compare/invest-backup-skill-v0.2.3...invest-backup-skill-v0.3.0) (2026-10-17)
 
 
