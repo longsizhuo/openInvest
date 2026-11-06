@@ -45,7 +45,7 @@ def main() -> int:
         names = subprocess.check_output(
             ["git", "-C", str(repo), "ls-files", "--cached", "--others", "--exclude-standard", "-z"]
         ).decode().split("\0")
-        private = {"memory", "db", "logs", ".git", ".venv", ".claude", ".hermes"}
+        private = {"memory", "db", "logs", ".git", ".venv", ".claude", ".hermes", "integrity", ".backups"}
         for name in names:
             if not name:
                 continue
@@ -128,6 +128,8 @@ assert not pathlib.Path('/home/ubuntu').exists()
 assert not pathlib.Path('/work/.env').exists()
 assert not pathlib.Path('/work/memory').exists()
 assert not pathlib.Path('/work/db').exists()
+assert not pathlib.Path('/work/integrity').exists()
+assert not pathlib.Path('/work/.backups').exists()
 assert not any('KEY' in k or 'TOKEN' in k or 'PASSWORD' in k for k in os.environ)
 with socket.socket() as s:
     s.settimeout(1)

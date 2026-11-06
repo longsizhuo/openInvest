@@ -59,3 +59,6 @@ docs/outperform_events.jsonl
 # oracle_redesign 的 yfinance 日线缓存（可重建）
 experiments/oracle_redesign/cache/
 experiments/dspy_trainset_v5.jsonl
+
+# Private provenance approvals, exclusions, recovery evidence and quarantine
+/integrity/

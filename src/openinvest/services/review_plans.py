@@ -20,7 +20,42 @@ def _now(now=None):
     return now or datetime.now(timezone.utc)
 
 
-def validate_plan(plan: Any, now: datetime) -> dict:
+def quote_unit(symbol: str) -> str | None:
+    from openinvest.calc.regime_probability import quote_currency_iso
+    symbol = symbol.upper()
+    # Some exchanges quote in subunits (e.g. pence) or multiple currencies.
+    # A currency suffix alone is insufficient to certify the native price scale.
+    if symbol.endswith((".L", ".JO", ".TA")):
+        return None
+    if symbol == "GC=F":
+        return "USD/oz"
+    if symbol == "^TNX":
+        return "percent"
+    if symbol.startswith("^"):
+        return "points"
+    if symbol.startswith("FUND:"):
+        return "CNY/unit"
+    if symbol.endswith("=X") and len(symbol[:-2]) in (3, 6):
+        return symbol[:-2][-3:] + "/unit"
+    return f"{quote_currency_iso(symbol) or 'UNKNOWN'}/unit"
+
+
+def canonical_unit(metric: str, unit):
+    if not isinstance(unit, str):
+        return unit
+    unit = unit.strip()
+    if metric == "quote_price" and unit in {"HKD", "AUD"}:
+        return unit + "/unit"
+    return {"%": "percent", "点": "points", "point": "points", "CNY/克": "CNY/g"}.get(unit, unit)
+
+
+def canonical_spec(spec: dict) -> dict:
+    # Interpret equivalent unit spelling without moving a saved target or expiry.
+    return {**spec, "conditions": [{**c, "unit": canonical_unit(c.get("metric"), c.get("unit"))}
+                                    for c in spec["conditions"]]}
+
+
+def validate_plan(plan: Any, now: datetime, symbol: str) -> dict:
     if not isinstance(plan, dict):
         raise ValueError("review_plan must be an object")
     expires = datetime.fromisoformat(str(plan.get("expires_at", "")))
@@ -35,6 +70,14 @@ def validate_plan(plan: Any, now: datetime) -> dict:
                 or isinstance(c.get("value"), bool) or not isinstance(c.get("value"), (int, float))
                 or not math.isfinite(c["value"])):
             raise ValueError("invalid review condition or missing price unit")
+    expected_units = {"quote_price": quote_unit(symbol), "price_cny_per_gram": "CNY/g",
+                      "vix": "points", "rsi": "points", "price_vs_ma20_pct": "percent", "price_vs_ma120_pct": "percent"}
+    conditions = [{**c, "unit": canonical_unit(c["metric"], c["unit"])} for c in conditions]
+    for c in conditions:
+        if expected_units[c["metric"]] is None:
+            raise ValueError(f"native_quote_unit_unverified: {symbol}")
+        if c["unit"] != expected_units[c["metric"]] or (c["metric"] == "price_cny_per_gram" and symbol.upper() != "GC=F"):
+            raise ValueError(f"review condition unit/asset mismatch: {c['metric']} requires {expected_units[c['metric']]}")
     if plan.get("logic", "all") not in ("all", "any"):
         raise ValueError("invalid condition logic")
     return {"conditions": conditions, "logic": plan.get("logic", "all"),
@@ -45,7 +88,7 @@ def check_conditions(spec: dict, observations: dict) -> bool:
     results = []
     for c in spec["conditions"]:
         value = observations.get(c["metric"])
-        if (not isinstance(value, dict) or value.get("unit") != c["unit"]
+        if (not isinstance(value, dict) or canonical_unit(c["metric"], value.get("unit")) != canonical_unit(c["metric"], c["unit"])
                 or value.get("stale") or not isinstance(value.get("value"), (int, float))
                 or not math.isfinite(value["value"])):
             results.append(False)
@@ -85,14 +128,16 @@ def update_plan(store: MemoryStore, symbol: str, plan: Any = None, *,
                 emit("conditions_met", record)
         if plan is not None:
             try:
-                spec = validate_plan(plan, now)
+                spec = validate_plan(plan, now, symbol)
             except (ValueError, TypeError, KeyError) as e:
+                changed_error = record.get("last_error") != str(e)
                 record["last_error"] = str(e)
                 record.setdefault("first_error_at", now.isoformat())
                 record.setdefault("changed_at", now.isoformat())
-                emit("invalid_plan", record)
+                if changed_error:
+                    emit("invalid_plan", record)
                 return finish(record)
-            same = record.get("spec") and digest(spec) == digest(record["spec"])
+            same = record.get("spec") and digest(spec) == digest(canonical_spec(record["spec"]))
             if record.get("plan_id") and not same:
                 if (plan.get("replaces_plan_id") != record["plan_id"]
                         or not str(plan.get("change_reason") or "").strip()):
@@ -100,6 +145,9 @@ def update_plan(store: MemoryStore, symbol: str, plan: Any = None, *,
                     record.setdefault("first_error_at", now.isoformat())
                     emit("replacement_rejected", record)
                     return finish(record)
+            if same:
+                record.pop("last_error", None)
+                record.pop("first_error_at", None)
             if not same:
                 record = {"symbol": symbol, "plan_id": uuid.uuid4().hex, "spec": spec,
                           "state": "active", "created_at": now.isoformat(), "changed_at": now.isoformat(),
@@ -140,14 +188,16 @@ def observe_prepared_market(store: MemoryStore, symbol: str, frame) -> None:
 
 
 def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, queue=True) -> dict:
-    from openinvest.calc.regime_probability import quote_currency_iso
     current = store.state_get(f"review_plan_{safe_symbol(symbol)}")
     if not current:
         return {}
-    ccy = quote_currency_iso(symbol) or "UNKNOWN"
-    unit = f"{ccy}/oz" if symbol == "GC=F" else f"{ccy}/unit"
-    observations = {"quote_price": {"value": price, "unit": unit}}
+    unit = quote_unit(symbol)
+    observations = {"quote_price": {"value": price, "unit": unit}} if unit else {}
     needed = {c["metric"] for c in current.get("spec", {}).get("conditions", [])}
+    if unit is None and "quote_price" in needed:
+        if current.get("last_error") == f"native_quote_unit_unverified: {symbol}":
+            return update_plan(store, symbol, observations={}, now=now)
+        return update_plan(store, symbol, current["spec"], observations={}, now=now)
     def fresh(frame):
         from openinvest.core.config import load_config
         return (not frame.empty and not frame.attrs.get("yf_fetch_failed")
