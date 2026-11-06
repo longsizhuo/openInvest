@@ -47,6 +47,7 @@ jobs:
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
             "https://pypi.org/pypi/openinvest/$VERSION/json" \
             | jq -e --arg v "$VERSION" '.info.version == $v'
+          jq -e '.name == "io.github.longsizhuo/openinvest" and (.packages | length) == 1 and .packages[0].registryType == "pypi" and .packages[0].identifier == "openinvest"' server.json
           jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp
           mv server.tmp server.json
           URL="https://registry.modelcontextprotocol.io/v0.1/servers/io.github.longsizhuo%2Fopeninvest/versions/$VERSION"
