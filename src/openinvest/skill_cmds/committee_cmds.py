@@ -196,14 +196,15 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     # 输出的 transcript_path 字段就是空字符串（Fresh Claude 端到端测试发现）
     safe_sym = safe_symbol(args.symbol)
     transcript_path = ROOT / "memory" / ".committee" / today / f"{safe_sym}.md"
-    from openinvest.core.decision_ledger import is_unclear, llm_failure_reason, parse_committee_file
-    cached_parsed = parse_committee_file(transcript_path) if transcript_path.exists() else None
+    from openinvest.core.decision_ledger import is_unclear, llm_failure_reason, parse_committee_file, parse_committee_text
+    cached_text = transcript_path.read_text(encoding="utf-8") if transcript_path.exists() else None
+    cached_parsed = parse_committee_text(cached_text) if cached_text is not None else None
     # CIO 没出裁决（UNCLEAR）的记录不当缓存，直接重跑；部分角色失败的照常命中但带 degraded
     from openinvest.core.decision_evidence import current_decision
     from openinvest.utils.llm import get_llm_config_safe
     if (transcript_path.exists() and not args.force and not is_unclear(cached_parsed)
             and current_decision(ROOT / "memory", (cached_parsed or {}).get("input_health", {}), args.symbol,
-                                 verdict=cached_parsed, expected_model=get_llm_config_safe()[2], transcript=transcript_path.read_text(encoding="utf-8"))):
+                                 verdict=cached_parsed, expected_model=get_llm_config_safe()[2], transcript=cached_text)):
         from openinvest.capabilities.committee.i18n import bilingual
         from openinvest.jobs.review_calc import confidence_display
         from openinvest.jobs.verdict_review import load_confidence_lookup
@@ -215,7 +216,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
                 "This asset already ran today; pass --force to rerun.",
             ),
             "transcript_path": str(transcript_path),
-            "transcript_md": transcript_path.read_text(encoding="utf-8"),
+            "transcript_md": cached_text,
             # 与 fresh 路径 / MCP run_committee cached 同款
             "confidence_lookup": (confidence_display(parsed, load_confidence_lookup(), with_raw=False)
                                   if parsed else None),
