@@ -158,14 +158,14 @@ def pending_committee_items(now: Optional[datetime] = None) -> List[Dict[str, An
         for sym in rec.get("symbols") or []:
             if sym not in latest or rec["queued_at"] > latest[sym]["queued_at"]:
                 latest[sym] = rec
-    from openinvest.core.decision_ledger import parse_committee_file
+    from openinvest.core.decision_ledger import parse_committee_file, llm_failure_reason
     root = MemoryStore().root / ".committee"
     out = []
     for sym, rec in sorted(latest.items()):
         queued = datetime.fromisoformat(rec["queued_at"]).astimezone().replace(tzinfo=None)
         parsed = parse_committee_file(root / queued.strftime("%Y-%m-%d") / f"{safe_symbol(sym)}.md")
         later = parse_committee_file(root / now.strftime("%Y-%m-%d") / f"{safe_symbol(sym)}.md")
-        done = any(p and p.get("run_at") and datetime.fromisoformat(p["run_at"]) >= queued
+        done = any(p and not llm_failure_reason(p) and p.get("verdict") != "UNCLEAR" and p.get("run_at") and datetime.fromisoformat(p["run_at"]).replace(tzinfo=None) >= queued
                    for p in (parsed, later))
         if not done:
             out.append({"symbol": sym, "reason": rec.get("reason", ""),

@@ -41,7 +41,9 @@ def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = 
         matches = []
         for f in sorted(insights_dir.glob("*.md")):
             if sym and sym in f.stem.lower():
-                matches.append(f"## {f.stem}\n{f.read_text(encoding='utf-8')[:600]}")
+                doc = store.read(f"insights/{f.stem}")
+                if doc is not None:
+                    matches.append(f"## {f.stem}\n{doc.body[:600]}")
         return "\n\n".join(matches)
     except Exception as e:  # noqa: BLE001
         log.warning(f"load_prior_insights graceful 退化 '': {type(e).__name__}: {e}")

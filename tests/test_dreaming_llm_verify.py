@@ -3,7 +3,7 @@
 验证：
 - 默认 env off → 行为完全不变（旧 candidates 全过）
 - env on + LLM 返 KEEP/REJECT → 应用 mask
-- LLM API 失败 → fallback 全 KEEP（保守策略）
+- LLM API 失败 → PENDING，保留候选且不发布
 - 全部被 REJECT → 不写 insights，dream_event 留 audit
 """
 from __future__ import annotations
@@ -48,9 +48,14 @@ def _make_candidate(asset="GC=F", action="bought", verdict=None,
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path, monkeypatch):
     """tmp memory store"""
     from openinvest.core.memory_store import MemoryStore
+    # These unit tests isolate verifier behavior; the real publication barrier
+    # is exercised without mocks in test_evidence_eligibility.
+    monkeypatch.setattr("openinvest.core.evidence_eligibility.Eligibility.allows",
+                        lambda self, key, payload, use: key.startswith("candidate:"))
+    monkeypatch.setattr("openinvest.core.evidence_eligibility.Eligibility.derive", lambda *a, **k: None)
     return MemoryStore(tmp_path / "memory")
 
 
@@ -148,11 +153,12 @@ def test_env_on_all_rejected_writes_audit_event(store, monkeypatch):
 
 # ---------- LLM API 失败 → fallback 保守 ----------
 
-def test_llm_api_failure_falls_back_to_keep_all(store, monkeypatch):
-    """env on 但 LLM 抛异常 → 全 KEEP（保守）"""
+def test_llm_api_failure_keeps_candidate_pending(store, monkeypatch):
+    """验证失败既不是 KEEP，也不是 REJECT。"""
     monkeypatch.setenv("INVEST_DREAMING_LLM_VERIFY", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key-for-test")
     cand = [_make_candidate()]
+    store.write_dream_state("candidates", {"candidates": cand})
 
     # mock OpenAI client 抛网络错
     fake_openai = MagicMock()
@@ -161,18 +167,20 @@ def test_llm_api_failure_falls_back_to_keep_all(store, monkeypatch):
     with patch("openai.OpenAI", return_value=fake_openai):
         accepted = dreaming_mod.deep_sleep(store, cand)
 
-    # API fail → fallback 全 KEEP → 候选仍然通过
-    assert len(accepted) == 1
+    assert accepted == []
+    assert len(store.read_dream_state("candidates")["candidates"]) == 1
+    assert "verification_pending" in (store.root / ".dreams/events.jsonl").read_text()
+    assert not (store.root / "insights").exists()
 
 
-def test_llm_no_api_key_skips_verify(store, monkeypatch):
-    """env on 但没 DEEPSEEK_API_KEY → 直接全 KEEP，不真调 OpenAI"""
+def test_llm_no_api_key_does_not_publish(store, monkeypatch):
+    """启用了验证但没有凭据，不能发布候选。"""
     monkeypatch.setenv("INVEST_DREAMING_LLM_VERIFY", "1")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     cand = [_make_candidate()]
 
     accepted = dreaming_mod.deep_sleep(store, cand)
-    assert len(accepted) == 1
+    assert accepted == []
 
 
 # ---------- 边界 ----------
@@ -219,8 +227,8 @@ def test_llm_verify_prompt_uses_config_values(store, monkeypatch):
     payload = user_msg["content"]
 
     # 默认值: MIN_RECALL=3, MIN_SCORE=0.8
-    assert "count≥3" in payload, f"MIN_RECALL=3 不在 payload: {payload[:200]}"
-    assert "score≥0.8" in payload, f"MIN_SCORE=0.8 不在 payload: {payload[:200]}"
+    assert "不代表候选已通过评估" in payload
+    assert "已经通过统计阈值" not in captured_messages[0]["content"]
     # _label() 把 verdict 值映射到 "action" key，值本身保留（2026-05-27 KeyError 回归锁）
     assert '"action": "ACCUMULATE"' in payload, f"verdict 值 ACCUMULATE 未正确映射: {payload[:300]}"
 
@@ -252,4 +260,4 @@ def test_llm_verify_prompt_override_min_recall(store, monkeypatch):
     user_msg = next(m for m in captured_messages if m["role"] == "user")
     payload = user_msg["content"]
 
-    assert "count≥7" in payload, f"min_recall=7 override 未生效: {payload[:200]}"
+    assert "count≥7" not in payload  # a diagnostic override cannot assert evaluation eligibility

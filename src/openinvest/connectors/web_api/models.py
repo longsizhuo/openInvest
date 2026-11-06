@@ -889,11 +889,14 @@ class SkillDeleteHoldingRequest(BaseModel):
 class CommitteePrepareRequest(BaseModel):
     """POST /api/committee/prepare body"""
     symbol: str
+    provider: str = "agent"
+    model: str = ""
 
 
 class CommitteeSaveRequest(BaseModel):
     """POST /api/committee/save body"""
     symbol: str
+    context_id: str = Field("", description="本次 prepare 返回的不可变输入标识")
     transcript: str = Field(..., description="6 段 '=== ROLE ===' 分隔的 transcript 全文")
     provider: str = Field("", description="实际扮演 4 角色的 agent 品牌（claude/hermes/...）；空 = claude")
     model: str = Field("", description="实际扮演 4 角色的模型名（如 claude-haiku-5-5）；空 = unknown")

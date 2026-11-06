@@ -7,6 +7,7 @@ Coordinator 协议——Hermes 接入后会把 Hermes 产出的 transcript 误�
 跑：uv run pytest tests/test_save_committee_provider_tag.py -q
 """
 from __future__ import annotations
+from tests.integrity_helpers import context_id
 
 import pandas as pd
 import pytest
@@ -52,7 +53,7 @@ SUGGESTED_ALLOC_CNY: 0
 def test_default_provider_is_claude_unchanged(tmp_path, monkeypatch):
     """不传 provider → 与历史硬编码字符串逐字节一致（向后兼容）。"""
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
-    result = save_committee_transcript("TESTSYM", _RAW)
+    result = save_committee_transcript("TESTSYM", _RAW, context_id=context_id("TESTSYM"))
     from pathlib import Path
     saved_text = Path(result["saved"]).read_text(encoding="utf-8")
     assert "**Provider**: claude (skill mode)" in saved_text
@@ -61,7 +62,7 @@ def test_default_provider_is_claude_unchanged(tmp_path, monkeypatch):
 def test_explicit_provider_is_recorded(tmp_path, monkeypatch):
     """传 provider="hermes" → transcript 准确标注实际调用方，不再一律 claude。"""
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path)
-    result = save_committee_transcript("TESTSYM2", _RAW, provider="hermes")
+    result = save_committee_transcript("TESTSYM2", _RAW, provider="hermes", context_id=context_id("TESTSYM2"))
     from pathlib import Path
     saved_text = Path(result["saved"]).read_text(encoding="utf-8")
     assert "**Provider**: hermes (skill mode)" in saved_text

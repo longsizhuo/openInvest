@@ -285,12 +285,17 @@ record_execution / ingest_event / buy / record_existing_position / sell / deposi
 record_dividend / record_fee / record_split / record_return_of_capital /
 place_fund_order / confirm_fund_order / cancel_fund_order /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
-run_committee / prepare_committee / submit_committee / pending_news / pending_committees / daily_report — schemas auto-discovered; call them directly, no table lookup needed.
+run_committee / prepare_committee / submit_committee / pending_news / pending_committees / daily_report / quality_status — schemas auto-discovered; call them directly, no table lookup needed.
 **Agent-run committee over MCP (no backend LLM key):** `prepare_committee` returns the data blocks, the 6 role
 prompts and `instructions`; play Macro / Quant / Risk (cheap subagents are fine), write the CIO memo yourself,
-then `submit_committee(symbol, transcript, provider, model)` within 6 hours (`provider` = your brand, `model` = the model that
+Pass your actual `provider` and `model` to `prepare_committee`, then call
+`submit_committee(symbol, transcript, provider, model, context_id)` with its exact returned `context_id` within 6 hours (`provider` = your brand, `model` = the model that
 plays the roles, e.g. `claude-haiku-5-5`; omitted is recorded as `unknown` and the scorecard buckets by `provider:model`). The backend applies its own saved facts for the
 defense / regime rules and rejects a CIO section with no parseable verdict (fix it and resubmit).
+All six role sections are required. A changed portfolio, configuration, or evidence registry invalidates the prepared context; prepare again.
+An identical retry returns the original decision without consuming another recommendation quota.
+`DATA_UNTRUSTED` is an input failure, not a market HOLD. Never silence `QUALITY_ALERT`, missing inputs,
+or an expired/triggered review plan merely because every allocation is HOLD. `quality_status` checks these independently.
 **Keyless backend (agent mode):** the backend queues work it would otherwise send to a model. `pending_news` lists
 fetched news — `ingest_event` the relevant items with `one_line_claim` / `stance` / `severity` / `affected_symbols`,
 pass the rest as `dismiss_urls`. `pending_committees` lists triggered re-runs — prepare, run, submit each.

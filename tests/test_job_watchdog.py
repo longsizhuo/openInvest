@@ -480,5 +480,5 @@ def test_run_failure_alert_send_failure_unclaims_so_next_run_retries(wired_flagg
 def test_shipped_ymls_flag_exactly_the_jobs_that_should_alert_on_failure():
     cfgs = {c["name"]: c for c in runner._load_job_configs()}
     flagged = {n for n, c in cfgs.items() if c.get("alert_on_failure", False) is True}
-    assert flagged == {"fund_confirm", "backup", "verdict_review", "price_sentinel"}
+    assert flagged == {"fund_confirm", "backup", "verdict_review", "price_sentinel", "learning_review"}
     assert all(isinstance(c.get("alert_on_failure", False), bool) for c in cfgs.values())

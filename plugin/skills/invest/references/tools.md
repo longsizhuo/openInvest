@@ -12,6 +12,7 @@
 
 | Command | Path | Use for | Returns |
 |------|------|------|------|
+| `quality_status` | Read only | Inspect evidence eligibility, prolonged HOLD, failed inputs and review-plan alerts | JSON health and alerts |
 | `doctor` (MCP: `doctor` tool) | Universal | Mandatory first step | JSON, `status: "ready"` or `"needs_setup"`. `needs_setup` only when memory isn't initialized (or `portfolio.md` is still v1). A missing LLM key / mail credentials / `.env` never changes it: those `checks` carry `optional_for_coordinator` / `optional_for_email` (Coordinator needs no key; `direct_ready` says whether Direct does). A `warning` check (`gold_booking`: legacy GC=F row not in CNY per gram, which also makes the daily DCA fail) is a data fix, not an onboarding gap — it never changes `status` |
 | `init [--from-stdin] [--force]` | Universal | **Not used in this skill** — first-time installation goes through the `invest-setup` skill | — |
 | `status` | Universal | View portfolio | cash + holdings + live prices + P&L + `performance` (same block as below); each `all_holdings[]` row carries `alerts` (the user's per-asset alert lines with `distance_pct` / `breached` / a ready-made `text` such as "距 price_below 还有 3.2%"; empty list = none set; a tracked asset with lines but no holding row shows as an `is_tracking_only` row) |

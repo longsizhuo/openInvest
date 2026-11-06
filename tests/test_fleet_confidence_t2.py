@@ -3,10 +3,20 @@
 钉 core.committee.debate._create_agent 抓 CIO 实际收到的 system prompt（同
 test_cio_json_fallback_e2e 的做法），不真调 LLM。"""
 import hashlib
+import pytest
 
 import openinvest.core.committee.debate as debate
 from openinvest.capabilities.committee.cio import build_cio_prompt
 from scripts import backtest_committee as bc
+from tests.prompt_anchor_fixture import anchored_control
+
+REAL_CIO_PROMPT = build_cio_prompt
+
+@pytest.fixture(autouse=True)
+def _synthetic_registered_control(monkeypatch):
+    monkeypatch.setattr("openinvest.capabilities.committee.cio.build_cio_prompt", anchored_control)
+    monkeypatch.setattr(debate, "build_cio_prompt", anchored_control)
+    monkeypatch.setitem(globals(), "build_cio_prompt", anchored_control)
 
 ASSET = {"symbol": "QQQ", "display_name": "QQQ"}
 
@@ -85,3 +95,9 @@ def test_t2_arm_flag_requires_prospective(monkeypatch):
     monkeypatch.setattr("sys.argv", ["backtest_committee", "--t2-confidence-arm", "--days", "1"])
     with pytest.raises(SystemExit, match="--prospective"):
         bc.main()
+
+
+def test_old_research_variant_rejects_the_new_live_prompt(monkeypatch):
+    monkeypatch.setattr("openinvest.capabilities.committee.cio.build_cio_prompt", REAL_CIO_PROMPT)
+    with pytest.raises(RuntimeError):
+        bc.build_cio_prompt_t2(ASSET)

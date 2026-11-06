@@ -35,6 +35,12 @@ def store(tmp_path, monkeypatch):
 
 
 def _write_reviews(store: MemoryStore, rows):
+    from tests.integrity_helpers import approve
+    from openinvest.core.evidence_eligibility import digest
+    rows = [{**r, "date": (datetime.fromisoformat(r["date"])-timedelta(days=i)).date().isoformat(),
+             "regime_at_decision": r.get("regime_at_decision", "range_bound")} for i, r in enumerate(rows)]
+    for r in rows:
+        approve(store.root.parent, f"review:{digest(r)}", r)
     path = store.root / ".dreams" / "verdict_review.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8")
@@ -109,10 +115,10 @@ def test_caution_no_downside_is_rejected_by_lift(store):
     _write_reviews(store, rows)
     candidates = dreaming.rem_sleep(store, dreaming.light_sleep(store))
     hold7 = next(c for c in candidates if c["verdict"] == "HOLD" and c["window_days"] == 7)
-    assert hold7["kind"] == "caution"          # 标签仍是 caution
+    assert hold7["kind"] == "directional_review_required"
     assert hold7["missed_up_rate"] == 1.0
     assert hold7.get("base_down", 0) == 0.0    # 该 regime 无真实下行
-    assert dreaming._score(hold7) == 0.0       # lift-based 拒绝：踏空=单向基率假象
+    assert hold7["hold_economic_interpretation"] == "unknown_without_exposure_and_feasible_counterfactual"
 
 
 def test_caution_lift_based_scoring_unit():
@@ -137,7 +143,7 @@ def test_hold_avoided_down_not_punished(store):
     hold7 = next(c for c in candidates if c["verdict"] == "HOLD" and c["window_days"] == 7)
     assert hold7["missed_up_rate"] == 0.0       # 跌的不算踏空
     assert hold7["avoided_down_rate"] == 1.0
-    assert hold7["kind"] == "reliable"          # 没踏空 → 不告诫
+    assert hold7["kind"] == "descriptive"
 
 
 # ---------- crash 样本免责（B 组）----------
@@ -149,7 +155,7 @@ def _crash_review(asset, verdict, hit7, ret7, date=_RECENT):
     return row
 
 
-def test_crash_sample_kept_in_jsonl_but_exempt_from_rem(store):
+def test_crash_negative_samples_are_retained_in_rem(store):
     """B5：decision_date regime=crash 的样本进了 verdict_review.jsonl + light_sleep 信号流
     （留痕），但不出现在 rem_sleep 候选桶里（免责，不进模式学习）。"""
     # 3 条 crash HOLD（应被剔除）+ 3 条正常 HOLD（应进桶）
@@ -167,9 +173,9 @@ def test_crash_sample_kept_in_jsonl_but_exempt_from_rem(store):
     # 免责：rem_sleep 候选只来自 3 条非 crash 样本
     candidates = dreaming.rem_sleep(store, signals)
     hold7 = [c for c in candidates if c["verdict"] == "HOLD" and c["window_days"] == 7]
-    assert hold7 and hold7[0]["count"] == 3, "crash 样本不应进 rem 桶"
+    assert hold7 and sum(c["count"] for c in hold7) == 6
     # 不存在以 crash 为 regime 的候选桶
-    assert not any("crash" in (c.get("regime") or "") for c in candidates)
+    assert any("crash" in (c.get("regime") or "") for c in candidates)
 
 
 def test_verdict_review_serializes_regime_marker():
@@ -191,7 +197,7 @@ def test_llm_verify_payload_uses_verdict_key(monkeypatch):
     这条路径默认关闭（INVEST_DREAMING_LLM_VERIFY=0），上线以来从没被跑过，
     2026-05-27 首次开启即崩 KeyError('action')。锁住别再回归。
     """
-    # 无 key → 走 fallback 全 KEEP，不发真请求；只验 payload 构造不炸
+    # 无 key → PENDING，不发真请求；仍需兼容 verdict 格式的候选。
     monkeypatch.setattr(
         "openinvest.utils.llm.get_llm_config_safe", lambda: (None, None, None, None)
     )
@@ -201,7 +207,8 @@ def test_llm_verify_payload_uses_verdict_key(monkeypatch):
         "avg_return_pct": 7.69, "score": 0.89,
     }]
     mask, verdicts = dreaming._llm_verify_candidates(cand)  # 不应抛 KeyError
-    assert mask == [True]  # 无 key fallback 全 KEEP
+    assert mask == [False]
+    assert verdicts[0]["decision"] == "PENDING"
 
 
 # ---------- config override 实时生效 ----------
@@ -244,7 +251,7 @@ def test_config_override_changes_min_recall(store):
     set_config_override({"dreaming": {"min_recall": 5}})
     candidates2 = dreaming.rem_sleep(store, signals)
     hold7_2 = [c for c in candidates2 if c["verdict"] == "HOLD" and c["window_days"] == 7]
-    assert not hold7_2, "min_recall=5 时 3 条不应产生候选"
+    assert hold7_2, "旧阈值不能再遮蔽候选；发布仍须独立资格和评估"
 
 
 def test_config_override_changes_windows(store):

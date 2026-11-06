@@ -463,8 +463,9 @@ def build_reentry_reference(
         f"- 现价: {cur}{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
         + ccy_note
-        + "\n（若要 TRIM，REENTRY_PRICE 必须低于现价；以上概率均为 D+window **期末**口径（非途中最低点）——期末仍低于现价的概率低 = 卖出后大概率买不回更低 = 别 TRIM。"
-        "先跌后涨占比高 = 回踩是该 regime 的常态路径，浅回踩别恐慌性止损）"
+        + "\n（以上概率均为 D+window **期末**口径，不是窗口内触及买回价的概率，不能据此推断买不回更低价。"
+        "择时买回需另行评估首次触价、成交条件和成本；止损及集中度退出不要求更低价买回。"
+        "历史路径形状仅作参考，不能单独否决风险退出。）"
     )
     return text, (profile if source == "ohlc" else None)
 

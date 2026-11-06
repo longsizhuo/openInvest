@@ -87,7 +87,7 @@ def test_busy_checkpoint_ships_wal(tmp_path, monkeypatch):
 
     assert res["checkpoint"]["db/trades.db"]["busy"] == 1
     with zipfile.ZipFile(res["path"]) as zf:
-        assert "db/trades.db-wal" in zf.namelist()
+        assert "db/trades.db-wal" not in zf.namelist()  # online snapshot includes the committed WAL
         zf.extractall(tmp_path / "restored")
     # 恢复 = 解压回去后正常打开（SQLite 自动从 -wal 恢复），4 笔都在
     assert _rows(tmp_path / "restored" / "db" / "trades.db") == 4
@@ -128,12 +128,14 @@ def test_excludes_lock_bak_tmp_and_keeps_hidden_dirs(tmp_path):
                 "portfolio.md.lock", "portfolio.md.bak.20260519-050555", "user.md.tmp.4242"):
         (mem / rel).write_text("x")
     (root / "db").mkdir()
-    (root / "db" / "market_data.db").write_bytes(b"cache")  # 可重建，不进自动备份
+    with sqlite3.connect(root / "db/market_data.db") as connection:
+        connection.execute("CREATE TABLE observation(value INTEGER)")
+        connection.execute("INSERT INTO observation VALUES(1)")
     InsightsDB(str(root / "db" / "insights.db")).close()
 
     res = backup.run(root=root, now=T0)
 
-    assert "error" in res["checkpoint"]["db/market_data.db"]  # 缓存库（此处是坏文件）checkpoint 报错：只记日志、不拖垮 job
+    assert "error" not in res["checkpoint"]["db/market_data.db"]
     with zipfile.ZipFile(res["path"]) as zf:
         names = set(zf.namelist())
     assert names == {
@@ -141,8 +143,10 @@ def test_excludes_lock_bak_tmp_and_keeps_hidden_dirs(tmp_path):
         "memory/.committee/2026-10-17/GC=F.md",
         "memory/.state/pnl_history.jsonl",
         "db/insights.db",
+        "db/market_data.db",
+        "backup_integrity.json",
     }
-    assert res["files"] == 4
+    assert res["files"] == 5
 
 
 def _seed_memory_with_backtest(root: Path) -> None:

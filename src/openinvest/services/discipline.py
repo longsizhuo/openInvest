@@ -1,8 +1,7 @@
-"""discipline — 委员会"纪律价值"只读聚合(可证的那部分:默认不作为 + 拦截冲动操作)。
+"""discipline — 决策与规则干预的只读描述统计。
 
-ADR-023 钉死:委员会不是 alpha 机器,方向预测低于随机;它唯一可证的正向价值是
-**纪律**——多数时候 HOLD(低换手)+ 确定性规则拦下冲动操作。这里把这两件事聚合成
-一个 summary,供 daily_report 邮件 / CLI / Web API 共用(单一可信源,防三处漂移)。
+ADR-028：不把 HOLD 多或拦截次数多当成已证明的价值，也不以增加交易频率为目标。
+收益、风险与机会成本须用来源合格、成本一致的独立评估验证。
 
 读两个已有台账,零 LLM:
 - memory/.dreams/verdict_review.jsonl → 只数 source==live 行,按 verdict 计数(HOLD 占比=不作为率)
@@ -84,12 +83,12 @@ def render_discipline_md(s: Optional[Dict[str, Any]] = None) -> str:
     if s is None:
         s = discipline_summary()
     ia, iv = s["inaction"], s["interventions"]
-    lines = ["## 🛡️ 纪律台账(累计 · 委员会的可证价值:不作为 + 拦冲动,**非 alpha**)"]
+    lines = ["## 决策与规则干预记录（描述统计，不代表策略有效）"]
     if ia["total_verdicts"]:
         lines.append(
             f"- **默认不作为**(live 决议):HOLD {ia['hold']}/{ia['total_verdicts']} = "
-            f"**{ia['hold_rate'] * 100:.0f}%** → 低换手、少折腾。"
-            "(方向性 verdict 预测力低于随机,价值不在判方向——见 ADR-023)"
+            f"**{ia['hold_rate'] * 100:.0f}%**。"
+            "HOLD 占比不能证明风险控制或收益优势，需结合持仓、成本和可执行替代方案评估。"
         )
     else:
         lines.append("- 默认不作为:暂无 verdict 记录。")
@@ -102,7 +101,7 @@ def render_discipline_md(s: Optional[Dict[str, Any]] = None) -> str:
                 parts.append(f"{tag} {a['n']} 次(反事实 {ns[0]}d 合计 ¥{ns[1]:+,.0f})")
             else:
                 parts.append(f"{tag} {a['n']} 次(未到结算窗)")
-        lines.append(f"- **拦截冲动操作**:共 {iv['total']} 次——" + ";".join(parts) + "。")
+        lines.append(f"- **规则改写**:共 {iv['total']} 次——" + ";".join(parts) + "。")
         lines.append(f"  _{iv['caveat']}_")
     else:
         lines.append("- 拦截冲动操作:暂无干预记录(新机制,从近期起攒)。")

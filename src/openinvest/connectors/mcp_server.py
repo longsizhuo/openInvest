@@ -1200,14 +1200,28 @@ def untrack_asset(
         return {"status": "error", "error": str(e)}
 
 
+@_tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
+def quality_status() -> Dict[str, Any]:
+    """Read independent decision-quality alerts and evidence/learning eligibility.
+
+    Check this before treating all-HOLD output as quiet success. Alerts are review
+    requests, not permission to trade. Does not modify accounts or send messages.
+    """
+    _check_advisory()
+    from openinvest.services.integrity_status import status as integrity_status
+    return integrity_status()
+
+
 # ---------- 委员会（Direct 路径） ----------
 
 # structured_output=False：只回一份 JSON 文本。默认会再附一份 structuredContent（中文转义后体积翻倍），
 # 宿主 Agent 的上下文里同一份出题内容出现两遍——实测 2.8 万字符的出题变成 5.5 万（2026-10-19）
-@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
        structured_output=False)
 def prepare_committee(
     symbol: Annotated[str, Field(description="A symbol already in strategy target_assets, e.g. 'GC=F', 'NDQ.AX'.")],
+    provider: Annotated[str, Field(description="Actual reasoning host, needed to scope learned evidence.")] = "agent",
+    model: Annotated[str, Field(description="Actual model or fixed role-model composition; unknown disables model-specific prior insights.")] = "",
 ) -> Dict[str, Any]:
     """Step 1 of the agent-run committee (Coordinator path): get everything YOU
     need to play the 4 roles yourself — no backend LLM key involved.
@@ -1226,19 +1240,20 @@ def prepare_committee(
     _check_advisory()
     from mcp.server.fastmcp.exceptions import ToolError
     from openinvest.core.committee_runner import prepare_committee_brief
-    out = prepare_committee_brief(symbol)
+    out = prepare_committee_brief(symbol, provider=provider, model=model) if model else prepare_committee_brief(symbol)
     if out.get("status") == "error":
         raise ToolError(f"{out.get('error')} {out.get('hint', '')}".strip())
     return json.loads(json.dumps(out, ensure_ascii=False, default=str))
 
 
-# 不标幂等：重交会再记一条反事实干预与 dream 事件，客户端不该当成可放心自动重试的调用
-@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False))
+# 同 context_id 和同一正文的重试返回收据，不再重复记干预或消耗建议配额。
+@_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def submit_committee(
     symbol: Annotated[str, Field(description="Same symbol you passed to prepare_committee.")],
     transcript: Annotated[str, Field(description="All sections, each starting with its separator line: === MACRO ===, === QUANT_R1 ===, === RISK_R1 ===, === QUANT_R2 ===, === RISK_R2 ===, === CIO ===.")],
     provider: Annotated[str, Field(description="Which agent played the roles, e.g. 'hermes', 'claude', 'codex'.")] = "agent",
     model: Annotated[str, Field(description="Model that actually played the roles, e.g. 'claude-sonnet-5-5'; omitted -> recorded as 'unknown'. The scorecard buckets verdicts by provider:model.")] = "",
+    context_id: Annotated[str, Field(description="Exact context_id returned by prepare_committee; required to bind inputs and rules to this submission.")] = "",
 ) -> Dict[str, Any]:
     """Step 2 of the agent-run committee: hand in the transcript you produced
     from `prepare_committee`. The backend parses the CIO memo, applies the same
@@ -1262,16 +1277,21 @@ def submit_committee(
     if not transcript.strip():
         raise ToolError("transcript is empty")
     try:
-        res = save_committee_transcript(symbol, transcript, provider=provider, model=model)
+        res = save_committee_transcript(symbol, transcript, provider=provider, model=model, context_id=context_id)
     except ValueError as e:
         raise ToolError(str(e)) from e
     from pathlib import Path
     parsed = parse_committee_file(Path(res["saved"])) or {}
     reason = llm_failure_reason(parsed)
     return {
-        "decision_id": f"{datetime.now().strftime('%Y-%m-%d')}/{symbol}",
+        "decision_id": f"{res.get('decision_date') or datetime.now().strftime('%Y-%m-%d')}/{symbol}",
         "verdict": json.loads(json.dumps(res["verdict"], default=str)),
         "saved": res["saved"],
+        "evidence_id": res.get("decision_id"),
+        "context_id": res.get("context_id"),
+        "replayed": res.get("replayed", False),
+        "response_type": res.get("response_type", "new_decision"),
+        "current_advice_valid": res.get("current_advice_valid", False),
         "facts_source": (parsed.get("input_health") or {}).get("facts_source"),
         **({"degraded": reason} if reason else {}),
     }
@@ -1338,7 +1358,10 @@ async def run_committee(
         parsed = parse_committee_file(cached)
         # CIO 没出裁决（UNCLEAR）的记录不当缓存，直接重跑；部分角色失败的照常命中但带 degraded
         # （单个角色持续失败时不至于每次调用都重跑整轮委员会）
-        if parsed and not is_unclear(parsed):
+        from openinvest.core.decision_evidence import current_decision
+        from openinvest.utils.llm import get_llm_config_safe
+        if parsed and not is_unclear(parsed) and current_decision(MemoryStore().root, parsed.get("input_health", {}), symbol,
+                                                                  verdict=parsed, expected_model=get_llm_config_safe()[2], transcript=cached.read_text(encoding="utf-8")):
             return {"cached": True, "decision_id": f"{today}/{symbol}",
                     **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny", "alloc_currency")},
                     "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),

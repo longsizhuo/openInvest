@@ -26,6 +26,11 @@ def db(tmp_path):
     """临时路径的 InsightsDB，测试完自动关闭"""
     db_path = str(tmp_path / "test_insights.db")
     _db = InsightsDB(db_path=db_path)
+    # Storage round trips explicitly use audit access. Default advice access is
+    # covered separately by test_evidence_eligibility and must fail closed.
+    from functools import partial
+    for name in ("get", "list_all", "list_fresh", "list_by_hit_rate"):
+        setattr(_db, name, partial(getattr(_db, name), purpose="audit"))
     yield _db
     _db.close()
 
@@ -192,7 +197,7 @@ class TestUpsertFromCandidate:
         assert row["hit_rate"] == pytest.approx(0.833)
         assert row["sample_count"] == 6
         assert row["source_score"] == pytest.approx(0.85)
-        assert "命中率" in row["title"]  # title 自动生成的
+        assert row["title"] == "insight body"  # same content-bound heading as the MD representation
 
     def test_candidate_title_auto_generated(self, db):
         """title 为空时自动从 asset/action/regime/hit_rate 生成"""
@@ -209,8 +214,7 @@ class TestUpsertFromCandidate:
         db.upsert_from_candidate("ndq_sold_vix_high_7d", candidate, "body")
         row = db.get("ndq_sold_vix_high_7d")
         # title 应含 NDQ.AX 和命中率字样
-        assert "NDQ.AX" in row["title"]
-        assert "75" in row["title"]  # 75% 命中率
+        assert row["title"] == "body"
 
 
 # ============ 并发安全 ============

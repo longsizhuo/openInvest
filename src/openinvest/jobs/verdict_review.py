@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from dataclasses import dataclass, asdict, field
 from datetime import date, datetime, timedelta
@@ -465,7 +466,17 @@ def review_one(
         )
 
     # 决议日 regime 标记（crash 样本留痕但下游免责）。截断到决议日，无穿越。
-    rv.regime_at_decision = _decision_regime(real_symbol, decision_date) if regime else None
+    rv.regime_at_decision = None
+    context_id = (parsed.get("input_health") or {}).get("context_id", "")
+    if regime and re.fullmatch(r"[a-f0-9]{32}", context_id):
+        from openinvest.core.evidence_eligibility import digest
+        from openinvest.core.committee_runner import regime_label_from_text
+        try:
+            record = json.loads((MemoryStore().root / ".evidence/contexts" / f"{context_id}.json").read_text())
+            if digest(record["payload"]) == record["sha256"] and record["payload"]["symbol"] == real_symbol:
+                rv.regime_at_decision = regime_label_from_text(record["payload"]["inputs"].get("regime_brief", "")) or None
+        except (OSError, ValueError, KeyError):
+            pass  # unavailable historical context stays unknown, never reconstructed as fact
 
     return rv
 
@@ -530,10 +541,10 @@ def write_report(reviews: List[VerdictReview], summary: Dict[str, Any]) -> Path:
         f"\n**总 verdict 数**: {summary['total']}  "
         f"(holdout {holdout['n']} + contaminated {contaminated['n']}"
         f" + 周末重复 {summary['weekend_dup_excluded']} 条不计, cutoff {summary['cutoff']})",
-        "\n> 🔒 机器强制分桶：holdout（cutoff 之后，干净业绩）与 contaminated（决议日落在 LLM "
+        "\n> 🔒 机器强制分桶：holdout（cutoff 之后，仅为旧日期分桶，不代表评估资格）与 contaminated（决议日落在 LLM "
         "训练窗口，记忆穿越非业绩）**分别统计，绝不合并成一个命中率**。",
     ]
-    lines += _bucket_lines("Holdout（干净业绩 · cutoff 之后）", holdout)
+    lines += _bucket_lines("旧日期分桶（cutoff 之后；资格另行核验）", holdout)
     lines += _bucket_lines("Contaminated（记忆穿越 · cutoff 及之前）", contaminated,
                            note=contaminated.get("note"))
     # 换模型后新旧账分开算（model_era）：按模型一节在全局校准 / 中性度之前
@@ -561,22 +572,17 @@ def write_report(reviews: List[VerdictReview], summary: Dict[str, Any]) -> Path:
                 for v in ["BUY", "ACCUMULATE", "SELL", "TRIM"]
             )
             directional_rate = directional_hits_30d / directional_n
-            lines.append(f"### holdout 方向性 verdict 真实命中率：{directional_rate*100:.1f}% "
+            lines.append(f"### holdout 方向性 verdict 描述性方向命中比例：{directional_rate*100:.1f}% "
                          f"(n={directional_n})\n")
-            lines.append("**说明**：剔除 HOLD（命中率被'波动 <flat band 算 hit'灌水）后的真实 alpha 信号。\n")
-            if directional_rate < 0.5:
-                lines.append("🔴 **低于随机**：方向性判断比抛硬币还差。\n")
-            elif directional_rate < 0.6:
-                lines.append("🟡 **接近随机**：微弱信号，样本量不足以确认。\n")
-            else:
-                lines.append("🟢 **高于随机**：方向性判断有真实 alpha，继续积累样本验证。\n")
+            lines.append("**说明**：这只是旧方向标签的描述，不是收益、校准概率或 alpha；必须另用冻结的持仓/成本/基准协议评估。\n")
+            lines.append("市场方向基率未必是 50%；不能把这里的比例与抛硬币比较来认定投资价值。\n")
 
     lines.append("\n## 已知 backtest 局限\n")
     lines.append("- portfolio_summary 在 backtest 模式是 mock 的'中性持仓'，LLM 看不到当时真实持仓状态")
     lines.append("- prior_insights 在 backtest 时为空（防穿越），失去 Dreaming 长期模式增强")
     lines.append("- 新闻/宏观叙事不在 tool 里（防 DDGS 时间泄露），Macro Strategist 仅靠数值指标")
     lines.append("- contaminated 桶决议日落在 LLM 训练窗口内，是记忆回放不是预测，**不可作为业绩证据**")
-    lines.append("- 这些限制让 holdout 结果是 LLM 能力的**下限**估计，实盘可能更好（也可能更差）")
+    lines.append("- 这些限制不能建立能力下限或收益保证；模型截止日期不确定时，只使用模型版本固定后的合格前瞻记录")
 
     out.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     return out
@@ -736,7 +742,7 @@ def write_confidence_lookup(reviews: List[VerdictReview]) -> Path:
     from openinvest.utils.llm import get_llm_config_safe
     # 只用与当前 config 的模型同口径的样本（换模型后旧模型的 30d 命中率不能冒充新模型的）；
     # 不够 30 的 verdict 在 load_confidence_lookup 里退回包内默认表并注明
-    data = {**build_confidence_lookup(reviews, review_fleet(), model=get_llm_config_safe()[2]),
+    data = {**build_confidence_lookup(qualified_reviews(reviews, "publish"), [], model=get_llm_config_safe()[2]),
             "generated_at": datetime.now().isoformat(timespec="seconds")}
     return MemoryStore().write_dream_state(CONFIDENCE_LOOKUP, data)
 
@@ -785,11 +791,15 @@ def _valid_lookup(read) -> Optional[Dict[str, Any]]:
 
 
 def load_confidence_lookup() -> Optional[Dict[str, Any]]:
-    """读展示查表：本机（.dreams）某 verdict n≥30 用本机，否则用包内默认表（merge_confidence_lookup）。
-    两边都没有/坏了 → None（展示按 n=0 显示"样本不足"，不阻断任何发送）。"""
-    local = _valid_lookup(lambda: MemoryStore().read_dream_state(CONFIDENCE_LOOKUP))
-    default = _valid_lookup(lambda: json.loads(DEFAULT_LOOKUP_PATH.read_text(encoding="utf-8")))
-    return merge_confidence_lookup(local, default)
+    """Only a qualified local table may be displayed; absent/invalid evidence stays unknown."""
+    store = MemoryStore()
+    local = _valid_lookup(lambda: store.read_dream_state(CONFIDENCE_LOOKUP))
+    from openinvest.core.evidence_eligibility import Eligibility
+    if local and Eligibility(store.data_root).allows("derived:confidence_lookup", local, "advice"):
+        return merge_confidence_lookup(local, None)
+    # Bundled backtests / another model's fleet are not a fallback for missing
+    # qualified evidence on the user's current model.
+    return None
 
 
 def _run_arm_safely() -> None:
@@ -798,6 +808,12 @@ def _run_arm_safely() -> None:
         run_arms()
     except Exception as e:  # noqa: BLE001
         log.warning("实验臂复盘失败（live 复盘不受影响）: %s: %s", type(e).__name__, e)
+
+
+def qualified_reviews(reviews: List[VerdictReview], use: str = "evaluate") -> List[VerdictReview]:
+    from openinvest.core.evidence_eligibility import Eligibility, digest
+    policy = Eligibility(MemoryStore().data_root)
+    return [r for r in reviews if policy.allows(f"review:{digest(asdict(r))}", asdict(r), use)]
 
 
 def run(*, include_backtest: bool = False) -> Dict[str, Any]:
@@ -809,14 +825,15 @@ def run(*, include_backtest: bool = False) -> Dict[str, Any]:
     """
     reviews = review_all(include_backtest=include_backtest)
     if not reviews:
-        _run_arm_safely()
         return {"status": "skipped", "reason": "no committee verdicts to review"}
-    summary = summarize(reviews)
-    md_path = write_report(reviews, summary)
+    qualified = qualified_reviews(reviews, "publish")
+    summary = summarize(qualified)
+    summary["eligibility"] = {"qualified": len(qualified), "unverified": len(reviews)-len(qualified),
+                              "note": "资格由来源、时点及评估协议决定，不按盈亏筛选"}
+    md_path = write_report(qualified, summary)
     jsonl_path = write_jsonl(reviews)
     write_confidence_lookup(reviews)
-    write_neutrality(summary)
-    _run_arm_safely()
+    write_neutrality(summarize(reviews))  # 描述性输出分布，独立于业绩资格
     return {
         "status": "ok",
         "summary": summary,

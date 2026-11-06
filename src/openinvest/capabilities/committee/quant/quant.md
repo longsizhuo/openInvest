@@ -20,8 +20,8 @@ STRATEGY_HINT: <该 regime 历史 forward return 概率口径（中位 / 跌破�
 该 regime 的历史 30d forward return 分布（中位 / 跌破现价概率 / 样本数）——
 **基于这些概率数据 + 当前指标（RSI / 分位 / MA）自行判断 SIGNAL 方向，不预设方向**——
 让数据 + 指标说话，没有按 regime 标签预设的方向硬锁。
-唯一硬约束（可执行性，非方向预测）:
-  - REGIME=crash → SIGNAL=neutral（崩盘期波动极高，任何方向都无法理性执行）
+执行约束与市场方向必须分开：
+  - REGIME=crash → 说明数据不确定性与流动性风险，不把 crash 标签机械改成 neutral；是否执行由资金和风控层决定
   - REGIME=unknown → 走原判定标准
 
 **你没有工具可调用，也不需要**——多周期对照已经由系统算好，放在 user message 的 `# 市场数据` 块里：
@@ -34,7 +34,7 @@ STRATEGY_HINT: <该 regime 历史 forward return 概率口径（中位 / 跌破�
 
 **你可能在 user message 里收到两段确定性事实（系统算的，不是你的判断，但你必须纳入）**：
 - `# 估值`（VALUATION / PRICE_QUANTILE_2Y）：trailing PE + 价格分位。trailing_PE 偏贵
-  或 PRICE_QUANTILE_2Y ≥ 70% → 在 KEY_DATA 里点出"估值偏高"，bullish 需更谨慎。
+  或 PRICE_QUANTILE_2Y ≥ {{RULE_QUANTILE_HIGH}}% → 在 KEY_DATA 里点出"估值偏高"，bullish 需更谨慎。
 - `# 市场情绪表盘`（FEAR_GREED_GAUGE / INDEP_DEFENSE_FLAG）：VIX 分位 + 恐慌贪婪。
   **INDEP_DEFENSE_FLAG=on**（VIX 处近2年高位）时，即使 REGIME=uptrend 也要在
   KEY_DATA 里报告"市场恐慌升温"——这是独立于 MA regime 的快速崩盘信号，别只看趋势。
@@ -59,17 +59,17 @@ ONE_LINER: <一句话技术结论，含支撑/阻力位，明确说 SIGNAL 与 R
 ```
 
 **判定标准**（在 REGIME 约束之内）：
-- bullish: 价位分位 ≤ 30% OR (上升趋势 MA20>MA120 AND RSI 50-70)
-- bearish: 价位分位 ≥ 70% AND (RSI > 70 OR 跌破 MA250 量增)
+- bullish: 价位分位 ≤ {{RULE_QUANTILE_LOW}}% OR (上升趋势 MA20>MA120 AND RSI {{RULE_RSI_TREND_LOW}}-{{RULE_RSI_HIGH}})
+- bearish: 价位分位 ≥ {{RULE_QUANTILE_HIGH}}% AND (RSI > {{RULE_RSI_HIGH}} OR 跌破 MA250 量增)
 - neutral: 中间状态
 
 **uptrend 衰竭检查（REGIME=uptrend 时强制）**：
 你在 uptrend 中出 bullish SIGNAL 之前，必须在 KEY_DATA 里报告以下指标（数据取自 `# 市场数据` 块与 REGIME INPUTS；只有当前值、判断不了趋势的项如实写「仅有当前值」，不得编造）：
-- 价格离 MA120 的偏离度（>15% = 均值回归风险高）
+- 价格离 MA120 的偏离度（ >{{RULE_MA_DEVIATION_PCT}}% = 均值回归风险高）
 - RSI 是否 > 70（超买区）
 - MA20 和 MA120 的 spread 是否在收窄（趋势减弱信号）
 
-如果上述指标有 2 个以上亮红灯，SIGNAL 应该是 neutral 而非 bullish——
+如果上述指标有 {{RULE_EXHAUSTION_FLAGS}} 个以上亮红灯，SIGNAL 应该是 neutral 而非 bullish——
 即使 REGIME=uptrend 允许 bullish。**趋势末期的 bullish 和趋势初期的 bullish
 不是同一个 bullish，你要区分它们。**
 

@@ -24,6 +24,7 @@ from .tunable import (
     IbkrConfig,
     LanguageConfig,
     MacroBucketConfig,
+    MarketRulesConfig,
     OracleAccuracyConfig,
     RegimeConfig,
     PathConfig,
@@ -85,7 +86,7 @@ def _read_env_overrides() -> dict[str, Any]:
     _KNOWN_SECTIONS = sorted(
         ["oracle_accuracy", "macro_buckets", "staleness", "language", "portfolio",
          "regime", "verdict", "dreaming", "reward", "sentiment", "valuation", "path", "dca", "autopilot", "ibkr", "event",
-         "scheduler", "fund"],
+         "scheduler", "fund", "market_rules"],
         key=len,
         reverse=True,
     )
@@ -172,6 +173,10 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
     portfolio = PortfolioConfig(**{k: v for k, v in data.get("portfolio", {}).items() if k in {f.name for f in fields(PortfolioConfig)}})
     regime = RegimeConfig(**{k: v for k, v in regime_data.items() if k in {f.name for f in fields(RegimeConfig)}})
     verdict = VerdictConfig(**{k: v for k, v in data.get("verdict", {}).items() if k in {f.name for f in fields(VerdictConfig)}})
+    unknown_market_keys = set(data.get("market_rules", {})) - {f.name for f in fields(MarketRulesConfig)}
+    if unknown_market_keys:
+        raise ValueError(f"unknown market rule keys: {sorted(unknown_market_keys)}")
+    market_rules = MarketRulesConfig(**{k: v for k, v in data.get("market_rules", {}).items() if k in {f.name for f in fields(MarketRulesConfig)}})
 
     dreaming_data = data.get("dreaming", {})
     # windows: list → tuple
@@ -227,6 +232,7 @@ def _build_tunable_from_dict(data: dict[str, Any]) -> TunableConfig:
         portfolio=portfolio,
         regime=regime,
         verdict=verdict,
+        market_rules=market_rules,
         dreaming=dreaming,
         macro_buckets=macro,
         sentiment=sentiment,

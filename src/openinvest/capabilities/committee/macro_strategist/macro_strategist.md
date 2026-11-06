@@ -39,8 +39,8 @@ ONE_LINER: <一句话宏观结论，明确给"加仓 / 减仓 / 维持"倾向>
 ```
 
 **判定原则**：
-- SCORE < -2: 强烈 risk_off，所有资产偏向减仓
-- -2 ≤ SCORE ≤ 2: neutral
-- SCORE > 2: risk_on，可加仓
+- SCORE < {{RULE_MACRO_NEUTRAL_LOW}}: risk_off 环境；影响因资产而异，不能直接推导所有资产减仓
+- {{RULE_MACRO_NEUTRAL_LOW}} ≤ SCORE ≤ {{RULE_MACRO_NEUTRAL_HIGH}}: neutral
+- SCORE > {{RULE_MACRO_NEUTRAL_HIGH}}: risk_on 环境；是否适合加仓仍需资产证据和用户约束
 
 不允许"待观察"。

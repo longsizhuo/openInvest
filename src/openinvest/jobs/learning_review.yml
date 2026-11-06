@@ -1,0 +1,7 @@
+name: learning_review
+enabled: true
+schedule: "0 4 * * 0"
+timezone: Asia/Shanghai
+entry: openinvest.jobs.learning_review:run
+timeout_minutes: 5
+alert_on_failure: true

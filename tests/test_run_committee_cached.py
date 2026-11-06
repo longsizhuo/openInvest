@@ -4,6 +4,7 @@ e2e 实测（2026-10-17）：CLI 的 key 闸先于缓存检查——今天已有
 MCP 缓存返回缺 memo / Input Health，agent 得再调一次 explain_decision。
 """
 from __future__ import annotations
+from tests.integrity_helpers import context_id, bind_cached_transcript
 
 import argparse
 import asyncio
@@ -79,7 +80,7 @@ def _seed(tmp_path, monkeypatch, text=PERSIST_MD):
     monkeypatch.setattr(ms, "MEMORY_ROOT", tmp_path / "memory")
     p = tmp_path / "memory" / ".committee" / datetime.now().strftime("%Y-%m-%d") / "AAPL.md"
     p.parent.mkdir(parents=True)
-    p.write_text(text, encoding="utf-8")
+    p.write_text(bind_cached_transcript(tmp_path/"memory", "AAPL", text), encoding="utf-8")
     return p
 
 
@@ -141,7 +142,7 @@ def test_coordinator_roundtrip_cio_memo_verbatim(mem_root):
            "=== RISK_R1 ===\nSIGNAL: concerned\nSTRENGTH: 5\n\n"
            f"=== CIO ===\n{_MEMO}\n\n"
            "=== QUANT ===\nSIGNAL: bullish\n\n=== RISK ===\nSIGNAL: concerned\n")
-    saved = save_committee_transcript("TESTSYM", raw, provider="hermes")["saved"]
+    saved = save_committee_transcript("TESTSYM", raw, provider="hermes", context_id=context_id("TESTSYM"))["saved"]
     text = Path(saved).read_text(encoding="utf-8")
     assert "### QUANT\n" in text and "### RISK\n" in text      # CIO 后面确有别的小节
     got = parse_committee_text(text)
@@ -163,11 +164,20 @@ def test_cli_cached_run_committee_works_without_llm_key(monkeypatch, capfd, tmp_
     monkeypatch.setattr("openinvest.jobs.verdict_review.load_confidence_lookup", lambda: {})
     md = tmp_path / "memory" / ".committee" / datetime.now().strftime("%Y-%m-%d") / "AAPL.md"
     md.parent.mkdir(parents=True)
-    md.write_text(PERSIST_MD, encoding="utf-8")
+    md.write_text(bind_cached_transcript(tmp_path/"memory", "AAPL", PERSIST_MD), encoding="utf-8")
 
+    from pathlib import Path
+    original_read=Path.read_text
+    reads=[]
+    def tracked_read(path,*a,**kw):
+        if path == md: reads.append(path)
+        return original_read(path,*a,**kw)
+    monkeypatch.setattr(Path,"read_text",tracked_read)
     cc.cmd_run_committee(argparse.Namespace(symbol="AAPL", force=False, max_rounds=1))
     out = json.loads(capfd.readouterr().out)
     assert out["status"] == "cached" and "Input Health" in out["transcript_md"]
+    assert len(reads)==1, "Return the same validated text snapshot; do not reread mutable latest"
+
 
     # 反向：没缓存（或 --force）+ 无 key → 仍然报 key 错并退出 1
     for force in (True, False):
@@ -252,17 +262,16 @@ DEGRADED_MD = PERSIST_MD.replace(
     '{"worker_unavailable": ["risk"], "forced_hold": false}')
 
 
-def test_mcp_degraded_transcript_still_served_from_cache_with_flag(monkeypatch, tmp_path):
-    """部分角色失败的记录照常命中缓存（不每次重跑整轮），但带 degraded 让 agent 转告用户。"""
-    _seed(tmp_path, monkeypatch, text=DEGRADED_MD)
-    monkeypatch.setattr("openinvest.jobs.verdict_review.load_confidence_lookup", lambda: {})
-    monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session",
-                        lambda **kw: pytest.fail("degraded 记录不该触发重跑"))
-    res = _call_mcp({"symbol": "AAPL"})
-    out = res.structuredContent
-    out = out.get("result", out)
-    assert not res.isError and out["cached"] is True
-    assert "risk" in out["degraded"] and "存疑" in out["degraded"]
+def test_mcp_degraded_transcript_is_retried_after_source_recovery(monkeypatch, tmp_path):
+    path=_seed(tmp_path,monkeypatch,text=DEGRADED_MD)
+    calls=[]
+    def recovered(**kw):
+        calls.append(kw);path.write_text(PERSIST_MD)
+        return {"asset_committees":{"AAPL":{"verdict":{"verdict":"ACCUMULATE","confidence":.7}}}}
+    monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session",recovered)
+    res=_call_mcp({"symbol":"AAPL"})
+    out=res.structuredContent;out=out.get("result",out)
+    assert not res.isError and not out["cached"] and len(calls)==1
 
 
 def test_mcp_fresh_degraded_returns_verdict_with_flag(monkeypatch, tmp_path):
@@ -292,7 +301,7 @@ def _cli_env(monkeypatch, tmp_path, text):
     monkeypatch.setattr("openinvest.jobs.verdict_review.load_confidence_lookup", lambda: {})
     md = tmp_path / "memory" / ".committee" / datetime.now().strftime("%Y-%m-%d") / "AAPL.md"
     md.parent.mkdir(parents=True)
-    md.write_text(text, encoding="utf-8")
+    md.write_text(bind_cached_transcript(tmp_path/"memory", "AAPL", text), encoding="utf-8")
     return cc, md
 
 
@@ -312,10 +321,13 @@ def test_cli_unclear_cache_reruns_and_fresh_unclear_exits_1(monkeypatch, capfd, 
     assert out["status"] == "error" and "没跑成" in out["error"]
 
 
-def test_cli_degraded_cache_hit_carries_flag(monkeypatch, capfd, tmp_path):
-    cc, md = _cli_env(monkeypatch, tmp_path, DEGRADED_MD)
-    monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session",
-                        lambda **kw: pytest.fail("degraded 记录不该触发重跑"))
-    cc.cmd_run_committee(argparse.Namespace(symbol="AAPL", force=False, max_rounds=1))
-    out = json.loads(capfd.readouterr().out)
-    assert out["status"] == "cached" and "risk" in out["degraded"]
+def test_cli_degraded_cache_is_retried_after_source_recovery(monkeypatch, capfd, tmp_path):
+    cc,md=_cli_env(monkeypatch,tmp_path,DEGRADED_MD)
+    calls=[]
+    def recovered(**kw):
+        calls.append(kw);md.write_text(PERSIST_MD)
+        return {"asset_committees":{"AAPL":{"verdict":{"verdict":"ACCUMULATE","confidence":.7}}}}
+    monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session",recovered)
+    cc.cmd_run_committee(argparse.Namespace(symbol="AAPL",force=False,max_rounds=1))
+    out=json.loads(capfd.readouterr().out)
+    assert out["status"] == "ok" and len(calls)==1

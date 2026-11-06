@@ -421,7 +421,14 @@ def _filter_by_window(
 
 def _with_by_model(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
     public = _suppress_small_samples(_aggregate(subset))
-    return {**public, "by_model": _by_model(subset, public)}
+    result = {**public, "by_model": _by_model(subset, public)}
+    # Never publish legacy self-confidence assumptions as calibrated event probabilities.
+    for cell in [result, *result["by_model"].values()]:
+        cal = cell.get("calibration", {})
+        for key in ("ece", "brier", "base_rate_brier"):
+            cal[key] = None
+        cal["status"] = "event_probability_not_declared"
+    return result
 
 
 def build_summary(jsonl_path: Path) -> Dict[str, Any]:
@@ -430,7 +437,12 @@ def build_summary(jsonl_path: Path) -> Dict[str, Any]:
     # ADR-022 红线：公开命中率只反映【live 实时决策】的真实战绩。backtest 条目一律剔除——
     # 污染段(决议日 ≤ 训练 cutoff)记忆穿越会虚高命中率，干净 holdout 也是回测而非实盘战绩；
     # 两者都不属于"live committee 准确率"。缺 source 的老条目按 live（jsonl 早于 backtest 集成时全是 live）。
-    rows = [r for r in rows if str(r.get("source", "live")) == "live"]
+    from openinvest.core.evidence_eligibility import Eligibility, digest
+    root = (jsonl_path.parent.parent.parent if jsonl_path.parent.name == ".dreams"
+            and jsonl_path.parent.parent.name == "memory" else jsonl_path.parent)
+    policy = Eligibility(root)
+    rows = [r for r in rows if r.get("source") == "live"
+            and policy.allows(f"review:{digest(r)}", r, "publish")]
     # 周末休市资产（FX/加密除外）的周末决议基准=周五收盘，是周五样本的重复（D8 统一周末口径）——不计入任何窗口
     n_live = len(rows)
     rows = [r for r in rows

@@ -107,6 +107,42 @@ class MarketStore:
         self.conn.commit()
         # 兼容迁移：给老库的 daily_prices 补 high/low/volume/close_raw 列
         self._migrate_ohlcv_columns()
+        # Actual observation vintages: an old bar downloaded today is not proof
+        # that the same adjusted value was available at its historical date.
+        cursor.executescript("""
+            CREATE TABLE IF NOT EXISTS daily_price_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, date TEXT,
+                observed_at TEXT NOT NULL, close REAL, source TEXT,
+                high REAL, low REAL, volume REAL, close_raw REAL);
+            CREATE INDEX IF NOT EXISTS idx_price_versions ON daily_price_versions(symbol,date,id);
+            CREATE TRIGGER IF NOT EXISTS price_vintage_insert AFTER INSERT ON daily_prices BEGIN
+                INSERT INTO daily_price_versions(symbol,date,observed_at,close,source,high,low,volume,close_raw)
+                VALUES(NEW.symbol,NEW.date,strftime('%Y-%m-%dT%H:%M:%fZ','now'),NEW.close,NEW.source,NEW.high,NEW.low,NEW.volume,NEW.close_raw);
+            END;
+            CREATE TRIGGER IF NOT EXISTS price_vintage_update AFTER UPDATE ON daily_prices
+            WHEN NEW.close IS NOT OLD.close OR NEW.source IS NOT OLD.source
+              OR NEW.high IS NOT OLD.high OR NEW.low IS NOT OLD.low OR NEW.volume IS NOT OLD.volume
+              OR NEW.close_raw IS NOT OLD.close_raw
+              OR NOT EXISTS(SELECT 1 FROM daily_price_versions WHERE symbol=NEW.symbol AND date=NEW.date)
+            BEGIN
+                INSERT INTO daily_price_versions(symbol,date,observed_at,close,source,high,low,volume,close_raw)
+                VALUES(NEW.symbol,NEW.date,strftime('%Y-%m-%dT%H:%M:%fZ','now'),NEW.close,NEW.source,NEW.high,NEW.low,NEW.volume,NEW.close_raw);
+            END;
+        """)
+        self.conn.commit()
+
+    def get_history_as_available(self, symbol, available_at):
+        """Only observed vintages; no fallback to today's historical download."""
+        from datetime import datetime
+        when = datetime.fromisoformat(str(available_at).replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            raise ValueError("available_at requires a timezone")
+        with self._lock:
+            rows = self.conn.execute("""SELECT date,close,high,low,volume,close_raw,observed_at
+                FROM (SELECT *, ROW_NUMBER() OVER(PARTITION BY date ORDER BY id DESC) AS rn
+                      FROM daily_price_versions WHERE symbol=? AND julianday(observed_at)<=julianday(?))
+                WHERE rn=1 AND date<=? ORDER BY date""", (symbol, when.isoformat(), when.date().isoformat())).fetchall()
+        return [dict(zip(("date","close","high","low","volume","close_raw","observed_at"), r)) for r in rows]
 
     def _migrate_ohlcv_columns(self):
         """向后兼容迁移：旧 daily_prices 只有 close，给它补 high/low/volume 列。

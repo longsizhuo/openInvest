@@ -209,10 +209,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("prepare_committee")
     p.add_argument("symbol")
+    p.add_argument("--provider", default="agent")
+    p.add_argument("--model", default="")
     p.set_defaults(func=cmd_prepare_committee)
 
     p = sub.add_parser("save_committee")
     p.add_argument("symbol")
+    p.add_argument("--context-id", default="", help="本次 prepare 返回的 context_id；禁止按标的猜最近一次输入")
     p.add_argument(
         "--provider", default=None,
         help="实际扮演 4 角色的 agent 品牌（claude/hermes/...），写进 transcript "
@@ -241,12 +244,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_run_committee)
 
-    sub.add_parser(
+    p = sub.add_parser(
         "daily_report",
         help="完整日报管道（多资产委员会+Gemini 第二意见+翻译官+纪律台账），stdout "
              "输出邮件同款 markdown，不发邮件——宿主 agent 侧 cron 原样投递用。"
              "需要 DEEPSEEK_API_KEY。",
-    ).set_defaults(func=cmd_daily_report)
+    )
+    p.add_argument("--only-actionable", action="store_true", help="普通全 HOLD 日报静默；质量告警和失败仍输出")
+    p.set_defaults(func=cmd_daily_report)
+    from openinvest.skill_cmds.committee_cmds import cmd_quality_status
+    sub.add_parser("quality_status", help="查看独立质量告警、洞察资格和学习发布门禁").set_defaults(func=cmd_quality_status)
 
     sub.add_parser(
         "autopilot_daily",

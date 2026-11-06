@@ -111,7 +111,7 @@ def test_calibration_excludes_zero_confidence_rows_and_counts_them():
         assert cal[k] == ref[k]
     assert cal["bins"][0]["n"] == 2                                   # ≤0.4 档没被 0.0 行撑大
     md = "\n".join(rc._calibration_lines(cal))
-    assert "另有 2 条自报恰为 0.0" in md and "另有" not in "\n".join(rc._calibration_lines(ref))
+    assert "不作为概率或策略收益证据" in md
     only_zero = rc.calibration_summary([_rv(conf=0.0)] * 3, min_n=1)  # 全是 0.0：n=0，只剩计数
     assert (only_zero["n"], only_zero["n_zero_conf"], only_zero["ece"]) == (0, 3, None)
 
@@ -167,8 +167,8 @@ def test_write_report_renders_both_tables(tmp_path, monkeypatch):
     rows = _hand_example() * 3 + _neutrality_rows() * 3          # 30 + 36 条
     summary = vr.summarize(rows)
     md = vr.write_report(rows, summary).read_text(encoding="utf-8")
-    assert "## 置信度校准" in md and "| 自报档 | N |" in md and "| 0.6–0.7 | 42 |" in md
-    assert "ECE" in md and "基率 Brier" in md
+    assert "## 概率校准" in md and "旧自报分诊断仅供内部审计" in md
+    assert "基率 Brier" not in md
     assert "## 裁决中性度" in md and "| HOLD |" in md and "同期市场" in md
 
 
@@ -176,7 +176,7 @@ def test_report_tables_degrade_when_small(tmp_path, monkeypatch):
     monkeypatch.setattr(vr, "ROOT", tmp_path)
     rows = [_rv(conf=0.62)] * 5
     md = vr.write_report(rows, vr.summarize(rows)).read_text(encoding="utf-8")
-    assert "按红线 #2 不展示具体数字" in md and "不出结论" in md
+    assert "不作为概率或策略收益证据" in md
 
 
 def test_neutrality_persisted_and_loaded_for_daily_report(tmp_path, monkeypatch):

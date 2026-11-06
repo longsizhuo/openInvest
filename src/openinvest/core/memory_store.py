@@ -181,6 +181,11 @@ class MemoryStore:
         self.root = Path(root) if root else MEMORY_ROOT
         self.root.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def data_root(self) -> Path:
+        """A custom memory directory owns its policy; never borrow a parent instance."""
+        return self.root.parent if self.root.name == "memory" else self.root
+
     # ---------- 普通 markdown 文档（user / strategy / portfolio / insights/*） ----------
 
     def path_of(self, name: str) -> Path:
@@ -207,11 +212,18 @@ class MemoryStore:
         post = frontmatter.Post(body, **meta)
         _atomic_write_text(path, frontmatter.dumps(post))
 
-    def read(self, name: str) -> Optional[MemoryDoc]:
+    def read(self, name: str, *, purpose: str = "advice") -> Optional[MemoryDoc]:
         """读取 memory 文档；不存在返回 None"""
         path = self.path_of(name)
+        relative = path.resolve().relative_to(self.root.resolve())
         with _file_lock(path):
-            return self._read_unlocked(path, name)
+            doc = self._read_unlocked(path, name)
+        if doc is not None and (relative.parts[0] == "insights" or doc.type == "insight"):
+            from openinvest.core.evidence_eligibility import Eligibility
+            if not Eligibility(self.data_root).allows_insight(
+                    relative.stem, doc.metadata, doc.body, purpose):
+                return None
+        return doc
 
     def write(self, name: str, type_: str, data: Dict[str, Any], body: str) -> Path:
         """写入 memory 文档（覆盖式）

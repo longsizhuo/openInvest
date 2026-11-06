@@ -19,8 +19,7 @@ role: quant
   根因是越界替 Risk 做仓位判断。）
 
 **改判 SIGNAL 的合法触发条件**：
-- Risk 揭示子弹（dry_powder）≤ 单笔最小 cap 且 Round 1 是 bullish → 可改 neutral
-  （加仓 actionability=0，纯可执行性约束，与 regime 方向无关）
+- 现金不足只影响能否执行，不改变市场 SIGNAL；在 REASONING 单独注明资金约束，交给 CIO 和执行层处理
 - 你 STRENGTH 想调整 ≥ 3 档 → 必须重新评估 SIGNAL 方向是否仍然成立
 - 辩论揭示的技术面新证据让你对方向改观 → 直接改（不需要 regime 许可）
 

@@ -12,10 +12,14 @@ from pathlib import Path
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _qualified_synthetic_math_inputs(monkeypatch):
+    monkeypatch.setattr("openinvest.core.evidence_eligibility.Eligibility.allows", lambda *a, **k: True)
+
 from openinvest.jobs import review_calc as rc
 from scripts.export_accuracy import MIN_SAMPLE_FOR_PUBLIC, build_summary
 
-PRE = rc.PRE_HEALTH_ERA                      # direct:deepseek-v4-flash(pre-health)
+PRE = "direct:deepseek-v4-flash"  # synthetic fixtures explicitly record their model
 SONNET_H = {"schema": 1, "model": "claude-sonnet-5-5"}
 SONNET = "direct:claude-sonnet-5-5"
 
@@ -30,8 +34,8 @@ SONNET = "direct:claude-sonnet-5-5"
      "hermes:claude-haiku-5-5"),
     ({"entry": "coordinator", "provider": "claude", "model": "unknown"}, "2026-10-20", "claude:unknown"),
     ({"entry": "coordinator", "provider": "Hermes"}, "2026-10-20", "hermes:unknown"),   # 老 Coordinator 行没 model
-    ({}, "2026-07-01", PRE),                                               # 老存档按日期归
-    ({}, "2026-10-18", PRE),                                               # 边界：≤ cutoff
+    ({}, "2026-07-01", "unknown"),
+    ({}, "2026-10-18", "unknown"),
     ({}, "2026-10-19", "unknown"),                                         # cutoff 之后没块 → 不猜
     (None, "2026-10-19", "unknown"),
 ])
@@ -44,7 +48,7 @@ def test_review_derives_model_era_and_keeps_explicit_one():
                          expected_direction="flat", macro_at_decision={}, input_health=dict(SONNET_H))
     assert r.model_era == SONNET
     assert rc.VerdictReview(date="2026-07-01", asset="X", verdict="HOLD", confidence=0.6,
-                            expected_direction="flat", macro_at_decision={}).model_era == PRE
+                            expected_direction="flat", macro_at_decision={}).model_era == "unknown"
     e = rc.VerdictReview(date="2026-07-01", asset="X", verdict="HOLD", confidence=0.6,
                          expected_direction="flat", macro_at_decision={}, model_era="custom:m")
     assert e.model_era == "custom:m"
@@ -65,7 +69,7 @@ def _rv(*, health=None, day="2026-09-01", verdict="HOLD", hit=True, mkt="flat", 
         matured=True, source="live"):
     r = rc.VerdictReview(date=day, asset="X", verdict=verdict, confidence=conf,
                          expected_direction=rc.EXPECTED_DIRECTION.get(verdict, rc.UNCLEAR_DIRECTION),
-                         macro_at_decision={}, input_health=health or {}, source=source)
+                         macro_at_decision={}, input_health=({"schema":1,"model":"deepseek-v4-flash"} if health is None else health), source=source)
     if matured:
         r.hits["30d"], r.directions["30d"] = hit, mkt
         r.actual_returns["30d"] = 0.0
@@ -78,7 +82,7 @@ def test_summarize_splits_holdout_by_model_and_suppresses_small_subbucket():
         + [_rv(health=SONNET_H, day="2026-10-20", hit=False) for _ in range(2)]   # Sonnet：总行 37、成熟 2
     s = rc.summarize_verdict_reviews(old + new)
     bm = s["holdout"]["by_model"]
-    assert list(bm) == [PRE, SONNET]                                    # 旧模型在前
+    assert set(bm) == {PRE, SONNET}
     d, n = bm[PRE], bm[SONNET]
     assert d["n"] == 40 and d["by_window"]["30d"]["hit_rate"] == 0.75   # 30/40
     assert d["calibration"]["n"] == 40 and d["neutrality"]["n"] == 40
@@ -164,7 +168,8 @@ def test_daily_run_writes_lookup_for_the_configured_model(tmp_path, monkeypatch)
     vr.run()
     saved = json.loads((tmp_path / ".dreams" / "confidence_lookup.json").read_text(encoding="utf-8"))
     assert saved["model"] == "claude-sonnet-5-5" and saved["by_verdict"] == {}   # 一条同模型样本都没有
-    assert vr.load_confidence_lookup()["by_verdict"]["HOLD"]["from"] == "default"
+    absent = vr.load_confidence_lookup()
+    assert absent is None or absent["by_verdict"].get("HOLD", {}).get("n", 0) == 0
     monkeypatch.setenv("LLM_MODEL", "deepseek-v4-flash")                    # 换回 DeepSeek → 40 条够 30
     vr.run()
     assert vr.load_confidence_lookup()["by_verdict"]["HOLD"]["from"] == "local"
@@ -175,7 +180,8 @@ def test_daily_run_writes_lookup_for_the_configured_model(tmp_path, monkeypatch)
 def _row(*, era=None, health=None, day="2026-08-03", hit=True, matured=True, conf=0.6):
     r = {"date": day, "asset": "X", "source": "live", "expected_direction": "flat", "confidence": conf,
          "hits": {"30d": hit} if matured else {}, "directions": {"30d": "flat"} if matured else {},
-         "actual_returns": {"30d": 0.0} if matured else {}, "input_health": health or {}}
+         "actual_returns": {"30d": 0.0} if matured else {},
+         "input_health": ({"schema":1,"model":"deepseek-v4-flash"} if health is None else health)}
     if era:
         r["model_era"] = era
     return r
@@ -300,7 +306,7 @@ def test_public_by_model_closes_direction_bucket_subtraction(tmp_path):
     assert w["direction_hit_rate"] is not None
     assert a["direction_hit_rate"] is None and b["direction_hit_rate"] is None
     # 校准同理（Brier×n 跨模型可加）
-    assert w["calibration"]["brier"] is not None
+    assert w["calibration"]["brier"] is None  # raw confidence is not a declared probability
     assert a["calibration"]["brier"] is None and b["calibration"]["brier"] is None
     # 两边都 ≥30 的 HOLD 桶不受牵连，照出
     assert a["by_direction"]["hold"]["hit"] == 20 and b["by_direction"]["hold"]["hit"] == 20
@@ -350,7 +356,7 @@ def test_old_coordinator_archive_without_health_is_not_deepseek(tmp_path, monkey
     assert parse_committee_text(skill)["provider"] == "claude"
     assert parse_committee_text(direct)["provider"] is None
     assert rc.model_era_of({}, "2026-09-01", "claude") == "claude:unknown"
-    assert rc.model_era_of({}, "2026-09-01", None) == PRE            # Direct 老存档：仍按日期归 DeepSeek
+    assert rc.model_era_of({}, "2026-09-01", None) == "unknown"
     # 端到端：review_one 把 Provider 行带进 model_era
     from openinvest.jobs import verdict_review as vr
     d = tmp_path / "2026-09-01"
@@ -362,7 +368,7 @@ def test_old_coordinator_archive_without_health_is_not_deepseek(tmp_path, monkey
     monkeypatch.setattr(vr, "_decision_regime", lambda *a, **k: None)
     monkeypatch.setattr(vr, "_atr_pct_cached", lambda *a, **k: 2.0)
     assert vr.review_one(d, "X", {}).model_era == "claude:unknown"
-    assert vr.review_one(d, "Y", {}).model_era == PRE
+    assert vr.review_one(d, "Y", {}).model_era == "unknown"
 
 
 # ---------- 安全评审 #497：掩码要跨族（direction_hit_rate 被掩 ⇒ 校准也掩） ----------
