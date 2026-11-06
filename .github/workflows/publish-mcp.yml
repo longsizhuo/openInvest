@@ -1,0 +1,85 @@
+name: Publish MCP Registry
+
+# Recover a missing registry entry without rebuilding or uploading to PyPI.
+# The immutable release tag and its already-published PyPI version are required.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing backend release tag (for example v0.68.2)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-mcp-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate the release tag
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Expected a backend release tag"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            | jq -e --arg tag "$TAG" '.tag_name == $tag and .draft == false and .prerelease == false'
+
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Prepare and check the published version
+        id: prepare
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          [ "$TAG" = "v$VERSION" ] || { echo "::error::Tag/package version mismatch"; exit 1; }
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "https://pypi.org/pypi/openinvest/$VERSION/json" \
+            | jq -e --arg v "$VERSION" '.info.version == $v'
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp
+          mv server.tmp server.json
+          URL="https://registry.modelcontextprotocol.io/v0.1/servers/io.github.longsizhuo%2Fopeninvest/versions/$VERSION"
+          CODE=$(curl -sSL --retry 3 --retry-delay 5 -o registry.json -w '%{http_code}' "$URL")
+          case "$CODE" in
+            200)
+              jq -e --arg v "$VERSION" '.server.name == "io.github.longsizhuo/openinvest" and .server.version == $v and any(.server.packages[]; .registryType == "pypi" and .identifier == "openinvest" and .version == $v)' registry.json
+              echo 'exists=true' >> "$GITHUB_OUTPUT"
+              echo "MCP Registry already contains $VERSION; skipping publication."
+              ;;
+            404) echo 'exists=false' >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Registry lookup returned HTTP $CODE; refusing to publish blindly"; exit 1 ;;
+          esac
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the missing MCP entry
+        if: steps.prepare.outputs.exists != 'true'
+        run: |
+          # Pin a release with uploaded assets; /latest can exist before its assets do.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.8/mcp-publisher_linux_amd64.tar.gz \
+            -o mcp-publisher.tar.gz
+          echo '09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4  mcp-publisher.tar.gz' | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: Verify registry publication
+        env:
+          URL: ${{ steps.prepare.outputs.url }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$URL" \
+            | jq -e --arg v "$VERSION" '.server.name == "io.github.longsizhuo/openinvest" and .server.version == $v and any(.server.packages[]; .registryType == "pypi" and .identifier == "openinvest" and .version == $v)'
+          echo "Verified io.github.longsizhuo/openinvest@$VERSION" >> "$GITHUB_STEP_SUMMARY"
