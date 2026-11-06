@@ -28,6 +28,9 @@ def main():
     review.add_argument("sample")
     review.add_argument("--label", required=True, choices=["accepted", "rejected", "failure_example"])
     review.add_argument("--cleaned", type=Path)
+    review.add_argument("--source-validity", choices=["valid", "invalid", "unknown"], default="unknown")
+    review.add_argument("--judgment-outcome", choices=["correct", "wrong", "unassessed"], default="unassessed")
+    review.add_argument("--use", action="append", choices=["audit", "agent_training"], default=[])
     export = actions.add_parser("export")
     export.add_argument("destination", type=Path)
     used = actions.add_parser("mark-used")
@@ -99,8 +102,9 @@ def main():
         print(json.dumps({"written": str(args.destination)}))
     elif args.action == "review":
         cleaned = json.loads(args.cleaned.read_text()) if args.cleaned else {}
-        sink.review(args.sample, args.label, cleaned)
-        print(json.dumps({"reviewed": args.sample}))
+        sink.review(args.sample, args.label, cleaned, source_validity=args.source_validity,
+                    judgment_outcome=args.judgment_outcome, allowed_uses=args.use)
+        print(json.dumps({"reviewed": args.sample, "source_validity": args.source_validity, "allowed_uses": args.use}))
     elif args.action == "export":
         print(json.dumps(sink.export(args.destination, archive), indent=2))
     elif args.action == "mark-used":

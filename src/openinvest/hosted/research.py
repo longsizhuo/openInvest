@@ -265,23 +265,43 @@ class Research:
                 self.store.metric("research_archive_failed")
                 log.warning("Research archive unavailable; encrypted queue retained")
 
-    def review(self, sample_id, label, cleaned=None):
+    def _authorized(self, sample):
+        with self.store.db() as control:
+            account = control.execute("SELECT * FROM accounts WHERE participant=?", (sample["participant"],)).fetchone()
+        return bool(account and not account["deleted"] and account["research"]
+                    and account["accepted"] == self.settings.policy_version and account["epoch"] == sample["epoch"])
+
+    def review(self, sample_id, label, cleaned=None, *, source_validity="unknown",
+               judgment_outcome="unassessed", allowed_uses=()):
         if label not in {"accepted", "rejected", "failure_example"}:
             raise ValueError("Invalid review label")
+        if source_validity not in {"valid", "invalid", "unknown"} or judgment_outcome not in {"correct", "wrong", "unassessed"}:
+            raise ValueError("Invalid source validity or judgment outcome")
+        if set(allowed_uses) - {"audit", "agent_training"}:
+            raise ValueError("Financial forecast evaluation needs separate verified market outcomes and a frozen protocol")
+        if source_validity != "valid" and set(allowed_uses) - {"audit"}:
+            raise ValueError("Unqualified sources are audit-only")
         cleaned = cleaned or {}
         if set(cleaned) - {"task_summary", "rationale", "evidence_summary"}:
             raise ValueError("Unsupported reviewed fields")
         if any(not isinstance(v, str) or len(v) > 32000 or PII.search(v) for v in cleaned.values()):
             raise ValueError("Reviewed text contains a disallowed value")
         with self.db() as db:
-            if not db.execute("SELECT 1 FROM samples WHERE id=? AND status IN ('pending','archived')", (sample_id,)).fetchone():
+            sample = db.execute("SELECT * FROM samples WHERE id=? AND status IN ('pending','archived')", (sample_id,)).fetchone()
+            if not sample:
                 raise ValueError("Unknown sample")
+            if not self._authorized(sample):
+                raise ValueError("Research participation is no longer active for this sample")
             db.execute("UPDATE samples SET label=? WHERE id=?", (label, sample_id))
-            db.execute("INSERT OR REPLACE INTO reviews VALUES(?,?)", (sample_id, self.seal(cleaned)))
+            db.execute("INSERT OR REPLACE INTO reviews VALUES(?,?)", (sample_id, self.seal({
+                "text": cleaned, "qualification": {"source_validity": source_validity,
+                "judgment_outcome": judgment_outcome, "allowed_uses": list(allowed_uses),
+                "reviewed_at": time.time(), "consent_epoch": sample["epoch"]}})))
 
     def export(self, destination: Path, archive=None):
         import tempfile
         dataset_id, ids = uuid.uuid4().hex, []
+        review_digests = {}
         destination.parent.mkdir(parents=True, exist_ok=True)
         manifest_path = destination.with_suffix(destination.suffix + ".manifest.json")
         created, temporary = [], None
@@ -292,20 +312,31 @@ class Research:
                 with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=destination.parent, delete=False) as out:
                     temporary = Path(out.name)
                     for row in db.execute("SELECT * FROM samples WHERE status IN ('pending','archived') AND label IN ('accepted','failure_example') ORDER BY created,id"):
+                        if not self._authorized(row):
+                            continue
+                        review = db.execute("SELECT payload FROM reviews WHERE id=?", (row["id"],)).fetchone()
+                        reviewed = self.unseal(review[0]) if review else {}
+                        qualification = reviewed.get("qualification", {})
+                        if (qualification.get("source_validity") != "valid"
+                                or "agent_training" not in qualification.get("allowed_uses", [])
+                                or qualification.get("consent_epoch") != row["epoch"]):
+                            continue
                         blob = row["payload"] or (archive.get(row["object_key"]) if archive else None)
                         if blob is None:
                             raise ValueError("Archive access required")
+                        review_digests[row["id"]] = hashlib.sha256(review[0]).hexdigest()
                         data = self.unseal(blob)
                         data.pop("quarantine", None)
-                        review = db.execute("SELECT payload FROM reviews WHERE id=?", (row["id"],)).fetchone()
-                        if review:
-                            data["reviewed_text"] = self.unseal(review[0])
+                        data["reviewed_text"] = reviewed.get("text", {})
+                        data["qualification"] = qualification
                         data.update(dataset_version=dataset_id, review_label=row["label"])
                         out.write(json.dumps(data, ensure_ascii=False, allow_nan=False) + "\n")
                         ids.append(row["id"])
-                manifest = {"dataset_version": dataset_id, "samples": ids,
+                manifest = {"dataset_version": dataset_id, "samples": ids, "review_digests": review_digests,
                             "sha256": hashlib.sha256(temporary.read_bytes()).hexdigest(),
-                            "note": "Not marked as trained; use mark-used when training consumes this version."}
+                            "note": "Agent-training only, not financial outcome truth. Revalidate with mark-used BEFORE training consumes this version."}
+                if any(not self._authorized(db.execute("SELECT * FROM samples WHERE id=?", (sample_id,)).fetchone()) for sample_id in ids):
+                    raise ValueError("Research participation changed during export")
                 os.link(temporary, destination)  # atomic publication, never overwrite
                 created.append(destination)
                 with manifest_path.open("x", encoding="utf-8", newline="\n") as output:
@@ -324,9 +355,29 @@ class Research:
 
     def mark_used(self, dataset_id):
         with self.db() as db:
-            row = db.execute("SELECT samples FROM datasets WHERE id=?", (dataset_id,)).fetchone()
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT samples,path FROM datasets WHERE id=?", (dataset_id,)).fetchone()
             if not row:
                 raise ValueError("Unknown or invalidated dataset")
+            ids = json.loads(row["samples"])
+            if not ids:
+                raise ValueError("Dataset has no qualified samples")
+            path = Path(row["path"])
+            manifest = json.loads(path.with_suffix(path.suffix+".manifest.json").read_text())
+            if manifest.get("sha256") != hashlib.sha256(path.read_bytes()).hexdigest() or manifest.get("samples") != ids:
+                raise ValueError("Dataset integrity check failed")
+            for sample_id in ids:
+                sample = db.execute("SELECT * FROM samples WHERE id=?", (sample_id,)).fetchone()
+                review = db.execute("SELECT payload FROM reviews WHERE id=?", (sample_id,)).fetchone()
+                qualification = self.unseal(review[0]).get("qualification", {}) if review else {}
+                if not review or manifest.get("review_digests", {}).get(sample_id) != hashlib.sha256(review[0]).hexdigest():
+                    raise ValueError("Dataset review changed; export the corrected review before training")
+                if (not sample or sample["status"] not in ("pending","archived")
+                        or sample["label"] not in ("accepted","failure_example") or not self._authorized(sample)
+                        or qualification.get("source_validity") != "valid"
+                        or "agent_training" not in qualification.get("allowed_uses", [])
+                        or qualification.get("consent_epoch") != sample["epoch"]):
+                    raise ValueError("Dataset sample was deleted, revoked or lost qualification")
             db.execute("UPDATE datasets SET used=1 WHERE id=?", (dataset_id,))
             db.executemany("UPDATE samples SET used=1 WHERE id=?", [(x,) for x in json.loads(row[0])])
 

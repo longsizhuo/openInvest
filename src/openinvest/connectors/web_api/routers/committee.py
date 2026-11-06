@@ -501,7 +501,8 @@ def committee_prepare(body: CommitteePrepareRequest = Body(...)) -> Dict[str, An
     """
     from openinvest.core.committee_runner import prepare_committee_brief
     try:
-        return prepare_committee_brief(body.symbol)
+        return (prepare_committee_brief(body.symbol, provider=body.provider, model=body.model)
+                if body.model else prepare_committee_brief(body.symbol))
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=503,
@@ -524,6 +525,7 @@ def committee_save(body: CommitteeSaveRequest = Body(...)) -> Dict[str, Any]:
     from openinvest.core.committee_runner import save_committee_transcript
     try:
         return save_committee_transcript(body.symbol, body.transcript,
-                                         provider=body.provider or "claude", model=body.model)
+                                         provider=body.provider or "claude", model=body.model,
+                                         context_id=body.context_id)
     except ValueError as e:   # CIO 解析不出裁决：不存档
         raise HTTPException(status_code=422, detail=str(e)) from e

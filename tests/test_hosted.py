@@ -229,7 +229,7 @@ def test_execution_feedback_export_keeps_reported_fact_without_correctness_label
     assert sample["reported_execution"] == expected
     assert sample["execution_source"] == "client_reported"
     assert sample["adoption"] == "unknown" and sample["correctness"] == "unverified"
-    env.research.review(sample["sample_id"], "accepted")
+    env.research.review(sample["sample_id"], "accepted", source_validity="valid", allowed_uses=["agent_training"])
     output = tmp_path/"feedback.jsonl"
     env.research.export(output)
     assert "PRIVATE_REASON" not in output.read_text()
@@ -351,7 +351,7 @@ def test_training_exact_amounts_quarantined_text_and_versioned_export(environmen
     data = env.research.unseal(row["payload"])
     assert data["arguments"]["amount"] == 12345.67
     assert data["adoption"] == "unknown"
-    env.research.review(row["id"], "accepted", {"rationale": "Evidence supports waiting."})
+    env.research.review(row["id"], "accepted", {"rationale": "Evidence supports waiting."}, source_validity="valid", allowed_uses=["agent_training"])
     output = tmp_path/"dataset.jsonl"
     manifest = env.research.export(output)
     exported = json.loads(output.read_text())
@@ -546,7 +546,7 @@ def test_research_completeness_versions_retries_and_atomic_export(environment, t
         rows = list(db.execute("SELECT id,payload FROM samples ORDER BY created"))
     assert [env.research.unseal(r["payload"])["sample_type"] for r in rows] == ["tool_call", "decision"]
     assert env.research.unseal(rows[1]["payload"])["result"]["verdict"]["_original_alloc"] == 88.75
-    env.research.review(rows[0]["id"], "accepted")
+    env.research.review(rows[0]["id"], "accepted", source_validity="valid", allowed_uses=["agent_training"])
     # Publishing must never overwrite an existing dataset or leave a partial export.
     target = tmp_path/"protected.jsonl"
     target.write_text("EXISTING")
@@ -657,3 +657,52 @@ def test_hosted_log_formatter_omits_request_and_traceback():
     from openinvest.hosted.safelog import SafeFormatter
     record = logging.LogRecord("hosted",logging.ERROR,"source",1,"IDENTITY_CREDENTIAL_CANARY",(),None)
     assert SafeFormatter().format(record) == "ERROR:hosted"
+
+
+def test_research_wrong_prediction_retained_and_revoked_consent_blocks_reuse(environment, tmp_path):
+    env=environment
+    account,token=env.accounts[0]
+    assert rpc(env,token).status_code == 200
+    with env.research.db() as db:
+        sample=db.execute("SELECT * FROM samples").fetchone()
+    env.research.review(sample["id"], "failure_example", source_validity="valid",
+                        judgment_outcome="wrong", allowed_uses=["agent_training"])
+    output=tmp_path/"negative-example.jsonl"
+    manifest=env.research.export(output)
+    assert json.loads(output.read_text())["qualification"]["judgment_outcome"] == "wrong"
+    # Simulate opt-out before asynchronous deletion; current consent must win.
+    with env.store.db() as db:
+        db.execute("UPDATE accounts SET research=0,epoch=epoch+1 WHERE id=?", (account["id"],))
+    with pytest.raises(ValueError,match="revoked|qualification"):
+        env.research.mark_used(manifest["dataset_version"])
+    second=tmp_path/"after-optout.jsonl"
+    assert env.research.export(second)["samples"] == []
+
+
+def test_research_export_requires_explicit_source_qualification(environment, tmp_path):
+    env=environment
+    _,token=env.accounts[0]
+    rpc(env,token)
+    with env.research.db() as db:
+        sample=db.execute("SELECT id FROM samples").fetchone()[0]
+    env.research.review(sample,"accepted")
+    assert env.research.export(tmp_path/"unknown.jsonl")["samples"] == []
+    env.research.review(sample,"accepted",source_validity="valid",allowed_uses=["agent_training"])
+    output=tmp_path/"qualified.jsonl"
+    manifest=env.research.export(output)
+    output.write_text(output.read_text()+" ")
+    with pytest.raises(ValueError,match="integrity"):
+        env.research.mark_used(manifest["dataset_version"])
+
+
+def test_re_review_invalidates_old_export_even_with_valid_negative_sample(environment,tmp_path):
+    env=environment
+    _,token=env.accounts[0];rpc(env,token)
+    with env.research.db() as db:sid=db.execute('SELECT id FROM samples').fetchone()[0]
+    env.research.review(sid,'accepted',{'rationale':'Original hypothesis'},source_validity='valid',judgment_outcome='correct',allowed_uses=['agent_training'])
+    manifest=env.research.export(tmp_path/'old.jsonl')
+    env.research.review(sid,'failure_example',{'rationale':'Corrected negative result'},source_validity='valid',judgment_outcome='wrong',allowed_uses=['agent_training'])
+    with pytest.raises(ValueError,match='review changed'):env.research.mark_used(manifest['dataset_version'])
+    new=env.research.export(tmp_path/'corrected.jsonl')
+    env.research.mark_used(new['dataset_version'])
+    assert json.loads((tmp_path/'corrected.jsonl').read_text())['qualification']['judgment_outcome']=='wrong'

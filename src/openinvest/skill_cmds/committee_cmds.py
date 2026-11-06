@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 
-def cmd_daily_report(_: argparse.Namespace) -> None:
+def cmd_daily_report(args: argparse.Namespace) -> None:
     """完整日报管道（多资产委员会 + Gemini 第二意见 + 翻译官 + 纪律台账），
     stdout 输出与邮件正文同源的 markdown（assemble_full_report）——宿主 agent
     侧 cron 原样投递用（Hermes `--no-agent --script` / OpenClaw cron）。不发邮件。
@@ -44,12 +44,28 @@ def cmd_daily_report(_: argparse.Namespace) -> None:
     result = run(send_email=False, include_report=True)
     report = result.get("full_report")
     if report:
+        if getattr(args, "only_actionable", False):
+            import re
+            verdicts = re.findall(r"\*\*(?:裁决|Verdict)\*\*:\s*([A-Z]+)", report)
+            incomplete = any(result.get(key) for key in ("missing_verdicts", "skipped_assets", "data_warnings"))
+            unhealthy = result.get("status") not in (None, "ok", "success")
+            if not incomplete and not unhealthy and verdicts and set(verdicts) == {"HOLD"} and "[QUALITY_ALERT]" not in report and "DATA_UNTRUSTED" not in report:
+                return
         # cli.main 把 sys.stdout 重定向到了 stderr（防 utils noise），真输出走 __stdout__
         real_stdout = getattr(sys, "__stdout__", sys.stdout)
         real_stdout.write(report if report.endswith("\n") else report + "\n")
         real_stdout.flush()
     else:
         _print_json(result)
+
+
+def cmd_quality_status(_: argparse.Namespace) -> None:
+    from openinvest.utils.advisory import is_advisory_mode
+    if is_advisory_mode():
+        _print_json({"status": "error", "error": "personal quality records are unavailable in advisory mode"})
+        return
+    from openinvest.services.integrity_status import status
+    _print_json(status())
 
 
 def cmd_autopilot_daily(_: argparse.Namespace) -> None:
@@ -133,7 +149,10 @@ def cmd_prepare_committee(args: argparse.Namespace) -> None:
     POST /api/committee/prepare 共享，coordinator 路径的 prep 不再由 entry 手搓）
     """
     from openinvest.core.committee_runner import prepare_committee_brief
-    _print_json(prepare_committee_brief(args.symbol))
+    if getattr(args, "model", ""):
+        _print_json(prepare_committee_brief(args.symbol, provider=getattr(args, "provider", "agent"), model=args.model))
+    else:
+        _print_json(prepare_committee_brief(args.symbol))
 
 
 # ---------- run_committee (Direct path — 给非 Claude agent 用) ----------
@@ -180,7 +199,11 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     from openinvest.core.decision_ledger import is_unclear, llm_failure_reason, parse_committee_file
     cached_parsed = parse_committee_file(transcript_path) if transcript_path.exists() else None
     # CIO 没出裁决（UNCLEAR）的记录不当缓存，直接重跑；部分角色失败的照常命中但带 degraded
-    if transcript_path.exists() and not args.force and not is_unclear(cached_parsed):
+    from openinvest.core.decision_evidence import current_decision
+    from openinvest.utils.llm import get_llm_config_safe
+    if (transcript_path.exists() and not args.force and not is_unclear(cached_parsed)
+            and current_decision(ROOT / "memory", (cached_parsed or {}).get("input_health", {}), args.symbol,
+                                 verdict=cached_parsed, expected_model=get_llm_config_safe()[2])):
         from openinvest.capabilities.committee.i18n import bilingual
         from openinvest.jobs.review_calc import confidence_display
         from openinvest.jobs.verdict_review import load_confidence_lookup
@@ -309,7 +332,8 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
     provider = getattr(args, "provider", None) or "claude"
     model = getattr(args, "model", None) or ""
     try:
-        _print_json(save_committee_transcript(args.symbol, raw, provider=provider, model=model))
+        _print_json(save_committee_transcript(args.symbol, raw, provider=provider, model=model,
+                                            context_id=getattr(args, "context_id", "")))
     except ValueError as e:   # CIO 解析不出裁决：不存档，退出码 1 让 agent 看见并重交
         _print_json({"status": "error", "error": str(e)})
         sys.exit(1)

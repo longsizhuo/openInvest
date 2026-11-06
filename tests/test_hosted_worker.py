@@ -216,9 +216,12 @@ from openinvest.hosted import analysis
 from openinvest.paths import INVEST_ROOT
 facts_file = INVEST_ROOT/'facts.json'
 facts_file.write_text(json.dumps({'atr_pct':2}))
-def prepare(symbol): return {'asset':{'symbol':symbol},'prompts':{'cio':'test'},'market_data':'Evidence at T1'}
+def prepare(symbol):
+    from openinvest.core.decision_evidence import prepare_context
+    context = prepare_context(INVEST_ROOT/'memory', symbol, {'atr_pct':2}, model='test')
+    return {'asset':{'symbol':symbol},'prompts':{'cio':'test'},'market_data':'Evidence at T1','context_id':context['context_id']}
 calls = []
-def submit(*args):
+def submit(*args, **kwargs):
     calls.append(args)
     return {'verdict':{'verdict':'HOLD'},'saved':str(INVEST_ROOT/'memory'/'result.md')}
 with patch('openinvest.core.runner.coordinator._brief_facts_path', return_value=facts_file), patch('openinvest.core.runner.coordinator._load_brief_facts', return_value={'atr_pct':2}):
@@ -231,7 +234,8 @@ with patch('openinvest.core.runner.coordinator._brief_facts_path', return_value=
     except ValueError: pass
     result = analysis.submit(submit,'AAPL','VERDICT: HOLD','test','test',aid)
     assert result['analysis_id'] == aid
-    assert analysis.submit(submit,'AAPL','VERDICT: HOLD','test','test',aid) == result
+    replayed=analysis.submit(submit,'AAPL','VERDICT: HOLD','test','test',aid)
+    assert replayed['analysis_id'] == result['analysis_id'] and replayed['replayed']
     assert len(calls) == 1
     try:
         analysis.submit(submit,'AAPL','VERDICT: BUY','test','test',aid)
@@ -369,4 +373,58 @@ finally:
         except docker.errors.NotFound: pass
         try: pool.client.volumes.get(pool.name(owner)).remove()
         except docker.errors.NotFound: pass
+''')
+
+
+def test_hosted_invalid_roles_and_model_can_be_corrected_before_running(tmp_path):
+    isolated(tmp_path, '''
+from openinvest.hosted import analysis
+from openinvest.hosted.ledger import initialize
+from openinvest.core.decision_evidence import prepare_context
+from openinvest.paths import INVEST_ROOT
+initialize({'currency':'USD','symbols':['AAPL']})
+roles=['MACRO','QUANT_R1','RISK_R1','QUANT_R2','RISK_R2','CIO']
+def prepare(symbol):
+    c=prepare_context(INVEST_ROOT/'memory',symbol,{'required_roles':roles},model='synthetic-model')
+    return {'asset':{'symbol':symbol},'context_id':c['context_id']}
+p=analysis.prepare(prepare,'AAPL')
+def submit(*a,**kw):return {'verdict':{'verdict':'HOLD'}}
+for transcript,model in [('=== CIO ===\\nVERDICT: HOLD','synthetic-model'),('VERDICT: HOLD','wrong-model')]:
+    try:analysis.submit(submit,'AAPL',transcript,'synthetic',model,p['analysis_id']);raise AssertionError('invalid accepted')
+    except ValueError:pass
+    with analysis.db() as db:assert db.execute('SELECT state FROM analyses').fetchone()[0]=='prepared'
+raw='\\n'.join('=== '+role+' ===\\n'+('VERDICT: HOLD' if role=='CIO' else 'synthetic report') for role in roles)
+assert analysis.submit(submit,'AAPL',raw,'synthetic','synthetic-model',p['analysis_id'])['verdict']['verdict']=='HOLD'
+''')
+
+
+def test_real_hosted_restore_preserves_exclusions_and_blocks_writes(tmp_path):
+    isolated(tmp_path, '''
+import json,shutil
+from starlette.testclient import TestClient
+from openinvest.hosted.worker import initialize,create_worker,snapshot
+from openinvest.hosted.app import rpc_message
+from openinvest.paths import INVEST_ROOT
+initialize({'currency':'USD','symbols':['AAPL']})
+archive=snapshot()
+shutil.rmtree(INVEST_ROOT/'memory')
+if (INVEST_ROOT/'db').exists(): shutil.rmtree(INVEST_ROOT/'db')
+(INVEST_ROOT/'.hosted-initialization.json').unlink()
+integrity=INVEST_ROOT/'integrity';integrity.mkdir(exist_ok=True)
+(integrity/'eligibility.json').write_text('{"schema":1,"artifacts":{}}')
+(integrity/'exclusions.jsonl').write_text('{"artifact_id":"synthetic-revoked"}\\n')
+headers={'Authorization':'Bearer synthetic-private-token','Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-03-26'}
+with TestClient(create_worker()) as client:
+    r=client.post('/internal/restore',content=archive,headers=headers)
+    assert r.status_code==200,r.text
+    assert (integrity/'restore_pending.json').exists()
+    assert (INVEST_ROOT/'.hosted-initialization.json').exists()
+    assert 'synthetic-revoked' in (integrity/'exclusions.jsonl').read_text()
+    r=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':1,'method':'tools/list','params':{}})
+    assert 'quality_status' in {t['name'] for t in rpc_message(r.content)['result']['tools']}
+    r=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'deposit','arguments':{'currency':'USD','amount':1,'idempotency_key':'synthetic'}}})
+    result=rpc_message(r.content)['result']
+    assert result.get('isError') or 'DATA_UNTRUSTED' in str(result)
+    from openinvest.core.portfolio_manager import PortfolioManager
+    assert PortfolioManager().cash == {'USD':0}
 ''')

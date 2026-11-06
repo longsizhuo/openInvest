@@ -87,7 +87,8 @@ def test_parser_reads_any_currency_and_clamps_at_given_ceiling():
                                      "suggested_alloc_aud": 4321})
     assert out["alloc_cny"] == 4321
     # 老存档（CNY 字段）照常解析
-    assert parse_cio_memo("VERDICT: HOLD\nSUGGESTED_ALLOC_CNY: -500\n")["alloc_cny"] == -500
+    held = parse_cio_memo("VERDICT: HOLD\nSUGGESTED_ALLOC_CNY: -500\n")
+    assert held["alloc_cny"] == 0 and held["_original_alloc"] == -500
 
 
 def test_aud_summary_counts_aud_cash_and_values_in_aud(tmp_path):

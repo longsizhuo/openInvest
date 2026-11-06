@@ -10,6 +10,8 @@ inner import（core.config.load_config）保持函数内，set_config_override �
 from __future__ import annotations
 
 import logging
+import json
+import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -137,6 +139,10 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
     out["verdict"] = "HOLD"
     out["confidence"] = min(out["confidence"], confidence_ceiling)
     out["alloc_cny"] = 0
+    if out.get("decision_status") != "DATA_UNTRUSTED":
+        out["decision_status"] = "CONSTRAINED"
+        if out.get("hold_reason") in (None, "unspecified"):
+            out["hold_reason"] = "deterministic_rule"
 
 
 def _fields_to_out(out: Dict[str, Any], fields: Dict[str, Any]) -> None:
@@ -234,6 +240,40 @@ def parse_cio_memo(
         ep = m.group(1).strip() if m else None
         out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
+    # Structured review conditions are retained rather than discarded with prose.
+    for name in ("review_plan", "alternatives"):
+        value = (fields or {}).get(name)
+        if fields is None:
+            match = re.search(rf"^{name.upper()}_JSON:\s*(.+)$", text, re.MULTILINE)
+            if match:
+                try:
+                    value = json.loads(match.group(1))
+                except ValueError:
+                    out[f"_{name}_error"] = "invalid_json"
+                    if name == "review_plan":
+                        value = {"parse_error": "invalid_json"}
+        out[name] = value
+    exit_intent = str((fields or {}).get("exit_intent") or "").strip().lower()
+    if fields is None:
+        match = re.search(r"^EXIT_INTENT:\s*(\w+)", text, re.MULTILINE | re.I)
+        exit_intent = match.group(1).lower() if match else ""
+    out["exit_intent"] = exit_intent if exit_intent in {
+        "risk_reduction", "thesis_invalidated", "liquidity_need", "tactical_reentry"
+    } else None
+    # Preserve the unmodified proposal before any configured rule rewrites it.
+    out["_raw_proposal"] = {k: v for k, v in out.items() if k != "raw"}
+    out["decision_status"] = "READY"
+    invalid_confidence = not math.isfinite(out["confidence"]) or not 0 <= out["confidence"] <= 1
+    if invalid_confidence:
+        out["_invalid_confidence"] = str(out["confidence"])
+        out["confidence"] = 0.0
+    out["hold_reason"] = (str((fields or {}).get("hold_reason") or "unspecified")
+                          if out["verdict"] == "HOLD" else None)
+    if fields is None and out["verdict"] == "HOLD":
+        match = re.search(r"^HOLD_REASON:\s*(\w+)", text, re.MULTILINE | re.I)
+        if match:
+            out["hold_reason"] = match.group(1).lower()
+
     # Sanity check 0: INVEST_CIO_CONFIDENCE_CAP（Optuna 训练参数）clamp confidence 上限
     cap_env = os.getenv("INVEST_CIO_CONFIDENCE_CAP")
     if cap_env:
@@ -293,7 +333,14 @@ def parse_cio_memo(
     _wu = _WU_SENTINEL in text or (
         worker_brief is not None and _WU_SENTINEL in worker_brief
     )
-    if _wu and out["confidence"] > floor:
+    # Failed input invalidates the directional proposal independently of how
+    # confident the CIO is. The floor is a ceiling on the resulting confidence,
+    # not a condition for enabling the failure backstop.
+    if _wu:
+        out["decision_status"] = "DATA_UNTRUSTED"
+        out["hold_reason"] = "worker_unavailable"
+        out.setdefault("_original_verdict", out["verdict"])
+        out.setdefault("_original_alloc", out["alloc_cny"])
         out["_original_confidence_unavailable"] = out["confidence"]
         _force_hold(out, confidence_ceiling=floor)
         log.warning("parse_cio_memo: 检测到 [WORKER_UNAVAILABLE] 标记，"
@@ -321,12 +368,14 @@ def parse_cio_memo(
         _force_hold(out, confidence_ceiling=_verdict_cfg.forced_hold_confidence_ceiling)
         log.warning("parse_cio_memo: 集中度 lens 已关闭（config）+ TRIM(concentration) → 强制 HOLD")
 
-    # Sanity check 5: TRIM 必须给出"低于现价的买回点"，否则降级 HOLD
-    # 卖出后买回点缺失 or 不低于现价 = 卖了高价大概率接回 = 纯亏，TRIM 不成立。
+    # Sanity check 5: 只为择时买回型 TRIM 保留旧校验，待隔离对照验证替代规则。
+    # 止损和集中度退出的目的在于降低风险，不以更低价买回为成立前提。
     # 只在拿得到 current_price 的 live 路径校验（re-parse 存档时 current_price=None 跳过）。
     if (current_price is not None
             and current_price > 0
-            and out["verdict"] == "TRIM"):
+            and out["verdict"] == "TRIM"
+            and out.get("exit_intent") not in ("risk_reduction", "thesis_invalidated", "liquidity_need")
+            and out.get("trim_reason") not in ("stop_loss", "concentration")):
         rp = out.get("reentry_price")
         if rp is None or rp >= current_price:
             out["_original_verdict"] = "TRIM"
@@ -368,6 +417,7 @@ def parse_cio_memo(
                 )
             else:
                 out["_defense_dca"] = f"blocked_{defense_dca.get('reason', 'spacing')}"
+                out.update(decision_status="CONSTRAINED", hold_reason=out["_defense_dca"])
                 out["verdict"] = "HOLD"
                 out["alloc_cny"] = 0
                 log.warning(
@@ -401,6 +451,7 @@ def parse_cio_memo(
     if (_verdict_cfg.risk_profile == "aggressive"
             and regime == "uptrend"
             and not defense_flag_on
+            and not _wu
             and out["verdict"] == "HOLD"):
         out.setdefault("_original_verdict", "HOLD")
         out["_risk_profile_applied"] = "aggressive_uptrend_hold_to_accumulate"
@@ -429,6 +480,15 @@ def parse_cio_memo(
         )
         out["alloc_cny"] = int(single_invest_cap)
 
+    if invalid_confidence:
+        out.setdefault("_original_verdict", out["verdict"])
+        out.setdefault("_original_alloc", out["alloc_cny"])
+        _force_hold(out, confidence_ceiling=0.0)
+        out.update(decision_status="DATA_UNTRUSTED", hold_reason="invalid_confidence")
+    if out["verdict"] == "HOLD" and out["alloc_cny"] != 0:
+        out.setdefault("_original_alloc", out["alloc_cny"])
+        out["_hold_allocation_zeroed"] = True
+        out["alloc_cny"] = 0
     return out
 
 

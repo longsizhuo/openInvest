@@ -319,6 +319,8 @@ class PortfolioManager:
         commit-on-success：with 块内抛异常 → 整个写不会落盘（已改的 metadata 丢弃）。
         """
         with self.store.transaction("portfolio") as p:
+            if (self.store.data_root / "integrity/restore_pending.json").exists():
+                raise ValueError("DATA_UNTRUSTED: restored ledger requires reconciliation before writes")
             # v1 文件直接拒绝（commit 会 pop 掉 v1 字段 = 现金永久丢失）
             _ensure_v2_inplace(p, self.store)
             yield p

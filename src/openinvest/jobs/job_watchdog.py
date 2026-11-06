@@ -290,11 +290,13 @@ def _send(findings: List[Dict[str, Any]]) -> None:
     # DM 已送达时邮件再失败也不抛：否则 run() 回滚 claim，SMTP 挂多久 DM 就每小时重发多久
     dm_ok = bool(send_discord_alert(f"**{subject}**\n{md}"))
     try:
-        send_email_html(
+        receiver = send_email_html(
             subject=subject,
             html_body=render_markdown_email(md, footer_label="Invest Job Watchdog"),
             plain_body=md,
         )
+        if not dm_ok and not receiver:
+            raise RuntimeError("No alert delivery channel succeeded; retain alert for retry")
     except Exception:
         if not dm_ok:
             raise
@@ -320,14 +322,20 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
         findings += find_silent_sources(store.state_get(SOURCE_HEALTH_STATE) or {})
     findings += find_failed_verdicts(store.root / ".committee", now)
     findings += find_agent_backlog(now)
+    from openinvest.services.decision_quality import findings as decision_findings
+    from openinvest.core.config import load_config
+    findings += decision_findings(store.root, hold_window=load_config().scheduler.decision_hold_review_days)
     for f in findings:
         log.warning(f"[job_watchdog] {f['text']}")
 
     fresh: List[Tuple[str, Dict[str, Any]]] = []
     for f in findings:
-        claim = f"{f['key']}#{int((now - f['since']).total_seconds() // 86400)}"
+        suffix = "once" if f.get("one_shot") else str(int((now - f["since"]).total_seconds() // 86400))
+        claim = f"{f['key']}#{suffix}"
         if store.state_claim(_STATE, claim):
             fresh.append((claim, f))
+        if len(fresh) >= 20:  # bounded delivery; remaining alerts stay unclaimed for the next run
+            break
     if fresh:
         try:
             _send([f for _, f in fresh])

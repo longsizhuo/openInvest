@@ -26,7 +26,8 @@ def _default_llm_model(monkeypatch):
 def _rv(verdict, hit, *, date="2026-06-01", conf=0.6, source="live", flat=True,
         asset="SPY", matured=True):
     r = VerdictReview(date=date, asset=asset, verdict=verdict, confidence=conf,
-                      expected_direction="", macro_at_decision={}, source=source)
+                      expected_direction="", macro_at_decision={}, source=source,
+                      input_health={"schema":1,"model":"deepseek-v4-flash"})
     if matured:
         r.hits["30d"] = hit
         r.directions["30d"] = "flat" if flat else "up"
@@ -139,17 +140,20 @@ def test_daily_verdict_review_refreshes_lookup(tmp_path, monkeypatch):
     monkeypatch.setattr(vr, "review_all", lambda **k: [_rv("HOLD", True)] * 30)
     monkeypatch.setattr(vr, "write_report", lambda *a: tmp_path / "r.md")
     monkeypatch.setattr(vr, "write_jsonl", lambda *a: tmp_path / "r.jsonl")
+    monkeypatch.setattr(vr, "qualified_reviews", lambda rows, use="publish": rows)
     dflt = tmp_path / "default.json"
     dflt.write_text(json.dumps(DEFAULT))
     monkeypatch.setattr(vr, "DEFAULT_LOOKUP_PATH", dflt)
-    assert vr.load_confidence_lookup()["by_verdict"]["HOLD"]["from"] == "default"
+    assert vr.load_confidence_lookup() is None
     vr.run()
+    from tests.integrity_helpers import approve
+    approve(tmp_path, "derived:confidence_lookup", json.loads((tmp_path / ".dreams/confidence_lookup.json").read_text()))
     lk = vr.load_confidence_lookup()["by_verdict"]["HOLD"]
     assert (lk["from"], lk["n"], lk["rate"], lk["n_live"], lk["n_fleet"]) == ("local", 30, 1.0, 30, 0)
     (tmp_path / ".dreams" / "confidence_lookup.json").write_text("{bad")
-    assert vr.load_confidence_lookup()["by_verdict"]["HOLD"]["from"] == "default"
+    assert vr.load_confidence_lookup() is None
     (tmp_path / ".dreams" / "confidence_lookup.json").write_text('{"by_verdict": []}')
-    assert vr.load_confidence_lookup()["by_verdict"]["HOLD"]["from"] == "default"
+    assert vr.load_confidence_lookup() is None
     dflt.unlink()
     assert vr.load_confidence_lookup() is None
 
@@ -224,8 +228,7 @@ def test_fleet_rows_join_lookup_offline(monkeypatch, tmp_path):
     assert vr.run()["status"] == "ok"
     assert calls == [], f"verdict_review 不许触网，实际尝试 {calls}"
     lk = json.loads((mem / ".dreams" / "confidence_lookup.json").read_text())
-    assert lk["by_verdict"]["HOLD"] == {"n": 2, "rate": None, "n_live": 1, "n_fleet": 1}
-    assert lk["by_verdict"]["ACCUMULATE"] == {"n": 1, "rate": None, "n_live": 0, "n_fleet": 1}
+    assert lk["by_verdict"] == {}, "未核验的历史/舰队不能充当当前模型的默认业绩"
     rows = (mem / ".dreams" / "verdict_review.jsonl").read_text().splitlines()
     assert len(rows) == 1, "舰队行只进查表，不进 jsonl"
 
@@ -245,7 +248,8 @@ def test_local_cli_cached_run_committee_carries_lookup(monkeypatch, capfd, tmp_p
     monkeypatch.setattr(vr, "load_confidence_lookup", lambda: LK)
     md = tmp_path / "memory" / ".committee" / datetime.now().strftime("%Y-%m-%d") / "AAPL.md"
     md.parent.mkdir(parents=True)
-    md.write_text("# Committee: AAPL\n**Verdict**: HOLD (confidence 0.62)\n", encoding="utf-8")
+    from tests.integrity_helpers import bind_cached_transcript
+    md.write_text(bind_cached_transcript(tmp_path/"memory", "AAPL", "# Committee: AAPL\n**Verdict**: HOLD (confidence 0.62)\n"), encoding="utf-8")
 
     cc.cmd_run_committee(argparse.Namespace(symbol="AAPL", force=False, max_rounds=1))
     out = json.loads(capfd.readouterr().out)

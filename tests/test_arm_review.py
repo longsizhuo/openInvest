@@ -370,6 +370,7 @@ def test_run_arms_never_pollutes_live_jsonl_lookup_or_public_json(review_env):
         shutil.move(str(parked / d.name), str(d))
     assert vr.run()["status"] == "ok"
     assert snapshot() == baseline, "实验臂不得改变 live jsonl / confidence_lookup / 公开 JSON"
+    vr.run_arms()  # research is now explicit; production review must not inspect experimental arms
     assert all(not str(json.loads(x)["source"]).startswith("arm:") for x in baseline[0].splitlines())
     for name in ("sealed", "debate", "macrosoft"):   # 臂行只在各自的独立 jsonl
         jl = review_env / ".dreams" / f"verdict_review_{name}.jsonl"

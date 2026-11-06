@@ -41,7 +41,7 @@ def test_alloc_text_formats(raw, expected):
     (float("nan"), 0), (float("inf"), 0), ("1e4", 10000), ("￥5,000", 5000), ("AUD 5,000", 5000),
 ])
 def test_alloc_json_values(raw, expected):
-    fields = {"verdict": "HOLD", "confidence": 0.5, "dominant_view": "macro", "suggested_alloc_cny": raw}
+    fields = {"verdict": "ACCUMULATE" if expected >= 0 else "TRIM", "confidence": 0.5, "dominant_view": "macro", "suggested_alloc_cny": raw}
     assert parse_cio_memo("(json)", fields=fields)["alloc_cny"] == expected
 
 

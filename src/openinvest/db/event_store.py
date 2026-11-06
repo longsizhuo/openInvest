@@ -94,6 +94,8 @@ class EventStore:
         embedding_dim: int = 1024,
     ) -> None:
         path = db_path or DB_PATH
+        parent = Path(path).parent
+        self.data_root = parent.parent if parent.name == "db" else parent
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.embedding_dim = embedding_dim
 
@@ -169,6 +171,10 @@ class EventStore:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sources_event ON sources(event_id)")
+            cur.execute("""CREATE TABLE IF NOT EXISTS event_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL, payload_json TEXT NOT NULL)""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_event_versions_time ON event_versions(event_id,observed_at,id)")
 
             if self._vec_loaded:
                 cur.execute(
@@ -292,8 +298,31 @@ class EventStore:
                     json.dumps(merged_entities, ensure_ascii=False),
                     eid,
                 ))
+            self._record_version(eid, event, was_new=was_new)
             self.conn.commit()
             return was_new, eid
+
+    def _record_version(self, event_id: str, reported: Optional[Dict[str, Any]] = None, *, was_new: bool = False) -> None:
+        """Append the version actually available now, never backdate a vintage."""
+        reported = reported or {}
+        row = self.conn.execute("SELECT * FROM events WHERE event_id=?", (event_id,)).fetchone()
+        if row is None:
+            return
+        previous = self.conn.execute("SELECT payload_json FROM event_versions WHERE event_id=? ORDER BY id DESC LIMIT 1", (event_id,)).fetchone()
+        prior = json.loads(previous[0]).get("vintage", {}) if previous else {}
+        observed = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        payload = _row_to_event(row)
+        payload["sources"] = self.get_sources(event_id)
+        payload["vintage"] = {
+            "event_time": reported.get("ts", prior.get("event_time")),
+            "published_at": reported.get("published_at", prior.get("published_at")),
+            "first_acquired_at": prior.get("first_acquired_at", observed),
+            "revision_published_at": reported.get("revision_published_at"),
+            "revision_acquired_at": observed,
+            "legacy_history_unknown": prior.get("legacy_history_unknown", not was_new),
+        }
+        self.conn.execute("INSERT INTO event_versions(event_id,observed_at,payload_json) VALUES(?,?,?)",
+                          (event_id, observed, json.dumps(payload, ensure_ascii=False)))
 
     def add_source(
         self,
@@ -314,6 +343,7 @@ class EventStore:
                     INSERT INTO sources(event_id, src_name, url, title, snippet, fetched_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (event_id, src_name, url, title, snippet, fetched_at))
+                self._record_version(event_id)
                 self.conn.commit()
                 return True
             except sqlite3.IntegrityError:
@@ -354,7 +384,11 @@ class EventStore:
         cur.execute("SELECT 1 FROM sources WHERE url = ? LIMIT 1", (url,))
         return cur.fetchone() is not None
 
-    def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+    def get_event(self, event_id: str, *, purpose: str = "advice") -> Optional[Dict[str, Any]]:
+        if purpose != "audit":
+            from openinvest.core.evidence_eligibility import Eligibility
+            if f"event:{event_id}" in Eligibility(self.data_root).excluded_ids():
+                return None
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM events WHERE event_id = ?", (event_id,))
         row = cur.fetchone()
@@ -390,23 +424,20 @@ class EventStore:
             SELECT * FROM events
              WHERE ts >= ? AND severity >= ?
              ORDER BY severity DESC, ts DESC
-             LIMIT ?
             """,
-            (cutoff, min_sev_int, limit),
+            (cutoff, min_sev_int),
         )
-        return [_row_to_event(r) for r in cur.fetchall()]
+        from openinvest.core.evidence_eligibility import Eligibility
+        excluded = {key[6:] for key in Eligibility(self.data_root).excluded_ids() if key.startswith("event:")}
+        return [_row_to_event(r) for r in cur.fetchall() if r["event_id"] not in excluded][:limit]
 
     def count_recent(self, *, hours: int = 24) -> Dict[str, int]:
         """汇总最近 N 小时事件数（按 severity 分桶）"""
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
-        cur = self.conn.cursor()
-        cur.execute(
-            "SELECT severity, COUNT(*) AS n FROM events WHERE ts >= ? GROUP BY severity",
-            (cutoff,),
-        )
         buckets = {1: 0, 2: 0, 3: 0}
-        for row in cur.fetchall():
-            buckets[row["severity"]] = row["n"]
+        for event in self.list_recent(hours=hours, limit=2**31-1):
+            severity = event.get("severity", 1)
+            severity = _SEVERITY_INT.get(severity, severity)
+            buckets[severity] += 1
         return {
             "low": buckets[1],
             "mid": buckets[2],
@@ -454,9 +485,17 @@ class EventStore:
           distance (float | None)
         """
         min_sev_int = _SEVERITY_INT.get(min_severity, 2)
+        from openinvest.core.evidence_eligibility import Eligibility
+        exclusions = Eligibility(self.data_root).excluded_ids()
+        excluded_events = [key.removeprefix("event:") for key in exclusions if key.startswith("event:")]
         if as_of is not None and as_of.tzinfo is None:
             raise ValueError("as_of 必须带时区（naive datetime 口径不明，可能前视）")
         anchor = as_of.astimezone(timezone.utc) if as_of is not None else datetime.now(timezone.utc)
+        if as_of is not None:
+            # Latest-row timestamps cannot reconstruct past stance/severity/source
+            # revisions. Only immutable observed versions qualify for as-of reads.
+            return self._recall_versions(symbol, anchor, time_window_days, min_sev_int,
+                                         top_k, aliases or [], extra_tags or [], set(excluded_events))
         cutoff = (anchor - timedelta(days=time_window_days)).isoformat(timespec="seconds")
         # created_at 全库统一 isoformat(timespec="seconds") 的 +00:00 串 → 同格式字典序比较精确
         as_of_iso = anchor.isoformat(timespec="seconds") if as_of is not None else None
@@ -486,6 +525,8 @@ class EventStore:
                "WHERE ts >= ? AND created_at >= ? AND severity >= ? AND event_type IS NOT 'price_alert' "
                f"AND ({match})")
         params = [cutoff, cutoff, min_sev_int, *match_syms, *tags]
+        sql += " AND event_id NOT IN (SELECT value FROM json_each(?))"
+        params.append(json.dumps(excluded_events))
         if as_of_iso is not None:
             sql += " AND created_at <= ?"
             params.append(as_of_iso)
@@ -539,6 +580,34 @@ class EventStore:
 
         # 最终按时间倒序返回（最新在前），保持 caller 期望
         return top_sorted[::-1]
+
+    def _recall_versions(self, symbol, anchor, days, min_severity, top_k, aliases, tags, exclusions):
+        cutoff = anchor - timedelta(days=days)
+        symbols = {str(s).lower() for s in [symbol, *aliases]}
+        wanted_tags = {str(t).lower() for t in tags}
+        rows = self.conn.execute("""SELECT payload_json FROM (
+            SELECT payload_json, ROW_NUMBER() OVER
+              (PARTITION BY event_id ORDER BY observed_at DESC,id DESC) AS rn
+            FROM event_versions WHERE julianday(observed_at)<=julianday(?)
+        ) WHERE rn=1""", (anchor.isoformat(),)).fetchall()
+        out = []
+        for row in rows:
+            event = json.loads(row[0])
+            if event["event_id"] in exclusions:
+                continue
+            seen = datetime.fromisoformat(event["vintage"]["revision_acquired_at"])
+            if seen < cutoff or event.get("event_type") == "price_alert":
+                continue
+            if _SEVERITY_INT.get(event.get("severity"), 0) < min_severity:
+                continue
+            if not (symbols & {s.lower() for s in event.get("affected_symbols", [])}
+                    or wanted_tags & {s.lower() for s in event.get("entities", [])}):
+                continue
+            event.pop("_id", None)
+            out.append(event)
+        # Current embeddings cannot rank a historical version of the text.
+        out.sort(key=lambda e: e["vintage"]["revision_acquired_at"], reverse=True)
+        return out[:top_k]
 
 
 def _row_to_event(row: sqlite3.Row) -> Dict[str, Any]:

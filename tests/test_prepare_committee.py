@@ -27,6 +27,8 @@ class _FakeHoldings:
 
 class _FakePM:
     def __init__(self):
+        from openinvest.core.memory_store import MemoryStore
+        self.store = MemoryStore()
         self.holdings = _FakeHoldings()
         self.strategy = {"target_assets": [
             {"symbol": "TEST.AX", "display_name": "Test ETF", "type": "etf"},
@@ -41,6 +43,7 @@ REENTRY = "REENTRY_PREP_SENTINEL"
 
 @pytest.fixture()
 def _mock_world(monkeypatch):
+    import openinvest.core.runner.session  # bind real dependencies before this fixture patches the coordinator's PM
     import openinvest.core.portfolio_manager as pm_mod
     monkeypatch.setattr(pm_mod, "PortfolioManager", _FakePM)
 
@@ -248,7 +251,9 @@ def test_prepare_facts_feed_save_defense_and_regime(_mock_world, monkeypatch):
     monkeypatch.setattr(persist, "_capture_macro_context", lambda **kw: {})
     brief = cr.prepare_committee_brief("TEST.AX")
     assert "path_profile" not in brief  # ……但不进出题内容（省 ~3K 字符）
-    facts = cr._load_brief_facts("TEST.AX")
+    from openinvest.core.decision_evidence import load_context
+    from openinvest.core.memory_store import MemoryStore
+    facts = load_context(MemoryStore().root, brief["context_id"], "TEST.AX")["inputs"]
     assert "path_profile" in facts      # 快照留着（交卷 / 路径快照用）……
     assert facts and facts["regime_brief"] and "INDEP_DEFENSE_FLAG: on" in facts["sentiment_brief"]
     seen = {}
@@ -256,7 +261,8 @@ def test_prepare_facts_feed_save_defense_and_regime(_mock_world, monkeypatch):
     monkeypatch.setattr(cr, "parse_cio_memo", lambda t, **kw: seen.update(kw) or real(t, **kw))
     # transcript 故意不抄任何确定性行
     res = cr.save_committee_transcript(
-        "TEST.AX", "=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\nSUGGESTED_ALLOC_CNY: 0\n")
+        "TEST.AX", "=== MACRO ===\nneutral\n=== QUANT_R1 ===\nneutral\n=== RISK_R1 ===\nok\n=== QUANT_R2 ===\nneutral\n=== RISK_R2 ===\nok\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\nSUGGESTED_ALLOC_CNY: 0\n",
+        context_id=brief["context_id"])
     assert seen["defense_flag_on"] is True
     assert seen["regime"] == cr.regime_label_from_text(facts["regime_brief"]) and seen["regime"]
     assert '"facts_source": "prepare"' in open(res["saved"], encoding="utf-8").read()

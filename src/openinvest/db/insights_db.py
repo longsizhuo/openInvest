@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from openinvest.db.wal import checkpoint as _wal_checkpoint
@@ -33,7 +34,10 @@ class InsightsDB:
     幂等写入：INSERT OR REPLACE（slug 是 PRIMARY KEY）
     """
 
-    def __init__(self, db_path: str = DEFAULT_DB_PATH):
+    def __init__(self, db_path: Optional[str] = None):
+        db_path = db_path or str(INVEST_ROOT / "db" / "insights.db")
+        parent = Path(db_path).parent
+        self.data_root = parent.parent if parent.name == "db" else parent
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         # 允许跨线程访问，配合 _lock 保证安全
         self.conn = sqlite3.connect(
@@ -121,10 +125,7 @@ class InsightsDB:
         action = candidate.get("verdict") or candidate.get("action", "")
         regime_tag = "_".join(candidate.get("regime", [])) or "any"
         hit_rate = candidate.get("hit_rate")
-        title = (
-            f"{candidate.get('asset', slug)} / {action} / {regime_tag} "
-            f"→ 命中率 {hit_rate*100:.0f}%" if hit_rate is not None else slug
-        )
+        title = body.strip().splitlines()[0].lstrip("# ") if body.strip() else slug
         self.upsert(
             slug=slug,
             asset=candidate.get("asset"),
@@ -137,26 +138,29 @@ class InsightsDB:
 
     # ============ 读 ============
 
-    def get(self, slug: str) -> Optional[Dict[str, Any]]:
+    def _eligible(self, row: Dict[str, Any], purpose: str) -> bool:
+        from openinvest.core.evidence_eligibility import Eligibility
+        return Eligibility(self.data_root).allows_insight(row["slug"], row, row.get("body") or "", purpose)
+
+    def get(self, slug: str, *, purpose: str = "advice") -> Optional[Dict[str, Any]]:
         """按 slug 查单条；不存在返回 None"""
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM insights WHERE slug = ?", (slug,))
             row = cursor.fetchone()
-        return dict(row) if row else None
+        return dict(row) if row and self._eligible(dict(row), purpose) else None
 
-    def list_all(self, limit: int = 200) -> List[Dict[str, Any]]:
+    def list_all(self, limit: int = 200, *, purpose: str = "advice") -> List[Dict[str, Any]]:
         """返回全部 insights，按 created_at 倒序，最多 limit 条"""
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT * FROM insights ORDER BY created_at DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM insights ORDER BY created_at DESC",
             )
             rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows if self._eligible(dict(r), purpose)][:limit]
 
-    def list_fresh(self, since_hours: int = 48, limit: int = 5) -> List[Dict[str, Any]]:
+    def list_fresh(self, since_hours: int = 48, limit: int = 5, *, purpose: str = "advice") -> List[Dict[str, Any]]:
         """返回最近 N 小时内写入的 insights，按 created_at 倒序
 
         对应 /api/insights/fresh 端点的核心查询，替代原来的 glob + mtime 扫描。
@@ -168,22 +172,22 @@ class InsightsDB:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT * FROM insights WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
-                (cutoff, limit)
+                "SELECT * FROM insights WHERE created_at >= ? ORDER BY created_at DESC",
+                (cutoff,)
             )
             rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows if self._eligible(dict(r), purpose)][:limit]
 
-    def list_by_hit_rate(self, min_hit_rate: float = 0.0, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_by_hit_rate(self, min_hit_rate: float = 0.0, limit: int = 50, *, purpose: str = "advice") -> List[Dict[str, Any]]:
         """按命中率过滤，用于测试和调试"""
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT * FROM insights WHERE hit_rate >= ? ORDER BY hit_rate DESC LIMIT ?",
-                (min_hit_rate, limit)
+                "SELECT * FROM insights WHERE hit_rate >= ? ORDER BY hit_rate DESC",
+                (min_hit_rate,)
             )
             rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows if self._eligible(dict(r), purpose)][:limit]
 
     def count(self) -> int:
         """总记录数"""
@@ -194,6 +198,8 @@ class InsightsDB:
 
     def delete(self, slug: str) -> bool:
         """删除单条，返回是否真删了"""
+        from openinvest.core.evidence_eligibility import Eligibility
+        Eligibility(self.data_root).revoke(f"insight:{slug}", "deleted")
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("DELETE FROM insights WHERE slug = ?", (slug,))

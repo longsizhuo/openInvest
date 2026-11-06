@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def _df(values):
     return pd.DataFrame(
-        {"Close": values}, index=pd.date_range("2024-01-01", periods=len(values)),
+        {"Close": values}, index=pd.date_range(end=pd.Timestamp.now().normalize(), periods=len(values)),
     )
 
 

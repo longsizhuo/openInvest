@@ -143,7 +143,18 @@ def load_skill(
     # Coordinator）都经这里，新模板用到也不会漏传。调用方显式传的同名变量优先。
     if "{{" in body:
         from openinvest.utils.base_currency import prompt_vars
-        variables = {**prompt_vars(), **variables}
+        from dataclasses import asdict
+        from openinvest.core.config import load_config
+        from openinvest.core.config.tunable import MarketRulesConfig
+        rules = asdict(load_config().market_rules)
+        per_asset = rules.pop("per_asset")
+        override = per_asset.get(str(variables.get("asset_symbol", "")).upper(), {})
+        if set(override) - set(rules):
+            raise ValueError("Unknown per-asset market rule")
+        rules = asdict(MarketRulesConfig(**{**rules, **override}))
+        rule_vars = {"RULE_" + k.upper(): format(v, "g") for k, v in rules.items() if k != "per_asset"}
+        currency_vars = prompt_vars() if re.search(r"\{\{(?!RULE_)[A-Z_]+\}\}", body) else {}
+        variables = {**currency_vars, **rule_vars, **variables}
     return _render_placeholders(body, variables)
 
 

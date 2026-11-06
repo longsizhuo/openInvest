@@ -15,6 +15,7 @@ import pytest
 
 from openinvest.core.decision_ledger import parse_committee_text
 from openinvest.core.runner import coordinator as co
+from tests.integrity_helpers import context_id
 
 CIO = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 800\n首笔 ¥800。"
 RAW = (f"=== MACRO ===\n宏观中性\n\n=== QUANT_R1 ===\nSIGNAL: bullish\n\n"
@@ -48,9 +49,9 @@ def _health(saved):
 
 def test_saved_facts_drive_defense_and_regime(env):
     mem, seen = env
-    co._save_brief_facts("TESTSYM", {"regime_brief": REGIME_BRIEF, "sentiment_brief": SENTIMENT_BRIEF,
-                                     "path_profile": {"p_down_30": 0.4}, "atr_pct": 1.2})
-    res = co.save_committee_transcript("TESTSYM", RAW, provider="hermes")
+    cid = context_id("TESTSYM", regime_brief=REGIME_BRIEF, sentiment_brief=SENTIMENT_BRIEF,
+                     path_profile={"p_down_30": 0.4}, atr_pct=1.2)
+    res = co.save_committee_transcript("TESTSYM", RAW, provider="hermes", context_id=cid)
     assert seen["defense_flag_on"] is True and seen["regime"] == "downtrend"
     assert _health(res["saved"])["facts_source"] == "prepare"
     got = parse_committee_text(open(res["saved"], encoding="utf-8").read())
@@ -60,24 +61,17 @@ def test_saved_facts_drive_defense_and_regime(env):
     assert snap["profile"] == {"p_down_30": 0.4} and snap["regime"] == "downtrend"
 
 
-def test_no_or_stale_facts_fall_back_to_transcript(env):
+def test_missing_context_never_falls_back_to_transcript(env):
     mem, seen = env
-    res = co.save_committee_transcript("TESTSYM", RAW)
-    assert seen["defense_flag_on"] is False                     # transcript 里没这行
-    assert _health(res["saved"])["facts_source"] == "transcript"
-    co._save_brief_facts("TESTSYM", {"regime_brief": REGIME_BRIEF, "sentiment_brief": SENTIMENT_BRIEF})
-    p = co._brief_facts_path("TESTSYM")
-    old = json.loads(p.read_text())
-    old["prepared_at"] = (datetime.now() - co.BRIEF_FACTS_MAX_AGE - timedelta(minutes=1)).isoformat()
-    p.write_text(json.dumps(old))
-    co.save_committee_transcript("TESTSYM", RAW)
-    assert seen["defense_flag_on"] is False                     # 超时的快照不用
+    with pytest.raises(ValueError, match="DATA_UNTRUSTED"):
+        co.save_committee_transcript("TESTSYM", RAW)
+    assert not seen
 
 
 def test_unparseable_cio_is_rejected_and_not_saved(env):
     mem, _ = env
     with pytest.raises(ValueError, match="UNCLEAR"):
-        co.save_committee_transcript("TESTSYM", "=== CIO ===\n我觉得还行\n")
+        co.save_committee_transcript("TESTSYM", "=== CIO ===\n我觉得还行\n", context_id=context_id("TESTSYM"))
     assert not list((mem / ".committee").rglob("TESTSYM.md"))
 
 
@@ -93,9 +87,9 @@ def _call_mcp(name, args):
 
 
 def test_mcp_submit_committee(env):
-    co._save_brief_facts("TESTSYM", {"regime_brief": REGIME_BRIEF, "sentiment_brief": SENTIMENT_BRIEF})
+    cid = context_id("TESTSYM", regime_brief=REGIME_BRIEF, sentiment_brief=SENTIMENT_BRIEF)
     res = _call_mcp("submit_committee", {"symbol": "TESTSYM", "transcript": RAW, "provider": "hermes",
-                                         "model": "claude-haiku-5-5"})
+                                         "model": "claude-haiku-5-5", "context_id": cid})
     assert not res.isError
     out = res.structuredContent
     out = out.get("result", out)
@@ -106,32 +100,34 @@ def test_mcp_submit_committee(env):
     from openinvest.jobs.review_calc import model_era_of
     h = parse_committee_text(Path(out["saved"]).read_text(encoding="utf-8"))["input_health"]
     assert h["model"] == "claude-haiku-5-5" and model_era_of(h, "2026-10-20") == "hermes:claude-haiku-5-5"
-    res2 = _call_mcp("submit_committee", {"symbol": "TESTSYM2", "transcript": RAW, "provider": "hermes"})
+    res2 = _call_mcp("submit_committee", {"symbol": "TESTSYM2", "transcript": RAW, "provider": "hermes", "context_id": context_id("TESTSYM2")})
     out2 = res2.structuredContent
     out2 = out2.get("result", out2)
     h2 = parse_committee_text(Path(out2["saved"]).read_text(encoding="utf-8"))["input_health"]
     assert h2["model"] == "unknown" and model_era_of(h2, "2026-10-20") == "hermes:unknown"
-    bad = _call_mcp("submit_committee", {"symbol": "TESTSYM", "transcript": "=== CIO ===\n还行\n"})
-    assert bad.isError and "UNCLEAR" in bad.content[0].text
+    bad = _call_mcp("submit_committee", {"symbol": "TESTSYM", "transcript": "=== CIO ===\n还行\n", "context_id": cid})
+    assert bad.isError and "different content" in bad.content[0].text
 
 
-def test_resubmit_without_facts_drops_stale_path_snapshot(env):
+def test_invalid_resubmit_preserves_existing_evidence(env):
     mem, _ = env
-    co._save_brief_facts("TESTSYM", {"regime_brief": REGIME_BRIEF, "sentiment_brief": SENTIMENT_BRIEF,
-                                     "path_profile": {"p_down_30": 0.4}})
-    co.save_committee_transcript("TESTSYM", RAW)
+    cid = context_id("TESTSYM", regime_brief=REGIME_BRIEF, sentiment_brief=SENTIMENT_BRIEF,
+                     path_profile={"p_down_30": 0.4})
+    co.save_committee_transcript("TESTSYM", RAW, context_id=cid)
     snap = mem / ".committee" / datetime.now().strftime("%Y-%m-%d") / "TESTSYM_path.json"
     assert snap.exists()
-    co._brief_facts_path("TESTSYM").unlink()                    # 快照没了 / 过期
-    co.save_committee_transcript("TESTSYM", RAW)
-    assert not snap.exists()                                     # 不留一份和新裁决对不上的路径快照
+    before = snap.read_bytes()
+    (mem / ".evidence/contexts" / f"{cid}.json").unlink()
+    replay = co.save_committee_transcript("TESTSYM", RAW, context_id=cid)
+    assert replay["replayed"] and not replay["current_advice_valid"]
+    assert snap.read_bytes() == before
 
 
 def test_submit_writes_daily_sidecar_and_loader_reads_it(env):
     mem, _ = env
-    co._save_brief_facts("TESTSYM", {"regime_brief": REGIME_BRIEF, "sentiment_brief": SENTIMENT_BRIEF,
-                                     "path_reference": "- 30d 回踩中位 -4%", "path_profile": {"x": 1}})
-    co.save_committee_transcript("TESTSYM", RAW, provider="hermes")
+    cid = context_id("TESTSYM", regime_brief=REGIME_BRIEF, sentiment_brief=SENTIMENT_BRIEF,
+                     path_reference="- 30d 回踩中位 -4%", path_profile={"x": 1})
+    co.save_committee_transcript("TESTSYM", RAW, provider="hermes", context_id=cid)
     day = datetime.now().strftime("%Y-%m-%d")
     rec = co.load_submitted_committee("TESTSYM", day)
     assert rec["verdict"]["verdict"] in ("ACCUMULATE", "HOLD")      # 规则后裁决（防御开着可能降级）
@@ -145,7 +141,7 @@ def test_sidecar_keeps_numpy_numbers_numeric(env, monkeypatch):
     real = co.parse_cio_memo
     monkeypatch.setattr(co, "parse_cio_memo", lambda t, **kw: {**real(t, **kw), "confidence": np.float64(0.66),
                                                               "alloc_cny": np.int64(800)})
-    co.save_committee_transcript("TESTSYM", RAW)
+    co.save_committee_transcript("TESTSYM", RAW, context_id=context_id("TESTSYM"))
     rec = co.load_submitted_committee("TESTSYM", datetime.now().strftime("%Y-%m-%d"))
     assert isinstance(rec["verdict"]["confidence"], float) and f"{rec['verdict']['confidence']:.2f}" == "0.66"
     assert rec["verdict"]["alloc_cny"] == 800

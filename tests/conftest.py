@@ -5,6 +5,12 @@ from pathlib import Path
 
 import pytest
 
+# Keep the data root supplied before any application imports by the isolated runner.
+# Deleting it in the per-test fixture would let subprocesses rediscover a real checkout.
+_ISOLATED_RUN = os.environ.get("INVEST_TEST_ISOLATED") == "1"
+if sys.platform.startswith("linux") and not _ISOLATED_RUN:
+    raise RuntimeError("Refusing tests without OS isolation. Use: python3 scripts/run_isolated_tests.py --python .venv/bin/python -- tests/ -q")
+
 ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -35,7 +41,8 @@ def _isolate_invest_env(monkeypatch):
     成为真正的 per-test config 隔离闸（不再只隔离 env 一半）。
     """
     from openinvest.core.config import reset_config
-    for key in [k for k in os.environ if k.startswith("INVEST_")] + list(OUTBOUND_KEYS):
+    for key in [k for k in os.environ if k.startswith("INVEST_")
+                and not (_ISOLATED_RUN and k in ("INVEST_HOME", "INVEST_TEST_ISOLATED"))] + list(OUTBOUND_KEYS):
         monkeypatch.delenv(key, raising=False)
     # 测试环境没有 LLM key，reasoning_by_agent() 自动判会落到 agent 模式；既有测试断言的是
     # backend 行为，默认钉 backend，测 agent 模式的测试在 body 里 setenv("…", "agent")

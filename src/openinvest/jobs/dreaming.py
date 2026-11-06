@@ -42,7 +42,10 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openinvest.db.insights_db import InsightsDB
 
 import pandas as pd
 
@@ -127,6 +130,7 @@ def light_sleep(store: MemoryStore) -> List[Dict[str, Any]]:
     path = store.root / ".dreams" / "verdict_review.jsonl"
     cutoff = (datetime.now() - timedelta(days=_get_dreaming_config().lookback_days)).strftime("%Y-%m-%d")
     signals: List[Dict[str, Any]] = []
+    seen_days = set()
 
     if not path.exists():
         store.dream_event({"phase": "light_sleep", "signals_collected": 0,
@@ -146,10 +150,26 @@ def light_sleep(store: MemoryStore) -> List[Dict[str, Any]]:
             continue
         if not r.get("hits"):  # 没有任何成熟窗口 → 无可学 outcome，跳过
             continue
+        if r.get("source") != "live":
+            continue
+        health = r.get("input_health") or {}
+        version_key = (str(r.get("model_era") or "unknown").lower(), health.get("code_version", "unknown"),
+                       health.get("config_sha256", "unknown"))
+        day_key = (r.get("asset"), r.get("date"), *version_key)
+        if day_key in seen_days:
+            continue
+        from openinvest.core.evidence_eligibility import Eligibility, digest
+        evidence_id = f"review:{digest(r)}"
+        if not Eligibility(store.data_root).allows(evidence_id, r, "learn"):
+            continue
+        seen_days.add(day_key)
         # regime 优先取 verdict_review.jsonl 已留痕的 regime_at_decision（review 时
         # 截断算好，一致且省重复拉行情）；老记录没有该字段时回退现算。
-        regime = r.get("regime_at_decision") or _decision_regime(r["asset"], r["date"])
+        # Do not reconstruct a missing decision-time feature with today's data.
+        regime = r.get("regime_at_decision")
         signals.append({
+            "evidence_id": evidence_id,
+            "model_era": version_key[0], "code_version": version_key[1], "config_sha256": version_key[2],
             "decision_date": r["date"],
             "asset": r["asset"],
             "verdict": r["verdict"],
@@ -205,10 +225,9 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
     for s in signals:
         if not s.get("verdict"):
             continue
-        # 免责只走 crash regime 一条（macro_shock 免责已退役，见 docstring）。
-        if s.get("regime_crash"):  # crash 期市场脱离基本面，免责，不进模式学习
-            continue
-        key = (s["asset"], s["verdict"], tuple(sorted(s.get("regime", []))))
+        # A real crash and a wrong prediction are valid negative samples.
+        key = (s["asset"], s["verdict"], tuple(sorted(s.get("regime", []))),
+               s.get("model_era", "unknown"), s.get("code_version", "unknown"), s.get("config_sha256", "unknown"))
         buckets[key].append(s)
 
     # regime 基率（lift-based caution 评分用）：每 (asset, regime, window) 统计**所有 verdict**
@@ -216,14 +235,15 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
     # base_down = 跌的比例。caution lift = HOLD missed_up − base_up；base_down 是"下行存在门"。
     regime_base: Dict[Tuple, Dict[str, int]] = defaultdict(lambda: {"up": 0, "down": 0, "n": 0})
     for s in signals:
-        if not s.get("verdict") or s.get("regime_crash"):
+        if not s.get("verdict"):
             continue
         reg_t = tuple(sorted(s.get("regime", [])))
         for window in _get_dreaming_config().windows:
             d = (s.get("directions") or {}).get(f"{window}d")
             if d is None:
                 continue
-            b = regime_base[(s["asset"], reg_t, window)]
+            b = regime_base[(s["asset"], reg_t, window, s.get("model_era", "unknown"),
+                             s.get("code_version", "unknown"), s.get("config_sha256", "unknown"))]
             b["n"] += 1
             if d == "up":
                 b["up"] += 1
@@ -231,8 +251,8 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
                 b["down"] += 1
 
     candidates: List[Dict[str, Any]] = []
-    for (asset, verdict, regime), items in buckets.items():
-        if len(items) < _get_dreaming_config().min_recall:
+    for (asset, verdict, regime, model_era, code_version, config_sha256), items in buckets.items():
+        if not items:
             continue
         is_hold = verdict.upper() == "HOLD"
         for window in _get_dreaming_config().windows:
@@ -242,7 +262,7 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
                 for i in items
                 if wk in i.get("hits", {}) and i["hits"].get(wk) is not None
             ]
-            if len(pairs) < _get_dreaming_config().min_recall:
+            if not pairs:
                 continue
             n = len(pairs)
             hit_rate = sum(1 for h, _ in pairs if h) / n
@@ -250,6 +270,8 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
             avg_return = (sum(rets) / len(rets) * 100) if rets else 0.0  # 小数→%
 
             cand = {
+                "model_era": model_era, "code_version": code_version, "config_sha256": config_sha256,
+                "source_evidence_ids": sorted({i["evidence_id"] for i in items if i.get("evidence_id")}),
                 "asset": asset,
                 "verdict": verdict,
                 "regime": list(regime),
@@ -257,23 +279,25 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
                 "count": n,
                 "hit_rate": round(hit_rate, 3),
                 "avg_return_pct": round(avg_return, 2),
-                "kind": "reliable",
+                "kind": "descriptive",
             }
             # 附 regime 基率（caution lift 评分用）
-            rb = regime_base.get((asset, regime, window))
+            rb = regime_base.get((asset, regime, window, model_era, code_version, config_sha256))
             if rb and rb["n"] > 0:
                 cand["base_up"] = round(rb["up"] / rb["n"], 3)
                 cand["base_down"] = round(rb["down"] / rb["n"], 3)
                 cand["base_n"] = rb["n"]
             if is_hold:
-                # 没命中(非 flat) 里，涨的=踏空、跌的=躲跌
+                # Market direction alone does not establish opportunity cost:
+                # HOLD with an existing position participates in both gains and losses.
                 missed_up = sum(1 for h, r in pairs if not h and r is not None and r > 0)
                 avoided_down = sum(1 for h, r in pairs if not h and r is not None and r < 0)
                 cand["missed_up_rate"] = round(missed_up / n, 3)
                 cand["avoided_down_rate"] = round(avoided_down / n, 3)
+                cand["hold_economic_interpretation"] = "unknown_without_exposure_and_feasible_counterfactual"
                 # 踏空比命中还频繁 → 这是个"该出手却 HOLD"的告诫模式
                 if cand["missed_up_rate"] > hit_rate:
-                    cand["kind"] = "caution"
+                    cand["kind"] = "directional_review_required"
             candidates.append(cand)
 
     store.write_dream_state("candidates", {"candidates": candidates,
@@ -286,34 +310,13 @@ def rem_sleep(store: MemoryStore, signals: List[Dict[str, Any]]) -> List[Dict[st
 # Deep Sleep — 阈值门 + （可选）LLM 验伪 + 写 insights
 # ----------------------------------------------------------------------
 
-LLM_VERIFY_SYSTEM_PROMPT = """\
-你是金融模式审稿人。下面是一系列"用户历史交易行为 vs 市场结果"的统计候选。
-每个候选都已经通过统计阈值门（命中率 + 样本量 + 平均收益）。
-
-但**统计阈值不能区分**：
-1. 真实可学习的行为模式 — 应该 KEEP 写入长期记忆
-2. 虚假相关性（spurious correlation） — 应该 REJECT，不污染未来决策
-
-虚假相关性的常见特征：
-- 样本量勉强（count 接近 MIN_RECALL）+ 命中率刚好擦边（hit_rate 0.6-0.7）
-- regime 标签太具体导致样本被切薄（例 "vix_low + tnx_mid + asset 三联组合"）
-- avg_return_pct 绝对值很小（< 1%）—— 可能纯噪音
-- 同一资产的对称模式都通过（"买金赚 / 卖金亏"+"卖金赚 / 买金亏" 同时通过 → 多半是回测过拟合）
-
-真实模式的特征：
-- 样本量充分（count ≥ 6）+ 命中率明显（≥ 0.75）
-- regime 简单或宽泛（vix_low 单标签）
-- 收益方向和动作意图一致（买入后正收益 / 卖出后负收益）
-
-你的任务：对每个候选输出 KEEP 或 REJECT，给一句话理由（中文，≤30 字）。
-
-输出格式（严格 JSON，无其他文字）：
-{
-  "verdicts": [
-    {"id": 0, "decision": "KEEP", "reason": "样本充分命中明确"},
-    {"id": 1, "decision": "REJECT", "reason": "regime 三联标签样本被切薄"}
-  ]
-}
+LLM_VERIFY_SYSTEM_PROMPT = """你是金融研究审稿人。以下是尚未获得发布资格的候选。
+统计分数只是旧规则的诊断，不能证明因果、独立样本或投资价值。不要以固定命中率或样本数认定有效。
+检查来源资格、重叠样本、时间穿越、模型版本、真实持仓/成本、反证和基准。
+判断错误的有效样本必须保留；HOLD 后价格下跌不代表持有人避免了损失。
+逐条输出 KEEP（仅建议继续研究）、REJECT（候选推断不成立）或 PENDING（信息不足）。
+本审稿不授予发布/学习资格，资格由独立的来源和评估审批决定。
+严格 JSON：{"verdicts":[{"id":0,"decision":"PENDING","reason":"缺少独立评估证据"}]}。
 """
 
 
@@ -322,14 +325,19 @@ def _llm_verify_candidates(
 ) -> Tuple[List[bool], List[Dict[str, Any]]]:
     """让 LLM 给每个候选输出 KEEP/REJECT。返回 (kept_mask, raw_verdicts)
 
-    失败时 fallback 全部 KEEP（保守策略：宁可放过 spurious 也不漏 real pattern；
-    LLM 只是额外过滤层，统计阈值才是底线）。
+    验证不可用或响应不完整时全部 PENDING，不发布，也不作为 REJECT 删除。
 
     成本：单次 LLM 调用，输入 ~500-2000 token / 输出 ~200-500 token，
     DeepSeek-Chat 价格 ≈ ¥0.001-0.005 一次。每天最多一次。
     """
     if not candidates:
         return [], []
+
+    def pending(reason: str):
+        return [False] * len(candidates), [
+            {"id": i, "decision": "PENDING", "reason": reason}
+            for i in range(len(candidates))
+        ]
 
     # 缩简候选 payload，不浪费 token
     minimal = [
@@ -347,12 +355,8 @@ def _llm_verify_candidates(
         for i, c in enumerate(candidates)
     ]
 
-    from openinvest.core.config import get_locked
-    min_recall = _get_dreaming_config().min_recall
-    _, locked_dreaming, _, _ = get_locked()
-    min_score = locked_dreaming.min_score
     user_payload = (
-        f"统计阈值: hit_rate≥0.5 隐含; count≥{min_recall}; score≥{min_score}\n"
+        "以下旧分数只作诊断，不代表候选已通过评估。\n"
         f"候选数: {len(candidates)}\n"
         f"候选 JSON:\n{json.dumps(minimal, ensure_ascii=False, indent=2)}"
     )
@@ -361,8 +365,8 @@ def _llm_verify_candidates(
     from openinvest.utils.llm import get_llm_config_safe, json_object_kwargs, needs_thinking_disabled, sampling_kwargs
     api_key, base_url, model, _provider = get_llm_config_safe()
     if not api_key:
-        log.warning("LLM_API_KEY / DEEPSEEK_API_KEY 未设，跳过 LLM 验伪 (全部 KEEP)")
-        return [True] * len(candidates), []
+        log.warning("Dreaming 验证凭据缺失：候选待核验，不发布")
+        return pending("verifier_unavailable")
 
     try:
         from openai import OpenAI
@@ -385,21 +389,23 @@ def _llm_verify_candidates(
         )
         raw = response.choices[0].message.content or "{}"
         parsed = json.loads(raw)
-        verdicts = parsed.get("verdicts") or []
-    except Exception as e:  # noqa: BLE001  网络/解析任一失败 → 全 KEEP fallback
-        log.warning(f"Dreaming LLM 验伪失败 ({type(e).__name__}: {e})，fallback 全 KEEP")
-        return [True] * len(candidates), []
+        verdicts = parsed["verdicts"]
+        if not isinstance(verdicts, list) or len(verdicts) != len(candidates):
+            raise ValueError("incomplete verification response")
+        ids = set()
+        for v in verdicts:
+            if (not isinstance(v, dict) or type(v.get("id")) is not int
+                    or v["id"] not in range(len(candidates)) or v["id"] in ids
+                    or v.get("decision") not in ("KEEP", "REJECT", "PENDING")):
+                raise ValueError("invalid or duplicate verification result")
+            ids.add(v["id"])
+    except Exception as e:  # noqa: BLE001  不可用与否决是不同状态
+        log.warning("Dreaming 验证失败 (%s)：候选待核验，不发布", type(e).__name__)
+        return pending("verification_failed")
 
-    # 把 verdicts 映射到 mask
-    mask = [True] * len(candidates)
+    mask = [False] * len(candidates)
     for v in verdicts:
-        try:
-            idx = int(v.get("id", -1))
-            decision = str(v.get("decision", "KEEP")).upper().strip()
-            if 0 <= idx < len(candidates) and decision == "REJECT":
-                mask[idx] = False
-        except (ValueError, TypeError):
-            continue
+        mask[v["id"]] = v["decision"] == "KEEP"
 
     return mask, verdicts
 
@@ -423,8 +429,9 @@ def _prune_rejected_from_candidates(
 
     # 构建 rejected 的 identity set
     def _key(c: Dict[str, Any]) -> tuple:
-        return (c.get("asset"), c.get("verdict"),
-                tuple(c.get("regime", [])), c.get("window_days"))
+        return (c.get("asset"), _label(c),
+                tuple(c.get("regime", [])), c.get("window_days"),
+                c.get("model_era"), c.get("code_version"), c.get("config_sha256"))
 
     rejected_keys = {_key(c) for c in rejected}
     original_count = len(pool["candidates"])
@@ -437,7 +444,10 @@ def _prune_rejected_from_candidates(
         log.info(f"candidates.json: 移除 {pruned} 条 LLM REJECT 条目")
 
 
-def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def deep_sleep(
+    store: MemoryStore, candidates: List[Dict[str, Any]], *,
+    insights_db: Optional[InsightsDB] = None,
+) -> List[Dict[str, Any]]:
     """阈值门通过的写 insights/*.md + 更新 MEMORY.md + 追加 DREAMS.md
 
     P1-3: 阈值门后再加一道可选 LLM 验伪（INVEST_DREAMING_LLM_VERIFY=1 启用）。
@@ -447,9 +457,9 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
     accepted: List[Dict[str, Any]] = []
     for c in candidates:
         score = _score(c)
-        if score < locked_dreaming.min_score or c["count"] < _get_dreaming_config().min_recall:
-            continue
         c["score"] = score
+        c["legacy_score_gate_passed"] = score >= locked_dreaming.min_score and c["count"] >= _get_dreaming_config().min_recall
+        # Old scores remain a shadow diagnostic, never a source-validity test.
         accepted.append(c)
 
     if not accepted:
@@ -465,13 +475,16 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
     if _get_dreaming_config().llm_verify_enabled:
         keep_mask, verdicts = _llm_verify_candidates(accepted)
         kept = [c for c, k in zip(accepted, keep_mask) if k]
-        rejected = [c for c, k in zip(accepted, keep_mask) if not k]
+        rejected_ids = {v["id"] for v in verdicts if v.get("decision") == "REJECT"}
+        rejected = [c for i, c in enumerate(accepted) if i in rejected_ids]
         rejected_count = len(rejected)
+        pending_count = len(accepted) - len(kept) - rejected_count
         store.dream_event({
             "phase": "deep_sleep_llm_verify",
             "input_count": len(accepted),
             "kept": len(kept),
             "rejected": rejected_count,
+            "pending": pending_count,
             "verdicts": verdicts[:20],  # 限长，防 events.jsonl 爆
         })
         log.info(
@@ -484,26 +497,30 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
         accepted = kept
         if not accepted:
             store.dream_event({"phase": "deep_sleep", "accepted": 0,
-                              "note": "all_rejected_by_llm_verify"})
+                              "note": "verification_pending" if pending_count else "all_rejected_by_llm_verify"})
             return []
+
+    from openinvest.core.evidence_eligibility import Eligibility, digest, candidate_payload
+    policy = Eligibility(store.data_root)
+    qualified = [c for c in accepted if policy.allows(f"candidate:{digest(candidate_payload(c))}", candidate_payload(c), "publish")]
+    if len(qualified) != len(accepted):
+        store.dream_event({"phase": "deep_sleep_eligibility", "pending": len(accepted) - len(qualified),
+                           "note": "source_lineage_and_independent_evaluation_required"})
+    accepted = qualified
+    if not accepted:
+        return []
 
     insights_dir = store.root / "insights"
     insights_dir.mkdir(parents=True, exist_ok=True)
 
-    # 按需懒加载 InsightsDB（DB 路径与 dreaming job 解耦；测试时传 db=None 跳过）
-    from openinvest.db.insights_db import InsightsDB
-    try:
-        _insights_db: Optional[InsightsDB] = InsightsDB()
-    except Exception as e:
-        log.warning(f"InsightsDB 初始化失败（降级：只写 .md）: {e}")
-        _insights_db = None
+    # 数据库由调用者显式提供；临时 MemoryStore 不得隐式打开另一个实例的库。
 
     for c in accepted:
         regime_tag = "_".join(c["regime"]) or "any"
         label = _label(c)
         is_caution = c.get("kind") == "caution"
         kind_tag = "caution" if is_caution else "reliable"
-        slug = _slugify(f"{c['asset']}_{label}_{regime_tag}_{c['window_days']}d_{kind_tag}")
+        slug = _candidate_slug(c)
         if is_caution:
             missed = c.get("missed_up_rate", 0.0)
             title = f"⚠️ 告诫: {regime_tag} 里对 {c['asset']} HOLD 频繁踏空"
@@ -520,7 +537,7 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
                 f"历史上当市场处于 **{regime_tag}** 时，委员会对 {c['asset']} 给出 **{label}**，"
                 f"{c['window_days']} 天后这个判断的命中率是 **{c['hit_rate']*100:.0f}%**"
                 f"（n={c['count']}，期间实际平均涨跌 {c['avg_return_pct']:+.2f}%）。\n\n"
-                f"> 命中率高 = 该模式经过事后验证，可加权。"
+                f"> 这是已核验来源的描述统计；命中率不等于扣费收益或独立预测优势。"
             )
         body = f"""# {title}
 
@@ -540,10 +557,13 @@ def deep_sleep(store: MemoryStore, candidates: List[Dict[str, Any]]) -> List[Dic
 > "没动"阈值按资产波动率定（非写死），经 MEMORY.md 索引注入决策上下文。
 """
         # 双写：.md 文件（人类可读副本，渐进迁移保留）+ SQLite（SQL 查询后端）
+        from openinvest.core.evidence_eligibility import insight_payload
+        parent = candidate_payload(c)
+        policy.derive(f"insight:{slug}", insight_payload(slug, c, body), {f"candidate:{digest(parent)}": parent})
         store.write(f"insights/{slug}", "insight", c, body)
-        if _insights_db is not None:
+        if insights_db is not None:
             try:
-                _insights_db.upsert_from_candidate(slug, c, body)
+                insights_db.upsert_from_candidate(slug, c, body)
             except Exception as e:
                 log.warning(f"insights SQLite 写入失败（slug={slug}）: {e}")
         store.dream_event({"phase": "deep_sleep", "accepted": slug, "score": c["score"]})
@@ -640,7 +660,12 @@ def run() -> Dict[str, Any]:
         store.dream_event({"phase": "start", "lock_acquired": True})
         signals = light_sleep(store)
         candidates = rem_sleep(store, signals)
-        accepted = deep_sleep(store, candidates)
+        from openinvest.db.insights_db import InsightsDB
+        db = InsightsDB(str(store.data_root / "db" / "insights.db"))
+        try:
+            accepted = deep_sleep(store, candidates, insights_db=db)
+        finally:
+            db.close()
         store.dream_event({"phase": "end", "accepted": len(accepted)})
         return {
             "status": "success",

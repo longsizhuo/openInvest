@@ -77,7 +77,7 @@ def build_input_health(report: "CommitteeReport", verdict: Dict[str, Any],
     unavailable = [role for role, text in (
         ("macro", report.macro_view), ("quant", report.quant_view),
         ("risk", report.risk_view), ("cio", report.cio_memo),
-    ) if text and AGENT_UNAVAILABLE_MARKER in text]
+    ) if text and f"{AGENT_UNAVAILABLE_MARKER} reason=" in text]
     health["worker_unavailable"] = unavailable
     if debate_meta:
         if debate_meta.get("model") is not None:
@@ -87,6 +87,7 @@ def build_input_health(report: "CommitteeReport", verdict: Dict[str, Any],
     health["rewritten"] = rewrite_tags(verdict)
     health["forced_hold"] = forced_hold(verdict)
     health["cio_unclear"] = str(verdict.get("verdict") or "").upper() == "UNCLEAR"
+    health["decision_status"] = verdict.get("decision_status", "READY")
     return health
 
 
@@ -143,6 +144,33 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     macro_ctx = _capture_macro_context(as_of_date=date_override)
     run_at = date_override or datetime.now().isoformat(timespec="seconds")
     health = build_input_health(report, verdict, debate_meta, input_health)
+    from openinvest.core.decision_evidence import enforce_input_health
+    enforce_input_health(verdict, health)
+    if health.get("context_id") and output_dir is None:
+        from openinvest.core.decision_evidence import load_context
+        try:
+            load_context(store.root, health["context_id"], report.asset.get("symbol", ""))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            verdict.setdefault("_original_verdict", verdict.get("verdict"))
+            verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
+            verdict.update(verdict="HOLD", alloc_cny=0, confidence=0.0,
+                           decision_status="DATA_UNTRUSTED", hold_reason="context_changed")
+            health.update(decision_status="DATA_UNTRUSTED", context_error=str(e))
+            report.cio_memo = "[QUALITY_ALERT] DATA_UNTRUSTED：输入或规则在分析期间变化，请重新分析。\n\n" + report.cio_memo
+    from openinvest.core.decision_evidence import record_decision
+    evidence = record_decision(store.root, report.asset.get("symbol", ""),
+                               {"cio_memo": report.cio_memo, "fields": verdict.get("_raw_proposal"),
+                                "macro": report.macro_view, "quant": report.quant_view,
+                                "risk": report.risk_view}, verdict, health,
+                               context_id=health.get("context_id"), historical=output_dir is not None)
+    health.update(evidence)
+    verdict.update(evidence)
+    if verdict.get("decision_status") == "DATA_UNTRUSTED" and "[QUALITY_ALERT]" not in report.cio_memo:
+        report.cio_memo = "[QUALITY_ALERT] DATA_UNTRUSTED：当前没有可执行建议，以下仅保留原始意见供排查。\n\n" + report.cio_memo
+    if output_dir is None and verdict.get("review_plan") is not None and verdict.get("decision_status") != "DATA_UNTRUSTED":
+        from openinvest.services.review_plans import update_plan
+        verdict["review_plan_state"] = update_plan(store, report.asset.get("symbol", ""),
+                                                   verdict["review_plan"], evidence_id=evidence["decision_id"])
 
     lines = [
         f"# Committee: {report.asset.get('display_name', report.asset.get('symbol'))}",

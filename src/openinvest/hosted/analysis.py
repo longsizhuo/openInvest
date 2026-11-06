@@ -57,7 +57,7 @@ def cancel():
 
 
 def prepare(call, symbol):
-    from openinvest.core.runner.coordinator import _brief_facts_path
+    from openinvest.core.decision_evidence import load_context
     with _lock:
         with db() as connection:
             connection.execute("UPDATE analyses SET state='expired' WHERE state='prepared' AND created<?", (time.time()-21600,))
@@ -70,7 +70,8 @@ def prepare(call, symbol):
         if fingerprint() != before:
             raise ValueError("Ledger changed during preparation; prepare again")
         canonical = result["asset"]["symbol"]
-        facts = json.loads(_brief_facts_path(canonical).read_text())
+        context = load_context(root()/"memory", result["context_id"], canonical)
+        facts = {"context_id": context["context_id"], "inputs": context["inputs"]}
         analysis_id = uuid.uuid4().hex
         from openinvest.core.portfolio_manager import PortfolioManager
         pm = PortfolioManager()
@@ -84,7 +85,8 @@ def prepare(call, symbol):
 
 
 def submit(call, symbol, transcript, provider, model, analysis_id):
-    from openinvest.core.runner.coordinator import _load_brief_facts, _COMMITTEE_SECTION_RE
+    from openinvest.core.runner.coordinator import _COMMITTEE_SECTION_RE
+    from openinvest.core.decision_evidence import load_context
     from openinvest.services.symbol_map import resolve_symbol
     from openinvest.core.portfolio_manager import PortfolioManager
     canonical = resolve_symbol(symbol, PortfolioManager().strategy.get("target_assets", []))
@@ -100,7 +102,10 @@ def submit(call, symbol, transcript, provider, model, analysis_id):
                 receipt = json.loads(row["result"])
                 if receipt["signature"] != signature:
                     raise ValueError("analysis_id already submitted with different arguments")
-                return receipt["response"]
+                response = receipt["response"]
+                from openinvest.core.decision_evidence import current_decision
+                valid = current_decision(root()/"memory", {"decision_id": response.get("evidence_id", "")}, canonical)
+                return {**response, "replayed": True, "response_type": "historical_receipt", "current_advice_valid": valid}
             if row["state"] != "prepared":
                 raise ValueError("Analysis unavailable or outcome unknown; inspect the ledger")
             if time.time()-row["created"] > 21600 or fingerprint() != row["fingerprint"]:
@@ -111,20 +116,29 @@ def submit(call, symbol, transcript, provider, model, analysis_id):
         if invalid:
             raise ValueError("Prepared inputs expired or ledger changed; prepare again")
         facts = json.loads(row["facts"])
-        current = _load_brief_facts(canonical)
-        if current != facts:
-            raise ValueError("Prepared evidence is unavailable; cancel and prepare again")
+        try:
+            current = load_context(root()/"memory", facts["context_id"], canonical)
+            if current["inputs"] != facts["inputs"]:
+                raise ValueError("Prepared evidence changed")
+        except (ValueError, KeyError, OSError) as e:
+            with db() as connection:
+                connection.execute("UPDATE analyses SET state='expired' WHERE id=?", (analysis_id,))
+            raise ValueError("Prepared evidence is unavailable; prepare again") from e
         from openinvest.core.committee import parse_cio_memo
         parts = _COMMITTEE_SECTION_RE.split(transcript)
         sections = {parts[i].strip(): parts[i+1].strip() for i in range(1, len(parts)-1, 2)}
         cio = sections.get("CIO", transcript if not sections else "")
         if not transcript.strip() or parse_cio_memo(cio, worker_brief=transcript).get("verdict") == "UNCLEAR":
             raise ValueError("CIO verdict is missing; correct the transcript and resubmit")
+        if current.get("declared_model") not in (None, "unknown", model.strip()):
+            raise ValueError("Model changed after prepare; correct the model or cancel and prepare again")
+        if any(not sections.get(role) for role in current["inputs"].get("required_roles", [])):
+            raise ValueError("Required committee roles are missing; complete the prepared protocol")
         with db() as connection:
             connection.execute("UPDATE analyses SET state='running' WHERE id=?", (analysis_id,))
         # After validation, ANY failure can follow a ledger side effect. Preserve
         # the uncertain receipt; never turn a post-write ValueError into replay.
-        result = call(canonical, transcript, provider, model)
+        result = call(canonical, transcript, provider, model, context_id=facts["context_id"])
         result = {**result, "analysis_id": analysis_id}
         if "saved" in result:
             saved = Path(result["saved"])

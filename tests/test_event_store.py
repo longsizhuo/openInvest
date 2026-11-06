@@ -160,7 +160,7 @@ def test_recall_vector_rerank(store):
     assert cs[0]["distance"] is not None
 
 
-def test_recall_as_of_excludes_events_created_after_cutoff(store):
+def test_recall_as_of_excludes_events_created_after_cutoff(store, monkeypatch):
     """issue #196 契约：as_of=D → 召回集内无 created_at > D 的事件（0/1：删 SQL 截断即红）
 
     - late_*：ts 早于 D 但 D 之后才入库（迟入库 = ts 口径截断的坑），向量最贴 query、
@@ -169,11 +169,19 @@ def test_recall_as_of_excludes_events_created_after_cutoff(store):
     - D 之后才挂上的源也不许出现
     """
     D = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=10)
+    import openinvest.db.event_store as event_module
+    clock = {"now": D-timedelta(hours=1)}
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"].astimezone(tz) if tz else clock["now"].replace(tzinfo=None)
+    monkeypatch.setattr(event_module, "datetime", Clock)
 
     def iso(dt):
         return dt.isoformat(timespec="seconds")
 
     for i in range(4):
+        clock["now"] = D-timedelta(hours=1)
         _, eid = store.upsert_event({
             "one_line_claim": f"pre {i}", "stance": "risk", "severity": "high",
             "ts": iso(D - timedelta(hours=i + 1)), "affected_symbols": ["AAPL"], "entities": [],
@@ -182,6 +190,7 @@ def test_recall_as_of_excludes_events_created_after_cutoff(store):
                            (iso(D - timedelta(hours=1)), eid))
         store.add_source(eid, src_name="early", url=f"https://e/{i}",
                          fetched_at=iso(D - timedelta(hours=1)))
+        clock["now"] = D+timedelta(hours=1)
         store.add_source(eid, src_name="late", url=f"https://l/{i}")  # fetched_at=now > D
     store.conn.commit()
     for i in range(3):
@@ -214,7 +223,7 @@ def test_recall_default_does_not_truncate_by_created_at(store):
     store.conn.commit()
 
     assert [e["event_id"] for e in store.recall("NDQ.AX", min_severity="mid")] == [eid]
-    assert store.recall("NDQ.AX", min_severity="mid", as_of=datetime.now(timezone.utc)) == []
+    assert [e["event_id"] for e in store.recall("NDQ.AX", min_severity="mid", as_of=datetime.now(timezone.utc))] == [eid]
 
 
 def test_recall_supersedes_marks_older_event_of_same_entity(store):

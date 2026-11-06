@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 from typing import Any, Dict, Tuple
 
 def _get_macro_buckets():
@@ -85,7 +87,11 @@ def _slugify(text: str) -> str:
 
 def _candidate_slug(c: Dict[str, Any]) -> str:
     regime_tag = "_".join(c["regime"]) or "any"
-    return _slugify(f"{c['asset']}_{_label(c)}_{regime_tag}_{c['window_days']}d")
+    base = _slugify(f"{c['asset']}_{_label(c)}_{regime_tag}_{c['window_days']}d")
+    version = {key: c.get(key) for key in ("model_era", "code_version", "config_sha256")}
+    if any(version.values()):
+        base += "_" + hashlib.sha256(json.dumps(version, sort_keys=True).encode()).hexdigest()[:12]
+    return base
 
 
 

@@ -113,14 +113,18 @@ def create_worker():
                         target = INVEST_ROOT/path
                         if any(parent.is_symlink() for parent in [target, *target.parents] if parent == INVEST_ROOT or INVEST_ROOT in parent.parents):
                             raise ValueError()
-                    for member in members:
-                        target = INVEST_ROOT/member.name
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_bytes(archive.extractfile(member).read())
+                    import tempfile, zipfile
+                    from openinvest.services.restore_guard import restore_archive
+                    with tempfile.TemporaryDirectory() as temporary:
+                        converted = Path(temporary) / "restore.zip"
+                        with zipfile.ZipFile(converted, "w") as output:
+                            for member in members:
+                                output.writestr(member.name, archive.extractfile(member).read())
+                        restore_archive(INVEST_ROOT, converted)
                 _apply_base_currency()
             except Exception:
                 return JSONResponse({"error": "Invalid backup"}, status_code=422)
-            return JSONResponse({"restored": True})
+            return JSONResponse({"restored": True, "status": "restored_pending_reconciliation"})
 
     @asynccontextmanager
     async def lifespan(_app):

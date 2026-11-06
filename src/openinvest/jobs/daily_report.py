@@ -664,6 +664,11 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         full_report = (f"> ⚠️ 今天这些标的没有委员会裁决（agent 模式下由宿主 Agent 交卷，未收到）："
                        f"{', '.join(missing_verdicts)}。本日报不含它们的裁决。\n\n{full_report}")
 
+    from openinvest.services.decision_quality import render as render_decision_quality
+    quality_text = render_decision_quality(store.root)
+    if quality_text:
+        full_report = quality_text + "\n\n" + full_report
+
     # 5) Append 给 Dreaming（被跳过的资产标 N/A）
     daily_block = f"**委员会摘要**\n\n- 宏观: {macro_view[:200]}\n\n**资产裁决**:"
     for a in target_assets:
