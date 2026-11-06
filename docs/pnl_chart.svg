@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 558" role="img" aria-label="PnL chart with benchmark bars">
+  <style>
+    .label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .title { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; font-weight: bold; }
+  </style>
+  <rect width="800" height="558" fill="#0d1117"/>
+
+  <!-- ===== 上半：折线图（总权益单线）===== -->
+  <text x="50" y="20" fill="#c9d1d9" class="title">📈 总权益曲线（基准币种，起点 = 100，最近 30 天）</text>
+  <line x1="50" y1="54.4" x2="770" y2="54.4"
+        stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="44" y="58.4" text-anchor="end" fill="#6e7681" class="label">100</text>
+  <text x="44" y="40" text-anchor="end" fill="#3fb950" class="label">+</text>
+  <text x="44" y="208" text-anchor="end" fill="#f85149" class="label">−</text>
+  <text x="50" y="228" fill="#6e7681" class="label">30 天前</text>
+  <text x="770" y="228" text-anchor="end" fill="#6e7681" class="label">今天</text>
+
+  <polyline points="50.0,54.4 56.4,54.7 62.9,50.8 69.3,51.6 75.7,53.3 82.1,57.8 88.6,57.6 95.0,57.3 101.4,60.7 107.9,62.4 114.3,65.5 120.7,68.0 127.1,70.8 133.6,73.9 140.0,71.4 146.4,65.5 152.9,62.4 159.3,64.9 165.7,70.8 172.1,72.0 178.6,70.3 185.0,69.7 191.4,68.6 197.9,69.4 204.3,76.2 210.7,86.4 217.1,97.4 223.6,97.4 230.0,98.2 236.4,99.7 242.9,101.4 249.3,106.2 255.7,127.1 262.1,127.1 268.6,133.6 275.0,123.7 281.4,120.0 287.9,119.7 294.3,118.3 300.7,125.4 307.1,127.1 313.6,133.0 320.0,125.4 326.4,127.1 332.9,124.0 339.3,127.3 345.7,125.4 352.1,126.5 358.6,115.5 365.0,119.4 371.4,122.3 377.9,127.3 384.3,128.2 390.7,125.4 397.1,120.8 403.6,116.0 410.0,99.9 416.4,103.6 422.9,101.6 429.3,110.1 435.7,100.5 442.1,103.3 448.6,103.3 455.0,106.2 461.4,109.0 467.9,116.0 474.3,117.7 480.7,120.8 487.1,124.5 493.6,124.5 500.0,125.4 506.4,124.0 512.9,138.4 519.3,146.6 525.7,146.0 532.1,151.4 538.6,151.9 545.0,154.8 551.4,159.6 557.9,172.3 564.3,183.3 570.7,179.3 577.1,175.4 583.6,174.3 590.0,174.8 596.4,178.2 602.9,178.2 609.3,159.8 615.7,171.7 622.1,168.0 628.6,168.3 635.0,178.8 641.4,185.8 647.9,183.9 654.3,177.9 660.7,171.7 667.1,181.3 673.6,188.9 680.0,189.2 686.4,146.6 692.9,140.6 699.3,138.6 705.7,139.8 712.1,137.0 718.6,114.6 725.0,98.0 731.4,122.8 737.9,105.0 744.3,104.7 750.7,105.0 757.1,109.5 763.6,116.9 770.0,162.4" fill="none" stroke="#d29922" stroke-width="2.5"/>
+  <text x="760" y="48" text-anchor="end" fill="#f85149" font-size="22" font-weight="bold">▼</text>
+
+  <!-- 折线图图例 -->
+  <g transform="translate(58, 42)" class="label">
+    <line x1="0" y1="0" x2="14" y2="0" stroke="#d29922" stroke-width="2.5"/>
+    <text x="20" y="4" fill="#c9d1d9" font-weight="bold">总权益（时间加权，剔除存取款）</text>
+  </g>
+
+  <!-- ===== 分隔线 ===== -->
+  <line x1="50" y1="250" x2="770" y2="250"
+        stroke="#21262d" stroke-width="1"/>
+
+  <!-- ===== 下半：横向柱状图（vs N 基准 + 用户实盘）===== -->
+  <text x="50" y="278" fill="#c9d1d9" class="title">🏆 vs 9 基准 · 截至今日累计涨幅 (30 天，sample size 较小不构成 alpha 证据)</text>
+
+  <line x1="372.5" y1="285" x2="372.5" y2="515" stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/><text x="372.5" y="282" text-anchor="middle" fill="#6e7681" class="label">0%</text>
+  <text x="192" y="305.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">招商白酒 161725</text>
+<rect x="372.5" y="293" width="347.5" height="16" fill="#2ea043" opacity="0.7" rx="2"/>
+<text x="726.0" y="305.0" text-anchor="start" fill="#2ea043" class="label" font-weight="normal">+8.36%</text>
+<text x="192" y="327.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">Wealthfront (年化 6.2%)</text>
+<rect x="372.5" y="315" width="12.3" height="16" fill="#58a6ff" opacity="0.7" rx="2"/>
+<text x="390.8" y="327.0" text-anchor="start" fill="#58a6ff" class="label" font-weight="normal">+0.30%</text>
+<text x="192" y="349.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">Betterment (年化 6.1%)</text>
+<rect x="372.5" y="337" width="12.2" height="16" fill="#79c0ff" opacity="0.7" rx="2"/>
+<text x="390.6" y="349.0" text-anchor="start" fill="#79c0ff" class="label" font-weight="normal">+0.29%</text>
+<text x="192" y="371.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">蚂蚁帮你投 (年化 5.16%)</text>
+<rect x="372.5" y="359" width="10.3" height="16" fill="#bc8cff" opacity="0.7" rx="2"/>
+<text x="388.8" y="371.0" text-anchor="start" fill="#bc8cff" class="label" font-weight="normal">+0.25%</text>
+<text x="192" y="393.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">1 年定存 (1.5%)</text>
+<rect x="372.5" y="381" width="3.1" height="16" fill="#6e7681" opacity="0.7" rx="2"/>
+<text x="381.5" y="393.0" text-anchor="start" fill="#6e7681" class="label" font-weight="normal">+0.07%</text>
+<text x="192" y="415.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">余额宝 (1.3%)</text>
+<rect x="372.5" y="403" width="2.6" height="16" fill="#7d8590" opacity="0.7" rx="2"/>
+<text x="381.1" y="415.0" text-anchor="start" fill="#7d8590" class="label" font-weight="normal">+0.06%</text>
+<text x="192" y="437.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">沪深300</text>
+<rect x="372.5" y="425" width="0.0" height="16" fill="#e3b341" opacity="0.7" rx="2"/>
+<text x="378.5" y="437.0" text-anchor="start" fill="#e3b341" class="label" font-weight="normal">+0.00%</text>
+<text x="192" y="459.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">兴全合宜 163417</text>
+<rect x="355.2" y="447" width="17.2" height="16" fill="#56d364" opacity="0.7" rx="2"/>
+<text x="349.2" y="459.0" text-anchor="end" fill="#56d364" class="label" font-weight="normal">-0.41%</text>
+<text x="192" y="481.0" text-anchor="end" fill="#c9d1d9" class="label" font-weight="normal">易方达蓝筹 005827</text>
+<rect x="329.9" y="469" width="42.5" height="16" fill="#3fb950" opacity="0.7" rx="2"/>
+<text x="323.9" y="481.0" text-anchor="end" fill="#3fb950" class="label" font-weight="normal">-1.02%</text>
+<text x="192" y="503.0" text-anchor="end" fill="#d29922" class="label" font-weight="bold">★ 我的实盘</text>
+<rect x="200.0" y="491" width="172.5" height="16" fill="#d29922" opacity="1" rx="2"/>
+<text x="206.0" y="503.0" text-anchor="start" fill="#0d1117" class="label" font-weight="bold">-4.15%</text>
+
+  <!-- 口径脚注：两侧统计口径不同，不可直接比大小（issue #179 P1-A③）-->
+  <text x="50" y="548" fill="#6e7681" class="label">口径：★ 实盘 = 总权益时间加权收益（剔除存取款，含现金）；基准 = 窗口首日满仓一次性买入。口径不同，只看方向不比大小。</text>
+</svg>
