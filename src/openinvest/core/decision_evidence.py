@@ -193,7 +193,7 @@ def record_decision(memory_root: Path, symbol: str, raw: dict, final: dict,
 
 
 def current_decision(memory_root: Path, health: dict, symbol: str, *, verdict: dict | None = None,
-                     expected_model: str | None = None) -> bool:
+                     expected_model: str | None = None, transcript: str | None = None) -> bool:
     """A historical record is readable, but only bound current inputs qualify as a cache."""
     try:
         decision_id = health.get("decision_id", "")
@@ -209,6 +209,18 @@ def current_decision(memory_root: Path, health: dict, symbol: str, *, verdict: d
                 or input_health.get("decision_status") == "DATA_UNTRUSTED" or input_health.get("worker_unavailable")
                 or input_health.get("input_errors") or input_health.get("cio_unclear")):
             return False
+        sealed_text = json.loads((memory_root / ".evidence/transcripts" / f"{decision_id}.json").read_text())
+        if digest(sealed_text["payload"]) != sealed_text["sha256"]:
+            return False
+        canonical_text = sealed_text["payload"]["text"]
+        if (memory_root / ".evidence/transcripts" / f"{decision_id}.md").read_text() != canonical_text:
+            return False
+        if transcript is not None and transcript != canonical_text:
+            return False
+        if verdict is not None and "cio_memo" in verdict:
+            from openinvest.core.decision_ledger import parse_committee_text
+            if verdict["cio_memo"] != parse_committee_text(canonical_text).get("cio_memo"):
+                return False
         context = load_context(memory_root, payload["context_id"], symbol)
         if expected_model and context.get("declared_model") != expected_model:
             return False
