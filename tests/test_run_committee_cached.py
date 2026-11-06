@@ -166,9 +166,18 @@ def test_cli_cached_run_committee_works_without_llm_key(monkeypatch, capfd, tmp_
     md.parent.mkdir(parents=True)
     md.write_text(bind_cached_transcript(tmp_path/"memory", "AAPL", PERSIST_MD), encoding="utf-8")
 
+    from pathlib import Path
+    original_read=Path.read_text
+    reads=[]
+    def tracked_read(path,*a,**kw):
+        if path == md: reads.append(path)
+        return original_read(path,*a,**kw)
+    monkeypatch.setattr(Path,"read_text",tracked_read)
     cc.cmd_run_committee(argparse.Namespace(symbol="AAPL", force=False, max_rounds=1))
     out = json.loads(capfd.readouterr().out)
     assert out["status"] == "cached" and "Input Health" in out["transcript_md"]
+    assert len(reads)==1, "Return the same validated text snapshot; do not reread mutable latest"
+
 
     # 反向：没缓存（或 --force）+ 无 key → 仍然报 key 错并退出 1
     for force in (True, False):
