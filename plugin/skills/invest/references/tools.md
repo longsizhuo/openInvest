@@ -71,7 +71,13 @@ markdown (the markdown body is rendered from the frontmatter and may lag slightl
 ### Importing holdings from broker-app **screenshots** (you do the OCR; zero backend dependency)
 
 When the user sends a **screenshot** of broker holdings: **read the image yourself** (you have
-vision), convert each row into text as `symbol/units/cost/currency/channel`, then run
+vision), convert each row into text as `symbol/units/cost/currency/channel`. **Before any import
+call, including a preview without `--commit`**, identify the configured provider/endpoint and
+explain that this text contains private holdings, quantities, costs and account/channel names.
+Obtain approval to send those details to that provider for parsing; a stored key is not approval.
+If declined, do not call import: show the locally transcribed rows for review and use authorized
+structured ledger entry tools (or `holdings_v2` during first-time setup), which avoid this extra
+backend parsing call. After external parsing is approved, run
 `import --text "..."` (or POST /api/holdings/import). The backend `import`'s LLM parses **text
 only** — do not feed it the image (DeepSeek and most chat models don't accept images and will
 error). In short: screenshot → you transcribe to text → import. This is more accurate than
