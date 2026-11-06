@@ -173,3 +173,16 @@ def test_failed_decision_and_tampered_plan_are_never_current():
     edited=json.loads(sidecar.read_text());edited['verdict']['review_plan']={'conditions':[{'value':9999}]};edited['cio_memo']='changed waiting target'
     sidecar.write_text(json.dumps(edited))
     assert load_submitted_committee("SYNTHETIC",good['decision_date']) is None
+
+
+def test_current_cache_rejects_changed_transcript_without_changing_header():
+    from tests.integrity_helpers import context_id
+    from openinvest.core.runner.coordinator import save_committee_transcript
+    from openinvest.core.decision_evidence import current_decision
+    from openinvest.core.decision_ledger import parse_committee_file
+    good=save_committee_transcript("SYNTHETIC","=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7\nORIGINAL_REASON",context_id=context_id("SYNTHETIC"))
+    path=Path(good['latest_saved']);original=path.read_text();parsed=parse_committee_file(path)
+    assert current_decision(MemoryStore().root,parsed['input_health'],'SYNTHETIC',verdict=parsed,transcript=original)
+    path.write_text(original.replace('ORIGINAL_REASON','TAMPERED_ADVICE'));parsed=parse_committee_file(path)
+    assert not current_decision(MemoryStore().root,parsed['input_health'],'SYNTHETIC',verdict=parsed)
+    assert not current_decision(MemoryStore().root,parsed['input_health'],'SYNTHETIC',verdict=parsed,transcript=path.read_text())

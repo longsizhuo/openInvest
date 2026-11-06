@@ -1464,7 +1464,7 @@ async def run_committee(
         from openinvest.core.decision_evidence import current_decision
         from openinvest.utils.llm import get_llm_config_safe
         if parsed and not is_unclear(parsed) and current_decision(MemoryStore().root, parsed.get("input_health", {}), symbol,
-                                                                  verdict=parsed, expected_model=get_llm_config_safe()[2]):
+                                                                  verdict=parsed, expected_model=get_llm_config_safe()[2], transcript=cached.read_text(encoding="utf-8")):
             return {"cached": True, "decision_id": f"{today}/{symbol}",
                     **{k: parsed[k] for k in ("verdict", "confidence", "alloc_cny", "alloc_currency")},
                     "confidence_lookup": confidence_display(parsed, load_confidence_lookup(),

@@ -203,7 +203,7 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
     from openinvest.utils.llm import get_llm_config_safe
     if (transcript_path.exists() and not args.force and not is_unclear(cached_parsed)
             and current_decision(ROOT / "memory", (cached_parsed or {}).get("input_health", {}), args.symbol,
-                                 verdict=cached_parsed, expected_model=get_llm_config_safe()[2])):
+                                 verdict=cached_parsed, expected_model=get_llm_config_safe()[2], transcript=transcript_path.read_text(encoding="utf-8"))):
         from openinvest.capabilities.committee.i18n import bilingual
         from openinvest.jobs.review_calc import confidence_display
         from openinvest.jobs.verdict_review import load_confidence_lookup

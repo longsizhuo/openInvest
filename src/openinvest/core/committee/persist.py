@@ -240,6 +240,12 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
         if archived is not None:
             log.info("persist: 同日重跑，旧 transcript 归档到 %s", archived)
     path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    from openinvest.core.decision_evidence import _write_once
+    immutable = store.root / ".evidence/transcripts" / f"{evidence['decision_id']}.md"
+    immutable.parent.mkdir(parents=True, exist_ok=True)
+    with immutable.open("x", encoding="utf-8", newline="\n") as output:
+        output.write("\n".join(lines))
+    _write_once(immutable.with_suffix(".json"), {"text": "\n".join(lines)})
     store.dream_event({
         "phase": "committee_finished",
         "asset": report.asset.get("symbol"),

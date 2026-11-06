@@ -31,4 +31,9 @@ def bind_cached_transcript(memory_root, symbol, text):
     health.update(evidence)
     section="## Input Health (deterministic)\n\n```json\n"+json.dumps(health)+"\n```\n\n"
     pattern=r"## Input Health[^\n]*\n\s*```json\n.*?\n```\n*"
-    return re.sub(pattern,lambda _:section,text,flags=re.S) if "## Input Health" in text else text+"\n"+section
+    bound = re.sub(pattern,lambda _:section,text,flags=re.S) if "## Input Health" in text else text+"\n"+section
+    from openinvest.core.decision_evidence import _write_once
+    directory=memory_root/".evidence/transcripts";directory.mkdir(parents=True,exist_ok=True)
+    (directory/f"{evidence['decision_id']}.md").write_text(bound)
+    _write_once(directory/f"{evidence['decision_id']}.json",{"text":bound})
+    return bound

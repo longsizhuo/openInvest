@@ -492,6 +492,8 @@ def _save_committee_transcript_once(
     immutable_path.parent.mkdir(parents=True, exist_ok=True)
     with immutable_path.open("x", encoding="utf-8", newline="\n") as immutable:
         immutable.write("\n".join(lines))
+    from openinvest.core.decision_evidence import _write_once
+    _write_once(immutable_path.with_suffix(".json"), {"text": "\n".join(lines)})
     # 路径预测快照（path_review 闭环），与 Direct session 6.5 同一入口；顾问模式同样跳过
     from openinvest.utils.advisory import is_advisory_mode
     if not facts:
