@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.4](https://github.com/longsizhuo/openInvest/compare/v0.68.3...v0.68.4) (2026-11-06)
+
+
+### Docs
+
+* **readme:** 补齐 Jawz、Tencent Cloud 与 Xiaomi 致谢 ([#586](https://github.com/longsizhuo/openInvest/issues/586)) ([8b35bcd](https://github.com/longsizhuo/openInvest/commit/8b35bcdb405515ea7fb691a329d45ac4b7b0e601))
+
 ## [0.68.3](https://github.com/longsizhuo/openInvest/compare/v0.68.2...v0.68.3) (2026-11-06)
 
 
