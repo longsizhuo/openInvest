@@ -8,7 +8,7 @@ import pytest
 
 EXPECTED_TOOLS = {
     # 健康自检：纯 MCP agent（无 Bash 权限）的第一步，与 CLI `doctor` 同源（#444）
-    "doctor",
+    "doctor", "quality_status",
     "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "record_execution", "ingest_event",
     "buy", "sell", "deposit", "withdraw", "run_committee",
@@ -61,7 +61,7 @@ def test_every_tool_dispatches_off_the_event_loop():
 
 
 READONLY_TOOLS = {
-    "doctor", "status", "strategy", "history", "live_prices", "what_if", "discipline",
+    "doctor", "quality_status", "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "news_sources", "rebalance_plan",
 }
 # destructive 桶：动钱 4 件 + 账本活动 4 件（动现金 / 改持仓数量与成本）+ 场外基金两段式 3 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
@@ -72,7 +72,7 @@ MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position",
 
 
 # 写、非资金、但重复调用会累加记录（反事实干预 / dream 事件）
-NON_IDEMPOTENT_WRITES = {"submit_committee", "daily_report"}
+NON_IDEMPOTENT_WRITES = {"prepare_committee", "daily_report"}
 
 
 def test_tool_annotations():
@@ -167,7 +167,7 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
         "untrack_asset": {"symbol": "GC=F"},
         "prepare_committee": {"symbol": "GC=F"},
         "submit_committee": {"symbol": "GC=F", "transcript": "=== CIO ===\nVERDICT: HOLD"},
-        "pending_news": {}, "pending_committees": {}, "daily_report": {},
+        "pending_news": {}, "pending_committees": {}, "daily_report": {}, "quality_status": {},
         "record_execution": {"decision_id": "2026-01-01/GC=F", "executed": True},
         "ingest_event": {"title": "t", "url": "https://x.co/a"},
     }

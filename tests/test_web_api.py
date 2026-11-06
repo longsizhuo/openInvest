@@ -507,7 +507,7 @@ def test_committee_view_renders_verdict_tile_and_charts(client, tmp_store, monke
     assert 'class="verdict-tile"' in body
     assert 'class="verdict-badge">HOLD' in body
     # D10 P1：卡片给同类决议查表（本机查表未生成 → 随包默认表），不再是"置信度 65%"
-    assert "同类 HOLD" in body and "默认表）（自报 0.65）" in body and "置信度" not in body
+    assert "样本不足（n=0）" in body and "置信度" not in body
     assert "90 天路径形状分布" in body
     assert "<svg" in body
     assert "先跌后涨" in body and "40%" in body  # pct_dip_then_up
@@ -946,7 +946,7 @@ def test_committee_sessions_reads_disk_after_first_run(client, tmp_store):
     assert s["confidence"] == 0.62
     assert s["suggested_alloc_cny"] == 0.0
     # D10 P1：本机查表没跑过 → 随包默认表；自报原数仍在 confidence 字段
-    assert s["confidence_lookup"].startswith("同类 HOLD") and s["confidence_lookup"].endswith("默认表）")
+    assert s["confidence_lookup"] == "样本不足（n=0）"
 
     # 详情端点也必须能读到完整 markdown
     r2 = client.get("/api/committee_sessions/2026-05-19/NDQ_AX")
@@ -958,10 +958,12 @@ def test_committee_sessions_reads_disk_after_first_run(client, tmp_store):
         "by_verdict": {"HOLD": {"n": 40, "rate": 0.7, "n_live": 10, "n_fleet": 30}},
         "market_flat": {"n": 50, "rate": 0.66, "n_live": 12, "n_fleet": 38},
     })
-    want = "同类 HOLD 之后 30 天涨跌留在正常波动带内的比例 70%（n=40；同期市场横盘基率 66%；含纸面舰队样本）"
+    # Unqualified local output must not acquire publication rights by existing.
+    want = "样本不足（n=0）"
     assert client.get("/api/committee_sessions").json()["sessions"][0]["confidence_lookup"] == want
-    assert r2.json()["confidence_lookup"].endswith("默认表）")
+    assert r2.json()["confidence_lookup"] == want
     assert client.get("/api/committee_sessions/2026-05-19/NDQ_AX").json()["confidence_lookup"] == want
+
 
 
 def test_committee_sessions_lists_multiple_dates_reverse_sorted(client, tmp_store):
@@ -1208,10 +1210,11 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
     assert b["valuation_brief"] == "VAL_SENTINEL"
     assert b["reentry_reference"] == "REENTRY_SENTINEL"
     assert "INDEP_DEFENSE_FLAG" in b["instructions"]
-    assert b["save_command"].endswith("save_committee NDQ.AX")
+    assert b["save_command"].endswith(f"--context-id {b['context_id']}")
 
 
 def test_committee_save_roundtrip(skill_client, tmp_store):
+    from tests.integrity_helpers import context_id
     transcript = (
         "=== MACRO ===\nmacro view text\n"
         "=== QUANT_R1 ===\nquant r1\n"
@@ -1219,7 +1222,7 @@ def test_committee_save_roundtrip(skill_client, tmp_store):
         "=== CIO ===\nverdict: HOLD\nconfidence: 0.55\nalloc_cny: 0\n"
     )
     r = skill_client.post("/api/committee/save", json={
-        "symbol": "NDQ.AX", "transcript": transcript,
+        "symbol": "NDQ.AX", "transcript": transcript, "context_id": context_id("NDQ.AX"),
     })
     assert r.status_code == 200
     b = r.json()
@@ -1232,6 +1235,7 @@ def test_committee_save_roundtrip(skill_client, tmp_store):
 
 
 def test_committee_save_records_provider_and_model(skill_client, tmp_store):
+    from tests.integrity_helpers import context_id
     """hub 的 persist RPC 也要把 host 的 provider / model 落进 Input Health（复盘 model_era = provider:model）；
     不传 = claude:unknown。"""
     import json as _json
@@ -1240,7 +1244,7 @@ def test_committee_save_records_provider_and_model(skill_client, tmp_store):
     transcript = "=== CIO ===\nverdict: HOLD\nconfidence: 0.55\nalloc_cny: 0\n"
 
     def _health(body):
-        r = skill_client.post("/api/committee/save", json={"symbol": "NDQ.AX", "transcript": transcript, **body})
+        r = skill_client.post("/api/committee/save", json={"symbol": "NDQ.AX", "transcript": transcript, "context_id": context_id("NDQ.AX"), **body})
         assert r.status_code == 200
         text = Path(r.json()["saved"]).read_text(encoding="utf-8")
         return _json.loads(re.search(r"## Input Health.*?```json\n(.*?)\n```", text, re.S).group(1))

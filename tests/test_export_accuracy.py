@@ -15,6 +15,12 @@ from pathlib import Path
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _qualified_synthetic_math_inputs(monkeypatch):
+    # This module tests aggregation/privacy of already-qualified synthetic rows.
+    # The production default-deny boundary is tested in test_evidence_eligibility.
+    monkeypatch.setattr("openinvest.core.evidence_eligibility.Eligibility.allows", lambda *a, **k: True)
+
 # 直接 import 模块（不作为 __main__ 运行）
 from scripts.export_accuracy import (
     build_summary,
@@ -104,6 +110,7 @@ def _make_row(
     if hit_30d is not None:
         hits["30d"] = hit_30d
     return {
+        "source": "live",  # explicit synthetic source; missing provenance is no longer inferred
         "date": date,
         "asset": asset,           # 原始数据有此字段
         "verdict": "HOLD",        # 原始数据有此字段
@@ -515,9 +522,9 @@ def test_calibration_key_values_in_every_window(tmp_path):
     _write_jsonl(jsonl, _conf_rows(30, 10))
     s = build_summary(jsonl)
     for name, w in s["windows"].items():
-        assert set(w["calibration"]) == {"ece", "brier", "base_rate_brier", "n", "n_excluded", "n_zero_conf"}, name   # 无分档明细
+        assert set(w["calibration"]) == {"ece", "brier", "base_rate_brier", "n", "n_excluded", "n_zero_conf", "status"}, name   # 无分档明细
     cal = s["windows"]["all"]["calibration"]
-    assert cal == {"ece": 0.15, "brier": 0.21, "base_rate_brier": 0.1875, "n": 40, "n_excluded": 0, "n_zero_conf": 0}
+    assert cal == {"ece": None, "brier": None, "base_rate_brier": None, "n": 40, "n_excluded": 0, "n_zero_conf": 0, "status": "event_probability_not_declared"}
     _assert_no_small_sample_rate_leak(s, where="calibration")
 
 

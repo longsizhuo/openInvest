@@ -38,8 +38,12 @@ def _json_output_addendum() -> str:
   "dominant_view": "quant|macro|risk",
   "suggested_alloc_cny": 整数金额（SELL/TRIM 用负数表示减仓）,
   "trim_reason": "concentration|stop_loss|bearish"（非 TRIM 用 null）,
-  "reentry_price": 数字，资产报价币种、与现价同单位（非 TRIM 用 null，TRIM 必须低于现价）,
-  "reentry_condition": 字符串（非 TRIM 用 null）,
+  "exit_intent": "risk_reduction|thesis_invalidated|liquidity_need|tactical_reentry" 或 null,
+  "hold_reason": "maintain_position|wait_for_edge|user_constraint|data_untrusted" 或 null,
+  "alternatives": 比较买入、持有、退出的支持证据、反证和约束的对象,
+  "review_plan": 按上述结构给出条件、单位、带时区有效期和变更理由的对象，或 null,
+  "reentry_price": 择时买回型 TRIM 用低于现价的数字，资产报价币种、与现价同单位；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
+  "reentry_condition": 择时买回条件；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
   "expected_path": 字符串（非 TRIM 用 null）,
   "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
 }
@@ -52,8 +56,12 @@ Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSO
   "dominant_view": "quant|macro|risk",
   "suggested_alloc_cny": integer amount (negative for SELL/TRIM to indicate a reduction),
   "trim_reason": "concentration|stop_loss|bearish" (null when not TRIM),
-  "reentry_price": number in the asset's quote currency, same unit as the current price (null when not TRIM; must be below the current price for TRIM),
-  "reentry_condition": string (null when not TRIM),
+  "exit_intent": "risk_reduction|thesis_invalidated|liquidity_need|tactical_reentry" or null,
+  "hold_reason": "maintain_position|wait_for_edge|user_constraint|data_untrusted" or null,
+  "alternatives": an object comparing evidence, counterevidence and constraints for buying, holding and exiting,
+  "review_plan": conditions, units, timezone-aware expiry and explicit replacement reason using the structure above, or null,
+  "reentry_price": number below the current price only for a tactical round-trip TRIM, in the asset's quote currency and unit; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
+  "reentry_condition": tactical reentry condition; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
   "expected_path": string (null when not TRIM),
   "memo": "your full investment-bank-grade analysis memo, multi-paragraph, matching the depth of the plain-text memo"
 }
@@ -109,15 +117,10 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
     cash_opp_cost_directive = ""
     if not verdict_cfg.cash_opportunity_cost_rule_enabled:
         cash_opp_cost_directive = bilingual(
-            "**🚫 现金仓位机会成本规则已被用户关闭**：忽略上方整段「现金仓位机会成本规则」——"
-            "`HOLD` 在**任何仓位 / 任何现金比例**都是合法 default，**不得**仅因 CONCENTRATION_PCT 低 / "
-            "子弹充足就强制 `ACCUMULATE` 或禁止 `HOLD`。是否加仓纯按 Quant/Macro/Risk 信号 + 估值 / "
-            "趋势证据决定。下方 Verdict 选项里「ACCUMULATE=100% 现金时的 default」与「HOLD 只在 20%+ "
-            "时合法」同样作废。",
-            "**🚫 The cash-opportunity-cost rule has been disabled by the user**: ignore the entire \"cash opportunity cost rule\" section above -- "
-            "`HOLD` is a legal default at **any position size / any cash ratio**. **Do not** force `ACCUMULATE` or forbid `HOLD` just because "
-            "CONCENTRATION_PCT is low or there is plenty of cash on hand. Whether to add to the position is decided purely by Quant/Macro/Risk signals "
-            "plus valuation / trend evidence. Below, the Verdict options' \"ACCUMULATE = default when 100% cash\" and \"HOLD only legal at 20%+\" are likewise void.",
+            "**现金比例强制动作规则已关闭**：不得仅因现金充足而强制加仓，也不得把 HOLD 当成默认正确。"
+            "分别比较买入、持有和退出的证据、反证与用户约束，再给出裁决。",
+            "**Cash-ratio action forcing is disabled**: sufficient cash does not force accumulation, and HOLD is not presumed correct. "
+            "Compare evidence, counterevidence and user constraints for buying, holding and exiting.",
         )
 
     prompt = load_skill(
@@ -127,8 +130,13 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
         TRIM_CONSTRAINT=trim_constraint,
         CONCENTRATION_DIRECTIVE=concentration_directive,
         CASH_OPP_COST_DIRECTIVE=cash_opp_cost_directive,
+        ACCUMULATE_DEFINITION=("分批建仓 / 加仓（100% 现金时按用户启用的规则试探建仓）"
+                               if verdict_cfg.cash_opportunity_cost_rule_enabled else "分批建仓 / 加仓，须有本次证据和预算依据"),
+        HOLD_DEFINITION=("维持现状，按用户启用的现金比例规则判断" if verdict_cfg.cash_opportunity_cost_rule_enabled
+                         else "维持现状，可在任意仓位选择，但须说明为何优于买入或退出"),
     )
     prompt = apply_lens_blocks(prompt, "concentration", verdict_cfg.concentration_lens_enabled)
+    prompt = apply_lens_blocks(prompt, "cash_opportunity", verdict_cfg.cash_opportunity_cost_rule_enabled)
     prompt = localize_prompt_output_requirements(prompt)
     contract = (
         "Start your first line exactly with `VERDICT:` and fill every required field in order. "

@@ -8,6 +8,7 @@
 - 每桶给同样本基率 / 提升 / Wilson 95% CI；n<30 时 lift / ci95 与 rate 一起抹掉
 """
 from __future__ import annotations
+from tests.integrity_helpers import context_id
 
 import json
 import time
@@ -357,19 +358,19 @@ def test_coordinator_save_records_model_and_era(mem_root):
     复盘 model_era = "<provider>:<model>"。"""
     from openinvest.core.runner.coordinator import save_committee_transcript
     from openinvest.jobs.review_calc import model_era_of
-    r = save_committee_transcript("TESTSYM", _COORD_RAW, provider="hermes", model=" claude-haiku-5-5 ")
+    r = save_committee_transcript("TESTSYM", _COORD_RAW, provider="hermes", model=" claude-haiku-5-5 ", context_id=context_id("TESTSYM"))
     h = parse_committee_text(Path(r["saved"]).read_text(encoding="utf-8"))["input_health"]
     assert h["model"] == "claude-haiku-5-5"
     assert model_era_of(h, "2026-10-20") == "hermes:claude-haiku-5-5"
     time.sleep(0.01)
-    r = save_committee_transcript("TESTSYM2", _COORD_RAW)
+    r = save_committee_transcript("TESTSYM2", _COORD_RAW, context_id=context_id("TESTSYM2"))
     h = parse_committee_text(Path(r["saved"]).read_text(encoding="utf-8"))["input_health"]
     assert h["model"] == "unknown" and model_era_of(h, "2026-10-20") == "claude:unknown"
 
 
 def test_coordinator_save_writes_health_block_and_archives(mem_root, monkeypatch):
     from openinvest.core.runner.coordinator import save_committee_transcript
-    r1 = save_committee_transcript("TESTSYM", _COORD_RAW, provider="hermes")
+    r1 = save_committee_transcript("TESTSYM", _COORD_RAW, provider="hermes", context_id=context_id("TESTSYM"))
     text = Path(r1["saved"]).read_text(encoding="utf-8")
     assert "**Run at**:" in text and "## Input Health (deterministic)" in text
     parsed = parse_committee_text(text)
@@ -381,6 +382,6 @@ def test_coordinator_save_writes_health_block_and_archives(mem_root, monkeypatch
     assert parsed["verdict"] == "HOLD"
     # 同日重跑 → 归档
     time.sleep(0.01)
-    save_committee_transcript("TESTSYM", _COORD_RAW)
-    runs = list((Path(r1["saved"]).parent / persist.RUNS_SUBDIR).glob("TESTSYM_*.md"))
+    save_committee_transcript("TESTSYM", _COORD_RAW, context_id=context_id("TESTSYM"))
+    runs = list((Path(r1["latest_saved"]).parent / persist.RUNS_SUBDIR).glob("TESTSYM_*.md"))
     assert len(runs) == 1

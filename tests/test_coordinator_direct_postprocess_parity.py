@@ -110,6 +110,7 @@ def _run_direct(monkeypatch, memo, sentiment):
         portfolio_summary_override="MOCK_PORTFOLIO", prior_insights_override="",
         sentiment_brief=sentiment, valuation_brief_override="",
     )
+    assert "verdict" in res, res
     return res["verdict"]
 
 
@@ -121,7 +122,19 @@ def _run_coordinator(memo, sentiment, regime_brief):
         "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
         f"=== CIO ===\n{memo}\n"
     )
-    return save_committee_transcript(SYM, raw)["verdict"]
+    from tests.integrity_helpers import context_id
+    from openinvest.core.portfolio_manager import PortfolioManager
+    from openinvest.core.runner.intervention import gold_defense_dca_plan
+    from openinvest.utils.exchange_fee import get_history_data
+    from openinvest.utils.market_metrics import compute_metrics
+    from openinvest.utils.base_currency import alloc_ceiling, single_invest_cap
+    pm = PortfolioManager(); target = pm.strategy.get("target_assets")[0]
+    df = get_history_data(SYM, "2y")
+    cid = context_id(SYM, regime_brief=regime_brief, sentiment_brief=sentiment,
+                     current_price=compute_metrics(df)["current_price"],
+                     defense_dca=gold_defense_dca_plan(SYM, target, df.index),
+                     alloc_ceiling=alloc_ceiling(), single_invest_cap=single_invest_cap(target, pm.strategy))
+    return save_committee_transcript(SYM, raw, context_id=cid)["verdict"]
 
 
 @pytest.mark.parametrize("memo,sentiment,expect_rule", [
@@ -137,7 +150,8 @@ def test_coordinator_matches_direct_postprocess(world, monkeypatch, memo, sentim
     rows_coord = _ledger(mem)
 
     assert [r["rule"] for r in rows_direct] == [expect_rule]   # 场景确实触发了干预
-    assert v_coord == v_direct
+    receipt_fields = {"decision_id", "context_id", "code_version", "evidence_sha256"}
+    assert {k:v for k,v in v_coord.items() if k not in receipt_fields} == {k:v for k,v in v_direct.items() if k not in receipt_fields}
     assert rows_coord == rows_direct
 
 
@@ -154,10 +168,12 @@ def test_coordinator_catches_worker_failure_outside_cio_section(world):
         "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
         f"=== CIO ===\n{memo}\n"
     )
-    v = save_committee_transcript(SYM, raw)["verdict"]
+    from tests.integrity_helpers import context_id
+    cid = context_id(SYM)
+    v = save_committee_transcript(SYM, raw, context_id=cid)["verdict"]
     assert v["verdict"] == "HOLD" and v["confidence"] <= 0.4 and v["alloc_cny"] == 0
 
     ok = save_committee_transcript(SYM, raw.replace(
         f"{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted",
-        f"SIGNAL: bullish\n无 {AGENT_UNAVAILABLE_MARKER} 标记"))["verdict"]
+        f"SIGNAL: bullish\n无 {AGENT_UNAVAILABLE_MARKER} 标记"), context_id=context_id(SYM))["verdict"]
     assert "_original_confidence_unavailable" not in ok

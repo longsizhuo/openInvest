@@ -46,3 +46,13 @@ def test_no_report_falls_back_to_json(monkeypatch, capfd):
 
     out, _ = capfd.readouterr()
     assert '"aborted"' in out, "无报告时必须输出结构化 JSON 让 cron 投递失败原因"
+
+
+def test_only_actionable_never_silences_missing_or_degraded_assets(monkeypatch, capfd):
+    import argparse
+    from openinvest.skill_cmds.committee_cmds import cmd_daily_report
+    for reason in ({'missing_verdicts':['SYNTHETIC']},{'skipped_assets':['SYNTHETIC']},
+                   {'data_warnings':['unavailable']},{'status':'degraded'}):
+        monkeypatch.setattr(daily_report_mod,'run',lambda **kw:{'status':'success','full_report':'**裁决**: HOLD\n缺卷警告',**reason})
+        cmd_daily_report(argparse.Namespace(only_actionable=True))
+        assert '缺卷警告' in capfd.readouterr().out

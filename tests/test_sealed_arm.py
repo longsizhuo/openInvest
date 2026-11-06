@@ -23,6 +23,12 @@ from openinvest.core.decision_ledger import parse_committee_text
 from openinvest.jobs.verdict_review import SEALED_ARM_SUBDIR
 from scripts import backtest_committee as bc
 
+@pytest.fixture
+def registered_anchor_control(monkeypatch):
+    from tests.prompt_anchor_fixture import anchored_control
+    monkeypatch.setattr("openinvest.capabilities.committee.cio.build_cio_prompt", anchored_control)
+    monkeypatch.setattr("openinvest.core.committee.debate.build_cio_prompt", anchored_control)
+
 
 def V(verdict: str, alloc: float = 0.0, conf: float = 0.62) -> Dict[str, Any]:
     return {"verdict": verdict, "confidence": conf, "alloc": alloc}
@@ -279,7 +285,7 @@ def _cio_prompts(monkeypatch):
     return seen
 
 
-def test_macro_soft_variant_only_touches_rule2_and_live_prompt_is_unchanged(monkeypatch):
+def test_macro_soft_variant_only_touches_rule2_and_live_prompt_is_unchanged(monkeypatch, registered_anchor_control):
     import hashlib
 
     import openinvest.core.committee.debate as debate
@@ -409,7 +415,7 @@ def test_main_runs_sealed_arm_after_control_and_shares_macro(monkeypatch):
     assert seen[1]["macro_view_override"] == "MACRO-X" and seen[1]["syms"] == ["AAA", "BBB"]
 
 
-def test_main_runs_all_four_arms_in_order_sharing_macro(monkeypatch):
+def test_main_runs_all_four_arms_in_order_sharing_macro(monkeypatch, registered_anchor_control):
     import openinvest.core.committee.debate as debate
     from openinvest.capabilities.committee.cio import build_cio_prompt
 

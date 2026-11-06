@@ -84,6 +84,28 @@ checkpoint_dbs() {
 cmd_backup() {
     local out_dir="${1:-$BACKUP_DIR}"
     mkdir -p "$out_dir"
+    # Current backends use online SQLite snapshots. Only a genuinely older
+    # backend may take the explicitly unverified legacy path below.
+    local backup_rc
+    if INVEST_BACKUP_OUTPUT_DIR="$out_dir" _py '
+import json, os, sys
+from pathlib import Path
+try:
+    from openinvest.jobs.backup import manual_backup
+except ImportError:
+    raise SystemExit(42)
+from openinvest.paths import INVEST_ROOT
+result = manual_backup(INVEST_ROOT, Path(os.environ["INVEST_BACKUP_OUTPUT_DIR"]))
+print(json.dumps(result.get("checkpoint", {})), file=sys.stderr)
+print(json.dumps(result))
+'; then
+        return 0
+    else
+        backup_rc=$?
+        if [ "$backup_rc" -ne 42 ]; then
+            return "$backup_rc"
+        fi
+    fi
     checkpoint_dbs
     local ts
     ts="$(date -u +%Y%m%d-%H%M%S)"
@@ -121,8 +143,13 @@ cmd_restore() {
     echo "先备份当前状态..." >&2
     cmd_backup "$BACKUP_DIR" >&2
 
-    (cd "$ROOT" && unzip -o -q "$zip_path")
-    echo "{\"status\":\"ok\",\"restored_from\":\"$zip_path\"}"
+    INVEST_RESTORE_ARCHIVE="$zip_path" _py '
+import json, os
+from pathlib import Path
+from openinvest.paths import INVEST_ROOT
+from openinvest.services.restore_guard import restore_archive
+print(json.dumps(restore_archive(INVEST_ROOT, Path(os.environ["INVEST_RESTORE_ARCHIVE"]))))
+'
 }
 
 cmd_list() {

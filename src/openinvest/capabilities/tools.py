@@ -196,7 +196,10 @@ def _impl_query_dreaming_insights(asset_symbol: str, top_k: int = 3) -> List[Dic
     matches = []
     sym_lower = asset_symbol.lower().replace("=", "_") if asset_symbol else ""
     for f in sorted(insights_dir.glob("*.md")):
-        text = f.read_text(encoding="utf-8")
+        doc = store.read(f"insights/{f.stem}")
+        if doc is None:
+            continue
+        text = doc.body
         if not asset_symbol or sym_lower in f.stem.lower() or sym_lower in text.lower()[:1000]:
             matches.append({
                 "title": f.stem,

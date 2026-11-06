@@ -1,4 +1,5 @@
 import os
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -416,16 +417,42 @@ def _safe_last_change(symbol: str) -> tuple[Optional[float], Optional[float]]:
     return last, change
 
 
+class MacroReport(str):
+    def __new__(cls, value, health):
+        obj = super().__new__(cls, value)
+        obj.input_health = health
+        return obj
+
+
+def macro_input_health(value) -> dict:
+    if hasattr(value, "input_health"):
+        return value.input_health
+    if not value or (isinstance(value, str) and (value.startswith("Error fetching macro data:") or "[MACRO_INPUT_UNAVAILABLE]" in value)):
+        return {"valid": False, "reason": "macro_source_unavailable"}
+    return {"valid": None, "reason": "legacy_input_health_unspecified"}
+
+
 def get_macro_data() -> str:
     try:
         tnx = get_history_data("^TNX", "1mo")
         vix = get_history_data("^VIX", "1mo")
 
-        tnx_last = tnx['Close'].iloc[-1] if not tnx.empty else 0.0
-        tnx_change = _calc_change(tnx['Close'].iloc[0], tnx_last) if not tnx.empty else 0.0
-
-        vix_last = vix['Close'].iloc[-1] if not vix.empty else 0.0
-        vix_change = _calc_change(vix['Close'].iloc[0], vix_last) if not vix.empty else 0.0
+        from openinvest.core.config import load_config
+        from datetime import datetime, timezone
+        max_age = load_config().staleness.price_stale_days
+        sources = {}
+        for name, frame in (("TNX", tnx), ("VIX", vix)):
+            valid = not frame.empty and not frame.attrs.get("yf_fetch_failed")
+            if valid:
+                valid = (math.isfinite(float(frame["Close"].iloc[-1])) and
+                         0 <= (datetime.now(timezone.utc).date() - frame.index[-1].date()).days <= max_age)
+            sources[name] = {"valid": bool(valid), "last_bar": str(frame.index[-1]) if not frame.empty else None}
+        if not all(item["valid"] for item in sources.values()):
+            return MacroReport("[MACRO_INPUT_UNAVAILABLE] Required macro observations unavailable/stale; values are unknown.", {"valid": False, "sources": sources})
+        tnx_last = tnx['Close'].iloc[-1]
+        tnx_change = _calc_change(tnx['Close'].iloc[0], tnx_last)
+        vix_last = vix['Close'].iloc[-1]
+        vix_change = _calc_change(vix['Close'].iloc[0], vix_last)
 
         # CONTAMINATION CHANNEL (ADR-022): 绝对价位/宏观点位逐字进 prompt → 记忆过历史的 LLM 可反推年代;归一化能压低但杀纪律规则(VIX>20=fear 吃绝对值),不可消除。
         report = f"""
@@ -455,9 +482,9 @@ def get_macro_data() -> str:
                 f"   *Note: TIP up = real yields down = bullish gold; TIP down = real yields up = bearish gold.*\n"
             )
 
-        return report
+        return MacroReport(report, {"valid": True, "sources": sources})
     except Exception as e:
-        return f"Error fetching macro data: {e}"
+        return MacroReport(f"[MACRO_INPUT_UNAVAILABLE] {type(e).__name__}; values unknown", {"valid": False, "reason": type(e).__name__})
 
 
 def get_full_market_data(target_asset: str, fx_symbol: Optional[str] = None) -> str:

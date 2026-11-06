@@ -20,7 +20,7 @@ def test_render_inaction_and_interventions():
     assert "拦加仓" in md and "10 次" in md
     assert "60d 合计 ¥-500" in md                         # 取最长已结算窗(90d 未结算→落 60d)
     assert "拦减仓" in md and "未到结算窗" in md          # trim_blocked 全未结算
-    assert "非 alpha" in md                              # ADR-023 定位措辞
+    assert "不代表策略有效" in md and "不能证明" in md
 
 
 def test_empty_graceful():

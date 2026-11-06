@@ -34,6 +34,11 @@ def _intervention_record(
     只动 confidence 不动 verdict/alloc 的不算干预。
     """
     v = verdict or {}
+    # Missing worker evidence invalidates the proposal, rather than identifying
+    # a forgone investment opportunity. Keep provenance in Input Health without
+    # contaminating the economic counterfactual ledger with failed-input trades.
+    if "_original_confidence_unavailable" in v:
+        return None
     orig_v = v.get("_original_verdict")
     if not orig_v:
         return None
@@ -163,8 +168,10 @@ def _gold_defense_dca_gate(
                 d = rec.get("date")
                 if d:
                     prior_dates.append(str(d)[:10])
-    except Exception as e:  # noqa: BLE001  账本读失败 → 当作无历史，放第一批（不致命）
-        log.warning(f"DCA 闸读 interventions.jsonl 失败 graceful：{e}")
+    except Exception as e:  # noqa: BLE001  无法核验既有约束时不能悄悄重置为第一批
+        log.warning(f"DCA 建议频率记录不可读，暂不放行：{e}")
+        return {"allow": False, "fraction": frac, "reason": "history_unavailable", "tranche_idx": None,
+                "quota_basis": "recommendations_not_executions"}
 
     # 无历史分批 → 直接放第一批
     if not prior_dates:
@@ -235,13 +242,15 @@ def gold_defense_dca_plan(
     if symbol.upper() != "GC=F" or not vcfg.gold_defense_dca_enabled:
         return None
     try:
-        return _gold_defense_dca_gate(
+        result = _gold_defense_dca_gate(
             symbol, trading_days,
             n_tranches=vcfg.gold_defense_dca_n_tranches,
             fraction=vcfg.gold_defense_dca_fraction,
             min_spacing_days=vcfg.gold_defense_dca_min_spacing_days,
             window_days=vcfg.gold_defense_dca_window_days,
         )
+        result["quota_basis"] = "recommendations_not_executions"
+        return result
     except Exception as e:  # noqa: BLE001  闸算失败 → 退回 None=旧全拦（安全侧）
         log.warning(f"黄金 DCA 闸计算失败 graceful，退回全拦：{e}")
         return None

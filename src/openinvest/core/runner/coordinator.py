@@ -92,7 +92,7 @@ def _load_brief_facts(symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
+def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str = "") -> Dict[str, Any]:
     """输出 Investment Committee brief — 含项目原生 prompt + 用户上下文，给 Claude 扮演 4 角色
 
     返回自包含 dict（brief + 6 段 prompt 全内联），coordinator 的 4 个 subagent
@@ -107,7 +107,10 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
         analyze_multi_timeframe, get_history_data, get_macro_data,
     )
     from openinvest.utils.gold_price import format_gold_report, get_gold_snapshot
+    from openinvest.core.decision_evidence import preparation_state, market_snapshot
+    from openinvest.core.memory_store import MemoryStore
 
+    prepared_state = preparation_state(MemoryStore().root)
     pm = PortfolioManager()
     target = next(
         (a for a in pm.strategy.get("target_assets", []) if a["symbol"] == symbol),
@@ -143,9 +146,10 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001  概率口径读失败不阻断
         pass
     regime_brief = format_regime_brief(metrics, symbol=target["symbol"], prob_hint=_prob_hint)
+    from openinvest.utils.exchange_fee import macro_input_health
     macro_data = get_macro_data()
     snap = get_gold_snapshot(offset_pct=0.0)
-    gold_ctx = format_gold_report(snap) if (snap and target.get("type") == "metal") else ""
+    gold_ctx = format_gold_report(snap) if (snap and target.get("symbol") == "GC=F") else ""
 
     # 2026-05-19 (A7 修复): 之前手搓 portfolio_summary 写死 NDQ + 黄金，fork 用户的
     # AAPL/0700.HK/BTC-USD 完全不进 Risk Officer 视野；total_cny 漏算非 NDQ/gold
@@ -178,7 +182,12 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     # insights / 确定性事实块以模块全局名调用 shared loaders（单一可信源 + 可被契约测试 monkeypatch）
     portfolio_summary = portfolio_summary_text(pm, total, current_prices,
                                                excluded=unvalued(_value_status))
-    insights = load_prior_insights(target, pm)
+    from openinvest.services.review_plans import plan_brief, observe_prepared_market
+    observe_prepared_market(pm.store, symbol, df_target)
+    portfolio_summary += plan_brief(pm.store, symbol)
+    from openinvest.core.evidence_eligibility import model_scope
+    with model_scope(f"{provider}:{model or 'unknown'}"):
+        insights = load_prior_insights(target, pm)
 
     # 2026-06-11 漂移修复（coordinator 防御链对齐）: direct 路径在 service layer
     # 加载的确定性事实块，coordinator 路径此前没产出 —— CIO 看不到 VALUATION/
@@ -218,13 +227,40 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001  路径参考读失败不阻断 prepare
         pass
 
-    _save_brief_facts(target["symbol"], {
+    facts = {
         "regime_brief": regime_brief, "sentiment_brief": sentiment_brief,
         "path_profile": path_profile, "atr_pct": metrics.get("atr_pct"),
         "path_reference": reentry_reference,
-    })
+        "current_price": metrics.get("current_price"),
+        "ohlcv_snapshot": market_snapshot(df_target),
+        "price_last_bar": str(df_target.index[-1]) if not df_target.empty else None,
+        "price_fetch_failed": bool(df_target.attrs.get("yf_fetch_failed", False)),
+        "portfolio_summary": portfolio_summary, "market_data": market,
+        "macro_data": macro_data, "macro_input_health": macro_input_health(macro_data), "event_brief": event_brief, "gold_snapshot": gold_ctx,
+        "prior_insights": insights, "valuation_brief": valuation_brief,
+        "target": target, "strategy": dict(pm.strategy.metadata) if hasattr(pm.strategy, "metadata") else dict(pm.strategy),
+        "required_roles": ["MACRO", "QUANT_R1", "RISK_R1", "QUANT_R2", "RISK_R2", "CIO"],
+        "alloc_ceiling": alloc_ceiling(), "single_invest_cap": single_invest_cap(target, pm.strategy),
+    }
+    from openinvest.core.runner.intervention import gold_defense_dca_plan
+    from openinvest.core.decision_evidence import prepare_context
+    facts["defense_dca"] = gold_defense_dca_plan(symbol, target, df_target.index)
+    prompts = {
+        "macro_strategist": build_macro_strategist_prompt(),
+        "quant_round1": build_quant_prompt(target, "opening"),
+        "risk_round1": build_risk_officer_prompt(target, "opening"),
+        "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),
+        "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal"),
+        "cio": build_cio_prompt(target),
+    }
+    context = prepare_context(pm.store.root, symbol, {**facts, "prompts": prompts, "provider": provider},
+                              model=model or "unknown", expected_state=prepared_state)
 
     return {
+        "context_id": context["context_id"],
+        "context_prepared_at": context["prepared_at"],
+        "context_requirement": "Submit this exact context_id. A later prepare for the same symbol must not replace it.",
+        "model_requirement": "Declare the actual model/composition in prepare and submit. Unknown identity cannot inherit another model's learned insights.",
         "asset": target,
         "portfolio_summary": portfolio_summary,
         "macro_data": macro_data,
@@ -242,17 +278,10 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
         # 给 Agent 看的人话版是上面的 reentry_reference（同源）
         "gold_snapshot": gold_ctx,
         "prior_insights": insights,
-        "prompts": {
-            "macro_strategist": build_macro_strategist_prompt(),
-            "quant_round1": build_quant_prompt(target, "opening"),
-            "risk_round1": build_risk_officer_prompt(target, "opening"),
-            "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),
-            "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal"),
-            "cio": build_cio_prompt(target),
-        },
+        "prompts": prompts,
         # 插件用户经 run.sh（uvx 拉后端，PATH 上不一定有 openinvest）；pip/uvx 装的直接
         # `openinvest save_committee`；MCP agent 用 submit_committee 工具（三者同一入口）
-        "save_command": f"bash <plugin>/skills/invest/scripts/run.sh save_committee {symbol}",
+        "save_command": f"bash <plugin>/skills/invest/scripts/run.sh save_committee {symbol} --context-id {context['context_id']}",
         "save_alternatives": [f"openinvest save_committee {symbol}",
                               "MCP tool: submit_committee(symbol, transcript)"],
         "instructions": (
@@ -274,6 +303,7 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
             "  valuation_brief 为空串=非权益类（黄金等走 Macro 货币因素），该段跳过。\n"
             "**Risk Officer**: 召唤 Risk Round 1/2 worker 时，prompt 模板:\n"
             '  "<paste prompts.risk_round1>\\n\\n# 用户持仓:\\n<paste portfolio_summary>'
+            '\\n\\n# 市场风险输入（原始数据，不是额外方向投票）:\\n<paste market_data>\\n<paste regime_brief>\\n<paste sentiment_brief>'
             '\\n\\n# 长期模式:\\n<paste prior_insights>"\n'
             "  Risk Officer 按 portfolio cash 判断流动性 + 风险预算。\n"
             "**CIO 必须塞确定性事实块 + 路径参考**（2026-06 防御链/路径化）: CIO prompt 末尾追加:\n"
@@ -286,7 +316,7 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
             "请依次扮演 6 段输出，用以下分隔符：\n"
             "=== MACRO ===\n=== QUANT_R1 ===\n=== RISK_R1 ===\n"
             "=== QUANT_R2 ===\n=== RISK_R2 ===\n=== CIO ===\n"
-            f"全部完成后交卷：MCP 调 submit_committee(symbol, transcript, provider, model)，"
+            f"全部完成后交卷：MCP 调 submit_committee(symbol, transcript, provider, model, context_id='{context['context_id']}')，"
             f"或命令行 stdin 喂给 save_command 加 --provider <你的品牌> --model <实际扮演角色的模型名>"
             f"（插件 run.sh；pip 安装用 openinvest save_committee {symbol}）。"
             "模型名只有你知道；不传记 unknown，复盘按 provider:model 分桶"
@@ -294,8 +324,8 @@ def prepare_committee_brief(symbol: str) -> Dict[str, Any]:
     }
 
 
-def save_committee_transcript(
-    symbol: str, raw: str, *, provider: str = "claude", model: str = "",
+def _save_committee_transcript_once(
+    symbol: str, raw: str, *, provider: str = "claude", model: str = "", context_id: str = "",
 ) -> Dict[str, Any]:
     """把 coordinator 模式产出的 6 段 transcript 落到 memory/.committee/<date>/<asset>.md
 
@@ -319,6 +349,15 @@ def save_committee_transcript(
 
     from openinvest.core.memory_store import MemoryStore
 
+    from openinvest.core.decision_evidence import load_context, record_decision
+    if not context_id:
+        match = re.search(r"^CONTEXT_ID:\s*([a-f0-9]{32})\s*$", raw, re.MULTILINE)
+        context_id = match.group(1) if match else ""
+    try:
+        context = load_context(MemoryStore().root, context_id, symbol)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise ValueError(f"DATA_UNTRUSTED: {e}. 请重新 prepare 并提交对应 context_id。") from e
+
     parts = _COMMITTEE_SECTION_RE.split(raw)
     sections: Dict[str, str] = {}
     if len(parts) > 1:
@@ -333,7 +372,7 @@ def save_committee_transcript(
     # 粘贴进去的确定性 regime_brief（REGIME:/INPUTS:/THRESHOLDS: 行）和
     # sentiment_brief（INDEP_DEFENSE_FLAG 行）
     # 确定性事实优先用本次 prepare 存下的（后端自己算的）；没有才退回从 transcript 解析
-    facts = _load_brief_facts(symbol)
+    facts = context["inputs"]
     fact_text = (f"{facts.get('regime_brief') or ''}\n{facts.get('sentiment_brief') or ''}"
                  if facts else raw)
     regime = regime_label_from_text(fact_text)
@@ -345,23 +384,10 @@ def save_committee_transcript(
     from openinvest.core.portfolio_manager import PortfolioManager
     from openinvest.core.runner.intervention import gold_defense_dca_plan, record_intervention
     from openinvest.utils.exchange_fee import get_history_data
-    try:
-        df = get_history_data(symbol, METRICS_PERIOD)
-    except Exception as e:  # noqa: BLE001  行情拉不到 → 现价 None（Sanity5 跳过），不阻断落盘
-        log.warning(f"save_committee 行情拉取失败 graceful：{e}")
-        df = None
-    has_df = df is not None and not df.empty
-    current_price = compute_metrics(df).get("current_price") if has_df else None
-    try:
-        strategy = PortfolioManager().strategy
-        target = next(
-            (a for a in strategy.get("target_assets", [])
-             if a.get("symbol") == symbol),
-            {},
-        )
-    except Exception:  # noqa: BLE001  策略读不到 → 当非黄金（defense_dca=None 旧全拦）、无单次上限
-        strategy, target = {}, {}
-    defense_dca = gold_defense_dca_plan(symbol, target, df.index if has_df else [])
+    current_price = facts.get("current_price")
+    has_df = current_price is not None and bool(facts.get("price_last_bar"))
+    target, strategy = facts.get("target", {}), facts.get("strategy", {})
+    defense_dca = facts.get("defense_dca")
     verdict = parse_cio_memo(
         cio_text,
         worker_brief=raw,  # 分段时 cio_text 只剩 CIO 段，worker 失败哨兵在别的段里
@@ -369,8 +395,8 @@ def save_committee_transcript(
         regime=regime,
         defense_flag_on=("INDEP_DEFENSE_FLAG: on" in fact_text or atr_defense_on),
         defense_dca=defense_dca,
-        alloc_ceiling=alloc_ceiling(),
-        single_invest_cap=single_invest_cap(target, strategy),  # Sanity 6（与 Direct 同源）
+        alloc_ceiling=facts.get("alloc_ceiling"),
+        single_invest_cap=facts.get("single_invest_cap"),
     )
     if str(verdict.get("verdict") or "").upper() == "UNCLEAR":
         # 解析不出裁决 = 不是一份裁决：不存档（否则当天记录成 UNCLEAR、看门狗报失败），让交卷方修了重交
@@ -405,9 +431,27 @@ def save_committee_transcript(
         report_like, verdict, None,
         {"entry": "coordinator", "provider": provider, "model": (model or "").strip() or "unknown",
          "has_df": bool(has_df),
+         "price_fetch_failed": facts.get("price_fetch_failed", False),
+         "macro_data_empty": facts.get("macro_input_health", {}).get("valid") is False or not bool(facts.get("macro_data")),
+         "macro_input_health": facts.get("macro_input_health", {}),
+         "context_id": context_id, "price_last_bar": facts.get("price_last_bar"),
+         "prepared_at": context["prepared_at"], "code_version": context["code_version"],
+         "config_sha256": context["config_sha256"],
          # prepare = 防御/regime 用后端存的事实；transcript = 没有可用快照，退回解析 agent 文字
          "facts_source": "prepare" if facts else "transcript"},
     )
+    from openinvest.core.decision_evidence import enforce_input_health
+    enforce_input_health(verdict, health)
+    evidence = record_decision(store.root, symbol, {"transcript": raw}, verdict, health,
+                               context_id=context_id)
+    health.update(evidence)
+    verdict.update(evidence)
+    if verdict.get("decision_status") == "DATA_UNTRUSTED":
+        sections["CIO"] = "[QUALITY_ALERT] DATA_UNTRUSTED：当前没有可执行建议，以下仅保留原始意见供排查。\n\n" + sections.get("CIO", cio_text)
+    from openinvest.services.review_plans import update_plan
+    if verdict.get("review_plan") is not None and verdict.get("decision_status") != "DATA_UNTRUSTED":
+        plan = update_plan(store, symbol, verdict["review_plan"], evidence_id=evidence["decision_id"])
+        verdict["review_plan_state"] = plan
     # 与 Direct _persist 同款宏观快照（verdict_review 事后归因读它；以前 Coordinator 记录这块为空）
     from openinvest.core.committee.persist import _capture_macro_context
     try:
@@ -444,6 +488,10 @@ def save_committee_transcript(
     if archived is not None:
         log.info("save_committee: 同日重跑，旧 transcript 归档到 %s", archived)
     path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    immutable_path = store.root / ".evidence/transcripts" / f"{evidence['decision_id']}.md"
+    immutable_path.parent.mkdir(parents=True, exist_ok=True)
+    with immutable_path.open("x", encoding="utf-8", newline="\n") as immutable:
+        immutable.write("\n".join(lines))
     # 路径预测快照（path_review 闭环），与 Direct session 6.5 同一入口；顾问模式同样跳过
     from openinvest.utils.advisory import is_advisory_mode
     if not facts:
@@ -460,9 +508,9 @@ def save_committee_transcript(
     sidecar = out_dir / f"{safe_sym}_committee.json"
     try:
         sidecar.unlink(missing_ok=True)   # 重交写失败时不能留下上一次的旧裁决
-        sidecar.write_text(json.dumps({
+        report_snapshot = {
             "symbol": symbol, "saved_at": now.isoformat(timespec="seconds"), "provider": provider,
-            "verdict": verdict,
+            "verdict": verdict, "input_health": health, **evidence,
             "macro_view": sections.get("MACRO", ""),
             "quant_view": sections.get("QUANT_R2") or sections.get("QUANT_R1") or sections.get("QUANT", ""),
             "risk_view": sections.get("RISK_R2") or sections.get("RISK_R1") or sections.get("RISK", ""),
@@ -470,8 +518,11 @@ def save_committee_transcript(
             "path_reference": (facts or {}).get("path_reference") or "",
             "path_profile": (facts or {}).get("path_profile"),
         # numpy 标量转回原生数（default=str 会把 confidence / alloc 存成字符串，日报格式化时炸）
-        }, ensure_ascii=False, default=lambda o: o.item() if hasattr(o, "item") else str(o)),
-            encoding="utf-8", newline="\n")
+        }
+        from openinvest.core.decision_evidence import _write_once
+        from openinvest.core.memory_store import _atomic_write_text
+        immutable = _write_once(store.root / ".evidence/reports" / f"{evidence['decision_id']}.json", report_snapshot)
+        _atomic_write_text(sidecar, json.dumps(immutable["payload"], ensure_ascii=False))
     except Exception as e:  # noqa: BLE001  写不下 → 日报把该标的列为缺卷（响亮），不阻断收卷
         log.warning(f"save_committee 日报侧文件写入失败：{e}")
     record_intervention(symbol, regime or "", current_price, verdict, atr_defense_on)
@@ -483,7 +534,65 @@ def save_committee_transcript(
         "provider": provider,
         "input_health": health,
     })
-    return {"saved": str(path), "verdict": verdict}
+    return {"saved": str(immutable_path), "latest_saved": str(path), "decision_date": today,
+            "current_advice_valid": verdict.get("decision_status") != "DATA_UNTRUSTED",
+            "verdict": verdict, **evidence}
+
+
+def save_committee_transcript(symbol: str, raw: str, *, provider: str = "claude", model: str = "",
+                              context_id: str = "") -> Dict[str, Any]:
+    """One immutable decision per prepared request; identical retries do not consume quota."""
+    from openinvest.core.memory_store import MemoryStore, _file_lock, _atomic_write_text
+    from openinvest.core.decision_evidence import load_context
+    from openinvest.core.evidence_eligibility import digest
+    store = MemoryStore()
+    if not context_id:
+        match = re.search(r"^CONTEXT_ID:\s*([a-f0-9]{32})\s*$", raw, re.MULTILINE)
+        context_id = match.group(1) if match else ""
+    signature = digest({"symbol": symbol, "transcript": raw, "provider": provider, "model": model})
+    if not re.fullmatch(r"[a-f0-9]{32}", context_id):
+        raise ValueError("DATA_UNTRUSTED: missing or invalid context_id")
+    receipt = store.root / ".evidence/receipts" / f"{context_id}.json"
+    with _file_lock(receipt):
+        if receipt.exists():
+            prior = json.loads(receipt.read_text())
+            if prior.get("signature") != signature:
+                raise ValueError("context_id already submitted with different content; prepare a new request")
+            if prior.get("state") != "done":
+                raise ValueError("Previous submission outcome is uncertain; inspect evidence before retrying")
+            from openinvest.core.decision_evidence import current_decision
+            valid = current_decision(store.root, prior["response"], symbol)
+            return {**prior["response"], "replayed": True, "response_type": "historical_receipt", "current_advice_valid": valid}
+    try:
+        context = load_context(store.root, context_id, symbol)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise ValueError(f"DATA_UNTRUSTED: {e}. 请重新 prepare 并提交对应 context_id。") from e
+    if context.get("declared_model") not in (None, "unknown", model.strip()):
+        raise ValueError("Model changed after prepare; prepare again with the actual model")
+    parts = _COMMITTEE_SECTION_RE.split(raw)
+    sections = {parts[i]: parts[i+1].strip() for i in range(1, len(parts)-1, 2)}
+    if any(not sections.get(role) for role in context["inputs"].get("required_roles", [])):
+        raise ValueError("DATA_UNTRUSTED: required committee roles are missing; complete the prepared protocol")
+    cio = sections.get("CIO", raw if not sections else "")
+    if parse_cio_memo(cio).get("verdict") == "UNCLEAR":
+        raise ValueError("CIO 段解析不出裁决（UNCLEAR），请修正后重交")
+    signature = digest({"symbol": symbol, "transcript": raw, "provider": provider, "model": model})
+    receipt = store.root / ".evidence/receipts" / f"{context_id}.json"
+    with _file_lock(receipt):
+        if receipt.exists():
+            prior = json.loads(receipt.read_text())
+            if prior.get("signature") != signature:
+                raise ValueError("context_id already submitted with different content; prepare a new request")
+            if prior.get("state") != "done":
+                raise ValueError("Previous submission outcome is uncertain; inspect evidence before retrying")
+            from openinvest.core.decision_evidence import current_decision
+            valid = current_decision(store.root, prior["response"], symbol)
+            return {**prior["response"], "replayed": True, "response_type": "historical_receipt", "current_advice_valid": valid}
+        _atomic_write_text(receipt, json.dumps({"signature": signature, "state": "started"}))
+        result = _save_committee_transcript_once(symbol, raw, provider=provider, model=model, context_id=context_id)
+        _atomic_write_text(receipt, json.dumps({"signature": signature, "state": "done", "response": result},
+                                             ensure_ascii=False, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+        return {**result, "replayed": False}
 
 def load_submitted_committee(symbol: str, day: str) -> Optional[Dict[str, Any]]:
     """读某天 Agent 交卷时写的日报侧文件 → daily_report 的 asset_committees 单项结构。没有 → None。"""
@@ -495,6 +604,21 @@ def load_submitted_committee(symbol: str, day: str) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(rec, dict) or not isinstance(rec.get("verdict"), dict):
         return None   # 格式不对按缺卷处理（日报响亮列出），不让整份日报挂掉
+    try:
+        from openinvest.core.evidence_eligibility import digest
+        sealed = json.loads((path.parents[2] / ".evidence/reports" / f"{rec.get('decision_id', '')}.json").read_text())
+        if sealed["sha256"] != digest(sealed["payload"]) or digest(rec) != sealed["sha256"]:
+            return None
+    except (OSError, ValueError, KeyError):
+        return None
+    from openinvest.core.decision_evidence import current_decision
+    if not current_decision(path.parents[2], rec, symbol, verdict=rec["verdict"]):
+        return None
+    try:
+        if rec["decision_id"] not in (path.parent / f"{safe_symbol(symbol)}.md").read_text():
+            return None
+    except OSError:
+        return None
     return {
         "verdict": rec["verdict"],
         "report": CommitteeReport(

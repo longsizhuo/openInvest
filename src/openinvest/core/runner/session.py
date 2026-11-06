@@ -119,6 +119,9 @@ def run_committee_for_symbol(
 
     # 1. 拉 strategy 找 target（顾问模式跳过持仓校验）
     _advisory = is_advisory_mode()
+    from openinvest.core.decision_evidence import preparation_state
+    from openinvest.core.memory_store import MemoryStore
+    prepared_state = None if _advisory else preparation_state(MemoryStore().root)
     pm = PortfolioManager()
     if _advisory:
         target = {"symbol": symbol, "display_name": symbol, "channel": ""}
@@ -192,7 +195,10 @@ def run_committee_for_symbol(
         except Exception as e:  # noqa: BLE001
             log.warning(f"get_macro_data 失败: {e}")
             macro_data = {}
-        input_health["macro_data_empty"] = not macro_data
+        from openinvest.utils.exchange_fee import macro_input_health
+        input_health["macro_input_health"] = macro_input_health(macro_data)
+        input_health["macro_input_snapshot"] = str(macro_data)
+        input_health["macro_data_empty"] = input_health["macro_input_health"]["valid"] is False
         macro_view = run_macro_view(str(macro_data), event_brief=effective_event_brief)
         emit("macro_done", macro_preview=macro_view[:240])
 
@@ -298,6 +304,24 @@ def run_committee_for_symbol(
         reentry_reference=reentry_reference, prob_hint=_prob_hint,
         portfolio_summary=portfolio_summary,
     ))
+    if not _advisory:
+        from openinvest.services.review_plans import plan_brief, observe_prepared_market
+        observe_prepared_market(pm.store, symbol, df)
+        portfolio_summary += plan_brief(pm.store, symbol)
+        from openinvest.core.decision_evidence import prepare_context, market_snapshot
+        from openinvest.utils.llm import get_llm_config_safe
+        context = prepare_context(pm.store.root, symbol, {
+            "asset": target, "market_data": market_data, "macro_view": macro_view,
+            "portfolio_summary": portfolio_summary, "prior_insights": prior_insights,
+            "regime_brief": regime_brief, "reentry_reference": reentry_reference,
+            "current_price": current_price, "sentiment_brief": effective_sentiment_brief,
+            "valuation_brief": effective_valuation_brief, "event_brief": effective_event_brief,
+            "input_health": input_health, "defense_dca": defense_dca,
+            "ohlcv_snapshot": market_snapshot(df),
+        }, model=get_llm_config_safe()[2] or "unknown", expected_state=prepared_state)
+        input_health = {**input_health, "context_id": context["context_id"],
+                        "prepared_at": context["prepared_at"], "code_version": context["code_version"],
+                        "config_sha256": context["config_sha256"]}
 
     # 6. 跑多轮辩论 + CIO
     # 顾问模式不落 transcript 到真实 memory——群聊问的资产多半不在用户 target_assets
@@ -514,7 +538,10 @@ def run_committee_session(
         except Exception as e:  # noqa: BLE001
             log.warning(f"get_macro_data 失败 graceful 退化空 dict: {e}")
             macro_data = {}
-        shared_health["macro_data_empty"] = not macro_data
+        from openinvest.utils.exchange_fee import macro_input_health
+        shared_health["macro_input_health"] = macro_input_health(macro_data)
+        shared_health["macro_input_snapshot"] = str(macro_data)
+        shared_health["macro_data_empty"] = shared_health["macro_input_health"]["valid"] is False
         macro_view = run_macro_view(str(macro_data), event_brief=event_brief)
         emit("macro_done", macro_preview=macro_view[:240], shared=True)
 

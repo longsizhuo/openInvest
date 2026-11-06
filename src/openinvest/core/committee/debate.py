@@ -198,6 +198,7 @@ def run_committee(
     risk_input_r1 = (
         f"# 资产: {asset.get('display_name', sym)} ({sym})\n"
         f"# 用户当前持仓:\n{portfolio_summary}\n\n"
+        f"# 市场风险输入（原始数据，不是额外方向投票）:\n{market_data}\n\n{regime_section}{sentiment_section}"
         f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n"
         f"请按 Risk Officer 格式输出风险评估。"
     )

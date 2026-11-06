@@ -316,6 +316,9 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
         price_alerts = []
 
     for sym in symbols:
+        if not dry_run:
+            from openinvest.services.review_plans import update_plan
+            update_plan(ms, sym, now=now)
         frames = _fetch_frames(sym)
         if frames is None:
             continue
@@ -323,6 +326,9 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
         age_min = (now - frames["last_bar_utc"]).total_seconds() / 60
         if age_min > _MAX_STALE_MIN:
             continue
+        if not dry_run:
+            from openinvest.services.review_plans import observe_quote
+            observe_quote(ms, sym, frames["price"], now=now)
         hit = _detect_move(frames["closes"], frames["atr_pct"], cfg.event.sentinel_atr_mult)
         if hit is None:
             continue

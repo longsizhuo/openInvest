@@ -35,7 +35,8 @@ def build_quant_prompt(asset: Dict[str, Any], round_label: str = "opening") -> s
     prompt = localize_prompt_output_requirements(prompt)
     directive = build_output_language_directive(artifact="analysis")
     field_value_directive = build_field_value_language_directive()
-    return f"{directive}\n{field_value_directive}\n\n{prompt}"
+    from openinvest.core.rule_audit import SHADOW_INSTRUCTION
+    return f"{directive}\n{field_value_directive}\n\n{prompt}\n{SHADOW_INSTRUCTION}"
 
 
 __all__ = ["build_quant_prompt"]

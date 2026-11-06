@@ -56,6 +56,8 @@ def llm_failure_reason(parsed: Optional[Dict[str, Any]]) -> Optional[str]:
     if not parsed:
         return None
     h = parsed.get("input_health") or {}
+    if h.get("decision_status") == "DATA_UNTRUSTED":
+        return "DATA_UNTRUSTED：输入或规则版本未通过核验，当前没有可执行建议；这不是市场 HOLD 判断"
     bad = h.get("worker_unavailable") or []
     if parsed.get("verdict") == "UNCLEAR" or h.get("cio_unclear"):
         return f"CIO 没给出裁决（UNCLEAR）；没产出的角色：{', '.join(bad) or '无'}"

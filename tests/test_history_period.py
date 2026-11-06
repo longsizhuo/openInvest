@@ -118,7 +118,15 @@ def _path(start, mid, end, n_tail=22):
     ])
 
 
-def test_macro_block_reports_true_one_month_change(store):
+def test_macro_block_reports_true_one_month_change(store, monkeypatch):
+    original = ef.get_history_data
+    def synthetic_fresh(symbol, period, **kwargs):
+        frame=original(symbol,period,**kwargs).copy()
+        if frame.empty: return frame
+        frame.index = frame.index + (pd.Timestamp.now().normalize()-frame.index[-1])
+        frame.attrs.pop("yf_fetch_failed", None)
+        return frame
+    monkeypatch.setattr(ef,"get_history_data",synthetic_fresh)
     # 复刻 2026-10-07：DXY 3 年跌、近 1 月涨；TIP 3 年涨、近 1 月跌
     _seed(store, "DX-Y.NYB", _path(104.37, 98.84, 102.07))
     _seed(store, "TIP", _path(96.37, 106.97, 104.18))

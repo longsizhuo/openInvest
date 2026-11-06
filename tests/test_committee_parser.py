@@ -182,8 +182,8 @@ def test_cio_prompt_cash_opp_cost_directive_when_off_by_default():
     """默认（rule OFF）→ 注入"机会成本规则已被用户关闭"directive，作废低集中度强制加仓"""
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
-    assert "现金仓位机会成本规则已被用户关闭" in prompt
-    assert "任何仓位 / 任何现金比例" in prompt
+    assert "CASH_DEPLOYMENT_MIN" not in prompt
+    assert "现金仓位机会成本规则已被用户关闭" not in prompt
 
 
 def test_cio_prompt_no_cash_opp_cost_directive_when_enabled():
@@ -511,7 +511,7 @@ def test_single_invest_cap_ignores_non_buy_verdicts():
     for v in ("HOLD", "SELL"):
         r = parse_cio_memo(f"VERDICT: {v}\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 25000",
                            single_invest_cap=1000)
-        assert r["verdict"] == v and r["alloc_cny"] == 25000
+        assert r["verdict"] == v and r["alloc_cny"] == (0 if v == "HOLD" else 25000)
         assert "_single_invest_cap" not in r and single_invest_cap_note(r) == ""
 
 

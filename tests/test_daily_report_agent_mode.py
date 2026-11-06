@@ -26,12 +26,10 @@ def test_agent_mode_reads_submissions_and_flags_missing(monkeypatch):
     today = datetime.now().strftime("%Y-%m-%d")
     d = MemoryStore().root / ".committee" / today
     d.mkdir(parents=True, exist_ok=True)
-    (d / "GC_F_committee.json").write_text(json.dumps({
-        "symbol": "GC=F", "verdict": {"verdict": "HOLD", "confidence": 0.6,
-                                      "dominant_view": "macro", "alloc_cny": 0},
-        "macro_view": "宏观偏紧", "quant_view": "q", "risk_view": "r", "cio_memo": "CIO 说明",
-        "path_reference": "", "path_profile": None,
-    }), encoding="utf-8")
+    from tests.integrity_helpers import context_id
+    from openinvest.core.runner.coordinator import save_committee_transcript
+    save_committee_transcript("GC=F", "=== MACRO ===\n宏观收紧\n=== QUANT_R1 ===\nq\n=== RISK_R1 ===\nr\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.6\nCIO 说明", context_id=context_id("GC=F"))
+
 
     pm = MagicMock()
     pm.strategy = {"target_assets": [{"symbol": "GC=F"}, {"symbol": "NDQ.AX"}]}

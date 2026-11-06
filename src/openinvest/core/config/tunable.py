@@ -324,6 +324,8 @@ class SchedulerConfig:
     # healthchecks.io 式外部心跳 URL；空 = 不发。调度器每 5 分钟 GET 一次，失败只记日志。
     # env: INVEST_SCHEDULER_HEARTBEAT_URL。用法见 docs/wiki/08-deployment.md。
     heartbeat_url: str = ""
+    # Operational review trigger, not a market threshold or trading instruction.
+    decision_hold_review_days: int = 20
 
 
 @dataclass(frozen=True)
@@ -357,12 +359,59 @@ class FleetConfig:
 
 
 @dataclass(frozen=True)
+class MarketRulesConfig:
+    """Versioned legacy market heuristics; defaults preserve the prior numeric policy.
+
+    These may be proposed for calibration, never self-relaxed without evaluation.
+    They are separate from money caps, source integrity and scoring definitions.
+    """
+    quantile_low: float = 30.0
+    quantile_high: float = 70.0
+    rsi_trend_low: float = 50.0
+    rsi_high: float = 70.0
+    ma_deviation_pct: float = 15.0
+    exhaustion_flags: int = 2
+    risk_strength_high: float = 7.0
+    risk_strength_low: float = 3.0
+    macro_neutral_low: float = -2.0
+    macro_neutral_high: float = 2.0
+    review_loss_pct: float = 5.0
+    review_profit_pct: float = 10.0
+    vix_rise_from: float = 15.0
+    vix_rise_to: float = 18.0
+    per_asset: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        import math
+        from dataclasses import fields
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if f.name != "per_asset" and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise ValueError(f"market_rules.{f.name} must be a finite number")
+        if not 0 <= self.quantile_low < self.quantile_high <= 100:
+            raise ValueError("market quantile bands must be ordered within 0..100")
+        if not 0 <= self.rsi_trend_low <= self.rsi_high <= 100:
+            raise ValueError("market RSI bands must be ordered within 0..100")
+        if not 0 <= self.risk_strength_low <= self.risk_strength_high <= 10:
+            raise ValueError("risk strength must use its declared 0..10 scale")
+        if not -5 <= self.macro_neutral_low <= self.macro_neutral_high <= 5:
+            raise ValueError("macro boundaries must use the declared -5..5 scale")
+        if type(self.exhaustion_flags) is not int or not 1 <= self.exhaustion_flags <= 3:
+            raise ValueError("exhaustion_flags must be an integer in 1..3")
+        if not 0 <= self.vix_rise_from <= self.vix_rise_to or min(self.ma_deviation_pct, self.review_loss_pct, self.review_profit_pct) < 0:
+            raise ValueError("invalid market heuristic bounds")
+        if not isinstance(self.per_asset, dict):
+            raise ValueError("per_asset must be a mapping")
+
+
+@dataclass(frozen=True)
 class TunableConfig:
     """所有可调参数的顶层容器"""
     language: LanguageConfig = field(default_factory=LanguageConfig)
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
     regime: RegimeConfig = field(default_factory=RegimeConfig)
     verdict: VerdictConfig = field(default_factory=VerdictConfig)
+    market_rules: MarketRulesConfig = field(default_factory=MarketRulesConfig)
     dreaming: DreamingTunableConfig = field(default_factory=DreamingTunableConfig)
     macro_buckets: MacroBucketConfig = field(default_factory=MacroBucketConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)

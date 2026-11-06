@@ -75,7 +75,8 @@ def model_era_of(input_health: Optional[Dict[str, Any]], date: str, provider: Op
     if not h:
         if provider:
             return f"{str(provider).strip().lower()}:unknown"
-        return PRE_HEALTH_ERA if str(date or "") <= MODEL_ERA_CUTOFF else UNKNOWN_ERA
+        # A calendar cutoff is not evidence of the model used by this run.
+        return UNKNOWN_ERA
     who = (str(h.get("provider") or "").strip().lower() or "coordinator") \
         if h.get("entry") == "coordinator" else "direct"
     return f"{who}:{str(h.get('model') or '').strip() or 'unknown'}"
@@ -612,6 +613,8 @@ def calibration_summary(reviews: List[VerdictReview], window: str = "30d", *,
          if window in r.hits and r.verdict in EXPECTED_DIRECTION),
         min_n=min_n)
     out["window"] = window
+    out["diagnostic_only"] = True
+    out["assumption"] = "Legacy assumption: CIO confidence equals directional correctness probability; not a defined forecast event"
     return out
 
 
@@ -642,6 +645,8 @@ def neutrality_summary(reviews: List[VerdictReview], window: str = "30d", *,
 
 
 def _calibration_lines(cal: Dict[str, Any], scope: str = "") -> List[str]:
+    if cal.get("diagnostic_only"):
+        return ["\n## 概率校准\n", "暂无具有明确事件、期限和概率声明的合格预测。旧自报分诊断仅供内部审计，不作为概率或策略收益证据。\n"]
     lines = [f"\n## 置信度校准（CIO 自报 vs {cal.get('window', '30d')} 实际命中 · live 干净样本 n={cal['n']}{scope}）\n"]
     zero = (f"另有 {cal['n_zero_conf']} 条自报恰为 0.0（解析失败兜底），不计入。\n"
             if cal.get("n_zero_conf") else "")
