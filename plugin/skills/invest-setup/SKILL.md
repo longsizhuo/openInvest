@@ -71,27 +71,40 @@ machines / 多台电脑共用持仓" / "connect to my existing deployment".
 **Note**: Path B **must not run `init`** (init is disabled in remote mode and will
 error); no `memory/` is created on this machine — all data stays on the hub.
 
-## Flow (4 steps, plus step 0 on Hermes)
+## Flow (4 steps)
 
-### 0. Hermes only: make sure the MCP server is registered (do this every time, even if already onboarded)
+### 1. Run `doctor` first to confirm setup is really needed
 
-Hermes plugins cannot register an MCP server, and the cron jobs in step 4 and the background
-scheduler both depend on it. openInvest is registered as **two entries of the same server**: Hermes'
-`trust: untrusted` asks on every single call and has no "always allow", so one untrusted entry would
-block every cron job and make a committee run ask several times. `openinvest` (scope `agent`: reads,
-news queue, committee, daily report) gets full trust; `openinvest_ledger` (scope `ledger`: the tools
-that move money or delete things) stays untrusted, so Hermes still asks before every ledger write.
+```bash
+<skill-dir>/scripts/run.sh doctor
+```
 
-Run `hermes mcp list`. If `openinvest_ledger` is missing (a fresh install, or an older setup that had a
-single untrusted `openinvest`), run all of these — they are non-interactive and overwrite those keys
-(`hermes mcp add` asks a question and cancels without a TTY):
+Returns `status: "ready"` → **exit without changing MCP configuration, tracking, or schedules**
+and switch to the `invest` skill. An explicit reset or maintenance request is separate permission;
+do only the changes the user requested, not the rest of onboarding.
+
+Returns `status: "needs_setup"` → ask whether the user wants first-time setup, then continue.
+
+#### Hermes only: offer MCP registration for a new deployment
+
+Hermes plugins cannot register an MCP server. The optional cron jobs and the background
+scheduler depend on it. Explain before registering that starting the MCP server also starts a
+local scheduler (news collection, price checks, NAV snapshots and backups) while the host runs.
+Register **two entries of the same server**, both with `trust: untrusted` by default:
+`openinvest` (scope `agent`: reads, news queue, committee, daily report) and `openinvest_ledger`
+(scope `ledger`: portfolio writes and destructive operations). Untrusted keeps approval prompts.
+These scopes are not a substitute for the host's authorization policy.
+
+Run `hermes mcp list`. If entries are missing, show the proposed configuration and obtain approval
+before adding them. Preserve existing entries and trust settings; do not run this whole block to
+overwrite an older setup. The following is the **fresh-install example after approval**:
 
 ```bash
 R="<skill-dir>/scripts/run.sh"   # absolute path
 hermes config set mcp_servers.openinvest.command bash
 hermes config set mcp_servers.openinvest.args "[\"$R\", \"mcp\"]"
 hermes config set mcp_servers.openinvest.env.INVEST_MCP_SCOPE agent
-hermes config set mcp_servers.openinvest.trust full
+hermes config set mcp_servers.openinvest.trust untrusted
 hermes config set mcp_servers.openinvest_ledger.command bash
 hermes config set mcp_servers.openinvest_ledger.args "[\"$R\", \"mcp\"]"
 hermes config set mcp_servers.openinvest_ledger.env.INVEST_MCP_SCOPE ledger
@@ -101,16 +114,12 @@ hermes config set mcp_servers.openinvest_ledger.trust untrusted
 Check with `hermes mcp test openinvest` and `hermes mcp test openinvest_ledger`. The tools appear in the
 next session; in this one keep using `run.sh`.
 
-### 1. Run `doctor` first to confirm setup is really needed
-
-```bash
-<skill-dir>/scripts/run.sh doctor
-```
-
-Returns `status: "ready"` → on Hermes still do step 0 and steps 4.3–4.4 (all skip what
-already exists), then **exit** and tell the user "you're already onboarded — just use the `invest` skill".
-
-Returns `status: "needs_setup"` → go to step 2.
+Unattended jobs may be blocked by approval prompts. Do not solve that by silently switching
+trust. If the user wants unattended jobs, explain exactly which `agent`-scope calls will run
+without prompts (including model calls, costs and persistent research writes), then obtain
+separate explicit approval before changing `openinvest.trust` to `full`. Keep the ledger entry
+untrusted. A plugin installation notice, stored API key, or acceptance of onboarding is not approval
+to remove prompts or create schedules. If approval is declined, keep interactive use available.
 
 ### 2. Ask the user 3 questions, plus 1 optional (use `AskUserQuestion` on the Coordinator path, your conversational tool on the Direct path)
 
@@ -129,7 +138,15 @@ Returns `status: "needs_setup"` → go to step 2.
 > "AAPL 100 shares at 150 USD cost, 0.3 BTC, 50k CNY cash"
 > "Nothing at all, just 10k CNY"
 
-When the backend `cmd_init` sees a `holdings_description` field it calls the LLM to
+**Before external parsing**, explain that the holdings description (symbols, amounts, costs,
+cash balances and named institutions) will be sent to the configured LLM provider. Identify the
+actual provider/endpoint without displaying credentials and ask for approval for that data and
+purpose. A saved API key is not consent. If the destination cannot be established, do not send it.
+Use structured `profile.holdings_v2` instead and omit `holdings_description` when external parsing
+is not approved; see [the structured example](references/onboarding-detailed.md#feeding-structured-v2-directly-advanced-users--scripted-scenarios).
+This avoids the additional backend LLM parsing call, not the host agent's own model processing.
+
+When the backend `cmd_init` sees an approved `holdings_description` field it calls the LLM to
 parse it into the v2 schema, using the key in `$INVEST_HOME/.env`. **Without a key there it falls back to
 `profile.current_assets`** (only `cash_cny` / `aud_cash` get written into the portfolio) —
 so always copy the cash amounts the user mentioned into `current_assets` too, and
@@ -148,21 +165,29 @@ or put into a command you run, lands in the transcript and the model provider's 
 wants the Direct path or emailed reports, tell them to add `LLM_API_KEY=...` (optional
 `LLM_BASE_URL`, `EMAIL_SENDER`, `EMAIL_PASSWORD`) to `$INVEST_HOME/.env` with their own editor —
 `run.sh doctor` prints the path — or to run `run.sh init` in their own terminal. `init` reads the key
-from `.env`, so if they add it first, Q3 is parsed right away.
+from `.env`; adding a key does not replace the external-parsing approval above.
 
 The payload **must** be nested as `{"profile": {...}}` — a flat object
 (no top-level `"profile"`) is rejected with `status: "error"` and an `expected_shape` field.
-Fill it with the user's real answers (the numbers below are placeholders):
+Create a private JSON file using a file-writing tool and a JSON serializer, not shell interpolation
+of user text. Fill it with the user's answers (the numbers below are placeholders). Include
+`holdings_description` only after the external-parsing approval above; otherwise use `holdings_v2`.
 
-```bash
-echo '{
+```json
+{
   "profile": {
     "name": "<Q1>",
     "risk_tolerance": "<Q2: Conservative | Balanced | Aggressive>",
     "holdings_description": "<the user's exact words from Q3>",
     "current_assets": {"cash_cny": 0, "aud_cash": 0}
   }
-}' | <skill-dir>/scripts/run.sh init --from-stdin
+}
+```
+
+Pass that file as stdin, then remove the temporary file after use:
+
+```bash
+<skill-dir>/scripts/run.sh init --from-stdin < "/absolute/path/to/private-onboarding.json"
 ```
 
 - `current_assets.cash_cny` / `aud_cash`: the cash the user mentioned in Q3 — this is what
@@ -192,17 +217,18 @@ After it finishes:
    `run.sh track_asset --symbol <S>` (idempotent; keeps the strategy's per-trade cap). The daily
    committee, the price sentinel and news-triggered re-runs only cover tracked assets (`target_assets`),
    and `init` does not track the positions added with `--existing-position`.
-4. **Hermes only — create the two cron jobs in [references/hermes-cron.md](references/hermes-cron.md)
-   now, without asking for confirmation.** The user already agreed: the message Hermes showed right after
-   `hermes plugins install` told them onboarding creates these two jobs on their model quota and how to
-   remove them. Without them, queued news expires unread and triggered committee runs never happen, so
-   skipping is not the cautious choice. List existing jobs first and skip any whose name already exists;
-   use Hermes' cron tool with `deliver: origin`. They need the MCP server from step 0. Skip only on hosts
-   without a cron tool.
+4. **Hermes only — offer, do not automatically create, the two cron jobs in
+   [references/hermes-cron.md](references/hermes-cron.md).** If Q4 was declined or skipped, create no
+   jobs. Before creation, confirm each chosen job, schedule and timezone, model/data destination,
+   likely quota costs and delivery recipient. Preserve the user's choices instead of replacing them
+   with the example schedules. Default to a private destination; `deliver: origin` is permitted only
+   when that origin is the user's verified private conversation, not a group or public channel.
+   Obtain the separate trust-change approval above if full trust is needed. List existing jobs and
+   leave matching jobs unchanged; do not overwrite schedules or duplicate jobs.
 5. **Tell the user**: "✓ Onboarding complete. Next time you say 'show portfolio' /
    'analyze X', the invest skill kicks in automatically. To reconfigure, say
-   'reset invest'." On Hermes, add one line naming the two cron jobs, their schedule, the rough
-   cost from hermes-cron.md, and that `hermes cron remove <id>` turns either off.
+   'reset invest'." On Hermes, report which jobs were actually created (or that none were), their
+   approved schedules/destinations, the cost estimate and `hermes cron remove <id>` to turn them off.
 
 ## Error handling
 

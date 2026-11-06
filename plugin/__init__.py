@@ -12,8 +12,9 @@ server's `instructions` into the prompt, so the agent only reached for openInves
 - a fixed routing rule in the system prompt (cache-safe, survives compression), and
 - a `pre_llm_call` hook that injects `run.sh brief --text` (offline ledger digest: holdings, today's
   verdicts, pending queues) on a session's first turn and again only when the digest changes.
-The digest goes into every session, group chats included (owner's choice); set the plugin setting
-`inject_digest: false` to keep only the routing rule.
+Automatic digest injection is limited to the local CLI. Hermes does not pass a reliable
+private/group or owner indicator to this hook, so gateway and unknown contexts receive only the
+routing rule. Set `inject_digest: false` to disable the CLI digest as well.
 """
 import logging
 import os
@@ -29,15 +30,19 @@ RUN_SH = Path(__file__).resolve().parent / "skills" / "invest" / "scripts" / "ru
 ROUTING_RULE = (
     "openInvest is installed: the owner's own investment ledger, live prices and a 4-role committee. "
     "For any question about stocks, funds, ETFs, gold, crypto, markets, macro, buying or selling, or the "
-    "owner's money, call the openinvest tools first (status / live_prices; the symbol may already be a holding) "
-    "and only then add web search. Load the openinvest:invest skill before running a committee."
+    "owner's money, call the openinvest tools first (live_prices for public market questions) "
+    "and only then add web search. In shared or unknown contexts, do not read or disclose the owner's "
+    "holdings, balances, status or portfolio-aware analysis without the owner's explicit authorization "
+    "for that audience. Load the openinvest:invest skill before running a committee."
 )
 BRIEF_TTL_SECONDS = 300
 BRIEF_TIMEOUT_SECONDS = 15
 # After a failed brief (first install still downloading the backend via uvx, older backend without
 # `brief`) wait this long before trying again, so a turn does not stall up to 15s every 5 minutes.
 BRIEF_RETRY_SECONDS = 1800
-SKIP_PLATFORMS = {"subagent", "cron"}  # our own cron prompts call the tools explicitly; children inherit context
+# The host hook supplies platform, but no reliable private/group or owner indicator.
+# Do not infer privacy from a session ID, sender ID, or an unrecognized/missing platform.
+DIGEST_PLATFORMS = {"cli"}
 
 _brief_cache = {"at": float("-inf"), "text": None, "ttl": 0.0}
 _refreshing = threading.Lock()
@@ -94,7 +99,7 @@ def _brief_text(invest_home):
 
 def _make_pre_llm_call(invest_home):
     def pre_llm_call(session_id=None, platform=None, **_):
-        if platform in SKIP_PLATFORMS:
+        if platform not in DIGEST_PLATFORMS:
             return None
         text = _brief_text(invest_home)
         if not text:
@@ -137,18 +142,21 @@ def register(ctx):
 
     # MCP 走本插件自带的 run.sh：它把后端钉在 release-please 盖章的版本（不跑 PyPI 上最新的），
     # 插件更新后 run.sh 跟着更新，这段配置不用改。拆两条：Hermes 的 untrusted 按 server 生效、每次都问、
-    # 没有"永久允许"，只有动钱那条（ledger）留 untrusted，cron 要用的 agent 那条给 full trust。
+    # 没有"永久允许"。两条默认都保留确认；持久 full trust 必须由用户明确批准。
     # 不写 INVEST_HOME：Hermes 不经 shell 起进程，~ 不会展开；run.sh 自己默认 INVEST_HOME=$HOME/openInvest
     log.info(
         "[openinvest] MCP tools: add to ~/.hermes/config.yaml (after-install.md has the commands)\n"
         "mcp_servers:\n"
-        "  openinvest:          # reads, news queue, committee — full trust so cron jobs can run\n"
+        "  openinvest:          # reads, news queue, committee — retain approval prompts by default\n"
         "    command: bash\n"
         f'    args: ["{RUN_SH}", "mcp"]\n'
         "    env: {INVEST_MCP_SCOPE: agent}\n"
+        "    trust: untrusted\n"
         "  openinvest_ledger:   # tools that move money — Hermes asks before each call\n"
         "    command: bash\n"
         f'    args: ["{RUN_SH}", "mcp"]\n'
         "    env: {INVEST_MCP_SCOPE: ledger}\n"
-        "    trust: untrusted"
+        "    trust: untrusted\n"
+        "[openinvest] Unattended operation is optional: obtain explicit approval for persistent full trust "
+        "and the exact cron schedules, delivery destinations and model costs before enabling either."
     )

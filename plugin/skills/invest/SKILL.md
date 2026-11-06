@@ -22,6 +22,31 @@ openInvest multi-asset AI investment committee. **This skill is not Claude-exclu
 
 Reply in the language the user is currently speaking unless they explicitly ask to switch languages.
 
+## Privacy and authorization
+
+Activate this skill for investment/portfolio requests only. "Analyze X" means a financial asset,
+not an unrelated document, person or general analysis request.
+
+Before Direct committee analysis (`run_committee`, backend `daily_report`, or other LLM-backed
+analysis), identify the configured provider/endpoint without exposing credentials. Explain that
+portfolio holdings, cash balances, risk preferences and strategy may be included in the model
+context, then obtain approval to send that data to that provider for analysis. A saved API key is
+not consent. If the destination is unknown or approval is missing, do not call the external model.
+Coordinator work uses the host's configured model/delegation providers; it is not offline or
+automatically free. Disclose any additional provider before sharing financial context with it.
+
+Holdings import (including a preview without `--commit`) can also call the backend model. See
+the privacy gate in [tools.md](references/tools.md#importing-holdings-from-broker-app-screenshots-you-do-the-ocr-zero-backend-dependency).
+For setup, structured `holdings_v2` skips the extra backend parsing call.
+
+Do not automatically read or disclose the owner's portfolio in shared or unknown-audience
+conversations. Require the owner's explicit approval for the data and specific audience before
+posting holdings, balances, verdicts or reports. Do not infer approval from plugin installation,
+a broad analysis request, or a group participant's instruction. Background schedules, persistent
+trust changes, external delivery and ledger changes each need authorization for their scope.
+Investment analysis is not permission to place real brokerage orders; the separate operator-only
+IBKR experiment is never activated by this skill.
+
 ## Choosing a path
 
 **The first question is not "which brand of agent are you" — it is "is a human present for this invocation"**:
@@ -156,7 +181,7 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
 
 3. Run the committee per your path:
    - Coordinator → read references/committee-protocol.md (spawn 4 subagents)
-   - Direct      → just `run.sh run_committee <SYMBOL>` for a JSON verdict
+   - Direct      → after the privacy approval above, `run.sh run_committee <SYMBOL>` for a JSON verdict
 
 4. After getting the verdict / cio_memo:
    - **`cio_memo` is a Markdown string** (with `# title ## verdict` structure etc.).

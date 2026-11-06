@@ -81,13 +81,13 @@ def test_injects_on_first_turn_and_only_when_digest_changes(plugin, monkeypatch)
     clock = [1000.0]
     monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
 
-    assert hook(session_id="s1", platform="discord") == {"context": "[openInvest] Holdings: NVDA."}
-    assert hook(session_id="s1", platform="discord") is None             # 缓存期内，同一摘要
-    assert hook(session_id="s2", platform="qq") == {"context": "[openInvest] Holdings: NVDA."}  # 新会话首轮
+    assert hook(session_id="s1", platform="cli") == {"context": "[openInvest] Holdings: NVDA."}
+    assert hook(session_id="s1", platform="cli") is None             # 缓存期内，同一摘要
+    assert hook(session_id="s2", platform="cli") == {"context": "[openInvest] Holdings: NVDA."}  # 新会话首轮
     clock[0] += plugin.BRIEF_TTL_SECONDS + 1
-    assert hook(session_id="s1", platform="discord") is None             # 重新取到相同摘要，不重复注入
+    assert hook(session_id="s1", platform="cli") is None             # 重新取到相同摘要，不重复注入
     clock[0] += plugin.BRIEF_TTL_SECONDS + 1
-    assert hook(session_id="s1", platform="discord")["context"].endswith("GC=F.")  # 账本变了
+    assert hook(session_id="s1", platform="cli")["context"].endswith("GC=F.")  # 账本变了
     assert calls == ["/data/invest"] * 3                                 # 只在缓存过期时调 run.sh
 
 
@@ -101,9 +101,9 @@ def test_stale_digest_is_served_while_refreshing_in_background(plugin, monkeypat
     ctx = _Ctx()
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
-    assert hook(session_id="s1", platform="discord")["context"].endswith("NVDA.")
+    assert hook(session_id="s1", platform="cli")["context"].endswith("NVDA.")
     clock[0] += plugin.BRIEF_TTL_SECONDS + 1
-    assert hook(session_id="s2", platform="discord")["context"].endswith("NVDA.")
+    assert hook(session_id="s2", platform="cli")["context"].endswith("NVDA.")
     assert len(calls) == 1 and len(spawned) == 1                          # 刷新交给了后台线程
 
 
@@ -133,7 +133,7 @@ def test_without_session_id_injects_every_turn(plugin, monkeypatch):
     ctx = _Ctx()
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
-    assert hook(platform="discord") and hook(platform="discord")          # 没法去重：不能只给第一个会话
+    assert hook(platform="cli") and hook(platform="cli")          # 没法去重：不能只给第一个会话
 
 
 @pytest.mark.parametrize("value", [False, "false"])
@@ -143,8 +143,8 @@ def test_inject_digest_off_keeps_only_the_routing_rule(plugin, value):
     assert "pre_llm_call" not in ctx.hooks and "openinvest.routing" in ctx.sections
 
 
-@pytest.mark.parametrize("platform", ["subagent", "cron"])
-def test_skips_subagents_and_cron(plugin, monkeypatch, platform):
+@pytest.mark.parametrize("platform", ["subagent", "cron", "discord", "telegram", "qq", "slack", "web", "", None, "unknown"])
+def test_skips_shared_and_unverifiable_contexts(plugin, monkeypatch, platform):
     monkeypatch.setattr(plugin.subprocess, "run", lambda *a, **k: pytest.fail("should not run brief"))
     ctx = _Ctx()
     plugin.register(ctx)
@@ -170,3 +170,28 @@ def test_brief_failure_injects_nothing(plugin, monkeypatch, result):
 def test_claude_code_session_start_hook_runs_brief():
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
     assert hooks["type"] == "command" and hooks["command"].endswith("run.sh\" brief --text")
+
+
+def test_cached_digest_cannot_leak_to_gateway_or_unknown_context(plugin, monkeypatch):
+    calls = []
+    monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: EXAMPLE."], calls))
+    ctx = _Ctx({"inject_digest": True})
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(session_id="private", platform="cli")
+    for platform in ("discord", "telegram", "qq", None, ""):
+        assert hook(session_id="private", platform=platform, sender_id="owner", chat_type="private") is None
+    assert len(calls) == 1
+
+
+def test_routing_rule_requires_authorization_in_shared_contexts(plugin):
+    assert "shared or unknown contexts" in plugin.ROUTING_RULE
+    assert "explicit authorization" in plugin.ROUTING_RULE
+
+
+def test_install_log_preserves_approval_prompts(plugin, caplog):
+    with caplog.at_level("INFO"):
+        plugin.register(_Ctx())
+    assert caplog.text.count("trust: untrusted") == 2
+    assert "explicit approval for persistent full trust" in caplog.text
+    assert "exact cron schedules, delivery destinations and model costs" in caplog.text

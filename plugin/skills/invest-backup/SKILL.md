@@ -36,6 +36,17 @@ openInvest's real data (holdings/strategy/user profile/committee records under `
 - **`backup` is safe to run while the scheduler is running** (`restore` is not — see above). It first flushes (checkpoints) the WAL of the SQLite databases into their main files, and any `*.db-wal` that could not be flushed is packed too — trades that exist only in the write-ahead log are not lost. (Backends older than this behaviour skip the flush with a warning on stderr; the `*.db-wal` files are still packed.)
 - **list**: lists existing backups, newest first, with sizes — both manual `openinvest-backup-*.zip` and the backend's daily automatic `auto_*.zip` (scheduler job `backup`, 03:30 Asia/Shanghai, keeps the latest 14; no `.backtest*` on weekdays, Sunday's `auto_*_full.zip` includes it; `restore` accepts either).
 
+## Backup privacy
+
+Archives contain private holdings and may contain `.env` API/SMTP credentials. They are
+**not encrypted**. The launcher creates new files with owner-only permissions and new
+directories with owner-only access, including its legacy fallback. Existing backup files
+and directory permissions are not retroactively changed. Keep archives on a private disk;
+do not upload, attach, or share them without explicit approval covering the credentials
+and financial data as well as the destination. Restore only a trusted archive, with the
+user's approval for the selected archive and any overwrite. File permissions do not protect
+against another process running as the same user or a privileged administrator.
+
 ## What is not included
 
 - The `memory/.backtest*` family of directories (about 240 MB zipped as of 2026-10, ~90% of a full backup). The historical backtest caches in there are regenerable with scripts like `scripts/backtest_committee.py`, but `memory/.backtest/` also holds the forward paper fleet (from 2026-07-24), which cannot be re-run. The manual `backup` therefore does **not exclude** them (it means "the entire data directory"). The backend's automatic `auto_*.zip` leaves them out on weekdays and includes them once a week (Sunday, Asia/Shanghai) as `auto_*_full.zip`.

@@ -1,4 +1,8 @@
-# Onboarding (read when doctor returns `needs_setup`)
+# Onboarding reference for `invest-setup`
+
+If you reached this file from the daily-use `invest` skill, **switch to `invest-setup` first**.
+This is shared reference material, not permission for the daily-use skill to initialize data.
+The setup skill's authorization, existing-install exit, privacy and scheduling rules apply here.
 
 The user hasn't done first-time setup yet. **Never** tell the user to "go edit
 user_profile.json yourself" — that is a skill failure mode. Both paths feed stdin:
@@ -28,7 +32,14 @@ Ask in Mandarin (if the user uses another language, follow the user):
 
 **Stop hard-coding "NDQ.AX share count / gold grams / aud_cash / cash_cny"**. Let the user
 describe freely. When the backend `cmd_init` sees a `holdings_description` field, it
-automatically calls DeepSeek to parse it into the v2 schema.
+calls the configured LLM provider to parse it into the v2 schema (DeepSeek by default).
+
+**Before sending `holdings_description`**, identify the actual provider/endpoint without displaying
+keys. Explain that the description may include symbols, units, costs, cash balances and institution
+names, and obtain explicit approval to send those details there for parsing. A configured key is
+not consent. If the destination is unknown or the user declines, omit `holdings_description` and
+use the structured `holdings_v2` path below. That avoids an additional backend LLM parsing call;
+the host agent still processes what the user shares in this conversation.
 
 **How to ask**:
 > Tell me in one sentence what you currently hold (both assets and cash). Examples:
@@ -59,23 +70,32 @@ automatically calls DeepSeek to parse it into the v2 schema.
 
 ## Assembling the payload
 
-Once you have the answers:
+Once you have the answers and the external-parsing approval, serialize the JSON with a JSON
+library and a file-writing tool into a private temporary file. Do not interpolate user text into
+shell commands. If parsing was not approved, replace `holdings_description` with `holdings_v2`.
 
-```bash
-echo '{
+```json
+{
   "profile": {
     "name": "<Q1>",
     "risk_tolerance": "<Q2>",
     "last_run_date": "<today YYYY-MM-DD>",
     "holdings_description": "<Q3 user's answer, pasted here verbatim>",
-    "current_assets": {"cash_cny": <CNY cash from Q3>, "aud_cash": <AUD cash from Q3>},
+    "current_assets": {"cash_cny": 0, "aud_cash": 0},
     "investment_strategy": {
       "target_allocation_stock": 0.7,
       "target_allocation_cash": 0.3,
       "max_single_invest_cny": 10000
     }
   }
-}' | <skill-dir>/scripts/run.sh init --from-stdin
+}
+```
+
+Use the user's actual cash amounts, not the placeholder zeros. Feed the file as stdin and
+remove the temporary file after use:
+
+```bash
+<skill-dir>/scripts/run.sh init --from-stdin < "/absolute/path/to/private-onboarding.json"
 ```
 
 Always copy the cash the user mentioned in Q3 into `current_assets.cash_cny` / `aud_cash` (0 only
@@ -120,11 +140,12 @@ EMAIL_SENDER=you@gmail.com
 EMAIL_PASSWORD=abcd efgh ijkl mnop
 ```
 
-`init` reads the key from `.env`, so if they add it before you run `init`, Q3 gets parsed right away.
+`init` reads the key from `.env`; never include `holdings_description` without the approval above.
 
 **Both are optional.** If chatting inside Claude Code is enough for the user, **skipping both is
 perfectly fine** — tell the user: "Just say 'show my portfolio' or 'should I add to X', and
-Claude will run the analysis for you — no tokens burned, no account registration needed."
+your agent will run the analysis for you using its configured model plan — no separate backend
+LLM key is required."
 
 ### LLM key (used by the Direct path; many people call it the "DeepSeek key" but it isn't limited to DeepSeek)
 

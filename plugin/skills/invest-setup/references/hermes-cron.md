@@ -1,13 +1,24 @@
-# Hermes cron jobs created at onboarding
+# Optional Hermes cron jobs
 
 openInvest's backend never calls a model on a plugin install: the background scheduler only
 collects (news into `pending_news`, price-triggered committee requests into `pending_committees`),
 and everything that needs reasoning is the host agent's job. On Hermes these two cron jobs do it
-unattended. Create both with Hermes' cron tool (action create), `deliver: origin`, and
-`enabled_toolsets: [openinvest, delegation]` — the `openinvest` entry is the full-trust agent scope, so
-the jobs never reach the money tools on `openinvest_ledger`. Skip a job whose name already exists.
+unattended **only after explicit opt-in**. If the user declined or skipped unattended operation,
+create no jobs. Before using Hermes' cron tool (action create), confirm the selected jobs,
+schedule and timezone, model provider, portfolio data sent for analysis, estimated costs and exact
+delivery recipient. Installation or onboarding alone is not consent. The schedules below are
+examples, not permission to override the user's choices.
 
-Cost runs on the user's own model quota. `openinvest-daily` runs one committee per target asset
+Use `enabled_toolsets: [openinvest, delegation]`, never `openinvest_ledger`. The `openinvest` entry
+defaults to `trust: untrusted`; unattended runs may require `full` trust. Explain that this removes
+approval prompts for the agent scope and obtain separate explicit approval before changing it.
+Do not weaken host safety gates to make a job run. Deliver only to the approved private destination;
+use `deliver: origin` only for a verified private origin. Never send holdings, verdicts or reports
+to a group/public origin without explicit approval of that audience and data. List existing jobs
+first, skip matching jobs, and do not replace their schedules or recipients without authorization.
+
+Cost runs on the user's own model quota, including the orchestrator and delegated role models.
+`openinvest-daily` runs one committee per target asset
 (design estimate about $0.07–0.10 per asset with role sub-agents on a cheap `delegation.model`;
 the orchestrating model dominates, so measure it on the first run). `openinvest-sentinel` scales
 with the news queue; with nothing pending it is a couple of tool calls and ends in `[SILENT]`.

@@ -37,7 +37,10 @@ whose contents are symlinks pointing back at the source directory — updates to
 `scripts/` take effect immediately, no reinstall needed. The backend itself is distributed via
 PyPI at the version pinned in `run.sh`; `git pull` in the clone moves that pin.
 
-## Workflow when changing the protocol
+## Maintainer workflow when changing the protocol
+
+This section is for a user-requested repository change, not an instruction for a running
+investment agent to modify itself. Follow the repository review and publication permissions.
 
 ```bash
 cd $INVEST_HOME
@@ -55,7 +58,7 @@ git add skills/invest/ && git commit -m "..." && git push
 
 | | invest (this skill) | invest-setup |
 |---|---|---|
-| When it triggers | Daily — "show portfolio" (看持仓), "analyze X" (分析 X), "add to a position" (加仓) | First time — "set up invest / 帮我初始化 invest", or `doctor` returns `needs_setup` |
+| When it triggers | Daily — "show portfolio" (看持仓), "analyze financial asset X" (分析投资标的 X), "add to a position" (加仓) | First time — "set up invest / 帮我初始化 invest", or `doctor` returns `needs_setup` |
 | Frequency | High-frequency, continuous use | Once (retires after onboarding) |
 | Internal scripts | its own `scripts/run.sh` | symlink → `../invest/scripts/run.sh` (reuse) |
 | Internal references | its own 5 md files | `onboarding-detailed.md` symlink → `../invest/references/onboarding.md` |
