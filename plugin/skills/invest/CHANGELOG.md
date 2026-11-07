@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.3](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.34.2...invest-skill-v0.34.3) (2026-11-07)
+
+
+### Bug Fixes
+
+* **integrity:** bind proposals to evidence and preserve alert delivery receipts ([85fa706](https://github.com/longsizhuo/openInvest/commit/85fa70609d4bbbd60578a3a8aa6552890b43685c))
+
 ## [0.34.2](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.34.1...invest-skill-v0.34.2) (2026-11-06)
 
 
