@@ -172,14 +172,21 @@ def test_live_recall_is_one_database_snapshot_across_process_connections(store,m
     writer=EventStore(str(store.data_root/"db/events.db"),embedding_dim=4)
     original=store.get_sources
     changed=False
-    def sources_with_concurrent_correction(eid):
+    def sources_with_concurrent_correction(eid,**kwargs):
         nonlocal changed
         if not changed:
             changed=True
             writer.write_news_observation(event(one_line_claim="Corrected report",stance="neutral",severity="low"),source("corrected source"))
-        return original(eid)
+        return original(eid,**kwargs)
     monkeypatch.setattr(store,"get_sources",sources_with_concurrent_correction)
     observed=store.recall("SYNTHETIC",min_severity="low")[0]
     assert observed["one_line_claim"]==first["event"]["one_line_claim"]
     assert observed["sources"][0]["title"]=="original source"
     writer.conn.close()
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

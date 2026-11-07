@@ -266,6 +266,11 @@ def find_silent_sources(health: Dict[str, Dict[str, Optional[str]]]) -> List[Dic
     out: List[Dict[str, Any]] = []
     for label, v in sorted(health.items()):
         ok = v.get("last_ok")
+        if v["last_run"]==latest and v.get("status") in ("failed","partial_failure"):
+            since=v.get("first_failure_at") or latest
+            out.append({"key":f"news_source_error:{label}:{since}","since":_ts(since),
+                        "text":f"[QUALITY_ALERT] 新闻源 `{label}` 抓取异常（{', '.join(v.get('error_codes') or ['unknown'])}）；保留其他源结果，此故障不能当作没有新闻。"})
+            continue
         if v["last_run"] != latest or not ok:
             continue
         gap = _ts(latest) - _ts(ok)

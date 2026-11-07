@@ -41,7 +41,7 @@ def test_default_is_one_per_thesis():
 def test_reprints_collapse_to_one_line_with_count():
     out = format_event_brief(_reprints())
     assert out.count("[risk/mid]") == 1
-    assert out.endswith("(×3 来源)") and "2026-10-10T12:00:00" in out  # 留最新（输入最新在前），标在 claim 行末
+    assert out.endswith("(×3 相似转述，不代表独立来源)") and "2026-10-10T12:00:00" in out  # 留最新（输入最新在前），标在 claim 行末
 
 
 def test_stance_counts_distinct_theses_not_reports():
@@ -59,7 +59,7 @@ def test_different_theses_or_symbol_sets_are_not_merged():
         _ev("Kuaishou picks banks for Hong Kong listing of its AI video unit", eid="c"),
     ]
     out = format_event_brief(events)
-    assert out.count("[risk/mid]") == 3 and "来源)" not in out
+    assert out.count("[risk/mid]") == 3 and "相似转述，不代表独立来源)" not in out
 
 
 def test_symbol_set_order_and_case_do_not_matter():
@@ -67,14 +67,14 @@ def test_symbol_set_order_and_case_do_not_matter():
         _ev(CLAIM, eid="a", syms=("GC=F", "^tnx")),
         _ev(CLAIM + "!", eid="b", syms=("^TNX", "gc=f")),
     ])
-    assert out.count("[risk/mid]") == 1 and "(×2 来源)" in out
+    assert out.count("[risk/mid]") == 1 and "(×2 相似转述，不代表独立来源)" in out
 
 
 def test_cap_threshold_and_off_switch(monkeypatch):
     out2 = format_event_brief(_reprints(), max_corroboration=2)
-    assert out2.count("[risk/mid]") == 2 and "(×3 来源)" in out2
+    assert out2.count("[risk/mid]") == 2 and "(×3 相似转述，不代表独立来源)" in out2
     assert format_event_brief(_reprints(), max_corroboration=3).count("[risk/mid]") == 3
-    assert "来源)" not in format_event_brief(_reprints(), max_corroboration=3)  # 没折叠就不标
+    assert "相似转述，不代表独立来源)" not in format_event_brief(_reprints(), max_corroboration=3)  # 没折叠就不标
     # config / env 路径：默认读 config，0 = 不归并
     monkeypatch.setenv("INVEST_EVENT_MAX_CORROBORATION", "0")
     reset_config()
@@ -102,7 +102,7 @@ def test_multi_merges_across_symbols_and_dedups_same_event_id():
     with patch.object(eb, "_get_event_store", return_value=Store()):
         out = eb.resolve_event_brief_multi(
             ["A.X", "B.X"], as_of=datetime(2026, 10, 11, tzinfo=timezone.utc))
-    assert out.count("[risk/mid]") == 1 and "(×2 来源)" in out
+    assert out.count("[risk/mid]") == 1 and "(×2 相似转述，不代表独立来源)" in out
 
 
 def test_opposite_stance_or_severity_never_merged():
@@ -114,7 +114,7 @@ def test_opposite_stance_or_severity_never_merged():
     ]
     out = format_event_brief(events)
     assert out.count("[risk/mid]") == 1 and out.count("[opportunity/mid]") == 1 and out.count("[risk/high]") == 1
-    assert "来源)" not in out
+    assert "相似转述，不代表独立来源)" not in out
     line = event_stance_line_for_symbol(out, "GC=F")
     assert "risk=2" in line and "opportunity=1" in line
 
@@ -136,11 +136,11 @@ def test_agent_event_neither_absorbs_crawler_events_nor_counts_in_n():
     blocks = out.split("\n\n")
     agent_block = next(b for b in blocks if "[agent:hermes-sentinel]" in b)
     crawler_block = next(b for b in blocks if "[agent:" not in b)
-    assert "来源)" not in agent_block                     # agent 行不带 ×N，没吃掉爬虫的报道
-    assert crawler_block.endswith("(×2 来源)")            # 爬虫的 N 只数爬虫事件，不含 agent 那条
+    assert "相似转述，不代表独立来源)" not in agent_block                     # agent 行不带 ×N，没吃掉爬虫的报道
+    assert crawler_block.endswith("(×2 相似转述，不代表独立来源)")            # 爬虫的 N 只数爬虫事件，不含 agent 那条
     # 反过来：爬虫排最前也一样
     out2 = format_event_brief([*crawler, agent])
-    assert out2.count("[risk/mid]") == 2 and "(×2 来源)" in out2 and "(×3" not in out2
+    assert out2.count("[risk/mid]") == 2 and "(×2 相似转述，不代表独立来源)" in out2 and "(×3" not in out2
     # EVENT_STANCE 把 agent 事件和爬虫论点各算 1 条
     assert "risk=2" in event_stance_line_for_symbol(out, "GC=F")
 
@@ -154,7 +154,7 @@ def test_agent_reprints_merge_only_within_same_agent_and_keep_tag():
     out = format_event_brief(events)
     assert out.count("[risk/mid]") == 2
     assert "[agent:hermes-sentinel]" in out and "[agent:other-agent]" in out
-    assert out.count("(×2 来源)") == 1
+    assert out.count("(×2 相似转述，不代表独立来源)") == 1
 
 
 def test_claims_differing_in_a_number_are_different_facts():
@@ -181,7 +181,7 @@ def test_keeps_newest_report_even_when_it_comes_later_in_the_input():
     newer = _ev(CLAIM + ".", eid="b", ts="2026-10-10T12:00:00+08:00", src="ft")   # = 04:00Z 比 09:00Z 旧
     newest = _ev(CLAIM + "!", eid="c", ts="2026-10-10T13:00:00Z", src="bloomberg")
     out = format_event_brief([older, newer, newest])
-    assert out.count("[risk/mid]") == 1 and out.endswith("(×3 来源)")
+    assert out.count("[risk/mid]") == 1 and out.endswith("(×3 相似转述，不代表独立来源)")
     assert "2026-10-10T13:00:00Z" in out and "(sources: bloomberg)" in out
     # ts 解析不了的排最后：不影响有 ts 的那条被留下
     junk = _ev(CLAIM + "?", eid="d", ts="not-a-time")

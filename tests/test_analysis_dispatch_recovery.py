@@ -84,3 +84,10 @@ def test_partially_withdrawn_request_closes_without_claiming_submission(context)
     assert json.loads(row["closed"])=={"NDQ.AX":"sources_revoked"}
     assert len(calls)==1
     database.conn.close()
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

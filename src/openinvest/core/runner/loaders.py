@@ -78,6 +78,8 @@ def append_event_stance_line(
     tracks = strategy 资产的可选 `tracks` 字段（issue #26 用户声明追踪的指数）。
     """
     try:
+        if (getattr(event_brief,"source_quality",{}) or {}).get("current_unqualified_events"):
+            return sentiment_brief+"\nEVENT_STANCE: unknown (source acquisition verification incomplete; not a neutral or zero-news signal)" if sentiment_brief else sentiment_brief
         from openinvest.utils.sentiment import event_stance_line_for_symbol
         line = event_stance_line_for_symbol(event_brief, symbol, tracks=tracks)
     except Exception as e:  # noqa: BLE001  聚合行失败不阻断委员会

@@ -69,10 +69,15 @@ def test_recent_events_revoke_and_replica_revisions(tmp_path):
         event={"one_line_claim":"Synthetic revision","stance":"opportunity","severity":2,"affected_symbols":["SYNTHETIC"]}
         _,eid=source.upsert_event(event)
         source.add_source(eid,src_name="test",url="https://example.test/item")
+        from tests.integrity_helpers import approve_event_reporting,approve_public_event
+        approve_event_reporting(source,eid);approve_public_event(source,eid)
         sync_public_events(a,b,{"example.test"})
         source.upsert_event({**event,"stance":"risk"})
+        approve_event_reporting(source,eid);approve_public_event(source,eid)
         sync_public_events(a,b,{"example.test"})
         target=EventStore(str(b/"db/events.db"))
+        assert target.get_event(eid) is None
+        approve_event_reporting(target,eid)
         assert target.get_event(eid)["stance"] == "risk"
         assert sync_public_events(a,b,{"example.test"})["imported_public_events"] == 0
         Eligibility(b).revoke(f"event:{eid}","synthetic revoked")

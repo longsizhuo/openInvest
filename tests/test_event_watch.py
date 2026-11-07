@@ -285,4 +285,11 @@ def test_record_source_health_keeps_last_ok_through_zero_runs(tmp_event_db):
     event_watch._record_source_health({"yfinance": 0}, now=datetime(2030, 1, 1, tzinfo=timezone.utc))
     second = MemoryStore().state_get(SOURCE_HEALTH_STATE)
     assert second["yfinance"] == {"last_run": "2030-01-01T00:00:00+00:00",
-                                       "last_ok": first["yfinance"]["last_ok"]}
+                                       "last_ok": first["yfinance"]["last_ok"],"status":"empty","error_codes":[],"first_failure_at":None}
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

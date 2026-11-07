@@ -315,3 +315,10 @@ def test_mixed_event_runs_only_target_symbol(env, monkeypatch, tmp_path):
     assert out["committee_symbols"] == ["MSFT"]
     assert trigger.call_args.kwargs["symbols"] == ["MSFT"]
     assert set(_state(tmp_path)["last"]) == {"MSFT"} and len(_state(tmp_path)["runs"]) == 1
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

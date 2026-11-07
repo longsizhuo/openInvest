@@ -39,11 +39,24 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
     if event_db.exists():
         import sqlite3
         from contextlib import closing
+        from openinvest.db.event_store import EventStore
+        try:
+            reader=EventStore(str(event_db),readonly=True)
+            try:source_state=reader.source_reporting_summary()
+            finally:reader.conn.close()
+            if source_state["current_unqualified_events"]:
+                out.append({"key":"quality:source_authentication_pending:"+source_state["incident_sha256"],"since":datetime.fromtimestamp(event_db.stat().st_mtime,timezone.utc),"one_shot":True,
+                    "text":f"[QUALITY_ALERT] {source_state['current_unqualified_events']} 条近期事件未具备来源用途资格（来源或输入关联待核验，或资格已撤销），已限制为审计，不作为当前来源事实；这不是没有新闻，也不是判定这些报道或预测全错。"})
+        except (ValueError,OSError,sqlite3.Error):
+            out.append({"key":"quality:source_verification_unavailable","since":datetime.fromtimestamp(event_db.stat().st_mtime,timezone.utc),
+                        "text":"[QUALITY_ALERT] 来源真实性核验状态无法读取，需要处理；不能当作正常空新闻。"})
         with closing(sqlite3.connect(event_db.resolve().as_uri()+"?mode=ro",uri=True)) as connection:
             if connection.execute("SELECT 1 FROM sqlite_master WHERE name='news_observation_conflicts'").fetchone():
-                for fingerprint,observed in connection.execute("SELECT fingerprint,observed_at FROM news_observation_conflicts WHERE status='review_required' ORDER BY observed_at DESC LIMIT 20"):
+                for fingerprint,observed,payload in connection.execute("SELECT fingerprint,observed_at,payload_json FROM news_observation_conflicts WHERE status='review_required' ORDER BY observed_at DESC LIMIT 20"):
+                    reason=json.loads(payload).get("reason")
                     out.append({"key":"quality:source_conflict:"+fingerprint,"since":datetime.fromisoformat(observed),"one_shot":True,
-                                "text":"[QUALITY_ALERT] 新收到的报道与同一故事已更正版本冲突；已隔离冲突观察，未覆盖当前事实，需要核对来源。"})
+                                "text":"[QUALITY_ALERT] 新输入的来源采集真实性尚未核验，已保留审计并阻止它覆盖已有可信报道。" if reason=="unverified_source_cannot_replace_verified_current_report" else
+                                       "[QUALITY_ALERT] 新收到的报道与同一故事已更正版本冲突；已隔离冲突观察，未覆盖当前事实，需要核对来源。"})
     if notification_db.exists():
         import sqlite3
         from contextlib import closing
@@ -52,7 +65,7 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
                 uncertain=connection.execute("""SELECT DISTINCT n.id,n.category,n.created FROM notifications n JOIN deliveries d ON d.notification_id=n.id
                     WHERE d.status IN ('unknown','expired') AND n.category!='job_watchdog' LIMIT 20""").fetchall()
                 pending=connection.execute("""SELECT n.id,n.category,n.created FROM notifications n JOIN followups f ON f.notification_id=n.id
-                    WHERE f.status IN ('unknown','expired') OR (f.status IN ('pending','dispatching') AND n.created<? AND f.error IS NOT NULL) LIMIT 20""",
+                    WHERE f.status IN ('unknown','expired','verification_required') OR (f.status IN ('pending','dispatching') AND n.created<? AND f.error IS NOT NULL) LIMIT 20""",
                     (datetime.now(timezone.utc).timestamp()-900,)).fetchall()
             for ident,category,created in uncertain:
                 out.append({"key":f"quality:notification_uncertain:{ident}","since":datetime.fromtimestamp(created,timezone.utc),"one_shot":True,

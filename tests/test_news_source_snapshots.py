@@ -10,6 +10,7 @@ from openinvest.db.event_store import EventStore
 from openinvest.services import agent_queue as q
 from openinvest.services.event_ingest import ingest_events
 from openinvest.services.news_sources import RawNewsItem
+from tests.integrity_helpers import reviewed_event_storage,approve_event_reporting
 
 
 @pytest.fixture
@@ -44,14 +45,14 @@ def test_identical_url_new_body_and_dismissed_story_still_offer_correction(sourc
     assert len(current)==1 and current[0]["source_snapshot_id"]!=first["source_snapshot_id"]
 
 
-def test_binding_cannot_modify_original_source_and_old_completion_stays_completed(source_context):
+def test_binding_cannot_modify_original_source_and_old_completion_stays_completed(source_context,reviewed_event_storage):
     q.enqueue_news([news()]);first=q.pending_news_items()[0]
     out=ingest_events([packet(first,snippet="Agent added an unreported gold demand conclusion")])
     assert out["ingested"]==1
     database=EventStore(str(source_context/"db/events.db"))
     saved=database.get_sources(out["events"][0]["event_id"])[0]
     assert saved["snippet"]==first["snippet"] and saved["raw_text"]==first["text"]
-    assert json.loads(saved["provenance_json"])["source_origin"]=="backend_collected"
+    assert json.loads(saved["provenance_json"])["source_origin"]=="captured_adapter_input"
     assert q.pending_news_items()==[]
     q.enqueue_news([news("Port has reopened")]);second=q.pending_news_items()[0]
     assert second["source_snapshot_id"]!=first["source_snapshot_id"]
@@ -74,6 +75,7 @@ def test_qualified_readonly_api_cannot_write_or_create_missing_database(source_c
     writer=EventStore(str(path))
     writer.upsert_event({"event_id":"sample","one_line_claim":"Original report","stance":"risk","severity":"high",
                          "affected_symbols":["SYNTHETIC"],"ts":datetime.now(timezone.utc).isoformat()})
+    approve_event_reporting(writer,"sample")
     writer.conn.close()
     reader=EventStore(str(path),readonly=True)
     assert reader.list_current_with_sources()[0]["claim_kind"]=="normalized_summary_not_verbatim_source"
@@ -108,7 +110,7 @@ def test_expired_unprocessed_source_remains_visible_and_watchdog_reports_it(sour
     assert find_agent_backlog(now)
 
 
-def test_same_url_batch_keeps_each_normalization_with_its_own_source(source_context):
+def test_same_url_batch_keeps_each_normalization_with_its_own_source(source_context,reviewed_event_storage):
     q.enqueue_news([news("First state"),news("Second state")]);items=q.pending_news_items()
     result=ingest_events([packet(item) for item in items])
     assert result["ingested"]==2
@@ -167,9 +169,9 @@ def test_revoked_capture_or_parent_blocks_pending_binding_and_remains_auditable(
     assert ingest_events([packet(original)])["status"]=="error"
 
 
-def test_revocation_propagates_to_stored_event_and_all_advice_reads(source_context):
+def test_revocation_propagates_to_stored_event_and_all_advice_reads(source_context,monkeypatch):
     from openinvest.core.evidence_eligibility import Eligibility
-    q.enqueue_news([news()]);original=q.pending_news_items()[0]
+    original=captured_sina(monkeypatch)
     saved=ingest_events([packet(original)]);eid=saved["events"][0]["event_id"]
     gate=Eligibility(source_context)
     gate.revoke("source_snapshot:"+original["source_snapshot_id"],"synthetic exclusion")

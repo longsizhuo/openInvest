@@ -84,3 +84,10 @@ def test_reasoning_review_wait_does_not_hide_expired_risk_cause(tmp_path,monkeyp
     pending=q.pending_committee_items(now,include_expired=True,memory_root=root)[0]
     assert pending["status"]=="expired" and pending["expired"]
     assert pending["review_requests"][0]["review_status"]=="failed"
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

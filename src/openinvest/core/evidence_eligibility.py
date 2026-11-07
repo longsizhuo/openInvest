@@ -64,6 +64,9 @@ def source_artifact_ids(metadata: Mapping[str, Any]) -> set[str]:
         ("source_snapshot_id", "source_snapshot:"),
         ("source_observation_id", "source_observation:"),
         ("response_sha256", "source_response:"),
+        ("response_capture_id", "source_capture:"),
+        ("collector_code_sha256", "collector_version:"),
+        ("collector_capture_id", "adapter_capture:"),
     ) if metadata.get(key)}
 
 

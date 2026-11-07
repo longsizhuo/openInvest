@@ -495,3 +495,10 @@ def test_digest_reports_price_basis_and_reads_raw_when_complete(tmp_path, monkey
     assert d["price_basis"] == {"AAA": "raw", "NDQ.AX": "adjusted", "GC=F": "adjusted"}
     assert _row(d, "AAA")["prev_close"] == 10.2 and _row(d, "AAA")["close"] == 9.7
     assert _row(d, "NDQ.AX")["close"] == 51.0   # 缺 D9 的 raw → 整只回退复权价
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

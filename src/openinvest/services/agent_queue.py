@@ -82,6 +82,10 @@ def enqueue_news(items: Iterable[Any], *, memory_root=None) -> int:
                  "raw_meta":getattr(it,"raw_meta",{}),"queued_at":now}
             row=database.register_input(row)
             snapshot=row["source_snapshot_id"]
+            # Normalization receives exactly this canonical acquisition, even
+            # when a repeated article reuses its original acquisition witness.
+            it.raw_meta={**row.get("raw_meta",{}),"source_snapshot_id":snapshot}
+            it.fetched_at=row["fetched_at"];it.url=row["url"]
             if snapshot in known:continue
             known.add(snapshot)
             append_jsonl(_dir(memory_root) / "news.jsonl",row)

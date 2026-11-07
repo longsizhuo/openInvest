@@ -22,7 +22,7 @@ from typing import List
 
 import requests
 
-from openinvest.services.news_sources import RawNewsItem, _normalize_domain, _trim
+from openinvest.services.news_sources import RawNewsItem, SourceItems, _normalize_domain, _trim
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def fetch_searxng_news(
         results = (resp.json() or {}).get("results") or []
     except Exception as e:
         log.warning(f"searxng query {query!r} 失败: {e}")
-        return []
+        return SourceItems(errors=[type(e).__name__])
 
     items: List[RawNewsItem] = []
     for r in results[:max_results]:

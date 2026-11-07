@@ -239,3 +239,10 @@ def test_resolve_symbol_prefers_existing_spelling():
     assert resolve_symbol("000001.SZ", legacy) == "000001.SZ"    # 场外基金裸码 ≠ 深市股票
     assert resolve_symbol("159915", legacy) == "159915.SZ"       # 没有 → canonical
     assert resolve_symbol("510300", [{"symbol": "510300.SS"}]) == "510300.SS"
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

@@ -152,3 +152,10 @@ def test_contract_list_reaches_email_but_no_llm_input(events_db, monkeypatch):
     assert captured["llm"][0] == captured["llm"][2] and captured["llm"][1] == captured["llm"][3]
     assert captured["session"][0] == captured["session"][1]
     assert CLAIM not in repr(captured["session"])
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")
