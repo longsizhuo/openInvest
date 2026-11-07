@@ -15,6 +15,68 @@ def _save(path,payload):
     _atomic_write_text(path,json.dumps({"payload":payload,"sha256":digest(payload)},ensure_ascii=False))
 
 
+def preserve_submission(memory_root,context_id,symbol,transcript,provider,model):
+    """Preserve the exact caller bytes before issuing an external review."""
+    path=Path(memory_root)/".evidence/submissions"/(context_id+".json")
+    content={"context_id":context_id,"symbol":symbol,"transcript":transcript,"provider":provider,"model":model}
+    with _file_lock(path):
+        if path.exists():
+            record=json.loads(path.read_text())
+            if record.get("sha256")!=digest(record.get("payload")) or record["payload"]!=content:
+                raise ValueError("original_submission_integrity_failure")
+        else:_save(path,content)
+
+
+def submitted_review(memory_root,context_id):
+    """Read one ledger's bound draft without acknowledgement or inference."""
+    import re
+    if not re.fullmatch(r"[a-f0-9]{32}",context_id or ""):raise ValueError("invalid_context_id")
+    root=Path(memory_root)
+    path=root/".evidence/submissions"/(context_id+".json")
+    if not path.exists():
+        return {"status":"unrecoverable_original_missing","context_id":context_id,"current_advice_valid":False,
+                "resume_allowed":False,"next_step":"原始全文缺失，仅保留审计；不得从摘要或记忆重建原文。新材料到达时再准备新上下文。"}
+    record=json.loads(path.read_text());original=record["payload"]
+    if record.get("sha256")!=digest(original) or original.get("context_id")!=context_id:
+        raise ValueError("original_submission_integrity_failure")
+    receipt=json.loads((root/".evidence/receipts"/(context_id+".json")).read_text())
+    expected=digest({name:original[name] for name in ("symbol","transcript","provider","model")})
+    if receipt.get("signature")!=expected:raise ValueError("submission_receipt_binding_failure")
+    response=receipt.get("response") or {}
+    key=response.get("request_sha256") or ((response.get("verdict") or {}).get("reasoning_review") or {}).get("request_sha256")
+    if not re.fullmatch(r"[a-f0-9]{64}",key or ""):raise ValueError("bound_review_request_unavailable")
+    draft=json.loads((root/".evidence/reasoning/drafts"/(key+".json")).read_text())
+    request=draft["payload"]["request"]
+    if draft.get("sha256")!=digest(draft["payload"]) or request.get("request_sha256")!=key:
+        raise ValueError("reasoning_draft_integrity_failure")
+    if digest({k:v for k,v in request.items() if k!="request_sha256"})!=key:
+        raise ValueError("reasoning_request_integrity_failure")
+    issued=draft["payload"].get("issued_prompts") or {name:response.get(name) for name in ("system_prompt","user_prompt")}
+    import hashlib
+    system=issued.get("system_prompt");user=issued.get("user_prompt")
+    if not isinstance(system,str) or not isinstance(user,str):raise ValueError("original_issued_prompts_unavailable")
+    if (hashlib.sha256(system.encode()).hexdigest()!=(request.get("verifier_contract") or {}).get("system_prompt_sha256")
+            or json.loads(user)!=request):raise ValueError("issued_review_prompt_integrity_failure")
+    context_record=json.loads((root/".evidence/contexts"/(context_id+".json")).read_text())
+    context_payload=context_record["payload"]
+    if context_record.get("sha256")!=digest(context_payload) or context_payload.get("symbol")!=original["symbol"]:
+        raise ValueError("context_integrity_failure")
+    from datetime import timedelta
+    expires_at=(datetime.fromisoformat(context_payload["prepared_at"])+timedelta(hours=6)).isoformat()
+    from openinvest.core.decision_evidence import load_context
+    try:
+        context=load_context(root,context_id,original["symbol"])
+        context_current=True
+    except (ValueError,OSError,KeyError,TypeError):
+        context_current=False;context={}
+    resume=context_current and receipt.get("state")=="awaiting_verification"
+    return {**issued,"request_sha256":key,**original,"status":"verification_required" if resume else "audit_only",
+            "receipt_state":receipt.get("state"),"resume_allowed":resume,"context_current":context_current,
+            "prepared_at":context_payload["prepared_at"],"expires_at":expires_at,"current_advice_valid":False,
+            "next_step":"使用逐字原文及已签发核验请求继续提交；不重跑六角色。" if resume else
+                        "原提案仅供审计；上下文已变化或核验已定稿，不能把旧记录当作当前建议。"}
+
+
 def review_once(request,*,memory_root,agent_factory,ask,asset,external_raw=None,backend_allowed=True):
     """No failed logical review regenerates CIO or chooses a different action."""
     root=Path(memory_root) if memory_root is not None else None
@@ -34,7 +96,9 @@ def review_once(request,*,memory_root,agent_factory,ask,asset,external_raw=None,
         attempts=0
         external_allowed=False
         draft=directory/"drafts"/(key+".json")
-        if not draft.exists():_save(draft,{"request":request,"recorded_at":datetime.now(timezone.utc).isoformat(),"allowed_uses":["audit"]})
+        if not draft.exists():_save(draft,{"request":request,"issued_prompts":{"system_prompt":SYSTEM_PROMPT,
+            "user_prompt":json.dumps(request,ensure_ascii=False,sort_keys=True)},
+            "recorded_at":datetime.now(timezone.utc).isoformat(),"allowed_uses":["audit"]})
         else:
             original=json.loads(draft.read_text())
             if original["sha256"]!=digest(original["payload"]) or original["payload"]["request"]!=request:

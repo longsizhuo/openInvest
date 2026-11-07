@@ -505,6 +505,16 @@ def source_snapshot(snapshot_id: Annotated[str,Field(description="Exact source_s
     except (ValueError,OSError) as exc:return {"status":"unavailable","reason":str(exc)}
 
 
+@_tool(annotations=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True))
+def committee_review(context_id: Annotated[str,Field(description="Exact context_id for this ledger's previously submitted draft.")]) -> Dict[str,Any]:
+    """Retrieve unchanged original transcript and issued verification packet; never completes work."""
+    _check_advisory()
+    from openinvest.services.reasoning_review import submitted_review
+    from openinvest.core.memory_store import MemoryStore
+    try:return submitted_review(MemoryStore().root,context_id)
+    except (ValueError,OSError,KeyError,TypeError):return {"status":"unavailable","reason":"bound_review_retrieval_failed","current_advice_valid":False}
+
+
 @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def pending_news(
     limit: Annotated[int, Field(description="Max items to return.", ge=1, le=100)] = 30,

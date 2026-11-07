@@ -627,7 +627,7 @@ def save_committee_transcript(symbol: str, raw: str, *, provider: str = "claude"
     if parse_cio_memo(cio).get("verdict") == "UNCLEAR":
         raise ValueError("CIO 段解析不出裁决（UNCLEAR），请修正后重交")
     from openinvest.core.committee.reasoning_quality import make_request,proposal_sources
-    from openinvest.services.reasoning_review import review_once,external_request
+    from openinvest.services.reasoning_review import review_once,external_request,preserve_submission
     from openinvest.core.committee.agent_io import _create_agent,_ask
     from openinvest.utils.llm import get_llm_config_safe,reasoning_by_agent
     backend_allowed=not reasoning_by_agent()
@@ -651,6 +651,7 @@ def save_committee_transcript(symbol: str, raw: str, *, provider: str = "claude"
                 from openinvest.core.decision_evidence import current_decision
                 valid = current_decision(store.root, prior["response"], symbol)
                 return {**prior["response"], "replayed": True, "response_type": "historical_receipt", "current_advice_valid": valid}
+        preserve_submission(store.root,context_id,symbol,raw,provider,model)
         review=review_once(request,memory_root=store.root,agent_factory=_create_agent,ask=_ask,asset=symbol,
                            external_raw=reasoning_review_json,backend_allowed=backend_allowed)
         if review["status"] in ("unavailable","invalid_response"):

@@ -33,13 +33,22 @@ def test_keyless_draft_then_external_review_does_not_regenerate_or_consume_conte
            "required_roles":["MACRO","QUANT_R1","RISK_R1","QUANT_R2","RISK_R2","CIO"],
            "trigger_requests":bindings}
     context=prepare_context(store.root,"SYNTHETIC",facts,model="synthetic-model")
-    raw=transcript()
+    raw=transcript()+"\n\n "
     first=save_committee_transcript("SYNTHETIC",raw,provider="unit",model="synthetic-model",context_id=context["context_id"])
     assert first["status"]=="verification_required" and not first["current_advice_valid"]
     assert not (store.root/".committee").exists()
     waiting=queue.pending_committee_items(memory_root=store.root)[0]
     assert waiting["status"]=="awaiting_reasoning_review"
     assert waiting["review_requests"][0]["completion_granted"] is False
+    from openinvest.services.reasoning_review import submitted_review
+    before={str(path.relative_to(store.root)):path.read_bytes() for path in store.root.rglob("*.json")}
+    recovered=submitted_review(store.root,context["context_id"])
+    assert recovered["transcript"]==raw and recovered["resume_allowed"]
+    assert recovered["provider"]=="unit" and recovered["model"]=="synthetic-model"
+    assert recovered["request_sha256"]==first["request_sha256"]
+    assert datetime.fromisoformat(recovered["expires_at"]).tzinfo is not None
+    assert before=={str(path.relative_to(store.root)):path.read_bytes() for path in store.root.rglob("*.json")}
+    assert queue.pending_committee_items(memory_root=store.root)[0]["status"]=="awaiting_reasoning_review"
     replay=save_committee_transcript("SYNTHETIC",raw,provider="unit",model="synthetic-model",context_id=context["context_id"])
     assert replay["request_sha256"]==first["request_sha256"] and replay["replayed"]
     check=json.dumps({"request_sha256":first["request_sha256"],"checks":{key:"passed" for key in CHECKS},"issues":[]})
@@ -47,12 +56,27 @@ def test_keyless_draft_then_external_review_does_not_regenerate_or_consume_conte
     assert final["verdict"]["reasoning_review"]["status"]=="passed"
     assert final["verdict"]["verdict"]=="HOLD"
     assert queue.pending_committee_items(memory_root=store.root)==[]
+    assert submitted_review(store.root,context["context_id"])["status"]=="audit_only"
+    import openinvest.services.reasoning_review as review_service
+    monkeypatch.setattr(review_service,"SYSTEM_PROMPT","Changed current prompt must not replace the issued historical prompt")
+    historical=submitted_review(store.root,context["context_id"])
+    assert historical["system_prompt"]==first["system_prompt"]
+    import hashlib
+    original_request=json.loads(historical["user_prompt"])
+    assert hashlib.sha256(historical["system_prompt"].encode()).hexdigest()==original_request["verifier_contract"]["system_prompt_sha256"]
     assert len(list((store.root/".evidence/decisions").glob("*.json")))==1
     assert len(list((store.root/".evidence/reasoning/drafts").glob("*.json")))==1
     changed=json.loads(check);changed["checks"]["arithmetic"]="warning"
     import pytest
     with pytest.raises(ValueError,match="different review"):
         save_committee_transcript("SYNTHETIC",raw,provider="unit",model="synthetic-model",context_id=context["context_id"],reasoning_review_json=json.dumps(changed))
+
+
+def test_review_retrieval_never_guesses_a_missing_original_or_reads_another_ledger(tmp_path):
+    from openinvest.services.reasoning_review import submitted_review
+    missing=submitted_review(tmp_path/"other-ledger/memory","a"*32)
+    assert missing["status"]=="unrecoverable_original_missing" and not missing["resume_allowed"]
+    assert "transcript" not in missing and not (tmp_path/"other-ledger").exists()
 
 
 def test_unsolicited_external_review_cannot_replace_backend_verification(tmp_path,monkeypatch):
