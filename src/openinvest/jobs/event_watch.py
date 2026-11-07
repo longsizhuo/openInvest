@@ -193,7 +193,7 @@ def run(
 
     # 入库前先按 url 跳过 sources 已见的（省 LLM token）
     store = EventStore(embedding_dim=DEFAULT_DIM)
-    unseen_items = [it for it in raw_items if not store.is_seen_url(it.url)]
+    unseen_items = [it for it in raw_items if not store.source_unchanged(it.url,it.title,it.snippet,published_at=it.published_at,raw_text=it.text)]
     log.info(f"[event_watch] unseen={len(unseen_items)} / total={len(raw_items)}")
     if not unseen_items:
         return {"status": "ok", "fetched": len(raw_items), "new_events": 0, "triggered": 0}
@@ -216,18 +216,9 @@ def run(
     # 入库 + 收集新事件
     new_events: List[Dict[str, Any]] = []
     for ne in normalized:
-        was_new, eid = store.upsert_event(ne.event, embedding=ne.embedding)
-        if ne.raw_item:
-            store.add_source(
-                eid,
-                src_name=ne.raw_item.src_name,
-                url=ne.raw_item.url,
-                title=ne.raw_item.title,
-                snippet=ne.raw_item.snippet,
-                fetched_at=ne.raw_item.fetched_at,
-            )
-        if was_new:
-            new_events.append({**ne.event, "event_id": eid})
+        observation=store.write_news_observation(ne.event,ne.raw_item,embedding=ne.embedding)
+        if observation["changed"]:
+            new_events.append({**observation["event"],"revision_previous":observation["previous"] if not observation["inserted"] else None})
 
     # 闸 + 冷却/日上限 + 触发 + 报警：与 agent 投喂门共用（services/event_trigger）。
     # 事件已入库，触发环节出错只记日志，不能让 job 失败把入库成果一起算成失败

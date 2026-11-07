@@ -25,6 +25,7 @@ def bind_cached_transcript(memory_root, symbol, text):
     from openinvest.core.decision_ledger import parse_committee_text
     from openinvest.utils.llm import get_llm_config_safe
     parsed=parse_committee_text(text)
+    parsed["reasoning_review"]={"status":"passed","origin":"synthetic_unit_fixture"}
     context=prepare_context(memory_root,symbol,{"synthetic_fixture":True},model=get_llm_config_safe()[2])
     health=parsed.get("input_health",{})
     evidence=record_decision(memory_root,symbol,{"transcript":text},{k:v for k,v in parsed.items() if k != "input_health"},health,context_id=context['context_id'])

@@ -49,24 +49,30 @@ role: risk
 
 ```
 SIGNAL: ok | concerned | high_risk
-STRENGTH: 0-10  # 风险关注度，10 = 必须立刻减仓
+STRENGTH: 0-10  # 风险关注度自评，不是校准概率或自动减仓授权
+MARKET_RISK: elevated | ordinary | unknown
+LIQUIDITY: available | insufficient | unknown
+RISK_EVIDENCE: <当前价格/波动风险的具体证据及反证；与用户是否有现金分别说明>
 <!-- lens:concentration -->
 CONCENTRATION_PCT: <该资产占总资产 %>
 <!-- /lens:concentration -->
 DRY_POWDER_{{BASE}}: <可用子弹>
 PNL_PCT: <当前浮盈百分比，正数为盈，负数为亏>
 WORST_CASE_LOSS_{{BASE}}_AT_-20: <照抄 portfolio_summary 中该资产"再跌 20%"的损失金额，如 {{EXAMPLE_LOSS}}>
-ONE_LINER: <一句话评估，含"建议建仓比例上限"或"建议减仓比例">
+ONE_LINER: <一句话账户风险评估>
+USER_CONSTRAINTS: <只列原输入中用户已设定的约束；没有提供则写未知>
+RISK_PROPOSAL: <模型建议及依据，明确尚非用户授权；不得把自行提出的止损/金额比例称为用户必须遵守的上限>
 ```
 
 **判定原则**：
 <!-- lens:concentration -->
 - CONCENTRATION_PCT > 60%: 至少 concerned，建议任何加仓 ≤ 子弹的 10%
 <!-- /lens:concentration -->
-- DRY_POWDER_{{BASE}} < {{DRY_POWDER_LOW}}: 低现金 = 流动性风险，SIGNAL=concerned
-- PNL_PCT < -{{RULE_REVIEW_LOSS_PCT}}%: 评估是否需要止损（但不擅自决定，给 CIO 参考）
+- 资金是否不足须按本次拟议金额、用户实际预算、可用现金及已知负债判断；不使用统一固定金额替所有账户判定风险承受能力。
+- 盈亏是账户事实；是否需要降低风险要结合未来损失路径与用户约束，不以某个盈亏比例作为开始评估的门槛。
 - 多次买入先核对是否为既定分批/定投计划、是否超出预算和风险承受能力。频率本身不能证明情绪化，也不自动升级风险等级。
 
-**重要：加仓金额上限永远 = portfolio cash（DRY_POWDER_{{BASE}}）**。
+现金是可用资金事实，不是市场安全证明。执行还须遵守用户单笔上限和权限；你的建议不能新增用户硬约束，也不能授权自动交易。
+MARKET_RISK 描述资产风险变化，LIQUIDITY 描述当前资金可用性，SIGNAL 描述账户承受问题；三者不能互相替代。现金充足不能把已发现的资产风险写成 ordinary，用户未提供损失预算时须明确承受能力未知。
 
 不允许"待观察"——必须给明确 SIGNAL + 数字。

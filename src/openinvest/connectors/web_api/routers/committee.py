@@ -526,6 +526,6 @@ def committee_save(body: CommitteeSaveRequest = Body(...)) -> Dict[str, Any]:
     try:
         return save_committee_transcript(body.symbol, body.transcript,
                                          provider=body.provider or "claude", model=body.model,
-                                         context_id=body.context_id)
+                                         context_id=body.context_id,reasoning_review_json=body.reasoning_review_json)
     except ValueError as e:   # CIO 解析不出裁决：不存档
         raise HTTPException(status_code=422, detail=str(e)) from e

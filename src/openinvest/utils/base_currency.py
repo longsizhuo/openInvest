@@ -28,7 +28,7 @@ def from_cny(amount_cny: float, base: Optional[str] = None, *, floor: bool = Fal
 
     floor=True：向下取整到 1 个单位、不取两位有效数字——给"硬上限"用（两位有效数字可能
     向上舍入，钳出来的金额会略高于用户设的人民币上限）。
-    拉不到汇率时原数返回并告警：阈值偏松，但委员会照常能跑。
+    汇率不可用时明确失败，不能把原币金额冒充目标币种、放宽资金保护。
     """
     base = base or base_currency()
     if base == "CNY" or not amount_cny:
@@ -36,8 +36,7 @@ def from_cny(amount_cny: float, base: Optional[str] = None, *, floor: bool = Fal
     from openinvest.utils.fx import to_base
     v = to_base("CNY", float(amount_cny), base)
     if v is None or not math.isfinite(v) or v <= 0:
-        log.warning("base_currency: CNY→%s 汇率不可用，金额阈值 %s 按原数使用", base, amount_cny)
-        return int(amount_cny)
+        raise ValueError(f"CNY->{base} conversion unavailable; monetary limits are not converted")
     if floor:
         return max(1, int(math.floor(v)))
     # ponytail: 两位有效数字够阈值用；不足 1 个单位的币种（极弱币以外不会出现）按 1 计
@@ -74,14 +73,28 @@ def single_invest_cap(
     解析层（cio_parse Sanity 6）只拿这个数比较，不碰 strategy.md。
     非 CNY 基准币种按汇率换算后**向下取整**（硬上限不往上舍；汇率拿不到时按原数，与其它阈值同款退化）。
     """
+    return resolve_single_invest_cap(target,strategy,base)["effective_amount"]
+
+
+def resolve_single_invest_cap(target,strategy,base=None):
+    base=base or base_currency()
     cap = target.get("max_single_invest_cny")
+    source="strategy.target_assets.max_single_invest_cny"
     if cap is None:
         cap = strategy.get("max_single_invest_cny")
+        source="strategy.max_single_invest_cny"
     try:
         cap_f = float(cap or 0)
-    except (TypeError, ValueError):
-        cap_f = 0.0
-    return from_cny(cap_f, base, floor=True) if cap_f > 0 else 0
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid single investment limit; cannot assume unlimited") from exc
+    if not math.isfinite(cap_f) or cap_f<0:raise ValueError("invalid single investment limit")
+    amount=from_cny(cap_f,base,floor=True) if cap_f>0 else 0
+    return {"state":"not_configured" if cap is None else "explicitly_unlimited" if cap_f==0 else "configured",
+            "original_amount":cap,"original_currency":"CNY","effective_amount":amount,"effective_currency":base,
+            "source_ref":source if cap is not None else "not_provided",
+            "conversion_ref":"identity" if base=="CNY" or cap_f==0 else "runtime_fx:CNY/"+base,
+            "effective_conversion_ratio_after_floor":amount/cap_f if cap_f else None,
+            "scope":"new_purchase_order_limit_only"}
 
 
 def prompt_vars() -> Dict[str, object]:

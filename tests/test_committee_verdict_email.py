@@ -11,11 +11,12 @@ from openinvest.services import event_notifier
 def _patch_email(monkeypatch, sink: dict):
     monkeypatch.setattr(event_notifier, "render_markdown_email", lambda md, **k: md)
 
-    def _send(*, subject, html_body, plain_body):
-        sink.update(subject=subject, body=plain_body)
-        return "longsizhuo@gmail.com"
-
-    monkeypatch.setattr(event_notifier, "send_email_html", _send)
+    original=event_notifier.render_committee_notice
+    def render(**kwargs):
+        payload=original(**kwargs)
+        if payload:sink.update(subject=payload["subject"],body=payload["plain"])
+        return payload
+    monkeypatch.setattr(event_notifier,"render_committee_notice",render)
 
 
 def test_verdict_email_renders_verdict(monkeypatch):
@@ -31,11 +32,11 @@ def test_verdict_email_renders_verdict(monkeypatch):
             "error": None,
         }
     }
-    rcv = event_notifier.send_committee_verdict_email(
+    rcv = event_notifier.render_committee_notice(
         task_id="ae69eb380b01", symbols=["GC=F"],
         by_asset=by_asset, event_ids=["7d0205cc9042eb13"],
     )
-    assert rcv == "longsizhuo@gmail.com"
+    assert isinstance(rcv,dict) and rcv["plain"]==sink["body"]
     assert "TRIM" in sink["subject"]
     body = sink["body"]
     assert "GC=F" in body and "TRIM" in body
@@ -50,7 +51,7 @@ def test_verdict_email_handles_errored_asset(monkeypatch):
     sink: dict = {}
     _patch_email(monkeypatch, sink)
     by_asset = {"NDQ.AX": {"verdict": {}, "error": "boom"}}
-    event_notifier.send_committee_verdict_email(
+    event_notifier.render_committee_notice(
         task_id="t1", symbols=["NDQ.AX"], by_asset=by_asset,
     )
     assert "运行失败" in sink["body"] and "boom" in sink["body"]
@@ -64,7 +65,7 @@ def test_verdict_email_link_has_api_prefix(monkeypatch):
     by_asset = {"GC=F": {"verdict": {"verdict": "ACCUMULATE", "confidence": 0.65,
                                      "dominant_view": "risk", "alloc_cny": 2700},
                          "error": None}}
-    event_notifier.send_committee_verdict_email(
+    event_notifier.render_committee_notice(
         task_id="abc123", symbols=["GC=F"], by_asset=by_asset,
         api_base_url="https://invest.example.com",
     )
@@ -80,7 +81,7 @@ def test_verdict_email_has_explain_decision_fallback(monkeypatch):
     by_asset = {"GC=F": {"verdict": {"verdict": "ACCUMULATE", "confidence": 0.65,
                                      "dominant_view": "risk", "alloc_cny": 2700},
                          "error": None}}
-    event_notifier.send_committee_verdict_email(
+    event_notifier.render_committee_notice(
         task_id="abc123", symbols=["GC=F"], by_asset=by_asset,
     )
     from datetime import datetime
@@ -99,10 +100,10 @@ def test_verdict_email_silent_when_all_hold(monkeypatch):
         "510300.SS": {"verdict": {"verdict": "HOLD", "confidence": 0.6,
                                   "dominant_view": "quant", "alloc_cny": 0}, "error": None},
     }
-    rcv = event_notifier.send_committee_verdict_email(
+    rcv = event_notifier.render_committee_notice(
         task_id="hold123", symbols=["GC=F", "510300.SS"], by_asset=by_asset,
     )
-    assert rcv == ""
+    assert rcv is None
     assert sink == {}
 
 
@@ -115,10 +116,10 @@ def test_verdict_email_still_sent_on_error(monkeypatch):
                              "dominant_view": "quant", "alloc_cny": 0}, "error": None},
         "NDQ.AX": {"verdict": {}, "error": "boom"},
     }
-    rcv = event_notifier.send_committee_verdict_email(
+    rcv = event_notifier.render_committee_notice(
         task_id="err123", symbols=["GC=F", "NDQ.AX"], by_asset=by_asset,
     )
-    assert rcv == "longsizhuo@gmail.com"
+    assert isinstance(rcv,dict) and rcv["plain"]==sink["body"]
     assert "boom" in sink["body"]
 
 

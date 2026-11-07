@@ -223,6 +223,15 @@ class MemoryStore:
             if not Eligibility(self.data_root).allows_insight(
                     relative.stem, doc.metadata, doc.body, purpose):
                 return None
+        if doc is not None and str(relative) in {"MEMORY.md", "DREAMS.md"} and purpose != "audit":
+            active = []
+            for insight_path in sorted((self.root / "insights").glob("*.md")):
+                insight = self.read("insights/"+insight_path.stem, purpose=purpose)
+                if insight is not None:
+                    active.append(insight.body)
+            return MemoryDoc(name=doc.name, type="active_knowledge_view",
+                             metadata={"qualified_insights":len(active), "historical_source_use":"audit_only"},
+                             body="\n\n".join(active) or "当前没有通过资格核验的洞察。历史索引和梦日记仅供审计，不作为建议依据。")
         return doc
 
     def write(self, name: str, type_: str, data: Dict[str, Any], body: str) -> Path:

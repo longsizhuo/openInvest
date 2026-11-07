@@ -47,9 +47,8 @@ from apscheduler.triggers.cron import CronTrigger
 from openinvest.core.decision_ledger import llm_failure_reason, parse_committee_file
 from openinvest.core.memory_store import MemoryStore
 from openinvest.scheduler.cron import SCHEDULED_SINCE, crontab_trigger
-from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.news_sources import SOURCE_HEALTH_STATE
-from openinvest.services.notifier import render_markdown_email, send_email_html
+from openinvest.services.notifier import render_markdown_email
 
 log = logging.getLogger(__name__)
 
@@ -210,25 +209,27 @@ def find_problems(
 
 
 def find_agent_backlog(now: datetime) -> List[Dict[str, Any]]:
-    """agent 模式：有待办、宿主 Agent 却超过 AGENT_DRAIN_STALE 没来取。backend 模式队列为空 → 不报。"""
-    if now.weekday() >= 5 or now.hour < 10:
-        return []
+    """Track actual unfinished requests, including expired ones; polling is not completion."""
     from openinvest.services import agent_queue as q
-    news, comm = q.pending_news_items(now), q.pending_committee_items(now)
-    if not news and not comm:
-        return []
-    last = q.last_drained()
-    if last is not None and now - last <= AGENT_DRAIN_STALE:
-        return []
-    anchor = last.isoformat(timespec="minutes") if last else "从未"
-    syms = ", ".join(c["symbol"] for c in comm) or "无"
-    return [{
-        "key": f"agent_backlog:{anchor}",
-        "since": (last + AGENT_DRAIN_STALE) if last else now,
-        "text": (f"Agent 待办没人取：{len(news)} 条新闻待归一化、{len(comm)} 个委员会重跑待跑"
-                 f"（{syms}），上次来取是 {anchor}——宿主 Agent（Hermes 哨兵 / 日报任务）可能停了，"
-                 f"后端不调模型，这些不会自己完成。"),
-    }]
+    news=q.pending_news_items(now,include_expired=True)
+    committees=q.pending_committee_items(now,include_expired=True)
+    findings=[]
+    legacy=q.legacy_news_items()
+    if legacy:
+        findings.append({"key":"agent_legacy_source_verification","since":now,"one_shot":True,
+                         "text":f"{len(legacy)} 条升级前的来源队列记录仅限审计，需要重新取得原始来源；不算已处理或已验证新闻。"})
+    for item in committees:
+        queued=datetime.fromisoformat(item["queued_at"])
+        deadline=queued+timedelta(hours=1)
+        if now<deadline:continue
+        findings.append({"key":f"agent_committee_unfinished:{item['symbol']}:{item['queued_at']}","since":deadline,
+                         "text":f"{item['symbol']} 有 {len(item.get('request_ids',[]))} 个委员会触发请求尚无绑定输入的完成回执（状态 {item.get('status','pending')}，最早排队 {queued.isoformat()}；轮询待办不等于完成。"})
+    if news:
+        oldest=min(datetime.fromisoformat(item["queued_at"]) for item in news)
+        if now-oldest>AGENT_DRAIN_STALE:
+            findings.append({"key":f"agent_news_unfinished:{oldest.isoformat()}","since":oldest+AGENT_DRAIN_STALE,
+                             "text":f"{len(news)} 条新闻尚未完成归一化，最早排队 {oldest.isoformat()}。"})
+    return findings
 
 
 def find_failed_verdicts(committee_dir: Any, now: datetime) -> List[Dict[str, Any]]:
@@ -278,7 +279,7 @@ def find_silent_sources(health: Dict[str, Dict[str, Optional[str]]]) -> List[Dic
     return out
 
 
-def _send(findings: List[Dict[str, Any]]) -> None:
+def _send(findings: List[Dict[str, Any]]) -> dict:
     subject = f"⚠️ openInvest 调度看门狗：{len(findings)} 项异常"
     md = (
         "## ⚠️ 调度看门狗告警\n\n"
@@ -286,21 +287,16 @@ def _send(findings: List[Dict[str, Any]]) -> None:
         + "\n\n_排查：`db/jobs.sqlite` 的 job_runs 表 + `logs/invest.log`；"
           "同一异常 24h 内只提醒一次。_"
     )
-    # 与 send_committee_verdict_email 同顺序：DM 先推（best-effort 永不抛），邮件保底归档。
-    # DM 已送达时邮件再失败也不抛：否则 run() 回滚 claim，SMTP 挂多久 DM 就每小时重发多久
-    dm_ok = bool(send_discord_alert(f"**{subject}**\n{md}"))
-    try:
-        receiver = send_email_html(
-            subject=subject,
-            html_body=render_markdown_email(md, footer_label="Invest Job Watchdog"),
-            plain_body=md,
-        )
-        if not dm_ok and not receiver:
-            raise RuntimeError("No alert delivery channel succeeded; retain alert for retry")
-    except Exception:
-        if not dm_ok:
-            raise
-        log.warning("[job_watchdog] 邮件投递失败，DM 已送达，不回滚去重")
+    from openinvest.services.notification_outbox import NotificationOutbox
+    from openinvest.core.evidence_eligibility import digest
+    outbox=NotificationOutbox(MemoryStore())
+    key="watchdog:"+digest([f["notification_claim"] for f in findings])
+    ident=outbox.enqueue(key,{"subject":subject,"plain":md,"discord":f"**{subject}**\n{md}",
+                             "html":render_markdown_email(md,footer_label="Invest Job Watchdog")},
+                         category="job_watchdog",policy="decision")
+    # The watchdog also attempts its own delivery when the delivery job is down.
+    outbox.flush(only_id=ident)
+    return outbox.receipt(ident)
 
 
 def run(now: Optional[datetime] = None) -> Dict[str, Any]:
@@ -329,26 +325,28 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
         log.warning(f"[job_watchdog] {f['text']}")
 
     fresh: List[Tuple[str, Dict[str, Any]]] = []
+    known=set(store.state_get(_STATE,{}) or {})
     for f in findings:
         suffix = "once" if f.get("one_shot") else str(int((now - f["since"]).total_seconds() // 86400))
         claim = f"{f['key']}#{suffix}"
-        if store.state_claim(_STATE, claim):
+        if claim not in known:
             fresh.append((claim, f))
         if len(fresh) >= 20:  # bounded delivery; remaining alerts stay unclaimed for the next run
             break
-    if fresh:
-        try:
-            _send([f for _, f in fresh])
-        except Exception:
-            # 投递失败 → 回滚 claim，下个小时重试，别让这次告警被 24h 去重吞掉
-            for claim, _ in fresh:
-                store.state_unclaim(_STATE, claim)
-            raise
+    accepted=[];queued=[]
+    for claim,f in fresh:
+        receipt=_send([{**f,"notification_claim":claim}])
+        if not isinstance(receipt,dict) or not receipt.get("notification_id"):
+            raise RuntimeError("watchdog alert was not durably queued")
+        store.state_claim(_STATE,claim)  # Queue receipt, not a claim of delivery.
+        queued.append(claim)
+        if receipt.get("accepted"):accepted.append(claim)
     return {
         "status": "ok",
         "jobs_checked": len(jobs),
         "findings": [f["text"] for f in findings],
-        "alerted": [claim for claim, _ in fresh],
+        "alerted": accepted,
+        "notifications_queued":queued,
     }
 
 

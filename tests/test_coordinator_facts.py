@@ -145,3 +145,11 @@ def test_sidecar_keeps_numpy_numbers_numeric(env, monkeypatch):
     rec = co.load_submitted_committee("TESTSYM", datetime.now().strftime("%Y-%m-%d"))
     assert isinstance(rec["verdict"]["confidence"], float) and f"{rec['verdict']['confidence']:.2f}" == "0.66"
     assert rec["verdict"]["alloc_cny"] == 800
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

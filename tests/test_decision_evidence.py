@@ -46,12 +46,13 @@ def test_submission_replay_does_not_duplicate_decision_or_intervention():
     raw="=== CIO ===\nVERDICT: TRIM\nCONFIDENCE: 0.7\nTRIM_REASON: bearish\nREENTRY_PRICE: 120\nSUGGESTED_ALLOC_CNY: -1000"
     first=save_committee_transcript("SYNTHETIC",raw,context_id=cid)
     store=MemoryStore(); ledger=store.root/".dreams/interventions.jsonl"
-    before=ledger.read_bytes()
+    before=ledger.read_bytes() if ledger.exists() else b""
+    assert before==b""  # An unqualified exit is not a successful money-saving intervention.
     second=save_committee_transcript("SYNTHETIC",raw,context_id=cid)
     assert second["replayed"] and second["decision_id"] == first["decision_id"]
     assert second["saved"] == first["saved"]
     assert len(list((store.root/".evidence/decisions").glob("*.json"))) == 1
-    assert ledger.read_bytes() == before
+    assert (ledger.read_bytes() if ledger.exists() else b"") == before
     with pytest.raises(ValueError,match="different content"):
         save_committee_transcript("SYNTHETIC",raw.replace("0.7","0.8"),context_id=cid)
 
@@ -61,6 +62,14 @@ def test_submit_uses_its_own_prepare_not_the_latest_symbol_snapshot():
     from openinvest.core.runner.coordinator import save_committee_transcript
     first=context_id("SYNTHETIC",current_price=100)
     second=context_id("SYNTHETIC",current_price=200)
-    raw="=== CIO ===\nVERDICT: TRIM\nCONFIDENCE: 0.7\nTRIM_REASON: bearish\nREENTRY_PRICE: 150\nSUGGESTED_ALLOC_CNY: -1000"
+    raw="=== CIO ===\nVERDICT: TRIM\nCONFIDENCE: 0.7\nTRIM_REASON: bearish\nEXIT_INTENT: tactical_reentry\nREENTRY_PRICE: 150\nSUGGESTED_ALLOC_CNY: -1000"
     assert save_committee_transcript("SYNTHETIC",raw,context_id=first)["verdict"]["verdict"] == "HOLD"
     assert save_committee_transcript("SYNTHETIC",raw,context_id=second)["verdict"]["verdict"] == "TRIM"
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

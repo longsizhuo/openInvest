@@ -40,14 +40,15 @@ def _json_output_addendum() -> str:
   "trim_reason": "concentration|stop_loss|bearish"（非 TRIM 用 null）,
   "exit_intent": "risk_reduction|thesis_invalidated|liquidity_need|tactical_reentry" 或 null,
   "hold_reason": "maintain_position|wait_for_edge|user_constraint|data_untrusted" 或 null,
-  "alternatives": 比较买入、持有、退出的支持证据、反证和约束的对象,
+  "alternatives": 数组；必须分别列 HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY，可增加 THESIS_EXIT、LIQUIDITY_EXIT；每项含 kind、applicability（applicable|not_applicable|unknown）、exit_intent、support、counterevidence、constraint_refs、assumptions、data_gaps；不能合并风险退出与择时买回,
   "review_plan": 按上述结构给出条件、单位、带时区有效期和变更理由的对象，或 null,
+  "risk_review_plan": 独立的下行风险复核计划，同 review_plan 结构，或 null；不得只在 memo 中承诺监控,
   "reentry_price": 择时买回型 TRIM 用低于现价的数字，资产报价币种、与现价同单位；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
   "reentry_condition": 择时买回条件；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
-  "expected_path": 字符串（非 TRIM 用 null）,
+  "expected_path": 择时买回型 TRIM 的路径依据；风险/需求退出或非 TRIM 可用 null,
   "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
 }
-上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到 [WORKER_UNAVAILABLE] 则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。""",
+上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到完整 [WORKER_UNAVAILABLE] reason= 失败标记则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。""",
         """=== Output format override (this is the only format for this call) ===
 Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSON object only** (no markdown code fences, no extra text), with the following fields:
 {
@@ -58,14 +59,15 @@ Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSO
   "trim_reason": "concentration|stop_loss|bearish" (null when not TRIM),
   "exit_intent": "risk_reduction|thesis_invalidated|liquidity_need|tactical_reentry" or null,
   "hold_reason": "maintain_position|wait_for_edge|user_constraint|data_untrusted" or null,
-  "alternatives": an object comparing evidence, counterevidence and constraints for buying, holding and exiting,
+  "alternatives": an array with separate HOLD_EXISTING, ADD, REDUCE_RISK and TACTICAL_REENTRY entries; optional THESIS_EXIT and LIQUIDITY_EXIT. Each includes kind, applicability (applicable|not_applicable|unknown), exit_intent, support, counterevidence, constraint_refs, assumptions and data_gaps. Risk reduction and tactical reentry must not be merged,
   "review_plan": conditions, units, timezone-aware expiry and explicit replacement reason using the structure above, or null,
+  "risk_review_plan": a separate downside-risk review plan using the same structure, or null; monitoring promised in prose must have structured conditions,
   "reentry_price": number below the current price only for a tactical round-trip TRIM, in the asset's quote currency and unit; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
   "reentry_condition": tactical reentry condition; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
-  "expected_path": string (null when not TRIM),
+  "expected_path": path evidence for tactical reentry; null is allowed for risk/needs exits and non-TRIM,
   "memo": "your full investment-bank-grade analysis memo, multi-paragraph, matching the depth of the plain-text memo"
 }
-All rules above still apply (sanity checks / TRIM constraints / concentration / verdict=HOLD with confidence<=0.4 when [WORKER_UNAVAILABLE] appears) -- they are just carried in the JSON fields.""",
+All rules above still apply (sanity checks / TRIM constraints / concentration / verdict=HOLD with confidence<=0.4 when the complete [WORKER_UNAVAILABLE] reason= failure marker appears) -- they are just carried in the JSON fields.""",
     )).replace("suggested_alloc_cny", f"suggested_alloc_{base_currency().lower()}")
 
 

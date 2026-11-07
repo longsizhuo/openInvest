@@ -48,39 +48,41 @@ def send_event_alert(
     Returns:
         receiver 邮箱，凭据缺失 → "", 投递失败抛 EmailDeliveryError。
     """
+    receipt = send_event_alert_receipt(
+        events, committee_task_id=committee_task_id, api_base_url=api_base_url,
+        holdings_snapshot=holdings_snapshot,
+    )
+    return receipt.get("channels", {}).get("email", {}).get("target") or ""
+
+
+def send_event_alert_receipt(
+    events: List[Dict[str, Any]], *, committee_task_id=None, api_base_url=None,
+    holdings_snapshot=None, notification_key=None, risk_alert=False, dispatch=True, store=None,
+    followup=None,
+    cooldown=None,
+    now=None,
+) -> dict:
+    """Queue first; a receipt reports channel acceptance, never merely a detection."""
     if not events:
-        return ""
-
-    # 2026-09-10 老大要求：暂停事件预警推送。
-    # 此前每个事件周期推一对消息（Event Alert + verdict），一天十几次太吵；
-    # 现在只保留「非 HOLD verdict」这一条有价值的通知（过滤逻辑见
-    # send_committee_verdict_email）。需要临时恢复时设 INVEST_EVENT_ALERT=1。
-    if os.getenv("INVEST_EVENT_ALERT", "0") != "1":
-        log.info(
-            "send_event_alert: 事件预警已暂停，跳过 %d 条（仅非 HOLD verdict 会通知）",
-            len(events),
-        )
-        return ""
-
+        return {"accepted": False, "channels": {}, "status": "empty"}
+    import hashlib
+    import json
+    from openinvest.services.notification_outbox import NotificationOutbox
     api_base_url = api_base_url or os.getenv("INVEST_API_BASE_URL", "http://localhost:8765")
-    subject = _build_subject(events)
-    md = _build_markdown(
-        events,
-        committee_task_id=committee_task_id,
-        api_base_url=api_base_url,
-        holdings_snapshot=holdings_snapshot or {},
-    )
-    html = render_markdown_email(
-        md, footer_label="Invest Event Watch", link_hosts=_link_hosts(events, api_base_url),
-    )
-    # Discord DM 先推（实时通道，best-effort 永不抛）；邮件随后作为保底归档，
-    # 顺序保证邮件投递失败（EmailDeliveryError）不影响 Discord 已送达
-    send_discord_alert(
-        _build_discord_text(
-            events, committee_task_id=committee_task_id, api_base_url=api_base_url
-        )
-    )
-    return send_email_html(subject=subject, html_body=html, plain_body=md)
+    md = _build_markdown(events, committee_task_id=committee_task_id,
+                         api_base_url=api_base_url, holdings_snapshot=holdings_snapshot or {})
+    payload = {"subject": _build_subject(events), "plain": md,
+               "html": render_markdown_email(md, footer_label="Invest Event Watch", link_hosts=_link_hosts(events, api_base_url)),
+               "discord": _build_discord_text(events, committee_task_id=committee_task_id, api_base_url=api_base_url),
+               "events": events, "followup": followup, "cooldown": cooldown}
+    fingerprint = json.dumps([{k: e.get(k) for k in ("event_id", "_version_id", "one_line_claim", "stance", "severity", "ts")} for e in events], sort_keys=True, ensure_ascii=False)
+    key = notification_key or "event:" + hashlib.sha256(fingerprint.encode()).hexdigest()
+    outbox = NotificationOutbox(store)
+    ident = outbox.enqueue(key, payload, category="market_risk" if risk_alert else "event",
+                           policy="risk" if risk_alert else "events",now=now)
+    if dispatch:
+        outbox.flush(only_id=ident,now=now)
+    return outbox.receipt(ident)
 
 
 def _build_discord_text(
@@ -204,14 +206,14 @@ def _build_markdown(
     return "\n".join(lines)
 
 
-def send_committee_verdict_email(
+def render_committee_notice(
     *,
     task_id: str,
     symbols: List[str],
     by_asset: Dict[str, Any],
     event_ids: Optional[List[str]] = None,
     api_base_url: Optional[str] = None,
-) -> str:
+) -> dict | None:
     """事件触发的委员会重跑完成后，发一封 verdict 结果邮件。
 
     补 event_watch → 委员会 → verdict 邮件链路的最后一环：此前 web 路径
@@ -237,7 +239,7 @@ def send_committee_verdict_email(
     _non_hold = [v for v in _verdicts if v and v != "HOLD"]
     if not _non_hold and not _has_error:
         log.info("send_committee_verdict_email: 全 HOLD %s，按老大要求静默", _verdicts)
-        return ""
+        return None
 
     api_base_url = api_base_url or os.getenv("INVEST_API_BASE_URL", "http://localhost:8765")
     today = datetime.now().strftime("%Y-%m-%d")
@@ -285,5 +287,27 @@ def send_committee_verdict_email(
     )
     html = render_markdown_email(md, footer_label="Invest Event Watch · Committee")
     # verdict 同样先推 DM（md 本身已足够精简，Discord 原生渲染 markdown）
-    send_discord_alert(f"**{subject}**\n{md}")
-    return send_email_html(subject=subject, html_body=html, plain_body=md)
+    return {"subject":subject,"html":html,"plain":md,"discord":f"**{subject}**\n{md}"}
+
+
+def send_committee_verdict_email(*,task_id,symbols,by_asset,event_ids=None,api_base_url=None) -> str:
+    """All entrances reconcile the same sealed decisions; the dispatcher sends once."""
+    from datetime import timezone
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.services.notification_outbox import NotificationOutbox
+    from openinvest.jobs.notification_delivery import reconcile_decisions
+    store=MemoryStore();outbox=NotificationOutbox(store)
+    now=datetime.now(timezone.utc)
+    reconcile_decisions(store,outbox,now=now)
+    failed=[]
+    for symbol in symbols:
+        item=by_asset.get(symbol) or {}
+        verdict=item.get("verdict") or {}
+        if item.get("error") or (verdict.get("verdict") not in (None,"HOLD") and not verdict.get("decision_id")):
+            failed.append(symbol)
+    if failed:
+        text="、".join(failed)+" 的分析未完成或无法核验完整输入。本轮没有新的可执行建议，需重新复核。"
+        payload={"subject":"openInvest 分析需要复核","plain":text,"discord":text,
+                 "html":render_markdown_email(text,footer_label="Investment Committee"),"decision_quality":True}
+        outbox.enqueue("committee-task-error:"+str(task_id),payload,category="decision_quality",policy="decision",now=now)
+    return ""  # Queued is not a receiver/provider acceptance receipt.

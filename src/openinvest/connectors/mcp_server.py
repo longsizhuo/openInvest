@@ -436,8 +436,8 @@ def record_execution(
 @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def ingest_event(
     title: Annotated[str, Field(description="Headline of the news item.")],
-    url: Annotated[str, Field(description="Canonical source URL (also the dedup key).")],
-    snippet: Annotated[str, Field(description="Short excerpt or summary of the article body.")] = "",
+    url: Annotated[str, Field(description="Publisher URL or backend-issued source locator from pending_news. A snapshot locator requires binding to this instance's captured original.")],
+    snippet: Annotated[str, Field(description="Original source excerpt copied verbatim; keep your interpretation in one_line_claim and assessed labels.")] = "",
     source: Annotated[str, Field(description="Publisher name (e.g. 'Reuters') — the news outlet.")] = "",
     published_at: Annotated[Optional[str], Field(description="ISO 8601 publication time, if known.")] = None,
     ingested_by: Annotated[str, Field(description="Your own agent identity (e.g. 'hermes') for provenance; distinct from source.")] = "host-agent",
@@ -447,6 +447,7 @@ def ingest_event(
     event_type: Annotated[Optional[str], Field(description="e.g. 'macro', 'policy', 'earnings', 'geopolitics', 'commodity', 'other'.")] = None,
     affected_symbols: Annotated[Optional[List[str]], Field(description="yfinance tickers the event materially affects, e.g. ['GC=F'].")] = None,
     entities: Annotated[Optional[List[str]], Field(description="Key entities (countries, companies, central banks), lowercase.")] = None,
+    source_snapshot_id: Annotated[Optional[str], Field(description="Exact pending_news source snapshot to bind. Original source fields remain immutable; labels are your interpretation.")] = None,
 ) -> Dict[str, Any]:
     """Feed a finance news item you (the host agent) found into the event
     ledger, graded and mapped to affected symbols, stored for committee RAG
@@ -461,8 +462,9 @@ def ingest_event(
     You have far better search reach than the self-hosted crawler (including
     Chinese-language sources) — proactively feed news relevant to the user's
     holdings, especially A-share/regional coverage the crawler misses.
-    Idempotent: re-sending the same url or claim does not double-insert.
-    Requires a backend LLM key.
+    Identical source snapshots are idempotent. Material corrections retain
+    versions; a shared topic or URL never proves a correction is duplicate.
+    Structured input needs no backend LLM key and grants no learning permission.
 
     Args:
         title: Headline of the news item.
@@ -486,14 +488,29 @@ def ingest_event(
                            "source": source, "published_at": published_at,
                            "one_line_claim": one_line_claim, "stance": stance, "severity": severity,
                            "event_type": event_type, "affected_symbols": affected_symbols,
-                           "entities": entities}],
+                           "entities": entities,"source_snapshot_id":source_snapshot_id}],
                          ingested_by=ingested_by)
+
+
+@_tool(annotations=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True))
+def source_snapshot(snapshot_id: Annotated[str,Field(description="Exact source_snapshot_id from this instance's pending_news or event provenance.")]) -> Dict[str,Any]:
+    """Read the immutable original input and acquisition proof for one source version.
+
+    A backend_snapshot locator identifies a captured API item, not an upstream
+    webpage. Source capture alone does not prove truth, independence or learning eligibility.
+    """
+    _check_advisory()
+    from openinvest.services.news_collection import source_snapshot as load
+    try:return {"status":"ok",**load(snapshot_id)}
+    except (ValueError,OSError) as exc:return {"status":"unavailable","reason":str(exc)}
 
 
 @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def pending_news(
     limit: Annotated[int, Field(description="Max items to return.", ge=1, le=100)] = 30,
-    dismiss_urls: Annotated[Optional[List[str]], Field(description="URLs you reviewed and judged irrelevant to the holdings; they won't be offered again.")] = None,
+    dismiss_urls: Annotated[Optional[List[str]], Field(description="Legacy version-limited dismissal; ambiguous multi-version URLs require dismiss_source_ids instead.")] = None,
+    dismiss_source_ids: Annotated[Optional[List[str]], Field(description="Exact source_snapshot_id values reviewed as irrelevant; future corrections remain eligible.")] = None,
+    include_expired: Annotated[bool,Field(description="Expose preserved unfinished versions older than 48h for explicit source verification/recovery.")] = False,
 ) -> Dict[str, Any]:
     """News the backend fetched but did not normalize because reasoning is
     delegated to you (agent mode). For each relevant item call `ingest_event`
@@ -503,7 +520,7 @@ def pending_news(
     """
     _check_advisory()
     from openinvest.services.agent_queue import pending_news as _pending
-    return _pending(limit=limit, dismiss_urls=dismiss_urls or [])
+    return _pending(limit=limit, dismiss_urls=dismiss_urls or [],dismiss_source_ids=dismiss_source_ids or [],include_expired=include_expired)
 
 
 # 不标幂等：每调一次都往当天 daily 记录追加一段委员会摘要
@@ -1254,6 +1271,7 @@ def submit_committee(
     provider: Annotated[str, Field(description="Which agent played the roles, e.g. 'hermes', 'claude', 'codex'.")] = "agent",
     model: Annotated[str, Field(description="Model that actually played the roles, e.g. 'claude-sonnet-5-5'; omitted -> recorded as 'unknown'. The scorecard buckets verdicts by provider:model.")] = "",
     context_id: Annotated[str, Field(description="Exact context_id returned by prepare_committee; required to bind inputs and rules to this submission.")] = "",
+    reasoning_review_json: Annotated[Optional[str],Field(description="Independent review JSON for the exact verification_request returned by an earlier submission; submit the unchanged original transcript.")] = None,
 ) -> Dict[str, Any]:
     """Step 2 of the agent-run committee: hand in the transcript you produced
     from `prepare_committee`. The backend parses the CIO memo, applies the same
@@ -1277,9 +1295,10 @@ def submit_committee(
     if not transcript.strip():
         raise ToolError("transcript is empty")
     try:
-        res = save_committee_transcript(symbol, transcript, provider=provider, model=model, context_id=context_id)
+        res = save_committee_transcript(symbol, transcript, provider=provider, model=model, context_id=context_id,reasoning_review_json=reasoning_review_json)
     except ValueError as e:
         raise ToolError(str(e)) from e
+    if res.get("status")=="verification_required":return res
     from pathlib import Path
     parsed = parse_committee_file(Path(res["saved"])) or {}
     reason = llm_failure_reason(parsed)

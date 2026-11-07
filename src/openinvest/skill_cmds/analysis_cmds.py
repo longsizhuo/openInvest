@@ -38,6 +38,9 @@ __all__ = [
     "cmd_event_check",
     "cmd_ingest_event",
     "cmd_pending_news",
+    "cmd_collect_news",
+    "cmd_event_history",
+    "cmd_source_snapshot",
     "cmd_pending_committees",
     "cmd_news_sources",
     "cmd_decisions",
@@ -355,6 +358,7 @@ def cmd_ingest_event(args) -> None:
         "severity": getattr(args, "severity", None), "event_type": getattr(args, "event_type", None),
         "affected_symbols": _csv(getattr(args, "symbols", None)),
         "entities": _csv(getattr(args, "entities", None)),
+        "source_snapshot_id":getattr(args,"source_snapshot_id",None),
     }], ingested_by=getattr(args, "ingested_by", "host-agent") or "host-agent")
     _print_json(result)
     if result.get("status") == "error":
@@ -364,7 +368,46 @@ def cmd_ingest_event(args) -> None:
 def cmd_pending_news(args) -> None:
     """agent 模式待办：等 Agent 归一化的新闻（等价 MCP pending_news）"""
     from openinvest.services.agent_queue import pending_news
-    _print_json(pending_news(limit=args.limit, dismiss_urls=args.dismiss or []))
+    _print_json(pending_news(limit=args.limit, dismiss_urls=args.dismiss or [],dismiss_source_ids=getattr(args,"dismiss_source_ids",None) or [],include_expired=getattr(args,"include_expired",False)))
+
+
+def cmd_collect_news(args) -> None:
+    from openinvest.services.news_collection import collect,inspect_candidates
+    if args.inspect_pending:
+        _print_json(inspect_candidates());return
+    try:result=collect(since=args.since,max_pages=args.max_pages,max_seconds=args.max_seconds,overlap_hours=args.overlap_hours)
+    except (ValueError,OSError) as exc:
+        _print_json({"status":"error","error":type(exc).__name__,"reason":"source_collection_or_state_unavailable"});sys.exit(2)
+    _print_json(result)
+    if result["status"]!="ok":sys.exit(2)
+
+
+def cmd_event_history(args) -> None:
+    from openinvest.db.event_store import EventStore
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.utils.advisory import is_advisory_mode
+    if is_advisory_mode():
+        _print_json({"status":"unavailable","reason":"private_history_not_available_in_advisory_mode"});sys.exit(1)
+    path=MemoryStore().data_root/"db/events.db"
+    if not path.exists():
+        _print_json({"status":"unavailable","reason":"configured_event_database_missing"});sys.exit(1)
+    store=EventStore(str(path),readonly=True)
+    try:
+        rows=store.list_current_with_sources(hours=args.hours,limit=args.limit+1)
+        _print_json({"status":"ok","data_root":str(store.data_root),"events":rows[:args.limit],
+                     "truncated":len(rows)>args.limit,"coverage_watermark":None,
+                     "note":"合格当前事件的核对视图；关键词/主题命中不否决来源更正，最后入库时间不代表扫描覆盖。"})
+    finally:store.conn.close()
+
+
+def cmd_source_snapshot(args):
+    from openinvest.utils.advisory import is_advisory_mode
+    from openinvest.services.news_collection import source_snapshot
+    if is_advisory_mode():
+        _print_json({"status":"unavailable","reason":"private_source_snapshot"});sys.exit(1)
+    try:_print_json({"status":"ok",**source_snapshot(args.snapshot_id)})
+    except (ValueError,OSError) as exc:
+        _print_json({"status":"unavailable","reason":str(exc)});sys.exit(1)
 
 
 def cmd_pending_committees(args) -> None:

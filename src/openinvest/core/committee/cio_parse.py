@@ -241,7 +241,7 @@ def parse_cio_memo(
         out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
     # Structured review conditions are retained rather than discarded with prose.
-    for name in ("review_plan", "alternatives"):
+    for name in ("review_plan", "risk_review_plan", "alternatives"):
         value = (fields or {}).get(name)
         if fields is None:
             match = re.search(rf"^{name.upper()}_JSON:\s*(.+)$", text, re.MULTILINE)
@@ -250,7 +250,7 @@ def parse_cio_memo(
                     value = json.loads(match.group(1))
                 except ValueError:
                     out[f"_{name}_error"] = "invalid_json"
-                    if name == "review_plan":
+                    if name.endswith("review_plan"):
                         value = {"parse_error": "invalid_json"}
         out[name] = value
     exit_intent = str((fields or {}).get("exit_intent") or "").strip().lower()
@@ -296,6 +296,7 @@ def parse_cio_memo(
         out["_original_confidence"] = out["confidence"]
         out["verdict"] = "ACCUMULATE"
         out["confidence"] = confidence_downgrade
+        out.update(decision_status="CONSTRAINED",constraint_reason="configured_buy_overdrive")
         log.warning(
             "parse_cio_memo: 降级 BUY(%s) → ACCUMULATE(%s) — 防 LLM 过度自信 / prompt injection",
             out["_original_confidence"], confidence_downgrade,
@@ -371,10 +372,15 @@ def parse_cio_memo(
     # Sanity check 5: 只为择时买回型 TRIM 保留旧校验，待隔离对照验证替代规则。
     # 止损和集中度退出的目的在于降低风险，不以更低价买回为成立前提。
     # 只在拿得到 current_price 的 live 路径校验（re-parse 存档时 current_price=None 跳过）。
+    if (out["verdict"]=="TRIM" and out.get("exit_intent") is None
+            and out.get("trim_reason") not in ("stop_loss","concentration")):
+        out.setdefault("_original_alloc",out.get("alloc_cny"))
+        out.setdefault("_original_verdict",out["verdict"])
+        out.update(alloc_cny=0,decision_status="REVIEW_REQUIRED",qualification_reason="exit_intent_unknown")
     if (current_price is not None
             and current_price > 0
             and out["verdict"] == "TRIM"
-            and out.get("exit_intent") not in ("risk_reduction", "thesis_invalidated", "liquidity_need")
+            and out.get("exit_intent") == "tactical_reentry"
             and out.get("trim_reason") not in ("stop_loss", "concentration")):
         rp = out.get("reentry_price")
         if rp is None or rp >= current_price:
@@ -388,8 +394,9 @@ def parse_cio_memo(
             # verdict="HOLD" 会漏归零 alloc_cny，让 TRIM 的负 alloc 存活下去
             # （_force_hold docstring 记载的 Sanity 3 同款历史 bug）。
             _force_hold(out, confidence_ceiling=out["confidence"])
+            out.update(decision_status="CONSTRAINED",hold_reason=out["_sanity5_reason"])
             log.warning(
-                "parse_cio_memo: TRIM 但买回点%s → 强制 HOLD（卖出后买不回更低 = 纯亏，TRIM 不成立）",
+                "parse_cio_memo: tactical TRIM 买回点%s，旧择时规则暂拦，保留原始提案",
                 "缺失" if rp is None else f"{rp} ≥ 现价 {current_price}（报价币种）",
             )
 
@@ -424,9 +431,13 @@ def parse_cio_memo(
                     "parse_cio_memo: 黄金防御分批 DCA 本批暂拦（%s，等满 spacing/quota）",
                     out["_defense_dca"],
                 )
-        elif out["verdict"] == "BUY":
+        elif out["_raw_proposal"]["verdict"] == "BUY":
+            # Compose buy protections from the original intent. Applying each
+            # rule to the previous rule's label caused BUY -> ACC -> HOLD at
+            # confidence .95 while the same BUY at .94 only became ACC.
             out["_defense_downgrade"] = "buy_to_accumulate"
             out["verdict"] = "ACCUMULATE"
+            out.update(decision_status="CONSTRAINED",constraint_reason="defense_buy_to_accumulate")
             log.warning(
                 "parse_cio_memo: 快崩防御触发（VIX 哨兵/ATR 飙升）→ %s（确定性降级，独立于 regime）",
                 out["_defense_downgrade"],
@@ -436,6 +447,7 @@ def parse_cio_memo(
             out.setdefault("_original_alloc", out["alloc_cny"])
             out["verdict"] = "HOLD"
             out["alloc_cny"] = 0
+            out.update(decision_status="CONSTRAINED",hold_reason="defense_accumulate_to_hold")
             log.warning(
                 "parse_cio_memo: 快崩防御触发（VIX 哨兵/ATR 飙升）→ %s（确定性降级，独立于 regime）",
                 out["_defense_downgrade"],
@@ -452,6 +464,8 @@ def parse_cio_memo(
             and regime == "uptrend"
             and not defense_flag_on
             and not _wu
+            and out["_raw_proposal"]["verdict"]=="HOLD"
+            and out["decision_status"]=="READY"
             and out["verdict"] == "HOLD"):
         out.setdefault("_original_verdict", "HOLD")
         out["_risk_profile_applied"] = "aggressive_uptrend_hold_to_accumulate"

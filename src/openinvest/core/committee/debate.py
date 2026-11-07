@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openinvest.capabilities.committee.cio import build_cio_prompt
@@ -57,6 +57,9 @@ class CommitteeReport:
     quant_adjusted: str = ""          # Round 2: Quant 看到 Risk 后调整
     risk_adjusted: str = ""           # Round 2: Risk 看到 Quant 后调整
     cio_memo: str = ""                # Round 3: CIO 综合
+    cio_raw_response: str = ""
+    cio_attempts: List[str] = field(default_factory=list)
+    reasoning_review: Dict[str,Any] = field(default_factory=dict)
     market_data: str = ""
     portfolio_summary: str = ""
     prior_insights: str = ""
@@ -64,13 +67,16 @@ class CommitteeReport:
     valuation_brief: str = ""         # 估值（确定性：trailing PE + 价格分位，仅权益类，per-asset）
     regime_brief: str = ""
     analysis_as_of: Optional[str] = None
+    source_macro_data: str = ""
+    source_event_brief: str = ""
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
         from openinvest.core.committee.evidence import cio_source_context
         lines = [
             f"=== ASSET: {self.asset.get('display_name', self.asset.get('symbol'))} ===",
-            cio_source_context(self.market_data, self.regime_brief, self.analysis_as_of),
+            cio_source_context(self.market_data, self.regime_brief, self.analysis_as_of,
+                               macro_data=self.source_macro_data, event_brief=self.source_event_brief),
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
         ]
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
@@ -123,6 +129,10 @@ def run_committee(
     max_debate_rounds: int = 1,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     input_health: Optional[Dict[str, Any]] = None,
+    source_macro_data: str = "",
+    source_event_brief: str = "",
+    verification_memory_root=None,
+    execution_constraint_facts=None,
 ) -> Dict[str, Any]:
     """对单个资产跑 Macro + Quant/Risk 多轮辩论 + CIO
 
@@ -173,6 +183,8 @@ def run_committee(
         valuation_brief=valuation_brief,
         regime_brief=regime_brief,
         analysis_as_of=(input_health or {}).get("prepared_at"),
+        source_macro_data=source_macro_data,
+        source_event_brief=source_event_brief,
     )
 
     quant_history: List[str] = []   # Round 1, 2, ..., N
@@ -208,6 +220,9 @@ def run_committee(
         f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n"
         f"请按 Risk Officer 格式输出风险评估。"
     )
+    from openinvest.core.committee.evidence import execution_constraints_context
+    constraint_context=execution_constraints_context(single_invest_cap,execution_constraint_facts)
+    risk_input_r1+="\n\n"+constraint_context
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,
         role="quant", asset=sym, round_label="opening",
@@ -245,16 +260,17 @@ def run_committee(
         debate_block = _format_debate_history(quant_history, risk_history)
 
         quant_input_rN = (
-            regime_section
+            quant_input_r1 + "\n\n"
             + f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
             + debate_block
             + "\n\n# 任务\n"
             + "请基于完整辩论历史调整或维持你的 SIGNAL/STRENGTH。"
-            + "REGIME 历史概率分布见 system prompt，作为背景数据参考（无方向硬锁）。"
+            + "先核对上方原始输入。改判须说明新增证据、纠错或分析期限变化；历史分组统计不能单独消除当前风险。"
             + "如果你认为意见已经稳定，重申当前判断即可。"
         )
         risk_input_rN = (
-            f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
+            risk_input_r1 + "\n\n"
+            + f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
             + debate_block
             + "\n\n# 任务\n"
             + "请基于 Quant 的最新技术信号调整或维持你的止损建议和风险评级。"
@@ -316,6 +332,7 @@ def run_committee(
     )
     # CIO 看完整辩论历史（不只是最后一轮），让它能识别 agent 是否在讨论中漂移
     cio_brief = report.to_cio_brief()
+    cio_brief+="\n\n"+constraint_context
     if len(quant_history) > 1:
         cio_brief += (
             "\n\n=== 完整辩论历史（含所有 cross-challenge 轮）===\n"
@@ -329,6 +346,8 @@ def run_committee(
     if reentry_reference:
         cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{reentry_reference}"
     report.cio_memo = _ask(cio_agent, cio_brief)
+    report.cio_attempts.append(report.cio_memo)
+    report.cio_raw_response=report.cio_memo
 
     # P1 优雅回退：JSON 模式下试解析；provider 没真支持 / 没吐合法 JSON（含 _ask 失败返回
     # 的 [WORKER_UNAVAILABLE] 哨兵）→ 退回文本模式重问一次，走 regex。DeepSeek 正常一次过。
@@ -347,6 +366,8 @@ def run_committee(
                 role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
             )
             report.cio_memo = _ask(cio_agent, cio_brief)
+            report.cio_attempts.append(report.cio_memo)
+            report.cio_raw_response=report.cio_memo
         else:
             # prose 保住：GUI/transcript 展示 memo 字段（缺失则留原始 JSON 文本）
             _memo = cio_fields.get("memo")
@@ -372,6 +393,19 @@ def run_committee(
         single_invest_cap=single_invest_cap,
     )
     cio_parsed["alloc_currency"] = base_currency()
+    from openinvest.core.committee.reasoning_quality import make_request,proposal_sources,apply_review
+    from openinvest.services.reasoning_review import review_once
+    from openinvest.utils.llm import get_llm_config_safe
+    request=make_request(sources=proposal_sources({"market_data":market_data,"macro_data":source_macro_data,
+        "event_brief":source_event_brief,"regime_brief":regime_brief,"portfolio_summary":portfolio_summary,
+        "path_reference":reentry_reference,"valuation_brief":valuation_brief,"sentiment_brief":sentiment_brief,
+        "single_invest_cap":single_invest_cap,"execution_constraint_facts":execution_constraint_facts,"analysis_as_of":report.analysis_as_of},
+        {"MACRO":macro_view,"QUANT_R1":quant_history[0],"QUANT_R2":quant_history[-1],"RISK_R1":risk_history[0],"RISK_R2":risk_history[-1]}),
+        proposal={"fields":cio_parsed.get("_raw_proposal") or {},"memo":report.cio_memo,"wire":report.cio_raw_response},
+        model=get_llm_config_safe()[2])
+    report.reasoning_review=review_once(request,memory_root=verification_memory_root,agent_factory=_create_agent,
+                                       ask=_ask,asset=sym,backend_allowed=True)
+    apply_review(cio_parsed,report.reasoning_review)
     # Sanity 6 钳过金额 → memo 末尾留一句人话（transcript / 邮件 / CLI 渲染的都是 memo）
     _cap_note = single_invest_cap_note(cio_parsed)
     if _cap_note:

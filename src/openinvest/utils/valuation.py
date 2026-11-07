@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -70,23 +71,23 @@ def build_valuation_brief(
 
     lines = []
     pe = info.get("trailingPE")
-    if isinstance(pe, (int, float)) and not isinstance(pe, bool) and pe > 0:
-        from openinvest.core.config import load_config
-        _pe_expensive = load_config().valuation.pe_expensive
+    if isinstance(pe, (int, float)) and not isinstance(pe, bool) and math.isfinite(pe) and pe > 0:
         lines.append(bilingual(
             f"VALUATION: trailing_PE={float(pe):.1f} "
-            f"(绝对水平: {_pe_level(float(pe))}, 阈值 >{_pe_expensive:g}=偏贵)",
+            "(仅报告指标；缺少行业、成长和自身估值历史校准时，公允价值判断未知)",
             f"VALUATION: trailing_PE={float(pe):.1f} "
-            f"(absolute level: {_pe_level(float(pe))}, threshold >{_pe_expensive:g}=expensive)",
+            "(observed ratio only; fair-value interpretation requires peer, growth and valuation-history evidence)",
         ))
 
     if price_quantile_2y is not None:
         try:
+            if not math.isfinite(float(price_quantile_2y)) or not 0 <= float(price_quantile_2y) <= 1:
+                raise ValueError("invalid historical price quantile")
             lines.append(bilingual(
                 f"PRICE_QUANTILE_2Y: {float(price_quantile_2y) * 100:.0f}% "
-                f"(价格在近2年的百分位，越高越贵)",
+                f"(价格在近2年的位置，不等于估值贵贱)",
                 f"PRICE_QUANTILE_2Y: {float(price_quantile_2y) * 100:.0f}% "
-                f"(price percentile over the past 2 years; higher means richer valuation)",
+                f"(historical price position, not a fair-value estimate)",
             ))
         except (TypeError, ValueError):
             pass

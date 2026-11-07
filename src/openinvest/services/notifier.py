@@ -223,6 +223,8 @@ def send_email_html(
     retry_interval = 5  # 5s → 10s → 20s → 40s → 80s
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
+        data_started = False
+        server_accepted = False
         try:
             print(f"🔄 [Attempt {attempt}/{max_retries}] 正在连接 SMTP 服务器...")
             # 注：smtplib.SMTP timeout=30 已 cover per-call，不动 socket.setdefaulttimeout
@@ -234,10 +236,20 @@ def send_email_html(
                 print(f"🔑 [Attempt {attempt}/{max_retries}] 正在验证身份...")
                 server.login(sender, password)
                 print(f"📨 [Attempt {attempt}/{max_retries}] 正在发送数据...")
+                data_started = True
                 server.sendmail(sender, [receiver], msg.as_string())
+                server_accepted = True
             print(f"✅ Email successfully sent to {receiver}")
             return receiver
         except (socket.timeout, smtplib.SMTPException, ConnectionError, OSError) as e:
+            if server_accepted:
+                # QUIT/connection cleanup can fail after the SMTP server accepted DATA.
+                # Retrying would send the same email again.
+                return receiver
+            if data_started and not isinstance(e, (smtplib.SMTPDataError, smtplib.SMTPRecipientsRefused)):
+                error = EmailDeliveryError("SMTP acceptance unknown after DATA; do not blindly resend")
+                error.delivery_uncertain = True
+                raise error from e
             last_exc = e
             print(f"❌ [Attempt {attempt}/{max_retries}] 发送失败: {e}")
             if attempt < max_retries:
