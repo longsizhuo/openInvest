@@ -94,7 +94,7 @@ def classify_regime(
                         + 价格仍在低位（分位 < recovery_quantile_max）
         3. uptrend    — MA spread% ÷ atr_pct_median_1y ≥ +trend_spread_atr_ratio
         4. downtrend  — 同上 ≤ -trend_spread_atr_ratio（趋势必须盖过自身噪声地板）
-        5. range_bound — 默认（MA 纠缠 + 波动正常）
+        5. range_bound — 未满足上述分类阈值；不代表波动或下跌风险正常
         6. unknown    — 缺关键数据
     """
     thresholds = get_thresholds()
@@ -233,7 +233,7 @@ def classify_regime(
         "regime": "range_bound",
         "reason": (
             f"趋势强度不足：MA spread {ma_spread_pct:+.2f}% 折合 {spread_norm:+.1f} 个典型日波"
-            f"（|{spread_norm:.1f}| < {thresholds['trend_spread_atr_ratio']}×），波动正常"
+            f"（|{spread_norm:.1f}| < {thresholds['trend_spread_atr_ratio']}×）；未满足趋势分类阈值，不代表波动或下跌风险正常"
         ),
         "inputs_used": inputs_used,
         "thresholds_used": thresholds,
@@ -261,11 +261,13 @@ def _regime_data_hint(
     pb = prob_hint.get("p_below")
     n = prob_hint.get("n")
     eff = prob_hint.get("effective_n") or n
-    overlap = f"（重叠窗口独立≈{eff}）" if (eff and n and eff != n) else ""
+    overlap = f"（重叠样本量启发式≈{eff}，不是独立样本证明）" if (eff and n and eff != n) else ""
+    import json
+    disclosure={key:prob_hint.get(key,"not_provided") for key in ("raw_conditional","unconditional","calibration","provenance")}
     return (
-        f"该 regime 历史 30d forward return：中位 {med:+.1f}%、"
+        f"历史模型参考（可能混合条件统计与无条件基率；不是当前风险概率）：30d forward return 中位 {med:+.1f}%、"
         f"期末低于现价概率 {pb * 100:.0f}%、样本 n={n}{overlap}。"
-        f"{q}结合分位 / RSI / 浮亏自行判断方向，不预设方向"
+        f"{q}结合当前市场证据自行判断方向，不预设方向。CALIBRATION_DISCLOSURE_JSON: "+json.dumps(disclosure,ensure_ascii=False,default=str)
     )
 
 

@@ -25,6 +25,8 @@ def tmp_event_db(monkeypatch):
         monkeypatch.setattr("openinvest.db.event_store.DB_PATH", path)
         # 触发冷却状态落 memory/.state（services/event_trigger）——隔离，防跨测试串冷却
         monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", Path(d) / "memory")
+        monkeypatch.setattr("openinvest.paths.INVEST_ROOT",Path(d))
+        monkeypatch.setattr("openinvest.services.analysis_dispatch.current_targets",lambda store:set(event_watch._load_user_context()["watching"]))
         yield path
 
 
@@ -67,9 +69,10 @@ def test_run_no_trigger_when_neutral_or_low(tmp_event_db, monkeypatch):
         _ne(1, "neutral", "neutral", "high", ["NDQ.AX"]),
     ])
     trigger = MagicMock()
-    send = MagicMock()
+    from openinvest.services.event_notifier import send_event_alert_receipt
+    send = MagicMock(wraps=send_event_alert_receipt)
     monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_trigger, "send_event_alert", send)
+    monkeypatch.setattr(event_trigger, "send_event_alert_receipt", send)
 
     out = event_watch.run()
     assert out["triggered"] == 0
@@ -94,18 +97,20 @@ def test_run_triggers_when_affected_high_risk(tmp_event_db, monkeypatch):
     ])
     monkeypatch.setattr(event_trigger, "_holdings_snapshot", lambda syms: {})
     trigger = MagicMock(return_value="task-abc")
-    send = MagicMock()
+    from openinvest.services.event_notifier import send_event_alert_receipt
+    send = MagicMock(wraps=send_event_alert_receipt)
     monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_trigger, "send_event_alert", send)
+    monkeypatch.setattr(event_trigger, "send_event_alert_receipt", send)
 
     out = event_watch.run()
     assert out["triggered"] == 1
     assert out["committee_task_id"] == "task-abc"
     trigger.assert_called_once()
     send.assert_called_once()
-    # 邮件 kwargs 含 committee_task_id
+    # 观察通知先于分析，不预先声称委员会已经排队
     args, kwargs = send.call_args
-    assert kwargs.get("committee_task_id") == "task-abc"
+    assert kwargs.get("committee_task_id") is None
+    assert kwargs["followup"]["symbols"] == ["NDQ.AX"]
 
 
 def test_run_dry_run_skips_email_and_committee(tmp_event_db, monkeypatch):
@@ -120,9 +125,10 @@ def test_run_dry_run_skips_email_and_committee(tmp_event_db, monkeypatch):
         _ne(0, "Nvidia miss", "risk", "high", ["NDQ.AX"]),
     ])
     trigger = MagicMock()
-    send = MagicMock()
+    from openinvest.services.event_notifier import send_event_alert_receipt
+    send = MagicMock(wraps=send_event_alert_receipt)
     monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_trigger, "send_event_alert", send)
+    monkeypatch.setattr(event_trigger, "send_event_alert_receipt", send)
 
     out = event_watch.run(dry_run=True)
     assert out["triggered"] == 1
@@ -140,11 +146,11 @@ def test_run_skips_duplicated_urls(tmp_event_db, monkeypatch):
 
     items = [RawNewsItem(src_name="r", title="t", url="https://r.co/0", snippet="s")]
     monkeypatch.setattr(event_watch, "fetch_all", lambda **kw: items)
-    monkeypatch.setattr(event_watch, "normalize", lambda its, **kw: [
-        _ne(0, "evt-x", "risk", "high", ["NDQ.AX"]),
-    ])
+    normalized=_ne(0, "evt-x", "risk", "high", ["NDQ.AX"])
+    normalized.raw_item=items[0]
+    monkeypatch.setattr(event_watch, "normalize", lambda its, **kw: [normalized])
     monkeypatch.setattr(event_trigger, "_trigger_committee", lambda **kw: "t1")
-    monkeypatch.setattr(event_trigger, "send_event_alert", lambda *a, **kw: "rcv")
+
 
     first = event_watch.run()
     assert first["triggered"] == 1
@@ -279,4 +285,11 @@ def test_record_source_health_keeps_last_ok_through_zero_runs(tmp_event_db):
     event_watch._record_source_health({"yfinance": 0}, now=datetime(2030, 1, 1, tzinfo=timezone.utc))
     second = MemoryStore().state_get(SOURCE_HEALTH_STATE)
     assert second["yfinance"] == {"last_run": "2030-01-01T00:00:00+00:00",
-                                       "last_ok": first["yfinance"]["last_ok"]}
+                                       "last_ok": first["yfinance"]["last_ok"],"status":"empty","error_codes":[],"first_failure_at":None}
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

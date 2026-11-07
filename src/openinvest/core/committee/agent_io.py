@@ -87,6 +87,9 @@ def _is_transient(exc: BaseException) -> bool:
     网络/超时/限流是常见 transient，重试有效。
     DeepSeek/openai 客户端会把不同 HTTP 错误包成不同 *Error 类，名字里通常含
     'Timeout' / 'Connection' / 'RateLimit' / 'APIStatusError'。"""
+    status=provider_http_status(exc)
+    if status is not None:
+        return status in {408,409,429} or status>=500
     name = type(exc).__name__.lower()
     if any(k in name for k in ("auth", "permission", "invalidrequest", "notfound")):
         return False
@@ -96,8 +99,51 @@ def _is_transient(exc: BaseException) -> bool:
     return True
 
 
+def provider_http_status(exc):
+    status=getattr(exc,"status_code",None)
+    if status is None:status=getattr(getattr(exc,"response",None),"status_code",None)
+    return status if isinstance(status,int) and 100<=status<=599 else None
+
+
 # 失败哨兵：让 CIO 上下文里能识别"这个 worker 没产出"，避免 CIO 在错误消息上面综合
 AGENT_UNAVAILABLE_MARKER = "[WORKER_UNAVAILABLE]"
+
+
+class WorkerReply(str):
+    """Text stays wire-compatible; only the caller records transport outcome."""
+    def __new__(cls,text,*,transport="unknown",reason=None,http_status=None):
+        value=super().__new__(cls,text)
+        value.transport=transport;value.failure_reason=reason
+        value.http_status=http_status
+        return value
+
+
+def worker_output_status(text):
+    import re
+    transport=getattr(text,"transport","unknown")
+    # Legacy hosts can report a complete error envelope. Quoting its words in
+    # an otherwise successful report never establishes a failed model call.
+    body=re.sub(r"^(?:MACRO|CIO|QUANT(?:_R\d+)?|RISK(?:_R\d+)?):\s*","",text.strip(),flags=re.IGNORECASE) if isinstance(text,str) else ""
+    envelope=bool(body) and re.fullmatch(
+        r"\[WORKER_UNAVAILABLE\] reason=[A-Za-z0-9_:-]+(?: exc_type=[A-Za-z0-9_.]+ exc_msg=[\s\S]{0,120})?",body) is not None
+    empty=transport=="succeeded" and not bool(text)
+    status={"transport":transport,"unavailable":transport=="failed" or empty or envelope,
+            "reason":getattr(text,"failure_reason",None) or ("reported_failure_envelope" if envelope else "empty_output" if empty else None)}
+    if getattr(text,"http_status",None) is not None:status["http_status"]=text.http_status
+    return status
+
+
+def legacy_worker_brief_unavailable(text):
+    """Compatibility for old callers; complete standalone envelopes only."""
+    import re
+    fenced=False
+    for line in str(text or "").splitlines():
+        if line.lstrip().startswith(("```","~~~")):
+            fenced=not fenced;continue
+        if fenced or line.lstrip().startswith((">","\"","'","`")):continue
+        line=re.sub(r"^(?:MACRO|CIO|QUANT(?:_R\d+)?|RISK(?:_R\d+)?):\s*","",line,flags=re.IGNORECASE)
+        if line.startswith(AGENT_UNAVAILABLE_MARKER+" reason=") and worker_output_status(line)["unavailable"]:return True
+    return False
 
 
 def _ask(agent: Optional[SDKAgent], context: str) -> str:
@@ -109,11 +155,12 @@ def _ask(agent: Optional[SDKAgent], context: str) -> str:
     把 confidence 压到 ≤ 0.4 + verdict 必须 HOLD。
     """
     if agent is None:
-        return f"{AGENT_UNAVAILABLE_MARKER} reason=agent_not_constructed"
+        return WorkerReply(f"{AGENT_UNAVAILABLE_MARKER} reason=agent_not_constructed",transport="failed",reason="agent_not_constructed")
     last_exc: Optional[BaseException] = None
     for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
         try:
-            return agent.run(context)
+            response=agent.run(context)
+            return WorkerReply(response,transport="succeeded") if isinstance(response,str) else response
         except Exception as e:
             last_exc = e
             if attempt >= LLM_MAX_ATTEMPTS or not _is_transient(e):
@@ -122,14 +169,14 @@ def _ask(agent: Optional[SDKAgent], context: str) -> str:
             delay = min(LLM_BASE_DELAY * (2 ** (attempt - 1)), LLM_MAX_DELAY)
             delay *= 0.5 + random.random()  # 0.5x ~ 1.5x jitter
             log.warning(
-                "Agent retry %d/%d: %s: %s → sleep %.1fs",
-                attempt, LLM_MAX_ATTEMPTS - 1, type(e).__name__, e, delay,
+                "Agent retry %d/%d: %s status=%s → sleep %.1fs",
+                attempt, LLM_MAX_ATTEMPTS - 1, type(e).__name__, provider_http_status(e), delay,
             )
             time.sleep(delay)
-    return (
+    return WorkerReply(
         f"{AGENT_UNAVAILABLE_MARKER} "
         f"reason=retry_exhausted exc_type={type(last_exc).__name__} "
-        f"exc_msg={str(last_exc)[:120]}"
+        f"exc_msg=provider_call_failed",transport="failed",reason="retry_exhausted",http_status=provider_http_status(last_exc)
     )
 
 
@@ -156,6 +203,10 @@ __all__ = [
     "_create_agent",
     "_is_transient",
     "AGENT_UNAVAILABLE_MARKER",
+    "WorkerReply",
+    "worker_output_status",
+    "provider_http_status",
+    "legacy_worker_brief_unavailable",
     "_ask",
     "_parallel_ask",
 ]

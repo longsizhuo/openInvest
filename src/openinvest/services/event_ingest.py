@@ -53,20 +53,36 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
     from openinvest.services.news_sources import RawNewsItem
 
     raw: List[RawNewsItem] = []
-    fields: Dict[str, Dict[str, Any]] = {}   # url → agent 自己给的结构化字段（有 one_line_claim 才算）
+    fields: Dict[int, Dict[str, Any]] = {}   # Associate interpretation with this input item, never URL alone.
     for it in items:
-        title = (it.get("title") or "").strip()
+        it={**it,"url":str(it.get("url") or "").strip()}
+        from openinvest.services.agent_queue import bind_news_source, news_snapshot_id
+        try:bound=bind_news_source(it)
+        except (ValueError,KeyError) as exc:
+            return {"status":"error","error":str(exc),"hint":"原始来源字段须绑定 pending_news 快照；判断不能写入来源原文。"}
+        from urllib.parse import urlsplit
+        if urlsplit(it["url"]).scheme.lower()=="openinvest-source" and not bound:
+            return {"status":"error","error":"backend_source_locator_requires_a_bound_snapshot"}
+        source_fields=bound or it
+        title = (source_fields.get("title") or "") if bound else (source_fields.get("title") or "").strip()
         url = (it.get("url") or "").strip()
         if not title or not url:
             return {"status": "error",
                     "error": f"title/url 必填，收到 {it!r}"}
-        src = (it.get("source") or "host-agent").strip()
+        src = (source_fields.get("source") or "host-agent") if bound else (source_fields.get("source") or "host-agent").strip()
         raw.append(RawNewsItem(
-            src_name=f"agent:{src}",
+            src_name=src if bound else f"agent:{src}",
             title=title,
             url=url,
-            snippet=(it.get("snippet") or "").strip(),
-            published_at=it.get("published_at"),
+            snippet=(source_fields.get("snippet") or "") if bound else (source_fields.get("snippet") or "").strip(),
+            text=source_fields.get("text") or "",
+            published_at=source_fields.get("published_at"),
+            fetched_at=(source_fields.get("fetched_at") or source_fields.get("queued_at") or "") if bound else "",
+            raw_meta={**(bound.get("raw_meta",{}) if bound else {}),"source_origin":(("captured_api_response" if (bound.get("raw_meta") or {}).get("response_sha256") else
+                      "controlled_adapter_report" if (bound.get("raw_meta") or {}).get("collector_capture_id") else "captured_adapter_input") if bound else "agent_supplied_unverified"),
+                      "source_snapshot_id":news_snapshot_id(bound) if bound else None,
+                      "source_regression":bool(bound.get("source_regression")) if bound else False,
+                      "normalized_by":ingested_by},
         ))
         if (it.get("one_line_claim") or "").strip():
             stance = str(it.get("stance") or "").lower()
@@ -75,10 +91,10 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
                 return {"status": "error",
                         "error": f"结构化事件 stance 须为 {sorted(_STANCES)}、severity 须为 "
                                  f"{sorted(_SEVERITIES)}，收到 stance={stance!r} severity={severity!r}"}
-            fields[url] = {**it, "stance": stance, "severity": severity}
+            fields[id(raw[-1])] = {**it, "stance": stance, "severity": severity}
 
     store = EventStore(embedding_dim=DEFAULT_DIM)
-    unseen = [it for it in raw if not store.is_seen_url(it.url)]
+    unseen = [it for it in raw if id(it) in fields or not store.source_unchanged(it.url,it.title,it.snippet,published_at=it.published_at,raw_text=it.text)]
     duplicates = len(raw) - len(unseen)
     if not unseen:
         return {"status": "ok", "ingested": 0, "duplicates": duplicates, "events": [],
@@ -88,18 +104,18 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
     from openinvest.services.embeddings import embed_text
     from openinvest.services.event_normalizer import _sanitize_event
     normalized = []
-    for k, item in enumerate(i for i in unseen if i.url in fields):
-        f = fields[item.url]
+    for k, item in enumerate(i for i in unseen if id(i) in fields):
+        f = fields[id(item)]
         ne = _sanitize_event({
             "idx": k, "one_line_claim": f["one_line_claim"], "stance": f["stance"],
             "severity": f["severity"], "event_type": f.get("event_type"),
             "entities": f.get("entities") or [], "affected_symbols": f.get("affected_symbols") or [],
-            "ts": f.get("ts") or f.get("published_at") or "",
+            "ts": f.get("ts") or item.published_at or "",
         }, offset=0)
         ne.raw_item = item
         ne.embedding = embed_text(ne.event["one_line_claim"])
         normalized.append(ne)
-    plain = [i for i in unseen if i.url not in fields]
+    plain = [i for i in unseen if id(i) not in fields]
     rejected: List[str] = []
     _hint = ("补 one_line_claim（一句话事实）、stance（risk/opportunity/neutral）、"
              "severity（low/mid/high），可选 event_type / affected_symbols / entities")
@@ -127,24 +143,26 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
         normalized.extend(llm_events)
 
     out = []
+    audit_only=[]
+    source_conflicts=[]
     new_events: List[Dict[str, Any]] = []
     for ne in normalized:
         ne.event["ingested_by"] = ingested_by  # normalizer 输出全来自 LLM——溯源在入库前注入
-        was_new, eid = store.upsert_event(ne.event, embedding=ne.embedding)
-        if ne.raw_item:
-            store.add_source(
-                eid,
-                src_name=ne.raw_item.src_name,
-                url=ne.raw_item.url,
-                title=ne.raw_item.title,
-                snippet=ne.raw_item.snippet,
-                fetched_at=ne.raw_item.fetched_at,
-            )
-        if not was_new:
+        observation=store.write_news_observation(ne.event,ne.raw_item,embedding=ne.embedding)
+        from openinvest.services.agent_queue import acknowledge_news_source
+        snapshot=(getattr(ne.raw_item,"raw_meta",{}) or {}).get("source_snapshot_id")
+        acknowledge_news_source(snapshot,(observation.get("event") or {}).get("event_id") or observation.get("blocked_event_id"),
+                                "audit_only" if observation.get("audit_only") else "stored_or_duplicate")
+        if observation.get("audit_only"):
+            audit_only.append(observation["blocked_event_id"])
+            if observation.get("source_conflict"):source_conflicts.append(observation["blocked_event_id"])
+            continue
+        if not observation["changed"]:
             duplicates += 1
             continue
-        ev = ne.event
-        new_events.append({**ev, "event_id": eid})
+        ev=observation["event"]
+        eid=ev["event_id"]
+        new_events.append({**ev,"revision_previous":observation["previous"] if not observation["inserted"] else None})
         out.append({
             "event_id": eid,
             "one_line_claim": ev.get("one_line_claim"),
@@ -162,6 +180,10 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
         log.warning(f"[event_ingest] 触发闸失败: {type(e).__name__}: {e}")
     result = {"status": "ok", "ingested": len(out), "duplicates": duplicates, "events": out,
               "committee_task_id": task_id}
+    if audit_only:
+        result.update(status="partial",audit_only_event_ids=audit_only,
+                      source_conflicts=source_conflicts,
+                      hint="排除来源的修订或与当前更正冲突的观察仅保留审计记录，需要复核。")
     if rejected:
         result.update({"status": "partial", "rejected_urls": rejected, "hint": _hint})
     return result

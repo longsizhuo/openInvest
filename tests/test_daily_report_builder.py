@@ -63,6 +63,43 @@ def _make_pm(tmp_path, cash=None, holdings=None) -> PortfolioManager:
     return PortfolioManager(store)
 
 
+@pytest.mark.parametrize("status",["REVIEW_REQUIRED","DATA_UNTRUSTED"])
+@pytest.mark.parametrize("target",["email","chat"])
+def test_unqualified_proposal_is_never_presented_as_ordinary_hold_or_overridden_by_translation(status,target):
+    verdict={"verdict":"HOLD","confidence":0.6,"alloc_cny":0,"dominant_view":"risk","decision_status":status}
+    report=assemble_full_report(today="2026-11-07",macro_view="",gold_snapshot_text="",friction_report="",
+        target_assets=[{"symbol":"SYNTHETIC"}],asset_committees={"SYNTHETIC":{"verdict":verdict,"report":_FakeReport(cio_memo="Raw audit memo")}},
+        skipped_assets=set(),total_assets_cny=0,final_decision_gemini="UNVERIFIED_SECONDARY_BUY_NOW",render_target=target,
+        plain_summaries={"SYNTHETIC":"UNVERIFIED_TRANSLATION_BUY_NOW"})
+    assert "[QUALITY_ALERT]" in report and "当前没有可执行建议" in report
+    assert "UNVERIFIED_TRANSLATION_BUY_NOW" not in report
+    assert "UNVERIFIED_SECONDARY_BUY_NOW" not in report
+    assert "**裁决**: HOLD" not in report and "继续持有，不买也不卖" not in report
+    assert "原提案 HOLD" in report
+
+
+@pytest.mark.parametrize("rewrite",[{"_original_verdict":"BUY","_defense_dca":"tranche"},
+    {"_original_verdict":"TRIM","_sanity5_reason":"reentry_missing"},
+    {"_original_verdict":"TRIM","_original_trim_reason":"concentration","_concentration_lens":"disabled"}])
+def test_unqualified_advice_never_describes_a_rewrite_as_current_permission(rewrite):
+    verdict={"verdict":"HOLD","confidence":0.6,"alloc_cny":0,"dominant_view":"risk",
+             "decision_status":"REVIEW_REQUIRED",**rewrite}
+    report=assemble_full_report(today="2026-11-07",macro_view="",gold_snapshot_text="",friction_report="",
+        target_assets=[{"symbol":"SYNTHETIC"}],asset_committees={"SYNTHETIC":{"verdict":verdict,"report":_FakeReport(cio_memo="Raw audit memo")}},
+        skipped_assets=set(),total_assets_cny=0,final_decision_gemini="")
+    assert "当前没有可执行建议" in report
+    assert "本次只放行" not in report and "**减仓被否**" not in report and "**减仓未执行" not in report
+
+
+def test_risk_trim_presentation_does_not_require_a_repurchase_plan():
+    verdict={"verdict":"TRIM","confidence":0.6,"alloc_cny":-1000,"dominant_view":"risk","exit_intent":"risk_reduction"}
+    report=assemble_full_report(today="2026-11-07",macro_view="",gold_snapshot_text="",friction_report="",
+        target_assets=[{"symbol":"SYNTHETIC"}],asset_committees={"SYNTHETIC":{"verdict":verdict,"report":_FakeReport(cio_memo="Raw audit memo")}},
+        skipped_assets=set(),total_assets_cny=0,final_decision_gemini="")
+    assert "风险或需求减仓" in report and "不要求承诺更低价买回" in report
+    assert "**减仓路径**" not in report
+
+
 # ============ 任务 3a：classify_asset_freshness ============
 
 class TestClassifyAssetFreshness:
@@ -434,7 +471,7 @@ class TestAssembleFullReport:
         )
         assert "一句话" in report
         assert "继续持有，不买也不卖" in report
-        assert "更便宜的概率约 42%" in report
+        assert "历史模型估计，30 天期末低于参考价的比例约 42%" in report
         assert "-3.0%" in report
 
     def test_plain_summary_without_profile_still_has_action(self):

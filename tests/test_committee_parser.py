@@ -50,6 +50,31 @@ def test_high_confidence_hold_not_downgraded():
     assert r["confidence"] == 0.99
 
 
+@pytest.mark.parametrize("confidence",[0.94,0.95,0.99])
+def test_buy_protections_compose_once_from_original_intent(confidence):
+    r=parse_cio_memo(f"VERDICT: BUY\nCONFIDENCE: {confidence}\nSUGGESTED_ALLOC_CNY: 5000",defense_flag_on=True)
+    assert r["_raw_proposal"]["verdict"]=="BUY"
+    assert r["verdict"]=="ACCUMULATE" and r["alloc_cny"]==5000
+    assert r["decision_status"]=="CONSTRAINED"
+    assert r["_defense_downgrade"]=="buy_to_accumulate"
+
+
+def test_defense_block_is_explicitly_constrained_not_market_hold():
+    r=parse_cio_memo("VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 5000",defense_flag_on=True)
+    assert r["verdict"]=="HOLD" and r["alloc_cny"]==0
+    assert r["decision_status"]=="CONSTRAINED"
+    assert r["hold_reason"]=="defense_accumulate_to_hold"
+
+
+def test_aggressive_profile_cannot_turn_a_constrained_exit_into_a_buy():
+    set_config_override({"verdict":{"risk_profile":"aggressive"}})
+    memo="VERDICT: TRIM\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: -5000\nEXIT_INTENT: tactical_reentry"
+    r=parse_cio_memo(memo,current_price=100,regime="uptrend")
+    assert r["verdict"]=="HOLD" and r["alloc_cny"]==0
+    assert r["decision_status"]=="CONSTRAINED"
+    assert r["_raw_proposal"]["verdict"]=="TRIM"
+
+
 def test_alloc_clamped_when_oversized():
     """单笔超过 ¥100k 大概率 LLM 输出错误，clamp 防误下单"""
     text = "VERDICT: BUY\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: 999999"
@@ -155,7 +180,10 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
     }})
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
-    assert "TRIM 约束" in prompt
+    assert "当前配置的旧择时减仓过滤" in prompt
+    assert "不是已核验的用户授权" in prompt
+    assert "风险减仓、投资依据失效、流动性需求不受此过滤影响" in prompt
+    assert "卖出坐实亏损" not in prompt
     assert "5.0%" in prompt
     assert "10.0%" in prompt
 
@@ -208,7 +236,7 @@ def _trim_text(reason: str = "concentration") -> str:
         f"CONFIDENCE: 0.7\n"
         f"DOMINANT_VIEW: risk\n"
         f"SUGGESTED_ALLOC_CNY: -5000\n"
-        f"TRIM_REASON: {reason}\n"
+        f"TRIM_REASON: {reason}\nEXIT_INTENT: risk_reduction\n"
     )
 
 
@@ -291,8 +319,10 @@ def test_cio_prompt_concentration_directive_on_when_lens_disabled():
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
-    assert "集中度 lens 已被用户关闭" in prompt
-    assert "不得提及、估算或引用该资产占总资产的比例" in prompt  # 2026-10-11：CIO 曾照抄 Risk 编的"仓位仅占 1.7%"
+    assert "集中度分析当前未启用（配置状态）" in prompt
+    assert "不得编造 CONCENTRATION_PCT" in prompt
+    assert "这不证明用户选择了单资产或刻意集中策略" in prompt
+    assert "集中度 lens 已被用户关闭" not in prompt
 
 
 def test_risk_officer_prompt_concentration_directive_both_rounds():
@@ -388,12 +418,12 @@ def test_rebuttal_char_limit_survives_language_localization():
     risk_rebuttal = build_risk_officer_prompt(asset, round_label="rebuttal")
 
     assert "必须中文回复" not in quant_rebuttal
-    assert "严格按下列格式" in quant_rebuttal
-    assert "≤150 字" in quant_rebuttal
+    assert "CHANGE_BASIS:" in quant_rebuttal
+    assert "RISK_EVIDENCE:" in quant_rebuttal
 
     assert "必须中文回复" not in risk_rebuttal
     assert "严格按下列格式" in risk_rebuttal
-    assert "≤120 字" in risk_rebuttal
+    assert "ADJUSTED_STRENGTH:" in risk_rebuttal
 
 
 # ---------- Sanity check 5: TRIM 必须给低于现价的买回点，否则降级 HOLD ----------
@@ -406,6 +436,7 @@ def _trim_reentry_text(reentry_price="950", reason="bearish") -> str:
         "DOMINANT_VIEW: quant\n"
         "SUGGESTED_ALLOC_CNY: -5000\n"
         f"TRIM_REASON: {reason}\n"
+        f"EXIT_INTENT: {'tactical_reentry' if reason == 'bearish' else 'risk_reduction'}\n"
         f"{rp}"
         "REENTRY_CONDITION: 价格跌至 ¥950 且 RSI<40\n"
         "EXPECTED_PATH: range_bound 顶部，30d 内 55% 概率跌破现价\n"
@@ -442,6 +473,15 @@ def test_sanity5_reentry_missing_forces_hold():
     r = parse_cio_memo(_trim_reentry_text(None), current_price=1000.0)
     assert r["verdict"] == "HOLD"
     assert r["_sanity5_reason"] == "reentry_missing"
+
+
+def test_unknown_exit_intent_is_review_required_not_a_tactical_hold():
+    text=_trim_reentry_text(None).replace("EXIT_INTENT: tactical_reentry\n","")
+    result=parse_cio_memo(text,current_price=1000)
+    assert result["verdict"]=="TRIM" and result["decision_status"]=="REVIEW_REQUIRED"
+    assert result["qualification_reason"]=="exit_intent_unknown"
+    assert result["alloc_cny"]==0 and result["_original_alloc"]==-5000
+    assert "_sanity5_reason" not in result
 
 
 def test_sanity5_skipped_without_current_price():
@@ -499,7 +539,7 @@ def test_single_invest_cap_within_cap_untouched():
 def test_single_invest_cap_leaves_sell_side_alone():
     """字段语义是"入场"上限：减仓（负 alloc）不受约束，防御性卖出不被缩成小单"""
     text = ("VERDICT: TRIM\nCONFIDENCE: 0.7\nSUGGESTED_ALLOC_CNY: -30000\n"
-            "TRIM_REASON: bearish\nREENTRY_PRICE: 50")
+            "TRIM_REASON: bearish\nEXIT_INTENT: risk_reduction\nREENTRY_PRICE: 50")
     r = parse_cio_memo(text, single_invest_cap=10000, current_price=100.0)
     assert r["verdict"] == "TRIM" and r["alloc_cny"] == -30000
     assert "_single_invest_cap" not in r
@@ -538,7 +578,8 @@ def test_single_invest_cap_resolver_target_level_wins():
     assert single_invest_cap({}, {"max_single_invest_cny": 10000}, "CNY") == 10000
     assert single_invest_cap({"max_single_invest_cny": 0}, {"max_single_invest_cny": 10000}, "CNY") == 0
     assert single_invest_cap({}, {}, "CNY") == 0
-    assert single_invest_cap({"max_single_invest_cny": "bogus"}, {}, "CNY") == 0
+    with pytest.raises(ValueError,match="invalid single investment limit"):
+        single_invest_cap({"max_single_invest_cny":"bogus"},{},"CNY")
 
 
 def test_single_invest_cap_is_last_clamp_so_forced_hold_wins():

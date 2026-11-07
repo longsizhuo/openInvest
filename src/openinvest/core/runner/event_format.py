@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import json
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -98,6 +99,15 @@ def collapse_corroboration(
     return [(e, kept.get(i, 0)) for i, e in enumerate(events) if cluster_of[i] is None or i in kept]
 
 
+class EventBrief(str):
+    """Text plus server-produced revision identities; never inferred from news prose."""
+    def __new__(cls, text, event_versions=None,source_quality=None):
+        value = str.__new__(cls,text)
+        value.event_versions = dict(event_versions or {})
+        value.source_quality=dict(source_quality or {})
+        return value
+
+
 def format_event_brief(
     events: List[Dict[str, Any]], *, max_corroboration: Optional[int] = None,
 ) -> str:
@@ -129,7 +139,13 @@ def format_event_brief(
         from openinvest.core.config import load_config
         max_corroboration = load_config().event.max_corroboration
     lines: List[str] = []
-    for e, n_reports in collapse_corroboration(events, int(max_corroboration)):
+    versions = {}
+    required=[e for e in events if e.get("_trigger_required")]
+    required_ids={e["event_id"] for e in required}
+    rendered=[(e,0) for e in required]+collapse_corroboration([e for e in events if e.get("event_id") not in required_ids],int(max_corroboration))
+    for e, n_reports in rendered:
+        if e.get("event_id") and isinstance(e.get("_version_id"),int):
+            versions[e["event_id"]] = e["_version_id"]
         ts = e.get("ts", "")
         stance = e.get("stance", "neutral")
         severity = e.get("severity", "low")
@@ -143,15 +159,25 @@ def format_event_brief(
         # agent 投喂的事件（MCP/CLI ingest_event → events.ingested_by 非空）打来源标签，
         # 让 Macro 知道这条不是爬虫抓的。放在 [syms] 之后：头行正则只锚前三个方括号，不破契约。
         agent_part = f" [agent:{_safe_agent_id(e['ingested_by'])}]" if e.get("ingested_by") else ""
-        corroboration = f" (×{n_reports} 来源)" if n_reports else ""
+        corroboration = f" (×{n_reports} 相似转述，不代表独立来源)" if n_reports else ""
         lines.append(
             f"[{ts}] [{stance}/{severity}] [{affected}]{agent_part}{src_part}\n"
-            f"{e.get('one_line_claim', '')}{corroboration}"
+            f"[归一化摘要与分析标签，不等于原文或交易指令] {e.get('one_line_claim', '')}{corroboration}"
         )
+        for source in (e.get("sources") or [])[:4]:
+            original=source.get("raw_text") or source.get("snippet") or source.get("title") or ""
+            if original:
+                evidence=source.get("reporting_evidence") or {}
+                kind=evidence.get("kind","acquisition_unverified")
+                label=("采集器输出摘录，非已核验发布者文章全文" if kind=="controlled_adapter_report" else
+                       "已采集来源报道摘录，内容真伪未核验" if evidence.get("allowed") else "待核验输入摘录，不是已核验来源")
+                lines.append(f"{label}（{kind}，{source.get('url','')}；截取前500字符）: "+json.dumps(original[:500],ensure_ascii=False))
         if e.get("supersedes"):
             lines.append(f" ↳ supersedes event {e['supersedes']}")
+        if e.get("revision_observed_at"):
+            lines.append(f"观察/修订获取时间: {e['revision_observed_at']}；事件发生时间仍以上方时间为准")
         lines.append("")
-    return "\n".join(lines).strip()
+    return EventBrief("\n".join(lines).strip(),versions)
 
 
 

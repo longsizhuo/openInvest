@@ -1392,6 +1392,7 @@ class PathReview:
     shape_top1_hit: Optional[bool] = None
     trough_pred_days: Optional[int] = None
     trough_real_days: Optional[int] = None
+    forecast_qualification: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

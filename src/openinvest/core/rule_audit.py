@@ -11,13 +11,17 @@ import re
 # These are auditable rule families, not new trading thresholds. A missing
 # rationale never authorizes an automatic production deletion or relaxation.
 FAMILIES = [
-    ("quant.entry_bands", "market_judgment", "capabilities/committee/quant/quant.md", "legacy_unvalidated", "Price quantile and RSI conjunction can suppress early recovery signals"),
+    ("quant.entry_bands", "market_judgment", "capabilities/committee/quant/quant.md", "removed_from_primary_direction", "Legacy quantile/RSI conjunction is not a necessary condition for market direction; retained configuration is diagnostic only"),
     ("quant.crash_direction_lock", "semantic_defect", "capabilities/committee/quant/quant.md", "repaired", "Execution risk must be separate from market direction"),
     ("quant.cash_direction_lock", "semantic_defect", "capabilities/committee/quant/quant_rebuttal.md", "repaired", "Available cash is not evidence of price direction"),
     ("cio.duplicate_defense", "semantic_defect", "capabilities/committee/cio/cio.md", "repaired", "Raw intent is preserved; the backend applies defense and permitted tranches once"),
     ("cio.consensus_confidence", "semantic_defect", "capabilities/committee/cio/cio.md", "repaired", "Agreement is not independent evidence or calibrated probability"),
-    ("risk.strength_bands", "market_judgment", "capabilities/committee/risk_officer/risk_officer_rebuttal.md", "legacy_unvalidated", "LLM strength 7/3 is not a calibrated market probability"),
-    ("cio.sell_conjunction", "market_judgment", "capabilities/committee/cio/cio.md", "legacy_unvalidated", "Joint macro/risk labels can hide otherwise valid exit alternatives"),
+    ("risk.strength_bands", "market_judgment", "capabilities/committee/risk_officer/risk_officer_rebuttal.md", "removed_from_primary_direction", "LLM strength bands do not determine market or liquidity risk"),
+    ("cio.sell_conjunction", "market_judgment", "capabilities/committee/cio/cio.md", "removed_from_primary_direction", "Every exit purpose is considered independently of joint macro/risk labels and cost-basis thresholds"),
+    ("cio.cash_amount_gates", "market_judgment", "capabilities/committee/cio/cio.md", "removed_from_primary_direction", "Universal cash-amount bands are not evidence about market direction or loss tolerance"),
+    ("cio.reasoning_verifier", "input_integrity", "core/committee/reasoning_quality.py", "implemented_pending_release_acceptance", "Bounded source and logic review preserves the raw proposal and never grants source or learning approval"),
+    ("source.negative_lineage", "provenance", "services/news_collection.py", "implemented_pending_release_acceptance", "Captured versions and source revocations remain distinct from the correctness of a prediction"),
+    ("runtime.final_reasoning", "reasoning_execution", "utils/llm.py", "implemented_pending_release_acceptance", "Final synthesis and verification have independent thinking controls; earlier analyst calls do not imply the final call reasoned"),
     ("cio.reentry_requirement", "semantic_defect", "core/committee/cio_parse.py", "repaired", "Permanent risk exits do not require a lower repurchase price"),
     ("path.terminal_vs_touch", "semantic_defect", "core/regime_probability.py", "repaired", "Terminal return probability cannot substitute for first-touch probability"),
     ("cio.worker_failure", "input_integrity", "core/committee/cio_parse.py", "repaired", "Missing evidence must disable action independently of confidence and risk profile"),
@@ -86,7 +90,14 @@ def inventory() -> dict:
         for line, content in enumerate(path.read_text().splitlines(), 1):
             if re.search(r"\d", content) and re.search(r"[<>≥≤%]|HOLD|阈值|threshold", content, re.I):
                 prompt_numeric_sites.append({"path": str(path.relative_to(root)), "line": line, "text": content.strip()})
-    return {"schema": 1, "parameters": parameters,
+    from openinvest.utils.llm import get_llm_config_safe,committee_role_thinking
+    import hashlib,os
+    _,endpoint,model,provider=get_llm_config_safe()
+    runtime={"model":model,"provider":provider,"endpoint_sha256":hashlib.sha256(endpoint.encode()).hexdigest(),
+             "thinking_by_role":{role:committee_role_thinking(role) for role in ("macro","quant","risk","cio","reasoning_verifier")},
+             "explicit_cio_thinking_override":os.getenv("INVEST_CIO_THINKING"),
+             "json_and_thinking_mutually_exclusive":False}
+    return {"schema": 1, "parameters": parameters,"runtime_controls":runtime,
             "locked": [asdict(c) for c in get_locked()],
             "families": [dict(zip(("id", "authority", "source", "status", "rationale"), row)) for row in FAMILIES],
             "numeric_sites": numeric_sites, "static_comparisons": static_candidates, "prompt_numeric_sites": prompt_numeric_sites,

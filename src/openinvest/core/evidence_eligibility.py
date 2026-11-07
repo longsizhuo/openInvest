@@ -17,6 +17,10 @@ USES = frozenset({"advice", "learn", "evaluate", "publish"})
 _MODEL_SCOPE = ContextVar("evidence_model_scope", default=None)
 
 
+class EvidenceIntegrityError(ValueError):
+    """A governance failure must not masquerade as a valid empty retrieval."""
+
+
 @contextmanager
 def model_scope(model_era: str):
     token = _MODEL_SCOPE.set(model_era.strip().lower())
@@ -55,6 +59,17 @@ def candidate_payload(candidate: Mapping[str, Any]) -> dict:
     return {k: v for k, v in candidate.items() if k not in {"score", "legacy_score_gate_passed"}}
 
 
+def source_artifact_ids(metadata: Mapping[str, Any]) -> set[str]:
+    return {prefix + str(metadata[key]) for key, prefix in (
+        ("source_snapshot_id", "source_snapshot:"),
+        ("source_observation_id", "source_observation:"),
+        ("response_sha256", "source_response:"),
+        ("response_capture_id", "source_capture:"),
+        ("collector_code_sha256", "collector_version:"),
+        ("collector_capture_id", "adapter_capture:"),
+    ) if metadata.get(key)}
+
+
 class Eligibility:
     def __init__(self, root: Path, *, consent_checker=None):
         self.root = Path(root)
@@ -68,11 +83,23 @@ class Eligibility:
             return set()
         try:
             rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+            if any(not isinstance(row,dict) or not isinstance(row.get("artifact_id"),str) or not row["artifact_id"] for row in rows):
+                raise ValueError("invalid exclusion row")
             excluded = {row["artifact_id"] for row in rows}
             if any(not isinstance(key, str) or not key for key in excluded):
                 raise ValueError("invalid exclusion id")
             registry_path = self.directory / "eligibility.json"
-            artifacts = json.loads(registry_path.read_text()).get("artifacts", {}) if registry_path.exists() else {}
+            registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"schema":1,"artifacts":{}}
+            if not isinstance(registry,dict) or registry.get("schema") != 1 or not isinstance(registry.get("artifacts"),dict):
+                raise ValueError("invalid eligibility registry structure")
+            artifacts = registry["artifacts"]
+            for key, value in artifacts.items():
+                if (not isinstance(key,str) or not key or not isinstance(value,dict)
+                        or not isinstance(value.get("parents",[]),list)
+                        or any(not isinstance(parent,str) or not parent for parent in value.get("parents",[]))):
+                    raise ValueError("invalid parent lineage structure")
+                if value.get("deleted") is True or value.get("research_participation")=="revoked":
+                    excluded.add(key)
             changed = True
             while changed:
                 additions = {key for key, value in artifacts.items()
@@ -80,8 +107,8 @@ class Eligibility:
                 changed = bool(additions)
                 excluded |= additions
             return excluded
-        except (OSError, ValueError, TypeError, KeyError) as e:
-            raise ValueError("DATA_UNTRUSTED: exclusion ledger unavailable") from e
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
+            raise EvidenceIntegrityError("DATA_UNTRUSTED: exclusion ledger unavailable") from e
 
     def _state(self) -> tuple[dict, set[str]]:
         """Reload revocations on every read, including after an old DB restore."""
@@ -116,6 +143,9 @@ class Eligibility:
                 record = artifacts.get(key)
                 if not isinstance(record, dict):
                     return False
+                allowed=record.get("allowed_uses")
+                if not isinstance(allowed,list) or any(not isinstance(value,str) or value not in (USES|{"audit"}) for value in allowed):
+                    return False
                 if (record.get("source_validity") != "valid"
                         or record.get("origin") not in ("prospective", "verified_point_in_time", "derived")
                         or use not in record.get("allowed_uses", [])
@@ -131,7 +161,9 @@ class Eligibility:
                 if expected_hash is not None and record["sha256"] != expected_hash:
                     return False
                 if use == "advice" and (key.startswith("insight:") or key == "derived:confidence_lookup" or record.get("scope")):
-                    if record.get("scope") != runtime_scope():
+                    current_scope=runtime_scope()
+                    model=current_scope.get("model_era","").partition(":")[2]
+                    if model in ("","unknown","none") or record.get("scope") != current_scope:
                         return False
                 # Outcomes deliberately do not select eligibility: valid wrong
                 # predictions are essential negative samples.
@@ -140,6 +172,8 @@ class Eligibility:
                     return False
                 hashes = record.get("parent_hashes", {})
                 if parents and (not isinstance(hashes, dict) or set(hashes) != set(parents)):
+                    return False
+                if parents and any(not isinstance(value,str) or len(value)!=64 or any(c not in "0123456789abcdef" for c in value) for value in hashes.values()):
                     return False
                 if record.get("origin") == "derived" and not parents:
                     return False
@@ -164,6 +198,24 @@ class Eligibility:
                 "artifact_id": artifact_id, "reason": reason,
                 "recorded_at": datetime.now(timezone.utc).isoformat(),
             })
+
+    def record_audit_lineage(self, artifact_id: str, payload: Any, parents: set[str]) -> None:
+        """Record negative lineage without granting source, advice or learning approval."""
+        from openinvest.core.memory_store import _file_lock, _atomic_write_text
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.directory / "eligibility.json"
+        with _file_lock(self.directory / "governance"), _file_lock(path):
+            if not (self.directory / "exclusions.jsonl").exists():
+                if path.exists():raise EvidenceIntegrityError("DATA_UNTRUSTED: missing exclusion ledger")
+                (self.directory / "exclusions.jsonl").touch()
+            artifacts, _ = self._state() if path.exists() else ({}, set())
+            previous = artifacts.get(artifact_id, {})
+            parents = sorted(set(previous.get("parents", [])) | (parents - {artifact_id}))
+            if previous.get("sha256") == digest(payload) and previous.get("parents") == parents:
+                return
+            artifacts[artifact_id] = {**previous, "sha256": digest(payload), "parents": parents,
+                "origin": "unverified", "source_validity": "pending_review", "allowed_uses": ["audit"]}
+            _atomic_write_text(path, json.dumps({"schema": 1, "artifacts": artifacts}, ensure_ascii=False))
 
     def derive(self, artifact_id: str, payload: Any, parents: dict[str, Any]) -> None:
         """Publish a deterministic projection only from explicitly reviewed parents."""

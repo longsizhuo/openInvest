@@ -486,6 +486,14 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
         "label": "价格异动哨兵",
         "help": "垂直线检测：10 分钟涨跌超过日 ATR% 阈值 → 先发报警邮件（含最近 verdict 锚点）再触发委员会重跑（ADR-025，默认开）",
     },
+    "event.risk_alerts_enabled": {
+        "type": "bool",
+        "label": "独立风险提醒",
+        "help": "价格异常与下行风险提醒独立于 HOLD 和泛新闻静默；仅通知，不授权交易。默认关闭，用户选择后开启",
+    },
+    "event.risk_tail_probability": {"type":"float", "label":"风险观察尾部分位", "help":"告警敏感度；实际价格阈值由资产此前历史分布计算，不代表未来下跌概率"},
+    "event.risk_reference_sessions": {"type":"int", "label":"风险观察历史窗口", "help":"参考的已完成交易日数，不包含当前交易日"},
+    "event.risk_min_reference_samples": {"type":"int", "label":"风险观察最少样本", "help":"样本不足时报告参考不可用，不套统一固定跌幅"},
     "event.sentinel_atr_mult": {
         "type": "float",
         "label": "哨兵触发倍数(×日ATR)",
@@ -499,7 +507,7 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
     "event.sentinel_schedule": {
         "type": "cron",
         "label": "哨兵扫描窗口",
-        "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认 */5 0-2,8-23 * * * = 与 event_watch 同窗口、5 分钟一次；空扫零 LLM 成本",
+        "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认全天每5分钟扫描，各资产行情新鲜度独立核验；扫描本身不调用LLM",
     },
     "staleness.price_stale_days": {
         "type": "int",

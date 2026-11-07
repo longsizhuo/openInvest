@@ -1198,6 +1198,9 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, {}))
 
+    from tests.integrity_helpers import approve_historical_generator
+    from openinvest.core.memory_store import MemoryStore
+    approve_historical_generator(MemoryStore().data_root)
     r = skill_client.post("/api/committee/prepare", json={"symbol": "NDQ.AX"})
     assert r.status_code == 200
     b = r.json()
@@ -1366,7 +1369,8 @@ def test_config_endpoints_roundtrip(client):
         "event.committee_escalation_bypass",
         # 2026-07-03: event_watch 扫描窗口 + 价格异动哨兵(ADR-025)
         "event.watch_schedule",
-        "event.sentinel_enabled", "event.sentinel_atr_mult",
+        "event.sentinel_enabled", "event.sentinel_atr_mult", "event.risk_alerts_enabled",
+        "event.risk_tail_probability", "event.risk_reference_sessions", "event.risk_min_reference_samples",
         "event.sentinel_cooldown_min", "event.sentinel_schedule",
         "staleness.price_stale_days", "staleness.hard_abort_stale_days",
     }

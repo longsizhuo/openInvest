@@ -60,14 +60,15 @@ def test_no_defense_no_downgrade():
     assert "_defense_downgrade" not in r
 
 
-def test_defense_stacks_with_sanity1_overconfident_buy():
-    """纵深：BUY(conf 0.99) 先被 Sanity 1 降 ACCUMULATE，防御再降 HOLD"""
+def test_defense_composes_with_sanity1_without_a_second_label_downgrade():
+    """原始BUY统一降为ACC，不因自报confidence跨门槛而额外降到HOLD。"""
     memo = "VERDICT: BUY\nCONFIDENCE: 0.99\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 5000"
     r = parse_cio_memo(memo, defense_flag_on=True)
-    assert r["verdict"] == "HOLD"
+    assert r["verdict"] == "ACCUMULATE"
     assert r["_original_verdict"] == "BUY"  # 审计链保留最早原值
-    assert r["_defense_downgrade"] == "accumulate_to_hold"
-    assert r["alloc_cny"] == 0
+    assert r["_defense_downgrade"] == "buy_to_accumulate"
+    assert r["decision_status"]=="CONSTRAINED"
+    assert r["alloc_cny"] == 5000
 
 
 # ---------- 黄金防御分批 DCA（2026-06-13 裁决，wiki18 §5）----------

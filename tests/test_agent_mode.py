@@ -26,6 +26,14 @@ class _Store:
     def is_seen_url(self, url):
         return url in _Store.seen
 
+    def source_unchanged(self,url,title,snippet="",*,published_at=None,raw_text=""):
+        return url in _Store.seen
+
+    def write_news_observation(self,event,raw_item=None,*,embedding=None):
+        new,eid=self.upsert_event(event,embedding)
+        if raw_item:self.add_source(eid,url=raw_item.url)
+        return {"inserted":new,"changed":new,"previous":None,"event":{**event,"event_id":eid}}
+
     def upsert_event(self, event, embedding=None):
         return True, "eid-" + event["one_line_claim"][:6]
 
@@ -63,14 +71,14 @@ def test_news_queue_drains_on_ingest_or_dismiss(agent):
     q.enqueue_news([_item(1)])                            # 重复入队按 url 去重
     out = q.pending_news(limit=10, dismiss_urls=["https://r.co/2"])
     assert [i["url"] for i in out["items"]] == ["https://r.co/1", "https://r.co/3"]
-    _Store.seen.add("https://r.co/1")                     # Agent ingest 过 → 出队
+    q.acknowledge_news_source(out["items"][0]["source_snapshot_id"],"synthetic-event","stored_or_duplicate")
     assert [i["url"] for i in q.pending_news_items()] == ["https://r.co/3"]
     later = datetime.now().astimezone() + q.NEWS_TTL + timedelta(minutes=1)
     assert q.pending_news_items(later) == []              # 48h 过期
     assert q.last_drained() is not None
 
 
-def test_committee_queue_done_after_newer_submission(agent):
+def test_later_submission_without_bound_inputs_does_not_complete_queue(agent):
     from openinvest.core.memory_store import MemoryStore
     from openinvest.services.event_trigger import _trigger_committee
     tid = _trigger_committee(["GC=F"], ["e1"])              # agent 模式：排队，不 POST
@@ -81,7 +89,7 @@ def test_committee_queue_done_after_newer_submission(agent):
     p.parent.mkdir(parents=True, exist_ok=True)
     later = (datetime.now() + timedelta(minutes=5)).isoformat(timespec="seconds")
     p.write_text(f"**Run at**: {later}\n**Verdict**: HOLD (confidence 0.50)\n", encoding="utf-8")
-    assert q.pending_committee_items() == []               # 交卷晚于请求 → 完成
+    assert len(q.pending_committee_items()) == 1  # A timestamp alone is not evidence that this cause was reviewed.
 
 
 def test_ingest_structured_without_backend_model(agent, monkeypatch):
@@ -124,8 +132,8 @@ def test_watchdog_backlog(agent, monkeypatch):
     sat_11 = datetime(2026, 10, 24, 11, 0).astimezone()
     monkeypatch.setattr(q, "_now", lambda: tue_11)
     q.enqueue_news([_item(9)])
-    assert find_agent_backlog(tue_11)                       # 有待办、从没人取 → 报
-    assert find_agent_backlog(sat_11) == []                 # 周末不报
+    assert find_agent_backlog(tue_11) == []                 # Newly queued news is within its completion SLA.
+    assert find_agent_backlog(sat_11)                       # Expiry/weekends cannot erase unfinished work.
     q.mark_drained()                                        # 刚取过
     assert find_agent_backlog(tue_11 + timedelta(hours=2)) == []
     assert find_agent_backlog(tue_11 + timedelta(hours=27))  # 超 26h 没人取 → 报

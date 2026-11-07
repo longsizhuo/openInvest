@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from openinvest.core.committee import (
@@ -199,7 +199,7 @@ def run_committee_for_symbol(
         input_health["macro_input_health"] = macro_input_health(macro_data)
         input_health["macro_input_snapshot"] = str(macro_data)
         input_health["macro_data_empty"] = input_health["macro_input_health"]["valid"] is False
-        macro_view = run_macro_view(str(macro_data), event_brief=effective_event_brief)
+        macro_view = run_macro_view(str(macro_data), event_brief=effective_event_brief,analysis_as_of=datetime.now(timezone.utc).isoformat())
         emit("macro_done", macro_preview=macro_view[:240])
 
     # 5.1. Portfolio summary
@@ -257,6 +257,18 @@ def run_committee_for_symbol(
     except Exception as e:  # noqa: BLE001  概率表读失败不能阻断委员会
         log.warning(f"reentry reference 构建失败 graceful 退化空: {e}")
 
+    historical_audit={"regime_brief":regime_brief,"path_reference":reentry_reference,"path_profile":path_profile}
+    from openinvest.core.committee.evidence import historical_reference_context
+    if _advisory:
+        historical_qualification={"forecast_use_allowed":False,"reason":"private_model_approval_not_used_in_advisory"}
+        regime_brief=historical_reference_context(regime_brief,kind="regime")
+        reentry_reference=historical_reference_context(reentry_reference)
+    else:
+        from openinvest.services.historical_evidence import project
+        regime_brief,reentry_reference,historical_qualification=project(regime_brief,reentry_reference,data_root=pm.store.data_root)
+    input_health["historical_forecast_qualification"]=historical_qualification
+    if path_profile is not None:path_profile={**path_profile,"forecast_qualification":historical_qualification}
+
     # 5.8. 确定性事实块（对齐 TradingAgents 维度，非投票 agent）
     # 情绪表盘：市场级，session 已算好就 override；否则 per-asset fallback
     if sentiment_brief is not None:
@@ -307,8 +319,10 @@ def run_committee_for_symbol(
     if not _advisory:
         from openinvest.services.review_plans import plan_brief, observe_prepared_market
         observe_prepared_market(pm.store, symbol, df)
-        portfolio_summary += plan_brief(pm.store, symbol)
-        from openinvest.core.decision_evidence import prepare_context, market_snapshot
+        existing_plans=plan_brief(pm.store, symbol)
+        portfolio_summary += existing_plans
+        from openinvest.core.decision_evidence import prepare_context, market_snapshot, utc_now
+        from openinvest.services.agent_queue import bind_context_requests
         from openinvest.utils.llm import get_llm_config_safe
         context = prepare_context(pm.store.root, symbol, {
             "asset": target, "market_data": market_data, "macro_view": macro_view,
@@ -318,6 +332,9 @@ def run_committee_for_symbol(
             "valuation_brief": effective_valuation_brief, "event_brief": effective_event_brief,
             "input_health": input_health, "defense_dca": defense_dca,
             "ohlcv_snapshot": market_snapshot(df),
+            "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
+            "source_plan_refs":getattr(existing_plans,'plan_refs',[]),
+            "trigger_requests":bind_context_requests(pm.store.root,symbol,effective_event_brief,utc_now().isoformat()),
         }, model=get_llm_config_safe()[2] or "unknown", expected_state=prepared_state)
         input_health = {**input_health, "context_id": context["context_id"],
                         "prepared_at": context["prepared_at"], "code_version": context["code_version"],
@@ -326,6 +343,8 @@ def run_committee_for_symbol(
     # 6. 跑多轮辩论 + CIO
     # 顾问模式不落 transcript 到真实 memory——群聊问的资产多半不在用户 target_assets
     # 里，落盘会把陌生标的混进用户自己的委员会历史，污染他后续查 history/decisions。
+    from openinvest.utils.base_currency import resolve_single_invest_cap
+    cap_facts=None if _advisory else resolve_single_invest_cap(target,pm.strategy)
     result = run_committee(
         target,
         market_data=market_data,
@@ -340,11 +359,16 @@ def run_committee_for_symbol(
         atr_defense_on=atr_defense_on,
         defense_dca=defense_dca,
         # Sanity 6 输入：用户单次入场上限（顾问模式无真实策略 → 不设限，也不把主人的上限泄进群聊）
-        single_invest_cap=0 if _advisory else single_invest_cap(target, pm.strategy),
+        single_invest_cap=0 if _advisory else cap_facts["effective_amount"],
+        execution_constraint_facts=cap_facts,
+        historical_qualification=historical_qualification,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
         persist_to_memory=not _advisory,
         input_health=input_health,
+        source_macro_data=input_health.get("macro_input_snapshot", ""),
+        source_event_brief=effective_event_brief,
+        verification_memory_root=None if _advisory else pm.store.root,
     )
     result["input_health"] = input_health
 
@@ -352,7 +376,7 @@ def run_committee_for_symbol(
     # 与 CIO prompt 里看到的是同一份文本（所见即所得，防口径分叉）。
     # path_profile 是同源结构化数据，给"一句话人话摘要"等确定性渲染用。
     result["path_reference"] = reentry_reference
-    result["path_profile"] = path_profile
+    result["path_profile"] = path_profile if historical_qualification.get("forecast_use_allowed") else None
 
     # 6.5. 路径预测快照落盘（path_review 闭环：90 天后回看实际路径 vs 预测分布）。
     # graceful：失败不阻断。顾问模式跳过——同 6 的理由，群聊流量不该污染用户自己
@@ -380,7 +404,7 @@ def run_committee_for_symbol(
             emit("intervention_logged", asset=symbol, rule=_rec["rule"])
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
-    if probability_table is not None:
+    if probability_table is not None and historical_qualification.get("forecast_use_allowed"):
         prob = get_regime_probability(
             symbol, regime_label, table=probability_table,
         )
@@ -499,19 +523,27 @@ def run_committee_session(
         # Web event-trigger 路径：caller 已知具体 event_ids，反查 + format
         event_brief = ""
         try:
+            from openinvest.core.evidence_eligibility import EvidenceIntegrityError
+            if _advisory:raise EvidenceIntegrityError("DATA_UNTRUSTED: advisory event_ids cannot read owner events")
             store = _get_event_store()
+            if store is None:raise EvidenceIntegrityError("DATA_UNTRUSTED: requested event store unavailable")
             if store is not None:
                 fetched: List[Dict[str, Any]] = []
                 for eid in event_ids:
-                    ev = store.get_event(eid)
+                    snapshot=getattr(store,"get_event_with_sources",None)
+                    ev = snapshot(eid) if callable(snapshot) else store.get_event(eid)
                     if not ev:
-                        continue
+                        raise EvidenceIntegrityError("DATA_UNTRUSTED: requested event no longer qualified or unavailable")
                     ev = dict(ev)
-                    ev["sources"] = store.get_sources(ev["event_id"])
+                    if "sources" not in ev:ev["sources"] = store.get_sources(ev["event_id"])
                     fetched.append(ev)
-                event_brief = format_event_brief(fetched)
+                from openinvest.core.runner.event_brief import _with_source_quality
+                event_brief = _with_source_quality(format_event_brief(fetched),store=store)
         except Exception as e:  # noqa: BLE001
-            log.warning(f"event_ids 翻译失败 graceful 退化 '': {type(e).__name__}: {e}")
+            from openinvest.core.evidence_eligibility import EvidenceIntegrityError
+            if isinstance(e, EvidenceIntegrityError):
+                raise
+            raise EvidenceIntegrityError("DATA_UNTRUSTED: requested event source read failed") from e
         event_brief_source = "event_ids"
     else:
         # 默认：跨资产 multi 召回 + 去重
@@ -542,7 +574,7 @@ def run_committee_session(
         shared_health["macro_input_health"] = macro_input_health(macro_data)
         shared_health["macro_input_snapshot"] = str(macro_data)
         shared_health["macro_data_empty"] = shared_health["macro_input_health"]["valid"] is False
-        macro_view = run_macro_view(str(macro_data), event_brief=event_brief)
+        macro_view = run_macro_view(str(macro_data), event_brief=event_brief,analysis_as_of=datetime.now(timezone.utc).isoformat())
         emit("macro_done", macro_preview=macro_view[:240], shared=True)
 
     # ---- Step 4.4: shared sentiment_brief（市场级情绪表盘，跨资产相同，跑一次）----

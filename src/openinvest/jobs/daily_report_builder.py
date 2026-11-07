@@ -172,6 +172,15 @@ _VERDICT_EMOJI = {
 }
 
 
+def qualification_note(verdict: Dict[str,Any]) -> str:
+    status=verdict.get("decision_status")
+    review=(verdict.get("reasoning_review") or {}).get("status")
+    if status=="DATA_UNTRUSTED":return "[QUALITY_ALERT] 输入或版本未通过核验，当前没有可执行建议"
+    if status=="REVIEW_REQUIRED" or review in ("failed","unavailable","invalid_response"):
+        return "[QUALITY_ALERT] 原提案仍待复核，当前没有可执行建议"
+    return ""
+
+
 def build_tldr_block(
     active_assets: List[Dict[str, Any]],
     asset_committees: Dict[str, Dict[str, Any]],
@@ -192,6 +201,10 @@ def build_tldr_block(
     for a in active_assets:
         sym = a["symbol"]
         v = asset_committees[sym]["verdict"]
+        blocked=qualification_note(v)
+        if blocked:
+            lines.append(f"⚠️ **{a.get('display_name',sym)}** ({sym}): {blocked}（原提案 {v.get('verdict','未知')}，仅供审计）")
+            continue
         emoji = _VERDICT_EMOJI.get(v["verdict"], "⚪")
         lines.append(
             f"{emoji} **{a.get('display_name', sym)}** ({sym}): "
@@ -208,6 +221,8 @@ def plain_verdict_summary(verdict: Dict[str, Any],
     专家细节（CIO 备忘/analyst 原文）保留在后面的段落，这行只翻译"该干嘛 +
     历史上类似行情接下来大概怎么走"。
     """
+    blocked=qualification_note(verdict)
+    if blocked:return f"**一句话**: {blocked}；原提案 {verdict.get('verdict','未知')} 不能作为当前操作指令。\n\n"
     vd = str(verdict.get("verdict", ""))
     act = _VERDICT_PLAIN.get(vd, vd)
     alloc = verdict.get("alloc_cny", 0) or 0
@@ -217,9 +232,9 @@ def plain_verdict_summary(verdict: Dict[str, Any],
     tail = ""
     if st and all(k in st for k in ("p_below", "downside_pct", "median_pct")):
         tail = (
-            f"。历史上类似行情，30 天后比今天更便宜的概率约 "
-            f"{st['p_below'] * 100:.0f}%；运气差的情形（最差 1/5）大约 "
-            f"{st['downside_pct']:+.1f}%，一般情形 {st['median_pct']:+.1f}%"
+            f"。历史模型估计，30 天期末低于参考价的比例约 "
+            f"{st['p_below'] * 100:.0f}%；模型下行情景参考 "
+            f"{st['downside_pct']:+.1f}%，中位参考 {st['median_pct']:+.1f}%，不保证适用当前行情"
         )
     return f"**一句话**: {act}{tail}。\n\n"
 
@@ -238,6 +253,7 @@ TRANSLATOR_SYSTEM_PROMPT = """你是 AI 投资委员会的"翻译官"，负责�
       如果数字之间看似矛盾（比如概率偏多但结论偏空），必须调和解释，不许装看不见
 3. 不堆术语；必须用术语时随手用半句话解释
 4. 数据里标了"⚠样本不足"的，要提醒用户该数字只能看方向、别当真到个位数
+5. 校准或混合模型的数字只能称模型估计，不能改写成实际观察到的频数；复核计划不是交易授权。
 
 输出格式（严格遵守，不要输出任何其他内容）：
 每个资产先输出单独一行 `@@<symbol>`，从下一行开始是这个资产的解读正文。"""
@@ -294,7 +310,7 @@ _GLOSSARY = """## 术语表（看不懂的词在这里查）
 - **输入缺失/强制 HOLD**: 被规则强制改成 HOLD（数据缺失 / 集中度 lens / 没给买回点 / 防御拦截）或自报 ≤0.4，不查表
 - **主导方**: 这次结论主要听谁的——macro=宏观面 / quant=技术面 / risk=风控
 - **regime**: 系统对当前行情的粗分类（uptrend 上行 / downtrend 下行 / crash 急跌 / recovery 修复 / range 震荡）
-- **n 与"重叠窗口独立≈k"**: 历史样本量。相邻交易日的窗口高度重叠，真实独立样本只有 ≈k 个；带 ⚠样本不足 的行别太当真
+- **n 与样本量启发式**: n 是历史记录数，相邻窗口可能重叠。折算数字只是启发式，不证明样本独立，也不证明模型适用于当前行情
 - **跌破现价概率**: 历史上同类行情里，N 天后价格低于今天的占比
 - **悲观情形(20分位)**: 历史同类行情里最差的 1/5 大约跌到哪（不是最坏情况）
 - **路径形状**: 未来 90 天怎么走的历史占比——先跌后涨 / 直接涨 / 冲高回落 / 一路收跌
@@ -377,36 +393,42 @@ def assemble_full_report(
     # 各资产委员会区块
     active_assets = [a for a in target_assets if a["symbol"] not in skipped_assets
                      and a["symbol"] in asset_committees]
+    if any(qualification_note(asset_committees[a["symbol"]]["verdict"]) for a in active_assets):
+        final_decision_gemini="[QUALITY_ALERT] 存在未通过核验的提案，补充意见不作为当前操作建议展示。"
 
     def _asset_block(idx: int, a: dict) -> str:
         sym = a["symbol"]
         c = asset_committees[sym]
         v = c["verdict"]
+        blocked=qualification_note(v)
         # 小白友好：人话解读。优先翻译官（LLM，能调和矛盾/解释防御拦截），
         # 该资产缺失/失败 → 回落确定性一句话（零 LLM）
-        translated = _t((plain_summaries or {}).get(sym, "").strip())
+        translated = "" if blocked else _t((plain_summaries or {}).get(sym, "").strip())
         plain_block = (
             f"**人话解读**: {translated}\n\n" if translated
             else plain_verdict_summary(v, c.get("path_profile"))
         )
         lines = [
             f"## {idx+2}. {a.get('display_name', sym)} ({sym})\n\n",
-            f"**裁决**: {v['verdict']} | {confidence_display(v, confidence_lookup)} | "
-            f"主导方 {v['dominant_view']} | 建议金额 {cur_prefix()}{v['alloc_cny']}\n\n",
+            (f"**状态**: {blocked}（原提案 {v.get('verdict','未知')}，仅供审计）\n\n" if blocked else
+             f"**裁决**: {v['verdict']} | {confidence_display(v, confidence_lookup)} | "
+             f"主导方 {v['dominant_view']} | 建议金额 {cur_prefix()}{v['alloc_cny']}\n\n"),
             plain_block,
         ]
         # TRIM 路径化：展示买回点 + 预期路径（让用户能判断"卖出是赚是亏"）
-        if v.get("verdict") == "TRIM":
+        if not blocked and v.get("verdict")=="TRIM" and v.get("exit_intent") in ("risk_reduction","thesis_invalidated","liquidity_need"):
+            lines.append("**风险或需求减仓**: 降低已有敞口；不要求承诺更低价买回，后续买回须独立复核。\n\n")
+        elif not blocked and v.get("verdict") == "TRIM":
             rp = v.get("reentry_price")
             rp_txt = f"{quote_currency_prefix(sym)}{rp:,.2f}" if rp is not None else "未给出"
             cond = _t(v.get("reentry_condition") or "未给出")
             path = _t(v.get("expected_path") or "未给出")
             lines.append(
                 f"**减仓路径**: 预期路径 {path} → 买回点 {rp_txt}"
-                f"（触发条件：{cond}）| 不达买回点则继续持有\n\n"
+                f"（触发条件：{cond}）| 触发只作复核，不自动买回，也不保证成交\n\n"
             )
         # 被 Sanity check 5 从 TRIM 降级成 HOLD 的，留痕给用户看为什么没减
-        elif v.get("_original_verdict") == "TRIM" and v.get("_sanity5_reason"):
+        elif not blocked and v.get("_original_verdict") == "TRIM" and v.get("_sanity5_reason"):
             why = ("没给买回点" if v["_sanity5_reason"] == "reentry_missing"
                    else "买回点不低于现价（卖了高价接回 = 纯亏）")
             lines.append(f"**减仓被否**: CIO 想 TRIM，但{why} → 系统降级 HOLD\n\n")
@@ -414,15 +436,15 @@ def assemble_full_report(
         # 你已声明本池为单资产 / 刻意集中 / 全可投资金，集中度不作为减仓理由。措辞明确
         # 留痕"CIO 想减仓 → 因 lens 关被拦"，不再用旧的"兜底充足/集中度不构成真实风险"
         # （那是已移除的 solvency 自动兜底口径）。CIO 给的卖出后路径预期仍摆出供对照。
-        elif (v.get("_original_verdict") == "TRIM"
+        elif (not blocked and v.get("_original_verdict") == "TRIM"
               and v.get("_original_trim_reason") == "concentration"
               and v.get("_concentration_lens") == "disabled"):
             _path = _t(v.get("expected_path") or "")
             _orig_alloc = v.get("_original_alloc", v.get("alloc_cny", 0))
             lines.append(
                 f"**减仓未执行（集中度 lens 已关）**: CIO 想因集中度减仓（建议金额 "
-                f"{cur_prefix()}{_orig_alloc}），但你已关闭集中度 lens（本池视为刻意集中 / 全可投资金）"
-                "→ 系统维持 HOLD。"
+                f"{cur_prefix()}{_orig_alloc}），但当前配置未启用集中度分析，缺少完整总资产分母"
+                "→ 此理由未获执行资格；不能推导为用户选择集中持仓或禁止风险减仓。"
                 + (f"系统对未来路径的预期仍供对照：{_path}"
                    "（系统预期偏空，你若有不同判断自行权衡）" if _path else "")
                 + "\n\n"
@@ -430,7 +452,7 @@ def assemble_full_report(
         # 买侧被快崩防御改写（VIX/ATR 哨兵），含黄金分批 DCA。翻译官路径已用
         # defense_note 渲染；这里是无翻译官时的确定性兜底，保证决策维度不丢
         #（守"邮件必须渲染决策维度"红线）。
-        elif v.get("_original_verdict") in ("BUY", "ACCUMULATE") and (
+        elif not blocked and v.get("_original_verdict") in ("BUY", "ACCUMULATE") and (
             v.get("_defense_dca") or v.get("_defense_downgrade")
         ):
             _oa = v.get("_original_alloc", v.get("alloc_cny", 0)) or 0

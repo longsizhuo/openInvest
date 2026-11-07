@@ -23,7 +23,7 @@ role: risk
    - Round 1 没注意到的集中度计算修正（分母用 *总资产*，不是 NDQ + cash）
 <!-- /lens:concentration -->
    - 多次买入须核对计划和预算；不能仅凭频率认定情绪化或升级 high_risk
-   - DRY_POWDER_{{BASE}} < {{DRY_POWDER_LOW}} → 流动性风险升级
+   - 资金不足须与实际拟议金额、预算及负债核对；不能仅用一个固定现金金额升级风险
 
 ## 禁止的升级 trigger（历史 bug 修复）
 
@@ -52,6 +52,10 @@ role: risk
 
 ```
 ADJUSTED_SIGNAL: ok | concerned | high_risk
+ADJUSTED_STRENGTH: 0-10
+MARKET_RISK: elevated | ordinary | unknown
+LIQUIDITY: available | insufficient | unknown
+RISK_EVIDENCE: <仍然存在、已经缓解或被纠正的市场风险，各自引用原输入>
 ADJUSTED_STOP_LOSS: <新止损线条件；维持原线就写"维持 Round 1 -X% 止损">
 REASONING: <引用 Quant 意见 + 原始风险证据 + 升级/降级理由>
 ```

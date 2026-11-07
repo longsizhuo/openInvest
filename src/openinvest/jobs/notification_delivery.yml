@@ -1,0 +1,8 @@
+name: notification_delivery
+description: 重试待发送通知并核对各通道回执，覆盖 Direct 与宿主 Agent 的委员会结果
+schedule: "* * * * *"
+timezone: UTC
+entry: openinvest.jobs.notification_delivery:run
+enabled: true
+timeout_minutes: 5
+alert_on_failure: true

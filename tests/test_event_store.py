@@ -136,23 +136,26 @@ def test_recall_time_window(store):
 
 def test_recall_vector_rerank(store):
     # 三条都符合硬过滤，但向量不同。query 接近 [0,0,1,0] → 期望 c3 排第一
+    from openinvest.services.embeddings import EmbeddingVector
+    def vector(values,text):
+        return EmbeddingVector(values,space_id="openai:synthetic:v1:4",text=text)
     store.upsert_event({
         "one_line_claim": "claim a", "stance": "risk", "severity": "high",
         "ts": _utc_iso(-1), "affected_symbols": ["AAPL"], "entities": [],
-    }, embedding=[1.0, 0.0, 0.0, 0.0])
+    }, embedding=vector([1.0, 0.0, 0.0, 0.0],"claim a"))
     store.upsert_event({
         "one_line_claim": "claim b", "stance": "risk", "severity": "high",
         "ts": _utc_iso(-2), "affected_symbols": ["AAPL"], "entities": [],
-    }, embedding=[0.0, 1.0, 0.0, 0.0])
+    }, embedding=vector([0.0, 1.0, 0.0, 0.0],"claim b"))
     store.upsert_event({
         "one_line_claim": "claim c", "stance": "risk", "severity": "high",
         "ts": _utc_iso(-3), "affected_symbols": ["AAPL"], "entities": [],
-    }, embedding=[0.0, 0.0, 1.0, 0.0])
+    }, embedding=vector([0.0, 0.0, 1.0, 0.0],"claim c"))
 
     if not store.vec_loaded:
         pytest.skip("sqlite-vec not loaded; rerank path covered elsewhere")
 
-    out = store.recall("AAPL", min_severity="mid", query_embedding=[0.0, 0.0, 0.99, 0.05], top_k=3)
+    out = store.recall("AAPL", min_severity="mid", query_embedding=vector([0.0, 0.0, 0.99, 0.05],"query"), top_k=3)
     # 向量精排后 c 应该最近，但最终返回按 ts DESC 排（最新在前），所以位置可能不在第一
     # 关键是 c 在返回里 + 它距离最近
     cs = [e for e in out if "claim c" in e["one_line_claim"]]
@@ -348,6 +351,8 @@ def test_recall_future_ts_not_pinned_at_top(store):
         # 绕过写侧钳制，模拟修复前已入库的存量行
         store.conn.execute("UPDATE events SET ts = ?, created_at = ? WHERE event_id = ?",
                            (ts, created_at, eid))
+        from tests.integrity_helpers import approve_event_reporting
+        approve_event_reporting(store,eid)
     add("stale future", _utc_iso(60), _utc_iso(-10))   # 入库 10 天前，ts 在 2 个月后
     fresh_created = _utc_iso(-2)
     add("fresh future", _utc_iso(60), fresh_created)   # 入库 2 天前，ts 在 2 个月后
@@ -403,3 +408,10 @@ def test_recall_unparseable_ts_falls_back_to_created_at(store):
     store.conn.commit()
     out = store.recall("GC=F", min_severity="mid")
     assert [e["one_line_claim"] for e in out] == ["fresh", "bad ts"]
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

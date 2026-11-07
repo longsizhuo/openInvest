@@ -48,12 +48,13 @@ _ACCUMULATE_OVER_CAP = (
 )
 _TRIM_REENTRY_ABOVE = (
     "VERDICT: TRIM\nCONFIDENCE: 0.7\nDOMINANT_VIEW: risk\n"
-    "SUGGESTED_ALLOC_CNY: -5000\nTRIM_REASON: bearish\nREENTRY_PRICE: 999999"
+    "SUGGESTED_ALLOC_CNY: -5000\nTRIM_REASON: bearish\nEXIT_INTENT: tactical_reentry\nREENTRY_PRICE: 999999"
 )
 
 
 @pytest.fixture()
 def world(tmp_path, monkeypatch):
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",lambda *a,**kw:{"status":"passed","origin":"synthetic_unit_fixture"})
     mem = tmp_path / "memory"
     mem.mkdir()
     (mem / "user.md").write_text("---\nname: user\ntype: profile\nschema_version: 1\n---\n")

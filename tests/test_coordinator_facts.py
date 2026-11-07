@@ -125,8 +125,11 @@ def test_invalid_resubmit_preserves_existing_evidence(env):
 
 def test_submit_writes_daily_sidecar_and_loader_reads_it(env):
     mem, _ = env
+    from tests.integrity_helpers import approve_historical_generator
+    from openinvest.services.historical_evidence import qualification
+    approve_historical_generator(mem.parent)
     cid = context_id("TESTSYM", regime_brief=REGIME_BRIEF, sentiment_brief=SENTIMENT_BRIEF,
-                     path_reference="- 30d 回踩中位 -4%", path_profile={"x": 1})
+                     path_reference="- 30d 回踩中位 -4%", path_profile={"x": 1},historical_qualification=qualification(mem.parent))
     co.save_committee_transcript("TESTSYM", RAW, provider="hermes", context_id=cid)
     day = datetime.now().strftime("%Y-%m-%d")
     rec = co.load_submitted_committee("TESTSYM", day)
@@ -145,3 +148,11 @@ def test_sidecar_keeps_numpy_numbers_numeric(env, monkeypatch):
     rec = co.load_submitted_committee("TESTSYM", datetime.now().strftime("%Y-%m-%d"))
     assert isinstance(rec["verdict"]["confidence"], float) and f"{rec['verdict']['confidence']:.2f}" == "0.66"
     assert rec["verdict"]["alloc_cny"] == 800
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

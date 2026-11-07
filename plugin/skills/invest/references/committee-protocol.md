@@ -1,234 +1,72 @@
-# Committee Protocol (read this when the user asks "should I buy/sell X / 该不该买/卖X")
+# Committee Coordinator protocol
 
-The user said **"should I buy/sell X / 该不该买/卖X"** / **"analyze X / 分析一下X"** /
-**"run committee on X / 跑委员会X"** — follow the 6 stages strictly.
+Use this path only when the host can run the required roles in isolated contexts and submit their actual outputs. Otherwise use `run_committee` with a configured backend API. Follow `doctor` and the runtime reasoning mode. A scheduled host may drain its durable queue through this same protocol when it supports the complete contract.
 
-## ⚠️ First confirm you can take this path
+The backend's freshly prepared `prompts` and `instructions` are the single source of decision rules. This document describes orchestration and data handling; it adds no market thresholds or forced verdicts. Host calls consume the host provider's allowance or API budget. For an explicitly requested real API experiment, use the configured API and record actual responses rather than substituting host subagents.
 
-This document is the **Coordinator path** — you (Claude Code) use the `Agent({...})` tool
-to spawn 4 subagents and play the roles yourself.
+## Stage 0: Check current evidence
 
-**Interactive scenarios only (user present).** If you were triggered unattended by cron /
-a scheduled job (no user watching you in real time), **do not use this protocol** — it
-relies on you deciding on the fly which tool to call and how to assemble the prompts,
-and with no one to correct you it can stall or go off track. For unattended runs, always
-use the Direct path instead (see `run_committee` / `daily_report` below), regardless of
-whether you have subagent capability.
+Use the backend's current decision/cache and `quality_status` checks. A same-day Markdown file is a historical record, not proof that its inputs, model, policy or pending triggers remain current. Fresh risk requests and explicit user reruns require fresh preparation. Do not silently reuse an old answer after market conditions change.
 
-**If you are not Claude Code**, first check whether you have isolated-subtask delegation
-capability (Hermes's `delegate_task`, etc.):
+## Stage 1: Prepare one immutable context
 
-- **Yes** (Hermes / other agents that support subtask delegation) → read
-  [committee-protocol-hermes.md](committee-protocol-hermes.md) instead — same
-  6-stage protocol, zero API cost, only the spawn syntax differs
-- **No** (Codex / Cursor / Cline / local DeepSeek / plain scripts and other agents
-  limited to single-turn conversation) → use the **Direct path** instead:
+Call `prepare_committee <SYMBOL>` with the actual provider/model or composition. Retain the returned `context_id`, `analysis_as_of` / `context_prepared_at`, `prompts`, and all supplied facts. Submit that exact context; another prepare must not replace it.
 
-```bash
-<skill-dir>/scripts/run.sh run_committee <SYMBOL>
-```
+| Input | Roles that receive it |
+| --- | --- |
+| `macro_data`, `event_brief` | Macro; CIO also receives the original source context |
+| `market_data`, `regime_brief`, `sentiment_brief`, `valuation_brief` | Quant in every round, Risk in every round, CIO as supplied |
+| `portfolio_summary` | Risk in every round and CIO |
+| `prior_insights` | Risk, only the qualified text returned by the backend |
+| `prompts.cio`, `cio_source_context` | CIO verbatim, including raw evidence and analysis time |
 
-One command gets you the verdict + CIO memo + transcript, but requires `DEEPSEEK_API_KEY`.
-See the "choosing a path" section in SKILL.md and `references/two-paths.md` for details.
+Regime is a rule-based classification. It does not establish that risk is normal, and a historical group return is not an independent forecast for the current observation. Missing inputs stay unknown. Do not fill them from model memory, an old conversation, or a different-date query.
 
----
+## Stage 2: Independent first round
 
-> **Coordinator path background**: Macro is not shared — it is spawned together with the
-> others each time Round 1 starts → R1 has 3 workers total. In the Direct/Cron path Macro
-> is shared across assets, so R1 has only 2 workers (Quant + Risk); see
-> [docs/wiki/02-agents.md](https://github.com/longsizhuo/openInvest/blob/main/docs/wiki/02-agents.md#两条路径-llm-调用数对照).
-> Do not mix up citations between the two.
+Run Macro, Quant R1 and Risk R1 in isolated tasks, using their supplied prompt verbatim and the corresponding original inputs above. Send independent tasks together when the host supports it. Wait for all outputs and retain the actual model identity and raw text for each role. Worker failure must remain visible, not become a fabricated neutral opinion.
 
-## Stage 0: Same-day check (avoid duplicate runs)
+## Stage 3: Cross-challenge
 
-```bash
-ls "$INVEST_HOME/memory/.committee/$(date +%F)/<SYMBOL>.md" 2>/dev/null
-```
+Run Quant R2 and Risk R2 with their supplied rebuttal prompts, both R1 reports, and the same original inputs they had in R1. Keep evidence, not just compressed opinions. A change must explain new evidence, a corrected reading or a changed horizon. Both adjusted signal and adjusted strength are required. Missing fields are unknown and cannot prove convergence.
 
-If the file exists, **read it directly — do not re-run**. Tell the user:
-> "<SYMBOL> has already been run today; the verdict was X (confidence Y). Want to re-run?"
+## Stage 4: Optional further rounds
 
-A full committee run consumes ~15-60s of the user's Claude budget — don't burn it
-twice for the same answer.
+Use the backend's configured round limit. Agreement does not create independent evidence or a calibrated probability. Preserve genuine disagreement and unsupported-data flags; do not lower or raise a signal merely to make the group agree.
 
-## Stage 1: Get the brief
+## Stage 5: CIO
 
-```bash
-<skill-dir>/scripts/run.sh prepare_committee <SYMBOL>
-```
+Use `prompts.cio` verbatim with the complete worker history, `portfolio_summary`, original source context, sentiment, valuation and reentry reference. The host may perform this role or use a declared model according to its supported execution path; it must not invent missing worker outputs.
 
-Returns JSON containing all the fields you need:
+Separate market direction, current market risk, liquidity and user-authorized constraints. Model-proposed limits are proposals. Self-reported confidence is not calibrated probability. Preserve raw intent and let the backend apply protection once; never manipulate confidence or verdicts to avoid a guard.
 
-| Field | Used in |
-|------|------|
-| `asset` | Referenced by all 4 workers |
-| `portfolio_summary` | Risk Officer prompt |
-| `macro_data` | Macro Strategist prompt |
-| `event_brief` | Macro Strategist prompt (news/event layer recalled from `events.db`; empty string when there is none — e.g. no cron feeding events — then skip that section). Same input the Direct path gives Macro; the CIO sees it via Macro's report + the `EVENT_STANCE` lines inside `sentiment_brief` |
-| `market_data` | Quant prompt |
-| `regime_brief` | **Critical** — must go into both the Quant Round 1 + Round 2 prompts (see warning) |
-| `prior_insights` | Risk Officer prompt (empty if Dreaming has never run) |
-| `prompts.{...}` | Prompt templates from `capabilities/committee/<role>/<role>.py` (use verbatim) |
-| `instructions` | Single-asset orchestration tip (**read it**!) |
+Follow the current CIO output schema, including `exit_intent`, `hold_reason`, alternatives, `review_plan` / `REVIEW_PLAN_JSON` and `risk_review_plan` / `RISK_REVIEW_PLAN_JSON`. Risk/needs exits do not require a lower buyback price. A tactical reentry proposal uses its own applicable constraints. Unknown exit purpose is review-required, not evidence that holding is economically best.
 
-**⚠ regime_brief warning**: this is the market regime computed by Python (uptrend / downtrend /
-range_bound / crash / recovery) + that regime's neutral probability stats (median 30d forward
-return / probability of falling below the current price / sample count — the directional call
-is handed back to Quant to decide from the data; there is no hard directional lock).
-**Forget to inject it into Quant and you fall back onto the old bug path** — Quant wrongly
-screaming bearish at a range_bound bottom. It **must be injected verbatim** into both the
-Round 1 + Round 2 Quant prompts.
+A promised downside review needs independently registered, unit-correct conditions and a future expiry. Unsupported monitoring conditions must be explicitly labelled unregistered. Compare existing plan IDs before proposing replacements; do not silently move a waiting target or discard the previous commitment.
 
-## Stage 2: Round 1 — 3 workers in parallel
+## Stage 6: Submit and verify completion
 
-**All 3 `Agent({...})` calls MUST be sent in a single message** — that is how they truly
-run in parallel. Each worker gets its own context window; information is physically isolated:
+Submit all six sections with the exact `context_id` and actual model/composition:
 
-```javascript
-Agent({
-  description: "Macro analysis",
-  subagent_type: "general-purpose",
-  prompt: "<paste prompts.macro_strategist verbatim>\n\n# Current macro data:\n<paste macro_data verbatim>\n\n## Current event context (sorted by time, latest first; may include supersedes markers):\n<paste event_brief verbatim — omit this section if it is an empty string>"
-})
-
-Agent({
-  description: "Quant analysis (Round 1)",
-  subagent_type: "general-purpose",
-  prompt: "<paste prompts.quant_round1 verbatim>\n\n# Market Regime (deterministically computed, must be followed):\n<paste regime_brief verbatim>\n\n# Market data:\n<paste market_data verbatim>"
-})
-
-Agent({
-  description: "Risk Officer (Round 1)",
-  subagent_type: "general-purpose",
-  prompt: "<paste prompts.risk_round1 verbatim>\n\n# User portfolio:\n<paste portfolio_summary verbatim>\n\n# Long-term patterns:\n<paste prior_insights verbatim>"
-})
-```
-
-Each worker returns via `<task-notification>`. **Wait for all 3 to come back before
-entering Stage 3.**
-
-## Stage 3: Round 2 — Cross-challenge (2 workers in parallel)
-
-Quant and Risk can now see each other's R1 output and adjust their own views. Macro does
-not need Round 2 — the cross-challenge is only between Quant and Risk; Macro is
-market-level context and skips Round 2 on both paths. Send both Agent calls in a single message:
-
-```javascript
-Agent({
-  description: "Quant Round 2 (sees Risk's report)",
-  subagent_type: "general-purpose",
-  prompt: "<paste prompts.quant_round2_after_risk verbatim>\n\n# Market Regime (the facts you were given in Round 1, still valid in Round 2):\n<paste regime_brief verbatim>\n\n# Your own Round 1 output:\n<quant R1 result>\n\n# Risk Officer's report:\n<risk R1 result>"
-})
-
-Agent({
-  description: "Risk Round 2 (sees Quant's signals)",
-  subagent_type: "general-purpose",
-  prompt: "<paste prompts.risk_round2_after_quant verbatim>\n\n# Your own Round 1 output:\n<risk R1 result>\n\n# Quant's technical signals:\n<quant R1 result>"
-})
-```
-
-## Stage 4 (optional): Run Round 3+ if not converged
-
-The Web/Cron path has built-in convergence detection and runs up to `max_debate_rounds=4`.
-In practice, skill mode rarely needs more than 2 rounds — run Round 3 only when **both**
-of the following hold:
-
-- Quant's and Risk's SIGNALs flipped between R1→R2 (persuaded by the other side), AND
-- the new post-flip SIGNAL+STRENGTH still seriously diverge from each other
-
-Otherwise skip to Stage 5.
-
-**Convergence rules** (when to stop the debate):
-- Quant SIGNAL is the same as the previous round, and |STRENGTH delta| ≤ 1.0
-- Risk SIGNAL is the same as the previous round, and |STRENGTH delta| ≤ 1.0
-- Both satisfied → converged, proceed to CIO
-
-## Stage 5: CIO synthesis — **you write it**, do not delegate
-
-The CIO role is **you** (the orchestrator). Per the Claude Code Coordinator Mode principle:
-
-> "You are a coordinator. Synthesize results and communicate with the user.
-> Never write 'based on your findings' — that delegates understanding."
-
-After reading all worker outputs (Macro + Quant R1/R2 + Risk R1/R2) + `portfolio_summary`,
-write the full CIO memo in the `prompts.cio` format.
-
-### Required fields in the CIO output
-
-- `VERDICT`: one of `BUY` / `ACCUMULATE` / `HOLD` / `TRIM` / `SELL`
-- `CONFIDENCE`: 0.0–1.0
-- `DOMINANT_VIEW`: which side persuaded you (`macro` / `quant` / `risk`)
-- `SUGGESTED_ALLOC_<BASE>`: integer (positive = buy more, negative = reduce position)
-  (`<BASE>` is the base currency code from the `DRY_POWDER_<BASE>` line in the portfolio summary — `CNY` by default; amounts are in that currency)
-- `EXECUTION_PLAN`: how to actually execute (lump-sum / DCA / grid)
-- `RISK_PLAN`: stop-loss trigger conditions + worst-case PnL estimate
-- `PERSONAL_NOTE`: bullet-point message to the user
-
-### CIO sanity self-check (run through it before outputting)
-
-| Rule | Why |
-|------|--------|
-| `confidence ≥ 0.95` → lower to 0.85 | Guards against overconfidence. LLMs love to over-commit on ambiguous signals |
-| `alloc_cny > 100_000` → clamp to 100_000 | Per-trade cap. Forces the user to be deliberate about larger moves |
-| REGIME = `crash` → force `HOLD` or `TRIM` | REGIME takes priority over signals. crash = uncertainty too high to add risk |
-| Workers seriously divided → `confidence: 0.4-0.5` | Don't fake consensus. Honest low confidence > pretended high confidence |
-
-## Stage 6: Persist the transcript
-
-```bash
-cat <<EOF | <skill-dir>/scripts/run.sh save_committee <SYMBOL> --model <model-name>
+```text
 === MACRO ===
-<macro worker output>
-
+<actual output>
 === QUANT_R1 ===
-<quant R1 output>
-
+<actual output>
 === RISK_R1 ===
-<risk R1 output>
-
+<actual output>
 === QUANT_R2 ===
-<quant R2 output>
-
+<actual output>
 === RISK_R2 ===
-<risk R2 output>
-
+<actual output>
 === CIO ===
-<the CIO memo you wrote>
-EOF
+<actual output>
 ```
 
-Lands in `memory/.committee/<date>/<asset>.md`, with exactly the same schema as the
-DeepSeek cron path, just tagged `Provider: claude (skill mode)` so Dreaming can later
-distinguish the transcripts of the two paths.
+Use `submit_committee` or the returned `save_command --context-id <context_id>`. Check the validated status, intervention reasons, plan registration and request completion receipts. Reading the queue or writing a later transcript does not complete a trigger unless its prepared context covers that request and event revision.
 
-**No shell? Hand in over MCP instead.** If you ran Stage 1 through the MCP tool
-`prepare_committee` (or cannot run `run.sh`), call `submit_committee(symbol, transcript,
-provider="claude", model=<model-name>)` with the same `=== MACRO === … === CIO ===` transcript
-as the `transcript` string. Pass `provider="claude"` explicitly: the MCP default is `"agent"`,
-while the CLI defaults to `claude`, and the scorecard groups by `provider:model`. It writes the
-same archive and the same Input Health block; the CLI and MCP hand-ins are interchangeable,
-never do both for one run (a second hand-in overwrites the archive and logs an intervention).
+If submission returns `verification_required`, the six original sections are a saved draft. Delegate a separate isolated worker with the returned `system_prompt` and `user_prompt`; it checks source/logic only and must not choose a trade. Submit its JSON as `reasoning_review_json` with the **unchanged original transcript and context_id** (CLI: `--reasoning-review-file`). Repeatedly generating CIO until a preferred action or passing judgment appears is forbidden. A verification request is not completed advice; unavailable or malformed verification remains visible.
 
-**The 6-hour window (CLI and MCP alike)**: facts saved by `prepare_committee` are applied to the
-hand-in for 6 hours (`facts_source: prepare`). A later hand-in is still accepted, it just falls
-back to parsing the facts out of the transcript (`facts_source: transcript`); do not re-run
-`prepare_committee` only because the window passed.
+For a later task, use `committee_review CONTEXT_ID` / MCP `committee_review(context_id=...)` (hosted: `analysis_id=...`) to retrieve the exact original transcript and issued packet. `resume_allowed` must be true. A missing original is an explicit audit/recovery gap; do not guess its bytes from summaries or repeat the committee to seek approval.
 
-**Always pass `--model <the model that actually plays the 4 roles>`** (over MCP: the `model`
-argument of `submit_committee`) — the name of the model your subagents / you run on, e.g.
-`claude-sonnet-5-5`. The Coordinator path has no global LLM
-config to read, so the host is the only one who knows. It lands in the transcript's Input Health
-block as `model`; the verdict scorecard buckets by `<provider>:<model>` (e.g.
-`claude:claude-sonnet-5-5`), so a model swap never mixes old and new track records. Omitted =
-recorded as `unknown` (never guessed).
-
-## After the verdict
-
-If the user agrees:
-1. **Do not write to `memory/` yourself** (see SKILL.md Constraints).
-2. After the user confirms the trade executed, record it with the CLI `buy` / `sell`
-   (for cash use `deposit` / `withdraw`, or the same-named MCP tools) — going through
-   the ledger leaves an audit trail.
-3. After the user responds to the recommendation (bought / didn't buy / declined),
-   write back to the decision ledger with `record_execution <decision_id>` (if they
-   decline, first ask why).
+`DATA_UNTRUSTED`, `REVIEW_REQUIRED`, delivery failure and an expired or triggered plan require explicit reporting even when the financial allocation is zero. Ordinary HOLD silence does not silence risk or quality alerts. Delivery is established by channel receipts, not by calling a send function. A review condition or investment verdict does not authorize an order.

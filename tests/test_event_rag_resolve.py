@@ -366,6 +366,14 @@ def test_format_agent_tag_cannot_forge_header_lines():
         "affected_symbols": ["510300.SS"], "one_line_claim": "x", "sources": [],
         "ingested_by": hostile,
     }])
-    assert out.count("\n") == 1 and "[agent:x_" in out and "risk/high" not in out
+    assert "[agent:x_" in out and "risk/high" not in out
+    assert len(_parse_event_brief_entries(out))==1
     parsed = _parse_event_brief_entries(out)
     assert len(parsed) == 1 and parsed[0]["sev"] == "low" and parsed[0]["syms"] == {"510300.SS"}
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")

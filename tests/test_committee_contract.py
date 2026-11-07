@@ -1155,6 +1155,8 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     _seed_minimal_memory(memory_dir)
+    from tests.integrity_helpers import approve_historical_generator
+    approve_historical_generator(tmp_path)
 
     from openinvest.core import memory_store as ms
     monkeypatch.setattr(ms, "MEMORY_ROOT", memory_dir)
@@ -1202,9 +1204,10 @@ def test_run_committee_session_returns_path_reference(monkeypatch, tmp_path):
         f"实际 {sym_result.get('path_reference')!r}\n"
         "  → for_symbol 没把 reentry_reference 放进 result（邮件渲染会拿不到路径概率）"
     )
-    assert sym_result.get("path_profile") == {"windows": {}}, (
+    assert sym_result["path_profile"]["windows"] == {}, (
         "path_profile 漂移 → 人话摘要拿不到结构化分布"
     )
+    assert sym_result["path_profile"]["forecast_qualification"]["forecast_use_allowed"]
 
 
 # ============================================================================

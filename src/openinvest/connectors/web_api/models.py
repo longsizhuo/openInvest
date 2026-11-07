@@ -900,6 +900,7 @@ class CommitteeSaveRequest(BaseModel):
     transcript: str = Field(..., description="6 段 '=== ROLE ===' 分隔的 transcript 全文")
     provider: str = Field("", description="实际扮演 4 角色的 agent 品牌（claude/hermes/...）；空 = claude")
     model: str = Field("", description="实际扮演 4 角色的模型名（如 claude-haiku-5-5）；空 = unknown")
+    reasoning_review_json: Optional[str] = None
 
 
 # ============ config-via-API（ADR-017）============

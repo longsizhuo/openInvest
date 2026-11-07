@@ -103,6 +103,8 @@ def realized_path(symbol: str, date: str) -> Optional[Dict[str, Any]]:
         if fr is None:
             continue   # 未成熟
         out[f"fwd_{w}"] = round(fr * 100, 3)
+        label_index=idx.searchsorted(ts+pd.Timedelta(days=days),side="left")
+        out[f"label_end_{w}"]=str(idx[label_index].date())
         if w == SHAPE_WINDOW:
             j = idx.searchsorted(ts + pd.Timedelta(days=days), side="left")
             seg = s.iloc[i + 1: j + 1].to_numpy()
@@ -123,6 +125,9 @@ def realized_path(symbol: str, date: str) -> Optional[Dict[str, Any]]:
 def score_one(snap: Dict[str, Any], source: str) -> Optional[PathReview]:
     """单条快照评分。30d 未成熟 → None（跳过）。"""
     profile = snap.get("profile") or {}
+    qualification=profile.get("forecast_qualification") or {}
+    if source=="live" and qualification.get("forecast_use_allowed") is not True:
+        source="shadow_not_used" if qualification else "legacy_live_use_unverified"
     real = realized_path(snap["symbol"], snap["date"])
     if real is None or not profile.get("windows"):
         return None
@@ -130,6 +135,7 @@ def score_one(snap: Dict[str, Any], source: str) -> Optional[PathReview]:
         date=snap["date"], asset=snap["symbol"],
         regime=snap.get("regime") or "", source=source,
         current_price=snap.get("current_price"),
+        forecast_qualification=qualification,
     )
     for w in WINDOWS:
         pred = profile["windows"].get(w)
@@ -141,6 +147,9 @@ def score_one(snap: Dict[str, Any], source: str) -> Optional[PathReview]:
             "in_band": bool(pred["p10_pct"] <= fr <= pred["p90_pct"]),
             "below_current": bool(fr < 0),
             "p_below": pred["p_below"],
+            "label_end":real.get(f"label_end_{w}"),
+            "pred_kind":"calibrated" if profile.get("calibration") else "raw_conditional",
+            "provenance":profile.get("provenance",{}),
             "err_vs_median": round(fr - pred["median_pct"], 3),
             # 原始预测统计（校准研究自包含：fit 脚本纯算术做 收缩/带宽 网格）
             "pred": {k: pred[k] for k in
@@ -191,7 +200,7 @@ def collect_live_snapshots() -> List[Dict[str, Any]]:
 def recompute_snapshots(
     symbols: List[str], dates: List[str],
 ) -> List[Dict[str, Any]]:
-    """walk-forward 重算"当时会预测什么"（零前视，代码口径=当前版本）。"""
+    """Date-truncated reconstruction with current code/data vintage; diagnostic only."""
     from openinvest.core.regime_probability import compute_regime_return_frame, get_path_profile
     from openinvest.db.market_store import MarketStore
 
@@ -238,9 +247,9 @@ def recompute_snapshots(
 
 
 def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
-                  live: bool = True) -> Tuple[Path, Path]:
+                  live: bool = True,purpose=None) -> Tuple[Path, Path]:
     """live=True（cron）写 *_live 两件；False（recompute）写校准基线两件。"""
-    suffix = "_live" if live else ""
+    suffix = "_shadow" if purpose=="shadow" else "_live" if live else ""
     store = MemoryStore()
     jl = store.root / ".dreams" / f"path_review{suffix}.jsonl"
     jl.parent.mkdir(parents=True, exist_ok=True)
@@ -248,10 +257,13 @@ def write_outputs(reviews: List[PathReview], summ: Dict[str, Any], *,
         for r in reviews:
             f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
     md = ROOT / "docs" / f"path_calibration{suffix}.md"
+    md.parent.mkdir(parents=True,exist_ok=True)
     lines = ["# 路径预测校准报告（gitignored，本地分析用）", "",
              f"样本 {summ['n']} 条（另有周末重复 {summ['weekend_dup_excluded']} 条不计）", ""]
-    if live:
-        lines += ["> live 快照逐日重叠：独立样本 ≥30（约 2027-05）之前不读这些数字。", ""]
+    if purpose=="shadow":
+        lines += ["> 审计/影子诊断；不计入已使用预测的 live 汇总，也不获得预测或学习资格。",""]
+    elif live:
+        lines += ["> live 快照窗口重叠；行数不是独立样本数，工程记录不构成收益或预测准确率证明。", ""]
     lines += ["| 窗 | n | P10-P90 覆盖(目标0.8) | p_below Brier | 基率 Brier | 中位|误差|pp | 中位偏差pp |",
               "|---|---|---|---|---|---|---|"]
     for w, x in summ["windows"].items():
@@ -272,7 +284,7 @@ def run(*, recompute_dates: Optional[List[str]] = None,
         symbols: Optional[List[str]] = None) -> Dict[str, Any]:
     # 常驻 scheduler 只 import 一次本模块：缓存只活一次 run，否则新落库的价格永远看不到
     _HIST.clear()
-    snaps = [(s, "live") for s in collect_live_snapshots()]
+    snaps = [] if recompute_dates else [(s, "live") for s in collect_live_snapshots()]
     if recompute_dates:
         if symbols is None:
             from openinvest.core.portfolio_manager import PortfolioManager
@@ -290,10 +302,16 @@ def run(*, recompute_dates: Optional[List[str]] = None,
             continue
         if r is not None:
             reviews.append(r)
-    summ = summarize(reviews)
-    jl, md = write_outputs(reviews, summ, live=not recompute_dates)
-    return {"reviews": len(reviews), "summary": summ,
-            "jsonl": str(jl), "report": str(md)}
+    primary=reviews if recompute_dates else [r for r in reviews if r.source=="live"]
+    shadow=[] if recompute_dates else [r for r in reviews if r.source!="live"]
+    summ = summarize(primary)
+    jl, md = write_outputs(primary, summ, live=not recompute_dates)
+    result={"reviews": len(reviews),"live_reviews":0 if recompute_dates else len(primary),"shadow_reviews":len(shadow),
+            "summary": summ,"jsonl": str(jl), "report": str(md)}
+    if shadow:
+        sj,sm=write_outputs(shadow,summarize(shadow),purpose="shadow")
+        result.update(shadow_jsonl=str(sj),shadow_report=str(sm))
+    return result
 
 
 if __name__ == "__main__":

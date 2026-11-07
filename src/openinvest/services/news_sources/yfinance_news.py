@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List
 
-from openinvest.services.news_sources import RawNewsItem
+from openinvest.services.news_sources import RawNewsItem, SourceItems
 
 log = logging.getLogger(__name__)
 
@@ -32,13 +32,13 @@ def fetch_yfinance_news(symbol: str, *, max_items: int = 20) -> List[RawNewsItem
         import yfinance as yf
     except ImportError:
         log.warning("yfinance 未安装，跳过 yfinance_news")
-        return []
+        return SourceItems(errors=["ImportError"])
 
     try:
         raw = yf.Search(symbol, news_count=max_items).news or []
     except Exception as e:
         log.warning(f"yfinance {symbol} news 抓取失败: {e}")
-        return []
+        return SourceItems(errors=[type(e).__name__])
 
     sym = symbol.upper()
     items: List[RawNewsItem] = []

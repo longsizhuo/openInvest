@@ -39,9 +39,16 @@ def enforce_input_health(verdict: dict, health: dict) -> None:
     if reasons:
         verdict.setdefault("_original_verdict", verdict.get("verdict"))
         verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
-        verdict.update(verdict="HOLD", alloc_cny=0, confidence=0.0,
-                       decision_status="DATA_UNTRUSTED", hold_reason="incomplete_required_inputs")
+        no_proposal=verdict.get("proposal_available") is False
+        verdict.update(verdict="UNCLEAR" if no_proposal else "HOLD", alloc_cny=0, confidence=0.0,
+                       decision_status="DATA_UNTRUSTED", hold_reason=verdict.get("hold_reason") if no_proposal else "incomplete_required_inputs")
         health.update(decision_status="DATA_UNTRUSTED", input_errors=reasons)
+
+
+def advice_qualified(verdict: dict) -> bool:
+    return (verdict.get("decision_status","READY") in ("READY","CONSTRAINED")
+            and verdict.get("verdict") not in (None,"UNCLEAR")
+            and (verdict.get("reasoning_review") or {}).get("status")=="passed")
 
 
 def code_version() -> str:
@@ -70,6 +77,8 @@ def config_snapshot() -> dict:
 
 def preparation_state(memory_root: Path) -> dict:
     owner = memory_root.parent if memory_root.name == "memory" else memory_root
+    from openinvest.core.evidence_eligibility import Eligibility
+    Eligibility(owner).excluded_ids()
     files = {}
     for relative in ("memory/user.md", "memory/strategy.md", "memory/portfolio.md",
                      "memory/.state/config_overrides.json", "integrity/eligibility.json", "integrity/exclusions.jsonl"):
@@ -123,12 +132,19 @@ def prepare_context(memory_root: Path, symbol: str, inputs: dict, *, model: str 
         raise ValueError("DATA_UNTRUSTED: restored financial state requires reconciliation")
     if expected_state is not None and preparation_state(memory_root) != expected_state:
         raise ValueError("DATA_UNTRUSTED: inputs or eligibility changed during preparation; prepare again")
+    from openinvest.services.agent_queue import pending_committee_items
+    covered={r["request_id"] for r in inputs.get("trigger_requests",[])}
+    if any(set(group["request_ids"])-covered for group in pending_committee_items(memory_root=memory_root) if group["symbol"]==symbol):
+        raise ValueError("DATA_UNTRUSTED: pending risk causes are not covered by these inputs; prepare again")
     context_id = uuid.uuid4().hex
     config = config_snapshot()
     payload = {
         "context_id": context_id, "symbol": symbol, "prepared_at": utc_now().isoformat(),
         "code_version": code_version(), "config": config, "config_sha256": digest(config),
         "declared_model": model, "inputs": _plain(inputs),
+        "source_event_versions":dict(getattr(inputs.get("event_brief"),"event_versions",{})),
+        "source_event_lineage_captured":hasattr(inputs.get("event_brief"),"event_versions") or not inputs.get("event_brief"),
+        "source_plan_lineage_captured":'=== EXISTING REVIEW PLAN ===' not in str(inputs.get('portfolio_summary') or '') or bool(inputs.get('source_plan_refs')),
         "origin": "synthetic" if os.getenv("INVEST_TEST_ISOLATED") == "1" else "prospective", "availability_evidence": "captured_before_inference",
         "historical_vintage_reconstructed": False,
         "eligibility_version": _eligibility_version(owner),
@@ -171,6 +187,11 @@ def load_context(memory_root: Path, context_id: str, symbol: str, *,
     for name, content in payload.get("documents", {}).items():
         if (Path(memory_root) / f"{name}.md").read_text() != content:
             raise ValueError("portfolio or user constraints changed after prepare; prepare again")
+    from openinvest.services.agent_queue import pending_committee_items
+    prepared=datetime.fromisoformat(payload["prepared_at"])
+    for group in pending_committee_items(memory_root=memory_root):
+        if group["symbol"]==symbol and any(datetime.fromisoformat(r["queued_at"])>prepared for r in group["requests"]):
+            raise ValueError("new risk request arrived after prepare; prepare fresh inputs")
     return payload
 
 
@@ -193,7 +214,8 @@ def record_decision(memory_root: Path, symbol: str, raw: dict, final: dict,
 
 
 def current_decision(memory_root: Path, health: dict, symbol: str, *, verdict: dict | None = None,
-                     expected_model: str | None = None, transcript: str | None = None) -> bool:
+                     expected_model: str | None = None, transcript: str | None = None,
+                     allow_pending_requests: bool = False) -> bool:
     """A historical record is readable, but only bound current inputs qualify as a cache."""
     try:
         decision_id = health.get("decision_id", "")
@@ -204,8 +226,9 @@ def current_decision(memory_root: Path, health: dict, symbol: str, *, verdict: d
         if record["sha256"] != digest(payload) or payload["symbol"] != symbol:
             return False
         final = payload["validated_proposal"]
+        if not advice_qualified(final):return False
         input_health = payload.get("input_health") or {}
-        if (final.get("decision_status") == "DATA_UNTRUSTED" or final.get("verdict") == "UNCLEAR"
+        if (final.get("decision_status") in ("DATA_UNTRUSTED","REVIEW_REQUIRED") or final.get("verdict") == "UNCLEAR"
                 or input_health.get("decision_status") == "DATA_UNTRUSTED" or input_health.get("worker_unavailable")
                 or input_health.get("input_errors") or input_health.get("cio_unclear")):
             return False
@@ -222,6 +245,11 @@ def current_decision(memory_root: Path, health: dict, symbol: str, *, verdict: d
             if verdict["cio_memo"] != parse_committee_text(canonical_text).get("cio_memo"):
                 return False
         context = load_context(memory_root, payload["context_id"], symbol)
+        if not allow_pending_requests:
+            from openinvest.services.agent_queue import pending_committee_items
+            covered={r["request_id"] for r in context["inputs"].get("trigger_requests",[])}
+            if any(set(group["request_ids"])-covered for group in pending_committee_items(memory_root=memory_root) if group["symbol"]==symbol):
+                return False
         if expected_model and context.get("declared_model") != expected_model:
             return False
         if verdict is not None:

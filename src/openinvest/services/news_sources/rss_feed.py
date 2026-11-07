@@ -27,7 +27,7 @@ import urllib3
 import yaml
 
 from openinvest.core.memory_store import _atomic_write_text, _file_lock
-from openinvest.services.news_sources import RawNewsItem, _trim
+from openinvest.services.news_sources import RawNewsItem, SourceItems, _trim
 
 log = logging.getLogger(__name__)
 
@@ -223,9 +223,9 @@ def fetch_rss(name: str, url: str, *, max_items: int = 20) -> List[RawNewsItem]:
     except Exception as e:
         direct = "（额外源直连、不经代理）" if public_only else ""
         log.warning(f"RSS {name} 抓取/解析失败{direct}: {e}")
-        return []
+        return SourceItems(errors=[type(e).__name__])
 
-    items: List[RawNewsItem] = []
+    items: List[RawNewsItem] = SourceItems(errors=["FeedParseError"] if getattr(parsed,"bozo",False) is True or getattr(parsed,"bozo",False)==1 else [])
     for entry in (parsed.entries or [])[:max_items]:
         link = entry.get("link") or entry.get("id") or ""
         title = entry.get("title") or ""

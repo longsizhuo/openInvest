@@ -22,6 +22,9 @@ class _Store:
     def is_seen_url(self, url):
         return False
 
+    def source_unchanged(self,*args,**kwargs):
+        return False
+
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
@@ -54,8 +57,8 @@ def _seed():
 def test_brief_lists_ledger_and_pending_without_draining(tmp_path):
     s = _seed()
     agent_queue.enqueue_committee(["NVDA"], [], "price spike")
-    (s.root / ".agent_queue" / "news.jsonl").write_text(json.dumps(
-        {"url": "https://x.co/1", "title": "t", "queued_at": datetime.now().astimezone().isoformat()}) + "\n")
+    from openinvest.services.news_sources import RawNewsItem
+    agent_queue.enqueue_news([RawNewsItem(src_name="synthetic-feed",url="https://x.co/1",title="t",snippet="source text")])
 
     b = build_brief(tmp_path)
     assert [h["symbol"] for h in b["holdings"]] == ["NVDA", "510300.SS"]

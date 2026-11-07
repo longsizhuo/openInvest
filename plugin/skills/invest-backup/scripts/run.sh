@@ -38,7 +38,7 @@ BACKUP_DIR="$ROOT/.backups"
 # 产物，恢复时自动重建，不带。*.db-wal **要带**：调度器长驻持有 SQLite 连接期间，
 # 新成交只躺在 WAL 里、主库文件还没更新——排除它等于丢账（旧版就丢过）。
 # 备份前 checkpoint_dbs 先把 WAL 刷进主库（WAL 通常因此为空）；刷不干净时 WAL 随包带上。
-INCLUDE_PATHS=(memory db .env user_profile.json user_profile.json.bak)
+INCLUDE_PATHS=(memory db integrity .env user_profile.json user_profile.json.bak)
 EXCLUDE_GLOBS=("*.pyc" "*.sqlite-journal" "*.db-shm" "*.lock")
 
 usage() {

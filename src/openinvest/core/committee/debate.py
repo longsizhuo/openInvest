@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openinvest.capabilities.committee.cio import build_cio_prompt
@@ -57,16 +57,28 @@ class CommitteeReport:
     quant_adjusted: str = ""          # Round 2: Quant 看到 Risk 后调整
     risk_adjusted: str = ""           # Round 2: Risk 看到 Quant 后调整
     cio_memo: str = ""                # Round 3: CIO 综合
+    cio_raw_response: str = ""
+    cio_attempts: List[str] = field(default_factory=list)
+    reasoning_review: Dict[str,Any] = field(default_factory=dict)
     market_data: str = ""
     portfolio_summary: str = ""
     prior_insights: str = ""
     sentiment_brief: str = ""         # 市场情绪表盘（确定性：VIX 分位 + CNN F&G，跨资产共享）
     valuation_brief: str = ""         # 估值（确定性：trailing PE + 价格分位，仅权益类，per-asset）
+    regime_brief: str = ""
+    analysis_as_of: Optional[str] = None
+    source_macro_data: str = ""
+    source_event_brief: str = ""
+    historical_qualification: Dict[str,Any] = field(default_factory=dict)
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
+        from openinvest.core.committee.evidence import cio_source_context
         lines = [
             f"=== ASSET: {self.asset.get('display_name', self.asset.get('symbol'))} ===",
+            cio_source_context(self.market_data, self.regime_brief, self.analysis_as_of,
+                               macro_data=self.source_macro_data, event_brief=self.source_event_brief,
+                               historical_qualification=self.historical_qualification),
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
         ]
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
@@ -119,6 +131,11 @@ def run_committee(
     max_debate_rounds: int = 1,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     input_health: Optional[Dict[str, Any]] = None,
+    source_macro_data: str = "",
+    source_event_brief: str = "",
+    verification_memory_root=None,
+    execution_constraint_facts=None,
+    historical_qualification=None,
 ) -> Dict[str, Any]:
     """对单个资产跑 Macro + Quant/Risk 多轮辩论 + CIO
 
@@ -167,12 +184,49 @@ def run_committee(
         prior_insights=prior_insights,
         sentiment_brief=sentiment_brief,
         valuation_brief=valuation_brief,
+        regime_brief=regime_brief,
+        analysis_as_of=(input_health or {}).get("prepared_at"),
+        source_macro_data=source_macro_data,
+        source_event_brief=source_event_brief,
+        historical_qualification=historical_qualification or {},
     )
+    from openinvest.core.committee.agent_io import worker_output_status
+    worker_calls=[];worker_outputs=[]
+    converged=False
+    def record_worker(role,round_label,text):
+        call={"role":role,"round":round_label,**worker_output_status(text)}
+        worker_calls.append(call);worker_outputs.append({"role":role,"round":round_label,"text":text})
+        return call
+    record_worker("macro","macro",macro_view)
+
+    def provider_abort():
+        failures=[call for call in worker_calls if call.get("used",True) and call.get("transport")=="failed"
+                  and (call.get("http_status") in {401,402,403,404} or call.get("reason")=="agent_not_constructed")]
+        if not failures:return None
+        report.cio_memo="[QUALITY_ALERT] 模型服务的账户、鉴权或模型配置不可用；后续调用已停止，本次没有可用的委员会建议。"
+        quant_raw=[row["text"] for row in worker_outputs if row["role"]=="quant"]
+        risk_raw=[row["text"] for row in worker_outputs if row["role"]=="risk"]
+        meta={"max_rounds":max_debate_rounds,"final_round":len(quant_raw),"converged":converged,
+              "worker_calls":worker_calls,"worker_outputs":worker_outputs,"quant_history":quant_raw,"risk_history":risk_raw,
+              "synthesis_performed":False,"termination":"provider_unavailable"}
+        verdict={"verdict":"UNCLEAR","confidence":0.,"alloc_cny":0,"dominant_view":None,
+                 "raw":report.cio_memo,"alloc_currency":base_currency(),"trim_reason":None,
+                 "reentry_price":None,"reentry_condition":None,"expected_path":None,
+                 "decision_status":"DATA_UNTRUSTED","hold_reason":"provider_unavailable",
+                 "proposal_available":False,"raw_market_verdict":None,
+                 "provider_failure":{"role":failures[0]["role"],"http_status":failures[0].get("http_status"),"reason":failures[0].get("reason")},
+                 "reasoning_review":{"status":"unavailable","reason":"provider_unavailable"}}
+        if persist_to_memory:_persist(report,verdict,debate_meta=meta,input_health=input_health)
+        return {"asset":sym,"verdict":verdict,"report":report,"debate":meta}
+
+    aborted=provider_abort()
+    if aborted:return aborted
 
     quant_history: List[str] = []   # Round 1, 2, ..., N
     risk_history: List[str] = []
+    from openinvest.core.committee.evidence import historical_reference_context
     regime_section = (
-        f"# 市场 Regime (事实背景 + 历史概率参考):\n{regime_brief}\n\n"
+        f"# 市场 Regime (规则分类结果，不代表风险正常):\n{historical_reference_context(regime_brief,qualification=historical_qualification,kind='regime')}\n\n"
         if regime_brief else ""
     )
 
@@ -202,6 +256,9 @@ def run_committee(
         f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n"
         f"请按 Risk Officer 格式输出风险评估。"
     )
+    from openinvest.core.committee.evidence import execution_constraints_context
+    constraint_context=execution_constraints_context(single_invest_cap,execution_constraint_facts)
+    risk_input_r1+="\n\n"+constraint_context
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,
         role="quant", asset=sym, round_label="opening",
@@ -214,6 +271,10 @@ def run_committee(
         (quant_agent_r1, quant_input_r1),
         (risk_agent_r1, risk_input_r1),
     ])
+    for role,text in (("quant",quant_r1),("risk",risk_r1)):record_worker(role,"opening",text)
+    report.quant_view=quant_r1;report.risk_view=risk_r1
+    aborted=provider_abort()
+    if aborted:return aborted
     # SENTINEL 覆写：portfolio_summary 字面给了集中度数字，LLM 仍偶发 hallucinate
     # (2026-05-20 某持仓真实 33.6% 被编成 70.2%)。这里强制改回真值。
     _true_conc = _extract_concentration_from_summary(portfolio_summary, sym)
@@ -239,16 +300,17 @@ def run_committee(
         debate_block = _format_debate_history(quant_history, risk_history)
 
         quant_input_rN = (
-            regime_section
+            quant_input_r1 + "\n\n"
             + f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
             + debate_block
             + "\n\n# 任务\n"
             + "请基于完整辩论历史调整或维持你的 SIGNAL/STRENGTH。"
-            + "REGIME 历史概率分布见 system prompt，作为背景数据参考（无方向硬锁）。"
+            + "先核对上方原始输入。改判须说明新增证据、纠错或分析期限变化；历史分组统计不能单独消除当前风险。"
             + "如果你认为意见已经稳定，重申当前判断即可。"
         )
         risk_input_rN = (
-            f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
+            risk_input_r1 + "\n\n"
+            + f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
             + debate_block
             + "\n\n# 任务\n"
             + "请基于 Quant 的最新技术信号调整或维持你的止损建议和风险评级。"
@@ -269,6 +331,10 @@ def run_committee(
             (quant_agent_rN, quant_input_rN),
             (risk_agent_rN, risk_input_rN),
         ])
+        for role,text in (("quant",quant_rN),("risk",risk_rN)):record_worker(role,f"round_{round_idx}",text)
+        report.quant_adjusted=quant_rN;report.risk_adjusted=risk_rN
+        aborted=provider_abort()
+        if aborted:return aborted
         # SENTINEL 覆写：Round 2+ 同样保护，防 LLM 在 rebuttal 里又编出新的集中度
         risk_rN = _override_concentration_in_risk_output(risk_rN, _true_conc)
         risk_rN = _strip_concentration_if_lens_off(risk_rN)
@@ -296,13 +362,16 @@ def run_committee(
 
     # ===== CIO 综合所有 =====
     emit("cio_start", asset=sym)
-    # P3 A/B: INVEST_CIO_THINKING=1 给终裁 CIO 开思考模式（分析师仍 fast path）。
-    # 默认关——委员会 4 worker 已思考过，且无 alpha 证据下加思考未必值（见 wiki 17）。
-    _cio_thinking = os.getenv("INVEST_CIO_THINKING") == "1"
+    # Final synthesis and verification need their own reasoning; analyst output
+    # is not proof that the final call already reasoned. Keep the legacy explicit
+    # 0/1 override visible, and record the actual API controls.
+    from openinvest.utils.llm import committee_role_thinking
+    _cio_thinking = committee_role_thinking("cio")
     # P1: CIO 走 DeepSeek JSON Output 结构化裁决，替正则解析（治 TRIM 负号等一类 bug）。
-    # 与思考 A/B 互斥（思考路径留文本+regex）。不支持的 provider 由下方运行时优雅回退兜底。
+    # JSON and DeepSeek thinking are compatible; enabling reasoning must not
+    # silently switch the financial proposal back to a less strict text parser.
     from openinvest.utils.llm import supports_json_output
-    _want_json = supports_json_output() and not _cio_thinking
+    _want_json = supports_json_output()
     cio_agent = _create_agent(
         build_cio_prompt(asset, json_mode=_want_json), search_enabled=False, temperature=0.1,
         role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
@@ -310,6 +379,7 @@ def run_committee(
     )
     # CIO 看完整辩论历史（不只是最后一轮），让它能识别 agent 是否在讨论中漂移
     cio_brief = report.to_cio_brief()
+    cio_brief+="\n\n"+constraint_context
     if len(quant_history) > 1:
         cio_brief += (
             "\n\n=== 完整辩论历史（含所有 cross-challenge 轮）===\n"
@@ -321,8 +391,13 @@ def run_committee(
             f"{'已收敛（连续 2 轮意见稳定）' if converged else '未收敛（达到上限）'}。"
         )
     if reentry_reference:
-        cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{reentry_reference}"
+        cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{historical_reference_context(reentry_reference,qualification=historical_qualification)}"
     report.cio_memo = _ask(cio_agent, cio_brief)
+    report.cio_attempts.append(report.cio_memo)
+    report.cio_raw_response=report.cio_memo
+    cio_call=record_worker("cio","cio",report.cio_memo)
+    aborted=provider_abort()
+    if aborted:return aborted
 
     # P1 优雅回退：JSON 模式下试解析；provider 没真支持 / 没吐合法 JSON（含 _ask 失败返回
     # 的 [WORKER_UNAVAILABLE] 哨兵）→ 退回文本模式重问一次，走 regex。DeepSeek 正常一次过。
@@ -341,6 +416,12 @@ def run_committee(
                 role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
             )
             report.cio_memo = _ask(cio_agent, cio_brief)
+            report.cio_attempts.append(report.cio_memo)
+            report.cio_raw_response=report.cio_memo
+            cio_call["used"]=False
+            record_worker("cio","cio_text_fallback",report.cio_memo)
+            aborted=provider_abort()
+            if aborted:return aborted
         else:
             # prose 保住：GUI/transcript 展示 memo 字段（缺失则留原始 JSON 文本）
             _memo = cio_fields.get("memo")
@@ -353,6 +434,7 @@ def run_committee(
         report.cio_memo,
         fields=cio_fields,
         worker_brief=cio_brief,
+        unavailable_workers=sorted({call["role"] for call in worker_calls if call.get("used",True) and call["unavailable"]}),
         current_price=current_price,
         # risk_profile / 快崩防御 后处理输入：regime 标签来自确定性 regime_brief
         # 首行；防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 腿（资产级, 调用方算好）
@@ -366,6 +448,20 @@ def run_committee(
         single_invest_cap=single_invest_cap,
     )
     cio_parsed["alloc_currency"] = base_currency()
+    from openinvest.core.committee.reasoning_quality import make_request,proposal_sources,apply_review
+    from openinvest.services.reasoning_review import review_once
+    from openinvest.utils.llm import get_llm_config_safe
+    request=make_request(sources=proposal_sources({"market_data":market_data,"macro_data":source_macro_data,
+        "event_brief":source_event_brief,"regime_brief":regime_brief,"portfolio_summary":portfolio_summary,
+        "path_reference":reentry_reference,"valuation_brief":valuation_brief,"sentiment_brief":sentiment_brief,
+        "single_invest_cap":single_invest_cap,"execution_constraint_facts":execution_constraint_facts,"analysis_as_of":report.analysis_as_of,
+        "historical_qualification":historical_qualification},
+        {"MACRO":macro_view,"QUANT_R1":quant_history[0],"QUANT_R2":quant_history[-1],"RISK_R1":risk_history[0],"RISK_R2":risk_history[-1]}),
+        proposal={"fields":cio_parsed.get("_raw_proposal") or {},"memo":report.cio_memo,"wire":report.cio_raw_response},
+        model=get_llm_config_safe()[2])
+    report.reasoning_review=review_once(request,memory_root=verification_memory_root,agent_factory=_create_agent,
+                                       ask=_ask,asset=sym,backend_allowed=True)
+    apply_review(cio_parsed,report.reasoning_review)
     # Sanity 6 钳过金额 → memo 末尾留一句人话（transcript / 邮件 / CLI 渲染的都是 memo）
     _cap_note = single_invest_cap_note(cio_parsed)
     if _cap_note:
@@ -383,6 +479,8 @@ def run_committee(
         # 真加了要改成从 agent 实例读（CR #431 建议 5）。
         "model": get_llm_config_safe()[2],
         "cio_json_mode": bool(_want_json and cio_fields is not None),
+        "worker_calls":worker_calls,
+        "worker_outputs":worker_outputs,
     }
     if persist_to_memory:
         _persist(report, cio_parsed, debate_meta=debate_meta, input_health=input_health)

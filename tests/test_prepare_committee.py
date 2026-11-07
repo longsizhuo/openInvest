@@ -78,6 +78,22 @@ def _mock_world(monkeypatch):
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, {}))
 
 
+def test_prepare_cio_source_evidence_is_in_frozen_prompt(_mock_world):
+    from datetime import datetime
+    from openinvest.core.runner.coordinator import prepare_committee_brief
+    from openinvest.core.memory_store import MemoryStore
+
+    out = prepare_committee_brief("TEST.AX")
+    prompt = out["prompts"]["cio"]
+    assert "MOCK_MARKET" in prompt
+    assert out["regime_brief"] in prompt
+    assert f"ANALYSIS_AS_OF: {out['analysis_as_of']}" in prompt
+    assert datetime.fromisoformat(out["analysis_as_of"]).tzinfo is not None
+    evidence = json.loads((MemoryStore().root / ".evidence/contexts" / f"{out['context_id']}.json").read_text())
+    assert evidence["payload"]["inputs"]["prompts"]["cio"] == prompt
+    assert evidence["payload"]["inputs"]["cio_source_context"] == out["cio_source_context"]
+
+
 def test_prepare_committee_emits_deterministic_blocks(_mock_world, capfd):
     """prepare 输出必须含 sentiment/valuation/reentry 三个 key，且 instructions
     指导 coordinator 把它们粘进 Quant/CIO prompt（缺了防御链在该路径失效）。
@@ -85,6 +101,9 @@ def test_prepare_committee_emits_deterministic_blocks(_mock_world, capfd):
     用 capfd 而非 capsys：_print_json 直写 sys.__stdout__（fd 级）绕过 capsys。
     """
     from openinvest.cli import cmd_prepare_committee
+    from tests.integrity_helpers import approve_historical_generator
+    from openinvest.core.memory_store import MemoryStore
+    approve_historical_generator(MemoryStore().data_root)
 
     cmd_prepare_committee(argparse.Namespace(symbol="TEST.AX"))
     raw = capfd.readouterr().out
