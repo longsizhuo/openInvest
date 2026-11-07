@@ -227,7 +227,12 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     except Exception:  # noqa: BLE001  路径参考读失败不阻断 prepare
         pass
 
+    from openinvest.core.decision_evidence import utc_now
+    from openinvest.core.committee.evidence import cio_source_context
+    analysis_as_of = utc_now().isoformat()
+    source_context = cio_source_context(market, regime_brief, analysis_as_of)
     facts = {
+        "analysis_as_of": analysis_as_of, "cio_source_context": source_context,
         "regime_brief": regime_brief, "sentiment_brief": sentiment_brief,
         "path_profile": path_profile, "atr_pct": metrics.get("atr_pct"),
         "path_reference": reentry_reference,
@@ -251,7 +256,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "risk_round1": build_risk_officer_prompt(target, "opening"),
         "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),
         "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal"),
-        "cio": build_cio_prompt(target),
+        "cio": build_cio_prompt(target) + "\n\n" + source_context,
     }
     context = prepare_context(pm.store.root, symbol, {**facts, "prompts": prompts, "provider": provider},
                               model=model or "unknown", expected_state=prepared_state)
@@ -259,6 +264,8 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     return {
         "context_id": context["context_id"],
         "context_prepared_at": context["prepared_at"],
+        "analysis_as_of": analysis_as_of,
+        "cio_source_context": source_context,
         "context_requirement": "Submit this exact context_id. A later prepare for the same symbol must not replace it.",
         "model_requirement": "Declare the actual model/composition in prepare and submit. Unknown identity cannot inherit another model's learned insights.",
         "asset": target,
@@ -288,7 +295,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
             "Claude: 这是 Investment Committee 的 3 轮流程：\n"
             "  Round 1 - 独立陈述: Macro (跨资产共享) + Quant + Risk Officer 各自看自己的数据\n"
             "  Round 2 - 横向交流: Quant 看到 Risk 报告后调整 + Risk 看到 Quant 报告后调整\n"
-            "  Round 3 - CIO 综合 4 份输出 + portfolio_summary，输出完整 memo\n"
+            "  Round 3 - CIO 综合 4 份输出 + portfolio_summary，按 prompts.cio 中的原始数据与分析时间核对，输出完整 memo\n"
             "**Macro 必须塞 event_brief**（与 Direct 路径 run_macro_view 同口径）: prompt 模板:\n"
             '  "<paste prompts.macro_strategist>\\n\\n# 当前宏观数据参考:\\n<paste macro_data>'
             '\\n\\n## 当前事件上下文（按时间排序，最新在前；可能含 supersedes 标记）\\n<paste event_brief>"\n'

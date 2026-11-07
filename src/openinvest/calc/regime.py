@@ -94,7 +94,7 @@ def classify_regime(
                         + 价格仍在低位（分位 < recovery_quantile_max）
         3. uptrend    — MA spread% ÷ atr_pct_median_1y ≥ +trend_spread_atr_ratio
         4. downtrend  — 同上 ≤ -trend_spread_atr_ratio（趋势必须盖过自身噪声地板）
-        5. range_bound — 默认（MA 纠缠 + 波动正常）
+        5. range_bound — 未满足上述分类阈值；不代表波动或下跌风险正常
         6. unknown    — 缺关键数据
     """
     thresholds = get_thresholds()
@@ -233,7 +233,7 @@ def classify_regime(
         "regime": "range_bound",
         "reason": (
             f"趋势强度不足：MA spread {ma_spread_pct:+.2f}% 折合 {spread_norm:+.1f} 个典型日波"
-            f"（|{spread_norm:.1f}| < {thresholds['trend_spread_atr_ratio']}×），波动正常"
+            f"（|{spread_norm:.1f}| < {thresholds['trend_spread_atr_ratio']}×）；未满足趋势分类阈值，不代表波动或下跌风险正常"
         ),
         "inputs_used": inputs_used,
         "thresholds_used": thresholds,

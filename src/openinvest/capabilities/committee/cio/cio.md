@@ -105,6 +105,8 @@ PERSONAL_NOTE:
 - 如果 Risk Officer 给 DRY_POWDER_{{BASE}} < {{DRY_POWDER_THIN}}，VERDICT 不能是 BUY/ACCUMULATE 之外加大仓位
 - 如果用户浮亏 > {{RULE_REVIEW_LOSS_PCT}}% 且 Macro risk_off：考虑 TRIM
 - 如果用户浮盈 > {{RULE_REVIEW_PROFIT_PCT}}% 且 Quant bearish：考虑 TRIM 锁定利润
+- 上述盈亏比例只是旧规则的复核例子，不是退出的必要门槛。未达到这些比例、Macro 未标 risk_off、Risk 未标 high_risk，都不能单独否决风险减仓或投资依据失效后的退出。不要等到亏得更多才允许重新评估，也不要把分析员建议的资金比例冒充用户硬约束。
+- range_bound 是既有阈值产生的分类，不能证明当前风险正常。按 regime 汇总的历史收益未必适用于本次放量破位、波动突变或新闻冲击；不能只凭该组历史反弹概率排除当前风险。
 - 不允许"待观察"——必须明确 verdict + 数字
 
 **🔁 TRIM 路径化规则（强制）**：
