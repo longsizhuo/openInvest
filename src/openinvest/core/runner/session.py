@@ -319,7 +319,8 @@ def run_committee_for_symbol(
     if not _advisory:
         from openinvest.services.review_plans import plan_brief, observe_prepared_market
         observe_prepared_market(pm.store, symbol, df)
-        portfolio_summary += plan_brief(pm.store, symbol)
+        existing_plans=plan_brief(pm.store, symbol)
+        portfolio_summary += existing_plans
         from openinvest.core.decision_evidence import prepare_context, market_snapshot, utc_now
         from openinvest.services.agent_queue import bind_context_requests
         from openinvest.utils.llm import get_llm_config_safe
@@ -332,6 +333,7 @@ def run_committee_for_symbol(
             "input_health": input_health, "defense_dca": defense_dca,
             "ohlcv_snapshot": market_snapshot(df),
             "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
+            "source_plan_refs":getattr(existing_plans,'plan_refs',[]),
             "trigger_requests":bind_context_requests(pm.store.root,symbol,effective_event_brief,utc_now().isoformat()),
         }, model=get_llm_config_safe()[2] or "unknown", expected_state=prepared_state)
         input_health = {**input_health, "context_id": context["context_id"],

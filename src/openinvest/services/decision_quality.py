@@ -101,9 +101,17 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
             ident=review.get("request_sha256") or rows[-1][0].date().isoformat()
             out.append({"key":f"quality:reasoning_review:{symbol}:{ident}","since":rows[-1][0],"one_shot":True,
                         "text":f"[QUALITY_ALERT] {symbol} 原提案仍待核验（{review.get('status','execution_or_reasoning_review_required')}）。原始判断已保留，当前不具备执行资格；这不是普通 HOLD，也不是已证实的预测错误。"})
+    plan_audit={'memo':{},'nodes':0,'code_version':None}
     for path in (root / ".state").glob("review_plan_*.json"):
         try:
             p = json.loads(path.read_text())
+            from openinvest.services.review_plans import plan_qualification
+            from openinvest.core.memory_store import MemoryStore
+            plan_audit['nodes']=0
+            qualification=plan_qualification(MemoryStore(root),p.get('symbol',''),p,purpose=p.get('purpose','review'),_audit=plan_audit)
+            if not qualification['allowed']:
+                out.append({'key':f"quality:plan_parent:{p.get('plan_id',path.stem)}",'since':datetime.fromisoformat(p['changed_at']),
+                            'one_shot':True,'text':f"[QUALITY_ALERT] {p.get('symbol',path.stem)} 旧生成计划的父决策、来源或条件绑定尚未通过核对，旧目标仅供审计，不能当作用户限制或继续等待的依据。"})
             if p.get("state") == "active" and datetime.fromisoformat(p["spec"]["expires_at"]) <= datetime.now(timezone.utc):
                 out.append({"key": f"quality:plan_expiry:{p['plan_id']}", "since": datetime.fromisoformat(p["spec"]["expires_at"]),
                             "text": f"[QUALITY_ALERT] {p.get('symbol',path.stem)} 等待计划已到期；报价不可用也必须复核。"})

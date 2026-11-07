@@ -184,7 +184,8 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
                                                excluded=unvalued(_value_status))
     from openinvest.services.review_plans import plan_brief, observe_prepared_market
     observe_prepared_market(pm.store, symbol, df_target)
-    portfolio_summary += plan_brief(pm.store, symbol)
+    existing_plans=plan_brief(pm.store, symbol)
+    portfolio_summary += existing_plans
     from openinvest.core.evidence_eligibility import model_scope
     with model_scope(f"{provider}:{model or 'unknown'}"):
         insights = load_prior_insights(target, pm)
@@ -242,6 +243,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "regime_brief": regime_brief, "sentiment_brief": sentiment_brief,
         "path_profile": path_profile, "atr_pct": metrics.get("atr_pct"),
         "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
+        "source_plan_refs":getattr(existing_plans,'plan_refs',[]),
         "path_reference": reentry_reference,
         "current_price": metrics.get("current_price"),
         "ohlcv_snapshot": market_snapshot(df_target),
