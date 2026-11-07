@@ -501,6 +501,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("snapshot_id")
     p.set_defaults(func=cmd_source_snapshot)
 
+    p=sub.add_parser("committee_review",help="只读取回本实例已保存的完整原提案与绑定核验请求，不重新生成委员会")
+    p.add_argument("context_id")
+    p.set_defaults(func=cmd_committee_review)
+
     p = sub.add_parser("pending_committees",
                        help="agent 模式：事件 / 价格触发、等你跑的委员会重跑请求")
     p.set_defaults(func=cmd_pending_committees)

@@ -67,4 +67,6 @@ Use `submit_committee` or the returned `save_command --context-id <context_id>`.
 
 If submission returns `verification_required`, the six original sections are a saved draft. Delegate a separate isolated worker with the returned `system_prompt` and `user_prompt`; it checks source/logic only and must not choose a trade. Submit its JSON as `reasoning_review_json` with the **unchanged original transcript and context_id** (CLI: `--reasoning-review-file`). Repeatedly generating CIO until a preferred action or passing judgment appears is forbidden. A verification request is not completed advice; unavailable or malformed verification remains visible.
 
+For a later task, use `committee_review CONTEXT_ID` / MCP `committee_review(context_id=...)` (hosted: `analysis_id=...`) to retrieve the exact original transcript and issued packet. `resume_allowed` must be true. A missing original is an explicit audit/recovery gap; do not guess its bytes from summaries or repeat the committee to seek approval.
+
 `DATA_UNTRUSTED`, `REVIEW_REQUIRED`, delivery failure and an expired or triggered plan require explicit reporting even when the financial allocation is zero. Ordinary HOLD silence does not silence risk or quality alerts. Delivery is established by channel receipts, not by calling a send function. A review condition or investment verdict does not authorize an order.

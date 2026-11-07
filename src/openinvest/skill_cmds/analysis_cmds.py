@@ -41,6 +41,7 @@ __all__ = [
     "cmd_collect_news",
     "cmd_event_history",
     "cmd_source_snapshot",
+    "cmd_committee_review",
     "cmd_pending_committees",
     "cmd_news_sources",
     "cmd_decisions",
@@ -408,6 +409,17 @@ def cmd_source_snapshot(args):
     try:_print_json({"status":"ok",**source_snapshot(args.snapshot_id)})
     except (ValueError,OSError) as exc:
         _print_json({"status":"unavailable","reason":str(exc)});sys.exit(1)
+
+
+def cmd_committee_review(args) -> None:
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.utils.advisory import is_advisory_mode
+    from openinvest.services.reasoning_review import submitted_review
+    if is_advisory_mode():
+        _print_json({"status":"unavailable","reason":"private_review_context"});sys.exit(1)
+    try:_print_json(submitted_review(MemoryStore().root,args.context_id))
+    except (ValueError,OSError,KeyError,TypeError):
+        _print_json({"status":"unavailable","reason":"bound_review_retrieval_failed"});sys.exit(1)
 
 
 def cmd_pending_committees(args) -> None:

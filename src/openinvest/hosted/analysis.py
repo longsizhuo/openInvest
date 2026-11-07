@@ -1,5 +1,5 @@
 """Durable per-ledger analysis receipts and immutable preparation evidence."""
-from contextlib import contextmanager
+from contextlib import contextmanager,closing
 import hashlib
 from importlib.metadata import version
 import json
@@ -159,6 +159,20 @@ def submit(call, symbol, transcript, provider, model, analysis_id, *, reasoning_
                                 "peer_signature":peer_signature,"state":"awaiting_verification" if waiting else "done",
                                 "response": result}, default=str), analysis_id))
         return result
+
+
+def review_packet(analysis_id):
+    import re
+    if not re.fullmatch(r"[a-f0-9]{32}",analysis_id or ""):raise ValueError("invalid_analysis_id")
+    path=root()/"db/hosted_analyses.sqlite3"
+    if not path.exists():raise ValueError("unknown_analysis")
+    with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True)) as connection:
+        row=connection.execute("SELECT state,facts FROM analyses WHERE id=?",(analysis_id,)).fetchone()
+    if row is None:raise ValueError("unknown_analysis")
+    from openinvest.services.reasoning_review import submitted_review
+    result=submitted_review(root()/"memory",json.loads(row[1])["context_id"])
+    if row[0]!="prepared":result.update(status="audit_only",resume_allowed=False)
+    return {**result,"analysis_id":analysis_id}
 
 
 def evidence_for(analysis_id):

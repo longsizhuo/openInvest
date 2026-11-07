@@ -97,7 +97,7 @@ def _tool(**options):
                 return fn
             import inspect
             # The resource boundary requires client-owned retry keys only in hosted mode.
-            required = {"idempotency_key"} if fn.__name__ in MONEY else {"analysis_id"} if fn.__name__ == "submit_committee" else set()
+            required = {"idempotency_key"} if fn.__name__ in MONEY else {"analysis_id"} if fn.__name__ in {"submit_committee","committee_review"} else set()
             if required:
                 signature = inspect.signature(fn, eval_str=True)
                 fn.__signature__ = signature.replace(parameters=[
@@ -591,6 +591,23 @@ def source_snapshot(snapshot_id: Annotated[str,Field(description="Exact source_s
     from openinvest.services.news_collection import source_snapshot as load
     try:return {"status":"ok",**load(snapshot_id)}
     except (ValueError,OSError) as exc:return {"status":"unavailable","reason":str(exc)}
+
+
+@_tool(annotations=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True))
+def committee_review(
+    context_id: Annotated[str,Field(description="Exact local context_id for a previously submitted draft.")] = "",
+    analysis_id: Annotated[Optional[str],Field(description="Hosted business analysis identifier from prepare_committee.")] = None,
+) -> Dict[str,Any]:
+    """Retrieve an owned, unchanged proposal and its issued review packet; no completion or model call."""
+    _check_advisory()
+    try:
+        if os.getenv("INVEST_HOSTED_WORKER")=="1":
+            from openinvest.hosted.analysis import review_packet
+            return review_packet(analysis_id)
+        from openinvest.services.reasoning_review import submitted_review
+        from openinvest.core.memory_store import MemoryStore
+        return submitted_review(MemoryStore().root,context_id)
+    except (ValueError,OSError,KeyError,TypeError):return {"status":"unavailable","reason":"bound_review_retrieval_failed","current_advice_valid":False}
 
 
 @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
