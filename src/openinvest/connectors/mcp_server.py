@@ -1310,7 +1310,7 @@ def submit_committee(
     provider: Annotated[str, Field(description="Which agent played the roles, e.g. 'hermes', 'claude', 'codex'.")] = "agent",
     model: Annotated[str, Field(description="Model that actually played the roles, e.g. 'claude-sonnet-5-5'; omitted -> recorded as 'unknown'. The scorecard buckets verdicts by provider:model.")] = "",
     context_id: Annotated[str, Field(description="Exact context_id returned by prepare_committee; required to bind inputs and rules to this submission.")] = "",
-    reasoning_review_json: Annotated[Optional[str],Field(description="Independent review JSON for the exact verification_request returned by an earlier submission; submit the unchanged original transcript.")] = None,
+    reasoning_review_json: Annotated[str,Field(description="Independent review JSON for the exact verification_request returned by an earlier submission; submit the unchanged original transcript. Omit for the first submission.")] = "",
 ) -> Dict[str, Any]:
     """Step 2 of the agent-run committee: hand in the transcript you produced
     from `prepare_committee`. The backend parses the CIO memo, applies the same
@@ -1334,7 +1334,7 @@ def submit_committee(
     if not transcript.strip():
         raise ToolError("transcript is empty")
     try:
-        res = save_committee_transcript(symbol, transcript, provider=provider, model=model, context_id=context_id,reasoning_review_json=reasoning_review_json)
+        res = save_committee_transcript(symbol, transcript, provider=provider, model=model, context_id=context_id,reasoning_review_json=reasoning_review_json or None)
     except ValueError as e:
         raise ToolError(str(e)) from e
     if res.get("status")=="verification_required":return res

@@ -60,6 +60,42 @@ def test_every_tool_dispatches_off_the_event_loop():
     assert [t.name for t in mcp._tool_manager.list_tools() if not t.is_async] == []
 
 
+def test_real_mcp_argument_validation_preserves_review_json_as_text(monkeypatch):
+    import json
+    from openinvest.connectors.mcp_server import mcp
+    calls=[]
+    def save(*args,**kwargs):
+        calls.append(kwargs)
+        return {'status':'verification_required'}
+    monkeypatch.setattr('openinvest.core.committee_runner.save_committee_transcript',save)
+    raw=json.dumps({'request_sha256':'a'*64,'checks':{},'issues':[]})
+    asyncio.run(mcp.call_tool('submit_committee',{'symbol':'SYNTHETIC','transcript':'Synthetic complete protocol',
+        'context_id':'b'*32,'reasoning_review_json':raw}))
+    assert calls[0]['reasoning_review_json']==raw and isinstance(calls[0]['reasoning_review_json'],str)
+    asyncio.run(mcp.call_tool('submit_committee',{'symbol':'SYNTHETIC','transcript':'Synthetic complete protocol','context_id':'b'*32}))
+    assert calls[1]['reasoning_review_json'] is None
+
+
+def test_review_json_survives_the_http_mcp_transport(monkeypatch):
+    import json
+    from starlette.testclient import TestClient
+    from openinvest.connectors.mcp_server import mcp
+    monkeypatch.setattr(mcp.settings,'stateless_http',True)
+    monkeypatch.setattr(mcp.settings.transport_security,'enable_dns_rebinding_protection',False)
+    monkeypatch.setattr(mcp,'_session_manager',None)
+    calls=[]
+    def save(*args,**kwargs):calls.append(kwargs);return {'status':'verification_required'}
+    monkeypatch.setattr('openinvest.core.committee_runner.save_committee_transcript',save)
+    raw=json.dumps({'request_sha256':'a'*64,'checks':{},'issues':[]})
+    with TestClient(mcp.streamable_http_app()) as client:
+        result=client.post('/mcp',headers={'Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-03-26'},
+            json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'submit_committee','arguments':{
+                'symbol':'SYNTHETIC','transcript':'Synthetic protocol','context_id':'b'*32,'reasoning_review_json':raw}}})
+        message=json.loads(next(line[5:].strip() for line in result.text.splitlines() if line.startswith('data:')))
+        assert result.status_code==200 and not message['result'].get('isError')
+    assert calls[0]['reasoning_review_json']==raw
+
+
 READONLY_TOOLS = {
     "source_snapshot",
     "event_history",
