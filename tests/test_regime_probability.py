@@ -212,7 +212,7 @@ def test_build_reentry_reference_text_marks_unavailable(tmp_path):
     ]
     p = _write_reviews(tmp_path, recs)
     txt = build_reentry_reference_text("GC=F", "range_bound", 1000.0,
-                                       source="verdict_review", jsonl_path=p)
+                                       source="verdict_review", jsonl_path=p,purpose="audit")
     assert "30d" in txt
     assert "90d: 历史样本不足 / unavailable" in txt
 
@@ -307,7 +307,8 @@ def test_effective_n_overlapping_window_downweights_confidence():
     assert rp_lo.effective_n == 6           # 200 // 30
     assert rp_lo.low_confidence is True      # 6 < 10 —— 原始 n=200 不会标，effective_n 会
     # 文案标注重叠窗口独立样本
-    assert "重叠窗口独立≈6" in rp_lo.summary_line()
+    assert "重叠样本量启发式≈6" in rp_lo.summary_line()
+    assert "不是独立样本证明" in rp_lo.summary_line()
 
 
 def test_build_probability_table_from_ohlc_stubbed(monkeypatch):
@@ -569,7 +570,7 @@ def test_build_reentry_reference_text_ohlc_multi_window_with_shape(monkeypatch):
     frame = compute_regime_return_frame(df, "TEST", windows=("90d",))
     regime = frame.loc[frame["regime"] != "unknown", "regime"].mode().iat[0]
 
-    txt = build_reentry_reference_text("TEST", regime, 1000.0)
+    txt = build_reentry_reference_text("TEST", regime, 1000.0,purpose="audit")
     assert "30d" in txt and "60d" in txt and "90d" in txt
     assert "路径形状" in txt
     assert "先跌后涨" in txt
@@ -677,12 +678,12 @@ def test_forward_summary_and_path_reference_share_calibration(monkeypatch):
 
     _frame, regimes = _random_walk_store(monkeypatch)
     set_config_override({"path": {"shrinkage_k": 0.0, "band_gamma": 1.0}})
-    raw = {rg: get_regime_forward_summary("TEST", rg, 100.0) for rg in regimes}
+    raw = {rg: get_regime_forward_summary("TEST", rg, 100.0,purpose="audit") for rg in regimes}
     set_config_override({"path": {"shrinkage_k": 80.0, "band_gamma": 1.1}})
     checked = moved = 0
     for rg in regimes:
-        _text, profile = build_reentry_reference("TEST", rg, 100.0)
-        hint = get_regime_forward_summary("TEST", rg, 100.0)
+        _text, profile = build_reentry_reference("TEST", rg, 100.0,purpose="audit")
+        hint = get_regime_forward_summary("TEST", rg, 100.0,purpose="audit")
         if profile is None or "30d" not in profile["windows"]:
             assert hint is None
             continue

@@ -41,20 +41,43 @@ G_GRID = (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6)
 TARGET = 0.80
 
 
-def load_rows():
-    path = MemoryStore().root / ".dreams" / "path_review.jsonl"
+def load_rows(*, diagnostic=False):
+    store=MemoryStore()
+    path = store.root / ".dreams" / "path_review.jsonl"
+    from openinvest.core.evidence_eligibility import Eligibility,digest
+    gate=Eligibility(store.data_root)
     out = []
+    seen={}
     for line in path.open():
         r = json.loads(line)
+        if r.get("source")!="recompute":continue
         for w, x in r.get("windows", {}).items():
             if "pred" not in x or "uncond" not in x:
                 continue
+            if x.get("pred_kind")!="raw_conditional" or not x.get("label_end"):
+                continue  # Legacy provenance remains auditable, never guessed into a fit contract.
+            key=(r["asset"],r["date"],w)
+            payload={"sample":r,"window":w}
+            if key in seen:
+                if seen[key]!=digest(payload):raise ValueError("conflicting duplicate calibration sample")
+                continue
+            seen[key]=digest(payload)
+            artifact="path_sample:"+":".join(key)
+            if artifact in gate.excluded_ids():continue
+            if not diagnostic and not gate.allows(artifact,payload,"learn"):continue
             out.append({
                 "date": r["date"], "asset": r["asset"], "window": w,
                 "fwd": x["fwd_real"], "below": x["below_current"],
                 "pred": x["pred"], "uncond": x["uncond"],
+                "label_end":x["label_end"],"regime":r.get("regime"),
             })
     return out
+
+
+def temporal_split(rows):
+    fit=[r for r in rows if r["date"]<=FIT_END and r["label_end"]<=FIT_END]
+    oos=[r for r in rows if r["date"]>FIT_END]
+    return fit,oos,[r for r in rows if r["date"]<=FIT_END<r["label_end"]]
 
 
 def apply_calibration(row, k: float, g: float):
@@ -90,12 +113,16 @@ def evaluate(rows, k: float, g: float):
 
 
 def main():
-    rows = load_rows()
-    fit = [r for r in rows if r["date"] <= FIT_END]
-    oos = [r for r in rows if r["date"] > FIT_END]
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--diagnostic",action="store_true",help="Inspect raw reconstructed samples without granting learning or publication eligibility")
+    args=parser.parse_args()
+    rows = load_rows(diagnostic=args.diagnostic)
+    fit,oos,purged=temporal_split(rows)
+    print(f"label windows crossing fit/OOS boundary purged={len(purged)}; overlapping rows are not independent observations")
     print(f"rows: fit={len(fit)//3 if fit else 0}×3窗  oos={len(oos)//3 if oos else 0}×3窗")
     if not fit or not oos:
-        print("数据不足，先跑 jobs/path_review.py --recompute-weekly-since 2005-01-01")
+        print("合格原始样本不足；需核对来源、算法/数据版本、标签成熟时间与资格，重算不自动恢复历史可得性。")
         return
 
     # 网格搜索（fit 时代）
@@ -127,12 +154,10 @@ def main():
                   if w in cal_oos and 0.75 <= cal_oos[w]["coverage"] <= 0.85)
     brier_ok = all(cal_oos[w]["brier"] <= raw_oos[w]["brier"] + 1e-9
                    for w in WINDOWS if w in cal_oos)
-    verdict = "PASS" if (in_band >= 2 and brier_ok) else "FAIL"
+    verdict = "DIAGNOSTIC_PASS" if (in_band >= 2 and brier_ok) else "DIAGNOSTIC_FAIL"
     print(f"\n预注册验收：OOS 覆盖落 [75%,85%] 的窗数 = {in_band}/3（需≥2），"
           f"Brier 全窗不劣化 = {brier_ok}")
-    print(f"=> {verdict}"
-          + ("：可写入 defaults.yaml path 节" if verdict == "PASS"
-             else "：保持禁用，结论落文档"))
+    print(f"=> {verdict}：仅作研究诊断，不授权写入 defaults.yaml；发布另需冻结协议、未耗尽评估集及独立验收。")
 
 
 if __name__ == "__main__":

@@ -1198,6 +1198,9 @@ def test_committee_prepare_returns_self_contained_brief(skill_client, monkeypatc
     monkeypatch.setattr(drb, "portfolio_summary_text", lambda *a, **k: "MOCK_PORTFOLIO")
     monkeypatch.setattr(fx, "total_portfolio_value_cny", lambda *a, **k: (0.0, {}))
 
+    from tests.integrity_helpers import approve_historical_generator
+    from openinvest.core.memory_store import MemoryStore
+    approve_historical_generator(MemoryStore().data_root)
     r = skill_client.post("/api/committee/prepare", json={"symbol": "NDQ.AX"})
     assert r.status_code == 200
     b = r.json()

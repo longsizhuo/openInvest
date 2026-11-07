@@ -69,6 +69,7 @@ class CommitteeReport:
     analysis_as_of: Optional[str] = None
     source_macro_data: str = ""
     source_event_brief: str = ""
+    historical_qualification: Dict[str,Any] = field(default_factory=dict)
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
@@ -76,7 +77,8 @@ class CommitteeReport:
         lines = [
             f"=== ASSET: {self.asset.get('display_name', self.asset.get('symbol'))} ===",
             cio_source_context(self.market_data, self.regime_brief, self.analysis_as_of,
-                               macro_data=self.source_macro_data, event_brief=self.source_event_brief),
+                               macro_data=self.source_macro_data, event_brief=self.source_event_brief,
+                               historical_qualification=self.historical_qualification),
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
         ]
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
@@ -133,6 +135,7 @@ def run_committee(
     source_event_brief: str = "",
     verification_memory_root=None,
     execution_constraint_facts=None,
+    historical_qualification=None,
 ) -> Dict[str, Any]:
     """对单个资产跑 Macro + Quant/Risk 多轮辩论 + CIO
 
@@ -185,12 +188,14 @@ def run_committee(
         analysis_as_of=(input_health or {}).get("prepared_at"),
         source_macro_data=source_macro_data,
         source_event_brief=source_event_brief,
+        historical_qualification=historical_qualification or {},
     )
 
     quant_history: List[str] = []   # Round 1, 2, ..., N
     risk_history: List[str] = []
+    from openinvest.core.committee.evidence import historical_reference_context
     regime_section = (
-        f"# 市场 Regime (规则分类结果 + 历史统计参考，不代表风险正常):\n{regime_brief}\n\n"
+        f"# 市场 Regime (规则分类结果，不代表风险正常):\n{historical_reference_context(regime_brief,qualification=historical_qualification,kind='regime')}\n\n"
         if regime_brief else ""
     )
 
@@ -318,13 +323,16 @@ def run_committee(
 
     # ===== CIO 综合所有 =====
     emit("cio_start", asset=sym)
-    # P3 A/B: INVEST_CIO_THINKING=1 给终裁 CIO 开思考模式（分析师仍 fast path）。
-    # 默认关——委员会 4 worker 已思考过，且无 alpha 证据下加思考未必值（见 wiki 17）。
-    _cio_thinking = os.getenv("INVEST_CIO_THINKING") == "1"
+    # Final synthesis and verification need their own reasoning; analyst output
+    # is not proof that the final call already reasoned. Keep the legacy explicit
+    # 0/1 override visible, and record the actual API controls.
+    from openinvest.utils.llm import committee_role_thinking
+    _cio_thinking = committee_role_thinking("cio")
     # P1: CIO 走 DeepSeek JSON Output 结构化裁决，替正则解析（治 TRIM 负号等一类 bug）。
-    # 与思考 A/B 互斥（思考路径留文本+regex）。不支持的 provider 由下方运行时优雅回退兜底。
+    # JSON and DeepSeek thinking are compatible; enabling reasoning must not
+    # silently switch the financial proposal back to a less strict text parser.
     from openinvest.utils.llm import supports_json_output
-    _want_json = supports_json_output() and not _cio_thinking
+    _want_json = supports_json_output()
     cio_agent = _create_agent(
         build_cio_prompt(asset, json_mode=_want_json), search_enabled=False, temperature=0.1,
         role="cio", asset=sym, round_label="cio", enable_thinking=_cio_thinking,
@@ -344,7 +352,7 @@ def run_committee(
             f"{'已收敛（连续 2 轮意见稳定）' if converged else '未收敛（达到上限）'}。"
         )
     if reentry_reference:
-        cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{reentry_reference}"
+        cio_brief += f"\n\n=== 卖出后路径 / 买回点参考 ===\n{historical_reference_context(reentry_reference,qualification=historical_qualification)}"
     report.cio_memo = _ask(cio_agent, cio_brief)
     report.cio_attempts.append(report.cio_memo)
     report.cio_raw_response=report.cio_memo
@@ -399,7 +407,8 @@ def run_committee(
     request=make_request(sources=proposal_sources({"market_data":market_data,"macro_data":source_macro_data,
         "event_brief":source_event_brief,"regime_brief":regime_brief,"portfolio_summary":portfolio_summary,
         "path_reference":reentry_reference,"valuation_brief":valuation_brief,"sentiment_brief":sentiment_brief,
-        "single_invest_cap":single_invest_cap,"execution_constraint_facts":execution_constraint_facts,"analysis_as_of":report.analysis_as_of},
+        "single_invest_cap":single_invest_cap,"execution_constraint_facts":execution_constraint_facts,"analysis_as_of":report.analysis_as_of,
+        "historical_qualification":historical_qualification},
         {"MACRO":macro_view,"QUANT_R1":quant_history[0],"QUANT_R2":quant_history[-1],"RISK_R1":risk_history[0],"RISK_R2":risk_history[-1]}),
         proposal={"fields":cio_parsed.get("_raw_proposal") or {},"memo":report.cio_memo,"wire":report.cio_raw_response},
         model=get_llm_config_safe()[2])

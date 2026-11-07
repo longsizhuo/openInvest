@@ -36,7 +36,7 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
     from openinvest.core.decision_evidence import _plain
     from pathlib import Path
     import hashlib
-    from openinvest.utils.llm import get_llm_config_safe
+    from openinvest.utils.llm import get_llm_config_safe,committee_role_thinking
     proposal=_plain(proposal)
     _,endpoint,runtime_model,provider=get_llm_config_safe()
     packet={"policy":POLICY,"sources":sources,"proposal":proposal,"verifier_model":model,
@@ -44,7 +44,7 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
                 "implementation_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "schema_version":1,"provider":provider,"runtime_model":runtime_model,
                 "endpoint_sha256":hashlib.sha256(str(endpoint).encode()).hexdigest(),
-                "temperature":0.0,"thinking":False,"response_format":{"type":"json_object"}},
+                "temperature":0.0,"thinking":committee_role_thinking("reasoning_verifier"),"response_format":{"type":"json_object"}},
             "required_checks":sorted(CHECKS),"issue_codes":sorted(CODES)}
     return {**packet,"request_sha256":digest(packet)}
 
@@ -59,6 +59,10 @@ def proposal_sources(facts:dict,sections:dict) -> dict:
                           ("terminal","path_reference","terminal_statistics_not_first_touch"),
                           ("valuation","valuation_brief","valuation_input"),("sentiment","sentiment_brief","sentiment_input")]:
         value=str(facts.get(key) or "")
+        if name in ("regime","terminal"):
+            from openinvest.core.committee.evidence import historical_reference_context
+            value=historical_reference_context(value,qualification=facts.get("historical_qualification"),
+                kind="regime" if name=="regime" else "path")
         sources[name]={"kind":kind,"text":value or "not_provided"}
     portfolio=str(facts.get("portfolio_summary") or "")
     user,marker,plans=portfolio.partition("=== EXISTING REVIEW PLAN ===")
@@ -142,8 +146,9 @@ def apply_review(verdict:dict,review:dict) -> None:
 
 
 def call_review(request,*,agent_factory,ask,asset):
+    from openinvest.utils.llm import committee_role_thinking
     agent=agent_factory(SYSTEM_PROMPT,search_enabled=False,temperature=0.0,role="reasoning_verifier",asset=asset,
-                        round_label="cio_quality",enable_thinking=False,response_format={"type":"json_object"})
+                        round_label="cio_quality",enable_thinking=committee_role_thinking("reasoning_verifier"),response_format={"type":"json_object"})
     if agent is None:
         return {"status":"unavailable","policy":POLICY,"request_sha256":request["request_sha256"],"reason":"verifier_capability_unavailable"}
     raw=ask(agent,json.dumps(request,ensure_ascii=False,sort_keys=True))

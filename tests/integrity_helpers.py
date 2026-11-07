@@ -6,6 +6,13 @@ from openinvest.core.memory_store import MemoryStore
 from tests.test_evidence_eligibility import approve
 
 
+def approve_historical_generator(root):
+    from openinvest.services.historical_evidence import ARTIFACT,model_specification
+    parents=["dataset:synthetic-history","evaluation:synthetic-temporal-test","protocol:synthetic-preregistered"]
+    for parent in parents:approve(root,parent,{"synthetic":parent})
+    approve(root,ARTIFACT,model_specification(),parents=parents)
+
+
 def context_id(symbol, **facts):
     data = {"current_price": 100.0, "price_last_bar": datetime.now(timezone.utc).isoformat(),
             "regime_brief": "REGIME: range_bound", "sentiment_brief": "INDEP_DEFENSE_FLAG: off",

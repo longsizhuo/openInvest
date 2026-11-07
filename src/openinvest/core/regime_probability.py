@@ -240,6 +240,7 @@ def get_regime_forward_summary(
     current_price: Optional[float],
     *,
     window: str = "30d",
+    purpose: str = "advice",
 ) -> Optional[Dict[str, Any]]:
     """给 regime_brief 的 STRATEGY_HINT 用的中性概率口径。
 
@@ -252,15 +253,24 @@ def get_regime_forward_summary(
     "该 regime 历史 30d forward return：中位X%、期末低于现价概率Y%、样本n"，让 LLM
     基于数据判断方向。源走 OHLC（0 token，与概率表同源）。
     """
-    est = get_reentry_estimate(asset, regime, current_price, window=window, source="ohlc")
-    if est is None:
+    if purpose not in ("advice","audit"):raise ValueError("unknown historical reference use")
+    if purpose=="advice":
+        from openinvest.services.historical_evidence import qualification
+        from openinvest.core.memory_store import MemoryStore
+        from openinvest.utils.advisory import is_advisory_mode
+        if is_advisory_mode() or not qualification(MemoryStore().data_root)["forecast_use_allowed"]:return None
+    if current_price is None or current_price<=0:return None
+    raw=get_path_profile(asset,regime,windows=(window,),shape_window=window)
+    if not raw:return None
+    profile=calibrate_profile(raw)
+    stats=profile.get("windows",{}).get(window)
+    if not stats:
         return None
     return {
-        "median_pct": est.median_return_pct,
-        "p_below": est.p_below_current,
-        "n": est.n,
-        "effective_n": est.effective_n,
+        **stats,
         "window": window,
+        "calibration":profile.get("calibration"),"raw_conditional":raw["windows"].get(window),
+        "unconditional":raw.get("uncond_windows",{}).get(window),"provenance":raw.get("provenance",{}),
     }
 
 
@@ -288,6 +298,10 @@ def _fx_forward_returns(
     fc = fdf["Close"].dropna()
     if fc.empty:
         return out, fxsym
+    import hashlib
+    input_provenance={"symbol":fxsym,"date_from":str(fc.index.min()),"date_through":str(fc.index.max()),
+                      "requested_asof":asof,"data_sha256":hashlib.sha256(fc.to_json(date_format="iso").encode()).hexdigest(),
+                      "vintage":"current_store_reconstruction_not_verified_historical_availability"}
     idx = fc.index
     vals = fc.to_numpy()
     nfx = len(fc)
@@ -300,6 +314,7 @@ def _fx_forward_returns(
         r[valid] = vals[pos[valid]] / vals[arange[valid]] - 1.0
         s = pd.Series(r, index=idx).dropna()
         if not s.empty:
+            s.attrs["input_provenance"]=input_provenance
             out[w] = s
     return out, fxsym
 
@@ -314,12 +329,13 @@ def build_reentry_reference_text(
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
     convert_ccy: Optional[str] = None,
+    purpose: str = "advice",
 ) -> str:
     """给 CIO brief 用的卖出后路径参考文本（多 window）。无可用数据返回 ""。"""
     text, _profile = build_reentry_reference(
         asset, regime, current_price,
         source=source, jsonl_path=jsonl_path, records=records, windows=windows,
-        convert_ccy=convert_ccy,
+        convert_ccy=convert_ccy,purpose=purpose,
     )
     return text
 
@@ -334,12 +350,14 @@ def build_reentry_reference(
     records: Optional[List[Dict[str, Any]]] = None,
     windows: Tuple[str, ...] = ("30d", "60d", "90d"),
     convert_ccy: Optional[str] = None,
+    purpose: str = "advice",
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """路径参考 (text, profile)。profile = get_path_profile 的结构化 dict
     （OHLC 源才有；给 path_review 决策时落快照用——事后校验"当时的预测分布"）。
 
     source: "ohlc"（默认，几十年 OHLC 直算）| "verdict_review"（旧源，保留）。
     """
+    if purpose not in ("advice","audit"):raise ValueError("unknown historical reference use")
     if current_price is None or current_price <= 0:
         return "", None
     cur = quote_currency_prefix(asset)
@@ -406,7 +424,7 @@ def build_reentry_reference(
                 shape_lines = [
                     (
                         f"- {shape['window']} 路径形状（n={shape['n']}，"
-                        f"重叠窗口独立≈{shape['effective_n']}）: "
+                        f"重叠样本量启发式≈{shape['effective_n']}，不是独立样本证明）: "
                         f"先跌后涨 {shape['pct_dip_then_up'] * 100:.0f}% / "
                         f"直接涨(无显著回踩) {shape['pct_up_no_dip'] * 100:.0f}% / "
                         f"冲高回落 {shape['pct_pop_then_down'] * 100:.0f}% / "
@@ -459,14 +477,27 @@ def build_reentry_reference(
             )
 
     text = (
-        f"# 路径参考（regime={regime} 历史 forward 路径分布；TRIM 买回点 + 持有路径预期）：\n"
+        f"# 历史模型参考（regime={regime}；可能混合条件统计与无条件基率，不是当前风险概率）：\n"
         f"- 现价: {cur}{current_price:,.2f}\n"
         + "\n".join(lines + shape_lines)
         + ccy_note
-        + "\n（以上概率均为 D+window **期末**口径，不是窗口内触及买回价的概率，不能据此推断买不回更低价。"
+        + ("\nCALIBRATION_DISCLOSURE_JSON: "+json.dumps({"raw_conditional":profile.get("raw_windows",profile.get("windows")),
+            "unconditional":profile.get("uncond_windows"),"calibrated":profile.get("windows"),
+            "calibration":profile.get("calibration"),"provenance":profile.get("provenance")},ensure_ascii=False,default=str) if profile else "")
+        + "\n（forward 收益表中的低于现价、跌幅及收益分位均为 D+window **期末**口径；"
+        "路径形状占比是含途中回撤与终值方向的历史联合事件，不能一概称为期末收益概率。"
+        "这些读数都不是本次具体买回障碍价的已验证首次触价或成交概率，不能据此推断买不回更低价。"
         "择时买回需另行评估首次触价、成交条件和成本；止损及集中度退出不要求更低价买回。"
         "历史路径形状仅作参考，不能单独否决风险退出。）"
     )
+    if purpose=="advice":
+        from openinvest.services.historical_evidence import qualification
+        from openinvest.core.memory_store import MemoryStore
+        from openinvest.core.committee.evidence import historical_reference_context
+        from openinvest.utils.advisory import is_advisory_mode
+        proof={"forecast_use_allowed":False} if is_advisory_mode() else qualification(MemoryStore().data_root)
+        if profile is not None:profile={**profile,"forecast_qualification":proof,"audit_text":text}
+        text=historical_reference_context(text,qualification=proof)
     return text, (profile if source == "ohlc" else None)
 
 
@@ -578,7 +609,7 @@ def get_path_profile(
 
     # 无条件分布（同资产全部非 unknown 历史日）：小样本收缩校准的混合对象
     uncond = frame[frame["regime"] != "unknown"]
-    out: Dict[str, Any] = {"asset": asset, "regime": regime,
+    out: Dict[str, Any] = {"asset": asset, "regime": regime,"probability_event":"terminal_return",
                            "windows": {}, "uncond_windows": {}, "shape": None}
     # 币种自适应（ADR-021）：持仓以非报价币种计价时（GC=F 报 USD 但浙商积存金记 CNY），
     # 把报价币分布按汇率折算到持仓币种,挂在 currency_overlay。本币黄金 57 年 ⊗ 汇率几十年,
@@ -637,6 +668,7 @@ def get_path_profile(
             up = end > 0
             n = len(s)
             out["shape"] = {
+                "probability_event":"historical_joint_path_shape",
                 "window": sw,
                 "n": n,
                 "effective_n": max(1, n // int(sw.rstrip("d"))),
@@ -654,6 +686,26 @@ def get_path_profile(
                 "regime_persist_median_days": int(s[f"persist_{sw}"].median()),
                 "window_median_days": int(s[f"wdays_{sw}"].median()),
             }
+    import hashlib,importlib
+    from openinvest.core.config import load_config
+    algorithm=hashlib.sha256(Path(__file__).read_bytes())
+    for name in ("openinvest.calc.regime","openinvest.calc.regime_probability","openinvest.utils.market_metrics","openinvest.calc.market_metrics"):
+        algorithm.update(Path(importlib.import_module(name).__file__).read_bytes())
+    config=load_config()
+    asset_input={"symbol":asset.upper(),"date_from":str(df.index.min()),"date_through":str(df.index.max()),
+                 "requested_asof":asof,"data_sha256":hashlib.sha256(df.to_json(date_format="iso").encode()).hexdigest()}
+    fx_input=(next(iter(fx_map.values())).attrs.get("input_provenance",{}) if fx_map else
+              {"symbol":fx_symbol,"availability":"not_used_or_unavailable"})
+    inputs={"asset":asset_input,"fx":fx_input}
+    out["provenance"]={"data_date_cutoff":str(df.index.max()),"requested_asof":asof,
+        "price_vintage":"current_store_reconstruction_not_verified_historical_availability",
+        "historical_forecast_eligible":False,
+        "algorithm_sha256":algorithm.hexdigest(),
+        "model_config_sha256":hashlib.sha256(json.dumps({"regime":dataclasses.asdict(config.regime),
+            "path":dataclasses.asdict(config.path)},sort_keys=True).encode()).hexdigest(),
+        "inputs":inputs,"data_sha256":hashlib.sha256(json.dumps(inputs,sort_keys=True).encode()).hexdigest()}
+    if out.get("currency_overlay") is not None:
+        out["currency_overlay"]["provenance"]={"inputs":inputs,"data_sha256":out["provenance"]["data_sha256"]}
     return out if out["windows"] else None
 
 

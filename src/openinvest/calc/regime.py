@@ -261,11 +261,13 @@ def _regime_data_hint(
     pb = prob_hint.get("p_below")
     n = prob_hint.get("n")
     eff = prob_hint.get("effective_n") or n
-    overlap = f"（重叠窗口独立≈{eff}）" if (eff and n and eff != n) else ""
+    overlap = f"（重叠样本量启发式≈{eff}，不是独立样本证明）" if (eff and n and eff != n) else ""
+    import json
+    disclosure={key:prob_hint.get(key,"not_provided") for key in ("raw_conditional","unconditional","calibration","provenance")}
     return (
-        f"该 regime 历史 30d forward return：中位 {med:+.1f}%、"
+        f"历史模型参考（可能混合条件统计与无条件基率；不是当前风险概率）：30d forward return 中位 {med:+.1f}%、"
         f"期末低于现价概率 {pb * 100:.0f}%、样本 n={n}{overlap}。"
-        f"{q}结合分位 / RSI / 浮亏自行判断方向，不预设方向"
+        f"{q}结合当前市场证据自行判断方向，不预设方向。CALIBRATION_DISCLOSURE_JSON: "+json.dumps(disclosure,ensure_ascii=False,default=str)
     )
 
 

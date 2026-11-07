@@ -134,9 +134,22 @@ def test_reentry_note_uses_quote_ccy_not_hardcoded_usd(monkeypatch):
         "AUDCNY=X": _rising(lambda a: 4.7 * (1.0 + 0.0002) ** a),
     })
     text, profile = build_reentry_reference(
-        "NDQ.AX", "uptrend", 50.0, convert_ccy="CNY",
+        "NDQ.AX", "uptrend", 50.0, convert_ccy="CNY",purpose="audit",
     )
     assert profile and profile.get("currency_overlay")
     assert "持仓以 CNY 计价" in text
     assert "AUD 口径" in text
     assert "USD 口径" not in text  # 不再写死 USD
+
+
+def test_fx_revision_changes_joint_input_signature_without_changing_asset_data(monkeypatch):
+    frames={"NDQ.AX":_rising(lambda a:30.0*np.exp(0.001*a)),
+            "AUDCNY=X":_rising(lambda a:4.5*np.exp(0.0002*a))}
+    _stub_marketstore(monkeypatch,frames)
+    first=get_path_profile("NDQ.AX","range_bound",convert_ccy="CNY")
+    frames["AUDCNY=X"]=_rising(lambda a:4.5*np.exp(0.001*a))
+    second=get_path_profile("NDQ.AX","range_bound",convert_ccy="CNY")
+    assert first["provenance"]["inputs"]["asset"]==second["provenance"]["inputs"]["asset"]
+    assert first["provenance"]["data_sha256"]!=second["provenance"]["data_sha256"]
+    assert first["provenance"]["inputs"]["fx"]["symbol"]=="AUDCNY=X"
+    assert first["currency_overlay"]["provenance"]!=second["currency_overlay"]["provenance"]

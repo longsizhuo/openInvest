@@ -164,6 +164,21 @@ def get_thinking_disable_kwargs(model: Optional[str] = None) -> dict:
     return {"extra_body": {"thinking": {"type": "disabled"}}}
 
 
+def committee_role_thinking(role: str, model: Optional[str] = None) -> bool:
+    """Explicit final-decision/review control, distinct from analyst fast calls."""
+    if role == "cio" and os.getenv("INVEST_CIO_THINKING") is not None:
+        value=os.environ["INVEST_CIO_THINKING"]
+        if value not in ("0","1"):
+            raise ValueError("INVEST_CIO_THINKING must be explicitly 0 or 1")
+        return value=="1"
+    return role in ("cio","reasoning_verifier") and "deepseek" in (model or get_llm_config_safe()[2]).lower()
+
+
+def get_thinking_enable_kwargs(model: Optional[str] = None) -> dict:
+    model=(model or get_llm_config_safe()[2]).lower()
+    return {"extra_body":{"thinking":{"type":"enabled"}}} if "deepseek" in model else {}
+
+
 def is_claude(model: Optional[str] = None) -> bool:
     # 子串判：覆盖网关前缀（anthropic/claude-…、anthropic.claude-…）。
     # ponytail: 老 Claude（≤4.6）也跟着走下面两条规则；真要钉老模型再细分

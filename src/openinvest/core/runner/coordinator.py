@@ -227,15 +227,21 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     except Exception:  # noqa: BLE001  路径参考读失败不阻断 prepare
         pass
 
+    historical_audit={"regime_brief":regime_brief,"path_reference":reentry_reference,"path_profile":path_profile}
+    from openinvest.services.historical_evidence import project
+    regime_brief,reentry_reference,historical_qualification=project(regime_brief,reentry_reference,data_root=pm.store.data_root)
+    if path_profile is not None:path_profile={**path_profile,"forecast_qualification":historical_qualification}
+
     from openinvest.core.decision_evidence import utc_now
     from openinvest.core.committee.evidence import cio_source_context
     analysis_as_of = utc_now().isoformat()
     source_context = cio_source_context(market, regime_brief, analysis_as_of,
-                                        macro_data=str(macro_data), event_brief=event_brief)
+                                        macro_data=str(macro_data), event_brief=event_brief,historical_qualification=historical_qualification)
     facts = {
         "analysis_as_of": analysis_as_of, "cio_source_context": source_context,
         "regime_brief": regime_brief, "sentiment_brief": sentiment_brief,
         "path_profile": path_profile, "atr_pct": metrics.get("atr_pct"),
+        "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
         "path_reference": reentry_reference,
         "current_price": metrics.get("current_price"),
         "ohlcv_snapshot": market_snapshot(df_target),
@@ -388,7 +394,11 @@ def _save_committee_transcript_once(
     # 粘贴进去的确定性 regime_brief（REGIME:/INPUTS:/THRESHOLDS: 行）和
     # sentiment_brief（INDEP_DEFENSE_FLAG 行）
     # 确定性事实优先用本次 prepare 存下的（后端自己算的）；没有才退回从 transcript 解析
-    facts = context["inputs"]
+    facts = dict(context["inputs"])
+    from openinvest.core.committee.evidence import historical_reference_context
+    proof=facts.get("historical_qualification")
+    facts["regime_brief"]=historical_reference_context(facts.get("regime_brief","") or "",qualification=proof,kind="regime")
+    facts["path_reference"]=historical_reference_context(facts.get("path_reference","") or "",qualification=proof)
     fact_text = (f"{facts.get('regime_brief') or ''}\n{facts.get('sentiment_brief') or ''}"
                  if facts else raw)
     regime = regime_label_from_text(fact_text)
@@ -548,7 +558,7 @@ def _save_committee_transcript_once(
             "risk_view": sections.get("RISK_R2") or sections.get("RISK_R1") or sections.get("RISK", ""),
             "cio_memo": sections.get("CIO", cio_text),
             "path_reference": (facts or {}).get("path_reference") or "",
-            "path_profile": (facts or {}).get("path_profile"),
+            "path_profile": (facts or {}).get("path_profile") if (facts.get("historical_qualification") or {}).get("forecast_use_allowed") else None,
         # numpy 标量转回原生数（default=str 会把 confidence / alloc 存成字符串，日报格式化时炸）
         }
         from openinvest.core.decision_evidence import _write_once

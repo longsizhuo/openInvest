@@ -58,7 +58,7 @@ CONCENTRATION_PCT: <该资产占总资产 %>
 <!-- /lens:concentration -->
 DRY_POWDER_{{BASE}}: <可用子弹>
 PNL_PCT: <当前浮盈百分比，正数为盈，负数为亏>
-WORST_CASE_LOSS_{{BASE}}_AT_-20: <照抄 portfolio_summary 中该资产"再跌 20%"的损失金额，如 {{EXAMPLE_LOSS}}>
+WORST_CASE_LOSS_{{BASE}}_AT_-20: <兼容字段名；仅照抄 portfolio_summary 中"再跌 20%"的压力损失，未提供写 N/A；这不是最坏损失界限>
 ONE_LINER: <一句话账户风险评估>
 USER_CONSTRAINTS: <只列原输入中用户已设定的约束；没有提供则写未知>
 RISK_PROPOSAL: <模型建议及依据，明确尚非用户授权；不得把自行提出的止损/金额比例称为用户必须遵守的上限>

@@ -22,8 +22,22 @@ def execution_constraints_context(single_invest_cap=None,resolved=None):
         "These supplied limits are execution facts, not directional market evidence. Missing loss tolerance proves neither safety nor a required action. Compare risk reduction separately from tactical reentry; no user stop rule is not evidence that retaining exposure is safe.")
 
 
+def historical_reference_context(text: str,*,qualification=None,kind="path") -> str:
+    if not text:return text
+    if (qualification or {}).get("forecast_use_allowed") is True:return text
+    notice=("HISTORICAL_FORECAST_UNAVAILABLE: the historical generator lacks current version-bound evaluation approval. "
+            "No neutral probability is substituted. This does not imply HOLD or prevent any market direction; "
+            "use the supplied current observations. Original historical references remain in the audit input.\n")
+    if kind=="regime":
+        # Preserve current rule classification and its observed inputs. Its
+        # derived historical strategy hint is a separate, unqualified model.
+        current=text.split("STRATEGY_HINT:",1)[0].split("CALIBRATION_DISCLOSURE_JSON:",1)[0].rstrip()
+        return notice+current
+    return notice
+
+
 def cio_source_context(market_data: str, regime_brief: str, analysis_as_of: str | None = None,
-                       *, macro_data: str = "", event_brief: str = "") -> str:
+                       *, macro_data: str = "", event_brief: str = "",historical_qualification=None) -> str:
     from openinvest.capabilities.committee.i18n import bilingual
     try:
         as_of = datetime.fromisoformat(analysis_as_of or "")
@@ -32,6 +46,7 @@ def cio_source_context(market_data: str, regime_brief: str, analysis_as_of: str 
         clock = as_of.isoformat()
     except (ValueError, TypeError):
         clock = "unknown; do not invent a calendar expiry or claim an input was current"
+    regime_brief=historical_reference_context(regime_brief,qualification=historical_qualification,kind="regime")
     blocks = [
         "=== SOURCE EVIDENCE FOR CIO ===",
         f"ANALYSIS_AS_OF: {clock}",

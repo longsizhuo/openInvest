@@ -101,6 +101,9 @@ def test_prepare_committee_emits_deterministic_blocks(_mock_world, capfd):
     用 capfd 而非 capsys：_print_json 直写 sys.__stdout__（fd 级）绕过 capsys。
     """
     from openinvest.cli import cmd_prepare_committee
+    from tests.integrity_helpers import approve_historical_generator
+    from openinvest.core.memory_store import MemoryStore
+    approve_historical_generator(MemoryStore().data_root)
 
     cmd_prepare_committee(argparse.Namespace(symbol="TEST.AX"))
     raw = capfd.readouterr().out

@@ -257,6 +257,18 @@ def run_committee_for_symbol(
     except Exception as e:  # noqa: BLE001  概率表读失败不能阻断委员会
         log.warning(f"reentry reference 构建失败 graceful 退化空: {e}")
 
+    historical_audit={"regime_brief":regime_brief,"path_reference":reentry_reference,"path_profile":path_profile}
+    from openinvest.core.committee.evidence import historical_reference_context
+    if _advisory:
+        historical_qualification={"forecast_use_allowed":False,"reason":"private_model_approval_not_used_in_advisory"}
+        regime_brief=historical_reference_context(regime_brief,kind="regime")
+        reentry_reference=historical_reference_context(reentry_reference)
+    else:
+        from openinvest.services.historical_evidence import project
+        regime_brief,reentry_reference,historical_qualification=project(regime_brief,reentry_reference,data_root=pm.store.data_root)
+    input_health["historical_forecast_qualification"]=historical_qualification
+    if path_profile is not None:path_profile={**path_profile,"forecast_qualification":historical_qualification}
+
     # 5.8. 确定性事实块（对齐 TradingAgents 维度，非投票 agent）
     # 情绪表盘：市场级，session 已算好就 override；否则 per-asset fallback
     if sentiment_brief is not None:
@@ -319,6 +331,7 @@ def run_committee_for_symbol(
             "valuation_brief": effective_valuation_brief, "event_brief": effective_event_brief,
             "input_health": input_health, "defense_dca": defense_dca,
             "ohlcv_snapshot": market_snapshot(df),
+            "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
             "trigger_requests":bind_context_requests(pm.store.root,symbol,effective_event_brief,utc_now().isoformat()),
         }, model=get_llm_config_safe()[2] or "unknown", expected_state=prepared_state)
         input_health = {**input_health, "context_id": context["context_id"],
@@ -346,6 +359,7 @@ def run_committee_for_symbol(
         # Sanity 6 输入：用户单次入场上限（顾问模式无真实策略 → 不设限，也不把主人的上限泄进群聊）
         single_invest_cap=0 if _advisory else cap_facts["effective_amount"],
         execution_constraint_facts=cap_facts,
+        historical_qualification=historical_qualification,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,
         persist_to_memory=not _advisory,
@@ -360,7 +374,7 @@ def run_committee_for_symbol(
     # 与 CIO prompt 里看到的是同一份文本（所见即所得，防口径分叉）。
     # path_profile 是同源结构化数据，给"一句话人话摘要"等确定性渲染用。
     result["path_reference"] = reentry_reference
-    result["path_profile"] = path_profile
+    result["path_profile"] = path_profile if historical_qualification.get("forecast_use_allowed") else None
 
     # 6.5. 路径预测快照落盘（path_review 闭环：90 天后回看实际路径 vs 预测分布）。
     # graceful：失败不阻断。顾问模式跳过——同 6 的理由，群聊流量不该污染用户自己
@@ -388,7 +402,7 @@ def run_committee_for_symbol(
             emit("intervention_logged", asset=symbol, rule=_rec["rule"])
 
     # 7. 查概率分布（按 asset×regime，regime 是信号 verdict 是噪声）
-    if probability_table is not None:
+    if probability_table is not None and historical_qualification.get("forecast_use_allowed"):
         prob = get_regime_probability(
             symbol, regime_label, table=probability_table,
         )
