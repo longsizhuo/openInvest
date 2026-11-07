@@ -706,3 +706,65 @@ def test_re_review_invalidates_old_export_even_with_valid_negative_sample(enviro
     new=env.research.export(tmp_path/'corrected.jsonl')
     env.research.mark_used(new['dataset_version'])
     assert json.loads((tmp_path/'corrected.jsonl').read_text())['qualification']['judgment_outcome']=='wrong'
+
+
+def test_usage_claim_and_consent_withdrawal_share_a_serialization_boundary(environment,tmp_path,monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor,TimeoutError
+    from threading import Event
+    env=environment
+    account,token=env.accounts[0]
+    rpc(env,token)
+    with env.research.db() as db:
+        sid=db.execute("SELECT id FROM samples").fetchone()[0]
+    env.research.review(sid,"failure_example",source_validity="valid",judgment_outcome="wrong",allowed_uses=["agent_training"])
+    manifest=env.research.export(tmp_path/"reviewed.jsonl")
+    checked=Event();release=Event();withdraw_started=Event()
+    original=env.research._authorized
+    def pause_after_check(sample,**kwargs):
+        result=original(sample,**kwargs)
+        checked.set()
+        assert release.wait(5)
+        return result
+    monkeypatch.setattr(env.research,"_authorized",pause_after_check)
+    def withdraw():
+        withdraw_started.set()
+        env.store.preferences(account["id"],False)
+        env.research.cancel_pending(account["participant"])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claiming=pool.submit(env.research.mark_used,manifest["dataset_version"])
+        try:
+            assert checked.wait(3)
+            withdrawing=pool.submit(withdraw)
+            assert withdraw_started.wait(3)
+            # Opt-out cannot report success while an authorized claim is uncommitted.
+            with pytest.raises(TimeoutError):
+                withdrawing.result(timeout=.1)
+        finally:
+            release.set()
+        claiming.result(timeout=5)
+        withdrawing.result(timeout=5)
+    with env.research.db() as db:
+        assert db.execute("SELECT used FROM samples WHERE id=?",(sid,)).fetchone()[0]==1
+    monkeypatch.setattr(env.research,"_authorized",original)
+    with pytest.raises(ValueError,match="revoked|qualification"):
+        env.research.mark_used(manifest["dataset_version"])
+
+
+def test_full_queue_metrics_do_not_invert_control_research_lock_order(environment,monkeypatch):
+    import sqlite3
+    from dataclasses import replace
+    env=environment
+    account,_=env.accounts[0]
+    monkeypatch.setattr(env.research,"settings",replace(env.research.settings,queue_bytes=0))
+    original=env.store.metric
+    calls=[]
+    def metric(name):
+        if name=="research_queue_full":
+            with sqlite3.connect(env.research.path,timeout=0) as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.rollback()
+        calls.append(name)
+        return original(name)
+    monkeypatch.setattr(env.store,"metric",metric)
+    env.research.capture(account,"status",{}, {"status":"ok"},1)
+    assert "research_queue_full" in calls and "research_capture_failed" not in calls

@@ -14,6 +14,10 @@ import uuid
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 log = logging.getLogger(__name__)
+
+
+class _QueueFull(Exception):
+    pass
 # Unknown fields and raw text are not silently copied into the structured dataset.
 NUMERIC = {"amount", "units", "quantity", "price", "cost_price", "cash_cny", "cash_aud", "alloc_cny",
            "suggested_allocation", "current_price", "total_value", "portfolio_value", "total_assets_cny",
@@ -193,14 +197,16 @@ class Research:
                 db.execute("BEGIN IMMEDIATE")
                 queued = db.execute("SELECT COALESCE(SUM(bytes),0) FROM samples WHERE payload IS NOT NULL").fetchone()[0]
                 if queued + len(encrypted) > self.settings.queue_bytes:
-                    self.store.metric("research_queue_full")
-                    return
+                    raise _QueueFull
                 # Recheck after queue-lock acquisition; settings changes also remove pending entries.
                 latest = self.store.account(account["id"])
                 if not latest or not latest["research"] or latest["epoch"] != account["epoch"]:
                     return
                 db.execute("INSERT INTO samples(id,participant,epoch,payload,bytes,status,created) VALUES(?,?,?,?,?,'pending',?)",
                            (sample_id, current["participant"], current["epoch"], encrypted, len(encrypted), time.time()))
+        except _QueueFull:
+            # Control writes must occur after the research write lock is released.
+            self.store.metric("research_queue_full")
         except Exception:
             self.store.metric("research_capture_failed")
             log.warning("Research capture failed; request data omitted")
@@ -265,9 +271,11 @@ class Research:
                 self.store.metric("research_archive_failed")
                 log.warning("Research archive unavailable; encrypted queue retained")
 
-    def _authorized(self, sample):
-        with self.store.db() as control:
-            account = control.execute("SELECT * FROM accounts WHERE participant=?", (sample["participant"],)).fetchone()
+    def _authorized(self, sample, *, control=None):
+        if control is None:
+            with self.store.db() as connection:
+                return self._authorized(sample,control=connection)
+        account = control.execute("SELECT * FROM accounts WHERE participant=?", (sample["participant"],)).fetchone()
         return bool(account and not account["deleted"] and account["research"]
                     and account["accepted"] == self.settings.policy_version and account["epoch"] == sample["epoch"])
 
@@ -354,7 +362,10 @@ class Research:
                 temporary.unlink(missing_ok=True)
 
     def mark_used(self, dataset_id):
-        with self.db() as db:
+        # Preferences and account deletion write the same control database.
+        # Hold that serialization boundary until the research claim commits.
+        with self.store.db() as control,self.db() as db:
+            control.execute("BEGIN IMMEDIATE")
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT samples,path FROM datasets WHERE id=?", (dataset_id,)).fetchone()
             if not row:
@@ -373,7 +384,7 @@ class Research:
                 if not review or manifest.get("review_digests", {}).get(sample_id) != hashlib.sha256(review[0]).hexdigest():
                     raise ValueError("Dataset review changed; export the corrected review before training")
                 if (not sample or sample["status"] not in ("pending","archived")
-                        or sample["label"] not in ("accepted","failure_example") or not self._authorized(sample)
+                        or sample["label"] not in ("accepted","failure_example") or not self._authorized(sample,control=control)
                         or qualification.get("source_validity") != "valid"
                         or "agent_training" not in qualification.get("allowed_uses", [])
                         or qualification.get("consent_epoch") != sample["epoch"]):
