@@ -19,7 +19,7 @@ import hashlib
 import logging
 from typing import List
 
-from openinvest.services.news_sources import RawNewsItem
+from openinvest.services.news_sources import RawNewsItem, SourceItems
 
 log = logging.getLogger(__name__)
 
@@ -68,12 +68,13 @@ def _fetch_sina(max_items: int) -> List[RawNewsItem]:
 
 def fetch_cn_wire(max_items: int = 20) -> List[RawNewsItem]:
     """拉全部中文快讯源。任一源失败 log + 跳过，绝不抛。"""
-    out: List[RawNewsItem] = []
+    out: List[RawNewsItem] = SourceItems()
     for name, fn in (("em_global", _fetch_em), ("sina_7x24", _fetch_sina)):
         try:
             got = fn(max_items)
             out.extend(got)
             log.info(f"[akshare:{name}] {len(got)} 条")
         except Exception as e:  # noqa: BLE001
+            out.errors.append(name+":"+type(e).__name__)
             log.warning(f"[akshare:{name}] 失败（上游接口变动/网络）: {type(e).__name__}: {str(e)[:80]}")
     return out

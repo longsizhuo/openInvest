@@ -103,24 +103,38 @@ class RawCollection:
             CREATE TABLE IF NOT EXISTS raw_input_heads(url TEXT PRIMARY KEY,id TEXT NOT NULL,content_hash TEXT NOT NULL);""")
         self.db.execute("CREATE TABLE IF NOT EXISTS raw_locator_mappings(candidate_id TEXT PRIMARY KEY,mapping TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS raw_observation_aliases(candidate_id TEXT PRIMARY KEY,observation_id TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS adapter_captures(id TEXT PRIMARY KEY,sha256 TEXT NOT NULL,payload TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS backend_observations(id TEXT PRIMARY KEY,sha256 TEXT NOT NULL,payload TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS response_captures(id TEXT PRIMARY KEY,sha256 TEXT NOT NULL,payload TEXT NOT NULL)")
         self.db.execute("CREATE INDEX IF NOT EXISTS raw_input_status ON raw_input_snapshots(status)")
         self.db.execute("CREATE INDEX IF NOT EXISTS raw_input_url ON raw_input_snapshots(url)")
         with self.db:self.db.execute("INSERT OR IGNORE INTO raw_collection_meta VALUES('scope',?)",(uuid.uuid4().hex,))
         self.scope=self.db.execute("SELECT value FROM raw_collection_meta WHERE key='scope'").fetchone()[0]
         self.path.chmod(0o600)
 
-    def snapshot(self,source,url,body,observed):
+    def snapshot(self,source,url,body,observed,*,requested_at=None):
         ident=hashlib.sha256(body).hexdigest()
-        with self.db:self.db.execute("INSERT OR IGNORE INTO raw_responses VALUES(?,?)",(ident,gzip.compress(body)))
-        return {"response_sha256":ident,"response_storage":str(self.path),"source":source,
-                "fetched_from":url,"fetched_at":observed.isoformat()}
+        from openinvest.core.evidence_eligibility import digest
+        packet={"response_sha256":ident,"source":source,"fetched_from":url,"fetched_at":observed.isoformat(),
+                "requested_at":requested_at.isoformat() if requested_at is not None else None,
+                "recorded_at":datetime.now(timezone.utc).isoformat()}
+        capture=digest({"scope":self.scope,"packet":packet})
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO raw_responses VALUES(?,?)",(ident,gzip.compress(body)))
+            self.db.execute("INSERT OR IGNORE INTO response_captures VALUES(?,?,?)",(capture,digest(packet),json.dumps(packet)))
+        return {**packet,"response_capture_id":capture,"response_storage":str(self.path)}
 
     def candidate(self,ident,record):
+        from openinvest.services.source_reporting import api_acquisition
+        def proved(value):
+            return api_acquisition(self.db,{"source":value["source"],"fetched_at":value["fetched_at"],"raw_meta":value["source_receipt"]}) is not None
         key=record["source"]+":"+record["source_item_id"]
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             prior=self.db.execute("SELECT * FROM raw_candidate_heads WHERE source_key=?",(key,)).fetchone()
-            if prior and prior["content_hash"]==ident:return prior["observation_id"]
+            if prior and prior["content_hash"]==ident:
+                previous=json.loads(self.db.execute("SELECT payload FROM raw_candidates WHERE id=?",(prior["observation_id"],)).fetchone()[0])
+                if proved(previous)==proved(record):return prior["observation_id"]
             observation=hashlib.sha256((self.scope+":"+(prior["observation_id"] if prior else "")+":"+ident).encode()).hexdigest()
             record={**record,"source_observation_id":observation}
             self.db.execute("INSERT INTO raw_candidates(id,source,payload,locator_verified) VALUES(?,?,?,?)",
@@ -130,8 +144,10 @@ class RawCollection:
 
     def register_input(self,row):
         from openinvest.services.agent_queue import news_content_hash
+        from openinvest.services.source_reporting import input_contract
         row={**row,"url":str(row.get("url") or "").strip()}
         content=news_content_hash(row)
+        contract=input_contract(self.db,row)
         reserved=urlsplit(row["url"]).scheme.lower()=="openinvest-source"
         status="pending"
         if reserved:
@@ -141,10 +157,11 @@ class RawCollection:
             self.db.execute("BEGIN IMMEDIATE")
             prior=self.db.execute("SELECT * FROM raw_input_heads WHERE url=?",(row["url"],)).fetchone()
             if prior and prior["content_hash"]==content:
-                return json.loads(self.db.execute("SELECT payload FROM raw_input_snapshots WHERE id=?",(prior["id"],)).fetchone()[0])
-            repeated=self.db.execute("SELECT 1 FROM raw_input_snapshots WHERE url=? AND content_hash=?",(row["url"],content)).fetchone() is not None
-            ident=hashlib.sha256((self.scope+":"+(prior["id"] if prior else "")+":"+content).encode()).hexdigest()
-            value={**row,"source_snapshot_id":ident,"content_sha256":content,"source_regression":repeated}
+                previous=json.loads(self.db.execute("SELECT payload FROM raw_input_snapshots WHERE id=?",(prior["id"],)).fetchone()[0])
+                if input_contract(self.db,previous)==contract:return previous
+            repeated=bool(prior and prior["content_hash"]!=content and self.db.execute("SELECT 1 FROM raw_input_snapshots WHERE url=? AND content_hash=?",(row["url"],content)).fetchone())
+            ident=hashlib.sha256((self.scope+":"+(prior["id"] if prior else "")+":"+content+":"+contract).encode()).hexdigest()
+            value={**row,"source_snapshot_id":ident,"content_sha256":content,"source_regression":repeated,"proof_contract_id":contract}
             self.db.execute("INSERT INTO raw_input_snapshots(id,url,content_hash,payload,status) VALUES(?,?,?,?,?)",(ident,row["url"],content,json.dumps(value,ensure_ascii=False),status))
             self.db.execute("INSERT OR REPLACE INTO raw_input_heads VALUES(?,?,?)",(row["url"],ident,content))
         from openinvest.core.evidence_eligibility import Eligibility,source_artifact_ids
@@ -301,7 +318,7 @@ def _collect(*,store,raw,since=None,overlap_hours=24,max_pages=20,max_seconds=90
                     requested_at=clock()
                     url,body=fetcher(source,current)
                     received_at=clock()
-                    receipt={**raw.snapshot(source,url,body,received_at),"requested_at":requested_at.isoformat(),"decoder_version":2}
+                    receipt={**raw.snapshot(source,url,body,received_at,requested_at=requested_at),"decoder_version":2}
                     page_id=receipt["response_sha256"]
                     if page_id in seen_pages:raise ValueError("provider_repeated_page_or_cursor")
                     seen_pages.add(page_id);pages+=1
@@ -342,7 +359,7 @@ def _collect(*,store,raw,since=None,overlap_hours=24,max_pages=20,max_seconds=90
         saved=raw.pending()
         eligible=list(saved.values())
         items=[RawNewsItem(src_name=r["source"],title=r["title"],url=(r.get("resolved_locator") or {}).get("source_locator") or r.get("source_locator") or r["url"],snippet=r["snippet"],text=r["text"],
-                           published_at=r["published_at"],fetched_at=r["fetched_at"],raw_meta={**r["source_receipt"],"source_item_id":r["source_item_id"],"source_origin":"backend_collected",
+                           published_at=r["published_at"],fetched_at=r["fetched_at"],raw_meta={**r["source_receipt"],"source_item_id":r["source_item_id"],"source_origin":"captured_api_response",
                            "locator_kind":(r.get("resolved_locator") or r).get("locator_kind","publisher_url"),"publisher_url":r.get("publisher_url",r["url"]),
                            "source_observation_id":r["source_observation_id"],
                            "locator_projection_version":2 if r.get("resolved_locator") else r["source_receipt"].get("decoder_version",1)}) for r in eligible]

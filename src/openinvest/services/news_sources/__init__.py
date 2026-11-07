@@ -25,6 +25,13 @@ log = logging.getLogger(__name__)
 SOURCE_HEALTH_STATE = "news_source_health"
 
 
+class SourceItems(list):
+    """List-compatible adapter output that retains partial or complete failures."""
+    def __init__(self,items=(),*,errors=()):
+        super().__init__(items)
+        self.errors=list(errors)
+
+
 @dataclass
 class RawNewsItem:
     """归一化后的原始新闻条目，给 event_normalizer 用"""
@@ -71,6 +78,9 @@ def fetch_all(
     cn_wire: bool = False,
     timeout_sec: float = 30.0,
     source_counts: Optional[Dict[str, int]] = None,
+    source_errors: Optional[Dict[str, List[str]]] = None,
+    capture: bool = False,
+    data_root=None,
 ) -> List[RawNewsItem]:
     """并发拉所有源。任一源失败 log warning + 继续，不影响其他源。
 
@@ -136,6 +146,8 @@ def fetch_all(
         return []
     counts = {} if source_counts is None else source_counts
     counts.update({_source_of(t["label"]): 0 for t in tasks})
+    failures={} if source_errors is None else source_errors
+    failures.update({_source_of(t["label"]):[] for t in tasks})
 
     all_items: List[RawNewsItem] = []
     # ponytail: 故意不用 `with ThreadPoolExecutor(...)` —— 它退出时 shutdown(wait=True)
@@ -146,24 +158,32 @@ def fetch_all(
     # 代价：卡死那条线程泄漏（非 daemon，进程退出靠 systemd SIGKILL 收尾）。
     # 上限：真根治要给每个源塞可用的 timeout，akshare 不暴露 → 先按泄漏处理。
     pool = ThreadPoolExecutor(max_workers=min(8, len(tasks)))
+    processed=set()
     try:
-        futures = {pool.submit(t["fn"], **t["kwargs"]): t["label"] for t in tasks}
+        futures = {pool.submit(t["fn"], **t["kwargs"]): t for t in tasks}
         # PR #5 Copilot CR 修复: as_completed(timeout=) 整体 wall-clock 用完后抛
         # concurrent.futures.TimeoutError，原版没 catch → 一个 slow source 拖
         # 整个 fetch_all 抛异常丢光其他源 result。改为 try/except + 把没完成的
         # 那些 future cancel 掉，已收到的 result 保留返回。
         try:
             for fut in as_completed(futures, timeout=timeout_sec):
-                label = futures[fut]
+                processed.add(fut)
+                task=futures[fut];label = task["label"]
                 try:
                     items = fut.result()
+                    failures[_source_of(label)].extend(str(error) for error in getattr(items,"errors",()))
+                    if capture:
+                        from openinvest.services.source_reporting import capture_adapter_items
+                        items=capture_adapter_items(items,task["fn"],task["kwargs"],data_root=data_root)
                     counts[_source_of(label)] += len(items)
                     all_items.extend(items)
                     log.info(f"[news_sources] {label} → {len(items)} items")
                 except Exception as e:
+                    failures[_source_of(label)].append(type(e).__name__)
                     log.warning(f"[news_sources] {label} 失败: {type(e).__name__}: {e}")
         except FuturesTimeoutError:
-            unfinished = [futures[f] for f in futures if not f.done()]
+            unfinished = [futures[f]["label"] for f in futures if f not in processed]
+            for label in unfinished:failures[_source_of(label)].append("TimeoutError")
             log.warning(
                 f"[news_sources] fetch_all 超时 ({timeout_sec}s)，"
                 f"未完成 sources={unfinished}；保留已收到 {len(all_items)} 条继续",

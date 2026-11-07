@@ -45,6 +45,8 @@ class NotificationOutbox:
                 db.execute("ALTER TABLE followups ADD COLUMN closed TEXT NOT NULL DEFAULT '{}'")
             if "attempts" not in columns:
                 db.execute("ALTER TABLE followups ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+            if "submitted_causes" not in columns:
+                db.execute("ALTER TABLE followups ADD COLUMN submitted_causes TEXT NOT NULL DEFAULT '{}'")
             db.execute("INSERT OR IGNORE INTO notification_meta VALUES('scope',?)",(uuid.uuid4().hex,))
             self.scope=db.execute("SELECT value FROM notification_meta WHERE key='scope'").fetchone()[0]
         self.path.chmod(0o600)

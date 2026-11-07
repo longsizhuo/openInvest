@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from openinvest.services.news_sources import RawNewsItem, _normalize_domain, _trim
+from openinvest.services.news_sources import RawNewsItem, SourceItems, _normalize_domain, _trim
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def fetch_ddgs_news(
         from ddgs import DDGS
     except ImportError:
         log.warning("ddgs 未安装，跳过 ddgs_news")
-        return []
+        return SourceItems(errors=["ImportError"])
 
     items: List[RawNewsItem] = []
     try:
@@ -42,7 +42,7 @@ def fetch_ddgs_news(
             ) or []
     except Exception as e:
         log.warning(f"DDGS query {query!r} 失败: {e}")
-        return []
+        return SourceItems(errors=[type(e).__name__])
 
     for r in results:
         url = (r.get("url") or "").strip()

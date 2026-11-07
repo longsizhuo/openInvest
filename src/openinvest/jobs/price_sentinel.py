@@ -205,6 +205,9 @@ def _queue_event(ms, event, *, key, followup_symbols=(), risk_alert=False, coold
     from openinvest.db.event_store import EventStore
     from openinvest.services.event_notifier import send_event_alert_receipt
     event = {**event, "event_id": hashlib.sha256(key.encode()).hexdigest()[:24]}
+    from openinvest.services.source_reporting import record_backend_observation
+    witness=record_backend_observation(ms.data_root,event,producer="openinvest.jobs.price_sentinel",inputs={"notification_key":key,"observation":event})
+    event={**event,"_backend_observation_id":witness}
     receipt = send_event_alert_receipt(
         [event], notification_key=key, risk_alert=risk_alert, dispatch=False, store=ms,
         cooldown=cooldown,now=now,
@@ -213,6 +216,12 @@ def _queue_event(ms, event, *, key, followup_symbols=(), risk_alert=False, coold
     )
     database=None
     try:
+        # A repeated detection key always indexes the original durable payload,
+        # including its acquisition witness, rather than a changed local copy.
+        with NotificationOutbox(ms).connection() as connection:
+            saved=connection.execute("SELECT payload FROM notifications WHERE id=?",(receipt["notification_id"],)).fetchone()
+        if saved:
+            event=json.loads(saved[0])["events"][0]
         database=EventStore(str(ms.data_root / "db/events.db"))
         database.upsert_event(event,embedding=None)
         receipt["event_index_status"]="stored"

@@ -50,21 +50,28 @@ DB_PATH = str(INVEST_ROOT / "db" / "events.db")
 _SEVERITY_INT = {"low": 1, "mid": 2, "high": 3}
 _SEVERITY_STR = {v: k for k, v in _SEVERITY_INT.items()}
 _VALID_STANCE = {"risk", "opportunity", "neutral"}
+_CURRENT_SUPPORT=object()
 
 
 def _locked_read(method):
     @wraps(method)
     def read(self,*args,**kwargs):
         with self._lock:
+            outer_read=not getattr(self,"_reporting_read_depth",0)
+            self._reporting_read_depth=getattr(self,"_reporting_read_depth",0)+1
+            if outer_read:self._reporting_policy=None
             own_snapshot=not self.conn.in_transaction
-            if own_snapshot:self.conn.execute("BEGIN")
             try:
+                if own_snapshot:self.conn.execute("BEGIN")
                 result=method(self,*args,**kwargs)
                 if own_snapshot:self.conn.commit()
                 return result
             except Exception:
                 if own_snapshot:self.conn.rollback()
                 raise
+            finally:
+                self._reporting_read_depth-=1
+                if outer_read:self._reporting_policy=None
     return read
 
 
@@ -214,6 +221,7 @@ class EventStore:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL,
                 observed_at TEXT NOT NULL, payload_json TEXT NOT NULL)""")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_event_versions_time ON event_versions(event_id,observed_at,id)")
+            cur.execute("CREATE TABLE IF NOT EXISTS event_reporting_support(event_id TEXT PRIMARY KEY,payload TEXT NOT NULL)")
             cur.execute("""CREATE TABLE IF NOT EXISTS news_observation_conflicts (
                 fingerprint TEXT PRIMARY KEY,event_id TEXT NOT NULL,observed_at TEXT NOT NULL,
                 payload_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'review_required')""")
@@ -266,8 +274,14 @@ class EventStore:
         eid = event.get("event_id") or claim_to_event_id(claim)
         affected = event.get("affected_symbols") or []
         entities = event.get("entities") or []
-        created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        created_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         ts = event.get("ts") or created_at
+        if event.get("_backend_observation_id"):
+            from openinvest.services.source_reporting import backend_observation_use
+            candidate={**event,"event_id":eid,"ts":ts}
+            if not backend_observation_use(self.data_root,candidate,event["_backend_observation_id"]):
+                raise ValueError("backend_observation_does_not_match_immutable_capture")
+            revision=True
 
         with self._lock:
             cur = self.conn.cursor()
@@ -359,6 +373,15 @@ class EventStore:
             cur.execute("UPDATE events SET updated_at=? WHERE event_id=?",(created_at,eid))
             if not was_new:
                 cur.execute("UPDATE events SET last_revision_at=? WHERE event_id=?",(created_at,eid))
+            if event.get("_backend_observation_id"):
+                from openinvest.services.source_reporting import backend_observation_use,event_payload
+                from openinvest.core.evidence_eligibility import Eligibility,digest
+                current=_row_to_event(cur.execute("SELECT * FROM events WHERE event_id=?",(eid,)).fetchone())
+                if not backend_observation_use(self.data_root,current,event["_backend_observation_id"]):
+                    raise ValueError("backend_observation_does_not_match_immutable_capture")
+                self._bind_reporting_support(eid,{"kind":"backend_observation","observation_id":event["_backend_observation_id"],
+                    "event_sha256":digest(event_payload(current))})
+                Eligibility(self.data_root).record_audit_lineage("event:"+eid,event_payload(current),{"backend_observation:"+event["_backend_observation_id"]})
             if _version:
                 self._record_version(eid, event, was_new=was_new)
             if _commit:
@@ -375,7 +398,8 @@ class EventStore:
         prior = json.loads(previous[0]).get("vintage", {}) if previous else {}
         observed = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         payload = _row_to_event(row)
-        payload["sources"] = self.get_sources(event_id)
+        payload["sources"] = self.get_sources(event_id,purpose="audit")
+        payload["reporting_support"]=self._reporting_support(event_id)
         payload["vintage"] = {
             "event_time": reported.get("ts", prior.get("event_time")),
             "published_at": prior.get("published_at") or reported.get("published_at"),
@@ -409,7 +433,8 @@ class EventStore:
             cur = self.conn.cursor()
             previous=cur.execute("SELECT * FROM sources WHERE event_id=? AND url=?",(event_id,url)).fetchone()
             if previous:
-                if (previous["title"] or "",previous["snippet"] or "",previous["published_at"],previous["raw_text"] or "") == (title or "",snippet or "",published_at,raw_text):
+                if ((previous["title"] or "",previous["snippet"] or "",previous["published_at"],previous["raw_text"] or "") == (title or "",snippet or "",published_at,raw_text)
+                        and json.loads(previous["provenance_json"] or "{}")== (provenance or {})):
                     return False
                 if _version:
                     self._record_version(event_id)
@@ -426,9 +451,13 @@ class EventStore:
                 self.conn.commit()
             return True
 
-    def source_unchanged(self, url: str, title: str, snippet: str = "", *, published_at=None,raw_text="") -> bool:
-        row=self.conn.execute("SELECT title,snippet,published_at,raw_text FROM sources WHERE url=? ORDER BY fetched_at DESC,id DESC LIMIT 1",(url,)).fetchone()
-        return row is not None and (row["title"] or "",row["snippet"] or "",row["published_at"],row["raw_text"] or "") == (title or "",snippet or "",published_at,raw_text)
+    def source_unchanged(self, url: str, title: str, snippet: str = "", *, published_at=None,raw_text="",require_qualified=True) -> bool:
+        row=self.conn.execute("SELECT * FROM sources WHERE url=? ORDER BY fetched_at DESC,id DESC LIMIT 1",(url,)).fetchone()
+        same=row is not None and (row["title"] or "",row["snippet"] or "",row["published_at"],row["raw_text"] or "") == (title or "",snippet or "",published_at,raw_text)
+        if same and require_qualified:
+            from openinvest.services.source_reporting import reporting_use
+            return reporting_use(self.data_root,dict(row))["allowed"] and self.get_event(row["event_id"]) is not None
+        return same
 
     def write_news_observation(self, event: dict, raw_item=None, *, embedding=None) -> dict:
         """Keep source revisions and distinguish material changes from retries."""
@@ -484,6 +513,19 @@ class EventStore:
                     eid=hashlib.sha256((eid+"|"+day(value.get("ts"))).encode()).hexdigest()[:16]
                     old=self.get_event(eid,purpose="audit")
             value["event_id"]=eid
+            from openinvest.services.source_reporting import reporting_use,from_item,event_payload,source_fingerprint
+            from openinvest.core.evidence_eligibility import digest
+            incoming_allowed=bool(raw_item and reporting_use(self.data_root,from_item(raw_item))["allowed"])
+            current_allowed=bool(old and self.get_event(eid))
+            if old and current_allowed and not incoming_allowed:
+                record={"event":value,"source":vars(raw_item) if raw_item else None,
+                        "reason":"unverified_source_cannot_replace_verified_current_report"}
+                encoded=json.dumps(record,ensure_ascii=False,sort_keys=True,default=str)
+                fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
+                self.conn.execute("INSERT OR IGNORE INTO news_observation_conflicts(fingerprint,event_id,observed_at,payload_json) VALUES(?,?,?,?)",
+                                  (fingerprint,eid,datetime.now(timezone.utc).isoformat(),encoded))
+                return {"event":None,"inserted":False,"changed":False,"audit_only":True,"source_verification_required":True,
+                        "blocked_event_id":eid,"previous":old}
             if old and raw_item and (getattr(raw_item,"raw_meta",{}) or {}).get("source_regression"):
                 record={"event":value,"source":vars(raw_item),"reason":"source_returned_to_previously_seen_content_requires_verification"}
                 encoded=json.dumps(record,sort_keys=True,ensure_ascii=False,default=str)
@@ -501,7 +543,7 @@ class EventStore:
                     parsed=datetime.fromisoformat(str(value).replace("Z","+00:00"))
                     if parsed.tzinfo is None:raise ValueError("source acquisition timezone unavailable")
                     return parsed
-                known=[observed_time(row["fetched_at"]) for row in self.get_sources(eid)]
+                known=[observed_time(row["fetched_at"]) for row in self.get_sources(eid,purpose="audit")]
                 older_different_observation=bool(known) and observed_time(raw_item.fetched_at)<max(known)
             if old and not related and (older_different_observation or claim_to_event_id(old["one_line_claim"])!=claim_to_event_id(value["one_line_claim"])):
                 # A late copy of the ORIGINAL article may hash to a story whose
@@ -516,14 +558,16 @@ class EventStore:
                 return {"event":None,"inserted":False,"changed":False,"audit_changed":True,
                         "audit_only":True,"blocked_event_id":eid,"source_conflict":True,"previous":old}
             changed=old is None or signature(old)!=signature(value)
-            source_changed=raw_item is not None and not self.source_unchanged(raw_item.url,raw_item.title,raw_item.snippet,published_at=getattr(raw_item,"published_at",None),raw_text=getattr(raw_item,"text",""))
-            if not changed and not source_changed:
+            source_changed=raw_item is not None and not self.source_unchanged(raw_item.url,raw_item.title,raw_item.snippet,published_at=getattr(raw_item,"published_at",None),raw_text=getattr(raw_item,"text",""),require_qualified=False)
+            if previous_source and raw_item and json.loads(previous_source["provenance_json"] or "{}")!=(getattr(raw_item,"raw_meta",{}) or {}):source_changed=True
+            promotion=incoming_allowed and not current_allowed
+            if not changed and not source_changed and not promotion:
                 return qualify({"event":old,"inserted":False,"changed":False,"previous":old})
             try:
                 if old is not None:
                     self._record_version(eid)
-                if changed:
-                    inserted,_=self.upsert_event(value,embedding=embedding,revision=bool(related),_commit=False,_version=False)
+                if changed or promotion:
+                    inserted,_=self.upsert_event(value,embedding=embedding,revision=bool(related or promotion),_commit=False,_version=False)
                 else:
                     inserted=False
                 if raw_item:
@@ -533,6 +577,11 @@ class EventStore:
                     from openinvest.core.evidence_eligibility import Eligibility,source_artifact_ids
                     parents=source_artifact_ids(getattr(raw_item,"raw_meta",{}) or {})
                     if parents:Eligibility(self.data_root).record_audit_lineage("event:"+eid,value,parents)
+                    if incoming_allowed:
+                        current_row=_row_to_event(self.conn.execute("SELECT * FROM events WHERE event_id=?",(eid,)).fetchone())
+                        stored_source=dict(self.conn.execute("SELECT * FROM sources WHERE event_id=? AND url=?",(eid,raw_item.url)).fetchone())
+                        self._bind_reporting_support(eid,{"kind":"source_report","source_id":source_fingerprint(stored_source),
+                            "event_sha256":digest(event_payload(current_row))})
                 self._record_version(eid,value,was_new=inserted)
                 self.conn.commit()
             except Exception:
@@ -572,6 +621,28 @@ class EventStore:
     # 读
     # ------------------------------------------------------------------
 
+    def _reporting_support(self,event_id):
+        if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='event_reporting_support'").fetchone():return None
+        row=self.conn.execute("SELECT payload FROM event_reporting_support WHERE event_id=?",(event_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def _bind_reporting_support(self,event_id,payload):
+        self.conn.execute("INSERT OR REPLACE INTO event_reporting_support VALUES(?,?)",(event_id,json.dumps(payload,ensure_ascii=False)))
+
+    def _policy(self):
+        from openinvest.services.source_reporting import ReportingPolicy
+        if getattr(self,"_reporting_read_depth",0):
+            if self._reporting_policy is None:self._reporting_policy=ReportingPolicy(self.data_root)
+            return self._reporting_policy
+        return ReportingPolicy(self.data_root)
+
+    def _reporting_allowed(self,event,*,sources=None,support=_CURRENT_SUPPORT,as_of=None):
+        from openinvest.services.source_reporting import event_reporting_use
+        return event_reporting_use(self.data_root,event,
+            self.get_sources(event["event_id"],purpose="audit") if sources is None else sources,
+            self._reporting_support(event["event_id"]) if support is _CURRENT_SUPPORT else support,as_of=as_of,policy=self._policy())
+
+
     def is_seen_url(self, url: str) -> bool:
         cur = self.conn.cursor()
         cur.execute("SELECT 1 FROM sources WHERE url = ? LIMIT 1", (url,))
@@ -590,22 +661,35 @@ class EventStore:
             return None
         event = _row_to_event(row)
         event["_version_id"] = row["source_version"] or 0
+        if purpose!="audit" and not self._reporting_allowed(event):return None
         return event
 
     def _source_excluded(self,event_id,excluded,*,sources=None):
         from openinvest.core.evidence_eligibility import source_artifact_ids
+        from openinvest.services.source_reporting import metadata
         if "event:"+event_id in excluded:return True
-        for source in self.get_sources(event_id) if sources is None else sources:
-            metadata=source.get("provenance_json") or "{}"
-            if isinstance(metadata,str):metadata=json.loads(metadata)
-            if source_artifact_ids(metadata) & excluded:return True
+        for source in self.get_sources(event_id,purpose="audit") if sources is None else sources:
+            if source_artifact_ids(metadata(source)) & excluded:return True
         return False
 
     @_locked_read
-    def get_sources(self, event_id: str) -> List[Dict[str, Any]]:
+    def get_sources(self, event_id: str, *, purpose="advice") -> List[Dict[str, Any]]:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM sources WHERE event_id = ? ORDER BY fetched_at", (event_id,))
-        return [dict(r) for r in cur.fetchall()]
+        rows=[dict(r) for r in cur.fetchall()]
+        if purpose=="audit":return rows
+        if "event:"+event_id in self._policy().excluded_ids():return []
+        from openinvest.services.source_reporting import reporting_use
+        allowed=[]
+        for source in rows:
+            state=reporting_use(self.data_root,source,policy=self._policy())
+            if state["allowed"]:allowed.append({**source,"reporting_evidence":state})
+        return allowed
+
+    @_locked_read
+    def get_event_with_sources(self,event_id):
+        event=self.get_event(event_id)
+        return {**event,"sources":self.get_sources(event_id)} if event is not None else None
 
     @_locked_read
     def list_recent(
@@ -614,6 +698,7 @@ class EventStore:
         hours: int = 24,
         min_severity: str = "low",
         limit: int = 50,
+        purpose: str = "advice",
     ) -> List[Dict[str, Any]]:
         """列最近 N 小时入库的事件（severity 倒序 + 时间倒序）。
 
@@ -637,8 +722,11 @@ class EventStore:
             (cutoff, min_sev_int),
         )
         from openinvest.core.evidence_eligibility import Eligibility
-        excluded = Eligibility(self.data_root).excluded_ids()
-        return [_row_to_event(r) for r in cur.fetchall() if not self._source_excluded(r["event_id"],excluded)][:limit]
+        rows=cur.fetchall()
+        if purpose=="audit":return [_row_to_event(r) for r in rows][:limit]
+        excluded = self._policy().excluded_ids()
+        return [_row_to_event(r) for r in rows if not self._source_excluded(r["event_id"],excluded)
+                and self._reporting_allowed(_row_to_event(r))][:limit]
 
     def count_recent(self, *, hours: int = 24) -> Dict[str, int]:
         """汇总最近 N 小时事件数（按 severity 分桶）"""
@@ -653,6 +741,33 @@ class EventStore:
             "high": buckets[3],
             "total": sum(buckets.values()),
         }
+
+    @_locked_read
+    def source_reporting_summary(self,*,hours=168):
+        from openinvest.services.source_reporting import reporting_use,event_payload,source_fingerprint,metadata
+        from openinvest.core.evidence_eligibility import digest,source_artifact_ids
+        cutoff=(datetime.now(timezone.utc)-timedelta(hours=hours)).isoformat()
+        rows=self.conn.execute("""SELECT e.* FROM events e WHERE julianday(COALESCE(last_revision_at,updated_at,created_at))>=julianday(?)""",(cutoff,)).fetchall()
+        current_unqualified=0;source_reasons={};unqualified_sources=0;verified_sources=0
+        incidents=[]
+        for row in rows:
+            event=_row_to_event(row)
+            sources=self.get_sources(event["event_id"],purpose="audit")
+            if not self._reporting_allowed(event):
+                current_unqualified+=1
+                incidents.append({"event":event_payload(event),"support":self._reporting_support(event["event_id"]),
+                    "sources":sorted((source_fingerprint(item),sorted(source_artifact_ids(metadata(item)))) for item in sources)})
+            for source in sources:
+                state=reporting_use(self.data_root,source,policy=self._policy())
+                if state["allowed"]:verified_sources+=1
+                else:
+                    unqualified_sources+=1
+                    source_reasons[state["reason"]]=source_reasons.get(state["reason"],0)+1
+        return {"schema":1,"window_hours":hours,"current_unqualified_events":current_unqualified,
+                "incident_sha256":digest(sorted(incidents,key=lambda item:item["event"]["event_id"])),
+                "unqualified_source_versions":unqualified_sources,"verified_source_versions":verified_sources,
+                "unqualified_reasons":source_reasons,"unknown_is_not_no_news":True,
+                "truth_or_learning_granted":False}
 
     @_locked_read
     def list_current_with_sources(self, *, hours=24, limit=100):
@@ -755,9 +870,13 @@ class EventStore:
             sql += " AND created_at <= ?"
             params.append(as_of_iso)
         cur = self.conn.cursor()
-        cur.execute(sql + " ORDER BY eff_jd DESC LIMIT 200", params)
-        candidates = [{**_row_to_event(r), "ts":r["shown_ts"],"_jd": r["eff_jd"], "_version_id":r["source_version"] or 0} for r in cur.fetchall()
-                      if not self._source_excluded(r["event_id"],exclusions)]
+        cur.execute(sql + " ORDER BY eff_jd DESC", params)
+        candidates=[]
+        for row in cur:
+            event=_row_to_event(row)
+            if self._source_excluded(row["event_id"],exclusions) or not self._reporting_allowed(event):continue
+            candidates.append({**event,"ts":row["shown_ts"],"_jd":row["eff_jd"],"_version_id":row["source_version"] or 0})
+            if len(candidates)>=200:break
         if not candidates:
             return []
 
@@ -792,7 +911,7 @@ class EventStore:
         # 挂 sources
         for c in top:
             c["sources"] = [
-                {"src_name": s["src_name"], "url": s["url"], "title": s["title"]}
+                s
                 for s in self.get_sources(c["event_id"])
                 # as_of：D 之后才挂上的源（brief 会渲染源名）同样是前视
                 if as_of_iso is None or s["fetched_at"] <= as_of_iso
@@ -828,6 +947,13 @@ class EventStore:
             event = json.loads(row[0])
             if self._source_excluded(event["event_id"],exclusions,sources=event.get("sources",[])):
                 continue
+            if not self._reporting_allowed(event,sources=event.get("sources",[]),support=event.get("reporting_support"),as_of=anchor):continue
+            from openinvest.services.source_reporting import reporting_use
+            qualified=[]
+            for source in event.get("sources",[]):
+                state=reporting_use(self.data_root,source,as_of=anchor,policy=self._policy())
+                if state["allowed"]:qualified.append({**source,"reporting_evidence":state})
+            event["sources"]=qualified
             seen = datetime.fromisoformat(event["vintage"]["revision_acquired_at"])
             relevance=event.get("material_revision_at") or event.get("ts")
             try:

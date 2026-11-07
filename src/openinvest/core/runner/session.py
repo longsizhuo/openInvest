@@ -521,22 +521,27 @@ def run_committee_session(
         # Web event-trigger 路径：caller 已知具体 event_ids，反查 + format
         event_brief = ""
         try:
+            from openinvest.core.evidence_eligibility import EvidenceIntegrityError
+            if _advisory:raise EvidenceIntegrityError("DATA_UNTRUSTED: advisory event_ids cannot read owner events")
             store = _get_event_store()
+            if store is None:raise EvidenceIntegrityError("DATA_UNTRUSTED: requested event store unavailable")
             if store is not None:
                 fetched: List[Dict[str, Any]] = []
                 for eid in event_ids:
-                    ev = store.get_event(eid)
+                    snapshot=getattr(store,"get_event_with_sources",None)
+                    ev = snapshot(eid) if callable(snapshot) else store.get_event(eid)
                     if not ev:
-                        continue
+                        raise EvidenceIntegrityError("DATA_UNTRUSTED: requested event no longer qualified or unavailable")
                     ev = dict(ev)
-                    ev["sources"] = store.get_sources(ev["event_id"])
+                    if "sources" not in ev:ev["sources"] = store.get_sources(ev["event_id"])
                     fetched.append(ev)
-                event_brief = format_event_brief(fetched)
+                from openinvest.core.runner.event_brief import _with_source_quality
+                event_brief = _with_source_quality(format_event_brief(fetched),store=store)
         except Exception as e:  # noqa: BLE001
             from openinvest.core.evidence_eligibility import EvidenceIntegrityError
             if isinstance(e, EvidenceIntegrityError):
                 raise
-            log.warning(f"event_ids 翻译失败 graceful 退化 '': {type(e).__name__}: {e}")
+            raise EvidenceIntegrityError("DATA_UNTRUSTED: requested event source read failed") from e
         event_brief_source = "event_ids"
     else:
         # 默认：跨资产 multi 召回 + 去重

@@ -128,7 +128,7 @@ def _rss_prefilter(items: List["RawNewsItem"], watched: List[str]) -> List["RawN
     return kept
 
 
-def _record_source_health(counts: Dict[str, int], now: Optional[datetime] = None) -> None:
+def _record_source_health(counts: Dict[str, int], now: Optional[datetime] = None,*,errors=None) -> None:
     """每源最近一次抓取 / 最近一次抓到 >0 条的时间 → job_watchdog 判单源断流。
 
     键是 fetch_all 的源口径（ddgs / searxng / yfinance / akshare / rss:<feed>）。
@@ -141,7 +141,10 @@ def _record_source_health(counts: Dict[str, int], now: Optional[datetime] = None
         cur = cur if isinstance(cur, dict) else {}
         for label, n in counts.items():
             last_ok = stamp if n else (cur.get(label) or {}).get("last_ok")
-            cur[label] = {"last_run": stamp, "last_ok": last_ok}
+            failed=(errors or {}).get(label,[])
+            cur[label] = {"last_run": stamp, "last_ok": last_ok,
+                          "status":("partial_failure" if n else "failed") if failed else ("ok" if n else "empty"),
+                          "error_codes":sorted(set(failed)),"first_failure_at":((cur.get(label) or {}).get("first_failure_at") or stamp) if failed else None}
         return cur, None
 
     try:
@@ -173,21 +176,27 @@ def run(
     # A 股 symbol 自动激活中文快讯源（akshare）——海外用户零调用（#153）
     has_cn = any(sym.upper().endswith((".SS", ".SZ", ".BJ")) for sym in watched)
     counts: Dict[str, int] = {}
+    errors:Dict[str,List[str]]={}
     raw_items = fetch_all(
         source_counts=counts,
+        source_errors=errors,
         queries=ctx["queries"],
         symbols=watched,
         rss_feeds=rss_feeds,
         max_per_source=cfg.event.max_per_source,
         cn_wire=has_cn,
+        capture=True,data_root=MemoryStore().data_root,
     )
     log.info(f"[event_watch] fetched {len(raw_items)} raw items")
-    _record_source_health(counts)
+    _record_source_health(counts,errors=errors)
+    from openinvest.services.agent_queue import enqueue_news,acknowledge_news_source
+    all_queued=0 if dry_run else enqueue_news(raw_items)
     if cfg.event.rss_prefilter_enabled:
         before = len(raw_items)
-        raw_items = _rss_prefilter(raw_items, watched)
-        log.info(f"[event_watch] rss 预过滤: {before} → {len(raw_items)}"
-                 f"（拦下 {before - len(raw_items)} 条与持仓/macro 无关的泛头条）")
+        priority = _rss_prefilter(raw_items, watched)
+        ids={id(item) for item in priority}
+        raw_items=priority+[item for item in raw_items if id(item) not in ids]
+        log.info(f"[event_watch] rss 优先次序: {len(priority)}/{before} 优先，全部来源仍保留待核对资格")
     if not raw_items:
         return {"status": "ok", "fetched": 0, "new_events": 0, "triggered": 0}
 
@@ -202,8 +211,7 @@ def run(
     # （交回时才入库、才过触发闸）。这一轮到此为止，不计 normalize_failed。
     from openinvest.utils.llm import reasoning_by_agent
     if reasoning_by_agent():
-        from openinvest.services.agent_queue import enqueue_news
-        queued = 0 if dry_run else enqueue_news(unseen_items)
+        queued = all_queued
         log.info(f"[event_watch] agent 模式：{queued} 条新闻排队待 Agent 归一化")
         return {"status": "ok", "fetched": len(raw_items), "new_events": 0,
                 "queued_for_agent": queued, "triggered": 0}
@@ -217,6 +225,9 @@ def run(
     new_events: List[Dict[str, Any]] = []
     for ne in normalized:
         observation=store.write_news_observation(ne.event,ne.raw_item,embedding=ne.embedding)
+        snapshot=(getattr(ne.raw_item,"raw_meta",{}) or {}).get("source_snapshot_id")
+        acknowledge_news_source(snapshot,(observation.get("event") or {}).get("event_id") or observation.get("blocked_event_id"),
+            "audit_only" if observation.get("audit_only") else "stored_or_duplicate")
         if observation["changed"]:
             new_events.append({**observation["event"],"revision_previous":observation["previous"] if not observation["inserted"] else None})
 

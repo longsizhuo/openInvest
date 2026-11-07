@@ -57,6 +57,8 @@ def _recall_events(symbol: str, *, as_of: Optional[datetime] = None) -> List[Dic
     cfg = load_config()
     if not cfg.event.enabled:
         return []
+    from openinvest.utils.advisory import is_advisory_mode
+    if is_advisory_mode():return []  # Owner events can contain private review plans and personal annotations.
     try:
         from openinvest.services.embeddings import embed_query
         store = _get_event_store()
@@ -98,6 +100,26 @@ def _recall_events(symbol: str, *, as_of: Optional[datetime] = None) -> List[Dic
         return []
 
 
+def _with_source_quality(brief,*,store=None):
+    from openinvest.utils.advisory import is_advisory_mode
+    from openinvest.core.config import load_config
+    if is_advisory_mode() or not load_config().event.enabled:return brief
+    store=store if store is not None else _get_event_store()
+    if store is None:return brief
+    method=getattr(store,"source_reporting_summary",None)
+    if method is None:
+        if type(store).__module__=="openinvest.db.event_store":raise EvidenceIntegrityError("DATA_UNTRUSTED: incomplete source verification runtime")
+        return brief
+    try:state=method()
+    except EvidenceIntegrityError:raise
+    except Exception as exc:raise EvidenceIntegrityError("DATA_UNTRUSTED: source verification state unavailable") from exc
+    if not isinstance(state,dict):return brief
+    from openinvest.core.runner.event_format import EventBrief
+    note=(f"[SOURCE_QUALITY] {state['current_unqualified_events']} 条近期事件未通过来源用途核验，未作为当前来源事实使用；"
+          "这不是没有新闻或风险正常的证据。\n\n") if state.get("current_unqualified_events") else ""
+    return EventBrief(note+str(brief),getattr(brief,"event_versions",{}),state)
+
+
 def _resolve_event_brief(
     symbol: str, override: Optional[str], *, as_of: Optional[datetime] = None,
 ) -> str:
@@ -122,7 +144,8 @@ def _resolve_event_brief(
     if override is not None:
         return override
     try:
-        return format_event_brief(_recall_events(symbol, as_of=as_of))
+        brief=format_event_brief(_recall_events(symbol, as_of=as_of))
+        return _with_source_quality(brief) if as_of is None else brief
     except EvidenceIntegrityError:
         raise
     except Exception as e:  # noqa: BLE001
@@ -174,7 +197,8 @@ def resolve_event_brief_multi(
         except Exception as e:  # noqa: BLE001
             log.warning(f"resolve_event_brief_multi: {sym} 召回失败（已跳过）: {type(e).__name__}: {e}")
     try:
-        return format_event_brief(events)
+        brief=format_event_brief(events)
+        return _with_source_quality(brief) if as_of is None else brief
     except EvidenceIntegrityError:
         raise
     except Exception as e:  # noqa: BLE001

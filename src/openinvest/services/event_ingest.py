@@ -64,21 +64,22 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
         if urlsplit(it["url"]).scheme.lower()=="openinvest-source" and not bound:
             return {"status":"error","error":"backend_source_locator_requires_a_bound_snapshot"}
         source_fields=bound or it
-        title = (source_fields.get("title") or "").strip()
+        title = (source_fields.get("title") or "") if bound else (source_fields.get("title") or "").strip()
         url = (it.get("url") or "").strip()
         if not title or not url:
             return {"status": "error",
                     "error": f"title/url 必填，收到 {it!r}"}
-        src = (source_fields.get("source") or "host-agent").strip()
+        src = (source_fields.get("source") or "host-agent") if bound else (source_fields.get("source") or "host-agent").strip()
         raw.append(RawNewsItem(
             src_name=src if bound else f"agent:{src}",
             title=title,
             url=url,
-            snippet=(source_fields.get("snippet") or "").strip(),
+            snippet=(source_fields.get("snippet") or "") if bound else (source_fields.get("snippet") or "").strip(),
             text=source_fields.get("text") or "",
             published_at=source_fields.get("published_at"),
             fetched_at=(source_fields.get("fetched_at") or source_fields.get("queued_at") or "") if bound else "",
-            raw_meta={**(bound.get("raw_meta",{}) if bound else {}),"source_origin":"backend_collected" if bound else "agent_supplied_unverified",
+            raw_meta={**(bound.get("raw_meta",{}) if bound else {}),"source_origin":(("captured_api_response" if (bound.get("raw_meta") or {}).get("response_sha256") else
+                      "controlled_adapter_report" if (bound.get("raw_meta") or {}).get("collector_capture_id") else "captured_adapter_input") if bound else "agent_supplied_unverified"),
                       "source_snapshot_id":news_snapshot_id(bound) if bound else None,
                       "source_regression":bool(bound.get("source_regression")) if bound else False,
                       "normalized_by":ingested_by},

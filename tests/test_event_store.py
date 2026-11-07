@@ -351,6 +351,8 @@ def test_recall_future_ts_not_pinned_at_top(store):
         # 绕过写侧钳制，模拟修复前已入库的存量行
         store.conn.execute("UPDATE events SET ts = ?, created_at = ? WHERE event_id = ?",
                            (ts, created_at, eid))
+        from tests.integrity_helpers import approve_event_reporting
+        approve_event_reporting(store,eid)
     add("stale future", _utc_iso(60), _utc_iso(-10))   # 入库 10 天前，ts 在 2 个月后
     fresh_created = _utc_iso(-2)
     add("fresh future", _utc_iso(60), fresh_created)   # 入库 2 天前，ts 在 2 个月后
@@ -406,3 +408,10 @@ def test_recall_unparseable_ts_falls_back_to_created_at(store):
     store.conn.commit()
     out = store.recall("GC=F", min_severity="mid")
     assert [e["one_line_claim"] for e in out] == ["fresh", "bad ts"]
+
+
+from tests.integrity_helpers import reviewed_event_storage
+import pytest
+
+# These tests exercise storage/ranking/dispatch with explicitly reviewed fixtures.
+pytestmark = pytest.mark.usefixtures("reviewed_event_storage")
