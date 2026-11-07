@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.5](https://github.com/longsizhuo/openInvest/compare/v0.68.4...v0.68.5) (2026-11-07)
+
+
+### Bug Fixes
+
+* **integrity:** bind proposals to evidence and preserve alert delivery receipts ([85fa706](https://github.com/longsizhuo/openInvest/commit/85fa70609d4bbbd60578a3a8aa6552890b43685c))
+
 ## [0.68.4](https://github.com/longsizhuo/openInvest/compare/v0.68.3...v0.68.4) (2026-11-06)
 
 
