@@ -163,7 +163,7 @@ Run the committee automatically via GitHub Actions and receive daily digest emai
 
 Local installations keep the ledger on your machine; private remote installations keep it on your chosen host. Neither automatically sends decision data to the official research service.
 
-The optional official hosted service provides a separate ledger per account, Google/GitHub login, OAuth and personal access tokens. After the web notice, research recording defaults on and can be disabled on the web without losing ledger features. De-identified research retains precise amounts/currencies and submitted decisions for research and future training; unused samples have a separate deletion control. Data is retained long term, with encrypted backups retained for 30 days. Model providers independently process the context your Agent sends them.
+The optional official hosted service provides a separate ledger per account, linked Google/GitHub login methods, OAuth and personal access tokens. Login methods can be linked in account settings after verifying both identities; existing ledgers remain separate archives rather than combining trades. After the web notice, research recording defaults on and can be disabled on the web without losing ledger features. De-identified research retains precise amounts/currencies and submitted decisions for research and future training; unused samples have a separate deletion control. Data is retained long term, with encrypted backups retained for 30 days. Model providers independently process the context your Agent sends them.
 
 Hosted registration stays closed until deployment and acceptance. See the [data and connection guide](docs/wiki/26-hosted-mcp.md) and [deployment runbook](deploy/hosted/README.md).
 

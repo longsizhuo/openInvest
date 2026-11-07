@@ -23,6 +23,8 @@ from .pool import DockerPool, Busy, WorkerRejected
 from .research import Research
 from .storage import configured_archive
 from .store import Store, Conflict
+from .identities import provider_for
+from .identity_routes import register_identity_routes, identity_summary
 
 log = logging.getLogger(__name__)
 MAX_BODY = 2 * 1024 * 1024
@@ -173,17 +175,17 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
 
     def identity(subject):
         if not settings.registration_open:
-            with store.db() as db:
-                exists = db.execute("SELECT 1 FROM accounts WHERE subject=? AND deleted=0", (subject,)).fetchone()
-            if not exists:
+            if not store.identity_binding(subject):
                 raise HTTPException(503, "Registration is not open yet")
         return store.identity(subject)
 
-    def session_response(account, location="/connect"):
-        token, _credential = store.credential(account["id"], "session", ttl=12*3600)
-        response = RedirectResponse(location, status_code=303)
+    def session_response(account, location="/connect", *, subject=None, json_response=False, authenticated_at=0):
+        token, _credential = store.credential(account["id"], "session", ttl=12*3600, subject=subject, authenticated_at=authenticated_at)
+        response = JSONResponse({"redirect": location}) if json_response else RedirectResponse(location, status_code=303)
         response.set_cookie("oi_session", token, secure=True, httponly=True, samesite="lax", max_age=12*3600, path="/")
         return response
+
+    identity_callback = register_identity_routes(app, settings, store, browser, oauth, session_response, pool, research)
 
     @app.get("/health")
     async def health():
@@ -199,7 +201,8 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
         connection = {"google": "google-oauth2", "github": "github"}.get(provider)
         if not connection:
             raise HTTPException(400, "Unsupported login provider")
-        return await oauth.auth0.authorize_redirect(request, settings.origin+"/auth/callback", connection=connection)
+        request.session.pop("identity_flow", None)
+        return await oauth.auth0.authorize_redirect(request, settings.origin+"/auth/callback", connection=connection, prompt="login", max_age=0)
 
     @app.get("/auth/callback")
     async def callback(request: Request):
@@ -208,7 +211,12 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
             subject = token["userinfo"]["sub"]
         except Exception:
             raise HTTPException(401, "Login could not be verified") from None
-        return session_response(identity(subject), "/account/")
+        if request.session.get("identity_flow"):
+            return await identity_callback(request, token["userinfo"])
+        auth_time = token["userinfo"].get("auth_time", 0)
+        if type(auth_time) not in {int, float} or auth_time > time.time()+60:
+            auth_time = 0
+        return session_response(identity(subject), "/account/", subject=subject, authenticated_at=auth_time)
 
     @app.get("/auth/action")
     async def action(request: Request, session_token: str, state: str):
@@ -219,24 +227,28 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
             if len(state) > 4096:
                 raise ValueError()
             store.ticket_once(session_token)
+            cutoff = store.subject_tokens_after(claims["sub"])
+            if cutoff and claims.get("iat", 0) <= cutoff:
+                raise ValueError()
             account = identity(claims["sub"])
         except HTTPException:
             raise
         except Exception:
             raise HTTPException(401, "Invalid authorization handoff") from None
-        request.session["pending"] = {"owner": account["id"], "client": claims["client_id"], "state": state}
-        return session_response(account)
+        request.session["pending"] = {"owner": account["id"], "subject": claims["sub"], "client": claims["client_id"], "state": state}
+        return session_response(account, subject=claims["sub"])
 
     @app.get("/api/me")
     async def me(request: Request):
         account, credential = browser(request)
-        provider = {"google-oauth2": "google", "github": "github"}.get(account["subject"].split("|", 1)[0], "other")
+        provider = provider_for(credential["session_subject"])
         return {"account_id": account["id"], "provider": provider,
                 "initialized": bool(account["initialized"]), "policy_version": settings.policy_version,
                 "accepted": account["accepted"] == settings.policy_version, "research_enabled": bool(account["research"]) if account["accepted"] else True,
                 "csrf": credential["csrf"], "mcp_url": settings.origin+"/mcp",
                 "pending_authorization": request.session.get("pending", {}).get("owner") == account["id"],
-                "credentials": store.credentials(account["id"]), "connections": store.connections(account["id"])}
+                "credentials": store.credentials(account["id"]), "connections": store.connections(account["id"]),
+                **identity_summary(store, account, credential, request.session.get("identity_flow"))}
 
     @app.post("/api/me/consent")
     async def accept_policy(request: Request):
@@ -323,8 +335,11 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
         pending = request.session.get("pending", {})
         if account["accepted"] != settings.policy_version or pending.get("owner") != account["id"]:
             raise HTTPException(409, "Complete account setup first")
+        binding = store.identity_binding(pending.get("subject"))
+        if not binding or binding["owner"] != account["id"] or pending["subject"] != _credential["session_subject"]:
+            raise HTTPException(409, "Restart client authorization")
         store.connect_oauth(account["id"], pending["client"], authorize=True)
-        resume = jwt.encode({"sub": account["subject"], "client_id": pending["client"], "approved": True,
+        resume = jwt.encode({"sub": pending["subject"], "client_id": pending["client"], "approved": True,
                              "aud": settings.origin, "iss": settings.origin, "state": pending["state"], "iat": int(time.time()), "exp": int(time.time())+60}, settings.action_secret, algorithm="HS256")
         from urllib.parse import urlencode
         result = settings.issuer+"continue?"+urlencode({"state": pending["state"], "session_token": resume})
@@ -379,16 +394,21 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
     @app.delete("/api/me/research/unused")
     async def delete_research(request: Request):
         account, _credential = browser(request, mutation=True)
-        count = await asyncio.to_thread(research.delete_unused, account["participant"], archive)
+        count = 0
+        for participant in store.participants(account["id"]):
+            count += await asyncio.to_thread(research.delete_unused, participant, archive)
         return {"deleted": count}
 
     @app.delete("/api/me")
     async def delete_account(request: Request):
         account, _credential = browser(request, mutation=True)
         # A busy worker rejects deletion rather than interrupting an active operation.
+        for archived in store.archived_accounts(account["id"]):
+            await pool.destroy(archived["id"])
         await pool.destroy(account["id"])
         store.delete(account["id"])
-        research.cancel_pending(account["participant"])
+        for participant in store.participants(account["id"]):
+            research.cancel_pending(participant)
         response = JSONResponse({"deleted": True})
         response.delete_cookie("oi_session", path="/")
         return response
@@ -449,7 +469,9 @@ def create_app(settings=None, *, store=None, pool=None, authenticator=None, arch
         data = await request.json()
         owner = uuid.UUID(hex=data["owner"]).hex
         stamp = str(data["backup"])
-        if not stamp.isdigit() or not store.account(owner) or archive is None:
+        with store.db() as db:
+            recoverable = db.execute("SELECT 1 FROM accounts WHERE id=? AND deleted=0", (owner,)).fetchone()
+        if not stamp.isdigit() or not recoverable or archive is None:
             raise HTTPException(422, "Invalid recovery source")
         blob = await asyncio.to_thread(archive.get, f"backups/{owner}/{stamp}.aesgcm")
         content = unseal(settings, blob, kind="ledger", owner=owner)

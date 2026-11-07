@@ -34,12 +34,11 @@ class Authenticator:
                 raise ValueError()
             client = claims.get("azp") or claims.get("client_id")
             # Authenticated resource requests must never provision an account or grant.
-            with self.store.db() as db:
-                row = db.execute("SELECT id FROM accounts WHERE subject=? AND deleted=0", (claims["sub"],)).fetchone()
-            account = self.store.account(row[0]) if row else None
+            binding = self.store.identity_binding(claims["sub"])
+            account = self.store.account(binding["owner"]) if binding else None
             if not account or not client or not self.store.connect_oauth(account["id"], client):
                 raise ValueError()
-            if claims["iat"] <= account["revoked_before"]:
+            if claims["iat"] <= max(account["revoked_before"], binding["tokens_after"]):
                 raise ValueError()
             scopes = set(str(claims.get("scope", "")).split())
             return account, scopes
