@@ -157,7 +157,12 @@ jobs:
             sleep 15
           done
           jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > s.tmp && mv s.tmp server.json
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          # Pin a complete release: /latest may advance before its assets are uploaded.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.8/mcp-publisher_linux_amd64.tar.gz \
+            -o mcp-publisher.tar.gz
+          echo '09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4  mcp-publisher.tar.gz' | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
           echo "✅ MCP Registry: io.github.longsizhuo/openinvest@$VERSION"
@@ -218,3 +223,4 @@ jobs:
           clawhub login --token "$CLAWHUB_TOKEN" --label "gh-actions release"
           bash scripts/publish_clawhub.sh
           echo "✅ ClawHub: openinvest@$VERSION"
+
