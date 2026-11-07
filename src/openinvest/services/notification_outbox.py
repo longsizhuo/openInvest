@@ -189,7 +189,7 @@ class NotificationOutbox:
                 status, error = "failed", None
                 delivery_payload = validated_delivery_payload(self.store,payload)
                 if delivery_payload!=payload:
-                    child={key:value for key,value in delivery_payload.items() if key not in ("notification_id","cooldown","followup","events","decision_id","context_id")}
+                    child={key:value for key,value in delivery_payload.items() if key not in ("notification_id","cooldown","followup","events","decision_id","context_id","decision_refs")}
                     child.update(supersedes_notification=ident,decision_quality=True)
                     child_key="supersede:"+ident+":"+hashlib.sha256(json.dumps(child,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
                     replacement=self.enqueue(child_key,child,category="decision_quality",policy="decision",now=now)
@@ -235,6 +235,13 @@ class NotificationOutbox:
 
 def validated_delivery_payload(store, payload):
     if payload.get("decision_quality"):return payload
+    if payload.get("decision_refs"):
+        from openinvest.core.decision_evidence import current_decision
+        if not all(current_decision(store.root,{"decision_id":ref.get("decision_id")},ref.get("symbol","")) for ref in payload["decision_refs"]):
+            from openinvest.services.notifier import render_markdown_email
+            message="待发送日报中的委员会记录已失效或无法核验，原日报停止投递。请复核当前账户与来源。"
+            return {**payload,"subject":"openInvest 日报状态需要复核","plain":message,"discord":message,
+                    "html":render_markdown_email(message,footer_label="Investment Committee"),"decision_quality":True}
     if payload.get("events"):
         from openinvest.core.evidence_eligibility import Eligibility, EvidenceIntegrityError
         from openinvest.db.event_store import EventStore
