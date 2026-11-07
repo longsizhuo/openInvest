@@ -332,9 +332,22 @@ def format_regime_brief(
         regime, metrics.get("price_quantile_2y"), symbol=symbol, prob_hint=prob_hint,
     )
 
+    # INPUTS 行只放 inputs_used（ADR-022 记忆穿越指纹的输入面），**不要**往里塞
+    # 只给 worker 看的辅助量——那会改指纹、让历史 verdict 不可比。
     inputs_str = ", ".join(
         f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
         for k, v in inputs.items()
+    )
+
+    # 趋势斜率独立成行：uptrend 衰竭检查要求 worker 判「spread 是否在收窄」，
+    # 只给当前值它只能猜。负值=走弱。口径是「MA 距离 / ATR(价格单位)」的 20 日变化，
+    # 不用百分比价差（那会被上涨本身机械压小）。
+    slope = metrics.get("trend_spread_norm_delta_20d")
+    slope_str = (
+        f"\nTREND_SLOPE: MA20/MA120 距离（ATR 归一）20 日变化 {slope:+.2f}"
+        f"（{'走弱' if slope < 0 else '加强'}）"
+        if isinstance(slope, (int, float)) and not isinstance(slope, bool)
+        else ""
     )
 
     # #113：阈值已尺度无关（比值口径），无 per-asset 覆盖
@@ -348,6 +361,7 @@ def format_regime_brief(
         f"INPUTS: {inputs_str}\n"
         f"THRESHOLDS: {threshold_str}\n"
         f"STRATEGY_HINT: {hint}"
+        f"{slope_str}"
     )
 
 # 完整历史导出面（含下划线名/常量）——façade `import *` 的完备性依赖本列表
