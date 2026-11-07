@@ -47,7 +47,7 @@ class RegimeProbability:
         conf = " ⚠样本不足" if self.low_confidence else ""
         eff = self.effective_n or self.n
         # 重叠窗口源：明确标注独立样本量，避免 n 被误读为独立观测数
-        overlap = f"，重叠窗口独立≈{eff}" if eff != self.n else ""
+        overlap = f"，重叠样本量启发式≈{eff}（不是独立样本证明）" if eff != self.n else ""
         return (
             f"{self.asset} {self.regime} (n={self.n}{overlap}): "
             f"涨>{self.threshold_pct:.0f}% {self.p_up * 100:.0f}%、"
@@ -74,7 +74,7 @@ def _percentile(values: List[float], q: float) -> float:
 class ReentryEstimate:
     """单个 (asset, regime, window) 的卖出后路径 / 买回点估计。
 
-    基于历史 forward return 分布给"悲观但可能"的低点 + 触及概率，
+    基于历史 forward return 分布给期末收益分位及期末低于现价的比例，
     作为 CIO 出 TRIM 时填 REENTRY_PRICE 的数据参考（不是强制值）。
     """
     asset: str
@@ -83,7 +83,7 @@ class ReentryEstimate:
     n: int
     current_price: float
     threshold_pct: float
-    p_below_current: float   # P(forward return < 0)，即跌破现价概率
+    p_below_current: float   # P(terminal forward return < 0)，不是途中触价概率
     p_down: float            # P(forward return < -threshold%)
     median_return_pct: float
     downside_pct: float      # forward return 的低分位（REENTRY_DOWNSIDE_QUANTILE）
@@ -100,7 +100,7 @@ class ReentryEstimate:
     def summary_line(self) -> str:
         conf = " ⚠样本不足" if self.low_confidence else ""
         eff = self.effective_n or self.n
-        overlap = f"，重叠窗口独立≈{eff}" if eff != self.n else ""
+        overlap = f"，重叠样本量启发式≈{eff}（不是独立样本证明）" if eff != self.n else ""
         if not self.has_downside:
             return (
                 f"{self.window} (n={self.n}{overlap}): 该 regime 历史上 {self.window} 内"
@@ -146,10 +146,14 @@ def calibrate_profile(
     uncond = profile.get("uncond_windows") or {}
     out = dict(profile)
     out["windows"] = {}
-    out["calibration"] = {"shrinkage_k": shrinkage_k, "band_gamma": band_gamma}
+    out["raw_windows"] = {w:dict(st) for w,st in profile.get("windows",{}).items()}
+    out["calibration"] = {"shrinkage_k": shrinkage_k, "band_gamma": band_gamma,
+                          "version":"conditional_unconditional_mixture_v1","conditional_weights":{},
+                          "effective_n_method":"n_div_calendar_window_heuristic_not_independence_proof"}
     for w, st in (profile.get("windows") or {}).items():
         st = dict(st)
         u = uncond.get(w)
+        lam=1.0
         if shrinkage_k and u:
             lam = st["effective_n"] / (st["effective_n"] + shrinkage_k)
             # 只校准两边都有的字段（fit 脚本喂的 mini-profile 无 p_down）
@@ -161,6 +165,7 @@ def calibrate_profile(
             for key in ("p_below", "p_down"):
                 if key in st:
                     st[key] = min(1.0, max(0.0, st[key]))
+        out["calibration"]["conditional_weights"][w]=lam
         if band_gamma != 1.0:
             med = st["median_pct"]
             for key in ("p10_pct", "p90_pct", "downside_pct"):

@@ -125,8 +125,11 @@ def test_invalid_resubmit_preserves_existing_evidence(env):
 
 def test_submit_writes_daily_sidecar_and_loader_reads_it(env):
     mem, _ = env
+    from tests.integrity_helpers import approve_historical_generator
+    from openinvest.services.historical_evidence import qualification
+    approve_historical_generator(mem.parent)
     cid = context_id("TESTSYM", regime_brief=REGIME_BRIEF, sentiment_brief=SENTIMENT_BRIEF,
-                     path_reference="- 30d 回踩中位 -4%", path_profile={"x": 1})
+                     path_reference="- 30d 回踩中位 -4%", path_profile={"x": 1},historical_qualification=qualification(mem.parent))
     co.save_committee_transcript("TESTSYM", RAW, provider="hermes", context_id=cid)
     day = datetime.now().strftime("%Y-%m-%d")
     rec = co.load_submitted_committee("TESTSYM", day)

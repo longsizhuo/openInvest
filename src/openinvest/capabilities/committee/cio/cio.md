@@ -112,8 +112,8 @@ EXECUTION_PLAN:
 RISK_PLAN:
   stop_loss_trigger: <根据本次风险证据写出具体条件及单位，不套用固定示例数值>
   what_if_wrong:
-    worst_case_pnl_{{base}}: <最坏情况浮亏 {{BASE}}>
-    recovery_estimate: <估计多久能解套，如 "3-6 个月">
+    stress_scenario_loss_{{base}}: <明确情景与损失金额；有限跌幅压力测试不是最坏损失界限，缺数据写未知>
+    recovery_estimate: <没有可核验的恢复模型时写未知；组内中位收益不能保证现有成本何时恢复>
 
 PERSONAL_NOTE:
   - <一句话评估用户当前持仓状态>

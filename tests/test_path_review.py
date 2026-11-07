@@ -66,6 +66,7 @@ def test_score_one_band_and_brier_inputs(monkeypatch):
     n = 200
     _stub_closes(monkeypatch, [100.0 + i for i in range(n)])
     profile = {
+        "forecast_qualification":{"forecast_use_allowed":True,"origin":"synthetic_unit_fixture"},
         "windows": {
             "30d": {"median_pct": 10.0, "p_below": 0.3, "p10_pct": -5.0, "p90_pct": 40.0},
             "90d": {"median_pct": 50.0, "p_below": 0.2, "p10_pct": 60.0, "p90_pct": 90.0},
@@ -138,6 +139,7 @@ def test_run_live_path_end_to_end(monkeypatch, tmp_path):
     _stub_closes(monkeypatch, [100.0 + i for i in range(200)])  # 2024-01-01 起线性上行
 
     profile = {
+        "forecast_qualification":{"forecast_use_allowed":True,"origin":"synthetic_unit_fixture"},
         "windows": {
             "30d": {"median_pct": 10.0, "p_below": 0.3, "p10_pct": -5.0, "p90_pct": 40.0},
             "60d": {"median_pct": 30.0, "p_below": 0.25, "p10_pct": 10.0, "p90_pct": 60.0},
@@ -163,6 +165,24 @@ def test_run_live_path_end_to_end(monkeypatch, tmp_path):
     md = Path(out["report"])
     assert md.name == "path_calibration_live.md"
     assert md.exists() and "路径预测校准报告" in md.read_text()
+
+
+def test_unqualified_audit_forecast_survives_without_entering_live_score(monkeypatch,tmp_path):
+    import openinvest.core.memory_store as ms
+    monkeypatch.setattr(ms,"MEMORY_ROOT",tmp_path)
+    monkeypatch.setattr(pr,"ROOT",tmp_path)
+    _stub_closes(monkeypatch,[100.0+i for i in range(200)])
+    profile={"forecast_qualification":{"forecast_use_allowed":False,"reason":"unqualified_generator"},
+             "windows":{"30d":{"median_pct":0,"p_below":0.9,"p10_pct":-10,"p90_pct":10}}}
+    directory=tmp_path/".committee/2024-02-01";directory.mkdir(parents=True)
+    original=json.dumps({"date":"2024-02-01","symbol":"SYNTHETIC","profile":profile,"current_price":131})
+    path=directory/"SYNTHETIC_path.json";path.write_text(original)
+    result=pr.run()
+    assert result["reviews"]==1 and result["live_reviews"]==0 and result["shadow_reviews"]==1
+    assert result["summary"]["n"]==0 and Path(result["jsonl"]).read_text()==""
+    audit=json.loads(Path(result["shadow_jsonl"]).read_text())
+    assert audit["source"]=="shadow_not_used" and not audit["forecast_qualification"]["forecast_use_allowed"]
+    assert path.read_text()==original and audit["windows"]["30d"]["p_below"]==0.9
 
 
 def test_live_run_never_writes_recompute_baseline(monkeypatch, tmp_path):

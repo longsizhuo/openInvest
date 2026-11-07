@@ -23,7 +23,7 @@ from openai import OpenAI
 
 from openinvest.capabilities.tools import TOOL_DEFINITIONS, execute_tool_call
 from openinvest.core.llm_telemetry import TelemetryMeta, record_llm_call, record_tool_call
-from openinvest.utils.llm import get_thinking_disable_kwargs, is_claude, sampling_kwargs
+from openinvest.utils.llm import get_thinking_disable_kwargs, get_thinking_enable_kwargs, is_claude, sampling_kwargs
 
 
 @dataclass
@@ -70,8 +70,9 @@ class SDKAgent:
         self.temperature = temperature
         self.enable_tools = enable_tools
         self.max_tool_iterations = max_tool_iterations
-        # 默认沿用全局策略（committee 4 worker 已思考 → disable 走 fast path）。
-        # enable_thinking=True 给单角色（如 CIO 终裁）开思考做 A/B；DeepSeek 思考的
+        # The caller selects thinking separately for each role. Other analyst
+        # outputs do not establish that this call has already reasoned.
+        # enable_thinking=True 给单角色（如 CIO 终裁）开思考；DeepSeek 思考的
         # reasoning_content 与 content 分开，不像 MiMo 会吃空 content。
         self.enable_thinking = enable_thinking
         # response_format={"type":"json_object"} 强制结构化输出（DeepSeek JSON Output）。
@@ -191,6 +192,8 @@ class SDKAgent:
         # enable_thinking=True 的角色跳过 disable，保留思考模式（P3 CIO A/B）。
         if not self.enable_thinking:
             kwargs.update(get_thinking_disable_kwargs(self.model))
+        else:
+            kwargs.update(get_thinking_enable_kwargs(self.model))
         if self.response_format and not is_claude(self.model):  # Anthropic 兼容层收 json_object 会 400
             kwargs["response_format"] = self.response_format
         if self.enable_tools:
