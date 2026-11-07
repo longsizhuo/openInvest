@@ -16,7 +16,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from openinvest.core.committee.agent_io import AGENT_UNAVAILABLE_MARKER
+from openinvest.core.committee.agent_io import AGENT_UNAVAILABLE_MARKER,worker_output_status,legacy_worker_brief_unavailable
 
 log = logging.getLogger(__name__)
 
@@ -190,6 +190,7 @@ def parse_cio_memo(
     *,
     fields: Optional[Dict[str, Any]] = None,
     worker_brief: Optional[str] = None,
+    unavailable_workers: Optional[List[str]] = None,
     current_price: Optional[float] = None,
     regime: Optional[str] = None,
     defense_flag_on: bool = False,
@@ -331,8 +332,8 @@ def parse_cio_memo(
     # CIO 自己写的"无 [WORKER_UNAVAILABLE] 标记"当成 worker 失败——2026-09~10 live 6 次
     # 强制 HOLD 全是这种误判（阶段四 R4 核查）。
     floor = _verdict_cfg.worker_unavailable_confidence_floor
-    _wu = _WU_SENTINEL in text or (
-        worker_brief is not None and _WU_SENTINEL in worker_brief
+    _wu = bool(unavailable_workers) if unavailable_workers is not None else (
+        worker_output_status(text)["unavailable"] or legacy_worker_brief_unavailable(text) or legacy_worker_brief_unavailable(worker_brief)
     )
     # Failed input invalidates the directional proposal independently of how
     # confident the CIO is. The floor is a ceiling on the resulting confidence,

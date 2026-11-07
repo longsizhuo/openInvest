@@ -39,8 +39,9 @@ def enforce_input_health(verdict: dict, health: dict) -> None:
     if reasons:
         verdict.setdefault("_original_verdict", verdict.get("verdict"))
         verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
-        verdict.update(verdict="HOLD", alloc_cny=0, confidence=0.0,
-                       decision_status="DATA_UNTRUSTED", hold_reason="incomplete_required_inputs")
+        no_proposal=verdict.get("proposal_available") is False
+        verdict.update(verdict="UNCLEAR" if no_proposal else "HOLD", alloc_cny=0, confidence=0.0,
+                       decision_status="DATA_UNTRUSTED", hold_reason=verdict.get("hold_reason") if no_proposal else "incomplete_required_inputs")
         health.update(decision_status="DATA_UNTRUSTED", input_errors=reasons)
 
 
