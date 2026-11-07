@@ -180,7 +180,10 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
     }})
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
-    assert "TRIM 约束" in prompt
+    assert "当前配置的旧择时减仓过滤" in prompt
+    assert "不是已核验的用户授权" in prompt
+    assert "风险减仓、投资依据失效、流动性需求不受此过滤影响" in prompt
+    assert "卖出坐实亏损" not in prompt
     assert "5.0%" in prompt
     assert "10.0%" in prompt
 
@@ -316,8 +319,10 @@ def test_cio_prompt_concentration_directive_on_when_lens_disabled():
     set_config_override({"verdict": {"concentration_lens_enabled": False}})
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
-    assert "集中度 lens 已被用户关闭" in prompt
-    assert "不得提及、估算或引用该资产占总资产的比例" in prompt  # 2026-10-11：CIO 曾照抄 Risk 编的"仓位仅占 1.7%"
+    assert "集中度分析当前未启用（配置状态）" in prompt
+    assert "不得编造 CONCENTRATION_PCT" in prompt
+    assert "这不证明用户选择了单资产或刻意集中策略" in prompt
+    assert "集中度 lens 已被用户关闭" not in prompt
 
 
 def test_risk_officer_prompt_concentration_directive_both_rounds():

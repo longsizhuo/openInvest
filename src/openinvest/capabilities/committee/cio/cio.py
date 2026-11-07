@@ -81,20 +81,20 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
     verdict_cfg = load_config().verdict
 
     # TRIM 约束：阈值 > 0 时注入（sweep 出 OOS 验证结果后才启用，遵守 ADR-010 rule 4）
-    # 用户显式开启（配 trim_*_loss_pct）= 采用"小额浮亏不 TRIM"纪律，覆盖通用 TRIM 规则。
+    # A configured legacy tactical filter is not evidence of user authorization.
     trim_constraint = ""
     if verdict_cfg.trim_no_trim_loss_pct > 0 and verdict_cfg.trim_caution_loss_pct > 0:
         trim_constraint = bilingual(
-            f"**🔥 小额浮亏 TRIM 约束（用户已启用，强制，覆盖通用 TRIM 规则）**：\n"
-            f"- **浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 不允许 TRIM** — 卖出坐实亏损，长期资金久期下应 HOLD 等修复\n"
-            f"- **浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 且 Macro SIGNAL 非 risk_off：倾向 HOLD** — 短期波动不是卖出理由\n"
-            f"- 只有浮亏 > {verdict_cfg.trim_caution_loss_pct}% 或 Macro SIGNAL=risk_off + Risk SIGNAL=high_risk 双触发时，才考虑 TRIM\n"
-            f"- 金融逻辑：长期投资账户，小额浮亏不值得交易",
-            f"**🔥 Small-unrealized-loss TRIM constraint (enabled by the user, mandatory, overrides the general TRIM rule)**:\n"
-            f"- **Unrealized loss < {verdict_cfg.trim_no_trim_loss_pct}%: TRIM is not allowed** -- selling locks in the loss; with a long capital horizon, HOLD and wait for recovery\n"
-            f"- **Unrealized loss {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% and Macro SIGNAL is not risk_off: lean HOLD** -- short-term volatility is not a reason to sell\n"
-            f"- Only consider TRIM when unrealized loss > {verdict_cfg.trim_caution_loss_pct}%, or Macro SIGNAL=risk_off together with Risk SIGNAL=high_risk\n"
-            f"- Rationale: long-term investment account -- a small unrealized loss is not worth trading over",
+            f"**当前配置的旧择时减仓过滤（不是已核验的用户授权）**：\n"
+            f"- 只适用于 tactical_reentry：浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 时不建议择时卖出后买回；"
+            f"浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 是该配置的谨慎区间。\n"
+            "- 风险减仓、投资依据失效、流动性需求不受此过滤影响；不要求先亏得更多或多个风险标签同时命中。\n"
+            "- 这些数字是配置策略，不是市场定律。账面损失已存在，不能把卖出本身说成产生了这笔损失。",
+            f"**Configured legacy tactical reduction filter (not verified user authorization)**:\n"
+            f"- Only tactical_reentry: below {verdict_cfg.trim_no_trim_loss_pct}% unrealized loss, do not recommend tactical sale/rebuy; "
+            f"{verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% is its caution interval.\n"
+            "- Risk reduction, thesis invalidation and liquidity exits are unaffected. Do not require larger losses or joint risk labels.\n"
+            "- These numbers are a configured policy, not market law. Existing mark-to-market loss is not created by selling.",
         )
 
     # 集中度 lens 关闭时（单资产/刻意集中策略）压掉 CIO 的超配规则。空串=开启时零改动
@@ -102,16 +102,14 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
     concentration_directive = ""
     if not verdict_cfg.concentration_lens_enabled:
         concentration_directive = bilingual(
-            "**🚫 集中度 lens 已被用户关闭（单资产 / 刻意集中策略）**：忽略上方所有基于 "
-            "CONCENTRATION_PCT 的超配规则——`<20% / 20-40% / >40%` 分档与 `>60% 限仓` 均不适用，"
-            "**不得以集中度 / 超配为由输出 TRIM**（也不得换标签成 bearish 但实由超配驱动）。"
-            "上下文不提供持仓占比：**不得提及、估算或引用该资产占总资产的比例**（Risk 报告里出现的占比也不要转述）。"
-            "仍须正常评估波动 / 回撤 / 止损 / 宏观 / 估值风险。",
-            "**🚫 The concentration lens has been disabled by the user (single-asset / deliberately concentrated strategy)**: ignore all "
-            "CONCENTRATION_PCT-based overweight rules above -- the `<20% / 20-40% / >40%` tiers and the `>60% cap` no longer apply. "
-            "**Do not output TRIM on grounds of concentration / overweight** (and do not relabel it as bearish while it is actually driven by concentration). "
-            "The context gives no position share: **do not mention, estimate, or cite this asset's share of total assets** (do not repeat a share that appears in the Risk report either). "
-            "Still evaluate volatility / drawdown / stop-loss / macro / valuation risk normally.",
+            "**集中度分析当前未启用（配置状态）**：输入可能只有部分资产，缺少完整总资产分母，"
+            "不得编造 CONCENTRATION_PCT、据此断言超配或新增持仓比例限制。"
+            "这不证明用户选择了单资产或刻意集中策略，也不是用户禁止减仓。"
+            "仍须独立评估当前敞口的波动、回撤、投资依据、宏观与流动性风险。",
+            "**Concentration analysis is currently disabled (configuration state)**: the input may cover only part of the assets, "
+            "so do not invent a total-portfolio denominator, CONCENTRATION_PCT, overweight conclusion or position-share limit. "
+            "This does not establish that the user chose a single-asset or deliberately concentrated strategy, and is not a user ban on reducing exposure. "
+            "Independently evaluate volatility, drawdown, investment thesis, macro and liquidity risk.",
         )
 
     # 现金仓位机会成本规则关闭时（默认）压掉"低集中度不许 HOLD、默认至少 ACCUMULATE"。
@@ -132,9 +130,9 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
         TRIM_CONSTRAINT=trim_constraint,
         CONCENTRATION_DIRECTIVE=concentration_directive,
         CASH_OPP_COST_DIRECTIVE=cash_opp_cost_directive,
-        ACCUMULATE_DEFINITION=("分批建仓 / 加仓（100% 现金时按用户启用的规则试探建仓）"
+        ACCUMULATE_DEFINITION=("分批建仓 / 加仓（按当前已配置的现金比例策略，不将配置冒充用户授权）"
                                if verdict_cfg.cash_opportunity_cost_rule_enabled else "分批建仓 / 加仓，须有本次证据和预算依据"),
-        HOLD_DEFINITION=("维持现状，按用户启用的现金比例规则判断" if verdict_cfg.cash_opportunity_cost_rule_enabled
+        HOLD_DEFINITION=("维持现状，核对当前配置的现金比例策略及其适用范围" if verdict_cfg.cash_opportunity_cost_rule_enabled
                          else "维持现状，可在任意仓位选择，但须说明为何优于买入或退出"),
     )
     prompt = apply_lens_blocks(prompt, "concentration", verdict_cfg.concentration_lens_enabled)

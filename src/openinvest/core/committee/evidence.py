@@ -9,6 +9,8 @@ def execution_constraints_context(single_invest_cap=None,resolved=None):
     """Expose the same effective input used by the execution guard, with its semantics."""
     from openinvest.utils.base_currency import base_currency
     from openinvest.capabilities.committee.i18n import bilingual
+    from openinvest.core.config import load_config
+    policy=load_config().verdict
     payload={"single_invest_cap":{"state":"not_supplied" if single_invest_cap is None else "effective_unlimited" if single_invest_cap==0 else "configured",
               "effective_amount":single_invest_cap,"effective_currency":base_currency(),
               "source_ref":"execution_layer.single_invest_cap","scope":"new_purchase_order_limit_only",
@@ -16,6 +18,12 @@ def execution_constraints_context(single_invest_cap=None,resolved=None):
              "loss_budget":{"state":"use_explicit_user_context_if_present_otherwise_unknown",
                             "cash_is_not_a_loss_budget":True},
              "model_proposed_levels":{"authority":"review_proposal_not_an_existing_user_stop_or_trade_permission"}}
+    payload["configured_modeling_policy"]={"authority":"effective_configuration_not_verified_user_intent",
+        "concentration_lens_enabled":policy.concentration_lens_enabled,
+        "cash_opportunity_cost_rule_enabled":policy.cash_opportunity_cost_rule_enabled,
+        "legacy_tactical_filter":{"no_trim_loss_pct":policy.trim_no_trim_loss_pct,
+             "caution_loss_pct":policy.trim_caution_loss_pct,"scope":"tactical_reentry_only_not_risk_or_needs_exits"},
+        "missing_total_assets_denominator":"do_not_invent_concentration_not_a_user_trade_ban"}
     if resolved is not None:payload["single_invest_cap"]=resolved
     return "=== EXECUTION CONSTRAINT INPUTS ===\n"+json.dumps(payload,ensure_ascii=False,sort_keys=True)+"\n"+bilingual(
         "本块只说明已传入的执行限额，不构成市场方向证据。缺少用户损失预算不证明安全，也不自动否决任何方向。风险减仓与择时卖出须分别比较；没有用户止损线不能证明应继续持有。",
