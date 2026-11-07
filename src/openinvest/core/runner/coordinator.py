@@ -414,9 +414,16 @@ def _save_committee_transcript_once(
     has_df = current_price is not None and bool(facts.get("price_last_bar"))
     target, strategy = facts.get("target", {}), facts.get("strategy", {})
     defense_dca = facts.get("defense_dca")
+    from openinvest.core.committee.agent_io import worker_output_status,legacy_worker_brief_unavailable
+    worker_calls=[{"role":name.split("_")[0].lower(),"round":name,**worker_output_status(value)}
+                  for name,value in sections.items() if name in {"MACRO","CIO","QUANT","RISK","QUANT_R1","QUANT_R2","RISK_R1","RISK_R2"}]
+    if not sections:
+        worker_calls=[{"role":"cio","round":"CIO",**worker_output_status(cio_text)}]
+        if legacy_worker_brief_unavailable(raw):worker_calls.append({"role":"legacy_worker","round":"legacy","transport":"unknown","unavailable":True,"reason":"reported_failure_envelope"})
     verdict = parse_cio_memo(
         cio_text,
         worker_brief=raw,  # 分段时 cio_text 只剩 CIO 段，worker 失败哨兵在别的段里
+        unavailable_workers=sorted({call["role"] for call in worker_calls if call["unavailable"]}),
         current_price=current_price,
         regime=regime,
         defense_flag_on=("INDEP_DEFENSE_FLAG: on" in fact_text or atr_defense_on),
@@ -461,7 +468,7 @@ def _save_committee_transcript_once(
         cio_memo=cio_text,
     )
     health = build_input_health(
-        report_like, verdict, None,
+        report_like, verdict, {"worker_calls":worker_calls},
         {"entry": "coordinator", "provider": provider, "model": (model or "").strip() or "unknown",
          "has_df": bool(has_df),
          "price_fetch_failed": facts.get("price_fetch_failed", False),

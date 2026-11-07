@@ -190,6 +190,37 @@ def run_committee(
         source_event_brief=source_event_brief,
         historical_qualification=historical_qualification or {},
     )
+    from openinvest.core.committee.agent_io import worker_output_status
+    worker_calls=[];worker_outputs=[]
+    converged=False
+    def record_worker(role,round_label,text):
+        call={"role":role,"round":round_label,**worker_output_status(text)}
+        worker_calls.append(call);worker_outputs.append({"role":role,"round":round_label,"text":text})
+        return call
+    record_worker("macro","macro",macro_view)
+
+    def provider_abort():
+        failures=[call for call in worker_calls if call.get("used",True) and call.get("transport")=="failed"
+                  and (call.get("http_status") in {401,402,403,404} or call.get("reason")=="agent_not_constructed")]
+        if not failures:return None
+        report.cio_memo="[QUALITY_ALERT] 模型服务的账户、鉴权或模型配置不可用；后续调用已停止，本次没有可用的委员会建议。"
+        quant_raw=[row["text"] for row in worker_outputs if row["role"]=="quant"]
+        risk_raw=[row["text"] for row in worker_outputs if row["role"]=="risk"]
+        meta={"max_rounds":max_debate_rounds,"final_round":len(quant_raw),"converged":converged,
+              "worker_calls":worker_calls,"worker_outputs":worker_outputs,"quant_history":quant_raw,"risk_history":risk_raw,
+              "synthesis_performed":False,"termination":"provider_unavailable"}
+        verdict={"verdict":"UNCLEAR","confidence":0.,"alloc_cny":0,"dominant_view":None,
+                 "raw":report.cio_memo,"alloc_currency":base_currency(),"trim_reason":None,
+                 "reentry_price":None,"reentry_condition":None,"expected_path":None,
+                 "decision_status":"DATA_UNTRUSTED","hold_reason":"provider_unavailable",
+                 "proposal_available":False,"raw_market_verdict":None,
+                 "provider_failure":{"role":failures[0]["role"],"http_status":failures[0].get("http_status"),"reason":failures[0].get("reason")},
+                 "reasoning_review":{"status":"unavailable","reason":"provider_unavailable"}}
+        if persist_to_memory:_persist(report,verdict,debate_meta=meta,input_health=input_health)
+        return {"asset":sym,"verdict":verdict,"report":report,"debate":meta}
+
+    aborted=provider_abort()
+    if aborted:return aborted
 
     quant_history: List[str] = []   # Round 1, 2, ..., N
     risk_history: List[str] = []
@@ -240,6 +271,10 @@ def run_committee(
         (quant_agent_r1, quant_input_r1),
         (risk_agent_r1, risk_input_r1),
     ])
+    for role,text in (("quant",quant_r1),("risk",risk_r1)):record_worker(role,"opening",text)
+    report.quant_view=quant_r1;report.risk_view=risk_r1
+    aborted=provider_abort()
+    if aborted:return aborted
     # SENTINEL 覆写：portfolio_summary 字面给了集中度数字，LLM 仍偶发 hallucinate
     # (2026-05-20 某持仓真实 33.6% 被编成 70.2%)。这里强制改回真值。
     _true_conc = _extract_concentration_from_summary(portfolio_summary, sym)
@@ -296,6 +331,10 @@ def run_committee(
             (quant_agent_rN, quant_input_rN),
             (risk_agent_rN, risk_input_rN),
         ])
+        for role,text in (("quant",quant_rN),("risk",risk_rN)):record_worker(role,f"round_{round_idx}",text)
+        report.quant_adjusted=quant_rN;report.risk_adjusted=risk_rN
+        aborted=provider_abort()
+        if aborted:return aborted
         # SENTINEL 覆写：Round 2+ 同样保护，防 LLM 在 rebuttal 里又编出新的集中度
         risk_rN = _override_concentration_in_risk_output(risk_rN, _true_conc)
         risk_rN = _strip_concentration_if_lens_off(risk_rN)
@@ -356,6 +395,9 @@ def run_committee(
     report.cio_memo = _ask(cio_agent, cio_brief)
     report.cio_attempts.append(report.cio_memo)
     report.cio_raw_response=report.cio_memo
+    cio_call=record_worker("cio","cio",report.cio_memo)
+    aborted=provider_abort()
+    if aborted:return aborted
 
     # P1 优雅回退：JSON 模式下试解析；provider 没真支持 / 没吐合法 JSON（含 _ask 失败返回
     # 的 [WORKER_UNAVAILABLE] 哨兵）→ 退回文本模式重问一次，走 regex。DeepSeek 正常一次过。
@@ -376,6 +418,10 @@ def run_committee(
             report.cio_memo = _ask(cio_agent, cio_brief)
             report.cio_attempts.append(report.cio_memo)
             report.cio_raw_response=report.cio_memo
+            cio_call["used"]=False
+            record_worker("cio","cio_text_fallback",report.cio_memo)
+            aborted=provider_abort()
+            if aborted:return aborted
         else:
             # prose 保住：GUI/transcript 展示 memo 字段（缺失则留原始 JSON 文本）
             _memo = cio_fields.get("memo")
@@ -388,6 +434,7 @@ def run_committee(
         report.cio_memo,
         fields=cio_fields,
         worker_brief=cio_brief,
+        unavailable_workers=sorted({call["role"] for call in worker_calls if call.get("used",True) and call["unavailable"]}),
         current_price=current_price,
         # risk_profile / 快崩防御 后处理输入：regime 标签来自确定性 regime_brief
         # 首行；防御 = VIX 哨兵（市场级, sentiment_brief）OR ATR 腿（资产级, 调用方算好）
@@ -432,6 +479,8 @@ def run_committee(
         # 真加了要改成从 agent 实例读（CR #431 建议 5）。
         "model": get_llm_config_safe()[2],
         "cio_json_mode": bool(_want_json and cio_fields is not None),
+        "worker_calls":worker_calls,
+        "worker_outputs":worker_outputs,
     }
     if persist_to_memory:
         _persist(report, cio_parsed, debate_meta=debate_meta, input_health=input_health)
