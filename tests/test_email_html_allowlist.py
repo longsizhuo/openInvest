@@ -174,13 +174,13 @@ def test_verdict_email_untrusted_fields_have_no_active_html(monkeypatch):
     monkeypatch.setattr(event_notifier, "send_email_html",
                         lambda **k: sink.update(k) or "to@example.com")
     evil = "<img src=x onerror=alert(1)>[go](https://evil.example)![p](https://track.example/p.gif)"
-    event_notifier.send_committee_verdict_email(
+    payload=event_notifier.render_committee_notice(
         task_id="t1", symbols=[f"A{evil}", "B"], event_ids=[evil],
         by_asset={f"A{evil}": {"verdict": {"verdict": f"SELL{evil}"}},
                   "B": {"error": evil}},
     )
-    assert _violations(sink["html_body"]) == []
-    assert "SELL" in sink["html_body"]
+    assert _violations(payload["html"]) == []
+    assert "SELL" in payload["html"]
 
 
 def test_event_alert_keeps_only_template_links():

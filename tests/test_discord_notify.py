@@ -7,6 +7,41 @@ from __future__ import annotations
 from openinvest.services.discord_notify import send_discord_alert
 from openinvest.services.event_notifier import _build_discord_text
 
+
+def test_lost_response_recovers_durable_provider_receipt_without_reposting(monkeypatch):
+    import hashlib
+    from types import SimpleNamespace
+    import requests
+    from openinvest.services.discord_notify import send_discord_alert_receipt
+    monkeypatch.setenv("CHATBOT_ALERT_URL","http://relay.invalid/alert/invest")
+    monkeypatch.setenv("CHATBOT_INTERNAL_KEY","synthetic")
+    posts=[];gets=[]
+    def lost(*args,**kw):
+        posts.append(kw);raise requests.ReadTimeout()
+    def lookup(url,**kw):
+        gets.append(url)
+        return SimpleNamespace(status_code=200,json=lambda:{"ok":True,"delivery_status":"accepted",
+            "notification_id":"a"*64,"message_id":"123456","text_sha256":hashlib.sha256(b"notice").hexdigest(),
+            "accepted_at":"2026-11-07T00:00:00+00:00"})
+    monkeypatch.setattr("openinvest.services.discord_notify.requests.post",lost)
+    monkeypatch.setattr("openinvest.services.discord_notify.requests.get",lookup)
+    receipt=send_discord_alert_receipt("notice",notification_id="a"*64)
+    assert receipt["accepted"] and len(posts)==len(gets)==1
+
+
+def test_missing_receipt_keeps_unknown_and_never_reposts(monkeypatch):
+    from types import SimpleNamespace
+    import requests
+    from openinvest.services.discord_notify import send_discord_alert_receipt
+    monkeypatch.setenv("CHATBOT_ALERT_URL","http://relay.invalid/alert/invest")
+    monkeypatch.setenv("CHATBOT_INTERNAL_KEY","synthetic")
+    calls=[]
+    def post(*args,**kw):calls.append(kw);raise requests.ReadTimeout()
+    monkeypatch.setattr("openinvest.services.discord_notify.requests.post",post)
+    monkeypatch.setattr("openinvest.services.discord_notify.requests.get",lambda *a,**kw:SimpleNamespace(status_code=404,json=lambda:{"delivery_status":"not_found"}))
+    receipt=send_discord_alert_receipt("notice",notification_id="a"*64)
+    assert not receipt["accepted"] and receipt["status"]=="unknown" and len(calls)==1
+
 _EVENTS = [
     {
         "one_line_claim": "美联储意外加息 50bp",
@@ -42,6 +77,9 @@ def test_post_success_and_failure(monkeypatch) -> None:
         def __init__(self, code: int) -> None:
             self.status_code = code
             self.text = ""
+
+        def json(self):
+            return {"ok":True,"delivery_status":"accepted","message_id":"123456"} if self.status_code==200 else {"ok":False,"delivery_status":"failed"}
 
     def fake_post(url, **kwargs):
         calls.append(kwargs)

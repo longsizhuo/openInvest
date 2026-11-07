@@ -125,7 +125,7 @@ def test_persist_roundtrip_cio_memo_verbatim(mem_root):
     report = CommitteeReport(asset={"symbol": "TESTSYM", "display_name": "Test"},
                              macro_view="MACRO risk_on", quant_view="QUANT bullish",
                              risk_view="RISK ok", cio_memo=_MEMO)
-    verdict = {"verdict": "ACCUMULATE", "confidence": 0.7, "dominant_view": "quant", "alloc_cny": 800}
+    verdict = {"verdict": "ACCUMULATE", "confidence": 0.7, "dominant_view": "quant", "alloc_cny": 800,"reasoning_review":{"status":"passed","origin":"synthetic_unit_fixture"}}
     persist._persist(report, verdict, debate_meta={"max_rounds": 2, "final_round": 2, "converged": True})
     md = mem_root / ".committee" / datetime.now().strftime("%Y-%m-%d") / "TESTSYM.md"
     got = parse_committee_text(md.read_text(encoding="utf-8"))
@@ -331,3 +331,11 @@ def test_cli_degraded_cache_is_retried_after_source_recovery(monkeypatch, capfd,
     cc.cmd_run_committee(argparse.Namespace(symbol="AAPL",force=False,max_rounds=1))
     out=json.loads(capfd.readouterr().out)
     assert out["status"] == "ok" and len(calls)==1
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

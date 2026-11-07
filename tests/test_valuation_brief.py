@@ -32,7 +32,8 @@ def test_equity_etf_emits_pe_and_quantile(monkeypatch):
 
     brief = build_valuation_brief("NDQ.AX", price_quantile_2y=0.82)
     assert "trailing_PE=35.8" in brief
-    assert "偏贵" in brief                  # 35.8 ≥ 30 阈值
+    assert "公允价值判断未知" in brief
+    assert "偏贵" not in brief
     assert "PRICE_QUANTILE_2Y: 82%" in brief
     assert "forward 盈利增速 v1 不可得" in brief
 
@@ -43,7 +44,7 @@ def test_cheap_pe_labeled(monkeypatch):
     from openinvest.utils.valuation import build_valuation_brief
 
     brief = build_valuation_brief("SOME.EQ")
-    assert "中性偏低" in brief
+    assert "trailing_PE=12.0" in brief and "公允价值判断未知" in brief
 
 
 def test_gold_future_returns_empty(monkeypatch):
@@ -116,13 +117,11 @@ def test_pe_thresholds_come_from_config(monkeypatch):
     reset_config()
     try:
         brief = build_valuation_brief("NDQ.AX")
-        assert "偏贵" in brief  # 默认 30 → 35.8 偏贵
+        assert "公允价值判断未知" in brief
 
         set_config_override({"valuation": {"pe_expensive": 40.0}})
         brief2 = build_valuation_brief("NDQ.AX")
-        assert "偏贵" not in brief2.split("\n")[0].split("阈值")[0]  # 标签变中性
-        assert "中性" in brief2
-        assert ">40" in brief2  # brief 文案里的阈值数字跟着 config 走
+        assert brief2 == brief  # Legacy PE bands cannot turn an observed ratio into a fair-value conclusion.
     finally:
         reset_config()
 

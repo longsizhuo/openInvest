@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import math
 import operator
+import re
 import uuid
 from typing import Any
 
@@ -14,6 +15,12 @@ from openinvest.utils.symbols import safe_symbol
 
 OPS = {">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le}
 METRICS = {"quote_price", "price_cny_per_gram", "vix", "rsi", "price_vs_ma20_pct", "price_vs_ma120_pct"}
+
+
+def _key(symbol: str, purpose: str) -> str:
+    if purpose not in ("review", "risk"):
+        raise ValueError("unsupported review plan purpose")
+    return f"review_plan_{'risk_' if purpose == 'risk' else ''}{safe_symbol(symbol)}"
 
 
 def _now(now=None):
@@ -46,6 +53,8 @@ def canonical_unit(metric: str, unit):
     unit = unit.strip()
     if metric == "quote_price" and unit in {"HKD", "AUD"}:
         return unit + "/unit"
+    if metric == "quote_price" and (match := re.fullmatch(r"([A-Z]{3})/(?:share|shares|股|份|unit)",unit)):
+        return match[1]+"/unit"
     return {"%": "percent", "点": "points", "point": "points", "CNY/克": "CNY/g"}.get(unit, unit)
 
 
@@ -98,9 +107,9 @@ def check_conditions(spec: dict, observations: dict) -> bool:
 
 
 def update_plan(store: MemoryStore, symbol: str, plan: Any = None, *,
-                observations: dict | None = None, evidence_id: str = "", now=None) -> dict:
+                observations: dict | None = None, evidence_id: str = "", now=None, purpose="review") -> dict:
     now = _now(now)
-    key = f"review_plan_{safe_symbol(symbol)}"
+    key = _key(symbol, purpose)
     events = []
 
     def change(old):
@@ -149,7 +158,7 @@ def update_plan(store: MemoryStore, symbol: str, plan: Any = None, *,
                 record.pop("last_error", None)
                 record.pop("first_error_at", None)
             if not same:
-                record = {"symbol": symbol, "plan_id": uuid.uuid4().hex, "spec": spec,
+                record = {"symbol": symbol, "purpose": purpose, "plan_id": uuid.uuid4().hex, "spec": spec,
                           "state": "active", "created_at": now.isoformat(), "changed_at": now.isoformat(),
                           "evidence_id": evidence_id, "replaces_plan_id": record.get("plan_id"),
                           "change_reason": plan.get("change_reason"), "execution_authorized": False}
@@ -165,10 +174,12 @@ def update_plan(store: MemoryStore, symbol: str, plan: Any = None, *,
     return result
 
 
-def plan_brief(store: MemoryStore, symbol: str) -> str:
-    if not store.state_get(f"review_plan_{safe_symbol(symbol)}"):
+def plan_brief(store: MemoryStore, symbol: str, *, purpose=None) -> str:
+    if purpose is None:
+        return "\n".join(plan_brief(store, symbol, purpose=p) for p in ("review", "risk"))
+    if not store.state_get(_key(symbol, purpose)):
         return ""
-    record = update_plan(store, symbol)
+    record = update_plan(store, symbol, purpose=purpose)
     if not record:
         return ""
     visible = {k: v for k, v in record.items() if k != "alerts"}
@@ -179,7 +190,7 @@ def plan_brief(store: MemoryStore, symbol: str) -> str:
 
 def observe_prepared_market(store: MemoryStore, symbol: str, frame) -> None:
     """Evaluate the existing plan before the new prompt can move its conditions."""
-    if not store.state_get(f"review_plan_{safe_symbol(symbol)}"):
+    if not any(store.state_get(_key(symbol,p)) for p in ("review", "risk")):
         return
     from openinvest.core.config import load_config
     if (not frame.empty and not frame.attrs.get("yf_fetch_failed")
@@ -187,8 +198,14 @@ def observe_prepared_market(store: MemoryStore, symbol: str, frame) -> None:
         observe_quote(store, symbol, float(frame["Close"].iloc[-1]), queue=False)
 
 
-def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, queue=True) -> dict:
-    current = store.state_get(f"review_plan_{safe_symbol(symbol)}")
+def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, queue=True, purpose=None) -> dict:
+    if purpose is None:
+        primary = observe_quote(store, symbol, price, now=now, queue=False, purpose="review")
+        downside = observe_quote(store, symbol, price, now=now, queue=False, purpose="risk")
+        ident=queue_plan_reviews(store,symbol,[primary,downside],now=now) if queue else None
+        record=primary or downside
+        return {**record,"notification_id":ident} if ident else record
+    current = store.state_get(_key(symbol, purpose))
     if not current:
         return {}
     unit = quote_unit(symbol)
@@ -196,8 +213,8 @@ def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, qu
     needed = {c["metric"] for c in current.get("spec", {}).get("conditions", [])}
     if unit is None and "quote_price" in needed:
         if current.get("last_error") == f"native_quote_unit_unverified: {symbol}":
-            return update_plan(store, symbol, observations={}, now=now)
-        return update_plan(store, symbol, current["spec"], observations={}, now=now)
+            return update_plan(store, symbol, observations={}, now=now, purpose=purpose)
+        return update_plan(store, symbol, current["spec"], observations={}, now=now, purpose=purpose)
     def fresh(frame):
         from openinvest.core.config import load_config
         return (not frame.empty and not frame.attrs.get("yf_fetch_failed")
@@ -226,20 +243,22 @@ def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, qu
     except Exception:
         # Missing observations cannot satisfy a condition; do not invent them.
         pass
-    record = update_plan(store, symbol, observations=observations, now=now)
-    if queue and record.get("state") in ("triggered", "expired"):
-        claim = f"{record['plan_id']}:{record['state']}"
-        if store.state_claim("review_plan_queue", claim):
-            try:
-                from openinvest.utils.llm import reasoning_by_agent
-                if reasoning_by_agent():
-                    from openinvest.services.agent_queue import enqueue_committee
-                    enqueue_committee([symbol], [], reason=f"review_plan:{claim}; reassess existing conditions, not an order")
-                else:
-                    from openinvest.services.event_trigger import _trigger_committee
-                    if not _trigger_committee([symbol], []):
-                        raise RuntimeError("review-plan committee could not be scheduled")
-            except Exception:
-                store.state_unclaim("review_plan_queue", claim)
-                raise
-    return record
+    record = update_plan(store, symbol, observations=observations, now=now, purpose=purpose)
+    ident=queue_plan_reviews(store,symbol,[record],now=now) if queue else None
+    return {**record,"notification_id":ident} if ident else record
+
+
+def queue_plan_reviews(store,symbol,records,*,now=None):
+    """Generated plans stay out of news RAG; notify and review, never trade."""
+    records=[r for r in records if r and r.get("state") in ("triggered","expired")]
+    if not records:return None
+    from openinvest.services.notification_outbox import NotificationOutbox
+    from openinvest.services.notifier import render_markdown_email
+    causes=sorted((r["plan_id"],r["state"]) for r in records)
+    message=f"{symbol} 已有复核计划达到条件或到期，需要用当前信息重新检查。旧计划及条件已保留，不自动移动目标，也不授权下单。\n"
+    message+="\n".join(f"计划 {ident}：{state}" for ident,state in causes)
+    payload={"subject":f"openInvest 计划需要复核 — {symbol}","plain":message,"discord":message,
+             "html":render_markdown_email(message,footer_label="Review plan"),"plan_causes":causes,
+             "followup":{"symbols":[symbol],"event_ids":[],"reason":"existing_generated_plans_require_fresh_review"}}
+    return NotificationOutbox(store).enqueue("plan-review:"+symbol+":"+digest(causes),payload,
+                                             category="plan_review",policy="decision",now=_now(now))

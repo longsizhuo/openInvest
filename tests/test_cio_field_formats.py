@@ -42,6 +42,7 @@ def test_alloc_text_formats(raw, expected):
 ])
 def test_alloc_json_values(raw, expected):
     fields = {"verdict": "ACCUMULATE" if expected >= 0 else "TRIM", "confidence": 0.5, "dominant_view": "macro", "suggested_alloc_cny": raw}
+    if expected < 0:fields["exit_intent"]="risk_reduction"
     assert parse_cio_memo("(json)", fields=fields)["alloc_cny"] == expected
 
 

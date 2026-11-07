@@ -90,14 +90,17 @@ def test_admit_tolerates_bad_state():
 def env(monkeypatch, tmp_path):
     monkeypatch.setattr("openinvest.db.event_store.DB_PATH", str(tmp_path / "events.db"))
     monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", tmp_path / "memory")
+    monkeypatch.setattr("openinvest.paths.INVEST_ROOT",tmp_path)
     monkeypatch.setattr(event_trigger, "_watched_symbols", lambda: list(WATCHED) + [HELD_ONLY])
     monkeypatch.setattr(event_trigger, "_target_symbols", lambda: list(WATCHED))
+    monkeypatch.setattr("openinvest.services.analysis_dispatch.current_targets",lambda store:set(event_trigger._target_symbols()))
     snapshot = MagicMock(return_value={})
     monkeypatch.setattr(event_trigger, "_holdings_snapshot", snapshot)
     trigger = MagicMock(side_effect=lambda symbols, event_ids: f"task-{len(trigger.mock_calls)}")
-    alert = MagicMock(return_value="")
+    from openinvest.services.event_notifier import send_event_alert_receipt
+    alert = MagicMock(wraps=send_event_alert_receipt)
     monkeypatch.setattr(event_trigger, "_trigger_committee", trigger)
-    monkeypatch.setattr(event_trigger, "send_event_alert", alert)
+    monkeypatch.setattr(event_trigger, "send_event_alert_receipt", alert)
     return trigger, alert, snapshot
 
 
@@ -212,13 +215,14 @@ def test_batch_only_marks_events_feeding_the_committee(env, monkeypatch):
     assert trigger.call_args.kwargs["event_ids"] == [claim_to_event_id("aapl-guidance")]
 
 
-def test_failed_trigger_rolls_back_reservation(env, monkeypatch, tmp_path):
+def test_unconfirmed_trigger_retains_unknown_and_does_not_blindly_retry(env, monkeypatch, tmp_path):
     trigger, _, _ = env
     trigger.side_effect = lambda symbols, event_ids: None  # 本机 web 挂了
     assert _feed(monkeypatch, "first", ["TSLA"])["committee_task_id"] is None
-    assert "TSLA" not in _state(tmp_path)["last"] and _state(tmp_path)["runs"] == []
+    assert "TSLA" in _state(tmp_path)["last"] and len(_state(tmp_path)["runs"]) == 1
     trigger.side_effect = lambda symbols, event_ids: "task-ok"
-    assert _feed(monkeypatch, "second", ["TSLA"])["committee_task_id"] == "task-ok"
+    assert _feed(monkeypatch, "second", ["TSLA"])["committee_task_id"] is None
+    assert trigger.call_count==1
 
 
 def test_reservation_is_locked_before_http_and_not_overwritten(env, monkeypatch, tmp_path):
@@ -277,9 +281,9 @@ def test_advisory_ingest_service_never_triggers_or_alerts(env, monkeypatch):
     watched.assert_not_called()  # 顾问模式不读持仓
 
 
-def test_adr_tagged_event_triggers_hk_listing_committee(env, monkeypatch):
+def test_listing_and_index_information_trigger_related_watched_assets(env, monkeypatch):
     """事件打标美股 ADR 代码、关注的是港股上市：照样过闸，委员会按关注写法跑，事件打上链接。
-    ETF→指数跟踪不进闸（指数事件不触发 ETF 委员会，现行为）。"""
+    指数信息也会触发其跟踪资产，保留原始指数身份。"""
     trigger, _, _ = env
     monkeypatch.setattr(event_trigger, "_watched_symbols", lambda: ["0700.HK", "QQQ"])
     monkeypatch.setattr(event_trigger, "_target_symbols", lambda: ["0700.HK", "QQQ"])
@@ -287,8 +291,9 @@ def test_adr_tagged_event_triggers_hk_listing_committee(env, monkeypatch):
     assert trigger.call_args.kwargs["symbols"] == ["0700.HK"]
     from openinvest.db.event_store import EventStore
     assert EventStore().get_event(out["events"][0]["event_id"])["committee_task_id"] == out["committee_task_id"]
-    assert _feed(monkeypatch, "index-slide", ["^NDX"])["committee_task_id"] is None
-    assert trigger.call_count == 1
+    assert _feed(monkeypatch, "index-slide", ["^NDX"])["committee_task_id"] == "task-2"
+    assert trigger.call_args.kwargs["symbols"] == ["QQQ"]
+    assert trigger.call_count == 2
 
 
 def test_held_only_symbol_alerts_but_never_runs_or_reserves(env, monkeypatch, tmp_path):

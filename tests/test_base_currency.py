@@ -50,7 +50,7 @@ def test_missing_fx_keeps_cny_number(monkeypatch):
     from openinvest.utils.base_currency import from_cny
     monkeypatch.setattr(fx, "get_fx_rate", lambda *a, **k: None)
     set_config_override({"portfolio": {"base_currency": "JPY"}})
-    assert from_cny(5000) == 5000
+    with pytest.raises(ValueError,match="conversion unavailable"):from_cny(5000)
 
 
 @pytest.mark.parametrize("lens", [False, True])
@@ -65,8 +65,8 @@ def test_aud_prompts_use_aud_fields_and_converted_thresholds(lens):
     assert "first_tranche_aud:" in p["cio"] and "worst_case_pnl_aud:" in p["cio"]
     assert "人民币" not in p["cio"]
     assert "|SUGGESTED_ALLOC_AUD| > 21000" in p["cio"]
-    assert "DRY_POWDER_AUD < 1100" in p["cio"]
-    assert "DRY_POWDER_AUD < 210" in p["risk"] and "DRY_POWDER_AUD < 210" in p["risk_rebuttal"]
+    assert "DRY_POWDER_AUD < 1100" not in p["cio"]
+    assert "DRY_POWDER_AUD < 210" not in p["risk"]
     assert "WORST_CASE_LOSS_AUD_AT_-20" in p["risk"] and "如 430 AUD" in p["risk"]
     json_cio = _prompts(json_mode=True)["cio"]
     assert '"suggested_alloc_aud"' in json_cio and "suggested_alloc_cny" not in json_cio

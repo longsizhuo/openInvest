@@ -217,7 +217,7 @@ def wired(db, tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_resolve_schedule", lambda name, s: s)
     store = MemoryStore(root=tmp_path / "memory")
     monkeypatch.setattr(job_watchdog, "MemoryStore", lambda: store)
-    monkeypatch.setattr(job_watchdog, "_send", lambda findings: sent.append(findings))
+    monkeypatch.setattr(job_watchdog, "_send", lambda findings: sent.append(findings) or {"notification_id":"synthetic","accepted":True})
     return db, sent
 
 
@@ -247,7 +247,7 @@ def test_send_failure_unclaims_so_next_run_retries(wired, monkeypatch):
     monkeypatch.setattr(job_watchdog, "_send", _down)
     with pytest.raises(RuntimeError):
         job_watchdog.run(now=_t("2026-07-30T19:07:00"))
-    monkeypatch.setattr(job_watchdog, "_send", lambda f: sent.append(f))
+    monkeypatch.setattr(job_watchdog, "_send", lambda f: sent.append(f) or {"notification_id":"synthetic","accepted":True})
     out = job_watchdog.run(now=_t("2026-07-30T20:07:00"))
     assert len(sent) == 1 and out["alerted"]
 
@@ -297,12 +297,16 @@ def test_email_failure_after_dm_delivered_does_not_repeat_dm(db, tmp_path, monke
     store = MemoryStore(root=tmp_path / "memory")
     monkeypatch.setattr(job_watchdog, "MemoryStore", lambda: store)
     dms = []
-    monkeypatch.setattr(job_watchdog, "send_discord_alert", lambda text: dms.append(text) or True)
+    monkeypatch.setattr("openinvest.paths.INVEST_ROOT",tmp_path)
+    def delivery(channel,payload):
+        if channel=="discord":dms.append(payload["discord"]);return True
+        raise RuntimeError("synthetic smtp outage")
+    monkeypatch.setattr("openinvest.services.notification_outbox.send_channel",delivery)
 
     def _boom(**kw):
         raise RuntimeError("smtp down")
 
-    monkeypatch.setattr(job_watchdog, "send_email_html", _boom)
+
     _seed_event_watch_until(db, _t("2026-07-30T17:30:00"))
     job_watchdog.run(now=_t("2026-07-30T19:07:00"))
     job_watchdog.run(now=_t("2026-07-30T20:07:00"))
@@ -434,7 +438,7 @@ def wired_flagged(db, tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_resolve_schedule", lambda name, s: s)
     store = MemoryStore(root=tmp_path / "memory")
     monkeypatch.setattr(job_watchdog, "MemoryStore", lambda: store)
-    monkeypatch.setattr(job_watchdog, "_send", lambda findings: sent.append(findings))
+    monkeypatch.setattr(job_watchdog, "_send", lambda findings: sent.append(findings) or {"notification_id":"synthetic","accepted":True})
     return db, sent
 
 
@@ -473,12 +477,13 @@ def test_run_failure_alert_send_failure_unclaims_so_next_run_retries(wired_flagg
     monkeypatch.setattr(job_watchdog, "_send", _down)
     with pytest.raises(RuntimeError):
         job_watchdog.run(now=_t("2026-01-05T22:07:00"))
-    monkeypatch.setattr(job_watchdog, "_send", lambda f: sent.append(f))
-    assert job_watchdog.run(now=_t("2026-01-05T23:07:00"))["alerted"] and len(sent) == 1
+    monkeypatch.setattr(job_watchdog, "_send", lambda f: sent.append(f) or {"notification_id":"synthetic","accepted":True})
+    out=job_watchdog.run(now=_t("2026-01-05T23:07:00"))
+    assert len(out["alerted"])==len(sent)==2  # failure + the separately persisted stale-job finding
 
 
 def test_shipped_ymls_flag_exactly_the_jobs_that_should_alert_on_failure():
     cfgs = {c["name"]: c for c in runner._load_job_configs()}
     flagged = {n for n, c in cfgs.items() if c.get("alert_on_failure", False) is True}
-    assert flagged == {"fund_confirm", "backup", "verdict_review", "price_sentinel", "learning_review"}
+    assert flagged == {"fund_confirm", "backup", "verdict_review", "price_sentinel", "learning_review", "notification_delivery"}
     assert all(isinstance(c.get("alert_on_failure", False), bool) for c in cfgs.values())

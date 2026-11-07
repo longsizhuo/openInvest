@@ -83,3 +83,11 @@ def test_all_missing_and_corrupt_sidecar_count_as_missing(monkeypatch):
     assert out["verdicts"] == {} and out["missing_verdicts"] == ["GC=F", "NDQ.AX"]
     first = out["full_report"].splitlines()[0]
     assert "GC=F" in first and "NDQ.AX" in first
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

@@ -23,6 +23,16 @@ class _FakeStore:
     def is_seen_url(self, url):
         return url in self.seen
 
+    def source_unchanged(self,url,title,snippet="",*,published_at=None,raw_text=""):
+        return url in self.seen
+
+    def write_news_observation(self,event,raw_item=None,*,embedding=None):
+        new,eid=self.upsert_event(event,embedding)
+        if raw_item:
+            self.add_source(eid,src_name=raw_item.src_name,url=raw_item.url,title=raw_item.title,
+                            snippet=raw_item.snippet,fetched_at=raw_item.fetched_at)
+        return {"changed":new,"inserted":new,"previous":None,"event":{**event,"event_id":eid}}
+
     def upsert_event(self, event, embedding=None):
         eid = "eid-" + event["one_line_claim"][:8]
         was_new = eid not in self.rows

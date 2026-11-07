@@ -88,6 +88,8 @@ def build_input_health(report: "CommitteeReport", verdict: Dict[str, Any],
     health["forced_hold"] = forced_hold(verdict)
     health["cio_unclear"] = str(verdict.get("verdict") or "").upper() == "UNCLEAR"
     health["decision_status"] = verdict.get("decision_status", "READY")
+    review=verdict.get("reasoning_review") or {}
+    health["reasoning_review"]={key:review[key] for key in ("status","request_sha256","reason","contract_error") if key in review}
     return health
 
 
@@ -144,12 +146,13 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     macro_ctx = _capture_macro_context(as_of_date=date_override)
     run_at = date_override or datetime.now().isoformat(timespec="seconds")
     health = build_input_health(report, verdict, debate_meta, input_health)
-    from openinvest.core.decision_evidence import enforce_input_health
+    from openinvest.core.decision_evidence import enforce_input_health, advice_qualified
     enforce_input_health(verdict, health)
+    prepared_context=None
     if health.get("context_id") and output_dir is None:
         from openinvest.core.decision_evidence import load_context
         try:
-            load_context(store.root, health["context_id"], report.asset.get("symbol", ""))
+            prepared_context=load_context(store.root, health["context_id"], report.asset.get("symbol", ""))
         except (OSError, ValueError, KeyError, TypeError) as e:
             verdict.setdefault("_original_verdict", verdict.get("verdict"))
             verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
@@ -159,7 +162,8 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
             report.cio_memo = "[QUALITY_ALERT] DATA_UNTRUSTED：输入或规则在分析期间变化，请重新分析。\n\n" + report.cio_memo
     from openinvest.core.decision_evidence import record_decision
     evidence = record_decision(store.root, report.asset.get("symbol", ""),
-                               {"cio_memo": report.cio_memo, "fields": verdict.get("_raw_proposal"),
+                               {"cio_memo": report.cio_memo,"cio_raw_response":getattr(report,"cio_raw_response",""),
+                                "cio_attempts":getattr(report,"cio_attempts",[]),"fields": verdict.get("_raw_proposal"),
                                 "macro": report.macro_view, "quant": report.quant_view,
                                 "risk": report.risk_view}, verdict, health,
                                context_id=health.get("context_id"), historical=output_dir is not None)
@@ -167,10 +171,16 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     verdict.update(evidence)
     if verdict.get("decision_status") == "DATA_UNTRUSTED" and "[QUALITY_ALERT]" not in report.cio_memo:
         report.cio_memo = "[QUALITY_ALERT] DATA_UNTRUSTED：当前没有可执行建议，以下仅保留原始意见供排查。\n\n" + report.cio_memo
-    if output_dir is None and verdict.get("review_plan") is not None and verdict.get("decision_status") != "DATA_UNTRUSTED":
+    elif not advice_qualified(verdict) and "[QUALITY_ALERT]" not in report.cio_memo:
+        report.cio_memo="[QUALITY_ALERT] REVIEW_REQUIRED：推理核验或执行资格未通过；原提案仅供审计，不是当前可执行建议。\n\n"+report.cio_memo
+    if output_dir is None and verdict.get("review_plan") is not None and advice_qualified(verdict):
         from openinvest.services.review_plans import update_plan
         verdict["review_plan_state"] = update_plan(store, report.asset.get("symbol", ""),
                                                    verdict["review_plan"], evidence_id=evidence["decision_id"])
+    if output_dir is None and verdict.get("risk_review_plan") is not None and advice_qualified(verdict):
+        from openinvest.services.review_plans import update_plan
+        verdict["risk_review_plan_state"] = update_plan(store, report.asset.get("symbol", ""),
+            verdict["risk_review_plan"], evidence_id=evidence["decision_id"], purpose="risk")
 
     lines = [
         f"# Committee: {report.asset.get('display_name', report.asset.get('symbol'))}",
@@ -246,6 +256,14 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     with immutable.open("x", encoding="utf-8", newline="\n") as output:
         output.write("\n".join(lines))
     _write_once(immutable.with_suffix(".json"), {"text": "\n".join(lines)})
+    if output_dir is None and health.get("context_id"):
+        from openinvest.services.agent_queue import acknowledge_context_decision
+        review=verdict.get("reasoning_review") or {}
+        if prepared_context and review.get("status")!="passed":
+            from openinvest.services.agent_queue import mark_requests_waiting_review
+            mark_requests_waiting_review(store.root,prepared_context["inputs"].get("trigger_requests",[]),
+                health["context_id"],review.get("request_sha256","unknown"),review.get("status","unavailable"))
+        acknowledge_context_decision(store.root,health["context_id"],evidence["decision_id"])
     store.dream_event({
         "phase": "committee_finished",
         "asset": report.asset.get("symbol"),

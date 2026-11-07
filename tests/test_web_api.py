@@ -1366,7 +1366,8 @@ def test_config_endpoints_roundtrip(client):
         "event.committee_escalation_bypass",
         # 2026-07-03: event_watch 扫描窗口 + 价格异动哨兵(ADR-025)
         "event.watch_schedule",
-        "event.sentinel_enabled", "event.sentinel_atr_mult",
+        "event.sentinel_enabled", "event.sentinel_atr_mult", "event.risk_alerts_enabled",
+        "event.risk_tail_probability", "event.risk_reference_sessions", "event.risk_min_reference_samples",
         "event.sentinel_cooldown_min", "event.sentinel_schedule",
         "staleness.price_stale_days", "staleness.hard_abort_stale_days",
     }

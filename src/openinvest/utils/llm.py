@@ -141,7 +141,7 @@ def needs_thinking_disabled(model: Optional[str] = None) -> bool:
     所以对 thinking model 一律 disable 走 fast path。
     """
     m = (model or get_llm_config_safe()[2]).lower()
-    deepseek_thinking = ("deepseek" in m and "v4" in m) or m == "deepseek-chat"
+    deepseek_thinking = ("deepseek" in m and "v4" in m) or m.rsplit("/",1)[-1] in {"deepseek-chat","deepseek-flash"}
     mimo_thinking = m.startswith("mimo") and "flash" not in m
     return deepseek_thinking or mimo_thinking
 

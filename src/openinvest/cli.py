@@ -214,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_prepare_committee)
 
     p = sub.add_parser("save_committee")
+    p.add_argument("--reasoning-review-file",help="提交第一次收卷返回的核验请求所对应的独立JSON，不改原始transcript")
     p.add_argument("symbol")
     p.add_argument("--context-id", default="", help="本次 prepare 返回的 context_id；禁止按标的猜最近一次输入")
     p.add_argument(
@@ -473,13 +474,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--event-type", dest="event_type")
     p.add_argument("--symbols", help="受影响的 ticker，逗号分隔（如 GC=F,NDQ.AX）")
     p.add_argument("--entities", help="关键实体，逗号分隔")
+    p.add_argument("--source-snapshot-id",help="绑定 pending_news 的原始来源快照，不改写原文")
     p.set_defaults(func=cmd_ingest_event)
 
     p = sub.add_parser("pending_news",
                        help="agent 模式：后端抓到但没归一化的新闻（等你结构化后 ingest_event）")
     p.add_argument("--limit", type=int, default=30)
     p.add_argument("--dismiss", nargs="*", default=[], metavar="URL", help="判定无关的 url，不再出现")
+    p.add_argument("--dismiss-source-ids",nargs="*",default=[],help="仅略过已审核的来源版本，更正仍可进入待办")
+    p.add_argument("--include-expired",action="store_true",help="查看仍未处理的过期来源，供核对恢复")
     p.set_defaults(func=cmd_pending_news)
+
+    p=sub.add_parser("collect_news",help="保存原始新闻快照与逐来源覆盖水位，不调用模型")
+    p.add_argument("--since",help="首次运行的显式起点，ISO时间须含时区")
+    p.add_argument("--overlap-hours",type=float,default=24)
+    p.add_argument("--max-pages",type=int,default=20)
+    p.add_argument("--max-seconds",type=float,default=90)
+    p.add_argument("--inspect-pending",action="store_true",help="只读列举待核对的原始来源候选，不抓取")
+    p.set_defaults(func=cmd_collect_news)
+
+    p=sub.add_parser("event_history",help="只读核对当前合格事件和来源，不作为去重否决或扫描水位")
+    p.add_argument("--hours",type=int,default=48)
+    p.add_argument("--limit",type=int,default=100)
+    p.set_defaults(func=cmd_event_history)
+    p=sub.add_parser("source_snapshot",help="只读查询本实例某一版本的原始来源与采集凭证，不授予学习资格")
+    p.add_argument("snapshot_id")
+    p.set_defaults(func=cmd_source_snapshot)
 
     p = sub.add_parser("pending_committees",
                        help="agent 模式：事件 / 价格触发、等你跑的委员会重跑请求")

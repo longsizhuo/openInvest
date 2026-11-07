@@ -266,6 +266,9 @@ def record_intervention(
     """确定性规则改写了 CIO 裁决 → 落 interventions.jsonl（"如果没拦会怎样"由
     jobs/intervention_review.py 事后回填）。返回落账记录；无干预/失败 → None（graceful）。"""
     try:
+        if verdict and (verdict.get("decision_status") in ("DATA_UNTRUSTED","REVIEW_REQUIRED")
+                        or ((verdict.get("reasoning_review") or {}).get("status") not in (None,"passed"))):
+            return None  # An analysis failure is not a successful money-saving intervention.
         rec = _intervention_record(symbol, regime_label, current_price, verdict, atr_defense_on)
         if rec is not None:
             _log_intervention(rec)

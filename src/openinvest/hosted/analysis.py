@@ -84,7 +84,7 @@ def prepare(call, symbol):
         return {**result, "analysis_id": analysis_id, "analysis_expires_in_seconds": 21600}
 
 
-def submit(call, symbol, transcript, provider, model, analysis_id):
+def submit(call, symbol, transcript, provider, model, analysis_id, *, reasoning_review_json=None):
     from openinvest.core.runner.coordinator import _COMMITTEE_SECTION_RE
     from openinvest.core.decision_evidence import load_context
     from openinvest.services.symbol_map import resolve_symbol
@@ -93,6 +93,7 @@ def submit(call, symbol, transcript, provider, model, analysis_id):
     if not analysis_id or len(analysis_id) != 32:
         raise ValueError("analysis_id from prepare_committee is required")
     signature = hashlib.sha256(json.dumps([canonical, transcript, provider, model]).encode()).hexdigest()
+    peer_signature=hashlib.sha256(reasoning_review_json.encode()).hexdigest() if reasoning_review_json is not None else None
     with _lock:
         with db() as connection:
             row = connection.execute("SELECT * FROM analyses WHERE id=?", (analysis_id,)).fetchone()
@@ -102,12 +103,19 @@ def submit(call, symbol, transcript, provider, model, analysis_id):
                 receipt = json.loads(row["result"])
                 if receipt["signature"] != signature:
                     raise ValueError("analysis_id already submitted with different arguments")
+                if peer_signature is not None and receipt.get("peer_signature")!=peer_signature:
+                    raise ValueError("analysis_id already finalized with a different reasoning review")
                 response = receipt["response"]
                 from openinvest.core.decision_evidence import current_decision
                 valid = current_decision(root()/"memory", {"decision_id": response.get("evidence_id", "")}, canonical)
                 return {**response, "replayed": True, "response_type": "historical_receipt", "current_advice_valid": valid}
             if row["state"] != "prepared":
                 raise ValueError("Analysis unavailable or outcome unknown; inspect the ledger")
+            draft=json.loads(row["result"]) if row["result"] else None
+            if draft is not None and draft.get("signature")!=signature:
+                raise ValueError("analysis_id draft already contains a different proposal")
+            if reasoning_review_json is not None and not (draft and draft.get("state")=="awaiting_verification"):
+                raise ValueError("Submit the original proposal first to obtain its bound verification request")
             if time.time()-row["created"] > 21600 or fingerprint() != row["fingerprint"]:
                 connection.execute("UPDATE analyses SET state='expired' WHERE id=?", (analysis_id,))
                 invalid = True
@@ -138,14 +146,18 @@ def submit(call, symbol, transcript, provider, model, analysis_id):
             connection.execute("UPDATE analyses SET state='running' WHERE id=?", (analysis_id,))
         # After validation, ANY failure can follow a ledger side effect. Preserve
         # the uncertain receipt; never turn a post-write ValueError into replay.
-        result = call(canonical, transcript, provider, model, context_id=facts["context_id"])
+        extra={"reasoning_review_json":reasoning_review_json} if reasoning_review_json is not None else {}
+        result = call(canonical, transcript, provider, model, context_id=facts["context_id"],**extra)
         result = {**result, "analysis_id": analysis_id}
         if "saved" in result:
             saved = Path(result["saved"])
             result["saved"] = str(saved.relative_to(root()))
         with db() as connection:
-            connection.execute("UPDATE analyses SET state='done',result=? WHERE id=?",
-                               (json.dumps({"signature": signature, "response": result}, default=str), analysis_id))
+            waiting=result.get("status")=="verification_required"
+            connection.execute("UPDATE analyses SET state=?,result=? WHERE id=?",
+                               ("prepared" if waiting else "done",json.dumps({"signature": signature,
+                                "peer_signature":peer_signature,"state":"awaiting_verification" if waiting else "done",
+                                "response": result}, default=str), analysis_id))
         return result
 
 

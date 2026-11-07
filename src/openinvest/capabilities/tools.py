@@ -188,6 +188,9 @@ def _impl_get_macro_snapshot() -> Dict[str, Any]:
 
 def _impl_query_dreaming_insights(asset_symbol: str, top_k: int = 3) -> List[Dict[str, Any]]:
     """从 memory/insights/*.md 读 top-k insight。Dreaming 三阶段产出的就在那里"""
+    from openinvest.utils.advisory import is_advisory_mode
+    if is_advisory_mode():
+        return []
     from openinvest.core.memory_store import MemoryStore
     store = MemoryStore()
     insights_dir = store.root / "insights"
@@ -213,6 +216,9 @@ def _impl_query_dreaming_insights(asset_symbol: str, top_k: int = 3) -> List[Dic
 
 def _impl_get_recent_committee_verdicts(asset_symbol: str, n: int = 5) -> List[Dict[str, Any]]:
     """从 memory/.committee/<date>/<symbol>.md 读最近 N 个决议"""
+    from openinvest.utils.advisory import is_advisory_mode
+    if is_advisory_mode():
+        return []
     from openinvest.core.memory_store import MemoryStore
     import re as _re
     store = MemoryStore()
@@ -230,6 +236,8 @@ def _impl_get_recent_committee_verdicts(asset_symbol: str, n: int = 5) -> List[D
         confidence = _re.search(r"confidence\s+([\d.]+)", text)
         out.append({
             "date": date_dir.name,
+            "source_type":"historical_model_opinion", "allowed_uses":["audit","plan_consistency_review"],
+            "market_evidence":False, "learning_eligible":False,
             "verdict": verdict.group(1) if verdict else "?",
             "confidence": float(confidence.group(1)) if confidence else 0.0,
             "summary": text[:300],

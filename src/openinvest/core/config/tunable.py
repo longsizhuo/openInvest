@@ -306,9 +306,13 @@ class EventConfig:
     watch_schedule: str = "*/30 0-2,8-23 * * *"
     # ---- 价格异动哨兵（ADR-025，jobs/price_sentinel.py）----
     sentinel_enabled: bool = True               # 垂直线哨兵总开关
+    risk_alerts_enabled: bool = False            # 用户选择的独立风险提醒；不受泛新闻静默/HOLD影响
+    risk_tail_probability: float = 0.05         # 监测敏感度；不是后续涨跌概率
+    risk_reference_sessions: int = 252          # 只用当前交易日前的历史窗口
+    risk_min_reference_samples: int = 60        # 数据充分性要求；不足时明确未知
     sentinel_atr_mult: float = 0.8              # 触发倍数：|10min 涨跌| ≥ mult × 日ATR%
     sentinel_cooldown_min: int = 120            # 同 symbol 同方向冷却分钟数
-    sentinel_schedule: str = "*/5 0-2,8-23 * * *"  # 哨兵扫描窗口 crontab（Asia/Shanghai）
+    sentinel_schedule: str = "*/5 * * * *"  # 全市场覆盖；闭市/陈旧行情逐资产标明
 
 
 @dataclass(frozen=True)

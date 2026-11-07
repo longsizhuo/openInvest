@@ -186,3 +186,11 @@ def test_current_cache_rejects_changed_transcript_without_changing_header():
     path.write_text(original.replace('ORIGINAL_REASON','TAMPERED_ADVICE'));parsed=parse_committee_file(path)
     assert not current_decision(MemoryStore().root,parsed['input_health'],'SYNTHETIC',verdict=parsed)
     assert not current_decision(MemoryStore().root,parsed['input_health'],'SYNTHETIC',verdict=parsed,transcript=path.read_text())
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

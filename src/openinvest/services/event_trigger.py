@@ -31,7 +31,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from openinvest.services.event_notifier import send_event_alert
+from openinvest.services.event_notifier import send_event_alert_receipt
 from openinvest.utils.advisory import is_advisory_mode
 
 log = logging.getLogger(__name__)
@@ -45,11 +45,14 @@ _CAP_WINDOW = timedelta(hours=24)
 
 def is_triggerable(ev: Dict[str, Any], watched_lower: Iterable[str], min_severity: str) -> bool:
     """单条新事件过闸：severity ≥ min_severity + stance ≠ neutral + 命中关注 symbol（大小写不敏感）。"""
-    if _SEVERITY_RANK.get(ev.get("severity"), 1) < _SEVERITY_RANK.get(min_severity, 2):
+    threshold=_SEVERITY_RANK.get(min_severity,2)
+    current=_SEVERITY_RANK.get(ev.get("severity"),1)>=threshold and ev.get("stance")!="neutral"
+    previous=ev.get("revision_previous") or {}
+    corrected=bool(previous) and _SEVERITY_RANK.get(previous.get("severity"),1)>=threshold and previous.get("stance")!="neutral"
+    if not (current or corrected):
         return False
-    if ev.get("stance") == "neutral":
-        return False
-    return bool({s.lower() for s in (ev.get("affected_symbols") or [])} & set(watched_lower))
+    subjects=set(ev.get("affected_symbols") or []) | set(previous.get("affected_symbols") or [])
+    return bool({s.lower() for s in subjects} & set(watched_lower))
 
 
 def _parse(ts: Any, now: datetime) -> Optional[datetime]:
@@ -81,6 +84,7 @@ def admit(
     cooldown_hours: int,
     daily_cap: int,
     escalation_bypass: bool = True,
+    revisions: Optional[set] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
     """冷却 + 滚动 24h 上限过滤。candidates = [(symbol, 本批该 symbol 最高 severity rank)]。
     返回 (放行 symbols, 放行后的新 state)。
@@ -100,11 +104,29 @@ def admit(
         if len(runs) + len(admitted) >= daily_cap:
             break
         prev, prev_sev = _last(last.get(sym), now)
-        if prev is not None and now - prev < cooldown and not (escalation_bypass and sev > prev_sev):
+        if prev is not None and now - prev < cooldown and sym not in (revisions or set()) and not (escalation_bypass and sev > prev_sev):
             continue
         admitted.append(sym)
         last[sym] = {"ts": iso, "sev": sev}
     return admitted, {"last": last, "runs": runs + [iso] * len(admitted)}
+
+
+def reserve_analysis(store, candidates, *, now, revisions=(),reservation_key=None):
+    """One cost budget for news and price observations; denial is deferral."""
+    from openinvest.core.config import load_config
+    cfg=load_config(_force_reload=True).event
+    def reserve(current):
+        requests=dict(current.get("requests",{})) if isinstance(current,dict) else {}
+        if reservation_key and reservation_key in requests:
+            return current,requests[reservation_key]["admitted"]
+        admitted,state=admit(current,candidates,now,cooldown_hours=cfg.committee_cooldown_hours,
+                             daily_cap=cfg.committee_daily_cap,escalation_bypass=cfg.committee_escalation_bypass,
+                             revisions=set(revisions))
+        if reservation_key and admitted:
+            requests[reservation_key]={"admitted":admitted,"reserved_at":now.isoformat()}
+        if requests:state["requests"]=requests
+        return state,admitted
+    return store.state_update(_STATE_NAME,reserve)
 
 
 # ---------- IO（monkeypatch 点） ----------
@@ -246,26 +268,31 @@ def trigger_for_new_events(
     cfg = load_config(_force_reload=True).event
     if watched is None:
         watched = _watched_symbols()
-    # 关注标的 ∪ 它的同公司跨市场代码（打标美股 ADR/OTC 代码的港股公司事件也过闸），
-    # 映射回关注写法；自身写法优先（同时关注 ADR 和港股时各归各）。
-    # 不含 ETF→指数跟踪（proxy_symbols_for）：指数事件不触发 ETF 委员会，现行为不变
-    from openinvest.services.symbol_map import listing_aliases
-    canonical = {a.lower(): s for s in watched for a in listing_aliases(s)}
-    canonical.update({s.lower(): s for s in watched})
+    # A reference may affect several watched instruments. Its quote is not an
+    # executable quote for those instruments; only its information is routed.
+    from openinvest.services.symbol_map import proxy_symbols_for
+    canonical={}
+    for symbol in watched:
+        for reference in proxy_symbols_for(symbol):
+            canonical.setdefault(reference.lower(),set()).add(symbol)
 
     triggerable: List[Dict[str, Any]] = []
     sev_by_sym: Dict[str, int] = {}  # 本批每个命中 symbol 的最高 severity（越级 / 额度排序用）
+    revisions=set()
     for ev in new_events:
         if not is_triggerable(ev, canonical.keys(), cfg.min_severity):
             continue
-        triggerable.append({**ev, "sources": store.get_sources(ev["event_id"])})
+        route_symbols=list(dict.fromkeys((ev.get("affected_symbols") or [])+(ev.get("revision_previous") or {}).get("affected_symbols",[])))
+        triggerable.append({**ev, "affected_symbols":route_symbols,"sources": store.get_sources(ev["event_id"])})
         rank = _SEVERITY_RANK.get(ev.get("severity"), 1)
         # 大小写不敏感匹配 + 映射回 canonical 写法：LLM 归一化吐出小写 ticker 时
         # 也要触发 canonical 写法的委员会（不然邮件发了委员会静默不跑）
-        for s in ev.get("affected_symbols") or []:
+        for s in route_symbols:
             if s.lower() in canonical:
-                c = canonical[s.lower()]
-                sev_by_sym[c] = max(sev_by_sym.get(c, 0), rank)
+                for c in canonical[s.lower()]:
+                    sev_by_sym[c] = max(sev_by_sym.get(c, 0), rank)
+                    if ev.get("revision_previous"):
+                        revisions.add(c)
     affected = sorted(sev_by_sym)
     out: Dict[str, Any] = {"triggered": len(triggerable), "affected_symbols": affected,
                            "committee_symbols": [], "committee_task_id": None}
@@ -279,59 +306,21 @@ def trigger_for_new_events(
         log.info(f"[event_trigger] 不在 target_assets，不跑委员会: {sorted(set(affected) - targets)}")
 
     from openinvest.core.memory_store import MemoryStore
-    ms = MemoryStore()
-    now = datetime.now(timezone.utc)
-    reserved: Dict[str, Any] = {}
-
-    def _reserve(cur: Any):
-        # 文件锁内 read → admit → write：额度在 HTTP 触发前就占下，两门并发不互相覆盖
-        admitted, new_state = admit(
-            cur, [(s, sev_by_sym[s]) for s in runnable], now,
-            cooldown_hours=cfg.committee_cooldown_hours, daily_cap=cfg.committee_daily_cap,
-            escalation_bypass=cfg.committee_escalation_bypass)
-        prev_last = cur.get("last") if isinstance(cur, dict) and isinstance(cur.get("last"), dict) else {}
-        reserved.update(admitted=admitted, mine={s: new_state["last"][s] for s in admitted},
-                        prev={s: prev_last.get(s) for s in admitted})
-        return new_state, admitted
-
-    def _release(cur: Any):
-        # 触发失败：只撤回本次预占（别人期间写入的记录不动），让下一条事件能重试
-        cur = cur if isinstance(cur, dict) else {}
-        last = dict(cur["last"]) if isinstance(cur.get("last"), dict) else {}
-        runs = list(cur["runs"]) if isinstance(cur.get("runs"), list) else []
-        for sym, mine in reserved["mine"].items():
-            if last.get(sym) == mine:
-                if reserved["prev"][sym] is None:
-                    last.pop(sym, None)
-                else:
-                    last[sym] = reserved["prev"][sym]
-            if mine["ts"] in runs:
-                runs.remove(mine["ts"])
-        return {"last": last, "runs": runs}, None
-
-    admitted = ms.state_update(_STATE_NAME, _reserve) if runnable else []
-    if admitted:
-        adm = set(admitted)
-        fed = [ev for ev in triggerable
-               if {canonical.get(s.lower()) for s in (ev.get("affected_symbols") or [])} & adm]
-        task_id = _trigger_committee(symbols=admitted, event_ids=[ev["event_id"] for ev in fed])
-        if task_id:
-            for ev in fed:
-                store.mark_committee_task(ev["event_id"], task_id)
-            out.update(committee_symbols=admitted, committee_task_id=task_id)
-        else:
-            ms.state_update(_STATE_NAME, _release)
-    if set(runnable) - set(admitted):
-        log.info(f"[event_trigger] 冷却/日上限拦下 {sorted(set(runnable) - set(admitted))}")
-
-    # 持仓快照要拉行情：只在报警真会发时才算（send_event_alert 默认静默，判据同它内部）
-    alerts_on = os.getenv("INVEST_EVENT_ALERT", "0") == "1"
-    try:
-        send_event_alert(
-            triggerable,
-            committee_task_id=out["committee_task_id"],
-            holdings_snapshot=_holdings_snapshot(affected) if alerts_on else {},
-        )
-    except Exception as e:
-        log.warning(f"send_event_alert 失败: {type(e).__name__}: {e}")
+    from openinvest.services.notification_outbox import NotificationOutbox
+    from openinvest.services.analysis_dispatch import dispatch_followups
+    ms=MemoryStore();now=datetime.now(timezone.utc)
+    risk=any(e.get("stance")=="risk" or (e.get("revision_previous") or {}).get("stance")=="risk" for e in triggerable)
+    alerts_on=os.getenv("INVEST_EVENT_ALERT","0")=="1" or (risk and cfg.risk_alerts_enabled)
+    # Persist every cause before analysis or network delivery. A consumed cost
+    # budget leaves a durable pending request, rather than discarding the event.
+    spec={"symbols":runnable,"event_ids":[e["event_id"] for e in triggerable],
+          "severity_by_symbol":sev_by_sym,"revisions":sorted(revisions),
+          "event_symbols":{e["event_id"]:sorted({c for s in e["affected_symbols"] for c in canonical.get(s.lower(),set())}) for e in triggerable}}
+    receipt=send_event_alert_receipt(triggerable,risk_alert=risk,store=ms,now=now,
+                                     holdings_snapshot=_holdings_snapshot(affected) if alerts_on else {},
+                                     followup=spec if runnable else None)
+    out["notification_id"]=receipt["notification_id"]
+    results=dispatch_followups(NotificationOutbox(ms),now=now,only_id=receipt["notification_id"],event_store=store)
+    if results:
+        out.update(results[0])
     return out

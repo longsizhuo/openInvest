@@ -332,9 +332,11 @@ def cmd_save_committee(args: argparse.Namespace) -> None:
     from openinvest.core.committee_runner import save_committee_transcript
     provider = getattr(args, "provider", None) or "claude"
     model = getattr(args, "model", None) or ""
+    review_file=getattr(args,"reasoning_review_file",None)
+    review_json=Path(review_file).read_text(encoding="utf-8") if review_file else None
     try:
         _print_json(save_committee_transcript(args.symbol, raw, provider=provider, model=model,
-                                            context_id=getattr(args, "context_id", "")))
+                                            context_id=getattr(args, "context_id", ""),reasoning_review_json=review_json))
     except ValueError as e:   # CIO 解析不出裁决：不存档，退出码 1 让 agent 看见并重交
         _print_json({"status": "error", "error": str(e)})
         sys.exit(1)

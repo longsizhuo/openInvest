@@ -172,7 +172,7 @@ drawInstall(0);
 // ---------- 试玩：你 vs AI。行情和 AI 决定是 build_game.py 生成的静态数据，输赢全在浏览器里算 ----------
 const POS = [["空仓", 0], ["半仓", 0.5], ["满仓", 1]];
 const ACT = { ACCUMULATE: ["加仓", 0.5], BUY: ["加仓", 0.5], TRIM: ["减仓", -0.5], SELL: ["清仓", -1] };
-const LOOK = { gold: ["🥇", "避险老将", "#FFE7A6"], ndx: ["💻", "科技快车", "#DED8FF"], csi300: ["🏮", "A 股大盘", "#FFD9D9"], tencent: ["🐧", "港股巨头", "#D3EAFF"] };
+const ROUND_LENGTHS = [12, 24, 36];
 const C = { you: "#EC5F93", ai: "#6B57F0", hold: "#A9A9B6" };
 const COST = 0.001, START = 100000, CALM = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let gm = null, gameUrl = null, busy = false;   // gm：当前一局；gameUrl：数据的绝对地址，表情包按它拼（QMuse 版接口在别的域名）
@@ -180,14 +180,17 @@ const yuan = (v) => "¥" + Math.round(v).toLocaleString("zh-CN");
 const pct = (v) => { const x = Math.round(v * 1000) / 10; return (x > 0 ? "+" : "") + x.toFixed(1) + "%"; };   // 先取整再定符号，免得出 "-0.0%"
 const tone = (v) => (v > 0 ? "up" : v < 0 ? "dn" : "");
 const posName = (p) => POS.find(([, v]) => v === p)[0];
-const px = (v) => v >= 100 ? v.toFixed(0) : v.toFixed(2);
+const px = (v) => v.toFixed(2);
 const sticker = (name) => String(new URL(`sticker/${name}`, gameUrl));
 
 function go(v) {
   ["home", "pick", "play", "dbt"].forEach((k) => { $("v-" + k).hidden = k !== v; });
   window.scrollTo(0, 0);
   if (v === "dbt" && lastFacts) drawChart(lastFacts.chart);   // 隐藏时画的图宽度不对，切过来重画
-  if (v === "home") drawHero();
+  if (v === "home") {
+    if (gm && gm.k >= gm.a.turns.length && heroA === gm.a) setHero(randomRound(heroA.turns.length));
+    drawHero();
+  }
   if (v === "play" && gm) { if (!$("gm-live").hidden) drawGame(); else drawEq(); }
 }
 
@@ -205,10 +208,10 @@ function tween(node, from, to, fmt) {
   requestAnimationFrame(f);
 }
 
-// 纵轴只按「到这一周为止」的价格定刻度：按全年定会把之后的最高价、最低价泄露出来。横轴按全年，线随周数往右长；
+// 纵轴只按「到这一周为止」的价格定刻度，避免泄露后续高低点。横轴按本局长度，线随周数往右长；
 // prev 给了就把这一周新长出来的那段线描出来
 function drawGame(prev) {
-  const a = gm.a, i = a.turns[gm.k].i, c = a.c.slice(0, i + 1), N = a.c.length;
+  const a = gm.a, i = a.turns[gm.k].i, base = a.c[a.turns[0].i], c = a.c.slice(0, i + 1).map((v) => v / base * 100), N = a.c.length;
   const svg = $("gm-chart"), W = size(svg, 160), PW = W - 44, X = (j) => j * PW / (N - 1);
   const lo = Math.min(...c), hi = Math.max(...c), Y = (v) => 8 + (hi - v) / (hi - lo || 1) * 140;
   const line = (from, to) => c.slice(from, to + 1).map((v, j) => `${j ? "L" : "M"}${X(from + j).toFixed(1)},${Y(v).toFixed(1)}`).join("");
@@ -231,7 +234,7 @@ function drawProg() {
 function drawTurn(prev, old) {
   const a = gm.a, t = a.turns[gm.k];
   $("gm-week").textContent = `第 ${gm.k + 1} / ${a.turns.length} 周`;
-  $("gm-date").textContent = `${a.d[t.i]}　收盘 ${px(a.c[t.i])}`;
+  $("gm-date").textContent = `第 ${gm.k + 1} 周 · 走势 ${px(a.c[t.i] / a.c[a.turns[0].i] * 100)}（开局 = 100）`;
   [["you", gm.you], ["ai", gm.ai]].forEach(([k, s]) => {
     tween($("gm-" + k), old ? old[k] : s.eq, s.eq, yuan);
     const r = s.eq / START - 1, p = $(`gm-${k}-p`); p.textContent = "";
@@ -261,9 +264,9 @@ function reveal({ t, act, r, ry, ra }) {
   if (Math.abs(d) > 5e-4) { const img = el("img"); img.src = sticker(d > 0 ? "cheer.jpg" : "pout.jpg"); img.alt = d > 0 ? "这周你赢了" : "这周 AI 赢了"; box.append(img); }
   const txt = el("div");
   txt.append(el("b", null, `AI 亮牌：${act}` + (t.v ? "" : "（这周没有记录，按持有算）")));
-  if (t.why) txt.append(el("p", null, t.why));   // 模型文本，只走 textContent
+  // 原始理由可能含标的、绝对价格或事件日期，对局中不展示。
   const wk = el("p", "g-wk");
-  wk.append(`这周${gm.a.name} `, el("b", tone(r), pct(r)), "　你 ", el("span", tone(ry), pct(ry)), "　AI ", el("span", tone(ra), pct(ra)));
+  wk.append("这周行情 ", el("b", tone(r), pct(r)), "　你 ", el("span", tone(ry), pct(ry)), "　AI ", el("span", tone(ra), pct(ra)));
   txt.append(wk); box.append(txt);
 }
 
@@ -292,11 +295,12 @@ function endGame() {
   const a = gm.a, you = gm.you.eq / START - 1, ai = gm.ai.eq / START - 1, i0 = a.turns[0].i;
   const hold = a.c[a.c.length - 1] / a.c[i0] - 1, diff = (you - ai) * 100, tie = Math.abs(diff) < 0.05;
   $("gm-live").hidden = true; $("gm-week").textContent = "结局"; drawProg();
+  $("gm-name").textContent = a.name;
   const box = $("gm-end"); box.textContent = ""; box.hidden = false;
   const k = tie ? "tie" : diff > 0 ? "win" : "lose", img = el("img");
   img.src = sticker(k === "lose" ? "lose.gif" : k + ".jpg"); img.alt = { tie: "打平", win: "你赢了", lose: "AI 赢了" }[k];
   box.append(img, el("h2", null, tie ? "和 AI 打平" : diff > 0 ? `你赢了 AI ${diff.toFixed(1)} 个点` : `AI 赢了你 ${(-diff).toFixed(1)} 个点`),
-    el("p", "g-sub", `${a.name}，${a.d[i0]} 到 ${a.d[a.d.length - 1]}，${a.turns.length} 周`));
+    el("p", "g-sub", `揭晓：${a.name}（${a.code}），${a.d[i0]} 到 ${a.d[a.d.length - 1]}，${a.turns.length} 周`));
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.id = "gm-eq"; svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "全程资金曲线：你、AI、一直满仓");
   const res = el("div", "g-res");
@@ -304,15 +308,15 @@ function endGame() {
     const c = el("div"), lab = el("small", null, n); lab.style.color = col; c.append(lab, el("b", tone(v), pct(v))); res.append(c);
   });
   const row = el("div", "g-ctas");
-  const again = el("button", "g-cta pri", "再来一局"); again.type = "button"; again.addEventListener("click", () => startGame(a));
-  const other = el("button", "g-cta sec", "换个标的"); other.type = "button"; other.addEventListener("click", () => go("pick"));
+  const again = el("button", "g-cta pri", "随机下一局"); again.type = "button"; again.addEventListener("click", () => { const next = randomRound(a.turns.length, a); setHero(next); startGame(next); });
+  const other = el("button", "g-cta sec", "重玩本局"); other.type = "button"; other.addEventListener("click", () => startGame(a));
   row.append(again, other); box.append(svg, res, row);
   drawEq();
 }
 
 function startGame(a) {
   gm = { a, k: 0, you: { eq: START, p: 0.5 }, ai: { eq: START, p: 0.5 }, hist: [], eq: [[START, START]] };
-  $("gm-name").textContent = `${(LOOK[a.key] || [""])[0]} ${a.name}`;
+  $("gm-name").textContent = "随机盲局";
   $("gm-end").hidden = true; $("gm-last").hidden = true; $("gm-live").hidden = false; busy = false;
   go("play"); drawTurn();
 }
@@ -329,6 +333,34 @@ pickButtons($("gm-pick"), play, true);
 
 // 首屏就是第一手：随机一个标的，画开局前三个月的走势（不含开局后任何价格），右边一块雾区是还没发生的下一周
 let GA = [], heroA = null;
+
+// 每局保留开局前 63 个交易日，只截取本局行情与结算点；从不按后续涨跌挑题。
+function makeRound(a, start, weeks) {
+  const selected = a.turns.slice(start, start + weeks);
+  if (selected.length !== weeks || selected.some((t) => !t.v)) throw new Error("AI 决策记录不完整");
+  const first = selected[0].i, from = Math.max(0, first - 63);
+  const end = start + weeks < a.turns.length ? a.turns[start + weeks].i : a.c.length - 1;
+  return { ...a, d: a.d.slice(from, end + 1), c: a.c.slice(from, end + 1), turns: selected.map((t) => ({ ...t, i: t.i - from })) };
+}
+
+function roundCandidates(weeks) {
+  return GA.map((a) => {
+    const starts = [];
+    for (let i = 0; i + weeks <= a.turns.length; i++) {
+      if (a.turns.slice(i, i + weeks).every((t) => t.v)) starts.push(i);
+    }
+    return { a, starts };
+  }).filter(({ starts }) => starts.length);
+}
+
+function randomRound(weeks = 12, previous = heroA) {
+  const eligible = roundCandidates(weeks);
+  const different = eligible.filter(({ a }) => a.key !== previous?.key);
+  const pool = different.length ? different : eligible;
+  if (!pool.length) throw new Error("没有足够的完整历史决策");
+  const { a, starts } = pool[Math.floor(Math.random() * pool.length)];
+  return makeRound(a, starts[Math.floor(Math.random() * starts.length)], weeks);
+}
 function drawHero() {
   const a = heroA; if (!a || $("v-home").hidden) return;
   const i0 = a.turns[0].i, c = a.c.slice(0, i0 + 1), n = c.length, svg = $("hc-chart"), H = 230, W = size(svg, H);
@@ -340,18 +372,18 @@ function drawHero() {
   s += `<rect x="${W - FW}" y="0" width="${FW}" height="${H - 22}" rx="16" fill="url(#fog)"/>`;
   s += `<text x="${W - FW / 2}" y="${(H - 22) / 2 + 20}" text-anchor="middle" font-size="60" font-weight="700" fill="${C.ai}">?</text>`;
   s += `<text x="${W - FW / 2}" y="${H - 6}" text-anchor="middle" font-size="12" fill="${T.axis}">下一周</text>`;
-  s += `<text x="0" y="${H - 6}" font-size="12" fill="${T.axis}">${a.d[0].slice(0, 7)}</text><text x="${x1}" y="${H - 6}" text-anchor="end" font-size="12" fill="${T.axis}">现在</text>`;
+  s += `<text x="0" y="${H - 6}" font-size="12" fill="${T.axis}">开局前</text><text x="${x1}" y="${H - 6}" text-anchor="end" font-size="12" fill="${T.axis}">现在</text>`;
   s += `<circle class="pulse" cx="${x1}" cy="${y1}" r="5" fill="${C.you}"/><circle cx="${x1}" cy="${y1}" r="5" fill="${C.you}" stroke="#fff" stroke-width="2"/>`;
   svg.innerHTML = s;
 }
 function setHero(a) {
   heroA = a;
-  $("hc-name").textContent = `${(LOOK[a.key] || [""])[0]} ${a.name}`;
-  $("hc-date").textContent = `开局 ${a.d[a.turns[0].i]}　收盘 ${px(a.c[a.turns[0].i])}`;
+  $("hc-name").textContent = "随机盲局";
+  $("hc-date").textContent = `${a.turns.length} 周 · 开局 = 100`;
   drawHero();
 }
 pickButtons($("hc-pick"), (p) => { if (!heroA) return; startGame(heroA); play(p); }, false);
-$("hc-dice").addEventListener("click", () => { if (GA.length) setHero(GA[(GA.indexOf(heroA) + 1) % GA.length]); });
+$("hc-dice").addEventListener("click", () => { if (heroA) setHero(randomRound(heroA.turns.length)); });
 document.addEventListener("keydown", (e) => {   // 桌面上 1/2/3 直接出手
   if ($("v-play").hidden || $("gm-live").hidden || $("rules").open || e.metaKey || e.ctrlKey || e.altKey || /INPUT|TEXTAREA/.test(e.target.tagName)) return;
   const k = "123".indexOf(e.key); if (k >= 0 && e.key) play(POS[k][1]);
@@ -369,15 +401,15 @@ document.querySelectorAll("[data-how]").forEach((b) => b.addEventListener("click
     gameUrl = r.url;
     $("hero-img").src = sticker("hero.jpg");
     GA = (await r.json()).assets;
-    const tape = GA.map((a) => { const i = a.turns[0].i, v = a.c[i] / a.c[i - 1] - 1; return `<span>${a.name}<b>${px(a.c[i])}</b><em class="${tone(v)}">${pct(v)}</em></span>`; }).join("");
-    $("tape").innerHTML = tape.repeat(8);   // 只有程序算的数字和固定标的名，拼 innerHTML 安全；开局那天的价格，不漏后市
-    setHero(GA[Math.floor(Math.random() * GA.length)]);
-    GA.forEach((a) => {
-      const [icon, tag, bg] = LOOK[a.key] || ["📈", a.code, "#E6E6EC"];
+    const tape = "<span>随机标的<b>名称隐藏</b></span><span>随机开局<b>日期隐藏</b></span><span>只看走势<b>开局 = 100</b></span><span>打完揭晓<b>你 vs AI</b></span>";
+    $("tape").innerHTML = tape.repeat(8);
+    setHero(randomRound());
+    ROUND_LENGTHS.forEach((weeks, j) => {
+      const [icon, tag, bg] = [["⚡", "快局", "#FFE7A6"], ["🎯", "标准局", "#DED8FF"], ["🏁", "长局", "#D3EAFF"]][j];
       const b = el("button"), ic = el("span", "g-ic", icon);
-      b.type = "button"; ic.style.background = bg;
-      b.append(ic, el("b", null, a.name), el("small", null, `${tag}，${a.turns.length} 周`));
-      b.addEventListener("click", () => startGame(a)); $("gm-assets").append(b);
+      b.type = "button"; b.dataset.weeks = weeks; ic.style.background = bg;
+      b.append(ic, el("b", null, `${weeks} 周`), el("small", null, `${tag} · ${roundCandidates(weeks).length} 个标的随机抽取`));
+      b.addEventListener("click", () => { const a = randomRound(weeks); setHero(a); startGame(a); }); $("gm-assets").append(b);
     });
   } catch { ["gm-err", "hc-err"].forEach((k) => { $(k).textContent = "游戏数据暂时拿不到，稍后再试"; $(k).hidden = false; }); }
 })();

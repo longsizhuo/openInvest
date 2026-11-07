@@ -25,11 +25,11 @@ NUMERIC = {"amount", "units", "quantity", "price", "cost_price", "cash_cny", "ca
            "total_amount", "max_single_invest_cny", "latency_ms", "input_tokens", "output_tokens", "atr_pct",
            "stock_pct", "cash_pct", "concentration_pct", "cost", "value", "market_value", "return_pct",
            "avg_cost", "market_value_cny", "pnl", "pnl_pct", "cny", "aud", "aud_in_cny", "_original_alloc", "_original_confidence", "_original_confidence_cap", "_original_confidence_unavailable"}
-CONTAINERS = {"cash", "holdings", "asset", "assets", "verdict", "result", "data", "input_health",
+CONTAINERS = {"cash", "holdings", "asset", "assets", "verdict", "result", "data", "input_health", "reasoning_review",
               "intervention", "facts", "metrics", "strategy", "current_assets", "regime", "usage", "research_evidence", "original", "final", "sources", "versions", "input_snapshot", "all_holdings", "all_currencies", "target_assets", "performance", "income_30d", "pending_fund_orders", "fx"}
 STRINGS = {"symbol", "currency", "cost_currency", "alloc_currency", "base_currency", "kind", "action",
            "verdict", "original_verdict", "final_verdict", "_original_verdict", "_original_trim_reason", "status", "rule", "rules", "provider", "model",
-           "regime_label", "algorithm_version", "as_of", "data_date", "round", "source", "rule_version", "backend_version", "tool_version", "prompt_version", "client_version", "client_name", "snapshot_hash", "facts_source"}
+           "regime_label", "algorithm_version", "as_of", "data_date", "round", "source", "rule_version", "backend_version", "tool_version", "prompt_version", "client_version", "client_name", "snapshot_hash", "facts_source", "decision_status", "qualification_reason"}
 ERROR_KINDS = frozenset({"tool_error", "rpc_error", "upstream_http_error", "transport_error",
                          "incomplete_response", "stream_interrupted", "cancelled", "capacity_busy",
                          "idempotency_conflict"})
@@ -42,7 +42,7 @@ def structured(value, parent=""):
     if isinstance(value, dict):
         out = {}
         for key, item in value.items():
-            if key == "executed" and isinstance(item, bool):
+            if key in {"executed","current_advice_valid","trade_authorized"} and isinstance(item, bool):
                 out[key] = item
             elif key == "decision_id" and isinstance(item, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}/[A-Za-z0-9.^=:_-]{1,40}", item):
                 out[key] = item
@@ -61,6 +61,12 @@ def structured(value, parent=""):
     if isinstance(value, list):
         return [structured(item, parent) for item in value[:1000] if isinstance(item, (dict, list))]
     return {}
+
+
+def awaiting_verification(data):
+    """Also protect old captured drafts that were mistakenly labelled decision."""
+    return (data.get("sample_type")=="proposal_draft" or
+            (data.get("tool")=="submit_committee" and (data.get("result") or {}).get("status")=="verification_required"))
 
 
 def features(arguments, result):
@@ -168,9 +174,10 @@ class Research:
             parts = re.split(r"^===\s*(MACRO|QUANT_R1|RISK_R1|QUANT_R2|RISK_R2|CIO)\s*===\s*$", text, flags=re.M)
             roles = {parts[i] for i in range(1, len(parts)-1, 2) if parts[i+1].strip()}
             complete = roles == {"MACRO", "QUANT_R1", "RISK_R1", "QUANT_R2", "RISK_R2", "CIO"}
+            waiting=tool=="submit_committee" and isinstance(result,dict) and result.get("status")=="verification_required"
             payload = {"schema_version": 2, "sample_id": sample_id, "tool": tool, "trace": trace,
-                       "sample_type": "decision" if tool == "submit_committee" and complete and not failed else "tool_call",
-                       "analysis_completeness": "complete" if complete else "partial_or_unavailable",
+                       "sample_type": "proposal_draft" if waiting else "decision" if tool == "submit_committee" and complete and not failed else "tool_call",
+                       "analysis_completeness": "awaiting_verification" if waiting else "complete" if complete else "partial_or_unavailable",
                        "participant": current["participant"], "retry": retry,
                        "retry_observation": "receipt_replay" if retry else "not_observed",
                        "client": structured(client_info or {}),
@@ -300,6 +307,8 @@ class Research:
                 raise ValueError("Unknown sample")
             if not self._authorized(sample):
                 raise ValueError("Research participation is no longer active for this sample")
+            if sample["payload"] and "agent_training" in allowed_uses and awaiting_verification(self.unseal(sample["payload"])):
+                raise ValueError("An unfinalized proposal is audit-only; it is not a completed decision or a training example")
             db.execute("UPDATE samples SET label=? WHERE id=?", (label, sample_id))
             db.execute("INSERT OR REPLACE INTO reviews VALUES(?,?)", (sample_id, self.seal({
                 "text": cleaned, "qualification": {"source_validity": source_validity,
@@ -334,6 +343,7 @@ class Research:
                             raise ValueError("Archive access required")
                         review_digests[row["id"]] = hashlib.sha256(review[0]).hexdigest()
                         data = self.unseal(blob)
+                        if awaiting_verification(data):continue
                         data.pop("quarantine", None)
                         data["reviewed_text"] = reviewed.get("text", {})
                         data["qualification"] = qualification
@@ -377,6 +387,9 @@ class Research:
             manifest = json.loads(path.with_suffix(path.suffix+".manifest.json").read_text())
             if manifest.get("sha256") != hashlib.sha256(path.read_bytes()).hexdigest() or manifest.get("samples") != ids:
                 raise ValueError("Dataset integrity check failed")
+            exported=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+            if any(awaiting_verification(data) for data in exported):
+                raise ValueError("Dataset contains an unfinalized proposal; export qualified finalized records before training")
             for sample_id in ids:
                 sample = db.execute("SELECT * FROM samples WHERE id=?", (sample_id,)).fetchone()
                 review = db.execute("SELECT payload FROM reviews WHERE id=?", (sample_id,)).fetchone()

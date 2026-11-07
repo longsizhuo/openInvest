@@ -10,10 +10,10 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 # 收敛判定用：从 agent 输出抓 SIGNAL + STRENGTH
-_SIGNAL_RE = re.compile(r"SIGNAL:\s*(\w+)", re.IGNORECASE)
+_SIGNAL_RE = re.compile(r"^\s*(?:ADJUSTED_)?SIGNAL:\s*(\w+)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
-_STRENGTH_RE = re.compile(r"STRENGTH:\s*([\d.]+)", re.IGNORECASE)
+_STRENGTH_RE = re.compile(r"^\s*(?:ADJUSTED_)?STRENGTH:\s*([\d.]+)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def _extract_signal_strength(text: str) -> Tuple[Optional[str], Optional[float]]:
@@ -41,10 +41,10 @@ def _check_convergence(
 
     def _stable(a: Tuple[Optional[str], Optional[float]],
                 b: Tuple[Optional[str], Optional[float]]) -> bool:
-        if a[0] != b[0]:
+        if a[0] is None or b[0] is None or a[0] != b[0]:
             return False
         if a[1] is None or b[1] is None:
-            return a[1] == b[1]
+            return False
         return abs(a[1] - b[1]) < 1.0
 
     return _stable(qa, qb) and _stable(ra, rb)

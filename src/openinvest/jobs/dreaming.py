@@ -523,13 +523,13 @@ def deep_sleep(
         slug = _candidate_slug(c)
         if is_caution:
             missed = c.get("missed_up_rate", 0.0)
-            title = f"⚠️ 告诫: {regime_tag} 里对 {c['asset']} HOLD 频繁踏空"
+            title = f"样本内观察: {regime_tag} 中 {c['asset']} 的 HOLD 后续行情"
             interp = (
                 f"历史上当市场处于 **{regime_tag}** 时，委员会对 {c['asset']} 给出 **HOLD**，"
                 f"但 {c['window_days']} 天后有 **{missed*100:.0f}%** 的情况市场明显上涨"
-                f"（期间平均涨跌 {c['avg_return_pct']:+.2f}%，n={c['count']}）——**子弹揣在兜里踏空了**。\n\n"
-                f"> **行动建议**：该 regime 下应**降低 HOLD 倾向**，更积极考虑 BUY/ACCUMULATE。"
-                f"这不是噪音——是委员会过度保守、错过上涨的实证模式。"
+                f"（期间平均涨跌 {c['avg_return_pct']:+.2f}%，n={c['count']}）。\n\n"
+                f"> 这是样本内后续行情，不足以证明 HOLD 错误、扣费收益优势或应提高买入频率。"
+                f"需要核对当时风险、成本、可执行性及独立样本；有效但错误的预测仍保留为负样本。"
             )
         else:
             title = f"长期洞察: 委员会对 {c['asset']} 给出 {label} 在 {regime_tag} 市场环境下"
@@ -546,7 +546,7 @@ def deep_sleep(
 - 样本数: {c['count']}
 - {c['window_days']}天后命中率: {c['hit_rate']*100:.1f}%
 - 平均 {c['window_days']}天后实际涨跌: {c['avg_return_pct']:+.2f}%
-{f"- 踏空率(HOLD 但市场涨): {c.get('missed_up_rate',0)*100:.1f}% / 躲跌率: {c.get('avoided_down_rate',0)*100:.1f}%" if is_caution or label == "HOLD" else ""}
+{f"- 后续市场上涨比例: {c.get('missed_up_rate',0)*100:.1f}% / 下跌比例: {c.get('avoided_down_rate',0)*100:.1f}%；持仓反事实收益未核实" if is_caution or label == "HOLD" else ""}
 - 综合评分: {c['score']:.3f}
 
 ## 解读
@@ -554,7 +554,7 @@ def deep_sleep(
 {interp}
 
 > 这条由 Dreaming Deep Sleep 从 verdict_review（委员会建议 vs 实际盘）自动提炼，
-> "没动"阈值按资产波动率定（非写死），经 MEMORY.md 索引注入决策上下文。
+> "没动"阈值按资产波动率定。进入建议上下文前仍须通过当前来源、父记录与模型版本资格核验。
 """
         # 双写：.md 文件（人类可读副本，渐进迁移保留）+ SQLite（SQL 查询后端）
         from openinvest.core.evidence_eligibility import insight_payload

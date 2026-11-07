@@ -37,6 +37,7 @@ import re
 import sqlite3
 import struct
 import threading
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -49,6 +50,22 @@ DB_PATH = str(INVEST_ROOT / "db" / "events.db")
 _SEVERITY_INT = {"low": 1, "mid": 2, "high": 3}
 _SEVERITY_STR = {v: k for k, v in _SEVERITY_INT.items()}
 _VALID_STANCE = {"risk", "opportunity", "neutral"}
+
+
+def _locked_read(method):
+    @wraps(method)
+    def read(self,*args,**kwargs):
+        with self._lock:
+            own_snapshot=not self.conn.in_transaction
+            if own_snapshot:self.conn.execute("BEGIN")
+            try:
+                result=method(self,*args,**kwargs)
+                if own_snapshot:self.conn.commit()
+                return result
+            except Exception:
+                if own_snapshot:self.conn.rollback()
+                raise
+    return read
 
 
 def claim_to_event_id(claim: str) -> str:
@@ -92,8 +109,19 @@ class EventStore:
         self,
         db_path: Optional[str] = None,
         embedding_dim: int = 1024,
+        *, readonly: bool = False,
     ) -> None:
         path = db_path or DB_PATH
+        if readonly:
+            location=Path(path).expanduser().resolve()
+            parent=location.parent
+            self.data_root=parent.parent if parent.name=="db" else parent
+            self.embedding_dim=embedding_dim
+            self.conn=sqlite3.connect(location.as_uri()+"?mode=ro",uri=True,check_same_thread=False,timeout=5)
+            self.conn.row_factory=sqlite3.Row
+            self._vec_loaded=False
+            self._lock=threading.RLock()
+            return
         parent = Path(path).parent
         self.data_root = parent.parent if parent.name == "db" else parent
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -114,14 +142,15 @@ class EventStore:
             self._vec_loaded = False
 
         cur = self.conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=5000")
-        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA journal_mode=WAL").fetchall()
+        cur.execute("PRAGMA busy_timeout=5000").fetchall()
+        cur.execute("PRAGMA synchronous=NORMAL").fetchall()
         try:
-            cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # #104：启动回收 WAL
+            cur.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
         except Exception:
             pass
         self.conn.commit()
+        cur.close()
 
         self._lock = threading.RLock()
         self._init_db()
@@ -165,8 +194,18 @@ class EventStore:
             # 在线迁移：既有库（CREATE IF NOT EXISTS 不会改老表）补 ingested_by 列
             # ——照 market_store._migrate_ohlcv_columns 的 PRAGMA 模式，幂等
             existing_cols = {r[1] for r in cur.execute("PRAGMA table_info(events)").fetchall()}
+            if "published_at" not in {r[1] for r in cur.execute("PRAGMA table_info(sources)").fetchall()}:
+                cur.execute("ALTER TABLE sources ADD COLUMN published_at TEXT")
+            for column in ("raw_text","provenance_json"):
+                if column not in {r[1] for r in cur.execute("PRAGMA table_info(sources)").fetchall()}:
+                    cur.execute(f"ALTER TABLE sources ADD COLUMN {column} TEXT")
             if "ingested_by" not in existing_cols:
                 cur.execute("ALTER TABLE events ADD COLUMN ingested_by TEXT")
+            if "updated_at" not in existing_cols:
+                cur.execute("ALTER TABLE events ADD COLUMN updated_at TEXT")
+                cur.execute("UPDATE events SET updated_at=created_at WHERE updated_at IS NULL")
+            if "last_revision_at" not in existing_cols:
+                cur.execute("ALTER TABLE events ADD COLUMN last_revision_at TEXT")
 
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity)")
@@ -175,7 +214,12 @@ class EventStore:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL,
                 observed_at TEXT NOT NULL, payload_json TEXT NOT NULL)""")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_event_versions_time ON event_versions(event_id,observed_at,id)")
-
+            cur.execute("""CREATE TABLE IF NOT EXISTS news_observation_conflicts (
+                fingerprint TEXT PRIMARY KEY,event_id TEXT NOT NULL,observed_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'review_required')""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS event_vector_meta (
+                row_id INTEGER PRIMARY KEY, space_id TEXT NOT NULL, content_sha256 TEXT NOT NULL)""")
+            self.conn.commit()
             if self._vec_loaded:
                 cur.execute(
                     f"CREATE VIRTUAL TABLE IF NOT EXISTS events_vec "
@@ -192,6 +236,9 @@ class EventStore:
         event: Dict[str, Any],
         *,
         embedding: Optional[List[float]] = None,
+        revision: bool = False,
+        _commit: bool = True,
+        _version: bool = True,
     ) -> Tuple[bool, str]:
         """归一化后落盘。返回 (was_new, event_id)。
 
@@ -229,11 +276,13 @@ class EventStore:
             if cur.execute("SELECT julianday(?) > julianday(?)", (ts, created_at)).fetchone()[0]:
                 ts = created_at
             cur.execute(
-                "SELECT id, severity, affected_symbols_json, entities_json "
+                "SELECT * "
                 "FROM events WHERE event_id = ?", (eid,),
             )
             row = cur.fetchone()
             was_new = row is None
+            if revision and row is not None and _version:
+                self._record_version(eid)
 
             if was_new:
                 cur.execute("""
@@ -261,6 +310,9 @@ class EventStore:
                         "INSERT INTO events_vec(rowid, embedding) VALUES (?, ?)",
                         (new_id, _serialize_vec(embedding)),
                     )
+                    cur.execute("INSERT OR REPLACE INTO event_vector_meta VALUES(?,?,?)",
+                                (new_id, getattr(embedding,"space_id","unqualified"),
+                                 getattr(embedding,"content_sha256","unqualified")))
             else:
                 # 已存在：merge 字段（不无脑覆盖）
                 # - severity bump 到 max（事件持续升级时）
@@ -285,21 +337,32 @@ class EventStore:
 
                 merged_affected = _union_preserve_order(old_affected, affected or [])
                 merged_entities = _union_preserve_order(old_entities, entities or [])
-
+                if revision:
+                    merged_affected, merged_entities = affected, entities
+                    cur.execute("""UPDATE events SET one_line_claim=?,event_type=?,source_reliability=?,ts=?
+                        WHERE event_id=?""", (claim,event.get("event_type"),event.get("source_reliability"),ts,eid))
+                    if self._vec_loaded and claim != row["one_line_claim"]:
+                        cur.execute("DELETE FROM events_vec WHERE rowid=?",(row["id"],))
+                        cur.execute("DELETE FROM event_vector_meta WHERE row_id=?",(row["id"],))
                 cur.execute("""
                     UPDATE events
                        SET severity = ?, stance = ?,
                            affected_symbols_json = ?, entities_json = ?
                      WHERE event_id = ?
                 """, (
-                    max(old_sev, sev_int),
+                    sev_int if revision else max(old_sev, sev_int),
                     stance,
                     json.dumps(merged_affected, ensure_ascii=False),
                     json.dumps(merged_entities, ensure_ascii=False),
                     eid,
                 ))
-            self._record_version(eid, event, was_new=was_new)
-            self.conn.commit()
+            cur.execute("UPDATE events SET updated_at=? WHERE event_id=?",(created_at,eid))
+            if not was_new:
+                cur.execute("UPDATE events SET last_revision_at=? WHERE event_id=?",(created_at,eid))
+            if _version:
+                self._record_version(eid, event, was_new=was_new)
+            if _commit:
+                self.conn.commit()
             return was_new, eid
 
     def _record_version(self, event_id: str, reported: Optional[Dict[str, Any]] = None, *, was_new: bool = False) -> None:
@@ -315,7 +378,8 @@ class EventStore:
         payload["sources"] = self.get_sources(event_id)
         payload["vintage"] = {
             "event_time": reported.get("ts", prior.get("event_time")),
-            "published_at": reported.get("published_at", prior.get("published_at")),
+            "published_at": prior.get("published_at") or reported.get("published_at"),
+            "observation_published_at": reported.get("published_at"),
             "first_acquired_at": prior.get("first_acquired_at", observed),
             "revision_published_at": reported.get("revision_published_at"),
             "revision_acquired_at": observed,
@@ -333,21 +397,150 @@ class EventStore:
         title: Optional[str] = None,
         snippet: Optional[str] = None,
         fetched_at: Optional[str] = None,
+        published_at: Optional[str] = None,
+        raw_text: str = "",
+        provenance: Optional[Dict[str, Any]] = None,
+        _commit: bool = True,
+        _version: bool = True,
     ) -> bool:
         """挂一条源到事件。同 (event_id, url) 已存在返回 False 不报错。"""
         fetched_at = fetched_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._lock:
             cur = self.conn.cursor()
-            try:
+            previous=cur.execute("SELECT * FROM sources WHERE event_id=? AND url=?",(event_id,url)).fetchone()
+            if previous:
+                if (previous["title"] or "",previous["snippet"] or "",previous["published_at"],previous["raw_text"] or "") == (title or "",snippet or "",published_at,raw_text):
+                    return False
+                if _version:
+                    self._record_version(event_id)
+                cur.execute("UPDATE sources SET src_name=?,title=?,snippet=?,fetched_at=?,published_at=?,raw_text=?,provenance_json=? WHERE id=?",
+                            (src_name,title,snippet,fetched_at,published_at,raw_text,json.dumps(provenance or {},ensure_ascii=False),previous["id"]))
+            else:
                 cur.execute("""
-                    INSERT INTO sources(event_id, src_name, url, title, snippet, fetched_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (event_id, src_name, url, title, snippet, fetched_at))
+                    INSERT INTO sources(event_id, src_name, url, title, snippet, fetched_at,published_at,raw_text,provenance_json)
+                    VALUES (?, ?, ?, ?, ?, ?,?,?,?)
+                """, (event_id, src_name, url, title, snippet, fetched_at,published_at,raw_text,json.dumps(provenance or {},ensure_ascii=False)))
+            if _version:
                 self._record_version(event_id)
+            if _commit:
                 self.conn.commit()
-                return True
-            except sqlite3.IntegrityError:
-                return False
+            return True
+
+    def source_unchanged(self, url: str, title: str, snippet: str = "", *, published_at=None,raw_text="") -> bool:
+        row=self.conn.execute("SELECT title,snippet,published_at,raw_text FROM sources WHERE url=? ORDER BY fetched_at DESC,id DESC LIMIT 1",(url,)).fetchone()
+        return row is not None and (row["title"] or "",row["snippet"] or "",row["published_at"],row["raw_text"] or "") == (title or "",snippet or "",published_at,raw_text)
+
+    def write_news_observation(self, event: dict, raw_item=None, *, embedding=None) -> dict:
+        """Keep source revisions and distinguish material changes from retries."""
+        if raw_item:
+            from urllib.parse import urlsplit
+            if urlsplit(str(raw_item.url).strip()).scheme.lower()=="openinvest-source":
+                from openinvest.services.agent_queue import bind_news_source
+                bound=bind_news_source({"url":str(raw_item.url).strip(),"source_snapshot_id":
+                    (getattr(raw_item,"raw_meta",{}) or {}).get("source_snapshot_id")},memory_root=self.data_root/"memory")
+                if bound is None:raise ValueError("backend_source_locator_requires_a_bound_snapshot")
+            from openinvest.core.evidence_eligibility import Eligibility,source_artifact_ids
+            if source_artifact_ids(getattr(raw_item,"raw_meta",{}) or {}) & Eligibility(self.data_root).excluded_ids():
+                raise ValueError("source_snapshot_revoked")
+        with self._lock,self.conn:
+            if not self.conn.in_transaction:
+                self.conn.execute("BEGIN IMMEDIATE")
+            value=dict(event)
+            def qualify(result):
+                record=result.get("event")
+                active=self.get_event(record["event_id"]) if record else None
+                if active is None and record is not None:
+                    return {**result,"event":None,"audit_changed":result["changed"],"changed":False,
+                            "audit_only":True,"blocked_event_id":record["event_id"]}
+                return {**result,"event":active,"audit_only":False}
+            previous_source=self.conn.execute("SELECT * FROM sources WHERE url=? ORDER BY fetched_at DESC,id DESC LIMIT 1",
+                                              (raw_item.url,)).fetchone() if raw_item else None
+            previous=self.get_event(previous_source["event_id"],purpose="audit") if previous_source else None
+            if previous_source and raw_item:
+                def acquired(ts):
+                    parsed=datetime.fromisoformat(str(ts).replace("Z","+00:00"))
+                    if parsed.tzinfo is None:
+                        raise ValueError("source acquisition timezone unavailable")
+                    return parsed
+                if acquired(raw_item.fetched_at) < acquired(previous_source["fetched_at"]):
+                    return qualify({"event":previous,"inserted":False,"changed":False,"previous":previous,"ignored":"older_source_observation"})
+            if raw_item:
+                value["published_at"]=getattr(raw_item,"published_at",None)
+            # A changed article stays attached to its story when its subjects overlap.
+            old_subjects=set(previous.get("affected_symbols",[])+previous.get("entities",[])) if previous else set()
+            new_subjects=set(value.get("affected_symbols",[])+value.get("entities",[]))
+            related=previous and (not old_subjects or not new_subjects or old_subjects & new_subjects)
+            if related:
+                value["event_id"]=previous["event_id"]
+            eid=value.get("event_id") or claim_to_event_id(value["one_line_claim"])
+            old=self.get_event(eid,purpose="audit")
+            if old and not previous_source and not value.get("event_id"):
+                def day(ts):
+                    try:
+                        moment=datetime.fromisoformat(str(ts).replace("Z","+00:00"))
+                        return moment.astimezone(timezone.utc).date().isoformat() if moment.tzinfo else str(ts)[:10]
+                    except ValueError:return str(ts)[:10]
+                if day(old.get("ts")) != day(value.get("ts")):
+                    eid=hashlib.sha256((eid+"|"+day(value.get("ts"))).encode()).hexdigest()[:16]
+                    old=self.get_event(eid,purpose="audit")
+            value["event_id"]=eid
+            if old and raw_item and (getattr(raw_item,"raw_meta",{}) or {}).get("source_regression"):
+                record={"event":value,"source":vars(raw_item),"reason":"source_returned_to_previously_seen_content_requires_verification"}
+                encoded=json.dumps(record,sort_keys=True,ensure_ascii=False,default=str)
+                fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
+                self.conn.execute("INSERT OR IGNORE INTO news_observation_conflicts(fingerprint,event_id,observed_at,payload_json) VALUES(?,?,?,?)",
+                                  (fingerprint,eid,datetime.now(timezone.utc).isoformat(),encoded))
+                return {"event":None,"inserted":False,"changed":False,"audit_only":True,
+                        "blocked_event_id":eid,"source_conflict":True,"previous":old}
+            def signature(v):
+                return (v.get("one_line_claim"),v.get("stance"),_SEVERITY_INT.get(v.get("severity"),v.get("severity")),v.get("event_type"),
+                        sorted(set(v.get("affected_symbols") or [])),sorted(set(v.get("entities") or [])))
+            older_different_observation=False
+            if old and raw_item and not related and signature(old)!=signature(value):
+                def observed_time(value):
+                    parsed=datetime.fromisoformat(str(value).replace("Z","+00:00"))
+                    if parsed.tzinfo is None:raise ValueError("source acquisition timezone unavailable")
+                    return parsed
+                known=[observed_time(row["fetched_at"]) for row in self.get_sources(eid)]
+                older_different_observation=bool(known) and observed_time(raw_item.fetched_at)<max(known)
+            if old and not related and (older_different_observation or claim_to_event_id(old["one_line_claim"])!=claim_to_event_id(value["one_line_claim"])):
+                # A late copy of the ORIGINAL article may hash to a story whose
+                # same-source correction retained that ID. It cannot merge its
+                # old risk labels into the corrected, different current claim.
+                conflict={"event":value,"source":vars(raw_item) if raw_item else None,
+                          "reason":"claim_hash_matches_a_different_corrected_story"}
+                encoded=json.dumps(conflict,ensure_ascii=False,sort_keys=True,default=str)
+                fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
+                self.conn.execute("INSERT OR IGNORE INTO news_observation_conflicts(fingerprint,event_id,observed_at,payload_json) VALUES(?,?,?,?)",
+                                  (fingerprint,eid,datetime.now(timezone.utc).isoformat(),encoded))
+                return {"event":None,"inserted":False,"changed":False,"audit_changed":True,
+                        "audit_only":True,"blocked_event_id":eid,"source_conflict":True,"previous":old}
+            changed=old is None or signature(old)!=signature(value)
+            source_changed=raw_item is not None and not self.source_unchanged(raw_item.url,raw_item.title,raw_item.snippet,published_at=getattr(raw_item,"published_at",None),raw_text=getattr(raw_item,"text",""))
+            if not changed and not source_changed:
+                return qualify({"event":old,"inserted":False,"changed":False,"previous":old})
+            try:
+                if old is not None:
+                    self._record_version(eid)
+                if changed:
+                    inserted,_=self.upsert_event(value,embedding=embedding,revision=bool(related),_commit=False,_version=False)
+                else:
+                    inserted=False
+                if raw_item:
+                    self.add_source(eid,src_name=raw_item.src_name,url=raw_item.url,title=raw_item.title,
+                                    snippet=raw_item.snippet,fetched_at=raw_item.fetched_at,published_at=getattr(raw_item,"published_at",None),
+                                    raw_text=getattr(raw_item,"text",""),provenance=getattr(raw_item,"raw_meta",{}),_commit=False,_version=False)
+                    from openinvest.core.evidence_eligibility import Eligibility,source_artifact_ids
+                    parents=source_artifact_ids(getattr(raw_item,"raw_meta",{}) or {})
+                    if parents:Eligibility(self.data_root).record_audit_lineage("event:"+eid,value,parents)
+                self._record_version(eid,value,was_new=inserted)
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+            current=self.get_event(eid,purpose="audit")
+            material=inserted or signature(current)!=signature(old or {}) or bool(previous_source and source_changed)
+            return qualify({"event":current,"inserted":inserted,"changed":material,"source_added":bool(not previous_source and source_changed),"previous":old})
 
     def mark_committee_task(self, event_id: str, task_id: str) -> None:
         with self._lock:
@@ -362,7 +555,7 @@ class EventStore:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat(timespec="seconds")
         with self._lock:
             cur = self.conn.cursor()
-            cur.execute("SELECT id FROM events WHERE ts < ?", (cutoff,))
+            cur.execute("SELECT id FROM events WHERE COALESCE(last_revision_at,ts,created_at) < ?", (cutoff,))
             ids = [r["id"] for r in cur.fetchall()]
             if not ids:
                 return 0
@@ -384,21 +577,37 @@ class EventStore:
         cur.execute("SELECT 1 FROM sources WHERE url = ? LIMIT 1", (url,))
         return cur.fetchone() is not None
 
+    @_locked_read
     def get_event(self, event_id: str, *, purpose: str = "advice") -> Optional[Dict[str, Any]]:
         if purpose != "audit":
             from openinvest.core.evidence_eligibility import Eligibility
-            if f"event:{event_id}" in Eligibility(self.data_root).excluded_ids():
+            if self._source_excluded(event_id,Eligibility(self.data_root).excluded_ids()):
                 return None
         cur = self.conn.cursor()
-        cur.execute("SELECT * FROM events WHERE event_id = ?", (event_id,))
+        cur.execute("SELECT *, (SELECT MAX(v.id) FROM event_versions v WHERE v.event_id=events.event_id) AS source_version FROM events WHERE event_id = ?", (event_id,))
         row = cur.fetchone()
-        return _row_to_event(row) if row else None
+        if row is None:
+            return None
+        event = _row_to_event(row)
+        event["_version_id"] = row["source_version"] or 0
+        return event
 
+    def _source_excluded(self,event_id,excluded,*,sources=None):
+        from openinvest.core.evidence_eligibility import source_artifact_ids
+        if "event:"+event_id in excluded:return True
+        for source in self.get_sources(event_id) if sources is None else sources:
+            metadata=source.get("provenance_json") or "{}"
+            if isinstance(metadata,str):metadata=json.loads(metadata)
+            if source_artifact_ids(metadata) & excluded:return True
+        return False
+
+    @_locked_read
     def get_sources(self, event_id: str) -> List[Dict[str, Any]]:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM sources WHERE event_id = ? ORDER BY fetched_at", (event_id,))
         return [dict(r) for r in cur.fetchall()]
 
+    @_locked_read
     def list_recent(
         self,
         *,
@@ -422,14 +631,14 @@ class EventStore:
         cur.execute(
             """
             SELECT * FROM events
-             WHERE ts >= ? AND severity >= ?
+             WHERE COALESCE(updated_at,created_at) >= ? AND severity >= ?
              ORDER BY severity DESC, ts DESC
             """,
             (cutoff, min_sev_int),
         )
         from openinvest.core.evidence_eligibility import Eligibility
-        excluded = {key[6:] for key in Eligibility(self.data_root).excluded_ids() if key.startswith("event:")}
-        return [_row_to_event(r) for r in cur.fetchall() if r["event_id"] not in excluded][:limit]
+        excluded = Eligibility(self.data_root).excluded_ids()
+        return [_row_to_event(r) for r in cur.fetchall() if not self._source_excluded(r["event_id"],excluded)][:limit]
 
     def count_recent(self, *, hours: int = 24) -> Dict[str, int]:
         """汇总最近 N 小时事件数（按 severity 分桶）"""
@@ -445,6 +654,19 @@ class EventStore:
             "total": sum(buckets.values()),
         }
 
+    @_locked_read
+    def list_current_with_sources(self, *, hours=24, limit=100):
+        """Qualified current claims and their original sources in one snapshot."""
+        records=[]
+        for entry in self.list_recent(hours=hours,limit=limit):
+            current=self.get_event(entry["event_id"])
+            if current is not None:
+                records.append({**current,"sources":self.get_sources(entry["event_id"]),
+                                "claim_kind":"normalized_summary_not_verbatim_source",
+                                "labels_kind":"assessed_relevance_not_a_trade_instruction"})
+        return records
+
+    @_locked_read
     def recall(
         self,
         symbol: str,
@@ -495,7 +717,7 @@ class EventStore:
             # Latest-row timestamps cannot reconstruct past stance/severity/source
             # revisions. Only immutable observed versions qualify for as-of reads.
             return self._recall_versions(symbol, anchor, time_window_days, min_sev_int,
-                                         top_k, aliases or [], extra_tags or [], set(excluded_events))
+                                         top_k, aliases or [], extra_tags or [], exclusions)
         cutoff = (anchor - timedelta(days=time_window_days)).isoformat(timespec="seconds")
         # created_at 全库统一 isoformat(timespec="seconds") 的 +00:00 串 → 同格式字典序比较精确
         as_of_iso = anchor.isoformat(timespec="seconds") if as_of is not None else None
@@ -517,14 +739,16 @@ class EventStore:
         # supersedes、返回顺序全按 eff_jd 排（2026-10-08：曾按 eff_ts 串排，+08:00 行虚高 8h 挤掉更新的 UTC 行）
         # INDEXED BY：ORDER BY 不再是裸 ts 后，无 stat 的规划器会改走 severity 索引扫大半张表（实测 4x 慢）
         # ts 解析不了（julianday 为 NULL）同样落到 created_at → eff_jd 永不为 NULL，下面 Python 排序不会撞 None
-        eff = "CASE WHEN julianday(ts) <= julianday(created_at) THEN ts ELSE created_at END"
-        sql = (f"SELECT *, {eff} AS eff_ts, julianday({eff}) AS eff_jd "
+        eff = "COALESCE(last_revision_at,CASE WHEN julianday(ts)<=julianday(created_at) THEN ts ELSE created_at END)"
+        shown = "CASE WHEN julianday(ts)<=julianday(COALESCE(last_revision_at,created_at)) THEN ts ELSE COALESCE(last_revision_at,created_at) END"
+        sql = (f"SELECT *, {eff} AS eff_ts, {shown} AS shown_ts, julianday({eff}) AS eff_jd, "
+               "(SELECT MAX(v.id) FROM event_versions v WHERE v.event_id=events.event_id) AS source_version "
                "FROM events INDEXED BY idx_events_ts "
                # price_alert = 用户自设价格线命中（jobs/price_sentinel），是提醒不是新闻：不管 rag_min_severity 调成多低，
                # 都不进召回（委员会论据 / 日报 / 持仓摘要）。IS NOT 对 event_type 为 NULL 的行也成立
-               "WHERE ts >= ? AND created_at >= ? AND severity >= ? AND event_type IS NOT 'price_alert' "
+               f"WHERE julianday({eff}) >= julianday(?) AND severity >= ? AND event_type IS NOT 'price_alert' "
                f"AND ({match})")
-        params = [cutoff, cutoff, min_sev_int, *match_syms, *tags]
+        params = [cutoff, min_sev_int, *match_syms, *tags]
         sql += " AND event_id NOT IN (SELECT value FROM json_each(?))"
         params.append(json.dumps(excluded_events))
         if as_of_iso is not None:
@@ -532,12 +756,21 @@ class EventStore:
             params.append(as_of_iso)
         cur = self.conn.cursor()
         cur.execute(sql + " ORDER BY eff_jd DESC LIMIT 200", params)
-        candidates = [{**_row_to_event(r), "ts": r["eff_ts"], "_jd": r["eff_jd"]} for r in cur.fetchall()]
+        candidates = [{**_row_to_event(r), "ts":r["shown_ts"],"_jd": r["eff_jd"], "_version_id":r["source_version"] or 0} for r in cur.fetchall()
+                      if not self._source_excluded(r["event_id"],exclusions)]
         if not candidates:
             return []
 
         # 向量精排（可选）
-        if self._vec_loaded and query_embedding is not None and candidates:
+        space = getattr(query_embedding, "space_id", "")
+        compatible = False
+        if self._vec_loaded and query_embedding is not None and space.startswith("openai:") and len(query_embedding) == self.embedding_dim:
+            metadata = {r["row_id"]: r for r in cur.execute("SELECT * FROM event_vector_meta WHERE row_id IN (SELECT value FROM json_each(?))",
+                                                        (json.dumps([c["_id"] for c in candidates]),)).fetchall()}
+            compatible = all(c["_id"] in metadata and metadata[c["_id"]]["space_id"] == space
+                             and metadata[c["_id"]]["content_sha256"] == hashlib.sha256(c["one_line_claim"].strip().encode()).hexdigest()
+                             for c in candidates)
+        if compatible:
             id_to_dist: Dict[int, float] = {}
             ids = [c["_id"] for c in candidates]
             qmarks = ",".join(["?"] * len(ids))
@@ -588,15 +821,21 @@ class EventStore:
         rows = self.conn.execute("""SELECT payload_json FROM (
             SELECT payload_json, ROW_NUMBER() OVER
               (PARTITION BY event_id ORDER BY observed_at DESC,id DESC) AS rn
-            FROM event_versions WHERE julianday(observed_at)<=julianday(?)
-        ) WHERE rn=1""", (anchor.isoformat(),)).fetchall()
+            FROM event_versions WHERE observed_at<=?
+        ) WHERE rn=1""", (anchor.astimezone(timezone.utc).isoformat(timespec="microseconds"),)).fetchall()
         out = []
         for row in rows:
             event = json.loads(row[0])
-            if event["event_id"] in exclusions:
+            if self._source_excluded(event["event_id"],exclusions,sources=event.get("sources",[])):
                 continue
             seen = datetime.fromisoformat(event["vintage"]["revision_acquired_at"])
-            if seen < cutoff or event.get("event_type") == "price_alert":
+            relevance=event.get("material_revision_at") or event.get("ts")
+            try:
+                relevant_at=datetime.fromisoformat(str(relevance).replace("Z","+00:00"))
+                if relevant_at.tzinfo is None:relevant_at=relevant_at.replace(tzinfo=timezone.utc)
+                relevant_at=min(relevant_at,seen)
+            except (TypeError,ValueError):relevant_at=seen
+            if seen < cutoff or relevant_at < cutoff or event.get("event_type") == "price_alert":
                 continue
             if _SEVERITY_INT.get(event.get("severity"), 0) < min_severity:
                 continue
@@ -620,6 +859,8 @@ def _row_to_event(row: sqlite3.Row) -> Dict[str, Any]:
         "severity": _SEVERITY_STR.get(row["severity"], "low"),
         "source_reliability": row["source_reliability"],
         "ts": row["ts"],
+        "revision_observed_at": row["updated_at"] if "updated_at" in row.keys() else row["created_at"],
+        "material_revision_at": row["last_revision_at"] if "last_revision_at" in row.keys() else None,
         "entities": json.loads(row["entities_json"] or "[]"),
         "affected_symbols": json.loads(row["affected_symbols_json"] or "[]"),
         "committee_task_id": row["committee_task_id"],

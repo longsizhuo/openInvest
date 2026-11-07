@@ -4,6 +4,7 @@ run_committee 必须【优雅回退】文本模式重问一次、regex 解析出
 
 钉 core.committee.debate._create_agent —— run_committee 在该命名空间解析工厂
 （façade patch 无效，见 CLAUDE.md）。不真调 LLM。"""
+import pytest
 import openinvest.core.committee.debate as debate
 
 
@@ -82,3 +83,11 @@ def test_supported_provider_no_double_call(monkeypatch):
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_review_for_non_review_contract(monkeypatch):
+    # These tests isolate storage/cache/format contracts; dedicated review-flow
+    # tests exercise actual verification, unavailable capability and failures.
+    monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
+        lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})

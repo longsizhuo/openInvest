@@ -60,5 +60,5 @@ docs/outperform_events.jsonl
 experiments/oracle_redesign/cache/
 experiments/dspy_trainset_v5.jsonl
 
-# Private provenance approvals, exclusions and quarantine
+# Private provenance approvals, exclusions, recovery evidence and quarantine
 /integrity/

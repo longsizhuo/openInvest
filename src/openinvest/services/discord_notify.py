@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
 
 import requests
 
@@ -26,25 +27,60 @@ log = logging.getLogger(__name__)
 _MAX_LEN = 1900
 
 
+def lookup_discord_alert_receipt(notification_id: str, text: str) -> dict:
+    """Read-only recovery; missing or ambiguous receipt never authorizes resend."""
+    url=os.getenv("CHATBOT_ALERT_URL","");key=os.getenv("CHATBOT_INTERNAL_KEY","")
+    if not url or not key or not notification_id:
+        return {"accepted":False,"status":"unknown","reason":"receipt_lookup_unavailable"}
+    try:
+        response=requests.get(url.rstrip("/")+"/"+notification_id,headers={"X-Internal-Key":key},timeout=5)
+        body=response.json()
+        if (response.status_code==200 and isinstance(body,dict) and body.get("ok") is True
+                and body.get("delivery_status")=="accepted" and body.get("notification_id")==notification_id
+                and body.get("text_sha256")==hashlib.sha256(text[:_MAX_LEN].strip().encode()).hexdigest()
+                and str(body.get("message_id") or "").isdecimal()):
+            return {"accepted":True,"status":"accepted","target":str(body["message_id"]),
+                    "accepted_at":body.get("accepted_at"),"recipient_read_receipt":"unknown"}
+    except Exception:
+        pass
+    return {"accepted":False,"status":"unknown","reason":"receipt_not_confirmed"}
+
+
 def send_discord_alert(text: str) -> bool:
-    """把报警文本推给 ChatBot 转发到 Discord DM；成功返回 True。"""
+    """兼容布尔接口：只有提供 Discord 消息编号的回执才算通道接受。"""
+    return send_discord_alert_receipt(text)["accepted"]
+
+
+def send_discord_alert_receipt(text: str, *, notification_id: str | None = None) -> dict:
     url = os.getenv("CHATBOT_ALERT_URL", "")
     key = os.getenv("CHATBOT_INTERNAL_KEY", "")
     if not url or not key or not text:
-        return False
+        return {"accepted":False,"status":"unavailable","reason":"not_configured"}
+    payload={"type":"invest_event","text":text[:_MAX_LEN]}
+    if notification_id:
+        payload["notification_id"]=notification_id
     try:
-        resp = requests.post(
-            url,
-            json={"type": "invest_event", "text": text[:_MAX_LEN]},
-            headers={"X-Internal-Key": key},
-            timeout=5,
-        )
-        if resp.status_code != 200:
-            log.warning(
-                "discord alert failed: HTTP %s %s", resp.status_code, resp.text[:120]
-            )
-            return False
-        return True
-    except Exception as e:  # noqa: BLE001 —— best-effort 通道，任何异常都不上抛
-        log.warning("discord alert failed: %s: %s", type(e).__name__, e)
-        return False
+        response=requests.post(url,json=payload,headers={"X-Internal-Key":key},timeout=5)
+        try:
+            body=response.json()
+        except ValueError:
+            body={}
+        if not isinstance(body,dict):
+            body={}
+        if body.get("delivery_status")=="not_configured" or body.get("msg")=="dm user not configured":
+            return {"accepted":False,"status":"unavailable","reason":"recipient_not_configured"}
+        message_id=str(body.get("message_id") or "")
+        if (response.status_code==200 and body.get("ok") is True and body.get("delivery_status")=="accepted"
+                and message_id.isdecimal() and (not notification_id or body.get("notification_id")==notification_id)):
+            return {"accepted":True,"status":"accepted","target":message_id,"recipient_read_receipt":"unknown"}
+        state="failed" if body.get("delivery_status")=="failed" else "unknown"
+        return {"accepted":False,"status":state,"reason":"provider_acceptance_not_confirmed"}
+    except requests.ConnectTimeout:
+        return {"accepted":False,"status":"failed","reason":"relay_connect_timeout_before_send"}
+    except requests.Timeout:
+        return lookup_discord_alert_receipt(notification_id,text) if notification_id else {"accepted":False,"status":"unknown","reason":"relay_timeout"}
+    except requests.ConnectionError:
+        return lookup_discord_alert_receipt(notification_id,text) if notification_id else {"accepted":False,"status":"unknown","reason":"relay_connection_interrupted"}
+    except Exception as error:
+        log.warning("discord alert failed: %s",type(error).__name__)
+        return {"accepted":False,"status":"unknown","reason":type(error).__name__}

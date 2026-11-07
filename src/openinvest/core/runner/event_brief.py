@@ -6,6 +6,7 @@ from openinvest.core.runner.event_format import format_event_brief  # noqa: F401
 
 import logging
 import os
+from openinvest.core.evidence_eligibility import EvidenceIntegrityError
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +33,8 @@ def _get_event_store():
             from openinvest.db.event_store import EventStore
             from openinvest.services.embeddings import DEFAULT_DIM
             _EVENT_STORE_SINGLETON = EventStore(embedding_dim=DEFAULT_DIM)
+        except EvidenceIntegrityError:
+            raise
         except Exception as e:  # noqa: BLE001
             log.warning(f"_get_event_store init 失败: {type(e).__name__}: {e}")
             return None
@@ -63,7 +66,7 @@ def _recall_events(symbol: str, *, as_of: Optional[datetime] = None) -> List[Dic
         q_embed = embed_query(symbol) if store.vec_loaded else None
         # issue #26: 召回时把用户标的扩展为代理集合（NDQ.AX 也命中 ^NDX 指数事件）
         from openinvest.services.symbol_map import proxy_symbols_for
-        return store.recall(
+        events = store.recall(
             symbol,
             time_window_days=cfg.event.rag_window_days,
             min_severity=cfg.event.rag_min_severity,
@@ -72,6 +75,24 @@ def _recall_events(symbol: str, *, as_of: Optional[datetime] = None) -> List[Dic
             aliases=sorted(proxy_symbols_for(symbol)),
             as_of=as_of,
         )
+        if as_of is None:
+            from openinvest.services.agent_queue import pending_committee_items
+            pending = pending_committee_items(memory_root=store.data_root / "memory")
+            requested=[]
+            for group in pending:
+                if group["symbol"] != symbol:
+                    continue
+                for eid in group["event_ids"]:
+                    event=store.get_event(eid)
+                    if event:
+                        event["sources"]=store.get_sources(eid)
+                        event["_trigger_required"]=True
+                        requested.append(event)
+            seen=set()
+            events=[event for event in requested+events if not (event["event_id"] in seen or seen.add(event["event_id"]))]
+        return events
+    except EvidenceIntegrityError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning(f"event RAG recall 失败 {symbol}: {type(e).__name__}: {e}")
         return []
@@ -102,6 +123,8 @@ def _resolve_event_brief(
         return override
     try:
         return format_event_brief(_recall_events(symbol, as_of=as_of))
+    except EvidenceIntegrityError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning(f"event brief 格式化失败 {symbol}: {type(e).__name__}: {e}")
         return ""
@@ -146,10 +169,14 @@ def resolve_event_brief_multi(
                         continue
                     seen_ids.add(eid)
                 events.append(e)
+        except EvidenceIntegrityError:
+            raise
         except Exception as e:  # noqa: BLE001
             log.warning(f"resolve_event_brief_multi: {sym} 召回失败（已跳过）: {type(e).__name__}: {e}")
     try:
         return format_event_brief(events)
+    except EvidenceIntegrityError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning(f"resolve_event_brief_multi: 格式化失败（退化为空）: {type(e).__name__}: {e}")
         return ""

@@ -1,6 +1,6 @@
 ---
 name: invest
-version: 0.34.1 # x-release-please-version
+version: 0.34.2 # x-release-please-version
 description: openInvest multi-asset AI investment committee — **daily use**. Read portfolio / live prices / strategy / decision history / adjust positions / run a 4-role LLM committee for an investment verdict. Supports any yfinance symbol (A-share `.SS`/`.SZ` / HK / US / ETF / crypto / commodities), China off-exchange funds (`FUND:<code>`) and any currency. **Two paths** — (1) Coordinator, Claude Code spawns 4 subagents, saves DeepSeek tokens; (2) Direct, any agent (Codex / Hermes / OpenClaw / Cursor / Cline / plain script) runs `run.sh run_committee <SYM>` for a one-shot verdict. **Trigger scenarios** — "show portfolio / 看看我的持仓", "how is my P&L / 我现在涨了多少", "should I buy/sell X / 该不该买卖X", "analyze X / 分析一下X", "run committee on X / 跑委员会", "track AAPL / 跟踪苹果", "add/trim a position, log a trade / 加仓减仓记一笔". **First-time install uses a separate skill `invest-setup`** (switch to it when `doctor` returns `needs_setup`). Backend — longsizhuo/openInvest.
 platforms: [linux, macos]
 metadata:
@@ -24,61 +24,22 @@ Reply in the language the user is currently speaking unless they explicitly ask 
 
 ## Choosing a path
 
-**The first question is not "which brand of agent are you" — it is "is a human present for this invocation"**:
+Choose a path by available capabilities and the configured reasoning mode. Both
+paths must use the backend's prepared prompts, input context, model identity and
+sealed submission contract. A scheduled host may use Coordinator only when it
+can actually delegate isolated roles and complete that contract; otherwise use
+Direct with a configured provider. Missing capability, credentials or a failed
+worker is an incomplete analysis, never permission to fabricate HOLD.
 
-```
-Is a user asking in chat right now ("should I buy X / 该不该买 X") where you can
-react in real time (wrong tool picked, blocked by a safety gate — the user sees it
-on the spot and corrects it on the spot)?
-  → Check whether you have an isolated sub-task delegation capability (Agent({...}) / delegate_task)
-    Yes → Coordinator (table below)
-    No  → Direct
+| Path | Requirements | Invocation |
+|------|--------------|------------|
+| Coordinator | Real isolated workers; complete prepared context; recorded provider/model | Follow `references/committee-protocol.md` (Hermes: `references/committee-protocol-hermes.md`) |
+| Direct | Configured backend model API | `run.sh run_committee <SYMBOL>` |
 
-Is this a cron / scheduled run with nobody watching?
-  → Always go Direct, no matter which agent you are or whether you can delegate
-```
-
-**Why unattended runs always go Direct, even with delegation capability**: the
-Coordinator protocol depends on you improvising "which tool to call and how to
-assemble the prompt". That is fine normally, but on 2026-07-14 a real Hermes cron
-ran Coordinator unattended — it did not faithfully call the delegation tool per
-the protocol, picked its own route instead, then hit the "unattended cron cannot
-approve dangerous commands" safety gate and stalled. Direct is pure deterministic
-Python code and never improvises. Saving the small hassle of configuring a key is
-not worth a probabilistic hang / derailment in unattended scenarios — a bad trade.
-
-| Scenario | Who you are | Path | What to run | Credentials |
-|------|--------|----------|--------|------|
-| Interactive (user present) | Claude Code (has the `Agent({...})` tool) | **Coordinator** | `prepare_committee` → spawn 4 subagents → `save_committee` | No key needed |
-| Interactive (user present) | Hermes (has the `delegate_task` tool) | **Coordinator** ([Hermes variant](references/committee-protocol-hermes.md)) | Same as above; spawn syntax becomes `delegate_task(tasks=[...])` | No key needed |
-| Interactive, no delegation capability | Codex / OpenClaw / Cursor / Cline / plain script | **Direct** | `run_committee <SYMBOL>` one-shot | Needs `LLM_API_KEY` |
-| **cron / unattended**, any agent | Anyone, with or without delegation capability | **Direct** | `run_committee` / `daily_report` | Needs `LLM_API_KEY` |
-
-All three paths share the **same foundation** — the same prompts, the same data
-preparation (regime classification + probability framing + deterministic fact
-block), and the same on-disk format
-(`memory/.committee/<date>/<asset>.md`; both Coordinator variants must call `save_committee`
-with `--provider <your-brand>` so the transcript is not mislabeled as claude, and
-`--model <the model that plays the 4 roles>`, e.g. `claude-haiku-5-5` — omitted is recorded as
-`unknown`, and the scorecard buckets verdicts per `<provider>:<model>`, so a model swap never
-mixes old and new track records). The only
-difference is "who plays the 4 LLM roles": on Coordinator you play them yourself
-(the model the user already subscribes to); on Direct the configured LLM (billed
-per token) plays them. Verdicts may differ (different models — useful for
-cross-validation).
-
-**`LLM_API_KEY` is not DeepSeek-only, and the cost is near zero**: `utils/llm.py` works with any
-OpenAI-compatible endpoint (three envs: `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`; `DEEPSEEK_*`
-remains supported for compatibility). Want zero cost → providers with free tiers right now
-(Qwen / Zhipu / MiMo etc.) all work (free-tier terms change — verify before use); don't want
-the hassle → just use DeepSeek: at daily-report volume (a few assets/day) roughly
-¥0.01-0.03 per run, under ¥2 a month. Do not bet the reliability of unattended
-runs on Coordinator just to save that much.
-
-**No sub-task delegation capability and no key configured**: do not force your way through
-Coordinator, do not fabricate a verdict, and do not write code to brute-force around it —
-just call `run_committee` (you will get a clear error) and honestly tell the user
-"LLM_API_KEY needs to be configured".
+The caller chooses the model provider; preserve that identity and its actual usage
+receipts. Model agreement is not independent evidence or a calibrated probability.
+For historical studies use the user's explicitly selected API provider and the
+study's sealed inputs; never substitute this host agent for paid model responses.
 
 ## Decision tree (identical up front, whichever path you take)
 
@@ -143,7 +104,8 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
                                                         --alert-price-below 900 | --alert-day-drop-pct 3
                                                         (MCP track_asset alert_* args) — then tell
                                                         the user alerts are only SENT when the server
-                                                        has INVEST_EVENT_ALERT=1 (see Constraints)
+                                                        has risk-alert delivery enabled and the channel
+                                                        returns an acceptance receipt (see Constraints)
    "I already held 3000 X before using this /
     补录我原来就有的持仓"                              → run.sh status first — never re-add a
                                                         symbol it lists (double count); else
@@ -168,25 +130,13 @@ just call `run_committee` (you will get a clear error) and honestly tell the use
 
 ## Coordinator path details (Claude Code only)
 
-Read `references/committee-protocol.md` and follow it strictly. Full 6 stages:
-
-- Stage 0: same-day check (if `memory/.committee/<today>/<asset>.md` exists, reuse it directly)
-- Stage 1: `prepare_committee` to get the brief
-- Stage 2: Round 1 — 3 `Agent({...})` in parallel (Macro + Quant + Risk)
-- Stage 3: Round 2 — Cross-challenge (2 Agents)
-- Stage 4 (optional): run Round 3+ if not converged
-- Stage 5: CIO synthesis (**you** write it yourself, do not delegate)
-- Stage 6: `save_committee` to persist
-
-**Critical warning**: the `regime_brief` / `sentiment_brief` /
-`valuation_brief` / `reentry_reference` / `event_brief` emitted by `prepare_committee` **must** be pasted
-verbatim into the corresponding workers' prompts per the instructions: `event_brief` (news/event
-layer, may be empty) goes into Macro; regime + valuation +
-sentiment go into Quant; all three blocks + the path reference go into the CIO. Consequences
-of omission: Quant loses the probability framing and the defensive-sentinel background; the
-CIO's EXPECTED_PATH is made up out of thin air; INDEP_DEFENSE_FLAG
-never reaches the transcript → `save_committee`'s deterministic defense downgrade
-(crash sentinel) breaks entirely.
+Read `references/committee-protocol.md` and follow the backend's prepared
+`prompts` verbatim. This entrypoint does not carry a second copy of role rules.
+Always call `prepare_committee` to obtain the current context and pending causes.
+Only the backend's validated current cache may be reused. A same-day Markdown
+transcript, a previous HOLD or a report timestamp is never sufficient proof of
+freshness or request completion. Record provider/model and submit against the
+exact context identifier. If input validation fails, report that state explicitly.
 
 If `valuation_brief` contains an `EQUIBLES_FUNDAMENTALS` block (A-share / HK stock with
 `EQUIBLES_API_KEY` set), keep its `Data: Equibles - https://equibles.com` line, and name
@@ -313,6 +263,8 @@ Per-asset alert lines: `track_asset` takes `alert_price_above` / `alert_price_be
 `alert_day_rise_pct` / `alert_drawdown_from_cost_pct`; `set_allocations` takes an `alerts` map
 (`{symbol: {rule: value}}`, a null value clears that rule, a null symbol clears all its rules). `status`
 shows each line and its distance on `all_holdings[].alerts` (e.g. "距 price_below 还有 3.2%").
+
+  `source_snapshot` reads one exact captured original input and its acquisition proof.
 
 **CLI/REST agents**, or long-tail operations MCP does not cover (trades intent flow /
 config whitelist / events / holdings import / gold-specific endpoints) → read
@@ -454,21 +406,15 @@ a signal worth recording.
   "无 X 行情数据（六位代码请写全…）", retry with the candidates it lists instead of giving up.
 - **Never write `memory/` directly.** All state changes go through CLI subcommands / MCP tools (atomic write +
   fcntl lock + audit trail). Direct editing causes schema drift + concurrent-write corruption.
-- **Do not rerun the committee for the same asset on the same day** — `run_committee` reads the cache by default;
-  on the Coordinator path, check with `ls memory/.committee/<today>/<SYM>.md` first.
-- **Do not fabricate CIO confidence.** When workers disagree sharply, honestly write `confidence: 0.4-0.5`.
-- **Next to a verdict, quote `confidence_lookup`, not `confidence`.** `run_committee` (CLI + MCP),
-  `explain_decision`, `/api/committee_sessions` and `/api/committee/{task_id}` return it: how similar
-  verdicts turned out 30 days later (deterministic table refreshed by the daily `verdict_review` job
-  from live verdicts plus the prospective paper fleet; when this install has n<30 for that verdict
-  it falls back to a fleet-only default table shipped with the package). The text ends with its
-  source — 含纸面舰队样本 / 默认表 / 本机样本 — keep it when you quote the number: paper-fleet runs use
-  a neutral portfolio and no event/valuation/sentiment inputs. For HOLD it is the share whose 30-day
-  move stayed inside the normal volatility band, shown next to the market's own sideways base rate —
-  that measures how sideways the market was, **not** accuracy, so never call it a hit rate. n<30 reads "样本不足（n=…）";
-  rule-forced HOLDs / self-reported ≤0.4 read "输入缺失/强制 HOLD". `confidence` is the CIO's
-  self-reported number, kept for the record only (historically no better than a constant); if you
-  mention it, label it self-reported (自报).
+- Always obtain the backend's current context. Backend cache qualification checks source,
+  model, policy and pending requests; an existing same-day Markdown file is insufficient.
+- Do not assign a fixed confidence because workers disagree. Keep the model's actual output
+  for audit; self-reported confidence is not a measured win probability.
+- Quote `confidence_lookup` only when the backend returns a currently qualified table.
+  Preserve its source and sample limitations. Missing or insufficient evidence means
+  “样本不足”; do not substitute bundled fleet defaults or a fixed confidence. A HOLD
+  sideways-outcome share measures market movement, not trading accuracy. Constrained,
+  untrusted and incomplete analysis must be named separately from a market HOLD.
 - **Do not leak the user's email or other personally identifying information** — never hard-code it in output.
 
 ## Where to look when something breaks

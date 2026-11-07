@@ -23,7 +23,15 @@ log = logging.getLogger(__name__)
 DEFAULT_DIM = 1024
 
 
-def embed_text(text: str, *, dim: int = DEFAULT_DIM) -> List[float]:
+class EmbeddingVector(list):
+    """A vector carries its coordinate-space identity; equal dimension is insufficient."""
+    def __init__(self, values, *, space_id: str, text: str):
+        super().__init__(values)
+        self.space_id = space_id
+        self.content_sha256 = hashlib.sha256(text.encode()).hexdigest()
+
+
+def embed_text(text: str, *, dim: int = DEFAULT_DIM) -> Optional[List[float]]:
     """根据 env 选 provider。失败一律退回 hash embedding。"""
     provider = os.getenv("INVEST_EMBEDDING_PROVIDER", "hash").lower()
     text = (text or "").strip()
@@ -34,8 +42,9 @@ def embed_text(text: str, *, dim: int = DEFAULT_DIM) -> List[float]:
         v = _openai_embed(text, dim=dim)
         if v is not None:
             return v
-        log.warning("openai embedding 失败，退回 hash provider")
-    return _hash_embed(text, dim=dim)
+        log.warning("semantic embedding unavailable; leave this event unranked")
+        return None
+    return EmbeddingVector(_hash_embed(text, dim=dim), space_id=f"hash:v1:{dim}", text=text)
 
 
 def embed_query(text: str, *, dim: int = DEFAULT_DIM) -> Optional[List[float]]:
@@ -89,19 +98,27 @@ def _openai_embed(text: str, *, dim: int) -> Optional[List[float]]:
         return None
     try:
         from openai import OpenAI
-        client = _get_openai_client(api_key)
+        endpoint_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        client = _get_openai_client(api_key, endpoint_url)
+        model = os.getenv("INVEST_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
         resp = client.embeddings.create(
-            model=os.getenv("INVEST_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+            model=model,
             input=text,
             dimensions=dim,
         )
-        return list(resp.data[0].embedding)
+        values = list(resp.data[0].embedding)
+        if len(values) != dim or not all(math.isfinite(v) for v in values):
+            return None
+        if getattr(resp, "model", model) != model:
+            return None
+        endpoint = hashlib.sha256(str(client.base_url).rstrip("/").encode()).hexdigest()
+        return EmbeddingVector(values, space_id=f"openai:{endpoint}:{model}:{dim}", text=text)
     except Exception as e:
         log.warning(f"openai embed 调用失败: {type(e).__name__}: {e}")
         return None
 
 
 @lru_cache(maxsize=1)
-def _get_openai_client(api_key: str):
+def _get_openai_client(api_key: str, endpoint_url: str):
     from openai import OpenAI
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key, base_url=endpoint_url)

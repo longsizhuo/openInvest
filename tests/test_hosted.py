@@ -563,6 +563,61 @@ def test_research_completeness_versions_retries_and_atomic_export(environment, t
     assert latest["client"] == {"client_name":"Test Client", "client_version":"1.2"}
 
 
+def test_draft_research_is_audit_only_while_final_failed_judgment_remains_a_valid_negative(environment,tmp_path):
+    env=environment;account,_=env.accounts[0]
+    transcript="\n".join(f"=== {role} ===\nSynthetic evidence" for role in
+        ("MACRO","QUANT_R1","RISK_R1","QUANT_R2","RISK_R2","CIO"))
+    args={"transcript":transcript,"analysis_id":"a"*32}
+    env.research.capture(account,"submit_committee",args,{"status":"verification_required","current_advice_valid":False},1)
+    with env.research.db() as db:draft=db.execute("SELECT * FROM samples").fetchone()
+    body=env.research.unseal(draft["payload"])
+    assert body["sample_type"]=="proposal_draft" and body["analysis_completeness"]=="awaiting_verification"
+    with pytest.raises(ValueError,match="audit-only"):
+        env.research.review(draft["id"],"accepted",source_validity="valid",allowed_uses=["agent_training"])
+    # An old captured draft may already carry a valid review and a wrong type.
+    body.update(sample_type="decision",analysis_completeness="complete")
+    old_review=env.research.seal({"qualification":{"source_validity":"valid","judgment_outcome":"unassessed",
+        "allowed_uses":["agent_training"],"consent_epoch":draft["epoch"]}})
+    with env.research.db() as db:
+        db.execute("UPDATE samples SET payload=?,label='accepted' WHERE id=?",(env.research.seal(body),draft["id"]))
+        db.execute("INSERT INTO reviews VALUES(?,?)",(draft["id"],old_review))
+    assert env.research.export(tmp_path/"no-drafts.jsonl")["samples"]==[]
+    final={"verdict":{"verdict":"HOLD","decision_status":"REVIEW_REQUIRED",
+             "reasoning_review":{"status":"failed"}},"current_advice_valid":False}
+    env.research.capture(account,"submit_committee",args,final,1)
+    with env.research.db() as db:row=db.execute("SELECT * FROM samples WHERE id!=?",(draft["id"],)).fetchone()
+    env.research.review(row["id"],"failure_example",source_validity="valid",judgment_outcome="wrong",allowed_uses=["agent_training"])
+    target=tmp_path/"valid-negative.jsonl";manifest=env.research.export(target)
+    assert manifest["samples"]==[row["id"]]
+    exported=json.loads(target.read_text())
+    assert exported["result"]["verdict"]["reasoning_review"]["status"]=="failed"
+    assert exported["result"]["verdict"]["decision_status"]=="REVIEW_REQUIRED"
+    assert exported["result"]["current_advice_valid"] is False
+    env.research.mark_used(manifest["dataset_version"])
+
+
+def test_preexisting_correctly_hashed_dataset_cannot_train_on_an_unfinalized_draft(environment,tmp_path):
+    import hashlib
+    env=environment;account,_=env.accounts[0]
+    env.research.capture(account,"submit_committee",{}, {"status":"verification_required"},1)
+    with env.research.db() as db:row=db.execute("SELECT * FROM samples").fetchone()
+    review=env.research.seal({"qualification":{"source_validity":"valid","allowed_uses":["agent_training"],"consent_epoch":row["epoch"]}})
+    output=tmp_path/"old-draft-export.jsonl"
+    old=env.research.unseal(row["payload"]);old["sample_type"]="decision"
+    output.write_text(json.dumps(old)+"\n")
+    ids=[row["id"]];dataset="b"*32
+    output.with_suffix(".jsonl.manifest.json").write_text(json.dumps({"samples":ids,
+        "sha256":hashlib.sha256(output.read_bytes()).hexdigest(),
+        "review_digests":{row["id"]:hashlib.sha256(review).hexdigest()}}))
+    with env.research.db() as db:
+        db.execute("UPDATE samples SET label='accepted' WHERE id=?",(row["id"],))
+        db.execute("INSERT INTO reviews VALUES(?,?)",(row["id"],review))
+        db.execute("INSERT INTO datasets VALUES(?,?,0,?)",(dataset,json.dumps(ids),str(output)))
+    with pytest.raises(ValueError,match="unfinalized proposal"):
+        env.research.mark_used(dataset)
+    with env.research.db() as db:assert db.execute("SELECT used FROM samples WHERE id=?",(row["id"],)).fetchone()[0]==0
+
+
 def test_ledger_reset_requires_setup_and_connection_revoke(environment):
     env = environment
     account, token = env.accounts[0]
