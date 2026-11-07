@@ -68,6 +68,17 @@ def test_missing_checks_cannot_default_to_pass():
     assert parse_review(json.dumps(value),req)["status"]=="invalid_response"
 
 
+def test_verifier_receives_the_same_config_policy_without_claiming_user_intent():
+    from openinvest.core.committee.reasoning_quality import proposal_sources
+    from openinvest.core.config import set_config_override
+    set_config_override({"verdict":{"concentration_lens_enabled":False}})
+    sources=proposal_sources({"single_invest_cap":1000},{})
+    text=sources["constraints"]["text"]
+    assert '"concentration_lens_enabled": false' in text
+    assert '"authority": "effective_configuration_not_verified_user_intent"' in text
+    assert '"scope": "tactical_reentry_only_not_risk_or_needs_exits"' in text
+
+
 def test_review_cache_key_changes_with_prompt_or_effective_model_config(monkeypatch):
     import openinvest.core.committee.reasoning_quality as quality
     first=request()["request_sha256"]
