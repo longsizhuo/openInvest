@@ -173,3 +173,7 @@ The opt-in Docker test creates ten random synthetic accounts, tests eviction, is
 Before changing `HOSTED_REGISTRATION_OPEN=1`, record evidence for **both social providers**, repeated login, real ChatGPT web OAuth+read+write, at least one terminal client, a 130-second stream behind the actual public proxy alongside another user's query, ten-account/two-worker **24-hour soak with no OOM**, remote archive outage/recovery and a daily backup/user restore. Unit mocks and a short local run do not satisfy these gates. Publish updated web/privacy documents first. Do not import the author's ledger or pre-rule history. Keep paid inference disabled.
 
 Cloud purchase remains pending coupon arrival and verification of annual-payment applicability and actual price. A $100 coupon package is not assumed to be $100 cash balance.
+
+## Multiple login methods
+
+Use the browser account settings to bind Google and GitHub to one application account. No Auth0 Management API token is needed. Existing accounts are backfilled without changing their UUIDs or ledgers. See [migration, confirmation and recovery](ACCOUNT_IDENTITIES.md) before rollout.

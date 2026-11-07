@@ -76,6 +76,9 @@ def restore_database(settings, archive, name, stamp):
                     db.execute("UPDATE oauth_connections SET revoked=1")
                     # A historical backup cannot prove the latest opt-out state.
                     db.execute("UPDATE accounts SET research=0,epoch=epoch+1,accepted=NULL")
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='identities'").fetchone():
+                        db.execute("UPDATE identities SET tokens_after=?", (time.time(),))
+                        db.execute("DELETE FROM identity_flows")
                 elif name == "research":
                     # Untrained candidates may have been deleted after the backup;
                     # never resurrect them from a stale control-plane snapshot.

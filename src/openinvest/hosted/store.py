@@ -9,13 +9,14 @@ import time
 import uuid
 import os
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from .identities import IdentityStore, provider_for
 
 
 class Conflict(ValueError):
     pass
 
 
-class Store:
+class Store(IdentityStore):
     def __init__(self, root: Path, encryption_key: bytes):
         self.root = root
         self.cipher = AESGCM(encryption_key)
@@ -42,6 +43,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS tickets (digest TEXT PRIMARY KEY, created REAL NOT NULL);
             """)
         self.path.chmod(0o600)
+        self.migrate_identities()
         business = root / "business"
         business.mkdir(mode=0o700, exist_ok=True)
         self.receipts_path = business / "receipts.sqlite3"
@@ -74,7 +76,7 @@ class Store:
 
     def account(self, owner):
         with self.db() as db:
-            row = db.execute("SELECT * FROM accounts WHERE id=? AND deleted=0", (owner,)).fetchone()
+            row = db.execute("SELECT * FROM accounts WHERE id=? AND deleted=0 AND merged_into IS NULL", (owner,)).fetchone()
         return dict(row) if row else None
 
     def ticket_once(self, ticket):
@@ -87,12 +89,15 @@ class Store:
 
     def identity(self, subject):
         with self.db() as db:
-            db.execute("INSERT OR IGNORE INTO accounts(id,subject,participant) VALUES(?,?,?)",
-                       (uuid.uuid4().hex, subject, uuid.uuid4().hex))
-            row = db.execute("SELECT * FROM accounts WHERE subject=?", (subject,)).fetchone()
-        if row["deleted"]:
-            raise Conflict("Account was deleted")
-        return dict(row)
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT a.* FROM identities i JOIN accounts a ON a.id=i.owner WHERE i.subject=? AND a.deleted=0 AND a.merged_into IS NULL", (subject,)).fetchone()
+            if not row:
+                owner = uuid.uuid4().hex
+                db.execute("INSERT INTO accounts(id,subject,participant) VALUES(?,?,?)", (owner, subject, uuid.uuid4().hex))
+                cutoff = db.execute("SELECT tokens_after FROM identity_revocations WHERE subject=?", (subject,)).fetchone()
+                db.execute("INSERT INTO identities VALUES(?,?,?,?,?,?)", (uuid.uuid4().hex, subject, owner, provider_for(subject), time.time(), cutoff[0] if cutoff else 0))
+                row = db.execute("SELECT * FROM accounts WHERE id=?", (owner,)).fetchone()
+            return dict(row)
 
     def preferences(self, owner, enabled, policy=None):
         with self.db() as db:
@@ -109,20 +114,23 @@ class Store:
     def digest(value):
         return hashlib.sha256(value.encode()).hexdigest()
 
-    def credential(self, owner, kind="pat", label="Terminal", ttl=None):
+    def credential(self, owner, kind="pat", label="Terminal", ttl=None, subject=None, authenticated_at=0):
         token = ("oi_" if kind == "pat" else "ws_") + secrets.token_urlsafe(32)
         item = dict(id=uuid.uuid4().hex, owner=owner, digest=self.digest(token), kind=kind,
                     label=label, created=time.time(), expires=time.time()+ttl if ttl else None,
-                    csrf=secrets.token_urlsafe(24) if kind == "session" else None)
+                    csrf=secrets.token_urlsafe(24) if kind == "session" else None,
+                    session_subject=(subject or self.account(owner)["subject"]) if kind == "session" else None,
+                    authenticated_at=authenticated_at)
         with self.db() as db:
-            db.execute("INSERT INTO credentials(id,owner,digest,kind,label,created,expires,csrf) VALUES(:id,:owner,:digest,:kind,:label,:created,:expires,:csrf)", item)
+            db.execute("INSERT INTO credentials(id,owner,digest,kind,label,created,expires,csrf,session_subject,authenticated_at) VALUES(:id,:owner,:digest,:kind,:label,:created,:expires,:csrf,:session_subject,:authenticated_at)", item)
         return token, item
 
     def authenticate(self, token, kind):
         with self.db() as db:
             row = db.execute("SELECT * FROM credentials WHERE digest=? AND kind=? AND revoked=0 AND (expires IS NULL OR expires>?)",
                              (self.digest(token), kind, time.time())).fetchone()
-        if row and self.account(row["owner"]):
+        binding = self.identity_binding(row["session_subject"]) if row and kind == "session" else None
+        if row and self.account(row["owner"]) and (kind != "session" or binding and binding["owner"] == row["owner"]):
             return dict(row)
         return None
 
@@ -185,11 +193,19 @@ class Store:
 
     def delete(self, owner):
         with self.db() as db:
-            db.execute("UPDATE accounts SET deleted=1,research=0,epoch=epoch+1,subject=NULL WHERE id=?", (owner,))
-            db.execute("UPDATE credentials SET revoked=1 WHERE owner=?", (owner,))
-            db.execute("DELETE FROM clients WHERE owner=?", (owner,))
+            db.execute("BEGIN IMMEDIATE")
+            owners = [r[0] for r in db.execute("SELECT id FROM accounts WHERE id=? OR merged_into=?", (owner, owner))]
+            for item in owners:
+                for row in db.execute("SELECT subject FROM identities WHERE owner=?", (item,)).fetchall():
+                    db.execute("INSERT OR REPLACE INTO identity_revocations VALUES(?,?)", (row[0], time.time()))
+                db.execute("DELETE FROM identities WHERE owner=?", (item,))
+                db.execute("UPDATE accounts SET deleted=1,research=0,epoch=epoch+1,subject=NULL WHERE id=?", (item,))
+                db.execute("UPDATE credentials SET revoked=1 WHERE owner=?", (item,))
+                db.execute("DELETE FROM clients WHERE owner=?", (item,))
+                db.execute("DELETE FROM identity_flows WHERE owner=?", (item,))
         with self.receipts_db() as db:
-            db.execute("DELETE FROM operations WHERE owner=?", (owner,))
+            for item in owners:
+                db.execute("DELETE FROM operations WHERE owner=?", (item,))
 
 
     def client_info(self, owner, credential, data=None):
