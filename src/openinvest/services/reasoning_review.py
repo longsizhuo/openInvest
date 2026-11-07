@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime,timezone
 import json
+import re
 from pathlib import Path
 
 from openinvest.core.memory_store import _atomic_write_text,_file_lock
@@ -17,6 +18,7 @@ def _save(path,payload):
 
 def preserve_submission(memory_root,context_id,symbol,transcript,provider,model):
     """Preserve the exact caller bytes before issuing an external review."""
+    if not isinstance(context_id,str) or not re.fullmatch(r"[a-f0-9]{32}",context_id):raise ValueError("invalid_context_id")
     path=Path(memory_root)/".evidence/submissions"/(context_id+".json")
     content={"context_id":context_id,"symbol":symbol,"transcript":transcript,"provider":provider,"model":model}
     with _file_lock(path):
@@ -29,7 +31,6 @@ def preserve_submission(memory_root,context_id,symbol,transcript,provider,model)
 
 def submitted_review(memory_root,context_id):
     """Read one ledger's bound draft without acknowledgement or inference."""
-    import re
     if not re.fullmatch(r"[a-f0-9]{32}",context_id or ""):raise ValueError("invalid_context_id")
     root=Path(memory_root)
     path=root/".evidence/submissions"/(context_id+".json")

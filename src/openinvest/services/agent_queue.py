@@ -339,6 +339,8 @@ def bind_context_requests(memory_root,symbol,event_brief,prepared_at):
 
 
 def acknowledge_context_decision(memory_root,context_id,decision_id):
+    import re
+    if not isinstance(context_id,str) or not re.fullmatch(r"[a-f0-9]{32}",context_id):raise ValueError("invalid_context_id")
     from openinvest.core.decision_evidence import current_decision
     from openinvest.core.evidence_eligibility import digest
     root=Path(memory_root)
