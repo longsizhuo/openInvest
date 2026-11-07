@@ -235,7 +235,8 @@ record_execution / ingest_event / buy / record_existing_position / sell / deposi
 record_dividend / record_fee / record_split / record_return_of_capital /
 place_fund_order / confirm_fund_order / cancel_fund_order /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /
-run_committee / prepare_committee / submit_committee / pending_news / pending_committees / daily_report / quality_status — schemas auto-discovered; call them directly, no table lookup needed.
+run_committee / prepare_committee / submit_committee / collect_news / event_history / pending_news / pending_committees / daily_report / quality_status — schemas auto-discovered; call them directly, no table lookup needed.
+Use current explicit user instructions and this request's versioned backend facts for financial constraints. Historical memory is not current cash, positions or a new trading restriction; a long-term preference is not a blanket ban on risk reduction. A verifier must judge only the issued bound packet, without importing unverified memory or conclusions from the proposing agent.
 **Agent-run committee over MCP (no backend LLM key):** `prepare_committee` returns the data blocks, the 6 role
 prompts and `instructions`; play Macro / Quant / Risk (cheap subagents are fine), write the CIO memo yourself,
 Pass your actual `provider` and `model` to `prepare_committee`, then call
@@ -246,12 +247,11 @@ All six role sections are required. A changed portfolio, configuration, or evide
 An identical retry returns the original decision without consuming another recommendation quota.
 `DATA_UNTRUSTED` is an input failure, not a market HOLD. Never silence `QUALITY_ALERT`, missing inputs,
 or an expired/triggered review plan merely because every allocation is HOLD. `quality_status` checks these independently.
-**Keyless backend (agent mode):** the backend queues work it would otherwise send to a model. `pending_news` lists
-fetched news — `ingest_event` the relevant items with `one_line_claim` / `stance` / `severity` / `affected_symbols`,
-pass the rest as `dismiss_urls`. `pending_committees` lists triggered re-runs — prepare, run, submit each.
+**Keyless backend (agent mode):** `collect_news` captures fixed providers with an explicit initial source window or resumes durable coverage; it makes no model calls. `event_history` reads qualified current events and is not a coverage cursor or a veto on corrected reports. `pending_news` lists
+fetched news — `ingest_event` the relevant items with `one_line_claim` / `stance` / `severity` / `affected_symbols` and their exact `source_snapshot_id`.
+Dismiss only individually checked snapshot versions with `dismiss_source_ids`; do not dismiss a URL or topic as permanently handled. Unprocessed expired items remain audit/recovery work, never evidence of a quiet market. `pending_committees` lists triggered re-runs — prepare, run, submit each.
 The plugin hooks inject a one-paragraph `[openInvest]` digest (`run.sh brief --text`) at session start; when it says
-items are waiting and the conversation is about investing, clear them before or after answering (news expires
-after 48 h, committee requests after 24 h) unless a cron job (`openinvest-sentinel`) already does it.
+items are waiting and the conversation is about investing, process them before or after answering unless a cron job already does it. Expiry is an overdue/recovery state; it never erases unfinished news or committee causes.
 Daily report in agent mode: submit a verdict for every target asset first, then `daily_report` returns the
 report Markdown to deliver; anything in `missing_verdicts` is a failure to report, never something to skip.
 Do the submissions and the `daily_report` call in the same run (it reads today's local date — splitting them
@@ -267,6 +267,7 @@ shows each line and its distance on `all_holdings[].alerts` (e.g. "距 price_bel
   `source_snapshot` reads one exact captured original input and its acquisition proof.
   A queued snapshot or a `backend` label alone does not authenticate a report. The backend checks its own API response, server acquisition receipt and item observation, or a controlled collector receipt. Unbound/legacy inputs remain audit-only until acquisition or content-bound review; inspect the actual ingest status and keep verification work pending. An authenticated report is not proof of truth, prediction accuracy, learning or publication permission. Do not rewrite provenance or repeatedly repack an excluded input to obtain acceptance.
   `committee_review` retrieves the exact saved transcript and bound review packet after a task boundary; inspect resume status before resubmitting.
+  For unattended jobs, `INVEST_MCP_SCOPE=automation` exposes only analysis, source ingestion and reports. Money/position changes, user constraints, execution feedback and embedded scheduler startup are unavailable in this scope. Interactive owner tools retain their usual capabilities.
 
 **CLI/REST agents**, or long-tail operations MCP does not cover (trades intent flow /
 config whitelist / events / holdings import / gold-specific endpoints) → read
