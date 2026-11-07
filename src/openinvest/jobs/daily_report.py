@@ -512,11 +512,14 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
             )
 
     # 3) Gemini 第二意见（综合所有资产 verdicts）
+    from openinvest.jobs.daily_report_builder import qualification_note
+    from openinvest.core.decision_evidence import advice_qualified
+    review_blocked={sym for sym,entry in asset_committees.items() if qualification_note(entry["verdict"])}
     cio_memos_combined = "\n\n".join([
         f"### {a.get('display_name', a['symbol'])} ({a['symbol']})\n"
         f"{asset_committees[a['symbol']]['report'].cio_memo}"
         for a in target_assets
-        if a["symbol"] not in skipped_assets and a["symbol"] in asset_committees
+        if a["symbol"] not in skipped_assets and a["symbol"] in asset_committees and a["symbol"] not in review_blocked
     ])
     gold_snapshot_text = format_gold_report(snap) if snap else "黄金数据获取失败"
     # 2026-05-19 修复：market_snapshot 持久化段（line 455）引用 macro_data_report
@@ -534,8 +537,9 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         event_brief=event_brief,
     )
     # agent 模式后端不发起任何模型调用（Gemini/agy CLI 也是模型）——第二意见交给宿主 Agent
-    final_decision_gemini = ("（agent 模式：第二意见由宿主 Agent 负责，后端不发起模型调用）"
-                             if agent_mode else _run_gemini_cli_review(gemini_prompt))
+    final_decision_gemini = ("[QUALITY_ALERT] 存在未通过核验的资产提案，暂停第二意见，避免把审计原文转成操作建议。"
+                            if review_blocked else "（agent 模式：第二意见由宿主 Agent 负责，后端不发起模型调用）"
+                            if agent_mode else _run_gemini_cli_review(gemini_prompt))
 
     # 3.5) 翻译官：人话解读（一次 LLM 调用；任何失败 graceful 回落
     # builder 内的确定性一句话，邮件照发）
@@ -555,6 +559,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
             continue
         r = asset_committees[sym]
         v = r["verdict"]
+        if qualification_note(v):continue  # Never let a translator turn an audit proposal into advice.
         defense_note = ""
         if v.get("_original_verdict") and v["_original_verdict"] != v["verdict"]:
             _dca = v.get("_defense_dca")
@@ -680,9 +685,13 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
             daily_block += f"\n- {a.get('display_name', sym)} ({sym}): SKIPPED（数据缺失）"
             continue
         v = asset_committees[sym]["verdict"]
+        review=v.get("reasoning_review") or {}
+        blocked=qualification_note(v)
         daily_block += (
             f"\n- {a.get('display_name', sym)} ({sym}): "
-            f"{v['verdict']} (conf {v['confidence']:.2f}, alloc {cur_prefix()}{v['alloc_cny']})"
+            f"{blocked+'；原提案仅供审计: ' if blocked else ''}{v['verdict']} "
+            f"(decision_status={v.get('decision_status','legacy_unverified')}, reasoning_review={review.get('status','not_provided')}, "
+            f"conf {v['confidence']:.2f}, alloc {cur_prefix()}{v['alloc_cny']})"
         )
     store.append_daily("committee_report", daily_block, date=today)
     store.append_daily(
@@ -715,7 +724,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
             })
 
     result: Dict[str, Any] = {
-        "status": "success" if not skipped_assets else "degraded",
+        "status": "degraded" if skipped_assets or missing_verdicts or review_blocked else "success",
         "date": today,
         "assets": [a["symbol"] for a in target_assets],
         "skipped_assets": sorted(skipped_assets),
@@ -728,6 +737,9 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
                 "verdict": r["verdict"]["verdict"],
                 "confidence": r["verdict"]["confidence"],
                 "alloc_cny": r["verdict"]["alloc_cny"],
+                "decision_status":r["verdict"].get("decision_status","legacy_unverified"),
+                "reasoning_review":r["verdict"].get("reasoning_review") or {"status":"not_provided"},
+                "current_advice_valid":advice_qualified(r["verdict"]),
             }
             for sym, r in asset_committees.items()
         },
