@@ -5,7 +5,6 @@ from datetime import datetime,timezone
 import json
 import re
 from pathlib import Path
-from os.path import basename
 
 from openinvest.core.memory_store import _atomic_write_text,_file_lock
 from openinvest.core.evidence_eligibility import digest
@@ -20,7 +19,9 @@ def _save(path,payload):
 def preserve_submission(memory_root,context_id,symbol,transcript,provider,model):
     """Preserve the exact caller bytes before issuing an external review."""
     if not isinstance(context_id,str) or not re.fullmatch(r"[a-f0-9]{32}",context_id):raise ValueError("invalid_context_id")
-    path=Path(memory_root)/".evidence/submissions"/(basename(context_id)+".json")
+    # Reconstruct the UUID filename from a number; no input path text is used.
+    filename=f"{int(context_id,16):032x}.json"
+    path=Path(memory_root)/".evidence/submissions"/filename
     content={"context_id":context_id,"symbol":symbol,"transcript":transcript,"provider":provider,"model":model}
     with _file_lock(path):
         if path.exists():
