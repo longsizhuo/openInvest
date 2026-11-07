@@ -265,6 +265,7 @@ Per-asset alert lines: `track_asset` takes `alert_price_above` / `alert_price_be
 shows each line and its distance on `all_holdings[].alerts` (e.g. "距 price_below 还有 3.2%").
 
   `source_snapshot` reads one exact captured original input and its acquisition proof.
+  A queued snapshot or a `backend` label alone does not authenticate a report. The backend checks its own API response, server acquisition receipt and item observation, or a controlled collector receipt. Unbound/legacy inputs remain audit-only until acquisition or content-bound review; inspect the actual ingest status and keep verification work pending. An authenticated report is not proof of truth, prediction accuracy, learning or publication permission. Do not rewrite provenance or repeatedly repack an excluded input to obtain acceptance.
   `committee_review` retrieves the exact saved transcript and bound review packet after a task boundary; inspect resume status before resubmitting.
 
 **CLI/REST agents**, or long-tail operations MCP does not cover (trades intent flow /
