@@ -62,11 +62,15 @@ class CommitteeReport:
     prior_insights: str = ""
     sentiment_brief: str = ""         # 市场情绪表盘（确定性：VIX 分位 + CNN F&G，跨资产共享）
     valuation_brief: str = ""         # 估值（确定性：trailing PE + 价格分位，仅权益类，per-asset）
+    regime_brief: str = ""
+    analysis_as_of: Optional[str] = None
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
+        from openinvest.core.committee.evidence import cio_source_context
         lines = [
             f"=== ASSET: {self.asset.get('display_name', self.asset.get('symbol'))} ===",
+            cio_source_context(self.market_data, self.regime_brief, self.analysis_as_of),
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
         ]
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
@@ -167,12 +171,14 @@ def run_committee(
         prior_insights=prior_insights,
         sentiment_brief=sentiment_brief,
         valuation_brief=valuation_brief,
+        regime_brief=regime_brief,
+        analysis_as_of=(input_health or {}).get("prepared_at"),
     )
 
     quant_history: List[str] = []   # Round 1, 2, ..., N
     risk_history: List[str] = []
     regime_section = (
-        f"# 市场 Regime (事实背景 + 历史概率参考):\n{regime_brief}\n\n"
+        f"# 市场 Regime (规则分类结果 + 历史统计参考，不代表风险正常):\n{regime_brief}\n\n"
         if regime_brief else ""
     )
 

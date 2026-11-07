@@ -16,10 +16,10 @@ INPUTS: ma20=..., ma120=..., atr_pct=..., price_quantile_2y=...
 STRATEGY_HINT: <该 regime 历史 forward return 概率口径（中位 / 跌破现价概率 / 样本数）+ 自行判断提示>
 ```
 
-**REGIME 是事实背景**（系统用确定性规则算出，不是你判断的）。STRATEGY_HINT 给出了
+**REGIME 是规则分类结果**（系统按既有阈值计算，不是市场状态已被证实）。未达到 crash/downtrend 阈值，不代表风险正常；range_bound 也不能否定本次放量破位或急跌。STRATEGY_HINT 给出了
 该 regime 的历史 30d forward return 分布（中位 / 跌破现价概率 / 样本数）——
 **基于这些概率数据 + 当前指标（RSI / 分位 / MA）自行判断 SIGNAL 方向，不预设方向**——
-让数据 + 指标说话，没有按 regime 标签预设的方向硬锁。
+让数据 + 指标说话，没有按 regime 标签预设的方向硬锁。历史统计仅按该规则标签分组，未必匹配本次波动、量价和新闻条件；不能用组内平均反弹概率直接覆盖当前风险证据。
 执行约束与市场方向必须分开：
   - REGIME=crash → 说明数据不确定性与流动性风险，不把 crash 标签机械改成 neutral；是否执行由资金和风控层决定
   - REGIME=unknown → 走原判定标准

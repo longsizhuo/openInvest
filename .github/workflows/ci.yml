@@ -131,6 +131,7 @@ jobs:
         run: |
           uv run python -c "import openinvest.core.decision_evidence, openinvest.core.evidence_eligibility, openinvest.core.evaluation_protocol, openinvest.core.learning_control, openinvest.core.rule_audit; import openinvest.services.review_plans, openinvest.services.decision_quality, openinvest.services.restore_guard, openinvest.services.integrity_status, openinvest.services.event_replication; import openinvest.jobs.learning_review"
           uv run python -c "from openinvest.core.committee import parse_cio_memo, AGENT_UNAVAILABLE_MARKER"
+          uv run python -c "from openinvest.core.committee.evidence import cio_source_context"
           uv run python -c "from openinvest.core.config import effective_api_config, set_persisted_override, clear_persisted_override, API_SETTABLE, DCAConfig"
           uv run python -c "from openinvest.core.memory_store import MemoryStore, _atomic_write_text"
           uv run python -c "from openinvest.utils.oslock import flock, LOCK_EX, LOCK_NB, LOCK_UN, pid_alive, CAN_UNLINK_OPEN"
