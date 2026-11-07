@@ -5,6 +5,11 @@
 
 ## Smoke test：宿主 agent 侧日报链路（Hermes，2026-07-12 验证通过）
 
+> 2026-11 完整性恢复：生产候选改为 Hermes `no_agent` 固定脚本，调用
+> `openinvest.jobs.fixed_invest daily|sentinel`，不加载聊天记忆或交易技能。
+> 日报结果与通知回执分别持久化；重试只补投，不重复推理。下面保留旧交互链路记录，
+> 不用于恢复生产自动任务。上线前须核对实际服务版本、原生任务入口与独立通道回执。
+
 验证 `openinvest daily_report`（stdout = 与邮件正文同源的日报 markdown，不发邮件）
 能被宿主 agent 的 cron 原样投递。服务器侧 `daily_report` cron 已默认停用
 （`jobs/daily_report.yml` `enabled: false`），这条链路是它的替代。

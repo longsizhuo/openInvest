@@ -184,9 +184,9 @@ def _compact_news(*,memory_root=None) -> None:
         _atomic_write_text(path,"".join(f"{line}\n" for line in keep))
 
 
-def pending_news_items(now: Optional[datetime] = None, *, include_expired=False) -> List[Dict[str, Any]]:
+def pending_news_items(now: Optional[datetime] = None, *, include_expired=False,memory_root=None) -> List[Dict[str, Any]]:
     """未入库、未 dismiss、未过期的新闻（按 url 去重，先进先出）。纯读，不记 last_drain。"""
-    rows=canonical_news_inputs(processing_status="pending")
+    rows=canonical_news_inputs(processing_status="pending",memory_root=memory_root)
     if not rows:  # 空队列不碰 EventStore：它会顺手建 db/events.db，调度器写锁时还要等 5s（brief 每个会话都调）
         return []
     now = now or _now()

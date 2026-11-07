@@ -108,3 +108,14 @@ def test_invalid_context_is_not_sent_as_current_buy_advice(tmp_path):
     assert sent and all("BUY NOW" not in p["plain"] for p in sent)
     assert all(p["decision_quality"] for p in sent)
     assert all(p["notification_id"]!=old and p["supersedes_notification"]==old for p in sent)
+
+
+def test_one_revoked_daily_decision_suppresses_the_whole_saved_report(tmp_path):
+    box=NotificationOutbox(MemoryStore(tmp_path/'memory'))
+    ident=box.enqueue('daily-stale',{**PAYLOAD,'plain':'Old buy advice','decision_refs':[
+        {'symbol':'SYNTHETIC','decision_id':'b'*32}]},category='daily_report',policy='decision',now=NOW)
+    sent=[]
+    box.flush(now=NOW,sender=lambda channel,payload:sent.append(payload) or True)
+    assert sent==[] and all(row['status']=='suppressed' for row in box.receipt(ident)['channels'].values())
+    box.flush(now=NOW,sender=lambda channel,payload:sent.append(payload) or True)
+    assert sent and all('Old buy advice' not in payload['plain'] for payload in sent)

@@ -804,3 +804,23 @@ def build_doctor_view(root: Path) -> Dict[str, Any]:
         ),
         "checks": checks,
     }
+
+
+def build_event_history_view(*,hours=48,limit=100):
+    """Qualified owner events only; this is not a source-coverage cursor."""
+    from openinvest.utils.advisory import is_advisory_mode
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.db.event_store import EventStore
+    if is_advisory_mode():return {"status":"unavailable","reason":"private_history_not_available_in_advisory_mode"}
+    if not isinstance(hours,int) or isinstance(hours,bool) or hours<1 or not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=1000:
+        return {"status":"error","reason":"hours_must_be_positive_and_limit_between_1_and_1000"}
+    path=MemoryStore().data_root/"db/events.db"
+    if not path.exists():return {"status":"unavailable","reason":"configured_event_database_missing"}
+    store=EventStore(str(path),readonly=True)
+    try:
+        rows=store.list_current_with_sources(hours=hours,limit=limit+1)
+        return {"status":"ok","data_root":str(store.data_root),"events":rows[:limit],
+                "truncated":len(rows)>limit,"coverage_watermark":None,
+                "source_quality":store.source_reporting_summary(),
+                "note":"合格当前事件的核对视图；关键词/主题命中不否决来源更正，最后入库时间不代表扫描覆盖。"}
+    finally:store.conn.close()

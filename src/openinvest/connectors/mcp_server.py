@@ -112,6 +112,14 @@ ADVISORY_ALLOWED_TOOLS = frozenset({
     "news_sources", "add_news_source", "remove_news_source",
 })
 
+# Scheduled analysis can write evidence and verdicts, never money, positions,
+# user constraints, source configuration or execution feedback.
+AUTOMATION_ALLOWED_TOOLS=frozenset({
+    "doctor","status","strategy","live_prices",
+    "collect_news","event_history","pending_news","source_snapshot","ingest_event","pending_committees",
+    "prepare_committee","submit_committee","committee_review","quality_status","daily_report",
+})
+
 
 def _check_advisory():
     """Disable portfolio-sensitive tools in INVEST_ADVISORY_MODE (guest/advisory mode)."""
@@ -400,6 +408,27 @@ def explain_decision(
 
 
 # ---------- 决策账本写 ----------
+
+@_tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=False,idempotentHint=False))
+def collect_news(since: Annotated[Optional[str],Field(description="Explicit initial source window start, timezone-aware ISO time; omit only to resume existing coverage.")]=None) -> Dict[str,Any]:
+    """Capture fixed news providers and durable per-source coverage, without a model call.
+
+    Capture is not proof of source truth or completed normalization. Incomplete
+    windows remain pending; never infer a quiet market from this failure.
+    """
+    _check_advisory()
+    from openinvest.services.news_collection import collect
+    try:return collect(since=since)
+    except (ValueError,OSError):return {"status":"error","reason":"source_collection_or_state_unavailable","model_calls":0}
+
+
+@_tool(annotations=_RO)
+def event_history(hours: Annotated[int,Field(ge=1,description="Current qualified-event lookback hours.")]=48,
+                  limit: Annotated[int,Field(ge=1,le=1000,description="Maximum returned qualified events.")]=100) -> Dict[str,Any]:
+    """Read qualified current events and source evidence. This is not a scan watermark or a duplicate veto."""
+    _check_advisory()
+    from openinvest.services.skill_views import build_event_history_view
+    return build_event_history_view(hours=hours,limit=limit)
 
 @_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
 def record_execution(
@@ -1649,9 +1678,16 @@ def _apply_scope(scope: str) -> None:
     批准、没有"永久允许"——cron 里 pending_news / submit_committee 全被拦，交互里跑一次委员会要点好几次。
     agent 那条给 full trust，ledger 那条保持 untrusted，动钱前照样先问。不设 = 全部工具（Claude Code 等）。
     """
-    if scope not in ("agent", "ledger"):
+    if not scope:
         return
+    if scope not in ("agent","ledger","automation"):raise ValueError("Unknown INVEST_MCP_SCOPE; refusing an unrestricted server")
+    if scope=="automation":
+        from openinvest.utils.llm import reasoning_by_agent
+        if not reasoning_by_agent():raise ValueError("Automation scope requires INVEST_REASONING_BY=agent; implicit backend inference is unavailable")
     for t in asyncio.run(mcp.list_tools()):
+        if scope=="automation":
+            if t.name not in AUTOMATION_ALLOWED_TOOLS:mcp.remove_tool(t.name)
+            continue
         destructive = bool(t.annotations and t.annotations.destructiveHint)
         if destructive != (scope == "ledger"):
             mcp.remove_tool(t.name)
@@ -1666,12 +1702,13 @@ def main() -> None:
         "--http", action="store_true",
         help="streamable-HTTP transport（remote MCP，INVEST_MCP_HOST/PORT，默认 stdio）",
     )
-    if p.parse_args().http:
+    args=p.parse_args()
+    scope=os.getenv("INVEST_MCP_SCOPE", "").strip().lower()
+    _apply_scope(scope)
+    if args.http:
         _serve_http()  # hub 上常驻的服务：调度器由 hub 自己的 daemon 管，不内嵌
     else:
-        scope = os.getenv("INVEST_MCP_SCOPE", "").strip().lower()
-        _apply_scope(scope)
-        if scope != "ledger":  # 拆成两条时只让 agent 那条去拉调度器
+        if scope not in ("ledger","automation"):
             _start_embedded_scheduler()
         mcp.run()  # stdio transport
 

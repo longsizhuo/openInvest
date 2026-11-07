@@ -15,7 +15,7 @@ EXPECTED_TOOLS = {
     # Agent 自己编排委员会（Coordinator）：出题 / 收卷，后端不调模型（2026-10-18 插件不持 key）
     "prepare_committee", "submit_committee",
     # agent 模式待办队列：后端不调模型时新闻 / 触发的重跑排队给 Agent
-    "pending_news", "pending_committees", "source_snapshot", "committee_review",
+    "pending_news", "pending_committees", "source_snapshot", "committee_review", "collect_news", "event_history",
     # 日报：agent 模式只读当天交卷，没交卷的列 missing_verdicts
     "daily_report",
     # 再平衡清单：只出清单不下单（读持仓，顾问模式拒绝）
@@ -62,6 +62,7 @@ def test_every_tool_dispatches_off_the_event_loop():
 
 READONLY_TOOLS = {
     "source_snapshot",
+    "event_history",
     "committee_review",
     "doctor", "quality_status", "status", "strategy", "history", "live_prices", "what_if", "discipline",
     "decisions", "explain_decision", "news_sources", "rebalance_plan",
@@ -74,7 +75,7 @@ MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position",
 
 
 # 写、非资金、但重复调用会累加记录（反事实干预 / dream 事件）
-NON_IDEMPOTENT_WRITES = {"prepare_committee", "daily_report"}
+NON_IDEMPOTENT_WRITES = {"prepare_committee", "daily_report", "collect_news"}
 
 
 def test_tool_annotations():
@@ -169,7 +170,7 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
         "untrack_asset": {"symbol": "GC=F"},
         "prepare_committee": {"symbol": "GC=F"},
         "submit_committee": {"symbol": "GC=F", "transcript": "=== CIO ===\nVERDICT: HOLD"},
-        "pending_news": {}, "pending_committees": {}, "source_snapshot": {"snapshot_id":"synthetic"}, "committee_review": {"context_id":"a"*32}, "daily_report": {}, "quality_status": {},
+        "pending_news": {}, "pending_committees": {}, "source_snapshot": {"snapshot_id":"synthetic"}, "committee_review": {"context_id":"a"*32}, "daily_report": {}, "quality_status": {}, "collect_news":{}, "event_history":{},
         "record_execution": {"decision_id": "2026-01-01/GC=F", "executed": True},
         "ingest_event": {"title": "t", "url": "https://x.co/a"},
     }

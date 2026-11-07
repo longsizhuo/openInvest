@@ -384,21 +384,10 @@ def cmd_collect_news(args) -> None:
 
 
 def cmd_event_history(args) -> None:
-    from openinvest.db.event_store import EventStore
-    from openinvest.core.memory_store import MemoryStore
-    from openinvest.utils.advisory import is_advisory_mode
-    if is_advisory_mode():
-        _print_json({"status":"unavailable","reason":"private_history_not_available_in_advisory_mode"});sys.exit(1)
-    path=MemoryStore().data_root/"db/events.db"
-    if not path.exists():
-        _print_json({"status":"unavailable","reason":"configured_event_database_missing"});sys.exit(1)
-    store=EventStore(str(path),readonly=True)
-    try:
-        rows=store.list_current_with_sources(hours=args.hours,limit=args.limit+1)
-        _print_json({"status":"ok","data_root":str(store.data_root),"events":rows[:args.limit],
-                     "truncated":len(rows)>args.limit,"coverage_watermark":None,
-                     "note":"合格当前事件的核对视图；关键词/主题命中不否决来源更正，最后入库时间不代表扫描覆盖。"})
-    finally:store.conn.close()
+    from openinvest.services.skill_views import build_event_history_view
+    result=build_event_history_view(hours=args.hours,limit=args.limit)
+    _print_json(result)
+    if result["status"]!="ok":sys.exit(1)
 
 
 def cmd_source_snapshot(args):

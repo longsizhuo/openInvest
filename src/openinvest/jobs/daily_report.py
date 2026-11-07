@@ -227,7 +227,7 @@ def _value_warnings(value_status: Dict[str, str]) -> List[str]:
     return out
 
 
-def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]:
+def run(send_email: bool = True, include_report: bool = False, *, max_debate_rounds: int = 4, optional_model_reviews: bool = True) -> Dict[str, Any]:
     """send_email=False: 跳过邮件（宿主 agent 侧 cron 自己投递）；
     include_report=True: 返回值带 full_report（邮件正文原文）——默认不带，
     避免 scheduler 把整篇 markdown 写进 job_runs 日志。"""
@@ -485,7 +485,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
         log.info("run_committee_session 跑 %d 资产...", len(target_symbols_to_run))
         session = run_committee_session(
             symbols=target_symbols_to_run,
-            max_debate_rounds=4,  # 三路径统一 4 轮 (cron 成本 ~¥2.5/月, 用户已确认)
+            max_debate_rounds=max_debate_rounds,
             portfolio_summary_override=portfolio_summary,  # 含 total_assets_cny + data_warnings
         )
         asset_committees = session["asset_committees"]
@@ -539,7 +539,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
     # agent 模式后端不发起任何模型调用（Gemini/agy CLI 也是模型）——第二意见交给宿主 Agent
     final_decision_gemini = ("[QUALITY_ALERT] 存在未通过核验的资产提案，暂停第二意见，避免把审计原文转成操作建议。"
                             if review_blocked else "（agent 模式：第二意见由宿主 Agent 负责，后端不发起模型调用）"
-                            if agent_mode else _run_gemini_cli_review(gemini_prompt))
+                            if agent_mode else "附加复核未启用。" if not optional_model_reviews else _run_gemini_cli_review(gemini_prompt))
 
     # 3.5) 翻译官：人话解读（一次 LLM 调用；任何失败 graceful 回落
     # builder 内的确定性一句话，邮件照发）
@@ -590,7 +590,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
             "path_lines": path_lines,
             "cio_memo": r["report"].cio_memo,
         })
-    if t_inputs and not agent_mode:   # agent 模式后端不调模型 → 用 builder 的确定性一句话
+    if t_inputs and not agent_mode and optional_model_reviews:
         # 只有 LLM 调用 + 输出解析在 graceful 守卫内（外部依赖才配 graceful）
         try:
             from openinvest.capabilities.sdk_agent import SDKAgent
@@ -740,6 +740,7 @@ def run(send_email: bool = True, include_report: bool = False) -> Dict[str, Any]
                 "decision_status":r["verdict"].get("decision_status","legacy_unverified"),
                 "reasoning_review":r["verdict"].get("reasoning_review") or {"status":"not_provided"},
                 "current_advice_valid":advice_qualified(r["verdict"]),
+                "decision_id":r["verdict"].get("decision_id"),
             }
             for sym, r in asset_committees.items()
         },
