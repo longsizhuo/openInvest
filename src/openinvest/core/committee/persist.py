@@ -83,6 +83,16 @@ def build_input_health(report: "CommitteeReport", verdict: Dict[str, Any],
         unavailable=sorted({call["role"] for call in calls if call.get("used",True) and call["unavailable"]})
         health["worker_calls"]=calls
     health["worker_unavailable"] = unavailable
+    from openinvest.core.committee.role_health import risk_output_health
+    risk_history=(debate_meta or {}).get('risk_history')
+    if risk_history is None:
+        risk_history=[report.risk_view]
+        if getattr(report,'risk_adjusted',''):risk_history.append(report.risk_adjusted)
+    health['role_health']=[risk_output_health(text,'RISK_R'+str(i+1)) for i,text in enumerate(risk_history)]
+    health['model_output_errors']=[{'role':row['role'],'round':row['round'],
+        'output_sha256':row['output_sha256'],'contract_version':row['contract_version'],
+        'reason':'model_output_'+row['structure'],'issue_refs':row['issue_refs']}
+        for row in health['role_health'] if row['structure'] in {'incomplete','invalid'}]
     if debate_meta:
         if debate_meta.get("model") is not None:
             health["model"] = debate_meta["model"]
@@ -160,7 +170,7 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
         except (OSError, ValueError, KeyError, TypeError) as e:
             verdict.setdefault("_original_verdict", verdict.get("verdict"))
             verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
-            verdict.update(verdict="UNCLEAR" if verdict.get("proposal_available") is False else "HOLD", alloc_cny=0, confidence=0.0,
+            verdict.update(verdict="UNCLEAR", alloc_cny=0, confidence=0.0,
                            decision_status="DATA_UNTRUSTED", hold_reason="context_changed")
             health.update(decision_status="DATA_UNTRUSTED", context_error=str(e))
             report.cio_memo = "[QUALITY_ALERT] DATA_UNTRUSTED：输入或规则在分析期间变化，请重新分析。\n\n" + report.cio_memo

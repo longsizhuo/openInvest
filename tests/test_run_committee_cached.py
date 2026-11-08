@@ -124,7 +124,7 @@ def test_persist_roundtrip_cio_memo_verbatim(mem_root):
     from openinvest.core.committee.debate import CommitteeReport
     report = CommitteeReport(asset={"symbol": "TESTSYM", "display_name": "Test"},
                              macro_view="MACRO risk_on", quant_view="QUANT bullish",
-                             risk_view="RISK ok", cio_memo=_MEMO)
+                             risk_view="SIGNAL: ok\nMARKET_RISK: ordinary\nLIQUIDITY: available", cio_memo=_MEMO)
     verdict = {"verdict": "ACCUMULATE", "confidence": 0.7, "dominant_view": "quant", "alloc_cny": 800,"reasoning_review":{"status":"passed","origin":"synthetic_unit_fixture"}}
     persist._persist(report, verdict, debate_meta={"max_rounds": 2, "final_round": 2, "converged": True})
     md = mem_root / ".committee" / datetime.now().strftime("%Y-%m-%d") / "TESTSYM.md"
@@ -139,7 +139,7 @@ def test_coordinator_roundtrip_cio_memo_verbatim(mem_root):
 
     from openinvest.core.runner.coordinator import save_committee_transcript
     raw = ("=== MACRO ===\n宏观中性\n\n=== QUANT_R1 ===\nSIGNAL: bullish\nSTRENGTH: 6\n\n"
-           "=== RISK_R1 ===\nSIGNAL: concerned\nSTRENGTH: 5\n\n"
+           "=== RISK_R1 ===\nSIGNAL: concerned\nSTRENGTH: 5\nMARKET_RISK: elevated\nLIQUIDITY: available\n\n"
            f"=== CIO ===\n{_MEMO}\n\n"
            "=== QUANT ===\nSIGNAL: bullish\n\n=== RISK ===\nSIGNAL: concerned\n")
     saved = save_committee_transcript("TESTSYM", raw, provider="hermes", context_id=context_id("TESTSYM"))["saved"]

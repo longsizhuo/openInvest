@@ -249,6 +249,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "ohlcv_snapshot": market_snapshot(df_target),
         "price_last_bar": str(df_target.index[-1]) if not df_target.empty else None,
         "price_fetch_failed": bool(df_target.attrs.get("yf_fetch_failed", False)),
+        "market_source_observation": df_target.attrs.get("source_observation"),
         "portfolio_summary": portfolio_summary, "market_data": market,
         "macro_data": macro_data, "macro_input_health": macro_input_health(macro_data), "event_brief": event_brief, "gold_snapshot": gold_ctx,
         "prior_insights": insights, "valuation_brief": valuation_brief,
@@ -469,6 +470,7 @@ def _save_committee_transcript_once(
         macro_view=sections.get("MACRO", ""),
         quant_view=sections.get("QUANT_R1") or sections.get("QUANT", ""),
         risk_view=sections.get("RISK_R1") or sections.get("RISK", ""),
+        risk_adjusted=sections.get("RISK_R2", ""),
         cio_memo=cio_text,
     )
     health = build_input_health(
@@ -476,6 +478,7 @@ def _save_committee_transcript_once(
         {"entry": "coordinator", "provider": provider, "model": (model or "").strip() or "unknown",
          "has_df": bool(has_df),
          "price_fetch_failed": facts.get("price_fetch_failed", False),
+         "market_source_observation": facts.get("market_source_observation"),
          "macro_data_empty": facts.get("macro_input_health", {}).get("valid") is False or not bool(facts.get("macro_data")),
          "macro_input_health": facts.get("macro_input_health", {}),
          "ledger_evidence":facts.get('ledger_evidence'),"target_symbol":symbol,

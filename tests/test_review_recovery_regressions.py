@@ -31,7 +31,7 @@ def test_invalid_plan_surfaces_and_changed_context_is_not_current_cache():
     from openinvest.services.decision_quality import findings
     from openinvest.core.config import set_config_override
     cid=context_id("SYNTHETIC")
-    raw='=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7\nREVIEW_PLAN_JSON: {bad'
+    raw='=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7\nREVIEW_PLAN_JSON: {bad'
     out=save_committee_transcript("SYNTHETIC",raw,context_id=cid)
     assert any("计划" in r["text"] for r in findings(MemoryStore().root))
     assert load_submitted_committee("SYNTHETIC",out["decision_date"])
@@ -172,7 +172,7 @@ def test_failed_decision_and_tampered_plan_are_never_current():
     assert not result['current_advice_valid']
     assert not current_decision(MemoryStore().root,result,"SYNTHETIC")
     assert not save_committee_transcript("SYNTHETIC",raw,context_id=cid)['current_advice_valid']
-    good=save_committee_transcript("SYNTHETIC","=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7",context_id=context_id("SYNTHETIC"))
+    good=save_committee_transcript("SYNTHETIC","=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7",context_id=context_id("SYNTHETIC"))
     assert load_submitted_committee("SYNTHETIC",good['decision_date'])
     sidecar=Path(good['latest_saved']).with_name('SYNTHETIC_committee.json')
     edited=json.loads(sidecar.read_text());edited['verdict']['review_plan']={'conditions':[{'value':9999}]};edited['cio_memo']='changed waiting target'
@@ -185,7 +185,7 @@ def test_current_cache_rejects_changed_transcript_without_changing_header():
     from openinvest.core.runner.coordinator import save_committee_transcript
     from openinvest.core.decision_evidence import current_decision
     from openinvest.core.decision_ledger import parse_committee_file
-    good=save_committee_transcript("SYNTHETIC","=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7\nORIGINAL_REASON",context_id=context_id("SYNTHETIC"))
+    good=save_committee_transcript("SYNTHETIC","=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7\nORIGINAL_REASON",context_id=context_id("SYNTHETIC"))
     path=Path(good['latest_saved']);original=path.read_text();parsed=parse_committee_file(path)
     assert current_decision(MemoryStore().root,parsed['input_health'],'SYNTHETIC',verdict=parsed,transcript=original)
     path.write_text(original.replace('ORIGINAL_REASON','TAMPERED_ADVICE'));parsed=parse_committee_file(path)

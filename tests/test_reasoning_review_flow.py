@@ -13,8 +13,8 @@ def transcript():
         "REDUCE_RISK":"risk_reduction","TACTICAL_REENTRY":"tactical_reentry"}.get(kind)}
         for kind in ["HOLD_EXISTING","ADD","REDUCE_RISK","TACTICAL_REENTRY"]]
     roles={"MACRO":"SIGNAL: neutral\nSTRENGTH: 4","QUANT_R1":"SIGNAL: neutral\nSTRENGTH: 4",
-           "QUANT_R2":"ADJUSTED_SIGNAL: neutral\nSTRENGTH: 4","RISK_R1":"SIGNAL: concerned\nSTRENGTH: 4",
-           "RISK_R2":"ADJUSTED_SIGNAL: concerned\nSTRENGTH: 4","CIO":"VERDICT: HOLD\nCONFIDENCE: 0.6\nDOMINANT_VIEW: risk\nSUGGESTED_ALLOC_CNY: 0\nALTERNATIVES_JSON: "+json.dumps(alternatives)}
+           "QUANT_R2":"ADJUSTED_SIGNAL: neutral\nSTRENGTH: 4","RISK_R1":"SIGNAL: concerned\nSTRENGTH: 4\nMARKET_RISK: elevated\nLIQUIDITY: available",
+           "RISK_R2":"ADJUSTED_SIGNAL: concerned\nSTRENGTH: 4\nMARKET_RISK: elevated\nLIQUIDITY: available","CIO":"VERDICT: HOLD\nCONFIDENCE: 0.6\nDOMINANT_VIEW: risk\nSUGGESTED_ALLOC_CNY: 0\nALTERNATIVES_JSON: "+json.dumps(alternatives)}
     return "\n\n".join("=== "+name+" ===\n"+body for name,body in roles.items())
 
 

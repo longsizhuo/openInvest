@@ -49,6 +49,7 @@ def build_input_health_facts(
         facts["price_last_bar"] = None
     try:
         facts["price_fetch_failed"] = bool(getattr(df, "attrs", {}).get("yf_fetch_failed", False))
+        facts["market_source_observation"] = getattr(df, "attrs", {}).get("source_observation")
     except Exception:  # noqa: BLE001
         facts["price_fetch_failed"] = None
     empty = [name for name, val in (

@@ -82,7 +82,7 @@ def test_coordinator_complete_sections_distinguish_error_body_from_negated_cio_q
            'required_roles':['MACRO','QUANT_R1','RISK_R1','QUANT_R2','RISK_R2','CIO']}
     context=prepare_context(store.root,'SYNTHETIC',facts,model='synthetic-model')
     raw=transcript().replace('=== CIO ===\n','=== CIO ===\n'+NEGATED+'\n')
-    if failed_role:raw=raw.replace('=== RISK_R1 ===\nSIGNAL: concerned\nSTRENGTH: 4','=== RISK_R1 ===\nRISK: [WORKER_UNAVAILABLE] reason=retry_exhausted')
+    if failed_role:raw=raw.replace('=== RISK_R1 ===\nSIGNAL: concerned\nSTRENGTH: 4\nMARKET_RISK: elevated\nLIQUIDITY: available','=== RISK_R1 ===\nRISK: [WORKER_UNAVAILABLE] reason=retry_exhausted')
     args={'provider':'unit','model':'synthetic-model','context_id':context['context_id']}
     first=save_committee_transcript('SYNTHETIC',raw,**args)
     assert first['status']=='verification_required'

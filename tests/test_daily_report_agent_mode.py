@@ -28,7 +28,7 @@ def test_agent_mode_reads_submissions_and_flags_missing(monkeypatch):
     d.mkdir(parents=True, exist_ok=True)
     from tests.integrity_helpers import context_id
     from openinvest.core.runner.coordinator import save_committee_transcript
-    save_committee_transcript("GC=F", "=== MACRO ===\n宏观收紧\n=== QUANT_R1 ===\nq\n=== RISK_R1 ===\nr\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.6\nCIO 说明", context_id=context_id("GC=F"))
+    save_committee_transcript("GC=F", "=== MACRO ===\n宏观收紧\n=== QUANT_R1 ===\nq\n=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.6\nCIO 说明", context_id=context_id("GC=F"))
 
 
     pm = MagicMock()

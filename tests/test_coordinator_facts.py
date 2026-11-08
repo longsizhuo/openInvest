@@ -19,7 +19,7 @@ from tests.integrity_helpers import context_id
 
 CIO = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 800\n首笔 ¥800。"
 RAW = (f"=== MACRO ===\n宏观中性\n\n=== QUANT_R1 ===\nSIGNAL: bullish\n\n"
-       f"=== RISK_R1 ===\nSIGNAL: ok\n\n=== CIO ===\n{CIO}\n")   # 故意不抄任何确定性行
+       f"=== RISK_R1 ===\nSIGNAL: ok\nMARKET_RISK: ordinary\nLIQUIDITY: available\n\n=== CIO ===\n{CIO}\n")   # 故意不抄任何确定性行
 REGIME_BRIEF = "REGIME: downtrend\nINPUTS: atr_spike_ratio=1.0"
 SENTIMENT_BRIEF = "INDEP_DEFENSE_FLAG: on"
 

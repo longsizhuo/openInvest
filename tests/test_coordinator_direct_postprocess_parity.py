@@ -98,7 +98,7 @@ def _run_direct(monkeypatch, memo, sentiment):
         def run(self, ctx):
             if self.role == "cio":
                 return memo
-            return "SIGNAL: neutral\nSTRENGTH: 3\nONE_LINER: stub\n"
+            return "SIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\nSTRENGTH: 3\nONE_LINER: stub\n"
 
         def tool_call_summary(self):
             return ""
@@ -120,7 +120,7 @@ def _run_coordinator(memo, sentiment, regime_brief):
     raw = (
         "=== MACRO ===\nMOCK_MACRO\n\n"
         f"=== QUANT_R1 ===\n{regime_brief}\n\n{sentiment}\nSIGNAL: neutral\n\n"
-        "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
+        "=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n\n"
         f"=== CIO ===\n{memo}\n"
     )
     from tests.integrity_helpers import context_id
@@ -166,13 +166,13 @@ def test_coordinator_catches_worker_failure_outside_cio_section(world):
     raw = (
         "=== MACRO ===\nMOCK_MACRO\n\n"
         f"=== QUANT_R1 ===\n{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted\n\n"
-        "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
+        "=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n\n"
         f"=== CIO ===\n{memo}\n"
     )
     from tests.integrity_helpers import context_id
     cid = context_id(SYM)
     v = save_committee_transcript(SYM, raw, context_id=cid)["verdict"]
-    assert v["verdict"] == "HOLD" and v["confidence"] <= 0.4 and v["alloc_cny"] == 0
+    assert v["verdict"] == "UNCLEAR" and v["decision_status"] == "DATA_UNTRUSTED" and v["alloc_cny"] == 0
 
     ok = save_committee_transcript(SYM, raw.replace(
         f"{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted",
