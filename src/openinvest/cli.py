@@ -365,6 +365,19 @@ def build_parser() -> argparse.ArgumentParser:
     _activity_flags(p)
     p.set_defaults(func=cmd_record_return_of_capital)
 
+    p = sub.add_parser('record_balance_observation',help='记录原始余额观察：市值/原生数量/每单位平均成本分开，不反推旧成交')
+    p.add_argument('--reference-symbol',required=True)
+    p.add_argument('--as-of',required=True,help='余额所对应的带时区ISO时刻，不是今天读到消息的时刻')
+    group=p.add_mutually_exclusive_group(required=True)
+    group.add_argument('--source-text');group.add_argument('--source-text-file')
+    p.add_argument('--source-locator',required=True)
+    p.add_argument('--idempotency-key',required=True)
+    p.add_argument('--reported-value',type=float);p.add_argument('--value-currency')
+    p.add_argument('--reported-quantity',type=float);p.add_argument('--quantity-unit');p.add_argument('--native-instrument')
+    p.add_argument('--reported-cost',type=float,help='原生每单位平均成本；不是总成本，不按份额或代理价格推算')
+    p.add_argument('--cost-currency')
+    p.set_defaults(func=cmd_record_balance_observation)
+
     p = sub.add_parser("place_fund_order",
         help="场外基金申购第一段：现金 −金额，订单记在途（总资产按面值含它，不会假跌）；份额等定价日净值公布后确认。"
              "预计确认日按周一到周五估计、延迟按基金类型（QDII / FOF 更慢）")
@@ -382,7 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
              "已确认的重复调用返回 already_confirmed，不重复入账；净值没公布返回 pending_nav")
     p.add_argument("--order-id", required=True, help="place_fund_order 返回的 order_id（status 的 pending_fund_orders 里也有）")
     p.add_argument("--nav", type=float, default=None, help="确认用的单位净值；不填取定价日已公布的净值")
-    p.add_argument("--fee", type=float, default=0.0, help="申购费（从订单金额里扣，份额 = (金额−费用)/净值），默认 0")
+    p.add_argument("--fee", type=float, default=None, help="实际申购费；未知则省略，真实零费用显式填 0。没有实际 NAV 和费用时只记录投影")
     p.set_defaults(func=cmd_confirm_fund_order)
 
     p = sub.add_parser("cancel_fund_order",

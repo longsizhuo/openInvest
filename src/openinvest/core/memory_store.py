@@ -425,7 +425,16 @@ class MemoryStore:
     # ---------- portfolio_history.jsonl - append-only 交易流水 ----------
 
     def append_history(self, trade: Dict[str, Any]) -> None:
-        append_jsonl(self.root / "portfolio_history.jsonl", {"ts": _now_iso(), **trade})
+        from openinvest.core.ledger_provenance import journal_provenance
+        ledger_domain=None
+        path=self.root/'portfolio.md'
+        if path.exists():ledger_domain=frontmatter.loads(path.read_text()).metadata.get('ledger_domain')
+        value={"ts": _now_iso(), **trade,**journal_provenance(trade,ledger_domain=ledger_domain),'recorded_at':_now_iso()}
+        reference=value.get('source_reference')
+        if (isinstance(reference,dict) and value.get('action') in {'deposit','withdraw'}
+                and (reference.get('sec_type')=='CASH' or reference.get('kind') in {'fx_conversion','fx_conversion_rollback'})):
+            value['external']=False
+        append_jsonl(self.root / "portfolio_history.jsonl",value)
 
     def read_history(self) -> List[Dict[str, Any]]:
         path = self.root / "portfolio_history.jsonl"

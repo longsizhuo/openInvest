@@ -235,7 +235,7 @@ class UserData(BaseModel):
 ActivityAction = Literal[
     "buy", "sell", "deposit", "withdraw", "gift", "delete_holding", "correction",
     "dividend", "interest", "fee", "tax", "split", "return_of_capital",
-    "fund_order_placed", "fund_order_confirmed", "fund_order_cancelled", "unknown",
+    "fund_order_placed", "fund_order_confirmed", "fund_order_cancelled", "broker_fee_report", "balance_observation", "unknown",
 ]
 
 
@@ -276,6 +276,12 @@ class Activity(BaseModel):
     settle_date: Optional[str] = None
     nav_date: Optional[str] = None
     source: Optional[str] = None
+    evidence_basis: str = "client_reported_not_independently_verified"
+    execution_domain: str = "client_reported"
+    source_reference: Optional[Any] = None
+    execution_time: Optional[str] = None
+    execution_time_precision: Optional[str] = None
+    fee_status: Optional[str] = None
     idempotency_key: Optional[str] = None
     note: Optional[str] = None
     unparsed: bool = False            # 数值字段解析失败：action 分类保留、效果全 0，不进回放（脏行不挡读方）
@@ -287,7 +293,13 @@ class Activity(BaseModel):
     @property
     def replayable(self) -> bool:
         """能进回放（产生 cash/units 效果）：已识别的 action + 有日期 + 数值可解析。"""
-        return self.action != "unknown" and self.trade_date is not None and not self.unparsed
+        return self.action not in {'unknown','broker_fee_report','balance_observation'} and self.trade_date is not None and not self.unparsed
+
+    @property
+    def execution_eligible(self) -> bool:
+        """Mathematical replay is not evidence that an automated estimate filled."""
+        return (self.replayable and self.evidence_basis in {'client_reported_not_independently_verified','broker_observed_fill'}
+                and self.execution_domain in {'client_reported','broker_live'})
 
 
 # ============ helper：把 metadata dict 校验后转回 dict（写 md 用） ============

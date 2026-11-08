@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 from typing import Dict, List
 
@@ -115,8 +116,12 @@ def test_drip_writes_dividend_and_buy_rows(tmp_path):
     assert (buy["action"], buy["source"], buy["external"], buy["schema_version"]) == ("buy", "drip", False, 2)
     assert (buy["units_effect"], buy["cash_effect"], buy["trade_date"]) == (5.0, -100.0, "2026-07-01")
     assert buy["idempotency_key"] == "drip-1#drip"
+    assert buy["source_reference"]["price_basis"] == "client_reported_fill_price"
+    assert buy["execution_domain"] == "client_reported"
+    assert buy["evidence_basis"] == "client_reported_not_independently_verified"
     acts, state = replay_ledger(_rows(pm), alias={})
     assert [a.action for a in acts] == ["dividend", "buy"] and not any(a.external for a in acts)
+    assert acts[1].execution_eligible
     assert state.units == {"NDQ.AX": 5.0} and state.cash["AUD"] == pytest.approx(0.0)
     assert history_as_trades(_rows(pm)) == []                           # DRIP 买入不是"执行了某条决议"
     # 同 key 重放：持仓 / 现金 / 两条记录都只有一份
@@ -125,17 +130,38 @@ def test_drip_writes_dividend_and_buy_rows(tmp_path):
     assert _h(pm)["units"] == 105.0 and len(_rows(pm)) == 2
 
 
-def test_drip_default_price_is_stored_raw_close_and_errors_leave_no_trace(tmp_path, monkeypatch):
+def test_drip_missing_fill_price_preserves_observation_without_ledger_mutation(tmp_path, monkeypatch):
     monkeypatch.setattr(ms_mod, "DB_PATH", str(tmp_path / "market_data.db"))
-    pm = _pm(tmp_path / "mem", cash={"AUD": 0.0})
-    with pytest.raises(ValueError, match="reinvest 需要单价"):           # 行情库没有原始价
-        pm.record_dividend("NDQ.AX", 100.0, "AUD", reinvest=True, trade_date="2026-07-01")
+    pm = _pm(tmp_path / "mem", cash={"AUD": 0.0}, history=[{
+        "ts_origin": "2026-06-01T10:00:00", "action": "buy", "symbol": "NDQ.AX",
+        "units": 100.0, "price": 50.0, "currency": "AUD", "funding_source": "external_funding", "source": "mcp",
+    }])
+    paths = [pm.store.path_of("portfolio"), pm.store.root / "portfolio_history.jsonl"]
+    before = {path: path.read_bytes() for path in paths}
+    kwargs = dict(tax_withheld=5.0, reinvest=True, trade_date="2026-07-01", idempotency_key="pending-drip")
+    out = pm.record_dividend("NDQ.AX", 105.0, "AUD", **kwargs)
+    assert out["status"] == "pending_reinvestment_confirmation"
+    assert out["reported_gross"] == 105.0 and out["reported_tax"] == 5.0
+    assert out["income_recorded"] is False and out["portfolio_mutated"] is False
     store = ms_mod.MarketStore()
     store.save_generic_price("NDQ.AX", "2026-06-30", 24.0, close_raw=25.0)
-    store.save_generic_price("NDQ.AX", "2026-05-01", 1.0, close_raw=1.0)    # 太老（> 7 天）不用
     store.conn.close()
-    out = pm.record_dividend("NDQ.AX", 100.0, "AUD", reinvest=True, trade_date="2026-07-01")
-    assert out["reinvested"]["price"] == 25.0 and out["reinvested"]["units"] == 4.0   # 用原始价 25，不是复权价 24
+    # 即使有缓存原始价也不能用它替代真实 DRIP 成交价；重试保留同一份观察。
+    again = pm.record_dividend("NDQ.AX", 105.0, "AUD", **kwargs)
+    assert again["status"] == "pending_reinvestment_confirmation" and again["estimate_id"] == out["estimate_id"]
+    assert {path: path.read_bytes() for path in paths} == before
+    assert pm.cash_amount("AUD") == 0.0 and _h(pm)["units"] == 100.0
+    assert "ledger_idempotency_keys" not in pm.store.read("portfolio").metadata
+    estimate_path, = (pm.store.root / ".evidence" / "tracking_estimates").glob("*.json")
+    observation = json.loads(estimate_path.read_text())["payload"]
+    assert observation["identity"]["plan"] == {
+        "purpose": "dividend_reinvestment_unconfirmed", "gross": 105.0, "tax": 5.0,
+        "currency": "AUD", "client_key": "pending-drip",
+    }
+    assert observation["quote"] == {
+        "reported_net_income": 100.0, "actual_reinvestment_price": None, "actual_quantity": None,
+    }
+    assert observation["execution_observed"] is False and observation["cash_flow_recorded"] is False
     # 业务错误不落账、不烧 key
     pm2 = _pm(tmp_path / "mem2", cash={"AUD": 0.0}, holdings=[
         {"symbol": "NDQ.AX", "kind": "etf", "units": 100.0, "avg_cost": 50.0, "cost_currency": "AUD", "proxy_kind": "direct"}])
@@ -148,6 +174,44 @@ def test_drip_default_price_is_stored_raw_close_and_errors_leave_no_trace(tmp_pa
     for p_ in (pm2, pm3):
         assert p_.cash_amount("AUD") == 0.0 and "ledger_idempotency_keys" not in p_.store.read("portfolio").metadata
     assert [r["action"] for r in _rows(pm3)] == ["buy"]
+
+
+def test_paper_drip_may_use_stored_raw_close_with_simulation_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms_mod, "DB_PATH", str(tmp_path / "market_data.db"))
+    pm = _pm(tmp_path / "paper", cash={"AUD": 0.0})
+    with pm.with_portfolio_tx() as portfolio:
+        portfolio["ledger_domain"] = "paper_simulation"
+    pm._reload()
+    before = pm.store.path_of("portfolio").read_bytes()
+    with pytest.raises(ValueError, match="reinvest 需要单价"):
+        pm.record_dividend("NDQ.AX", 100.0, "AUD", reinvest=True, trade_date="2026-07-01")
+    assert pm.store.path_of("portfolio").read_bytes() == before and _rows(pm) == []
+    store = ms_mod.MarketStore()
+    store.save_generic_price("NDQ.AX", "2026-06-30", 24.0, close_raw=25.0)
+    store.save_generic_price("NDQ.AX", "2026-05-01", 1.0, close_raw=1.0)
+    store.conn.close()
+    out = pm.record_dividend("NDQ.AX", 100.0, "AUD", reinvest=True, trade_date="2026-07-01")
+    assert out["reinvested"] == {"units": 4.0, "price": 25.0, "cost": 100.0}
+    assert _h(pm)["units"] == 104.0 and pm.cash_amount("AUD") == 0.0
+    dividend, buy = _rows(pm)
+    assert dividend["execution_domain"] == buy["execution_domain"] == "paper_simulation"
+    assert buy["evidence_basis"] == "paper_simulated_fill"
+    assert buy["source_reference"]["price_basis"] == "simulated_market_reference"
+    activities, state = replay_ledger(_rows(pm), alias={})
+    assert activities[1].replayable and not activities[1].execution_eligible
+    assert state.units == {"NDQ.AX": 4.0}
+
+
+def test_legacy_drip_without_price_evidence_remains_readable_but_unverified():
+    legacy = {"ts_origin": "2026-07-01T10:00:00", "action": "buy", "source": "drip",
+              "symbol": "NDQ.AX", "units": 5.0, "price": 20.0, "currency": "AUD"}
+    before = json.dumps(legacy, sort_keys=True)
+    activities, state = replay_ledger([legacy], alias={})
+    activity, = activities
+    assert activity.evidence_basis == "legacy_drip_price_basis_unverified"
+    assert activity.replayable and not activity.execution_eligible
+    assert state.units == {"NDQ.AX": 5.0} and state.cash == {"AUD": -100.0}
+    assert json.dumps(legacy, sort_keys=True) == before
 
 
 # ============ interest / fee / tax ============
@@ -418,6 +482,7 @@ def test_drip_on_adjusted_symbol_is_skipped_as_a_pair(tmp_path, monkeypatch):
         _income("dividend", "2026-01-07", 50.0, symbol="AAA", cash_effect=50.0, reinvest=True),
         {"ts_origin": "2026-01-07T10:00:01", "schema_version": 2, "action": "buy", "symbol": "AAA", "units": 5.0,
          "price": 10.0, "currency": "CNY", "source": "drip", "funding_source": "cash_deduct", "external": False,
+         "source_reference": {"price_basis": "client_reported_fill_price"},
          "cash_effect": -50.0, "units_effect": 5.0, "trade_date": "2026-01-07"},
     ]
     holding = {**AAA, "units": 105.0}
@@ -587,8 +652,7 @@ def test_replay_split_uses_ledger_held_not_snapshot_units_effect():
     assert state.units["X"] == 40.0
 
 
-def test_reviewer_scenario_nav_has_no_phantom_opening_units(tmp_path, monkeypatch):
-    px = dict(zip(DAYS, [10.0] * 5))
+def test_reviewer_balance_correction_preserves_math_without_inventing_historical_returns(tmp_path, monkeypatch):
     history = [
         {"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "AAA", "units": 10.0, "price": 20.0,
          "currency": "CNY", "funding_source": "external_funding"},
@@ -597,8 +661,14 @@ def test_reviewer_scenario_nav_has_no_phantom_opening_units(tmp_path, monkeypatc
         {"ts_origin": "2026-01-08T10:00:00", "action": "manual_override", "symbol": "AAA", "units": 40.0,
          "price": 10.0, "currency": "CNY"},
     ]
-    perf, rows = _perf(tmp_path, monkeypatch, {"AAA": px}, {"AAA": dict(px)}, {"CNY": 0.0}, [{**AAA, "units": 40.0}], history)
-    assert perf["data_quality"]["unreconciled"]["units"] == {}
+    _, state = replay_ledger(history, alias={})
+    assert state.units == {"AAA": 40.0}
+    pm = _pm(tmp_path, cash={"CNY": 0.0}, holdings=[{**AAA, "units": 40.0}], history=history)
+    monkeypatch.setattr(ap, "MarketStore", lambda: pytest.fail("A balance delta does not prove the missing execution/cash flow"))
+    perf = ap.build_account_performance(pm, today="2026-01-09")
+    assert perf["status"] == "unverified_execution_history" and perf["financial_performance_eligible"] is False
+    assert perf["ledger_evidence"]["balance_adjustments_not_executions"] == 1
+    assert pm.find_holding("AAA")["units"] == 40.0
 
 
 # ============ 评审 #482：价格口径缺口 / 边界 / DRIP raw 口径 ============
@@ -651,6 +721,7 @@ def test_drip_on_raw_basis_keeps_nav_continuous(tmp_path, monkeypatch):
         _income("dividend", "2026-01-07", 50.0, symbol="AAA", cash_effect=50.0, reinvest=True),
         {"ts_origin": "2026-01-07T10:00:01", "schema_version": 2, "action": "buy", "symbol": "AAA", "units": drip_units,
          "price": 9.5, "currency": "CNY", "source": "drip", "funding_source": "cash_deduct", "external": False,
+         "source_reference": {"price_basis": "client_reported_fill_price"},
          "cash_effect": -drip_units * 9.5, "units_effect": drip_units, "trade_date": "2026-01-07"},
     ]
     holding = {**AAA, "units": 100.0 + drip_units}

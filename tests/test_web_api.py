@@ -1028,7 +1028,7 @@ def skill_client(client, monkeypatch):
 
 # cmd_status 的输出 key 集——/api/skill/status 必须与 CLI 同形状（防 local/remote 漂移）
 _CLI_STATUS_KEYS = {
-    "user", "cash", "gold", "all_holdings",
+    "user", "cash", "gold", "all_holdings", "ledger_evidence",
     "total_assets_cny", "fx", "live_prices",
     "performance",   # 真实账户业绩块（TWR/XIRR/回撤/vs 基准），CLI / MCP / REST 同一视图
 }

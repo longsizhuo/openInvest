@@ -87,6 +87,58 @@ _FUND_ORDER = _FUND_CASH_MOVES | {"fund_order_confirmed"}
 # 在途余额的增减符号（按订单面值 amount）
 PENDING_SIGN = {"fund_order_placed": 1.0, "fund_order_confirmed": -1.0, "fund_order_cancelled": -1.0}
 _EPS = 1e-9
+BALANCE_CORRECTION_ACTION='manual_override'
+
+
+def balance_observation_correction(row: Mapping[str,Any]) -> bool:
+    return (row.get('action')==BALANCE_CORRECTION_ACTION
+            and row.get('evidence_basis')=='client_reported_balance_observation')
+
+
+def absolute_balance_correction(row: Mapping[str,Any]) -> bool:
+    """An absolute balance is not proof of an intervening trade or cash flow."""
+    return row.get('action')==BALANCE_CORRECTION_ACTION
+
+
+def execution_basis(row: Mapping[str, Any]) -> str:
+    """Producer semantics, independent of profitability or guessed source names."""
+    pair=(str(row.get('source') or ''),str(row.get('action') or '').lower())
+    explicit=row.get('evidence_basis')
+    positive={'client_reported_not_independently_verified','broker_observed_fill'}
+    if isinstance(explicit,str) and explicit and explicit not in positive:return explicit
+    if pair==('dca_daily','buy'):return 'unobserved_dca_projection'
+    if pair in {('reconcile_dca_phantom','dca_reconcile_backfill'),('reconcile_dca_phantom','dca_reconcile_reverse'),
+                ('dca_reconcile','dca_reconcile_backfill'),('dca_reconcile','dca_reconcile_reverse')}:
+        return 'algorithmic_projection_correction'
+    if pair==('fund_auto_confirm','fund_order_confirmed'):return 'nav_calculated_without_execution_confirmation'
+    if pair[0]=='paper_autopilot':return 'paper_simulated_fill'
+    reference=row.get('source_reference')
+    reference=reference if isinstance(reference,dict) else {}
+    if pair[0]=='drip':
+        return ('client_reported_not_independently_verified' if reference.get('price_basis')=='client_reported_fill_price'
+                else 'legacy_drip_price_basis_unverified')
+    if pair[0]=='ibkr_autopilot':
+        return 'broker_observed_fill' if explicit=='broker_observed_fill' and reference.get('exec_id') else 'broker_receipt_details_unverified'
+    if explicit=='broker_observed_fill':return 'unreviewed_broker_producer'
+    return 'client_reported_not_independently_verified'
+
+
+def execution_domain(row: Mapping[str,Any]) -> str:
+    basis=execution_basis(row)
+    value=str(row.get('execution_domain') or '')
+    if basis=='paper_simulated_fill' or row.get('source')=='paper_autopilot':return 'paper_simulation'
+    if basis in {'unobserved_dca_projection','algorithmic_projection_correction','nav_calculated_without_execution_confirmation',
+                 'market_price_projection','tracking_projection'}:return 'projection'
+    if row.get('source')=='ibkr_autopilot' or basis=='broker_observed_fill':
+        return value if value in {'broker_live','broker_paper','broker_unknown'} else 'broker_unknown'
+    if value in {'paper_simulation','projection','unknown','broker_unknown','broker_paper'}:return value
+    return 'client_reported'
+
+
+def unobserved_execution(row: Mapping[str, Any]) -> bool:
+    if execution_basis(row)=='client_reported_balance_observation':return False
+    if execution_basis(row)=='broker_receipt_details_unverified':return False
+    return execution_basis(row) not in {'client_reported_not_independently_verified','broker_observed_fill'}
 
 
 @dataclass
@@ -97,6 +149,8 @@ class LedgerState:
     cash: Dict[str, float] = field(default_factory=dict)       # Σ cash_effect
     pending: Dict[str, float] = field(default_factory=dict)    # 场外基金在途金额（面值）按币种：placed + / confirmed·cancelled −
     unknown: int = 0                                           # 不进回放的行数：未知 action / 无可用日期 / 数值解析失败（仍在 Activity 列表里）
+    unobserved_execution_rows: int = 0                         # 数学投影可回放，但不能作为真实成交或收益标签
+    observation_rows: int = 0                                 # 零效应费用等凭证，不制造交易/资金流
 
 
 def _day(r: Mapping[str, Any]) -> str:
@@ -118,12 +172,16 @@ def _opt_f(v: Any) -> Optional[float]:
 _ACTION = {**_BUY_LIKE, "gift": "gift", "sell": "sell", "sold": "sell", "deposit": "deposit", "withdraw": "withdraw",
            "manual_override": "correction", "delete_holding": "delete_holding",
            **{a: a for a in _CASH_ONLY - _CASH_ACTIONS}, "split": "split", **{a: a for a in _FUND_ORDER}}
+_ACTION['broker_fee_report']='broker_fee_report'
+_ACTION['balance_observation']='balance_observation'
 
 
 def _effects(raw_action: str, r: Mapping[str, Any], sym: str, held: Mapping[str, float]) -> Dict[str, Any]:
     """数量 / 金额 / 现金与持仓效果。数值字段解析不了会抛 ValueError / TypeError（调用方降级为 unparsed）。"""
     if raw_action not in _ACTION:
         return {"action": "unknown"}
+    if raw_action in {'broker_fee_report','balance_observation'}:
+        return {'action':raw_action,'cash_effect':0,'units_effect':0,'external':False}
     units = float(r.get("units") or 0)
     price = float(r.get("price") or r.get("price_per_unit") or 0)
     amount = float(r.get("total_amount") or abs(units) * price)
@@ -174,8 +232,11 @@ def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mappi
         trade_date=day if len(day) == 10 else None,
         settle_date=_s(r.get("settle_date")), nav_date=_s(r.get("nav_date")),
         source="dca_reconcile" if raw_action in _RECONCILE else _s(r.get("source")),
+        evidence_basis=execution_basis(r),
+        execution_domain=execution_domain(r),source_reference=r.get('source_reference'),fee_status=r.get('fee_status'),
+        execution_time=r.get('execution_time'),execution_time_precision=r.get('execution_time_precision'),
         idempotency_key=_s(r.get("idempotency_key")), note=_s(r.get("note")),
-        fee=_opt_f(r.get("fee")), ts=_s(r.get("ts_origin") or r.get("ts")), seq=seq, raw=r,
+        fee=_opt_f(r.get("fee")), ts=_s(r.get('execution_time') or (None if execution_domain(r).startswith('broker_') else r.get("ts_origin") or r.get("ts"))), seq=seq, raw=r,
     )
     try:
         f.update(_effects(raw_action, r, sym, held))
@@ -190,6 +251,9 @@ def _activity(seq: int, r: Dict[str, Any], alias: Mapping[str, str], held: Mappi
                     f[k] = float(r[k])
             if r.get("external") is not None:
                 f["external"] = bool(r["external"])
+        reference=r.get('source_reference')
+        if isinstance(reference,dict) and (reference.get('sec_type')=='CASH' or reference.get('kind') in {'fx_conversion','fx_conversion_rollback'}):
+            f['external']=False
     except (TypeError, ValueError):
         f.update(action=_ACTION.get(raw_action, "unknown"), unparsed=True)
     return Activity(**f)
@@ -232,6 +296,10 @@ def replay_ledger(records: List[Dict[str, Any]], *, alias: Mapping[str, str]) ->
     for seq, r in sorted(enumerate(records), key=lambda p: _day(p[1])):
         a = _activity(seq, r, alias, state.units)
         out.append(a)
+        state.unobserved_execution_rows+=int(unobserved_execution(r))
+        if a.action in {'broker_fee_report','balance_observation'}:
+            state.observation_rows+=1
+            continue
         if not a.replayable:
             state.unknown += 1
             continue
@@ -245,6 +313,8 @@ def external_flow(a: Activity) -> float:
     deposit / withdraw 就是 ``cash_effect``；external_funding 的买卖与赠股是新钱直接变持仓
     （``cash_effect`` = 0），流量 = ``±amount``（符号随 ``units_effect``）。
     """
+    # This is recorded-flow arithmetic for reconciliation. Actual performance
+    # readers must separately require execution_eligible/source qualification.
     if not a.external:
         return 0.0
     if a.action in _CASH_ACTIONS:
@@ -280,4 +350,4 @@ def recent_income(activities: List[Activity], since: str) -> Dict[str, Dict[str,
     return out
 
 
-__all__ = ["LedgerState", "PENDING_SIGN", "external_flow", "later_split_factors", "recent_income", "replay_ledger"]
+__all__ = ["LedgerState", "PENDING_SIGN", "external_flow", "later_split_factors", "recent_income", "replay_ledger","execution_basis","execution_domain","unobserved_execution","BALANCE_CORRECTION_ACTION","balance_observation_correction","absolute_balance_correction"]

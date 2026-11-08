@@ -317,6 +317,8 @@ def run_committee_for_symbol(
         portfolio_summary=portfolio_summary,
     ))
     if not _advisory:
+        from openinvest.services.ledger_evidence import account_source_status
+        input_health.update(ledger_evidence=account_source_status(pm),target_symbol=symbol)
         from openinvest.services.review_plans import plan_brief, observe_prepared_market
         observe_prepared_market(pm.store, symbol, df)
         existing_plans=plan_brief(pm.store, symbol)
@@ -334,6 +336,7 @@ def run_committee_for_symbol(
             "ohlcv_snapshot": market_snapshot(df),
             "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
             "source_plan_refs":getattr(existing_plans,'plan_refs',[]),
+            "ledger_evidence":input_health['ledger_evidence'],
             "trigger_requests":bind_context_requests(pm.store.root,symbol,effective_event_brief,utc_now().isoformat()),
         }, model=get_llm_config_safe()[2] or "unknown", expected_state=prepared_state)
         input_health = {**input_health, "context_id": context["context_id"],

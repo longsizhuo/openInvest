@@ -43,6 +43,20 @@ def enforce_input_health(verdict: dict, health: dict) -> None:
         verdict.update(verdict="UNCLEAR" if no_proposal else "HOLD", alloc_cny=0, confidence=0.0,
                        decision_status="DATA_UNTRUSTED", hold_reason=verdict.get("hold_reason") if no_proposal else "incomplete_required_inputs")
         health.update(decision_status="DATA_UNTRUSTED", input_errors=reasons)
+    account=health.get('ledger_evidence') or {}
+    target=(account.get('holdings') or {}).get(health.get('target_symbol'),{})
+    quantity=target.get('current_quantity','client_recorded')
+    if (not reasons and verdict.get('verdict') in {'TRIM','SELL'}
+            and (account.get('status')=='unavailable' or quantity in {'estimated_or_proxy_unreconciled','broker_observed_domain_unresolved'}
+                 or str(quantity).startswith('balance_observation_'))):
+        verdict.setdefault('_original_alloc',verdict.get('alloc_cny'))
+        verdict.update(alloc_cny=0,decision_status='REVIEW_REQUIRED',account_execution_unverified=True)
+        health.update(decision_status='REVIEW_REQUIRED',account_reconciliation_required=True)
+    if (not reasons and verdict.get('verdict') in {'ACCUMULATE','BUY'}
+            and (account.get('status')=='unavailable' or account.get('allocation_cash_eligible') is False)):
+        verdict.setdefault('_original_alloc',verdict.get('alloc_cny'))
+        verdict.update(alloc_cny=0,decision_status='REVIEW_REQUIRED',account_execution_unverified=True)
+        health.update(decision_status='REVIEW_REQUIRED',account_reconciliation_required=True)
 
 
 def advice_qualified(verdict: dict) -> bool:
@@ -80,7 +94,8 @@ def preparation_state(memory_root: Path) -> dict:
     from openinvest.core.evidence_eligibility import Eligibility
     Eligibility(owner).excluded_ids()
     files = {}
-    for relative in ("memory/user.md", "memory/strategy.md", "memory/portfolio.md",
+    for relative in ("memory/user.md", "memory/strategy.md", "memory/portfolio.md","memory/portfolio_history.jsonl",
+                     "memory/.state/account_observation_heads.json",
                      "memory/.state/config_overrides.json", "integrity/eligibility.json", "integrity/exclusions.jsonl"):
         path = memory_root / relative.removeprefix("memory/") if relative.startswith("memory/") else owner / relative
         if path.exists():
@@ -88,6 +103,10 @@ def preparation_state(memory_root: Path) -> dict:
             files[relative] = (st.st_ino, st.st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
         else:
             files[relative] = None
+    estimates=memory_root/'.evidence/tracking_estimates'
+    files['tracking_estimate_receipts']={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(estimates.glob('*.json'))}
+    for kind in ('broker_fee_reports','broker_fee_applications'):
+        files[kind]={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted((memory_root/'.evidence'/kind).glob('*.json'))}
     return {"files": files, "config": config_snapshot(), "code": code_version()}
 
 
@@ -138,6 +157,9 @@ def prepare_context(memory_root: Path, symbol: str, inputs: dict, *, model: str 
         raise ValueError("DATA_UNTRUSTED: pending risk causes are not covered by these inputs; prepare again")
     context_id = uuid.uuid4().hex
     config = config_snapshot()
+    from openinvest.services.ledger_evidence import store_source_status
+    from openinvest.core.memory_store import MemoryStore
+    ledger_evidence=store_source_status(MemoryStore(Path(memory_root)))
     payload = {
         "context_id": context_id, "symbol": symbol, "prepared_at": utc_now().isoformat(),
         "code_version": code_version(), "config": config, "config_sha256": digest(config),
@@ -145,6 +167,7 @@ def prepare_context(memory_root: Path, symbol: str, inputs: dict, *, model: str 
         "source_event_versions":dict(getattr(inputs.get("event_brief"),"event_versions",{})),
         "source_event_lineage_captured":hasattr(inputs.get("event_brief"),"event_versions") or not inputs.get("event_brief"),
         "source_plan_lineage_captured":'=== EXISTING REVIEW PLAN ===' not in str(inputs.get('portfolio_summary') or '') or bool(inputs.get('source_plan_refs')),
+        "account_evidence_fingerprint":ledger_evidence.get('content_sha256'),
         "origin": "synthetic" if os.getenv("INVEST_TEST_ISOLATED") == "1" else "prospective", "availability_evidence": "captured_before_inference",
         "historical_vintage_reconstructed": False,
         "eligibility_version": _eligibility_version(owner),
@@ -187,6 +210,12 @@ def load_context(memory_root: Path, context_id: str, symbol: str, *,
     for name, content in payload.get("documents", {}).items():
         if (Path(memory_root) / f"{name}.md").read_text() != content:
             raise ValueError("portfolio or user constraints changed after prepare; prepare again")
+    from openinvest.services.ledger_evidence import store_source_status
+    from openinvest.core.memory_store import MemoryStore
+    ledger_evidence=store_source_status(MemoryStore(Path(memory_root)))
+    if (payload.get('account_evidence_fingerprint') is None or ledger_evidence.get('content_sha256') is None
+            or payload.get('account_evidence_fingerprint')!=ledger_evidence.get('content_sha256')):
+        raise ValueError('account evidence changed after prepare; prepare again')
     from openinvest.services.agent_queue import pending_committee_items
     prepared=datetime.fromisoformat(payload["prepared_at"])
     for group in pending_committee_items(memory_root=memory_root):

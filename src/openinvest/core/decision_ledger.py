@@ -17,12 +17,15 @@ from __future__ import annotations
 from openinvest.core.decision_calc import (  # noqa: F401
     MATCH_WINDOW_DAYS,
     _VERDICT_DIRECTION,
+    _REAL_EXECUTION_DOMAINS,
     _match_trades,
     _safe_stem,
     _vid_matches,
     history_as_trades,
+    execution_domain as _execution_domain,
     summarize_decisions,
 )
+from openinvest.calc.ledger_replay import execution_basis, unobserved_execution
 
 import json
 import logging
@@ -203,10 +206,15 @@ def record_execution(
     reason: Optional[str] = None,
     trade_ids: Optional[List[int]] = None,
     path: Optional[Path] = None,
+    *,
+    execution_domain: str = "client_reported",
+    evidence_basis: Optional[str] = None,
+    source_reference: Optional[str] = None,
 ) -> Dict[str, Any]:
     """记录用户对某决议的执行/拒绝（宿主 Agent 通过 CLI/API/MCP 回写）。
 
-    幂等（ADR-016）：与该 decision_id 现存最新记录内容相同 → 跳过 append。
+    非真实域的 executed 只表示域内执行，落盘顶层 executed=False；模拟结果另存。
+    幂等（ADR-016）：与该 decision_id + execution_domain 最新记录内容相同 → 跳过 append。
     check-then-append 全程持排他锁——HTTP 重试 / agent 重发 / CLI 与 MCP
     并发同写时不会双记（ADR-016 的原子幂等闸要求）。锁用 memory_store 的 sidecar flock
     （与其它 jsonl 追加同一纪律），不再直接 flock 数据文件。
@@ -216,14 +224,26 @@ def record_execution(
 
     if "/" not in decision_id:
         raise ValueError(f"decision_id 应为 '<date>/<symbol>'，收到: {decision_id!r}")
+    domain = _execution_domain({"execution_domain": execution_domain, "reason": reason,
+                                "evidence_basis": evidence_basis})
+    real = domain in _REAL_EXECUTION_DOMAINS
     rec = {
-        "schema": 1,
+        "schema": 2,
         "decision_id": decision_id,
-        "executed": bool(executed),
+        # Keep older consumers from reading a simulated fill as user adoption.
+        "executed": bool(executed) if real else False,
+        "execution_domain": domain,
+        "evidence_basis": evidence_basis or (
+            "paper_simulated_fill" if domain == "paper_simulation"
+            else "client_reported_not_independently_verified"),
+        "source_reference": source_reference,
+        "domain_execution_state": "executed" if executed else "not_executed",
         "reason": reason or None,
         "trade_ids": trade_ids or None,
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
     }
+    if domain == "paper_simulation":
+        rec["simulated_execution"] = bool(executed)
     p = path or _executions_path()
     with _file_lock(p), p.open("a+", encoding="utf-8", newline="\n") as f:
         # 过渡一版（下个版本可删）：旧版本进程只 flock 数据文件本身、不认 sidecar，长寿命进程
@@ -241,11 +261,13 @@ def record_execution(
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if r.get("decision_id") == decision_id:
+            if r.get("decision_id") == decision_id and _execution_domain(r) == domain:
                 latest = r
         if latest is not None and all(
             latest.get(k) == rec[k] for k in ("executed", "reason", "trade_ids")
-        ):
+        ) and all(latest.get(k) == rec[k] for k in (
+            "execution_domain", "evidence_basis", "source_reference", "domain_execution_state"
+        )):
             return latest  # 重放/重试，幂等跳过（锁随 with 释放）
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return rec
@@ -276,10 +298,20 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
 
     interventions = _load_jsonl(MemoryStore().root / ".dreams" / "interventions.jsonl")
     reviews = _load_jsonl(MemoryStore().root / ".dreams" / "verdict_review.jsonl")
-    executions: Dict[str, Dict[str, Any]] = {}
+    executions: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    real_executions: Dict[str, Dict[str, Any]] = {}
     for r in _load_jsonl(_executions_path()):
         if r.get("decision_id"):
-            executions[r["decision_id"]] = r  # 后写覆盖 → 最新记录生效
+            domain = _execution_domain(r)
+            normalized = {**r, "execution_domain": domain}
+            if domain == "paper_simulation":
+                # Historical paper_autopilot rows used executed=True without a
+                # domain. Preserve that simulation result without real adoption.
+                normalized["simulated_execution"] = r.get("simulated_execution", bool(r.get("executed")))
+                normalized["executed"] = False
+            executions.setdefault(r["decision_id"], {})[domain] = normalized
+            if domain in _REAL_EXECUTION_DOMAINS and not unobserved_execution(r):
+                real_executions[r["decision_id"]] = normalized
 
     try:
         trades = TradesDB().list_trades(limit=10000)
@@ -322,7 +354,16 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
                        and r.get("source") == "live"), None)
             matched = _match_trades(trades, decision_id, date, symbol, parsed["verdict"],
                                     run_at=parsed.get("run_at"))
-            decl = executions.get(decision_id)
+            linked = [t for t in trades if t.get("verdict_id")
+                      and _vid_matches(t["verdict_id"], decision_id, date, symbol)]
+            declarations = executions.get(decision_id, {})
+            decl = real_executions.get(decision_id)
+            simulation = declarations.get("paper_simulation")
+            simulated_matches = _match_trades(
+                trades, decision_id, date, symbol, parsed["verdict"],
+                run_at=parsed.get("run_at"), execution_domain="paper_simulation")
+            simulated_executed = (bool(simulation.get("simulated_execution"))
+                                  if simulation is not None else True if simulated_matches else None)
 
             executed: Optional[bool] = None  # None = 未知（无声明也无匹配依据）
             if decl is not None:
@@ -351,10 +392,21 @@ def list_decisions(days: int = 90) -> List[Dict[str, Any]]:
                 },
                 "executed": executed,
                 "execution": decl,
+                "simulated_executed": simulated_executed,
+                "simulated_execution": simulation,
+                "domain_executions": declarations,
+                # A verdict link also has research value for planned/projected
+                # or paper rows, without asserting any real-world execution.
+                "linked_trades": [{**t, "execution_domain": _execution_domain(t),
+                                   "evidence_basis": execution_basis(t)} for t in linked],
                 "matched_trades": [
-                    {k: t.get(k) for k in ("id", "ts", "direction", "units", "price", "status")}
+                    {**{k: t.get(k) for k in ("id", "ts", "direction", "units", "price", "status",
+                                          "source", "evidence_basis", "execution_domain", "fee_status",
+                                          "source_reference")},
+                     "execution_domain": _execution_domain(t), "evidence_basis": execution_basis(t)}
                     for t in matched
                 ],
+                "simulated_matched_trades": [dict(t) for t in simulated_matches],
                 "outcome": None if rv is None else {
                     "actual_returns": rv.get("actual_returns"),
                     "hits": rv.get("hits"),

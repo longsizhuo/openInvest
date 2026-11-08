@@ -104,6 +104,12 @@ def build_status_view() -> Dict[str, Any]:
     from openinvest.utils.quotes import get_quote
     pm = PortfolioManager()
 
+    from openinvest.services.ledger_evidence import account_source_status
+    from openinvest.utils.portfolio_summary import balance_field_qualified, holding_source_grade, source_status_readable
+    ledger_evidence=account_source_status(pm)
+    source_available = source_status_readable(ledger_evidence)
+    cash_qualified = source_available and ledger_evidence.get("allocation_cash_eligible", True)
+    paper = ledger_evidence.get("ledger_domain") in {"paper_simulation", "broker_paper"}
     cash_cny = pm.cash_amount("CNY")
     held = [h for h in pm.holdings if h.get("symbol") and not h.get("is_tracking_only")]
 
@@ -138,7 +144,10 @@ def build_status_view() -> Dict[str, Any]:
     # 失败不阻断 status（持仓/现金是硬需求，业绩是附加块）。
     try:
         from openinvest.services.account_performance import build_account_performance
-        performance = build_account_performance(pm)
+        performance = (build_account_performance(pm) if source_available else {
+            "status": "unavailable", "reason": "account_source_history_unavailable",
+            "financial_performance_eligible": False,
+        })
     except Exception as e:  # noqa: BLE001
         performance = {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
@@ -201,6 +210,25 @@ def build_status_view() -> Dict[str, Any]:
         view["alerts"], alert_price = _alerts_for(sym, h)
         if view.get("current_price") is None and alert_price is not None:  # 追踪仓：线是按哪个价算的要看得见
             view["current_price"] = round(alert_price, 6)
+        grade=holding_source_grade(ledger_evidence,sym)
+        view['source_evidence']=grade
+        quantity_qualified = balance_field_qualified(grade, "current_quantity")
+        cost_qualified = balance_field_qualified(grade, "cost_basis")
+        view.update(units_basis=grade["current_quantity"], cost_basis=grade["cost_basis"],
+                    execution_domain=ledger_evidence.get("ledger_domain", "unknown"))
+        if not quantity_qualified or not cost_qualified:
+            view["tracking_projection"] = {key: view.get(key) for key in (
+                "units", "avg_cost", "market_value", "market_value_cny")}
+            view.update(pnl=None,pnl_pct=None,pnl_basis="unknown")
+        else:
+            view["pnl_basis"] = "paper_simulated" if paper else "client_recorded_unrealized"
+        if not quantity_qualified:
+            view.update(units=None,actual_quantity=None,market_value=None,market_value_cny=None,
+                        market_value_basis="unknown")
+        else:
+            view["market_value_basis"] = "paper_simulated" if paper else "reported_quantity_at_market_price"
+        if not cost_qualified:
+            view.update(avg_cost=None,actual_cost_basis=None)
         holding_views.append(view)
     # 设了报警线但没有持仓行的跟踪标的：也要让用户在 status 里看到线与距离（追踪仓行，无仓位）。
     # 键与普通行对齐（拉不到价 = null），外部脚本按 h["current_price"] 取值不会 KeyError
@@ -218,44 +246,78 @@ def build_status_view() -> Dict[str, Any]:
     gold_hs = [h for h in held if _is_gold_gram(h)]
     gold_block: Dict[str, Any] = {}
     if gold_hs:
-        grams = sum(float(h.get("units", 0) or 0) for h in gold_hs)
-        gold_avg = sum(float(h.get("units", 0) or 0) * float(h.get("avg_cost", 0) or 0) for h in gold_hs) / grams if grams else 0.0
+        gold_views = [view for view in holding_views if view.get("symbol") in {h["symbol"] for h in gold_hs}]
+        quantity_qualified = all(view.get("units") is not None for view in gold_views)
+        cost_qualified = quantity_qualified and all(view.get("avg_cost") is not None for view in gold_views)
+        grams = sum(float(view["units"]) for view in gold_views) if quantity_qualified else None
+        cost_total = sum(float(view["units"]) * float(view["avg_cost"]) for view in gold_views) if cost_qualified else None
+        gold_avg = cost_total / grams if cost_total is not None and grams else 0.0 if cost_qualified else None
         gold_now = next((current_prices[str(h["symbol"])] for h in gold_hs if str(h["symbol"]) in current_prices), None)
+        values = [view.get("market_value_cny") for view in gold_views]
+        pnls = [view.get("pnl") for view in gold_views]
+        gold_pnl = sum(pnls) if all(value is not None for value in pnls) else None
         gold_block = {
             "grams": grams,
-            "avg_cost_cny_per_gram": round(gold_avg, 4),
+            "avg_cost_cny_per_gram": round(gold_avg, 4) if gold_avg is not None else None,
             # 金价拉不到就是 null，不再拿 0 当现价算出"亏光"的 pnl
             "now_cny_per_gram": round(gold_now, 2) if gold_now else None,
-            "value_cny": round(gold_now * grams, 2) if gold_now else None,
-            "pnl_cny": round((gold_now - gold_avg) * grams, 2) if gold_now and gold_avg else None,
-            "pnl_pct": round(((gold_now / gold_avg) - 1) * 100, 2) if gold_now and gold_avg > 0 else None,
+            "value_cny": round(sum(values), 2) if all(value is not None for value in values) else None,
+            "pnl_cny": round(gold_pnl, 2) if gold_pnl is not None else None,
+            "pnl_pct": round(gold_pnl / cost_total * 100, 2) if gold_pnl is not None and cost_total else None,
+            "source_evidence": {view["symbol"]: view["source_evidence"] for view in gold_views},
+            "pnl_basis": "paper_simulated" if paper and gold_pnl is not None else "client_recorded_unrealized" if gold_pnl is not None else "unknown",
         }
+        if not quantity_qualified or not cost_qualified:
+            raw_grams = sum(float(h.get("units") or 0) for h in gold_hs)
+            gold_block["tracking_projection"] = {
+                "grams": raw_grams,
+                "avg_cost_cny_per_gram": (sum(float(h.get("units") or 0) * float(h.get("avg_cost") or 0)
+                                                for h in gold_hs) / raw_grams) if raw_grams else None,
+            }
+
+    total_qualified = cash_qualified and all(
+        balance_field_qualified(holding_source_grade(ledger_evidence, str(h["symbol"])), "current_quantity")
+        and (_value_status.get(str(h["symbol"])) != "cost_fallback"
+             or balance_field_qualified(holding_source_grade(ledger_evidence, str(h["symbol"])), "cost_basis"))
+        for h in held)
+    notices = {}
+    if not source_available:
+        notices["source_warning"] = "[QUALITY_ALERT] 账本来源资格暂无法核对；数量、成本、可用资金和盈亏均未知。"
+    elif ledger_evidence.get("status") == "requires_reconciliation" or any(
+        not balance_field_qualified(holding_source_grade(ledger_evidence, str(h["symbol"])), field)
+        for h in held for field in ("current_quantity", "cost_basis")):
+        notices["source_warning"] = "[QUALITY_ALERT] 数量、成本、账户域或费用仍有待核字段；未知字段不报告实际盈亏。"
+    if paper:
+        notices["account_label"] = "纸面/模拟账户；以下金额、成本和盈亏为模拟数据，不表示用户真实资金或实盘采纳。"
 
     return {
+        **notices,
+        "ledger_evidence":ledger_evidence,
         "user": {
             "name": pm.user.get("display_name") if pm.user else "unknown",
             "risk_tolerance": pm.user.get("risk_tolerance") if pm.user else None,
         },
         "cash": {
-            "cny": round(cash_cny, 2),
+            "cny": round(cash_cny, 2) if cash_qualified else None,
             **({
-                "aud": round(pm.cash_amount("AUD"), 2),
-                "aud_in_cny": round(pm.cash_amount("AUD") * audcny, 2) if audcny else None,
+                "aud": round(pm.cash_amount("AUD"), 2) if cash_qualified else None,
+                "aud_in_cny": round(pm.cash_amount("AUD") * audcny, 2) if cash_qualified and audcny else None,
             } if "AUD" in ccys else {}),
             # v2 通用：列出所有币种（其他 agent 想读非 CNY/AUD 时方便）
-            "all_currencies": pm.cash,
+            "all_currencies": pm.cash if cash_qualified else {ccy: None for ccy in pm.cash},
         },
         **({"gold": gold_block} if gold_block else {}),
         # v2 新增：完整 holdings 数组（其他 yfinance symbol 也能被 agent 看到）
         "all_holdings": holding_views,
-        "total_assets_cny": total_cny,
+        "total_assets_cny": total_cny if total_qualified else None,
+        **({"tracking_projection": {"total_assets_cny": total_cny, "cash": pm.cash}} if not total_qualified else {}),
         # 真实账户业绩：twr_30d / twr_ytd / twr_all / xirr / max_drawdown / volatility_annual /
         # benchmark / data_quality（基准币种）；历史不足 → {"status": "insufficient_history"}
         "performance": performance,
         # 最近 30 天分红 / 利息合计（没有记录就不出这个键）
-        **({"income_30d": income} if (income := _income_30d(pm)) else {}),
+        **({"income_30d": income} if source_available and (income := _income_30d(pm)) else {}),
         # 在途场外基金申购（ADR-027 D6）：现金已扣、份额待确认，total_assets_cny 已按面值含它；没有在途单就不出这两个键
-        **_pending_fund_fields(pm),
+        **(_pending_fund_fields(pm) if source_available else {}),
         # 拉不到汇率 / 价格、没算进 total 的条目——有就列出来，别让总资产悄悄偏小
         **({"total_assets_excludes": unvalued(_value_status)} if unvalued(_value_status) else {}),
         "fx": {f"{c.lower()}cny": round(r, 4) for c, r in fx_rates.items() if r},

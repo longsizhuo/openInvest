@@ -26,6 +26,14 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
             if row:
                 by_symbol[row.get("symbol") or path.stem].append((dt, row))
     out = []
+    if (root/'portfolio.md').exists():
+        from openinvest.services.ledger_evidence import store_source_status
+        from openinvest.core.memory_store import MemoryStore
+        ledger=store_source_status(MemoryStore(root))
+        if ledger['status'] in {'requires_reconciliation','unavailable'}:
+            out.append({'key':'quality:ledger_sources:'+str(ledger.get('content_sha256','unavailable')),
+                        'since':datetime.fromtimestamp((root/'portfolio.md').stat().st_mtime,timezone.utc),
+                        'text':'[QUALITY_ALERT] 账本存在未核对的估算/价值代理或来源缺口；当前数量、成本与历史成交须分别核对，不把它们自动当真实成交、实际收益或学习标签。'})
     from openinvest.core.evidence_eligibility import Eligibility, EvidenceIntegrityError
     try:
         Eligibility(root.parent).excluded_ids()

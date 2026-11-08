@@ -20,10 +20,32 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Dict, Sequence
+import json
+from typing import TYPE_CHECKING, Any, Dict, Sequence
 
 if TYPE_CHECKING:
     from openinvest.core.portfolio_manager import PortfolioManager
+
+
+_READABLE_LEDGER_STATUSES = frozenset({"client_recorded", "simulation_only", "requires_reconciliation"})
+_QUALIFIED_BALANCE_BASES = frozenset({"client_recorded", "client_observed_balance", "broker_recorded",
+                                    "paper_simulated", "broker_paper_recorded"})
+
+
+def source_status_readable(evidence: Dict[str, Any]) -> bool:
+    return evidence.get("status") in _READABLE_LEDGER_STATUSES
+
+
+def holding_source_grade(evidence: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+    """Missing provenance never defaults to a reported client balance."""
+    grade = dict((evidence.get("holdings") or {}).get(symbol) or {})
+    for field in ("current_quantity", "current_value", "cost_basis"):
+        grade[field] = (grade.get(field) or "unknown") if source_status_readable(evidence) else "unknown"
+    return grade
+
+
+def balance_field_qualified(grade: Dict[str, Any], field: str) -> bool:
+    return grade.get(field) in _QUALIFIED_BALANCE_BASES
 
 
 def portfolio_summary_text(
@@ -48,45 +70,68 @@ def portfolio_summary_text(
     """
     from openinvest.utils.base_currency import base_currency, money
     base = base_currency()
+    from openinvest.services.ledger_evidence import account_source_status
+    ledger_evidence=account_source_status(pm)
+    source_available = source_status_readable(ledger_evidence)
+    cash_qualified = source_available and ledger_evidence.get("allocation_cash_eligible", True)
+    paper = ledger_evidence.get("ledger_domain") in {"paper_simulation", "broker_paper"}
+    def has_market_price(symbol):
+        price = current_prices.get(symbol)
+        return isinstance(price, (int, float)) and math.isfinite(price) and price > 0
+    valuation_qualified = all(
+        balance_field_qualified(holding_source_grade(ledger_evidence, str(h.get("symbol") or "")), "current_quantity")
+        and (has_market_price(str(h.get("symbol") or ""))
+             or balance_field_qualified(holding_source_grade(ledger_evidence, str(h.get("symbol") or "")), "cost_basis"))
+        for h in pm.holdings if not h.get("is_tracking_only"))
     cash_base = pm.cash_amount(base)
     aud_cash = pm.cash_amount("AUD")
-    risk_level = str(pm.user.get("risk_tolerance", "Balanced"))
+    risk_level = str(pm.user.get("risk_tolerance") or "未提供")
     # 可投子弹 = 所有币种现金折算成基准币种（方案 A，2026-10）；只有基准币种现金时与旧口径相同
     from openinvest.utils.fx import dry_powder as _dry_powder
-    dry_powder, dp_missing = _dry_powder(pm, base)
+    dry_powder, dp_missing = _dry_powder(pm, base) if cash_qualified else (None, [])
     foreign_cash = {str(c).upper(): float(a or 0) for c, a in pm.cash.items()
                     if str(c).upper() != base and float(a or 0) > 0}
 
     # 总资产是否可用：NaN / 非有限（上游某腿不可解析污染了 total）时显式降级，
     # 绝不渲染 ¥nan 或据假值算集中度。
     total_ok = (
-        isinstance(total_assets, (int, float))
+        cash_qualified and valuation_qualified and isinstance(total_assets, (int, float))
         and math.isfinite(total_assets)
         and total_assets > 0
     )
     total_str = money(total_assets, base) if total_ok else ("¥不可用" if base == "CNY" else "不可用")
-    if excluded:
+    if not source_available:
+        total_str = "未知（来源资格暂无法核对）"
+    elif not valuation_qualified and isinstance(total_assets, (int, float)) and math.isfinite(total_assets):
+        total_str = "未核跟踪投影 " + money(total_assets, base) + "（非已确认账户余额）"
+    if excluded and source_available:
         total_str += f"（未计入 {'、'.join(excluded)}：拉不到汇率或价格，实际总资产更高）"
 
     # 现金部分（多币种通用）
     lines = [
         f"用户风险偏好: {risk_level}",
         f"总资产估算: {total_str}",
-        f"  - {base} 现金: {money(cash_base, base)}",
-        f"  - 可投子弹 (dry_powder): {money(dry_powder, base)}"
-        + ("（含外币现金按汇率折算）" if set(foreign_cash) - set(dp_missing) else "")
+        f"  - {base} 现金: " + (money(cash_base, base) if cash_qualified else "未知（来源或费用待核）"),
+        f"  - 可投子弹 (dry_powder): " + (money(dry_powder, base) if cash_qualified else "未知（来源或费用待核）")
+        + ("（含外币现金按汇率折算）" if cash_qualified and set(foreign_cash) - set(dp_missing) else "")
         + (f"（未计入 {'、'.join(dp_missing)} 现金：拉不到汇率）" if dp_missing else ""),
     ]
-    if aud_cash > 0 and base != "AUD":
+    if paper:
+        lines.insert(0,'[PAPER ACCOUNT] 这里是纸面/模拟账户；金额不是用户真实资金能力，也不证明实盘采纳。')
+    if ledger_evidence['status']=='requires_reconciliation':
+        lines.append('[QUALITY_ALERT] 账本有独立列出的来源/用途缺口（数量、成本、账户域或费用等）；不能把未核字段当作实盘成交、可承受亏损或实际收益。')
+    elif not source_available:
+        lines.insert(0,'[QUALITY_ALERT] 账本来源资格暂无法核对；数量、成本、可用资金和盈亏均未知。')
+    if cash_qualified and aud_cash > 0 and base != "AUD":
         lines.append(f"  - AUD 现金: ${aud_cash:,.0f}")
     for ccy, amt in sorted(foreign_cash.items()):
-        if ccy != "AUD":
+        if cash_qualified and ccy != "AUD":
             lines.append(f"  - {ccy} 现金: {amt:,.0f} {ccy}")
 
     # 在途场外基金申购（ADR-027）：现金已扣、份额还没到，总资产已按面值含它——明说，免得 Risk 看到
     # "总资产 > 现金 + 持仓"自己去对账，或把这只基金当成没仓位。没有 pending_fund_orders 的替身 = 没有在途
     pending_fn = getattr(pm, "pending_fund_orders", None)
-    for o in (pending_fn() if callable(pending_fn) else []):
+    for o in (pending_fn() if source_available and callable(pending_fn) else []):
         ccy = str(o.get("currency") or "CNY").upper()
         amt = float(o.get("amount") or 0)
         lines.append(
@@ -96,10 +141,12 @@ def portfolio_summary_text(
     # 持仓部分：遍历实际 holdings，按 unit_label / cost_currency 通用化展示
     real_holdings = [
         h for h in pm.holdings
-        if not h.get("is_tracking_only") and float(h.get("units", 0) or 0) > 0
+        if not h.get("is_tracking_only") and (float(h.get("units", 0) or 0) > 0
+            or not balance_field_qualified(holding_source_grade(ledger_evidence, str(h.get("symbol") or "")), "current_quantity"))
     ]
     if not real_holdings:
-        lines.append("  - **当前无实仓持仓**（onboarding 后请通过 GUI/NapCat 添加）")
+        lines.append("  - **当前无实仓持仓**（onboarding 后请通过 GUI/NapCat 添加）" if source_available
+                     else "  - 持仓来源资格未知，暂不能确认当前持仓。")
 
     # 算每个 holding 的 market value（基准币种）用于集中度
     # 2026-05-19 修复：LLM 自己算集中度连续 6 天错算 68.5%（真实 33.3%），
@@ -117,6 +164,8 @@ def portfolio_summary_text(
         units = float(h.get("units", 0) or 0)
         ccy = str(h.get("cost_currency", "CNY"))
         cur = current_prices.get(sym)
+        if not source_available:
+            continue
         # NaN 价等同缺价：不写进 holding_values（否则 NaN 市值会污染下游展示）
         if cur is None or not math.isfinite(cur):
             continue
@@ -137,6 +186,23 @@ def portfolio_summary_text(
         channel = h.get("channel") or ""
         channel_str = f" ({channel})" if channel else ""
 
+        grade=holding_source_grade(ledger_evidence,sym)
+        observations = {field: observation for field, observation in (grade.get("balance_observations") or {}).items()
+                        if grade.get(field) == "client_observed_balance"}
+        observation_lines = (["    已声明余额观察（保留原 as_of，不反推其它字段）：" + json.dumps(observations, ensure_ascii=False)]
+                             if observations else [])
+        if not balance_field_qualified(grade, "current_quantity"):
+            value=holding_values.get(sym)
+            lines.append(f'  - **{display}** ({sym}){channel_str}: 未核对的跟踪/价值代理；不提供真实数量、持仓总成本或浮盈。'
+                         +(f'代理估值约 {money(value,base)}，不是已确认平台余额。' if value is not None else '代理估值暂不可用。'))
+            lines.extend(observation_lines)
+            continue
+        if not balance_field_qualified(grade, "cost_basis"):
+            reason = "手续费待核，成本未知" if grade.get("cost_basis") == "broker_commission_pending" else "成本来源待核"
+            lines.append(f'  - **{display}** ({sym}){channel_str}: 已记录数量 {units:.4f} {unit_label}；{reason}，不报告浮盈。')
+            lines.extend(observation_lines)
+            continue
+
         cur = current_prices.get(sym)
         # NaN 价等同缺价：只显示持仓量 + 均价，不算浮盈/集中度
         if cur is None or not math.isfinite(cur) or cost <= 0:
@@ -145,6 +211,7 @@ def portfolio_summary_text(
                 f"  - **{display}** ({sym}){channel_str}: "
                 f"{units:.4f} {unit_label}, 均价 {cost:.2f} {ccy}/{unit_label}",
             )
+            lines.extend(observation_lines)
             continue
 
         pnl_pct = ((cur / cost) - 1) * 100
@@ -155,7 +222,7 @@ def portfolio_summary_text(
             f"{units:.4f} {unit_label}, "
             f"均价 {ccy_symbol}{cost:.2f}, "
             f"现价 {ccy_symbol}{cur:.2f}, "
-            f"浮盈 {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})"
+            f"{'模拟浮盈' if paper else '浮盈'} {pnl_pct:+.2f}% (≈ {ccy_symbol}{pnl_local:+,.2f} {ccy})"
         )
         # 该腿汇率拉不到时 value=None：市值 / 集中度 / 压力测试都标"暂不可计算"，不当 0 用
         value = holding_values.get(sym)
@@ -180,5 +247,6 @@ def portfolio_summary_text(
             a, b, c = (money(value * k, base) for k in (0.10, 0.20, 0.35))
             line += f"，现价再跌 10% / 20% / 35% 损失 {a} / {b} / {c}"
         lines.append(line)
+        lines.extend(observation_lines)
 
     return "\n".join(lines) + "\n"
