@@ -26,7 +26,7 @@ def _fake_get_history(monkeypatch, mapping):
     monkeypatch.setattr(ef, "get_history_data", fake)
 
 
-def test_macro_data_includes_dxy_and_real_rate(monkeypatch):
+def test_macro_data_includes_dxy_and_raw_tip_etf_change(monkeypatch):
     """DXY + TIP 行出现在 macro reference 文本里"""
     _fake_get_history(monkeypatch, {
         "^TNX": _df([4.0, 4.5]),
@@ -39,12 +39,12 @@ def test_macro_data_includes_dxy_and_real_rate(monkeypatch):
     out = get_macro_data()
     assert "US Dollar Index (DXY" in out
     assert "100.00" in out
-    assert "Real-rate proxy (TIPS ETF TIP" in out
-    assert "rising (gold headwind)" in out
+    assert "TIPS bond ETF price (TIP" in out
+    assert "does not establish" in out and "rising (gold headwind)" not in out
 
 
-def test_macro_data_tip_up_is_tailwind(monkeypatch):
-    """TIP 涨 → 实际利率下行 → 利好黄金"""
+def test_macro_data_tip_up_does_not_assert_a_real_yield_or_gold_direction(monkeypatch):
+    """ETF price returns cannot establish a real-yield or gold direction."""
     _fake_get_history(monkeypatch, {
         "^TNX": _df([4.0, 4.5]),
         "^VIX": _df([15.0, 18.0]),
@@ -54,7 +54,8 @@ def test_macro_data_tip_up_is_tailwind(monkeypatch):
     from openinvest.utils.exchange_fee import get_macro_data
 
     out = get_macro_data()
-    assert "falling (gold tailwind)" in out
+    assert "TIPS bond ETF price (TIP" in out and "+1.85%" in out
+    assert "falling (gold tailwind)" not in out
 
 
 def test_macro_data_graceful_when_dxy_missing(monkeypatch):

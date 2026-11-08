@@ -102,7 +102,8 @@ def test_failed_today_refresh_still_respects_ttl(store, monkeypatch, tk):
 
     for _ in range(5):
         df = ef.get_history_data(SYM)
-        assert df["Close"].iloc[-1] == 4.252 and df.attrs["yf_fetch_failed"] is False
+        assert df["Close"].iloc[-1] == 4.252 and df.attrs["yf_fetch_failed"] is True
+        assert df.attrs['source_observation']['quote_fresh'] is False
     assert tk.calls == [("5d", "1d")]
 
     store.conn.execute("UPDATE fetch_log SET fetched_at = ?", (time.time() - ef._TODAY_BAR_TTL_S - 60,))

@@ -121,10 +121,21 @@ def _path(start, mid, end, n_tail=22):
 def test_macro_block_reports_true_one_month_change(store, monkeypatch):
     original = ef.get_history_data
     def synthetic_fresh(symbol, period, **kwargs):
+        # This test exercises period arithmetic on a constructed same-scale
+        # series, rather than claiming that the unavailable old feed is fresh.
+        from datetime import datetime,timedelta,timezone
+        from openinvest.utils.market_observation import history_observation
         frame=original(symbol,period,**kwargs).copy()
         if frame.empty: return frame
         frame.index = frame.index + (pd.Timestamp.now().normalize()-frame.index[-1])
         frame.attrs.pop("yf_fetch_failed", None)
+        current = datetime.now(timezone.utc)
+        frame.attrs['source_observation'] = {**history_observation(frame,now=current,
+            provider='synthetic_period_fixture',metadata={'currency':'USD','instrumentType':'ETF',
+                'exchangeTimezoneName':'UTC','regularMarketTime':current.timestamp(),
+                'currentTradingPeriod':{'regular':{'start':(current-timedelta(minutes=1)).timestamp(),
+                                                  'end':(current+timedelta(minutes=1)).timestamp()}}}),
+            'history_basis_qualified':True,'history_basis':'synthetic_same_scale_for_period_arithmetic'}
         return frame
     monkeypatch.setattr(ef,"get_history_data",synthetic_fresh)
     # 复刻 2026-10-07：DXY 3 年跌、近 1 月涨；TIP 3 年涨、近 1 月跌
@@ -144,7 +155,7 @@ def test_macro_block_reports_true_one_month_change(store, monkeypatch):
     assert dxy == pytest.approx(true_mom("DX-Y.NYB"), abs=1e-4)
     tip = float(re.search(r"TIP, MoM\): ([+-][\d.]+)%", out).group(1)) / 100
     assert tip == pytest.approx(true_mom("TIP"), abs=1e-4)
-    assert "rising (gold headwind)" in out, "TIP 近 1 月跌 = 实际利率上行 = 黄金逆风"
+    assert 'does not establish' in out and 'rising (gold headwind)' not in out
     for sym, label in (("^TNX", "Treasury Yield"), ("^VIX", "Volatility Index")):
         m = re.search(label + r" \(\^\w+\): [\d.]+%? \(MoM: ([+-][\d.]+)%\)", out)
         assert float(m.group(1)) / 100 == pytest.approx(true_mom(sym), abs=1e-4)

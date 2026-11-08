@@ -85,7 +85,7 @@ def test_non_trading_day_call_writes_only_bar_dates(store_and_bars):
     ])
     snap = get_gold_snapshot(offset_pct=0.0)
     assert snap.gold_usd_per_oz == 3350.0 and snap.usdcny_rate == 7.18
-    assert snap.is_stale is False
+    assert snap.is_stale is True  # Date-only legs without provider quote asof are references.
     assert _rows(s, "GC=F") == {
         "2026-07-01": (3340.0, 3350.0, 3300.0, 1e5),
         "2026-07-02": (3350.0, 3360.0, 3320.0, 9e4),
@@ -163,5 +163,5 @@ def test_get_gold_snapshot_skips_half_formed_nan_bar():
          patch("openinvest.db.market_store.MarketStore"):
         MockTicker.side_effect = lambda sym: MagicMock(history=lambda **kw: frames[sym])
         snap = get_gold_snapshot(offset_pct=0.0)
-    assert snap is not None and snap.is_stale is False
+    assert snap is not None and snap.is_stale is True
     assert snap.gold_usd_per_oz == 4510.0 and snap.usdcny_rate == 6.81
