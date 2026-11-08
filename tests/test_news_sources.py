@@ -16,7 +16,7 @@ def _stub_items(prefix: str, n: int):
     ]
 
 
-def test_fetch_all_runs_each_source_and_dedups_urls(monkeypatch):
+def test_fetch_all_runs_each_source_and_keeps_different_observed_text_at_one_url(monkeypatch):
     # 测试隔离：本机 .env 可能配了 SEARXNG_URL（load_dotenv 会带进进程），
     # 不清掉会注册 searxng 任务真发 HTTP，条数断言全崩
     monkeypatch.delenv("SEARXNG_URL", raising=False)
@@ -34,8 +34,8 @@ def test_fetch_all_runs_each_source_and_dedups_urls(monkeypatch):
             symbols=["NDQ.AX"],
             rss_feeds=[{"name": "r", "url": "https://feed"}],
         )
-    # 3 ddgs + 2 yf + 2 rss = 7 raw，1 条 url 跟 ddgs/0 重复 → 6 条
-    assert len(out) == 6
+    # The repeated URL has a different retained title/body; it is not a duplicate input.
+    assert len(out) == 7
     assert m_ddgs.called and m_yf.called and m_rss.called
 
 

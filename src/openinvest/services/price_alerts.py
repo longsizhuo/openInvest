@@ -34,13 +34,19 @@ def _day_change(
     extra.day_change_pct + last_updated；黄金克价等没有的，取行情代理（yfinance_proxy 或 symbol）最近两根日线
     （美元口径，日内汇率变动忽略）。拉不到 → (None, None)。
     日期是休市日去重的依据：休市时这根线停在上一交易日，不是「今日」。"""
+    if (extra or {}).get('day_change_source_qualified') is False:
+        return None, None
     v = (extra or {}).get("day_change_pct")
     if v is not None and last_updated:
         return float(v), str(last_updated)[:10]
     try:
         from openinvest.utils.exchange_fee import get_history_data
 
-        closes = get_history_data(str((holding or {}).get("yfinance_proxy") or symbol), "5d")["Close"].dropna()
+        frame = get_history_data(str((holding or {}).get("yfinance_proxy") or symbol), "5d")
+        from openinvest.utils.market_observation import frame_observation
+        if frame_observation(frame).get('history_basis_qualified') is False:
+            return None, None
+        closes = frame["Close"].dropna()
         if len(closes) < 2 or not closes.iloc[-2]:
             return None, None
         pct = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1.0) * 100.0
@@ -58,6 +64,9 @@ def evaluate_symbol(
     price: Optional[float],
     extra: Optional[Mapping[str, Any]] = None,
     last_updated: Optional[str] = None,
+    cost_qualification: Optional[Mapping[str, Any]] = None,
+    native_quote_qualified: bool = False,
+    quote_currency: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """某标的的全部已设规则求值（calc.price_alerts.evaluate 的结果）。
 
@@ -65,8 +74,28 @@ def evaluate_symbol(
     日涨跌规则且 quote 没带时才补拉日涨跌。drawdown_from_cost 只对有成本的在持仓位判（追踪仓 / 零仓位无成本 → 无法判定）。
     """
     avg_cost = None
-    if holding and not holding.get("is_tracking_only") and float(holding.get("units") or 0) > 0:
-        avg_cost = float(holding.get("avg_cost") or 0) or None
+    # The quote adapter attests the native scale from provider metadata. Do not
+    # apply a second exchange-suffix guess that rejects verified listings.
+    native_currency = quote_currency if native_quote_qualified else None
+    grade = cost_qualification or {}
+    cost_ok = (holding and not holding.get('is_tracking_only') and native_quote_qualified
+        and grade.get('cost_basis') in {'client_recorded','client_observed_balance'}
+        and grade.get('current_quantity') in {'client_recorded','client_observed_balance'}
+        and (grade.get('valuation_unit_mapping') or {}).get('qualified') is True
+        and native_currency is not None and str(holding.get('cost_currency') or '') == native_currency
+        and quote_currency == native_currency)
+    if cost_ok:
+        try:
+            value, units = holding.get('avg_cost'), holding.get('units')
+            if not isinstance(value,bool) and not isinstance(units,bool):
+                value, units = float(value), float(units)
+                if math.isfinite(value) and value>0 and math.isfinite(units) and units>0:avg_cost=value
+        except (TypeError,ValueError):pass
     day, bar = _day_change(symbol, holding, extra or {}, last_updated) if any(
         alerts.get(r) is not None for r in _DAY_RULES) else (None, None)
-    return evaluate(alerts, price=price, avg_cost=avg_cost, day_change_pct=day, day_bar=bar)
+    results=evaluate(alerts, price=price, avg_cost=avg_cost, day_change_pct=day, day_bar=bar)
+    for result in results:
+        if result['rule']=='drawdown_from_cost_pct' and avg_cost is None:
+            result['qualification']='native_cost_quantity_or_quote_unverified'
+            result['text']+='；成本/数量/报价币种单位未核对'
+    return results
