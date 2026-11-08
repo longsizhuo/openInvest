@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.7](https://github.com/longsizhuo/openInvest/compare/v0.68.6...v0.68.7) (2026-11-08)
+
+
+### Bug Fixes
+
+* **notifications:** aggregate maintenance alerts and bound email delivery ([9768ba0](https://github.com/longsizhuo/openInvest/commit/9768ba0609cf3ceafe834b8c072aff0721d34094))
+
 ## [0.68.6](https://github.com/longsizhuo/openInvest/compare/v0.68.5...v0.68.6) (2026-11-08)
 
 
