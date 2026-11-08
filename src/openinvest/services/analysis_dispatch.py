@@ -34,8 +34,9 @@ def _defer_inputs(store):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def _seed_confirmed_causes(db, now, live_events, index):
-    """Old committed per-row submissions can supply dispatch receipts, never completion."""
+def _prepare_confirmed_causes(db, now, live_events, index):
+    """Read and qualify legacy receipts before taking the outbox writer lock."""
+    prepared, seen = [], set()
     rows = db.execute("SELECT notification_id,submitted,submitted_causes FROM followups "
                       "WHERE submitted!='{}' AND submitted_causes!='{}'").fetchall()
     for row in rows:
@@ -47,6 +48,10 @@ def _seed_confirmed_causes(db, now, live_events, index):
             for eid, version in events.items():
                 if type(version) is not int:
                     continue
+                reference = (symbol, eid, version, task)
+                if reference in seen:
+                    continue
+                seen.add(reference)
                 current = live_events.get(eid) or index.get_event(eid)
                 if current is None:
                     continue
@@ -54,10 +59,9 @@ def _seed_confirmed_causes(db, now, live_events, index):
                     'cause_id':_cause_id(eid, current), 'cause_version':str(_cause_version(current))}
                 if not _receipt_source_qualified(index, candidate):
                     continue  # Both the exact saved input and current permission must still qualify.
-                db.execute("""INSERT OR IGNORE INTO analysis_causes
-                    (symbol,cause_id,cause_version,source_event_id,source_event_version,notification_id,status,task_id,changed)
-                    VALUES(?,?,?,?,?,?,'queued',?,?)""",
-                    (symbol, _cause_id(eid, current), str(_cause_version(current)), eid, str(version), row["notification_id"], task, now.timestamp()))
+                prepared.append((symbol, _cause_id(eid, current), str(_cause_version(current)),
+                    eid, str(version), row["notification_id"], task, now.timestamp()))
+    return prepared
 
 
 def _receipt_source_qualified(index, receipt):
@@ -106,9 +110,13 @@ def _claim_causes(outbox, ident, causes, now, live_events, *, event_store=None):
 def _claim_causes_from_index(outbox, ident, causes, now, live_events, index):
     """Claim exact causes before spending; another row cannot dispatch them concurrently."""
     shared, blocked, owned = {}, {}, {}
+    with outbox.connection() as reader:
+        prepared = _prepare_confirmed_causes(reader, now, live_events, index)
     with outbox.connection() as db:
         db.execute("BEGIN IMMEDIATE")
-        _seed_confirmed_causes(db, now, live_events, index)
+        db.executemany("""INSERT OR IGNORE INTO analysis_causes
+            (symbol,cause_id,cause_version,source_event_id,source_event_version,notification_id,status,task_id,changed)
+            VALUES(?,?,?,?,?,?,'queued',?,?)""", prepared)
         legacy = db.execute("""SELECT f.notification_id,f.status,n.payload FROM followups f
             JOIN notifications n ON n.id=f.notification_id
             WHERE f.status IN ('unknown','dispatching') AND f.notification_id!=?""", (ident,)).fetchall()
