@@ -48,6 +48,11 @@ def reviewed_storage_contracts(monkeypatch):
     from openinvest.db.event_store import EventStore
     from openinvest.services.source_reporting import from_item,source_fingerprint,source_payload
     upsert=EventStore.upsert_event;add=EventStore.add_source;write=EventStore.write_news_observation
+    selection=EventStore.normalization_input
+    def reviewed_selection(self,item):
+        source=from_item(item)
+        approve(self.data_root,'source_report:'+source_fingerprint(source),source_payload(source))
+        return selection(self,item)
     def reviewed_upsert(self,*args,**kwargs):
         result=upsert(self,*args,**kwargs);approve_event_reporting(self,result[1]);return result
     def reviewed_add(self,event_id,*args,**kwargs):
@@ -60,6 +65,7 @@ def reviewed_storage_contracts(monkeypatch):
     monkeypatch.setattr(EventStore,"upsert_event",reviewed_upsert)
     monkeypatch.setattr(EventStore,"add_source",reviewed_add)
     monkeypatch.setattr(EventStore,"write_news_observation",reviewed_write)
+    monkeypatch.setattr(EventStore,'normalization_input',reviewed_selection)
 
 
 def context_id(symbol, **facts):

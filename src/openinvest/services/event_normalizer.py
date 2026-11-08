@@ -45,6 +45,7 @@ class NormalizedEvent:
     event: Dict[str, Any]          # 给 event_store.upsert_event 用
     embedding: Optional[List[float]] = None
     raw_item: Optional[RawNewsItem] = None  # 留给调用方挂 sources
+    reused: bool = False
 
 
 _SYSTEM_PROMPT = """\
@@ -92,6 +93,7 @@ def normalize(
     base_url: Optional[str] = None,
     skip_embedding: bool = False,
     stats: Optional[Dict[str, int]] = None,
+    reuse_store=None,
 ) -> List[NormalizedEvent]:
     """批量归一化。空 items 返回 []，缺 LLM key 返回 []。
 
@@ -103,6 +105,20 @@ def normalize(
         stats.setdefault("failed_batches", 0)
     if not items:
         return []
+    originals=items
+    indexes=list(range(len(items)))
+    cached=[]
+    if reuse_store is not None:
+        pending=[];indexes=[]
+        for index,item in enumerate(items):
+            planned=reuse_store.normalization_input(item)
+            if planned['status']=='reuse':
+                cached.append(NormalizedEvent(index,dict(planned['event']),raw_item=item,reused=True))
+            else:
+                pending.append(item);indexes.append(index)
+        items=pending
+        if stats is not None:stats['reused_inputs']=stats.get('reused_inputs',0)+len(cached)
+        if not items:return cached
     # 统一从 utils.llm 读 LLM 配置，向后兼容 DEEPSEEK_*
     from openinvest.utils.llm import get_llm_config_safe
     _ak, _bu, _m, _p = get_llm_config_safe(default_model=DEFAULT_MODEL)
@@ -113,9 +129,9 @@ def normalize(
             n = -(-len(items) // MAX_BATCH)
             stats["batches"] += n
             stats["failed_batches"] += n
-        return []
+        return cached
 
-    results: List[NormalizedEvent] = []
+    results: List[NormalizedEvent] = list(cached)
     # 分批，每批 MAX_BATCH 条
     for i in range(0, len(items), MAX_BATCH):
         batch = items[i:i + MAX_BATCH]
@@ -135,12 +151,21 @@ def normalize(
                 stats["failed_batches"] += 1
             continue
 
+        rejected_index=False
         for ne in batch_events:
-            raw = items[ne.raw_idx] if 0 <= ne.raw_idx < len(items) else None
+            if type(ne.raw_idx) is not int or not i<=ne.raw_idx<i+len(batch):
+                rejected_index=True
+                if stats is not None:
+                    stats['unbound_events_rejected']=stats.get('unbound_events_rejected',0)+1
+                log.warning('Rejected normalizer event with an unbound input index')
+                continue
+            ne.raw_idx=indexes[ne.raw_idx]
+            raw = originals[ne.raw_idx] if 0 <= ne.raw_idx < len(originals) else None
             ne.raw_item = raw
             if not skip_embedding:
                 ne.embedding = embed_text(ne.event["one_line_claim"])
             results.append(ne)
+        if rejected_index and stats is not None:stats['failed_batches']+=1
     return results
 
 
@@ -247,8 +272,12 @@ def _parse_events_json(raw_text: str, *, expected_size: int, offset: int) -> Lis
 
     out: List[NormalizedEvent] = []
     seen_idx = set()
+    invalid_indices=0
     for raw in raw_events:
         if not isinstance(raw, dict):
+            continue
+        if type(raw.get('idx')) is not int or not offset<=raw['idx']<offset+expected_size:
+            invalid_indices+=1
             continue
         # 多段 JSON 可能把同一组 events 吐两遍：同 idx 只留第一次（省一次 embedding，计数不虚高）
         if raw.get("idx") is not None:
@@ -262,6 +291,8 @@ def _parse_events_json(raw_text: str, *, expected_size: int, offset: int) -> Lis
             continue
         if ne:
             out.append(ne)
+    if invalid_indices and not out:
+        raise ValueError('normalizer_events_have_no_bound_source_index')
     return out
 
 
@@ -283,7 +314,7 @@ def _apply_entity_symbol_fallback(
 def _sanitize_event(raw: Dict[str, Any], *, offset: int) -> Optional[NormalizedEvent]:
     """字段校验 + 归一化。缺关键字段返回 None"""
     idx = raw.get("idx")
-    if not isinstance(idx, int):
+    if type(idx) is not int:
         return None
     # 换行 / 控制字符压成空格：claim 原样渲染进 Macro brief 的一行，不能借它造出额外的 brief 行
     claim = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw.get("one_line_claim") or "")).strip()

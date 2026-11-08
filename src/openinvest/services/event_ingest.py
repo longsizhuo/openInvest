@@ -129,7 +129,7 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
         rejected = [i.url for i in plain]
         plain = []
     if plain:
-        llm_events = normalize(plain)
+        llm_events = normalize(plain,reuse_store=store)
         if not llm_events:
             # normalize 空返回 = 缺 LLM key 或全批失败——对 agent 必须显式，不能装成功
             from openinvest.utils.llm import get_llm_config_safe
@@ -148,7 +148,9 @@ def ingest_events(items: List[Dict[str, Any]], *, ingested_by: str = "host-agent
     new_events: List[Dict[str, Any]] = []
     for ne in normalized:
         ne.event["ingested_by"] = ingested_by  # normalizer 输出全来自 LLM——溯源在入库前注入
-        observation=store.write_news_observation(ne.event,ne.raw_item,embedding=ne.embedding)
+        options={'embedding':ne.embedding}
+        if getattr(ne,'reused',False):options['reuse_extraction']=True
+        observation=store.write_news_observation(ne.event,ne.raw_item,**options)
         from openinvest.services.agent_queue import acknowledge_news_source
         snapshot=(getattr(ne.raw_item,"raw_meta",{}) or {}).get("source_snapshot_id")
         acknowledge_news_source(snapshot,(observation.get("event") or {}).get("event_id") or observation.get("blocked_event_id"),

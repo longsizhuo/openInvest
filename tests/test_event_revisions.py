@@ -159,7 +159,7 @@ def test_publication_metadata_only_revision_preserves_each_reported_time(store):
     first=store.write_news_observation(event(),original)
     later=source("same content");later.published_at="2026-10-01T02:00:00Z"
     revised=store.write_news_observation(event(),later)
-    assert revised["changed"]
+    assert not revised["changed"]  # Time metadata is retained without a new material cause.
     versions=[json.loads(row[0]) for row in store.conn.execute("SELECT payload_json FROM event_versions ORDER BY id")]
     assert versions[0]["vintage"]["observation_published_at"]==original.published_at
     assert versions[-1]["vintage"]["observation_published_at"]==later.published_at

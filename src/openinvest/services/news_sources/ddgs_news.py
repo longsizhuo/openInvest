@@ -41,6 +41,12 @@ def fetch_ddgs_news(
                 max_results=max_results,
             ) or []
     except Exception as e:
+        if type(e).__name__=='DDGSException' and str(e).strip()=='No results found.':
+            # In the pinned library this exact sentinel means its engines did
+            # not throw, but no matching results survived. It is query-local,
+            # not evidence that the entire provider or the market is silent.
+            log.info('DDGS query %r returned no matching results',query)
+            return SourceItems()
         log.warning(f"DDGS query {query!r} 失败: {e}")
         return SourceItems(errors=[type(e).__name__])
 
@@ -57,7 +63,8 @@ def fetch_ddgs_news(
             url=url,
             snippet=_trim(r.get("body") or r.get("snippet") or "", 260),
             published_at=published,
-            raw_meta={"query": query, "domain": domain},
+            raw_meta={"query": query, "domain": domain,
+                      'publication_time_basis':'search_result_reported_unverified'},
         )
         items.append(item)
     return items
