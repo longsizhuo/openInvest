@@ -69,7 +69,7 @@ class StrategyData(BaseModel):
 
     target_allocation_stock: float = Field(..., ge=0, le=1)
     target_allocation_cash: float = Field(..., ge=0, le=1)
-    target_assets: List[TargetAsset] = Field(..., min_length=1)
+    target_assets: List[TargetAsset] = Field(default_factory=list)
 
     # 旧字段兼容（v1 单资产时代）
     max_single_invest_cny: Optional[float] = None
@@ -321,3 +321,4 @@ def _validated_dict(model_cls: type[BaseModel], metadata: Dict[str, Any]) -> Dic
     cleaned = {k: v for k, v in metadata.items() if k not in {"name", "type", "updated"}}
     instance = model_cls.model_validate(cleaned)
     return instance.model_dump(exclude_none=True)
+

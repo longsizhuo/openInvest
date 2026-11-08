@@ -239,7 +239,7 @@ def patch_target_asset(
 def remove_target_asset(
     symbol: str, *, store: Optional[MemoryStore] = None
 ) -> Dict[str, Any]:
-    """删除 target_asset。schema 要求至少剩 1 个（删最后一个会 ValueError 回滚）。
+    """删除 target_asset（允许删到空列表，方便全清仓后重新配置）。
     symbol 不存在 → StrategyNotFound。"""
     with _store(store).transaction("strategy") as tx:
         before = _targets(tx.metadata)
@@ -250,6 +250,7 @@ def remove_target_asset(
         tx["target_assets"] = [a for a in existing if a.get("symbol") != symbol]
         _validate_or_raise(dict(tx.metadata), before)
         final_meta = dict(tx.metadata)
+        final_meta.setdefault("target_assets", [])
     return _response(final_meta, f"已删除 {symbol}")
 
 
@@ -337,3 +338,4 @@ __all__ = [
     "remove_target_asset",
     "upsert_target_asset",
 ]
+

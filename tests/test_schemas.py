@@ -85,10 +85,13 @@ def test_strategy_no_duplicate_symbols():
         StrategyData(**bad)
 
 
-def test_strategy_must_have_at_least_one_asset():
-    bad = _valid_strategy(target_assets=[])
-    with pytest.raises(ValidationError):
-        StrategyData(**bad)
+def test_strategy_allows_empty_or_omitted_target_assets():
+    """初始建仓前或全部清仓后允许 target_assets 为空列表或省略（#593）"""
+    s_empty = StrategyData(**_valid_strategy(target_assets=[]))
+    assert s_empty.target_assets == []
+    minimal = {"target_allocation_stock": 0.7, "target_allocation_cash": 0.3}
+    s_omitted = StrategyData(**minimal)
+    assert s_omitted.target_assets == []
 
 
 def test_strategy_extra_field_allowed_for_legacy():

@@ -131,13 +131,23 @@ def test_upsert_new_symbol_without_any_cap_gives_readable_error(store):
     assert store.read("strategy").metadata["target_assets"] == before
 
 
-def test_remove_and_last_asset_guard(store):
+def test_remove_last_asset_and_set_allocations_without_assets(store, tmp_path):
     svc.remove_target_asset("GC=F", store=store)
     assert _symbols(store) == ["NDQ.AX"]
-    # schema 要求至少剩 1 个 → 删最后一个回滚
-    with pytest.raises(ValueError, match="validation failed"):
-        svc.remove_target_asset("NDQ.AX", store=store)
-    assert _symbols(store) == ["NDQ.AX"]
+    # 允许删掉最后一个标的（#593：全清仓后 untrack 最后一个标的不再死锁）
+    out = svc.remove_target_asset("NDQ.AX", store=store)
+    assert out["target_assets"] == []
+    assert _symbols(store) == []
+
+    # 全新安装尚无 target_assets 时，直接 set_allocations 也能成功（#593）
+    fresh = MemoryStore(tmp_path / "fresh_memory")
+    fresh.write("strategy", "strategy", {
+        "target_allocation_stock": 0.6,
+        "target_allocation_cash": 0.4,
+    }, "# fresh")
+    res = svc.set_allocations(0.7, 0.3, store=fresh)
+    assert res["status"] == "ok"
+    assert res["target_assets"] == []
 
 
 def test_body_untouched(store):
@@ -197,3 +207,4 @@ def test_upsert_concurrent_same_new_symbol_all_succeed(store):
         t.join(timeout=10)
     assert not errors, f"并发 track 不该报错: {errors}"
     assert _symbols(store).count("RACE") == 1
+
