@@ -90,6 +90,8 @@ def reserve(*, receiver, subject, plain_body, html_body=None, category='direct',
         active = [v for v in entries.values() if v['target'] == target and v['phase'] != 'failed' and v['at'] > clock-86400]
         if len(active) >= cap:
             raise EmailDeferred('email_24h_budget_deferred', min(v['at'] for v in active) + 86400)
+        if mode != 'all' and not daily and sum(not v.get('daily') for v in active) >= max(0,cap-1):
+            raise EmailDeferred('daily_summary_slot_reserved', clock + 3600)
         if mode != 'all' and daily and any(v.get('daily') and v.get('day') == day for v in active):
             raise EmailDeferred('one_daily_summary_already_admitted', clock + 3600)
         if mode != 'all' and urgency_key and any(v.get('urgency') == urgency_key for v in active):

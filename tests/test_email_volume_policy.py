@@ -117,6 +117,16 @@ def test_old_daily_cannot_consume_todays_summary_slot(tmp_path):
     assert reserve(store,'current-report',category='daily_report',report_date=NOW.astimezone().date().isoformat())[1]
 
 
+def test_urgent_notices_leave_one_slot_for_daily_summary(tmp_path):
+    set_config_override({'event':{'email_mode':'daily_and_risk','email_daily_cap':2}})
+    store=MemoryStore(tmp_path/'memory')
+    _,risk=reserve(store,'risk',category='market_risk',urgency_key='price:first')
+    email_budget.finish(store,risk,'accepted')
+    with pytest.raises(email_budget.EmailDeferred,match='daily_summary_slot_reserved'):
+        reserve(store,'more-risk',category='market_risk',urgency_key='price:second')
+    assert reserve(store,'daily',category='daily_report',report_date=NOW.astimezone().date().isoformat())[1]
+
+
 def test_deferred_email_is_retained_with_retry_time(tmp_path, monkeypatch):
     from openinvest.services.notification_outbox import NotificationOutbox
     box = NotificationOutbox(MemoryStore(tmp_path/'memory'))
