@@ -409,6 +409,34 @@ def explain_decision(
 
 # ---------- 决策账本写 ----------
 
+@_tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=True))
+def record_balance_observation(
+    reference_symbol: Annotated[str,Field(description="Existing tracked position. A quote proxy is not automatically the native instrument.")],
+    as_of: Annotated[str,Field(description="Timezone-aware time of the reported balance, separate from today's server receipt time.")],
+    source_text: Annotated[str,Field(description="Original client statement or description of the source. Never reconstruct it from an Agent's old summary.")],
+    source_locator: Annotated[str,Field(description="Source locator text or JSON object as text. This records client provenance; it does not claim broker verification.")],
+    idempotency_key: Annotated[str,Field(min_length=1,max_length=200,description="Reuse the same key and unchanged facts when retrying.")],
+    reported_value: Optional[float]=None,value_currency: Optional[str]=None,
+    reported_quantity: Optional[float]=None,quantity_unit: Optional[str]=None,native_instrument: Optional[str]=None,
+    reported_cost: Optional[float]=None,cost_currency: Optional[str]=None,
+) -> Dict[str,Any]:
+    """Record independent value, native quantity or per-native-unit average cost observations.
+
+    No value-to-quantity conversion, cash movement, inferred fill or historical
+    return approval. Historical/mismatched evidence stays audit-only. Invoke
+    only for facts the client actually supplied, with its original as-of time.
+    """
+    _check_advisory()
+    from openinvest.services.balance_observations import record_observation
+    locator=source_locator
+    if source_locator.strip().startswith('{'):
+        try:locator=json.loads(source_locator)
+        except ValueError:raise ValueError('source_locator_json_invalid')
+    return record_observation(_pm(),reference_symbol,as_of=as_of,source_text=source_text,source_locator=locator,
+        idempotency_key=idempotency_key,reported_value=reported_value,value_currency=value_currency,
+        reported_quantity=reported_quantity,quantity_unit=quantity_unit,native_instrument=native_instrument,
+        reported_cost=reported_cost,cost_currency=cost_currency)
+
 @_tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=False,idempotentHint=False))
 def collect_news(since: Annotated[Optional[str],Field(description="Explicit initial source window start, timezone-aware ISO time; omit only to resume existing coverage.")]=None) -> Dict[str,Any]:
     """Capture fixed news providers and durable per-source coverage, without a model call.
@@ -1067,7 +1095,7 @@ def confirm_fund_order(
     nav: Annotated[Optional[float], Field(description=(
         "Unit NAV to confirm at. Omit to fetch the pricing day's published NAV (if it isn't published yet "
         "the call returns status 'pending_nav' and changes nothing)."), gt=0)] = None,
-    fee: Annotated[float, Field(description="Subscription fee in CNY, taken out of the order amount (units = (amount - fee) / nav). Default 0.", ge=0)] = 0.0,
+    fee: Annotated[Optional[float], Field(description="Actual subscription fee. Omit when unknown; use explicit 0 only for a known zero fee. Without both reported NAV and fee this creates only a tracking projection.", ge=0)] = None,
 ) -> Dict[str, Any]:
     """Second leg of an off-exchange fund purchase: turn an in-transit order
     into shares at the pricing day's NAV (units = (amount - fee) / nav; average

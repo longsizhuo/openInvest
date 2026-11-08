@@ -241,6 +241,11 @@ def plan_qualification(store: MemoryStore, symbol: str, record: dict, *, purpose
         excluded=Eligibility(store.data_root).excluded_ids()
         if {'decision:'+ident,'context:'+context_id,'review_plan:'+str(record.get('plan_id'))}&excluded:
             raise ValueError('parent_evidence_revoked')
+        if set((context['inputs'].get('ledger_evidence') or {}).get('parent_ids',[]))&excluded:
+            raise ValueError('parent_account_observation_revoked')
+        from openinvest.services.balance_observations import validate_parent_facts
+        if not validate_parent_facts(store,context['inputs'].get('ledger_evidence') or {})['allowed']:
+            raise ValueError('parent_account_observation_fact_unverified')
         if not context.get('source_event_lineage_captured') or context['inputs'].get('prior_insights'):
             raise ValueError('parent_source_lineage_requires_review')
         if not context.get('source_plan_lineage_captured'):raise ValueError('parent_plan_lineage_requires_review')

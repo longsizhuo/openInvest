@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -52,6 +53,20 @@ from openinvest.core.benchmarks import (
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.portfolio_manager import MemoryNotInitialized, PortfolioManager
 from openinvest.services.account_performance import build_account_performance
+from openinvest.services.financial_publication import historical_performance_publication_block as _publication_source_block
+from openinvest.services.financial_publication import (
+    SOURCE_STATEMENT,
+    derived_publication_block,
+    qualified_history,
+    qualified_point,
+    freeze_render_artifact,
+    frozen_artifact_block,
+    VERIFICATION_PENDING_SVG,
+    seal_calculated_point,
+    seal_outperform_event,
+    seal_render_manifest,
+    validate_selected_points,
+)
 from openinvest.utils.base_currency import base_currency
 from openinvest.utils.eastmoney_fund import canonical_fund_symbol
 from openinvest.utils.exchange_fee import get_history_data
@@ -130,6 +145,10 @@ def _compute_snapshot(store: MemoryStore) -> Optional[Snapshot]:
     except MemoryNotInitialized:
         return None
     base = base_currency()
+    if blocked := _publication_source_block(pm=pm):
+        raise _Skip(**blocked)
+    from openinvest.services.ledger_evidence import account_source_status
+    ledger_before = account_source_status(pm)
     _refresh_market(pm, base)
     perf = build_account_performance(pm, base=base)
     if perf.get("status") != "ok" or perf.get("twr_all") is None:
@@ -137,42 +156,30 @@ def _compute_snapshot(store: MemoryStore) -> Optional[Snapshot]:
     unvalued_n = len((perf.get("data_quality") or {}).get("unvalued") or [])
     if unvalued_n:
         raise _Skip(reason="unvalued_holdings", count=unvalued_n)
-    return Snapshot(
-        ts=datetime.now().astimezone().isoformat(timespec="seconds"),
+    snap = Snapshot(
+        ts=datetime.now().astimezone().isoformat(timespec="microseconds"),
         equity_idx=round(100 * (1 + float(perf["twr_all"]) / 100), 4),
     )
+    try:
+        snap.calculation_receipt = seal_calculated_point(store,
+            {"ts": snap.ts, "equity_idx": snap.equity_idx}, perf, ledger_before)
+    except (ValueError, TypeError):
+        raise _Skip(**derived_publication_block("unverified_calculation_inputs"))
+    return snap
 
 
 def _append_history(snap: Snapshot) -> None:
+    row = qualified_point(MemoryStore(), {
+        "ts": snap.ts, "equity_idx": snap.equity_idx,
+        "total_pnl_pct": round(snap.equity_idx - 100, 4), "calculation_receipt": snap.calculation_receipt,
+    })
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(HISTORY_PATH, "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps({
-            "ts": snap.ts,
-            "equity_idx": snap.equity_idx,
-            # GUI 系统页「总浮盈 %」读这个键：现为成立以来的账户 TWR %（= equity_idx − 100）
-            "total_pnl_pct": round(snap.equity_idx - 100, 4),
-        }, ensure_ascii=False) + "\n")
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _read_history(window_days: int = WINDOW_DAYS) -> List[Dict[str, Any]]:
-    if not HISTORY_PATH.exists():
-        return []
-    cutoff = datetime.now().astimezone() - timedelta(days=window_days)
-    out: List[Dict[str, Any]] = []
-    with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                ts = datetime.fromisoformat(entry["ts"])
-                # 只取总权益曲线的点：旧版两资产口径的点（无 equity_idx）不混画，也不当窗口起点
-                if ts >= cutoff and entry.get("equity_idx"):
-                    out.append(entry)
-            except (json.JSONDecodeError, ValueError, KeyError):
-                continue
-    return out
+    return qualified_history(MemoryStore(), HISTORY_PATH, window_days=window_days)
 
 
 def _ensure_benchmarks_fresh(start_date: str, end_date: str) -> None:
@@ -204,6 +211,7 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
     _ensure_benchmarks_fresh / get_all_series 在本命名空间解析——
     tests/test_pnl_snapshot 的 monkeypatch 依赖这一点。
     """
+    history = validate_selected_points(MemoryStore(), history)
     if history:
         start_date = history[0]["ts"][:10]
         end_date = history[-1]["ts"][:10]
@@ -213,7 +221,15 @@ def render_svg(history: List[Dict[str, Any]]) -> str:
         benchmark_series = get_all_series(start_date)
     else:
         benchmark_series = []
-    return _render_svg_pure(history, benchmark_series)
+    svg = _render_svg_pure(history, benchmark_series)
+    svg = svg.replace("★ 我的实盘", "★ 客户账本计算").replace("口径：★ 实盘", "口径：★ 客户账本计算")
+    dimensions = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg)
+    if dimensions is None:
+        raise ValueError("financial SVG canvas unavailable")
+    height = float(dimensions.group(2))
+    svg = svg.replace(dimensions.group(0), f'viewBox="0 0 {dimensions.group(1)} {height + 24:g}"', 1)
+    svg = svg.replace(f'height="{dimensions.group(2)}"', f'height="{height + 24:g}"', 1)
+    return svg.replace("</svg>", f'<text x="{MARGIN_L}" y="{height + 12:g}" fill="#6e7681" class="label">{SOURCE_STATEMENT}</text>\n</svg>')
 
 
 def _is_trading_window(now: Optional[datetime] = None) -> bool:
@@ -244,161 +260,134 @@ def _redact_token_in(text: str) -> str:
     return _re.sub(r"x-access-token:[^@\s]+@", "x-access-token:***@", text)
 
 
+def _with_pending_notice(block: Dict[str, Any]) -> Dict[str, Any]:
+    """Opted-in publishers replace an unqualified public curve with fixed status text."""
+    if os.getenv("INVEST_PNL_AUTOPUSH", "0") != "1":
+        return block
+    return {**block, "withdrawal": _publish_svg_buffer(VERIFICATION_PENDING_SVG, notice_only=True)}
+
+
+def _notice_if_existing_chart_unverified(info: Dict[str, Any]) -> Dict[str, Any]:
+    """A skipped calculation must not leave a revoked public curve current."""
+    if os.getenv("INVEST_PNL_AUTOPUSH", "0") != "1":
+        return info
+    if blocked := _publication_source_block():
+        return _with_pending_notice(blocked)
+    try:
+        artifact = freeze_render_artifact(MemoryStore(), SVG_PATH, HISTORY_PATH)
+        blocked = frozen_artifact_block(MemoryStore(), artifact)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        blocked = derived_publication_block("unverified_render_manifest")
+    return _with_pending_notice(blocked) if blocked else info
+
+
 def _auto_push_svg() -> Dict[str, Any]:
-    """可选：把 docs/pnl_chart.svg commit 到 git 并 push 到 GitHub。
-
-    只在 INVEST_PNL_AUTOPUSH=1 时启用。token 从 GITHUB_TOKEN env 读。
-    任何失败都吞掉只 print，避免 PnL 数据已落盘但 push 失败导致整个 job 标 fail。
-
-    分支策略：
-    - INVEST_PNL_PUSH_BRANCH=main (默认): 直接推主分支，git log 会有 hourly 噪音
-    - INVEST_PNL_PUSH_BRANCH=pnl-data: 推到独立 orphan 分支（每次 reset 到只
-      含最新 SVG），主分支历史保持干净
-    """
     if os.getenv("INVEST_PNL_AUTOPUSH", "0") != "1":
         return {"pushed": False, "reason": "INVEST_PNL_AUTOPUSH != 1"}
+    if blocked := _publication_source_block():
+        return _with_pending_notice(blocked)
+    try:
+        artifact = freeze_render_artifact(MemoryStore(), SVG_PATH, HISTORY_PATH)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return _with_pending_notice(derived_publication_block("unverified_render_manifest"))
+    return _publish_svg_buffer(artifact.content, artifact=artifact)
 
+
+def _publish_svg_buffer(svg_bytes: bytes, *, artifact=None, notice_only: bool = False) -> Dict[str, Any]:
+    """Stage only frozen bytes in a private index; never read the SVG path again."""
+    def result(value):
+        return {**value, **({"publication_kind": "verification_notice", "historical_performance_eligible": False,
+                            "learning_eligible": False, "prediction_eligible": False} if notice_only else {})}
+
+    if os.getenv("INVEST_PNL_AUTOPUSH", "0") != "1":
+        return result({"pushed": False, "reason": "INVEST_PNL_AUTOPUSH != 1"})
+    if notice_only:
+        if svg_bytes != VERIFICATION_PENDING_SVG:
+            return result(derived_publication_block("invalid_verification_notice_payload"))
+    else:
+        if artifact is None or artifact.content != svg_bytes:
+            return derived_publication_block("unverified_frozen_artifact")
+        if blocked := frozen_artifact_block(MemoryStore(), artifact):
+            return _with_pending_notice(blocked)
     token = os.getenv("GITHUB_TOKEN", "").strip()
     if not token:
-        return {"pushed": False, "reason": "GITHUB_TOKEN env 缺失"}
-
+        return result({"pushed": False, "reason": "GITHUB_TOKEN env 缺失"})
     branch = os.getenv("INVEST_PNL_PUSH_BRANCH", "main").strip() or "main"
-    use_orphan = (branch != "main")
+    orphan = branch != "main"
 
-    def _git(args: List[str], check: bool = True) -> subprocess.CompletedProcess:
+    def _git(args, *, check=True, index=None, binary=False, data=None):
         return subprocess.run(
-            ["git", *args], cwd=str(ROOT), capture_output=True, text=True,
-            check=check,
+            ["git", *args], cwd=str(ROOT), capture_output=True, text=not binary,
+            check=check, input=data,
+            env={**os.environ, "GIT_INDEX_FILE": str(index)} if index is not None else None,
         )
+
+    class _BlobMismatch(ValueError):
+        pass
+
+    def _stage(index, name, content):
+        oid = _git(["hash-object", "-w", "--stdin"], binary=True, data=content).stdout.decode("ascii").strip()
+        _git(["update-index", "--add", "--cacheinfo", "100644", oid, name], index=index)
 
     try:
-        # 拿 remote URL，注入 token 走 https
         remote = _git(["config", "--get", "remote.origin.url"]).stdout.strip()
         if not remote.startswith("https://github.com/"):
-            return {"pushed": False, "reason": f"only https github remote supported, got {remote}"}
-        # https://github.com/owner/repo.git → https://x-access-token:TOKEN@github.com/owner/repo.git
-        authed_remote = remote.replace(
-            "https://", f"https://x-access-token:{token}@", 1
-        )
+            return result({"pushed": False, "reason": f"only https github remote supported, got {remote}"})
+        authed_remote = remote.replace("https://", f"https://x-access-token:{token}@", 1)
+        exists = bool(_git(["ls-remote", "--heads", authed_remote, branch], check=False).stdout.strip())
+        if orphan:
+            _git(["worktree", "prune"], check=False)
+        if exists:
+            ref = f"refs/remotes/origin/{branch}"
+            _git(["fetch", authed_remote, f"+refs/heads/{branch}:{ref}"])
+            base = _git(["rev-parse", ref]).stdout.strip()
+        else:
+            base = None if orphan else _git(["rev-parse", "HEAD"]).stdout.strip()
 
-        if use_orphan:
-            # Orphan 分支模式：临时 worktree 切到 pnl-data，只 commit SVG，force push
-            import tempfile
-            with tempfile.TemporaryDirectory() as wt_dir:
-                # 检查远端有没有这个分支
-                ls = _git(["ls-remote", "--heads", authed_remote, branch], check=False)
-                exists_remote = bool(ls.stdout.strip())
-                if exists_remote:
-                    # 2026-10-07（#232-5）：ls-remote 只"看"远端，不建 remote-tracking ref。
-                    # 单分支 clone / CI / 自建分支的机器上 refs/remotes/origin/<branch> 不存在，
-                    # 旧代码 worktree add check=False 静默失败，后续 git 在裸 temp dir 里跑，
-                    # pushed 永远 False 而 job 报 ok。先显式 fetch 建 ref，两步都 check（失败走
-                    # 下方 CalledProcessError 分支、stderr 脱敏）。"+" 强更：分支是 force push 的。
-                    # 被杀/异常留下的 worktree 登记（temp dir 已删）会让 add -B 永远报
-                    # "already used by worktree"——先 prune 自愈
-                    _git(["worktree", "prune"], check=False)
-                    _git(["fetch", authed_remote,
-                          f"+refs/heads/{branch}:refs/remotes/origin/{branch}"])
-                    _git(["worktree", "add", wt_dir, "-B", branch,
-                          f"refs/remotes/origin/{branch}"])
-                else:
-                    # 全新 orphan：先 worktree add 主分支占位，然后切到 orphan
-                    _git(["worktree", "add", "--detach", wt_dir, "HEAD"])
-
-                wt = Path(wt_dir)
-                if not exists_remote:
-                    subprocess.run(["git", "checkout", "--orphan", branch],
-                                   cwd=str(wt), check=True, capture_output=True)
-                    subprocess.run(["git", "rm", "-rf", "--cached", "."],
-                                   cwd=str(wt), check=False, capture_output=True)
-                    # 清空 worktree 但保留 .git
-                    for p in wt.iterdir():
-                        if p.name != ".git":
-                            if p.is_dir():
-                                import shutil
-                                shutil.rmtree(p)
-                            else:
-                                p.unlink()
-
-                # 复制最新 SVG 进 worktree 并 commit
-                target_svg = wt / "docs" / "pnl_chart.svg"
-                target_svg.parent.mkdir(parents=True, exist_ok=True)
-                target_svg.write_bytes(SVG_PATH.read_bytes())
-                # README 提示
-                (wt / "README.md").write_text(
-                    "# pnl-data branch\n\n"
-                    "This orphan branch holds the auto-generated PnL chart only. "
-                    "Do not commit code here. Updated hourly by `jobs/pnl_snapshot`.\n",
-                    encoding="utf-8", newline="\n"
-                )
-
-                subprocess.run(["git", "add", "docs/pnl_chart.svg", "README.md"],
-                               cwd=str(wt), check=True, capture_output=True)
-                # 没变化跳过
-                diff = subprocess.run(["git", "diff", "--cached", "--quiet"],
-                                       cwd=str(wt), capture_output=True)
-                if diff.returncode == 0:
-                    _git(["worktree", "remove", "--force", wt_dir], check=False)
-                    return {"pushed": False, "reason": "no svg change", "branch": branch}
-
-                subprocess.run([
-                    "git", "-c", "user.name=pnl-bot",
-                    "-c", "user.email=pnl-bot@invest.local",
-                    "commit", "-m", "chore(pnl): hourly snapshot [skip ci]",
-                ], cwd=str(wt), check=True, capture_output=True)
-
-                # Orphan 分支总是 force push 一个**无父** commit（每次 reset 到只含最新 SVG）。
-                # 2026-10-07：worktree 现在基于刚 fetch 的远端 tip，直接推 HEAD 会每次续一个
-                # commit（公开仓库一年 ~1.5k 个 SVG commit）——用同一棵 tree 另起无父 commit 推
-                orphan = subprocess.run(
-                    ["git", "-c", "user.name=pnl-bot", "-c", "user.email=pnl-bot@invest.local",
-                     "commit-tree", "HEAD^{tree}", "-m", "chore(pnl): hourly snapshot [skip ci]"],
-                    cwd=str(wt), check=True, capture_output=True, text=True,
-                ).stdout.strip()
-                push = subprocess.run(
-                    ["git", "push", "--force", authed_remote, f"{orphan}:refs/heads/{branch}"],
-                    cwd=str(wt), capture_output=True, text=True,
-                )
-                _git(["worktree", "remove", "--force", wt_dir], check=False)
-                if push.returncode != 0:
-                    return {"pushed": False, "reason": f"push failed: {_redact_token_in(push.stderr[:200])}",
-                            "branch": branch}
-                return {"pushed": True, "branch": branch, "mode": "orphan"}
-
-        # 主分支模式：直接 add + commit + push
-        _git(["add", "docs/pnl_chart.svg"])
-        diff = _git(["diff", "--cached", "--quiet"], check=False)
-        if diff.returncode == 0:
-            return {"pushed": False, "reason": "no svg change", "branch": "main"}
-        _git([
-            "-c", "user.name=pnl-bot",
-            "-c", "user.email=pnl-bot@invest.local",
-            "commit", "-m", "chore(pnl): hourly snapshot [skip ci]",
-        ])
-        push = _git(["push", authed_remote, f"HEAD:{branch}"], check=False)
-        if push.returncode != 0:
-            # 必须脱敏：git push 失败 stderr 会回显带 token 的 authed_remote
-            # （'fatal: unable to access https://x-access-token:TOKEN@github.com/...'）
-            # 与 orphan 路径同口径，避免 GITHUB_TOKEN 流到 scheduler 日志（audit security M1）
-            return {"pushed": False,
-                    "reason": f"push failed: {_redact_token_in(push.stderr[:200])}",
-                    "branch": branch}
-        return {"pushed": True, "branch": branch, "mode": "main"}
-
-    except subprocess.CalledProcessError as e:
-        # e.stderr 同样可能带 authed_remote（token），统一脱敏
-        raw = e.stderr[:200] if e.stderr else str(e)
-        # orphan 分支里的裸 subprocess.run 没开 text=True，stderr 是 bytes——直接喂
-        # _redact_token_in 会抛 TypeError，把真正的 git 错误吞成 job failed
-        # （生产 2026-08-12 17:00 job_runs 实证）。
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="openinvest-pnl-index-") as directory:
+            index = Path(directory) / "index"
+            _git(["read-tree", base] if base else ["read-tree", "--empty"], index=index)
+            _stage(index, "docs/pnl_chart.svg", svg_bytes)
+            if orphan:
+                _stage(index, "README.md", (
+                    "# pnl-data branch\n\nThis orphan branch holds the auto-generated PnL chart only. "
+                    "Do not commit code here. Updated hourly by `jobs/pnl_snapshot`.\n"
+                ).encode("utf-8"))
+            # Verify the actual staged blob and then the immutable tree that is
+            # passed to commit-tree. Neither operation rereads the SVG path.
+            if _git(["show", ":docs/pnl_chart.svg"], index=index, binary=True).stdout != svg_bytes:
+                raise _BlobMismatch()
+            if base and _git(["diff", "--cached", "--quiet", base], check=False, index=index).returncode == 0:
+                return result({"pushed": False, "reason": "no svg change", "branch": branch})
+            tree = _git(["write-tree"], index=index).stdout.strip()
+            if _git(["show", f"{tree}:docs/pnl_chart.svg"], binary=True).stdout != svg_bytes:
+                raise _BlobMismatch()
+            if not notice_only and (blocked := frozen_artifact_block(MemoryStore(), artifact)):
+                return _with_pending_notice(blocked)
+            commit = _git([
+                "-c", "user.name=pnl-bot", "-c", "user.email=pnl-bot@invest.local",
+                "commit-tree", tree, *([] if orphan else ["-p", base]),
+                "-m", "chore(pnl): hourly snapshot [skip ci]",
+            ]).stdout.strip()
+            if not notice_only and (blocked := frozen_artifact_block(MemoryStore(), artifact)):
+                return _with_pending_notice(blocked)
+            push = _git(["push", *(["--force"] if orphan else []), authed_remote,
+                         f"{commit}:refs/heads/{branch}"], check=False)
+            if push.returncode != 0:
+                return result({"pushed": False, "reason": f"push failed: {_redact_token_in(push.stderr[:200])}",
+                               "branch": branch})
+            return result({"pushed": True, "branch": branch, "mode": "orphan" if orphan else "main"})
+    except _BlobMismatch:
+        return result(derived_publication_block("staged_svg_mismatch"))
+    except subprocess.CalledProcessError as exc:
+        raw = exc.stderr[:200] if exc.stderr else str(exc)
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8", errors="replace")
-        return {"pushed": False, "reason": f"git failure: {_redact_token_in(raw)}"}
-    except Exception as e:
-        # 兜底分支同样可能带 authed_remote（token）—— 非 CalledProcessError 的
-        # subprocess 异常（OSError/TimeoutExpired）或库异常的 message 里也会回显
-        # 带 token 的 URL，统一脱敏。type 名不含 secret，保留不脱敏。
-        return {"pushed": False, "reason": f"unexpected: {type(e).__name__}: {_redact_token_in(str(e))}"}
+        return result({"pushed": False, "reason": f"git failure: {_redact_token_in(raw)}"})
+    except Exception as exc:
+        return result({"pushed": False,
+                       "reason": f"unexpected: {type(exc).__name__}: {_redact_token_in(str(exc))}"})
 
 
 # 不 push 的正常原因；其余 pushed=False 都是失败。#232-5：之前失败只埋在 push 子 dict 里，
@@ -407,6 +396,8 @@ _PUSH_NOOP_REASONS = ("INVEST_PNL_AUTOPUSH != 1", "no svg change")
 
 
 def _push_status(push: Dict[str, Any]) -> str:
+    if push.get("status") in {"unverified", "simulation_only"}:
+        return push["status"]
     if push.get("pushed") or push.get("reason") in _PUSH_NOOP_REASONS:
         return "ok"
     log.warning(f"[pnl_snapshot] SVG push 失败: {push.get('reason')}")
@@ -421,10 +412,12 @@ def _persist_outperform(events: List[Dict[str, Any]]) -> None:
     """
     if not events:
         return
+    history = _read_history()
+    sealed_events = [seal_outperform_event(MemoryStore(), event, HISTORY_PATH, history) for event in events]
     out_path = SVG_PATH.parent / "outperform_events.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("a", encoding="utf-8", newline="\n") as f:
-        for ev in events:
+        for ev in sealed_events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
 
@@ -432,33 +425,47 @@ def run() -> Dict[str, Any]:
     """job entry：算快照 + 写历史 + 渲染 SVG + 可选自动 push"""
     # 跳过非交易时段（周末 / 凌晨）
     if not _is_trading_window():
-        return {"status": "skipped", "reason": "non_trading_window",
-                "now": datetime.now().isoformat(timespec="seconds")}
+        return _notice_if_existing_chart_unverified({"status": "skipped", "reason": "non_trading_window",
+                "now": datetime.now().isoformat(timespec="seconds")})
 
     store = MemoryStore()
     try:
         snap = _compute_snapshot(store)
     except _Skip as e:
-        return {"status": "skipped", **e.info}
+        info = {"status": "skipped", **e.info}
+        return (_with_pending_notice(info) if info["status"] in {"unverified", "simulation_only"}
+                else _notice_if_existing_chart_unverified(info))
     if snap is None:
-        return {"status": "skipped", "reason": "no_portfolio"}
+        return _notice_if_existing_chart_unverified({"status": "skipped", "reason": "no_portfolio"})
 
-    _append_history(snap)
-    history = _read_history()
+    try:
+        _append_history(snap)
+        history = _read_history()
+    except (OSError, ValueError, KeyError, TypeError):
+        return _with_pending_notice(derived_publication_block("unverified_point_receipt"))
+    if len(_equity_rel(history)) < 2:
+        return _with_pending_notice(derived_publication_block("insufficient_qualified_history", points=len(history)))
     window_pct = _window_pct(history)
 
     # 渲染并原子写入 SVG。部署后第一轮只有 1 个新点（旧点口径不同被过滤）：已有旧图就先留着，
     # 别用「数据采集中」占位图覆盖已发布的图（autopush 会推上 README）——2h 后下一轮就有 2 个点。
     if len(_equity_rel(history)) >= 2 or not SVG_PATH.exists():
         SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        svg_content = render_svg(history)
-        tmp = SVG_PATH.with_suffix(".svg.tmp")
-        tmp.write_text(svg_content, encoding="utf-8", newline="\n")
-        oslock.replace(tmp, SVG_PATH)
+        try:
+            svg_content = render_svg(history)
+            tmp = SVG_PATH.with_suffix(".svg.tmp")
+            tmp.write_text(svg_content, encoding="utf-8", newline="\n")
+            oslock.replace(tmp, SVG_PATH)
+            seal_render_manifest(store, SVG_PATH, HISTORY_PATH, history, window_days=WINDOW_DAYS)
+        except (OSError, ValueError, KeyError, TypeError):
+            return _with_pending_notice(derived_publication_block("unverified_render_manifest"))
 
     # 跑赢基准的"可分享瞬间"事件（PM-3 增长杠杆）
-    events = _outperform_events(snap)
-    _persist_outperform(events)
+    try:
+        events = _outperform_events(snap)
+        _persist_outperform(events)
+    except (OSError, ValueError, KeyError, TypeError):
+        return _with_pending_notice(derived_publication_block("unverified_event_sources"))
 
     # 可选：commit + push 到 GitHub（受 INVEST_PNL_AUTOPUSH env 控制）
     push_result = _auto_push_svg()
@@ -483,15 +490,27 @@ def render_only() -> Dict[str, Any]:
     场景：清理过 pnl_history.jsonl 噪声后，想重新生成图但不想再追加新点
     （尤其当前是非交易时段）。
     """
-    history = _read_history()
+    if blocked := _publication_source_block():
+        return _with_pending_notice(blocked)
+    try:
+        history = _read_history()
+    except (OSError, ValueError, KeyError, TypeError):
+        return _with_pending_notice(derived_publication_block("unverified_point_receipt"))
+    if len(_equity_rel(history)) < 2:
+        return _with_pending_notice(derived_publication_block("insufficient_qualified_history", points=len(history)))
     SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    svg_content = render_svg(history)
-    tmp = SVG_PATH.with_suffix(".svg.tmp")
-    tmp.write_text(svg_content, encoding="utf-8", newline="\n")
-    oslock.replace(tmp, SVG_PATH)
+    try:
+        svg_content = render_svg(history)
+        tmp = SVG_PATH.with_suffix(".svg.tmp")
+        tmp.write_text(svg_content, encoding="utf-8", newline="\n")
+        oslock.replace(tmp, SVG_PATH)
+        seal_render_manifest(MemoryStore(), SVG_PATH, HISTORY_PATH, history, window_days=WINDOW_DAYS)
+    except (OSError, ValueError, KeyError, TypeError):
+        return _with_pending_notice(derived_publication_block("unverified_render_manifest"))
     push_result = _auto_push_svg()
+    push_status = _push_status(push_result)
     return {
-        "status": "ok_render_only",
+        "status": "ok_render_only" if push_status == "ok" else push_status,
         "history_points": len(history),
         "svg_path": str(SVG_PATH),
         "push": push_result,

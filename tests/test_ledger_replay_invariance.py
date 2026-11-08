@@ -1,11 +1,11 @@
-"""calc/ledger_replay.py —— 账本流水唯一读法的回放不变量（ADR-027 PR1：纯重构，行为逐字不变）。
+"""calc/ledger_replay.py —— 保留旧数学回放；独立验证来源资格，不能把投影升级成实际收益。
 
 oracle = PR1 之前 ``services/account_performance._ledger_events`` / 内联的"账本里有、持仓里没有的 symbol"循环 /
 ``core/decision_calc.history_as_trades`` 的**原样拷贝**（下面 ``_old_*``，不要"顺手修"——它们的价值就是冻结旧解释）。
 守三件事：
 1. 事件级：脱敏合成流水（覆盖全部历史 action × 两种价格字段形状）+ 种子随机流水，新旧事件逐字段相等；
-2. NAV 级：同一份流水喂整条 ``build_account_performance``（旧事件+旧 symbol 登记 vs 新路径），日度 NAV 行与整份 perf 相等；
-3. 决议匹配：``history_as_trades`` 新旧输出相等。
+2. NAV 级：只对来源合格的合成客户流水比较新旧日度 NAV 与 perf；原定投投影单独断言拒绝实际收益计算；
+3. 决议匹配：保留旧交易标识与数值形状，新 provenance/status 单独按事实检查。
 另守 Activity 形状 / LedgerState 数值 / "没人再自抄别名表"。
 """
 from __future__ import annotations
@@ -113,6 +113,12 @@ def _old_history_as_trades(records: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return out
 
 
+def _legacy_trade_fields(trades):
+    """Frozen oracle still owns historical field shapes; status now has source qualifications."""
+    keys = ("id", "ts", "verdict_id", "symbol", "direction", "units", "price")
+    return [{key: row[key] for key in keys} for row in trades]
+
+
 # ===================================================================================
 # 脱敏合成流水：全部历史 action × 两种价格字段形状；文件顺序故意与日期顺序不一致
 # ===================================================================================
@@ -197,6 +203,18 @@ SYNTH_ALIAS = {"GOLD-CNY": "GC=F"}
 SYNTH_PM_DAYS = [f"2026-01-{d:02d}" for d in (5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23)]
 
 
+def client_reported_synthetic_ledger():
+    """An execution/cash-flow NAV cohort excludes projections and balance anchors.
+
+    All historical actions stay covered by the full mathematical event oracle.
+    The absolute correction reports a balance, not the missing trade or external
+    cash flow needed to calculate an observed historical return.
+    """
+    return [row for row in synthetic_ledger()
+            if row.get("source") not in {"dca_daily", "reconcile_dca_phantom"}
+            and row.get("action") != "manual_override"]
+
+
 # ===================================================================================
 # 1. 事件级
 # ===================================================================================
@@ -262,7 +280,7 @@ def test_random_ledgers_events_and_trades_equal_oracle(seed):
     recs = _random_records(rng, 300)
     for alias in ({}, SYNTH_ALIAS):
         assert ap._ledger_events(recs, alias) == _old_ledger_events(recs, alias)
-    assert history_as_trades(recs) == _old_history_as_trades(recs)
+    assert _legacy_trade_fields(history_as_trades(recs)) == _legacy_trade_fields(_old_history_as_trades(recs))
 
 
 @pytest.mark.parametrize("seed", range(3))
@@ -275,13 +293,17 @@ def test_random_ledgers_symbol_registration_equals_oracle(seed):
     assert new == old
 
 
-def test_history_as_trades_equals_oracle_on_synthetic_ledger():
+def test_history_as_trades_preserves_legacy_fields_and_adds_source_qualification():
     recs = synthetic_ledger()
     new = history_as_trades(recs)
-    assert new == _old_history_as_trades(recs)
+    assert _legacy_trade_fields(new) == _legacy_trade_fields(_old_history_as_trades(recs))
     # 对账 / 定投 / 赠股 / 修正都不是"执行了决议"；bought 行的 price 仍是 None（旧行为，改它是可见变化）
     assert [t["id"] for t in new] == [f"history:{i}" for i in (1, 3, 7, 8, 9, 10, 15, 17, 18, 20)]
     assert next(t for t in new if t["id"] == "history:3")["price"] is None
+    assert next(t for t in new if t["id"] == "history:1")["status"] == "executed"
+    assert next(t for t in new if t["id"] == "history:20")["status"] == "unobserved"  # no usable date
+    assert all(t["evidence_basis"] == "client_reported_not_independently_verified" for t in new)
+    assert all(t["execution_domain"] == "client_reported" for t in new)
 
 
 # ===================================================================================
@@ -314,7 +336,7 @@ def _synthetic_pm(tmp_path, history) -> PortfolioManager:
         {"symbol": "AAA", "units": 140.0, "avg_cost": 10.2, "cost_currency": "CNY"},
         {"symbol": "BBB.AX", "units": 30.0, "avg_cost": 51.0, "cost_currency": "AUD"},
         {"symbol": "GC=F", "units": 10.0, "avg_cost": 650.0, "cost_currency": "CNY",
-         "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
+         "kind": "metal", "unit_label": "克", "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
     ]}, "")
     for h in history:
         store.append_history(h)
@@ -324,11 +346,6 @@ def _synthetic_pm(tmp_path, history) -> PortfolioManager:
 def _run_perf(monkeypatch, tmp_path, history, *, old_path: bool):
     """跑整条 build_account_performance；old_path=True 时事件与 symbol 登记换成 PR1 之前的旧实现。
     返回 (perf, 送进 account_metrics 的日度 NAV 行 + 开盘 NAV)。"""
-    monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({
-        "AAA": _prices(10.0, 0.1), "BBB.AX": _prices(50.0, 0.3), "DDD": _prices(5.0, 0.05),
-        "GC=F": _prices(3110.35, 3.0), "USDCNY=X": _prices(7.0, 0.01), "AUDCNY=X": _prices(4.5, 0.02),
-    }))
-    monkeypatch.setattr(ap, "_benchmark_symbol", lambda: "")
     captured: Dict[str, Any] = {}
     real_metrics = ap.account_metrics
 
@@ -336,19 +353,27 @@ def _run_perf(monkeypatch, tmp_path, history, *, old_path: bool):
         captured["rows"], captured["opening_nav"] = list(rows), opening_nav
         return real_metrics(rows, opening_nav, *a, **kw)
 
-    monkeypatch.setattr(ap, "account_metrics", _spy)
-    pm = _synthetic_pm(tmp_path, history)
-    if old_path:
-        alias = {ap.GOLD_LEDGER_SYMBOL: "GC=F"}
-        monkeypatch.setattr(ap, "_events_of", lambda _acts: _old_ledger_events(pm.store.read_history(), alias)[0])
-        monkeypatch.setattr(ap, "_register_ledger_symbols",
-                            lambda by_sym, _acts: _old_register_ledger_symbols(by_sym, pm.store.read_history(), alias))
-    perf = ap.build_account_performance(pm, today="2026-01-23", base="CNY")
+    # Restore the old-path overrides before invoking the new path. Otherwise
+    # the alleged comparison would run the frozen oracle on both sides.
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ap, "MarketStore", lambda: _FakeStore({
+            "AAA": _prices(10.0, 0.1), "BBB.AX": _prices(50.0, 0.3), "DDD": _prices(5.0, 0.05),
+            "GC=F": _prices(3110.35, 3.0), "USDCNY=X": _prices(7.0, 0.01), "AUDCNY=X": _prices(4.5, 0.02),
+        }))
+        scoped.setattr(ap, "_benchmark_symbol", lambda: "")
+        scoped.setattr(ap, "account_metrics", _spy)
+        pm = _synthetic_pm(tmp_path, history)
+        if old_path:
+            alias = {ap.GOLD_LEDGER_SYMBOL: "GC=F"}
+            scoped.setattr(ap, "_events_of", lambda _acts: _old_ledger_events(pm.store.read_history(), alias)[0])
+            scoped.setattr(ap, "_register_ledger_symbols",
+                           lambda by_sym, _acts: _old_register_ledger_symbols(by_sym, pm.store.read_history(), alias))
+        perf = ap.build_account_performance(pm, today="2026-01-23", base="CNY")
     return perf, captured
 
 
 def test_nav_series_and_perf_equal_old_path(monkeypatch, tmp_path):
-    history = synthetic_ledger()
+    history = client_reported_synthetic_ledger()
     old_perf, old_cap = _run_perf(monkeypatch, tmp_path / "old", history, old_path=True)
     new_perf, new_cap = _run_perf(monkeypatch, tmp_path / "new", history, old_path=False)
     assert old_perf["status"] == "ok" and new_perf["status"] == "ok"
@@ -362,7 +387,24 @@ def test_nav_series_and_perf_equal_old_path(monkeypatch, tmp_path):
     assert new_perf["data_quality"]["skipped_events"] == 1
     # 流水确实在动 NAV 与外部流（不是两边都空转）
     assert any(r[2] for r in new_cap["rows"]) and any(r[3] for r in new_cap["rows"])
-    assert new_perf["twr_all"] is not None and new_perf["data_quality"]["events"] == len(synthetic_ledger()) - 1
+    assert new_perf["twr_all"] is not None and new_perf["data_quality"]["events"] == len(history) - 1
+
+
+def test_legacy_projection_math_is_preserved_but_actual_performance_is_ineligible(monkeypatch, tmp_path):
+    history = synthetic_ledger()
+    activities, state = replay_ledger(history, alias=SYNTH_ALIAS)
+    projections = [a for a in activities if a.seq in (2, 4, 5)]
+    assert [a.units_effect for a in projections] == [50, 10, -50]
+    assert [a.amount for a in projections] == [525, 104, 525]
+    assert all(a.replayable and not a.execution_eligible and a.execution_domain == "projection" for a in projections)
+    assert state.unobserved_execution_rows == 3
+    pm = _synthetic_pm(tmp_path, history)
+    before = (pm.store.root / "portfolio_history.jsonl").read_bytes()
+    monkeypatch.setattr(ap, "MarketStore", lambda: pytest.fail("unverified execution must stop before valuation"))
+    perf = ap.build_account_performance(pm, today="2026-01-23", base="CNY")
+    assert perf["status"] == "unverified_execution_history" and perf["financial_performance_eligible"] is False
+    assert perf.get("twr_all") is None
+    assert (pm.store.root / "portfolio_history.jsonl").read_bytes() == before
 
 
 # ===================================================================================
@@ -469,7 +511,7 @@ def _garbage_rows() -> List[Dict[str, Any]]:
 def test_unparseable_numeric_rows_degrade_instead_of_raising():
     clean, dirty = synthetic_ledger(), synthetic_ledger() + _garbage_rows()
     # 旧 history_as_trades 从不转数字：脏行存在也不抛、输出与旧实现逐字相同
-    assert history_as_trades(dirty) == _old_history_as_trades(dirty)
+    assert _legacy_trade_fields(history_as_trades(dirty)) == _legacy_trade_fields(_old_history_as_trades(dirty))
     acts, state = replay_ledger(dirty, alias=SYNTH_ALIAS)
     assert len(acts) == len(dirty)
     by_seq = {a.seq: a for a in acts}
@@ -487,9 +529,10 @@ def test_unparseable_numeric_rows_degrade_instead_of_raising():
 
 
 def test_unparseable_row_does_not_break_account_performance(monkeypatch, tmp_path):
-    base_perf, base_cap = _run_perf(monkeypatch, tmp_path / "clean", synthetic_ledger(), old_path=False)
+    history = client_reported_synthetic_ledger()
+    base_perf, base_cap = _run_perf(monkeypatch, tmp_path / "clean", history, old_path=False)
     dirty_rows = [r for r in _garbage_rows() if r.get("ts")]          # append_history 会给无日期行补 ts，这里只放有日期的
-    perf, cap = _run_perf(monkeypatch, tmp_path / "dirty", synthetic_ledger() + dirty_rows, old_path=False)
+    perf, cap = _run_perf(monkeypatch, tmp_path / "dirty", history + dirty_rows, old_path=False)
     assert perf["status"] == "ok" and cap["rows"] == base_cap["rows"]
     assert perf["data_quality"]["skipped_events"] == base_perf["data_quality"]["skipped_events"] + len(dirty_rows)
     for p in (perf, base_perf):

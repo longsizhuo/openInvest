@@ -56,15 +56,20 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(trades_db_mod, "TradesDB", _FakeTradesDB)
     _freeze_ledger_clock(monkeypatch)
     reset_config()
-    return MemoryStore(mem)
+    store = MemoryStore(mem)
+    (mem / ".autopilot_origin.json").write_text(json.dumps({"cloned_at": TODAY}))
+    return store
 
 
 def _seed(store: MemoryStore, cash=None, holdings=None):
     store.write("user", "user", {"display_name": "T", "risk_tolerance": "Aggressive"}, "")
     store.write("strategy", "strategy", {"target_allocation_stock": 0.7, "target_allocation_cash": 0.3,
                                           "target_assets": []}, "")
+    positions = holdings if holdings is not None else [dict(CNY_POS)]
+    if (store.root / ".autopilot_origin.json").exists():
+        positions = [{**h, "channel": h.get("channel", "paper_autopilot")} for h in positions]
     store.write("portfolio", "state", {"cash": cash if cash is not None else {"CNY": 30000.0},
-                                        "holdings": holdings if holdings is not None else [dict(CNY_POS)],
+                                        "holdings": positions,
                                         "schema_version": 2}, "")
 
 
@@ -139,6 +144,41 @@ def test_disabled_is_noop(home, monkeypatch):
     assert _decision(f"{TODAY}/510300.SS")["execution"] is None
 
 
+def test_enabling_on_primary_home_cannot_mutate_or_relabel_real_ledger(home, monkeypatch):
+    (home.root / ".autopilot_origin.json").unlink()
+    _enable(monkeypatch)
+    _seed(home)
+    _verdict(home, "510300.SS", "ACCUMULATE", 3000)
+    before = home.path_of("portfolio").read_bytes()
+    monkeypatch.setattr(ap, "get_quote", lambda *args: pytest.fail("primary home must stop before quoting"))
+    assert ap.run(TODAY) == {"status": "error", "reason": "paper_home_requires_independent_clone"}
+    assert home.path_of("portfolio").read_bytes() == before and home.read_history() == []
+    assert not (home.root / ".state" / "paper_autopilot.json").exists()
+
+
+@pytest.mark.parametrize("contamination", ["domain", "history", "holding"])
+def test_clone_marker_cannot_relabel_existing_real_ledger(home, monkeypatch, contamination):
+    _enable(monkeypatch)
+    _seed(home)
+    _verdict(home, "510300.SS", "ACCUMULATE", 3000)
+    pm = _pm(home)
+    if contamination == "domain":
+        with pm.with_portfolio_tx() as p:
+            p["ledger_domain"] = "client_reported"
+    elif contamination == "history":
+        pm.deposit_cash("CNY", 100, source="mcp")
+    else:
+        with pm.with_portfolio_tx() as p:
+            positions = list(p["holdings"])
+            positions[0]["channel"] = "user"
+            p["holdings"] = positions
+    before = home.path_of("portfolio").read_bytes()
+    history_before = home.read_history()
+    out = ap.run(TODAY)
+    assert out["status"] == "error" and out["reason"].startswith("paper_home_has_non_simulated_")
+    assert home.path_of("portfolio").read_bytes() == before and home.read_history() == history_before
+
+
 # ---------------- 买 / 卖 ----------------
 
 def test_accumulate_lot_buy_fee_and_execution(home, monkeypatch):
@@ -157,8 +197,16 @@ def test_accumulate_lot_buy_fee_and_execution(home, monkeypatch):
     hist = home.read_history()
     assert [h["action"] for h in hist] == ["buy", "fee"]
     assert hist[0]["source"] == "paper_autopilot" and hist[1]["cash_effect"] == -0.9
-    d = _decision(f"{TODAY}/510300.SS")   # 决议 ↔ 成交匹配成立
-    assert d["executed"] is True and d["execution"]["reason"] == "paper_autopilot"
+    assert all(h["execution_domain"] == "paper_simulation" for h in hist)
+    assert all(h["evidence_basis"] == "paper_simulated_fill" for h in hist)
+    assert all(h["fee_status"] == "estimated" for h in hist)
+    assert all(h["source_reference"] == f"paper_autopilot:{TODAY}/510300.SS" for h in hist)
+    d = _decision(f"{TODAY}/510300.SS")
+    assert d["executed"] is None and d["execution"] is None
+    assert d["matched_trades"] == [] and d["simulated_executed"] is True
+    assert d["simulated_execution"]["reason"] == "paper_autopilot"
+    persisted = json.loads((home.root / ".dreams" / "executions.jsonl").read_text().strip())
+    assert persisted["executed"] is False and persisted["simulated_execution"] is True
 
 
 def test_trim_sells_by_amount_and_sell_clears(home, monkeypatch):
@@ -179,6 +227,43 @@ def test_trim_sells_by_amount_and_sell_clears(home, monkeypatch):
     assert f2["units"] == 800.0 and _pm(home).find_holding("510300.SS")["units"] == 0.0
 
 
+def test_paper_book_keeps_domain_without_leaking_producer_scope(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    _verdict(home, "510300.SS", "ACCUMULATE", 3000)
+    _market(monkeypatch, {"510300.SS": (5.0, "CNY")})
+    assert ap.run(TODAY)["filled"]
+    _pm(home).deposit_cash("CNY", 100, source="mcp")
+    activity = home.read_history()[-1]
+    assert activity["source"] == "mcp" and activity["execution_domain"] == "paper_simulation"
+    assert activity["evidence_basis"] == "client_reported_not_independently_verified"
+    assert activity.get("source_reference") is None
+    assert activity.get("fee_status") is None
+    from openinvest.calc.ledger_replay import replay_ledger
+    activities, _ = replay_ledger([activity], alias={})
+    assert activities[0].external is True
+
+
+def test_empty_paper_scope_does_not_relabel_a_client_book(tmp_path):
+    store = MemoryStore(tmp_path / "client" / "memory")
+    _seed(store)
+    pm = _pm(store)
+    with pm.with_portfolio_tx() as portfolio:
+        portfolio["ledger_domain"] = "client_reported"
+    before = store.path_of("portfolio").read_bytes()
+    with pm.recording_scope(
+        evidence_basis="paper_simulated_fill", execution_domain="paper_simulation",
+        source_reference="temporary-paper-scope", fee_status="estimated", trade_date=TODAY,
+    ):
+        pass
+    assert store.path_of("portfolio").read_bytes() == before and store.read_history() == []
+    pm.deposit_cash("CNY", 100, source="mcp")
+    activity, = store.read_history()
+    assert activity["source"] == "mcp" and activity["execution_domain"] == "client_reported"
+    assert activity["evidence_basis"] == "client_reported_not_independently_verified"
+    assert activity.get("source_reference") is None and activity.get("fee_status") is None
+
+
 def test_sell_without_position_is_skipped_and_recorded(home, monkeypatch):
     _enable(monkeypatch)
     _seed(home, holdings=[])
@@ -186,7 +271,7 @@ def test_sell_without_position_is_skipped_and_recorded(home, monkeypatch):
     _market(monkeypatch, {"510300.SS": (5.0, "CNY")})
     out = ap.run(TODAY)
     assert out["filled"] == [] and out["skipped"] == [{"symbol": "510300.SS", "reason": "no_position"}]
-    ex = _decision(f"{TODAY}/510300.SS")["execution"]
+    ex = _decision(f"{TODAY}/510300.SS")["simulated_execution"]
     assert ex["executed"] is False and ex["reason"] == "paper_autopilot:no_position"
 
 
@@ -197,7 +282,7 @@ def test_otc_fund_unsupported_is_recorded_not_filled(home, monkeypatch):
     _market(monkeypatch, {})   # 不该取价
     out = ap.run(TODAY)
     assert out["filled"] == [] and out["skipped"] == [{"symbol": "FUND:000001", "reason": "unsupported_otc_fund"}]
-    ex = _decision(f"{TODAY}/FUND:000001")["execution"]
+    ex = _decision(f"{TODAY}/FUND:000001")["simulated_execution"]
     assert ex["executed"] is False and ex["reason"] == "paper_autopilot:unsupported_otc_fund"
     assert home.read_history() == [] and _pm(home).cash_amount("CNY") == 30000.0
 
@@ -230,7 +315,7 @@ def test_cash_shortfall_shrinks_then_no_cash(home, monkeypatch):
     _verdict(home, "159949.SZ", "ACCUMULATE", 5000)
     _market(monkeypatch, {"159949.SZ": (1.0, "CNY")})
     ap.run(TODAY)   # 510300 已有 execution 被过滤；159949 一手要 100 元 + 手续费 > 100
-    assert _decision(f"{TODAY}/159949.SZ")["execution"]["reason"] == "paper_autopilot:no_cash"
+    assert _decision(f"{TODAY}/159949.SZ")["simulated_execution"]["reason"] == "paper_autopilot:no_cash"
     assert _pm(home).cash_amount("CNY") == 100.0
 
 
@@ -241,7 +326,7 @@ def test_min_order_gate(home, monkeypatch):
     _market(monkeypatch, {"510300.SS": (5.0, "CNY")})
     out = ap.run(TODAY)
     assert out["skipped"] == [{"symbol": "510300.SS", "reason": "too_small"}] and home.read_history() == []
-    assert _decision(f"{TODAY}/510300.SS")["execution"]["executed"] is False
+    assert _decision(f"{TODAY}/510300.SS")["simulated_execution"]["simulated_execution"] is False
 
 
 def test_aud_symbol_auto_fx_two_legs_with_idempotency_keys(home, monkeypatch):
@@ -262,6 +347,14 @@ def test_aud_symbol_auto_fx_two_legs_with_idempotency_keys(home, monkeypatch):
         assert k in keys
     acts = [(h["action"], h.get("symbol"), h.get("source")) for h in home.read_history()]
     assert acts[:2] == [("withdraw", "CNY", "paper_autopilot"), ("deposit", "AUD", "paper_autopilot")]
+    assert all(h["execution_domain"] == "paper_simulation" for h in home.read_history())
+    assert all(h["evidence_basis"] == "paper_simulated_fill" for h in home.read_history())
+    fx_rows = home.read_history()[:2]
+    assert all(h["source_reference"]["kind"] == "fx_conversion" for h in fx_rows)
+    from openinvest.calc.ledger_replay import replay_ledger, external_flow
+    activities, _ = replay_ledger(fx_rows, alias={})
+    assert all(not activity.external and external_flow(activity) == 0 for activity in activities)
+    assert _pm(home).portfolio.get("ledger_domain") == "paper_simulation"
 
 
 def test_gold_without_holding_uses_cny_per_gram(home, monkeypatch):
@@ -296,9 +389,10 @@ def test_rerun_same_day_does_not_double_book(home, monkeypatch):
     assert out["filled"] == [] and out["skipped"][0]["reason"] == "duplicate_key"
     assert (_pm(home).cash_amount("CNY"), _pm(home).find_holding("510300.SS")["units"]) == snap
     assert [h["action"] for h in home.read_history()] == ["buy", "fee"]
-    # duplicate_key 不写 execution（那会盖掉匹配出的 executed=True）
+    # duplicate_key 不写新反馈，模拟匹配仍可恢复，但不能升级成用户真实采纳。
     d = _decision(f"{TODAY}/510300.SS")
-    assert d["execution"] is None and d["executed"] is True
+    assert d["execution"] is None and d["executed"] is None
+    assert d["simulated_execution"] is None and d["simulated_executed"] is True
 
 
 def test_currency_mismatch_is_terminal_skip(home, monkeypatch):
@@ -323,7 +417,13 @@ def test_buy_failure_after_fx_rolls_back_conversion(home, monkeypatch):
     assert out["skipped"] == [{"symbol": "NDQ.AX", "reason": "buy_failed"}]
     pm = _pm(home)
     assert pm.cash_amount("CNY") == pytest.approx(30000.0) and pm.cash_amount("AUD") == pytest.approx(0.0)
-    assert _decision(f"{TODAY}/NDQ.AX")["execution"]["reason"] == "paper_autopilot:buy_failed"
+    assert _decision(f"{TODAY}/NDQ.AX")["simulated_execution"]["reason"] == "paper_autopilot:buy_failed"
+    assert all(h["execution_domain"] == "paper_simulation" for h in home.read_history())
+    assert [h["source_reference"]["kind"] for h in home.read_history()] == [
+        "fx_conversion", "fx_conversion", "fx_conversion_rollback", "fx_conversion_rollback"]
+    from openinvest.calc.ledger_replay import replay_ledger, external_flow
+    activities, _ = replay_ledger(home.read_history(), alias={})
+    assert all(not a.external and external_flow(a) == 0 for a in activities)
 
 
 # ---------------- 休市 / 陈旧行情 ----------------

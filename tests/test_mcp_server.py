@@ -21,7 +21,7 @@ EXPECTED_TOOLS = {
     # 再平衡清单：只出清单不下单（读持仓，顾问模式拒绝）
     "rebalance_plan",
     # 补录用系统前就持有的仓位（不扣现金）：独立工具，老 server 上 Unknown tool 而不是静默扣现金
-    "record_existing_position",
+    "record_existing_position", "record_balance_observation",
     # 账本活动（ADR-027 PR2）：interest 并入 record_dividend 的 kind、tax 并入 record_fee 的 kind
     "record_dividend", "record_fee", "record_split", "record_return_of_capital",
     # 场外基金两段式（ADR-027 PR3）：下单扣现金记在途 → 按净值确认 / 撤销
@@ -104,7 +104,7 @@ READONLY_TOOLS = {
     "decisions", "explain_decision", "news_sources", "rebalance_plan",
 }
 # destructive 桶：动钱 4 件 + 账本活动 4 件（动现金 / 改持仓数量与成本）+ 场外基金两段式 3 件 + untrack_asset / remove_news_source（删配置条目，client 该弹确认）
-MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position",
+MONEY_TOOLS = {"buy", "sell", "deposit", "withdraw", "record_existing_position", "record_balance_observation",
                "record_dividend", "record_fee", "record_split", "record_return_of_capital",
                "place_fund_order", "confirm_fund_order", "cancel_fund_order",
                "untrack_asset", "remove_news_source"}
@@ -191,6 +191,8 @@ def test_advisory_mode_blocks_non_whitelisted_tools(monkeypatch):
         "rebalance_plan": {},
         "buy": {"symbol": "GC=F", "units": 1, "price": 1},
         "record_existing_position": {"symbol": "GC=F", "units": 1, "price": 1},
+        "record_balance_observation": {'reference_symbol':'SYNTHETIC','as_of':'2026-11-08T00:00:00+00:00',
+            'source_text':'Synthetic original statement','source_locator':'synthetic:test','idempotency_key':'synthetic-test'},
         "sell": {"symbol": "GC=F", "units": 1, "price": 1},
         "deposit": {"currency": "CNY", "amount": 1},
         "withdraw": {"currency": "CNY", "amount": 1},

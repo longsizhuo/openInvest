@@ -18,6 +18,7 @@ idempotency_key；**账本写入一旦提交就不再 unclaim**（防"已成交 
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import datetime
@@ -153,7 +154,49 @@ def _alloc_cny(d: Dict[str, Any]) -> float:
     return amt * _fx(ccy) if amt and ccy != "CNY" else amt
 
 
+def _paper_home_error(pm: PortfolioManager) -> Optional[str]:
+    """Enabling a job never converts the user's current ledger into a paper one."""
+    origin_path = pm.store.root / ".autopilot_origin.json"
+    try:
+        origin = json.loads(origin_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "paper_home_requires_independent_clone"
+    if not isinstance(origin, dict) or not origin.get("cloned_at"):
+        return "paper_home_requires_independent_clone"
+    domain = pm.portfolio.get("ledger_domain")
+    if domain not in (None, "paper_simulation"):
+        return "paper_home_has_non_simulated_ledger_domain"
+    from openinvest.core.decision_calc import execution_domain
+    history = pm.store.read_history()
+    if any(execution_domain(row) != "paper_simulation" for row in history):
+        return "paper_home_has_non_simulated_history"
+    paper_symbols = {row.get("symbol") for row in history}
+    if domain is None and any(h.get("channel") != _CLAIM and h.get("symbol") not in paper_symbols
+                              for h in pm.holdings):
+        return "paper_home_has_non_simulated_holdings"
+    return None
+
+
+def _fx_recording_scope(pm: PortfolioManager, d: Dict[str, Any], today: str, *, rollback=False):
+    return pm.recording_scope(
+        evidence_basis="paper_simulated_fill", execution_domain="paper_simulation",
+        source_reference={"kind": "fx_conversion_rollback" if rollback else "fx_conversion",
+                          "producer": _CLAIM, "decision_id": d["decision_id"]},
+        trade_date=today, fee_status="estimated",
+    )
+
+
 def _fill(pm: PortfolioManager, d: Dict[str, Any], today: str, cfg) -> Dict[str, Any]:
+    """All fills, commissions and FX legs belong to the same paper domain."""
+    with pm.recording_scope(
+        evidence_basis="paper_simulated_fill", execution_domain="paper_simulation",
+        source_reference=f"paper_autopilot:{d['decision_id']}", trade_date=today,
+        fee_status="estimated",
+    ):
+        return _fill_simulated(pm, d, today, cfg)
+
+
+def _fill_simulated(pm: PortfolioManager, d: Dict[str, Any], today: str, cfg) -> Dict[str, Any]:
     """成交一条决议；返回 filled 行。_Skip 由调用方处理。"""
     symbol, verdict = d["symbol"], d["verdict"]
     side = "buy" if verdict in _BUY else "sell"
@@ -175,12 +218,14 @@ def _fill(pm: PortfolioManager, d: Dict[str, Any], today: str, cfg) -> Dict[str,
         cny_out = math.ceil(plan["topup"] * fx * 100) / 100
         k = f"paper-fx-{today}-{symbol}-{ccy}"
         if plan["topup"] > 0:   # CNY 换汇补足：两笔各带幂等键（同 key 会被账本当重复，所以 -out / -in 分开）
-            pm.withdraw_cash("CNY", cny_out, source=_CLAIM, idempotency_key=f"{k}-out")
-            try:
-                pm.deposit_cash(ccy, plan["topup"], source=_CLAIM, idempotency_key=f"{k}-in")
-            except Exception:
-                pm.deposit_cash("CNY", cny_out, source=_CLAIM, idempotency_key=f"{k}-undo")   # 换汇只做了一半：把 CNY 退回去
-                raise
+            with _fx_recording_scope(pm, d, today):
+                pm.withdraw_cash("CNY", cny_out, source=_CLAIM, idempotency_key=f"{k}-out")
+                try:
+                    pm.deposit_cash(ccy, plan["topup"], source=_CLAIM, idempotency_key=f"{k}-in")
+                except Exception:
+                    with _fx_recording_scope(pm, d, today, rollback=True):
+                        pm.deposit_cash("CNY", cny_out, source=_CLAIM, idempotency_key=f"{k}-undo")
+                    raise
         try:
             res = pm.buy(symbol, plan["units"], price, currency=ccy, kind=kind, unit_label=unit_label,
                          source=_CLAIM, idempotency_key=f"paper-{today}-{symbol}-buy")
@@ -188,8 +233,9 @@ def _fill(pm: PortfolioManager, d: Dict[str, Any], today: str, cfg) -> Dict[str,
             if plan["topup"] > 0:   # 换汇已提交而买入没成：反向换回，别留下没有成交的现金结构。
                 # 换汇键已烧，重试会被判重复 → 本次判终局（不 unclaim）
                 log.warning(f"[autopilot] {symbol} 买入失败，回滚换汇: {e}")
-                pm.withdraw_cash(ccy, plan["topup"], source=_CLAIM, idempotency_key=f"{k}-rollback-out")
-                pm.deposit_cash("CNY", cny_out, source=_CLAIM, idempotency_key=f"{k}-rollback-in")
+                with _fx_recording_scope(pm, d, today, rollback=True):
+                    pm.withdraw_cash(ccy, plan["topup"], source=_CLAIM, idempotency_key=f"{k}-rollback-out")
+                    pm.deposit_cash("CNY", cny_out, source=_CLAIM, idempotency_key=f"{k}-rollback-in")
                 raise _Skip("buy_failed", terminal=True) from e
             raise
     else:
@@ -209,12 +255,15 @@ def _fill(pm: PortfolioManager, d: Dict[str, Any], today: str, cfg) -> Dict[str,
         except Exception as e:  # noqa: BLE001
             log.warning(f"[autopilot] {symbol} 手续费记账失败（成交已提交）: {e}")
     try:
-        record_execution(d["decision_id"], True, reason=_CLAIM)
+        record_execution(d["decision_id"], True, reason=_CLAIM,
+                         execution_domain="paper_simulation", evidence_basis="paper_simulated_fill",
+                         source_reference=f"paper_autopilot:{d['decision_id']}")
     except Exception as e:  # noqa: BLE001
         log.warning(f"[autopilot] {symbol} record_execution 失败（成交已提交）: {e}")
     return {"symbol": symbol, "side": side, "verdict": verdict, "units": plan["units"], "price": price,
             "currency": ccy, "amount_cny": round(plan["cost"] * fx, 2), "fee_cny": round(plan["fee"] * fx, 2),
-            "fx_topup": plan.get("topup", 0.0) or None}
+            "fx_topup": plan.get("topup", 0.0) or None,
+            "execution_domain": "paper_simulation", "evidence_basis": "paper_simulated_fill"}
 
 
 def run(today: Optional[str] = None) -> Dict[str, Any]:
@@ -224,11 +273,18 @@ def run(today: Optional[str] = None) -> Dict[str, Any]:
         return {"status": "skipped", "reason": "autopilot_disabled"}
 
     pm = PortfolioManager()
+    home_error = _paper_home_error(pm)
+    if home_error:
+        return {"status": "error", "reason": home_error}
+    if pm.portfolio.get("ledger_domain") is None:
+        with pm.with_portfolio_tx() as portfolio:
+            portfolio["ledger_domain"] = "paper_simulation"
+        pm._reload()
     today = today or datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
     # 只取今天的、还没有 execution 记录的方向性裁决；先卖后买（卖出回款可供当天买入），其余按 symbol 字母序，保证确定性
     todo = sorted(
         (d for d in list_decisions(days=3)
-         if d["date"] == today and d["execution"] is None and d["verdict"] in _BUY + _SELL),
+         if d["date"] == today and d.get("simulated_execution") is None and d["verdict"] in _BUY + _SELL),
         key=lambda d: (d["verdict"] in _BUY, d["symbol"]))
     filled: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
@@ -250,7 +306,9 @@ def run(today: Optional[str] = None) -> Dict[str, Any]:
                 pass
             elif s.terminal:
                 try:
-                    record_execution(d["decision_id"], False, reason=f"{_CLAIM}:{s.reason}")
+                    record_execution(d["decision_id"], False, reason=f"{_CLAIM}:{s.reason}",
+                                     execution_domain="paper_simulation", evidence_basis="paper_simulated_fill",
+                                     source_reference=f"paper_autopilot:{d['decision_id']}")
                 except Exception as e:  # noqa: BLE001
                     log.warning(f"[autopilot] {symbol} 记 skip 失败: {e}")
             else:

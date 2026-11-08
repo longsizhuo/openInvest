@@ -37,6 +37,7 @@ class Snapshot:
     """一个时点的总权益指数（账户时间加权收益链接指数，成立日 = 100；剔除存取款，含现金）。"""
     ts: str
     equity_idx: float
+    calculation_receipt: Optional[Dict[str, str]] = None
 
 
 def _equity_rel(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

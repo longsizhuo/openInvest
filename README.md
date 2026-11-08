@@ -26,15 +26,15 @@ It provides a verifiable investment committee, evidence-based reasoning, long-ho
 
 ---
 
-## Live Performance & PnL
+## Account Performance & PnL
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/longsizhuo/openInvest/pnl-data/docs/pnl_chart.svg" alt="PnL chart" width="100%"/>
-  <sub>Data feed is automatically updated every 2 hours using `jobs/pnl_snapshot` and pushed to the <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data branch</a></sub>
+  <sub>Client-recorded account calculations, subject to source reconciliation and publication checks. Original records are preserved for audit; this chart does not establish forecasting performance. See the <a href="https://github.com/longsizhuo/openInvest/tree/pnl-data">pnl-data branch</a>.</sub>
   <br/>
-  <sub>Upper half: 30-day total-equity curve (whole account, time-weighted so deposits/withdrawals don't count as returns, rebased to 100 at the window start) · Lower half: same-window return against 8 benchmark assets (transparent disclosure, <b>not an alpha claim</b>—the committee's proven value is discipline and transparency, not excess return, see <a href="docs/wiki/adr/023-honest-positioning-not-alpha.md">ADR-023</a>)</sub>
+  <sub>When qualified data is available, the chart shows the account's time-weighted return and same-window benchmarks. Source validity, decision quality and economic value are assessed separately; see <a href="docs/wiki/adr/028-evidence-integrity-and-decision-objective.md">ADR-028</a>.</sub>
   <br/>
-  <sub>📌 <b>Note</b>: The current chart shows the author's live production portfolio. After self-hosting, the same job draws your own total-equity curve from your own ledger (`memory/portfolio_history.jsonl`) — any holdings, no fixed assets, no symbols or quantities in the public SVG. It appears once the ledger spans 2 trading days.</sub>
+  <sub>Self-hosted instances use their own ledger. Publishing requires at least two distinct qualified calculation receipts and a matching artifact manifest. Estimated, simulated and unverified historical records remain available for audit; the public SVG contains no holdings or quantities.</sub>
 </div>
 
 *   **Benchmark Portfolio**: The system introduces 8 standard control benchmarks across 4 quadrants (AI advisors / Mutual funds / Wealth management / Broad market index). For details on the comparison methodology and data cleaning logic, see [docs/wiki/README.md](docs/wiki/README.md).

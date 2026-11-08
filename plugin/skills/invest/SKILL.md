@@ -91,10 +91,10 @@ study's sealed inputs; never substitute this host agent for paid model responses
     today / 申购了场外基金 / 基金份额确认了吗"          → run.sh place_fund_order (MCP tool of the same
                                                         name) when the order was just placed: cash goes
                                                         out now, the order is "in transit" and total
-                                                        assets do not dip; shares arrive when the
-                                                        pricing-day NAV is published (the fund_confirm
-                                                        job confirms nightly; confirm_fund_order only to
-                                                        give a NAV / fee yourself, cancel_fund_order if
+                                                        assets do not dip. NAV publication only creates a
+                                                        tracking projection. confirm_fund_order requires
+                                                        the reported fill NAV and fee (explicit 0 for a
+                                                        known zero fee). cancel_fund_order if
                                                         the order never went through). Status shows
                                                         pending_fund_orders. Don't use buy for these
    "should I buy/sell X / analyze X / 该不该买卖X"    → committee protocol ↓
@@ -231,7 +231,7 @@ add `Authorization: Bearer $INVEST_API_TOKEN` when curling.
 
 **MCP users** (auto-registered once the plugin is installed; same for Claude Code / Codex): doctor / status / strategy /
 history / live_prices / what_if / rebalance_plan / discipline / decisions / explain_decision /
-record_execution / ingest_event / buy / record_existing_position / sell / deposit / withdraw /
+record_execution / ingest_event / buy / record_existing_position / record_balance_observation / sell / deposit / withdraw /
 record_dividend / record_fee / record_split / record_return_of_capital /
 place_fund_order / confirm_fund_order / cancel_fund_order /
 set_allocations / track_asset / untrack_asset / news_sources / add_news_source / remove_news_source /

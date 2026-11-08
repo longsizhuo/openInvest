@@ -256,6 +256,8 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "required_roles": ["MACRO", "QUANT_R1", "RISK_R1", "QUANT_R2", "RISK_R2", "CIO"],
         "alloc_ceiling": alloc_ceiling(), "single_invest_cap": None,
     }
+    from openinvest.services.ledger_evidence import account_source_status
+    facts['ledger_evidence']=account_source_status(pm)
     from openinvest.core.runner.intervention import gold_defense_dca_plan
     from openinvest.core.decision_evidence import prepare_context
     facts["defense_dca"] = gold_defense_dca_plan(symbol, target, df_target.index)
@@ -476,6 +478,7 @@ def _save_committee_transcript_once(
          "price_fetch_failed": facts.get("price_fetch_failed", False),
          "macro_data_empty": facts.get("macro_input_health", {}).get("valid") is False or not bool(facts.get("macro_data")),
          "macro_input_health": facts.get("macro_input_health", {}),
+         "ledger_evidence":facts.get('ledger_evidence'),"target_symbol":symbol,
          "context_id": context_id, "price_last_bar": facts.get("price_last_bar"),
          "prepared_at": context["prepared_at"], "code_version": context["code_version"],
          "config_sha256": context["config_sha256"],

@@ -123,6 +123,11 @@ class PortfolioManager:
         self.strategy = strategy_doc
         self.portfolio = portfolio_doc
 
+    @staticmethod
+    def recording_scope(**kwargs):
+        from openinvest.core.ledger_provenance import recording_scope
+        return recording_scope(**kwargs)
+
     # ---------- v2 接口：cash + holdings ----------
     # v1 fallback 已于 2026-05-10 正式退场（见 docs/wiki/adr/004-v1-fallback-retirement.md）
     # 迁移工具：scripts/migrate_portfolio_to_holdings.py
@@ -730,7 +735,8 @@ class PortfolioManager:
         gross = 税前总额（券商对账单的"分红总额"）；tax_withheld = 已被预扣的税；``currency`` = 现金到账币种。
         ``trade_date`` = 到账日（YYYY-MM-DD，缺省今天）——账户业绩按它在 NAV 里入账，补记历史分红请传真实日期。
         reinvest=True（DRIP）：同一事务里再追加一笔 buy（source=drip，external=False，用掉这笔净额），
-        单价 = ``reinvest_price``，缺省取行情库当日原始收盘价（``backfill_raw_close`` 回填的 close_raw，往前最多 7 天）；
+        单价须为客户端明确报告的 ``reinvest_price``。缺省时真实账本只保存观察/投影，不改资金或份额；
+        仅已声明的 paper_simulation 账本可用缓存原始收盘价模拟（不会作为实际成交）。
         持仓必须存在且 ``currency`` 必须等于该持仓的计价币种。
         symbol 已无持仓但账本里有它（例如除息后卖掉、派息日才到账）允许记；完全没见过的 symbol 抛 ValueError（防写错）。
         idempotency_key 语义同 buy（ADR-016）。非法参数抛 ValueError。"""
@@ -747,9 +753,18 @@ class PortfolioManager:
         day = _activity_day(trade_date)
         net = round(gross - tax, 2)
         price = None
+        paper_domain=self.portfolio.get('ledger_domain')=='paper_simulation'
         if reinvest:
-            price = float(reinvest_price) if reinvest_price else _stored_raw_close(self, symbol, day)
-            if not price or price <= 0:
+            if reinvest_price is None and not paper_domain:
+                from openinvest.services.ledger_evidence import record_tracking_estimate
+                estimate=record_tracking_estimate(self.store,symbol=symbol,day=day,
+                    plan={'purpose':'dividend_reinvestment_unconfirmed','gross':gross,'tax':tax,'currency':ccy,'client_key':idempotency_key},
+                    quote={'reported_net_income':net,'actual_reinvestment_price':None,'actual_quantity':None})
+                return {'status':'pending_reinvestment_confirmation','symbol':symbol,'estimate_id':estimate['estimate_id'],
+                        'reported_gross':gross,'reported_tax':tax,'income_recorded':False,'portfolio_mutated':False,
+                        'note':'分红资料已保留为观察；缺少实际再投资价格，不能按行情收盘价生成实仓或假定现金去向。'}
+            price = float(reinvest_price) if reinvest_price is not None else _stored_raw_close(self, symbol, day)
+            if price is None or not math.isfinite(price) or price <= 0:
                 raise ValueError(
                     f"reinvest 需要单价：行情库没有 {symbol} 在 {day} 前 7 天内的原始收盘价。"
                     f"传 reinvest_price，或先跑 `openinvest backfill_raw_close --symbols {symbol}`")
@@ -793,6 +808,10 @@ class PortfolioManager:
                 "cash_effect": -cost, "units_effect": reinvested["units"], "trade_date": day,
                 **({"idempotency_key": f"{idempotency_key}#drip"} if idempotency_key else {}),
                 "note": f"DRIP: reinvested {symbol} dividend",
+                'evidence_basis':'paper_simulated_fill' if paper_domain else 'client_reported_not_independently_verified',
+                'execution_domain':'paper_simulation' if paper_domain else 'client_reported',
+                'source_reference':{'price_basis':'simulated_market_reference' if reinvest_price is None else 'client_reported_fill_price',
+                                    'quantity_basis':'calculated_from_reported_net_and_price'},
             })
         out: Dict[str, Any] = {
             "status": "ok", "action": "dividend", "symbol": symbol, "gross": gross, "tax_withheld": tax,
@@ -1122,7 +1141,7 @@ class PortfolioManager:
         self,
         order_id: str,
         nav: Optional[float] = None,
-        fee: float = 0.0,
+        fee: Optional[float] = None,
         *,
         confirm_date: Optional[str] = None,
         source: str = "skill_cli",
@@ -1132,15 +1151,18 @@ class PortfolioManager:
 
         - ``nav`` 缺省：取东方财富历史净值里订单定价日（``nav_date``）的单位净值；定价日净值还没公布 → ``{"status": "pending_nav"}``
           什么都不改（job 下一次再试）；定价日休市 / 无净值而更晚的净值已公布 → 顺延用之后第一个净值（返回里标 ``nav_date_planned``）
-        - ``fee``：申购费（从订单金额里扣，不另扣现金）
+        - ``fee``：实际申购费（从订单金额里扣，不另扣现金）；未知为 None，真实零费用显式填 0。
+          没有显式实际 NAV/费用时只保存跟踪投影，不能把公布净值当作平台成交确认。
         - ``confirm_date``：确认动作的发生日（缺省今天，北京时间；账户业绩按它把份额记进 NAV）
         - **CAS**：单子已确认 → ``already_confirmed``、已取消 → ``cancelled``，原样返回、不改任何东西、不报错；
           订单不存在抛 ValueError。联网取净值在锁外，状态检查与写入在同一个 with_portfolio_tx 里。"""
         from openinvest.calc import fund_rules as fr
         from openinvest.utils.eastmoney_fund import fetch_fund_nav_history
 
-        fee = float(fee or 0)
-        if not math.isfinite(fee) or fee < 0:
+        fee_known=fee is not None
+        nav_known=nav is not None
+        fee = float(fee) if fee_known else None
+        if fee_known and (not math.isfinite(fee) or fee < 0):
             raise ValueError("fee 必须 ≥ 0")
         if nav is not None:
             nav = float(nav)
@@ -1160,6 +1182,17 @@ class PortfolioManager:
                         "reason": "nav_not_published" if history else "nav_fetch_failed",
                         "note": f"{planned} 的单位净值还没公布" if history else "净值接口取不到，稍后重试或手填 nav"}
             used_date, nav = picked
+        if not fee_known or not nav_known or source=='fund_auto_confirm':
+            from openinvest.services.ledger_evidence import record_tracking_estimate
+            amount=float(order['amount'])
+            estimate=record_tracking_estimate(self.store,symbol=sym,day=used_date,
+                plan={'order_id':order_id,'amount':amount,'nav_date_planned':planned,'purpose':'fund_nav_projection'},
+                quote={'nav':nav,'nav_date':used_date,'projected_quantity_if_fee_zero':round(amount/nav,6),
+                       'reported_fee':fee,'fee_observed':fee_known,'execution_observed':False})
+            return {'status':'pending_execution_confirmation','order_id':order_id,'symbol':sym,
+                    'nav':nav,'nav_date':used_date,'nav_date_planned':planned,'estimate_id':estimate['estimate_id'],
+                    'actual_fee':None,'actual_quantity':None,'portfolio_mutated':False,
+                    'note':'净值可用只支持份额投影；请按平台实际成交提供 NAV 和费用（确为零时显式填 0），或单独记录已观察到的余额。'}
         try:
             with self.with_portfolio_tx() as p:
                 holdings = list(p.get("holdings") or [])
@@ -1179,7 +1212,7 @@ class PortfolioManager:
                 h["units"] = round(new_units, 6)
                 h["avg_cost"] = round((old_units * old_avg + amount) / new_units, 6)
                 o.update(status="confirmed", confirmed_on=day, nav=nav, nav_date=used_date, units=units,
-                         **({"fee": fee} if fee else {}))
+                         fee=fee,confirmation_basis='client_reported_nav_and_fee')
                 if used_date != planned:
                     o["nav_date_planned"] = planned
                 h["extra"] = {**(h.get("extra") or {}), _PENDING_KEY: _keep_recent(_pending_of(h))}
@@ -1190,8 +1223,8 @@ class PortfolioManager:
         self._reload()
         self.store.append_history(_activity_row(
             "fund_order_confirmed", currency=ccy, day=day, source=source, key=None, note=None,
-            symbol=sym, amount=amount, fee=fee or None, price=nav, units=units, cash_effect=0.0, units_effect=units,
-            settle_date=expected, nav_date=used_date, order_id=order_id))
+            symbol=sym, amount=amount, fee=fee, price=nav, units=units, cash_effect=0.0, units_effect=units,
+            settle_date=expected, nav_date=used_date, order_id=order_id,confirmation_basis='client_reported_nav_and_fee'))
         out: Dict[str, Any] = {
             "status": "ok", "action": "fund_order_confirmed", "order_id": order_id, "symbol": sym, "amount": amount,
             "fee": fee, "nav": nav, "nav_date": used_date, "units": units, "total_units": units_now,

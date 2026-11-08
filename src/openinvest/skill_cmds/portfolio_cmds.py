@@ -31,7 +31,27 @@ __all__ = [
     "cmd_place_fund_order",
     "cmd_confirm_fund_order",
     "cmd_cancel_fund_order",
+    "cmd_record_balance_observation",
 ]
+
+
+def cmd_record_balance_observation(args):
+    from openinvest.services.balance_observations import record_observation
+    from pathlib import Path
+    import json
+    from openinvest.utils.advisory import is_advisory_mode
+    if is_advisory_mode():
+        _print_json({'status':'error','error':'Balance observations are unavailable in advisory mode'});sys.exit(1)
+    try:
+        text=Path(args.source_text_file).read_text() if args.source_text_file else args.source_text
+        locator=json.loads(args.source_locator) if args.source_locator.strip().startswith('{') else args.source_locator
+    except (OSError,ValueError) as exc:
+        _print_json({'status':'error','error':'Balance source text or locator is unavailable','reason':type(exc).__name__});sys.exit(1)
+    pm=_resolve_pm()
+    _run_record(lambda:record_observation(pm,args.reference_symbol,as_of=args.as_of,source_text=text,
+        source_locator=locator,idempotency_key=args.idempotency_key,reported_value=args.reported_value,
+        value_currency=args.value_currency,reported_quantity=args.reported_quantity,quantity_unit=args.quantity_unit,
+        native_instrument=args.native_instrument,reported_cost=args.reported_cost,cost_currency=args.cost_currency))
 
 
 def _resolve_pm():

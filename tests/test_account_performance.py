@@ -105,7 +105,7 @@ def test_gold_ledger_symbol_maps_to_proxy_holding_and_fx_converts(tmp_path, monk
     pm = _pm(tmp_path, cash={"CNY": 0.0, "AUD": 0.0},
              holdings=[
                  {"symbol": "GC=F", "units": 10.0, "avg_cost": 650.0, "cost_currency": "CNY",
-                  "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
+                  "kind": "metal", "unit_label": "克", "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
                  {"symbol": "NDQ.AX", "units": 100.0, "avg_cost": 50.0, "cost_currency": "AUD"},
              ],
              history=[
@@ -224,8 +224,8 @@ def test_deleted_gold_holding_still_valued_from_ledger_symbol(tmp_path, monkeypa
     assert perf["data_quality"]["unvalued"] == [] and perf["data_quality"]["cost_fallback"] == []
 
 
-def test_manual_override_is_a_correction_flow_not_a_return(tmp_path, monkeypatch):
-    """账本之前就持有的份数经 manual_override 首次入账：当天按收盘记外部流入，TWR 不动。"""
+def test_absolute_balance_does_not_prove_a_historical_external_cash_flow(tmp_path, monkeypatch):
+    """A reported balance is retained without inventing a historical deposit."""
     monkeypatch.setattr(ap, "MarketStore", lambda: _FakeStore({"AAA": dict(zip(DAYS, [10.0] * 5))}))
     pm = _pm(tmp_path, cash={"CNY": 0.0},
              holdings=[{"symbol": "AAA", "units": 128.0, "avg_cost": 10.0, "cost_currency": "CNY"}],
@@ -236,9 +236,9 @@ def test_manual_override_is_a_correction_flow_not_a_return(tmp_path, monkeypatch
                   "price_per_unit": 10.0, "currency": "CNY"},
              ])
     perf = ap.build_account_performance(pm, today="2026-01-09")
-    assert perf["data_quality"]["unreconciled"] == {"units": {}, "cash": {}}
-    assert perf["opening_nav"] == 0.0 and perf["nav"] == 1280.0
-    assert perf["twr_all"] == 0.0 and perf["max_drawdown"]["pct"] == 0.0
+    assert perf['status']=='unverified_execution_history' and perf['financial_performance_eligible'] is False
+    assert pm.holdings.find('AAA')['units']==128.0
+    assert perf['ledger_evidence']['balance_adjustments_not_executions']==1
 
 
 def test_sell_without_net_amount_and_withdraw_sign_variants(tmp_path, monkeypatch):
@@ -407,7 +407,7 @@ def test_gold_proxy_and_funds_are_always_adjusted(tmp_path, monkeypatch):
         {"GC=F": dict(zip(DAYS, [3110.35] * 5)), "FUND:000001": dict(zip(DAYS, [1.0] * 5))}))
     pm = _pm(tmp_path, cash={"CNY": 0.0}, holdings=[
         {"symbol": "GC=F", "units": 10.0, "avg_cost": 650.0, "cost_currency": "CNY",
-         "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
+         "kind": "metal", "unit_label": "克", "proxy_kind": "gold_cny_per_gram", "yfinance_proxy": "GC=F"},
         {"symbol": "FUND:000001", "kind": "fund", "units": 100.0, "avg_cost": 1.0, "cost_currency": "CNY"},
     ], history=[
         {"ts_origin": "2026-01-05T10:00:00", "action": "buy", "symbol": "GC=F", "units": 10.0,

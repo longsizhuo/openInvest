@@ -69,12 +69,13 @@ def test_status_a_share_etf_and_otc_fund_without_any_author_asset(monkeypatch):
 
 
 def test_status_gold_gram_recognised_by_proxy_kind_not_symbol(monkeypatch):
-    """克价口径看 proxy_kind（老行没写 proxy_kind 的 kind=metal 同口径），symbol 叫什么都行；
+    """已声明的克价/代理口径不依赖 symbol 名；
     多个克价持仓合并成 gold 汇总块，金价 / USDCNY 来自 get_quote 的 extra（不再单独拉快照）。"""
     _seed({"CNY": 0.0}, [
         {"symbol": "ABC-GOLD", "kind": "metal", "units": 10.0, "avg_cost": 1000.0, "cost_currency": "CNY",
-         "proxy_kind": "gold_cny_per_gram", "unit_label": "克"},
-        {"symbol": "OLD-ROW", "kind": "metal", "units": 5.0, "avg_cost": 1200.0, "cost_currency": "CNY"},
+         "proxy_kind": "gold_cny_per_gram", "unit_label": "克", "yfinance_proxy": "GC=F"},
+        {"symbol": "SECOND-GOLD", "kind": "metal", "units": 5.0, "avg_cost": 1200.0, "cost_currency": "CNY",
+         "proxy_kind": "gold_cny_per_gram", "unit_label": "克", "yfinance_proxy": "GC=F"},
     ])
     seen = {}
 
@@ -87,7 +88,7 @@ def test_status_gold_gram_recognised_by_proxy_kind_not_symbol(monkeypatch):
 
     out = skill_views.build_status_view()
 
-    assert seen == {"ABC-GOLD": "gold_cny_per_gram", "OLD-ROW": "gold_cny_per_gram"}
+    assert seen == {"ABC-GOLD": "gold_cny_per_gram", "SECOND-GOLD": "gold_cny_per_gram"}
     g = out["gold"]
     assert g["grams"] == 15.0
     assert g["avg_cost_cny_per_gram"] == pytest.approx((10 * 1000 + 5 * 1200) / 15)
@@ -95,6 +96,21 @@ def test_status_gold_gram_recognised_by_proxy_kind_not_symbol(monkeypatch):
     assert g["pnl_cny"] == pytest.approx((1100 - (16000 / 15)) * 15, abs=0.01)
     assert out["live_prices"] == {"gold_usd_per_oz": 2400.0, "usdcny": 7.2}
     assert out["total_assets_cny"] == 16500.0
+
+
+def test_legacy_metal_quote_fallback_does_not_prove_grams_or_actual_profit(monkeypatch):
+    _seed({'CNY':0.0},[{'symbol':'OLD-ROW','kind':'metal','units':5.0,'avg_cost':1200.0,'cost_currency':'CNY'}])
+    seen=[]
+    def quote(h):
+        seen.append(h['proxy_kind'])
+        return _quote(1100.0,gold_usd_per_oz=2400.0,usdcny_rate=7.2)
+    monkeypatch.setattr('openinvest.utils.quotes.get_quote',quote)
+    out=skill_views.build_status_view()
+    assert seen==['gold_cny_per_gram']  # Market observation remains available.
+    assert out['all_holdings'][0]['current_price']==1100
+    assert out['all_holdings'][0]['units'] is None and out['all_holdings'][0]['pnl'] is None
+    assert out['gold']['grams'] is None and out['gold']['pnl_cny'] is None
+    assert out['total_assets_cny'] is None
 
 
 def test_status_gold_quote_unavailable_is_null_not_zero(monkeypatch):

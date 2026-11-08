@@ -2,7 +2,7 @@
 
 ``PortfolioManager.place_fund_order`` 下单时现金已扣、订单记成 ``placed``（在途，总资产按面值含它）；本 job 工作日晚间
 每 30 分钟（``fund_confirm.yml``）对每笔 ``placed`` 且定价日 ``nav_date <= 今天``（北京时间）的单子调
-``confirm_fund_order``：取 ``nav_date`` 当天的单位净值，``units = (金额 − 费用) / 净值``，订单转 ``confirmed``。
+读取 ``nav_date`` 的公开净值，保存独立份额投影；没有平台实际成交与费用时订单保持在途。
 
 - **净值没公布** → 单子原样留着（``pending_nav``），下一次再试，不算失败。QDII / FOF 的净值常晚一两天公布，
   靠连续几晚的重试自然接上；预计确认日过了还没取到，status 会提示（``pending_fund_orders_line``）。
@@ -10,7 +10,7 @@
   job 重跑 / 与手动 ``confirm_fund_order`` 并发都只有一个生效，另一个读到 ``already_confirmed``。
 - **失败**：单笔确认抛异常（账本损坏、金额非法……）不挡其余订单，跑完整批后统一抛 RuntimeError → runner 记
   job_runs ``failed``；fund_confirm.yml 标了 ``alert_on_failure: true``，job_watchdog 据此告警（判据 f，同一天只报一次）。
-- **申购费**：自动确认按 fee=0（job 不知道券商实际收了多少）；要记费用，到点前手动 ``confirm_fund_order --nav N --fee F``。
+- **申购费**：job 不知道券商实际费用，不能默认零。用户按实际成交显式 ``confirm_fund_order --nav N --fee F``；真实零费用填 0。
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def run(*, today: Optional[str] = None, pm: Optional[PortfolioManager] = None) -
         pm = pm or PortfolioManager()
     except MemoryNotInitialized:   # 还没 init 的数据目录：没有账本就没有在途单，不算失败
         return {"status": "skipped", "reason": "memory_not_initialized"}
-    counts = {"confirmed": 0, "pending_nav": 0, "already": 0, "not_due": 0}
+    counts = {"confirmed": 0, "pending_nav": 0, "pending_execution_confirmation":0,"already": 0, "not_due": 0}
     details: List[Dict[str, Any]] = []
     errors: List[str] = []
     for o in pm.pending_fund_orders():
@@ -56,6 +56,9 @@ def run(*, today: Optional[str] = None, pm: Optional[PortfolioManager] = None) -
         elif st == "pending_nav":
             counts["pending_nav"] += 1
             log.info("[fund_confirm] %s 定价日 %s 的净值还没公布（%s），下次再试", sym, nav_date, r.get("reason"))
+        elif st=='pending_execution_confirmation':
+            counts['pending_execution_confirmation']+=1
+            log.info('[fund_confirm] %s 净值投影已保存，实际成交和费用仍待确认',sym)
         else:   # already_confirmed / cancelled：别处先到了
             counts["already"] += 1
     if errors:

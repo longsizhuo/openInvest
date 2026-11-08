@@ -92,7 +92,7 @@ class FakeBroker:
 
 def _fill(sym, side, qty, px, exec_id, fee=0.35, ref="oi:x", sec="STK"):
     return {"exec_id": exec_id, "symbol": sym, "side": side, "qty": qty, "price": px, "commission": fee,
-            "ref": ref, "sec_type": sec, "date": TODAY}
+            "commission_ccy": "USD", "account": ACCT, "ref": ref, "sec_type": sec, "date": TODAY}
 
 
 def _freeze_ledger_clock(monkeypatch):
@@ -513,7 +513,374 @@ def test_reconcile_books_fill_and_fee_idempotently(home, monkeypatch):
     assert out["cash_drift"] == {}
     again = ia.reconcile(broker=b)
     assert again["booked"] == [] and PortfolioManager(home).find_holding("QQQM")["units"] == pytest.approx(0.495)
-    assert [h["action"] for h in home.read_history()] == ["buy", "fee"]
+    assert [h["action"] for h in home.read_history()] == ["broker_fee_report", "buy", "fee"]
+
+
+def test_reconcile_preserves_past_fill_date_time_and_broker_ids(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = {**_fill("QQQM", "BOT", 1.0, 40.0, "receipt-1"), "date": "2026-10-15",
+            "execution_time": "2026-10-15T14:00:01.123456+00:00", "order_id": 17,
+            "perm_id": 3001, "client_id": 18, "ref": "oi:2026-10-15/QQQM/BUY",
+            "account_mode": "live"}   # A bare mode label does not prove the historical domain.
+    b = FakeBroker(cash=259.65, positions={"QQQM": 1.0}, fills=[fill])
+    assert ia.reconcile(broker=b)["status"] == "ok"
+    assert ia.reconcile(broker=b)["booked"] == []
+    history = home.read_history()
+    assert [h["action"] for h in history] == ["broker_fee_report", "buy", "fee"]
+    for row in history:
+        assert row["evidence_basis"] == "broker_observed_fill"
+        assert row["execution_domain"] == "broker_unknown"
+        assert row["trade_date"] == "2026-10-15"
+        assert row["execution_time"] == fill["execution_time"]
+        assert row["execution_time_precision"] == "instant"
+        assert row["fee_status"] == "reported"
+        ref = row["source_reference"]
+        assert (ref["exec_id"], ref["account"], ref["account_mode"]) == ("receipt-1", ACCT, "unknown")
+        assert (ref["order_id"], ref["perm_id"], ref["client_id"], ref["order_ref"]) == (17, 3001, 18, fill["ref"])
+
+
+@pytest.mark.parametrize("mode", ["paper", "live"])
+def test_reconcile_accepts_only_account_bound_domain_evidence(home, monkeypatch, mode):
+    _enable(monkeypatch)
+    _seed(home)
+    declaration = {"account": ACCT, "mode": mode, "source_reference": {"declaration_id": "fixture-account-map-v1"}}
+    fill = {**_fill("QQQM", "BOT", 1, 40, "domain-1", fee=None), "account_mode_evidence": declaration}
+    b = FakeBroker(cash=260, positions={"QQQM": 1}, fills=[fill])
+    assert ia.reconcile(broker=b)["status"] == "ok"
+    row, = home.read_history()
+    assert row["execution_domain"] == f"broker_{mode}"
+    assert row["source_reference"]["account_mode_evidence"] == declaration
+    assert row["evidence_basis"] == "broker_observed_fill"
+    # A broker paper fill remains an observed broker fill, with its distinct domain.
+    assert row["fee_status"] == "unknown"
+    assert row["execution_time_precision"] == "day"
+    assert "execution_time" not in row
+
+
+@pytest.mark.parametrize("fee", [None, "", "not-a-number", float("nan"), float("inf"), 1.7976931348623157e308])
+def test_reconcile_missing_commission_can_arrive_later_without_rebooking(home, monkeypatch, fee):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = _fill("QQQM", "BOT", 1, 40, "late-fee", fee=fee)
+    b = FakeBroker(cash=260, positions={"QQQM": 1}, fills=[fill])
+    assert ia.reconcile(broker=b)["status"] == "ok"
+    row, = home.read_history()
+    assert row["fee_status"] == "unknown" and row["source_reference"]["commission"] is None
+    assert PortfolioManager(home).cash_amount("USD") == 260
+    b._fills[0] = {**fill, "commission": 0.35}
+    b._cash["USD"] = 259.65
+    assert ia.reconcile(broker=b)["booked"] == []
+    assert ia.reconcile(broker=b)["booked"] == []
+    history = home.read_history()
+    assert [h["action"] for h in history] == ["buy", "broker_fee_report", "fee"]
+    assert [h["fee_status"] for h in history] == ["unknown", "reported", "reported"]
+    assert {row["source_reference"]["exec_id"] for row in history} == {"late-fee"}
+    pm = PortfolioManager(home)
+    assert pm.find_holding("QQQM")["units"] == 1 and pm.cash_amount("USD") == 259.65
+
+
+def test_reconcile_late_reported_zero_is_evidence_without_cash_movement(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = _fill("QQQM", "BOT", 1, 40, "late-zero", fee=None)
+    b = FakeBroker(cash=260, positions={"QQQM": 1}, fills=[fill])
+    ia.reconcile(broker=b)
+    b._fills[0] = {**fill, "commission": 0}
+    assert ia.reconcile(broker=b)["booked"] == []
+    assert ia.reconcile(broker=b)["booked"] == []
+    history = home.read_history()
+    assert [h["action"] for h in history] == ["buy", "broker_fee_report"]
+    assert [h["fee_status"] for h in history] == ["unknown", "reported_zero"]
+    assert history[1]["amount"] == history[1]["cash_effect"] == history[1]["units_effect"] == 0
+    assert history[1]["source_reference"]["exec_id"] == "late-zero"
+    pm = PortfolioManager(home)
+    assert pm.find_holding("QQQM")["units"] == 1 and pm.cash_amount("USD") == 260
+
+
+def test_reconcile_missing_commission_currency_does_not_guess_usd(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = {**_fill("QQQM", "BOT", 1, 40, "fee-no-ccy"), "commission_ccy": None}
+    b = FakeBroker(cash=260, positions={"QQQM": 1}, fills=[fill])
+    ia.reconcile(broker=b)
+    rows = home.read_history()
+    assert [row["action"] for row in rows] == ["broker_fee_report", "buy"]
+    assert all(row["fee_status"] == "unknown" for row in rows)
+    assert all(row["source_reference"]["commission"] == 0.35 for row in rows)
+    assert all(row["source_reference"]["commission_currency"] is None for row in rows)
+    assert PortfolioManager(home).cash_amount("USD") == 260
+
+
+def test_reconcile_preserves_reported_commission_precision(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = _fill("QQQM", "BOT", 1, 40, "precise-fee", fee=0.00001)
+    b = FakeBroker(cash=260, positions={"QQQM": 1}, fills=[fill])
+    assert ia.reconcile(broker=b)["status"] == "ok"
+    fee, = [row for row in home.read_history() if row["action"] == "fee"]
+    assert fee["amount"] == 0.00001 and fee["fee_status"] == "reported"
+    assert fee["source_reference"]["commission"] == 0.00001
+
+
+def _fee_report_files(store):
+    return sorted((store.root / ".evidence/broker_fee_reports").glob("*.json"))
+
+
+def _fee_report_envelopes(store):
+    return [json.loads(path.read_text()) for path in _fee_report_files(store)]
+
+
+def test_failed_cash_fee_cannot_be_confused_with_a_known_broker_report_or_retried_blindly(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = {**_fill("QQQM", "BOT", 1, 40, "fee-write-fails", fee=1.25),
+            "account_mode_evidence": {"account": ACCT, "mode": "live", "source_reference": "synthetic-login"}}
+    broker = FakeBroker(cash=258.75, positions={"QQQM": 1}, fills=[fill])
+    with monkeypatch.context() as scoped:
+        scoped.setattr(PortfolioManager, "record_fee", lambda *a, **k: (_ for _ in ()).throw(OSError("synthetic fee failure")))
+        failed = ia.reconcile(broker=broker)
+    assert failed["status"] == "halted" and any("synthetic fee failure" in text for text in failed["problems"])
+    rows = home.read_history()
+    assert [row["action"] for row in rows] == ["broker_fee_report", "buy"]
+    assert all(row["source_reference"]["fee_cash_application"] == "not_applied" for row in rows)
+    assert rows[0]["cash_effect"] == rows[0]["units_effect"] == 0 and rows[0]["amount"] == 1.25
+    assert rows[0]["cash_applied"] is False and rows[1]["fee_status"] == "reported"
+    pm = PortfolioManager(home)
+    assert pm.cash_amount("USD") == 260 and pm.find_holding("QQQM")["units"] == 1
+    originals = {path.name: path.read_bytes() for path in _fee_report_files(home)}
+    again = ia.reconcile(broker=broker)
+    assert again["status"] == "halted" and any("commission_application_requires_reconciliation" in text for text in again["problems"])
+    assert home.read_history() == rows and PortfolioManager(home).cash_amount("USD") == 260
+    assert {path.name: path.read_bytes() for path in _fee_report_files(home)} == originals
+    intent, = (home.root / ".evidence/broker_fee_applications").glob("*.json")
+    assert json.loads(intent.read_text())["payload"]["purpose"] == "cash_application_intent_not_proof_of_applied_fee"
+
+
+@pytest.mark.parametrize("revised_total,revised_currency", [(0.50, "USD"), (0.20, "USD"), (0, "USD"),
+                                                           (-0.20, "USD"), (0.35, "AUD")])
+def test_distinct_commission_revisions_are_preserved_and_halt_without_another_cash_debit(home, monkeypatch, revised_total, revised_currency):
+    from openinvest.core.evidence_eligibility import digest
+    _enable(monkeypatch)
+    _seed(home)
+    fill = _fill("QQQM", "BOT", 1, 40, "fee-revised", fee=0.35)
+    broker = FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[fill])
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    broker._fills[0] = {**fill, "commission": revised_total, "commission_ccy": revised_currency}
+    broker._cash["USD"] = round(260 - revised_total, 2) if revised_currency == "USD" else 260
+    revised = ia.reconcile(broker=broker)
+    assert revised["status"] == "halted"
+    assert any("commission_report_revision_requires_reconciliation" in text for text in revised["problems"])
+    rows = home.read_history()
+    assert [row["action"] for row in rows] == ["broker_fee_report", "buy", "fee", "broker_fee_report"]
+    assert PortfolioManager(home).cash_amount("USD") == 259.65
+    assert PortfolioManager(home).find_holding("QQQM")["units"] == 1
+    fee, = [row for row in rows if row["action"] == "fee"]
+    assert fee["amount"] == 0.35 and fee["cash_effect"] == -0.35
+    assert fee["source_reference"]["fee_cash_application"] == "applied"
+    reports = [row for row in rows if row["action"] == "broker_fee_report"]
+    assert [row["amount"] for row in reports] == [0.35, revised_total]
+    assert reports[0]["source_reference"]["fee_report_hash"] != reports[1]["source_reference"]["fee_report_hash"]
+    assert all(row["cash_effect"] == row["units_effect"] == 0 for row in reports)
+    for envelope in _fee_report_envelopes(home):
+        payload = envelope["payload"]
+        assert envelope["sha256"] == digest(payload) and payload["report_hash"] == digest(payload["report"])
+        assert payload["report"]["account"] == ACCT and payload["report"]["exec_id"] == "fee-revised"
+        assert datetime.fromisoformat(payload["captured_at"]).tzinfo is not None
+    assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert home.read_history() == rows and len(_fee_report_files(home)) == 2
+
+
+def test_first_zero_report_then_positive_revision_requires_reconciliation_without_guessing_a_debit(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = _fill("QQQM", "BOT", 1, 40, "zero-revised", fee=0)
+    broker = FakeBroker(cash=260, positions={"QQQM": 1}, fills=[fill])
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    broker._fills[0] = {**fill, "commission": 0.35}
+    broker._cash["USD"] = 259.65
+    assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert [row["action"] for row in home.read_history()] == ["broker_fee_report", "buy", "broker_fee_report"]
+    assert PortfolioManager(home).cash_amount("USD") == 260
+
+
+def test_fee_journal_failure_after_cash_commit_does_not_charge_again(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    broker = FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[_fill("QQQM", "BOT", 1, 40, "fee-append-fails")])
+    append = MemoryStore.append_history
+
+    def fail_fee_append(store, trade):
+        if trade["action"] == "fee":
+            raise OSError("synthetic journal failure after cash commit")
+        return append(store, trade)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(MemoryStore, "append_history", fail_fee_append)
+        assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert PortfolioManager(home).cash_amount("USD") == 259.65
+    assert [row["action"] for row in home.read_history()] == ["broker_fee_report", "buy"]
+    assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert PortfolioManager(home).cash_amount("USD") == 259.65
+    assert not [row for row in home.read_history() if row["action"] == "fee"]
+
+
+def test_lost_fee_journal_and_expired_pm_claim_cannot_authorize_another_fee_debit(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    broker = FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[_fill("QQQM", "BOT", 1, 40, "fee-journal-lost")])
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    rows = [row for row in home.read_history() if row["action"] != "fee"]
+    (home.root / "portfolio_history.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    with PortfolioManager(home).with_portfolio_tx() as portfolio:
+        portfolio["ledger_idempotency_keys"] = [key for key in portfolio["ledger_idempotency_keys"]
+                                                if key != "ibkr-fee-fee-journal-lost"]
+    assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert PortfolioManager(home).cash_amount("USD") == 259.65
+    assert PortfolioManager(home).find_holding("QQQM")["units"] == 1
+    assert home.read_history() == rows
+
+
+def test_report_journal_append_can_recover_from_immutable_file_without_moving_cash_twice(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    broker = FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[_fill("QQQM", "BOT", 1, 40, "report-append-fails")])
+    append = MemoryStore.append_history
+
+    def fail_report_append(store, trade):
+        if trade["action"] == "broker_fee_report":
+            raise OSError("synthetic report journal failure")
+        return append(store, trade)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(MemoryStore, "append_history", fail_report_append)
+        assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert home.read_history() == [] and PortfolioManager(home).cash_amount("USD") == 300
+    path, = _fee_report_files(home)
+    original = path.read_bytes()
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    assert PortfolioManager(home).cash_amount("USD") == 259.65
+    assert PortfolioManager(home).find_holding("QQQM")["units"] == 1
+    assert path.read_bytes() == original
+    report = home.read_history()[0]
+    assert report["captured_at"] == json.loads(original)["payload"]["captured_at"]
+
+
+def test_deleted_zero_effect_report_journal_recovers_without_reapplying_the_fee(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home)
+    broker = FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[_fill("QQQM", "BOT", 1, 40, "report-row-lost")])
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    rows = [row for row in home.read_history() if row["action"] != "broker_fee_report"]
+    (home.root / "portfolio_history.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    assert len([row for row in home.read_history() if row["action"] == "fee"]) == 1
+    assert PortfolioManager(home).cash_amount("USD") == 259.65
+    assert len([row for row in home.read_history() if row["action"] == "broker_fee_report"]) == 1
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "missing", "nonobject", "intent"])
+def test_fee_receipt_integrity_failure_cannot_be_treated_as_a_new_report(home, monkeypatch, damage):
+    _enable(monkeypatch)
+    _seed(home)
+    broker = FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[_fill("QQQM", "BOT", 1, 40, "damaged-report")])
+    assert ia.reconcile(broker=broker)["status"] == "ok"
+    path, = _fee_report_files(home)
+    if damage == "corrupt":
+        path.write_text('{"schema":1,"payload":{}}')
+    elif damage == "missing":
+        path.unlink()
+    elif damage == "nonobject":
+        path.write_text("[]")
+    else:
+        intent, = (home.root / ".evidence/broker_fee_applications").glob("*.json")
+        intent.write_text("[]")
+    before = home.read_history()
+    assert ia.reconcile(broker=broker)["status"] == "halted"
+    assert home.read_history() == before and PortfolioManager(home).cash_amount("USD") == 259.65
+
+
+@pytest.mark.parametrize("missing", ["account", "exec_id", "execution_domain", "finite_amount"])
+def test_self_consistent_fee_report_without_business_identity_fails_closed(home, monkeypatch, missing):
+    from openinvest.core.evidence_eligibility import digest
+    from openinvest.services.ledger_evidence import account_source_status
+    _enable(monkeypatch)
+    _seed(home)
+    fill = {**_fill("QQQM", "BOT", 1, 40, "report-schema"),
+            "account_mode_evidence": {"account": ACCT, "mode": "live", "source_reference": "synthetic-declaration"}}
+    assert ia.reconcile(broker=FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[fill]))["status"] == "ok"
+    assert account_source_status(PortfolioManager(home))["historical_execution_eligible"]
+    path, = _fee_report_files(home)
+    envelope = json.loads(path.read_text())
+    if missing=='finite_amount':
+        envelope['payload']['report']['reported_commission']=10**400
+        envelope['payload']['fill_source_reference']['commission']=10**400
+    else:
+        envelope["payload"]["report"].pop(missing)
+    report_hash = digest(envelope["payload"]["report"])
+    envelope["payload"]["report_hash"] = report_hash
+    envelope["sha256"] = digest(envelope["payload"])
+    path.unlink()
+    path.with_name(report_hash + ".json").write_text(json.dumps(envelope))
+    grade = account_source_status(PortfolioManager(home))
+    assert grade["status"] == "unavailable" and not grade["historical_execution_eligible"]
+
+
+@pytest.mark.parametrize("damage", ["foreign_execution", "foreign_zero_intent", "amount", "currency", "purpose", "idempotency_key", "naive_time"])
+def test_self_consistent_fee_intent_must_bind_its_exact_report(home, monkeypatch, damage):
+    from openinvest.core.evidence_eligibility import digest
+    from openinvest.services.ledger_evidence import account_source_status
+    _enable(monkeypatch)
+    _seed(home)
+    fill = {**_fill("QQQM", "BOT", 1, 40, "intent-binding"),
+            "account_mode_evidence": {"account": ACCT, "mode": "live", "source_reference": "synthetic-declaration"}}
+    assert ia.reconcile(broker=FakeBroker(cash=259.65, positions={"QQQM": 1}, fills=[fill]))["status"] == "ok"
+    assert account_source_status(PortfolioManager(home))["historical_execution_eligible"]
+    path, = (home.root / ".evidence/broker_fee_applications").glob("*.json")
+    envelope = json.loads(path.read_text())
+    intent = envelope["payload"]
+    if damage in {"foreign_execution", "foreign_zero_intent"}:
+        intent["execution"].update(account="SYNTHETIC-OTHER", exec_id="synthetic-other")
+        intent["idempotency_key"] = "ibkr-fee-synthetic-other"
+        if damage == "foreign_zero_intent":
+            intent["target_total"] = 0
+    elif damage == "amount":
+        intent["target_total"] = 0.5
+    elif damage == "currency":
+        intent["currency"] = "AUD"
+    elif damage == "naive_time":
+        intent["attempted_at"] = "2026-10-19T12:00:00"
+    else:
+        intent.pop(damage)
+    envelope["sha256"] = digest(intent)
+    path.unlink()
+    path.with_name(digest(intent["execution"]) + ".json").write_text(json.dumps(envelope))
+    grade = account_source_status(PortfolioManager(home))
+    assert grade["status"] == "unavailable" and not grade["historical_execution_eligible"]
+
+
+def test_reconcile_sell_preserves_date_without_fabricating_a_clock(home, monkeypatch):
+    _enable(monkeypatch)
+    _seed(home, holdings=[{"symbol": "QQQM", "units": 2, "avg_cost": 30, "cost_currency": "USD", "kind": "equity"}])
+    fill = {**_fill("QQQM", "SLD", 1, 40, "sell-date", fee=None), "date": "2026-10-15"}
+    b = FakeBroker(cash=340, positions={"QQQM": 1}, fills=[fill])
+    assert ia.reconcile(broker=b)["status"] == "ok"
+    row, = home.read_history()
+    assert row["action"] == "sell" and row["trade_date"] == "2026-10-15"
+    assert row["execution_time_precision"] == "day" and "execution_time" not in row
+    assert row["source_reference"]["exec_id"] == "sell-date"
+
+
+@pytest.mark.parametrize("change", [{"date": "2026-10-15T12:00:00"}, {"account": "U-OTHER"}, {"exec_id": ""}])
+def test_reconcile_invalid_receipt_is_rejected_before_cash_or_quantity_mutation(home, monkeypatch, change):
+    _enable(monkeypatch)
+    _seed(home)
+    fill = {**_fill("QQQM", "BOT", 1, 40, "invalid-receipt"), **change}
+    b = FakeBroker(cash=300, fills=[fill])
+    assert ia.reconcile(broker=b)["status"] == "halted"
+    assert home.read_history() == []
+    pm = PortfolioManager(home)
+    assert pm.find_holding("QQQM") is None and pm.cash_amount("USD") == 300
 
 
 def test_reconcile_books_fx_conversion_both_legs(home, monkeypatch):
@@ -529,6 +896,10 @@ def test_reconcile_books_fx_conversion_both_legs(home, monkeypatch):
     assert pm.cash_amount("AUD") == pytest.approx(5.0) and pm.cash_amount("USD") == pytest.approx(495 * 0.7 - 2.0)
     assert out["cash_drift"] == {}
     assert ia.reconcile(broker=b)["booked"] == []            # 幂等
+    for row in home.read_history():
+        assert row["trade_date"] == TODAY and row["evidence_basis"] == "broker_observed_fill"
+        assert row["source_reference"]["exec_id"] == "fx-1"
+        assert row["execution_domain"] == "broker_unknown"
 
 
 def test_reconcile_position_drift_halts(home, monkeypatch, tmp_path):
@@ -611,9 +982,9 @@ class FakeIB:
         fx.localSymbol = "AUD.USD"
         return [
             Fill(Stock("QQQM", "SMART", "USD"), Execution(execId="e1", acctNumber="U1", side="BOT", shares=0.495,
-                 price=201.5, orderRef="oi:a", time=t), CommissionReport(commission=0.35), t),
+                 price=201.5, orderRef="oi:a", time=t), CommissionReport(execId="e1", commission=0.35, currency="USD"), t),
             Fill(fx, Execution(execId="e2", acctNumber="U1", side="SLD", shares=495, price=0.7, time=t),
-                 CommissionReport(commission=2.88, currency="AUD"), t),
+                 CommissionReport(execId="e2", commission=2.88, currency="AUD"), t),
             Fill(Stock("SPY", "SMART", "USD"), Execution(execId="e3", acctNumber="U9", side="BOT", shares=1, price=1,
                  time=t), CommissionReport(), t)]
 
@@ -674,6 +1045,52 @@ def test_gateway_read_mappings():
         ("QQQM", "BOT", 0.495, 0.35, "STK", "2026-10-20")
     assert (f[1]["symbol"], f[1]["side"], f[1]["sec_type"], f[1]["commission"], f[1]["commission_ccy"]) == \
         ("AUD.USD", "SLD", "CASH", 2.88, "AUD")                # 换汇佣金按券商回报的币种（AUD）
+    assert f[0]["execution_time"] == "2026-10-20T02:00:00+00:00"
+    assert f[0]["execution_time_precision"] == "instant"
+    assert f[0]["account"] == "U1" and f[0]["account_mode"] == "unknown"
+    assert f[0]["fee_status"] == "reported"
+
+
+@pytest.mark.parametrize("report, expected, status", [
+    (CommissionReport(), None, "unknown"),
+    (CommissionReport(execId="other-exec", commission=0, currency="USD"), None, "unknown"),
+    (CommissionReport(execId="e1", commission=UNSET, currency="USD"), None, "unknown"),
+    (CommissionReport(execId="e1", commission=None, currency="USD"), None, "unknown"),
+    (CommissionReport(execId="e1", commission=float("nan"), currency="USD"), None, "unknown"),
+    (CommissionReport(execId="e1", commission=0, currency="USD"), 0, "reported_zero"),
+    (CommissionReport(execId="e1", commission=0.35, currency="USD"), 0.35, "reported"),
+    (CommissionReport(execId="e1", commission=0.35), 0.35, "unknown"),
+])
+def test_gateway_only_matching_reports_prove_commission(monkeypatch, report, expected, status):
+    ib = FakeIB()
+    original = ib.fills()[0]
+    monkeypatch.setattr(ib, "fills", lambda: [Fill(original.contract, original.execution, report, original.time)])
+    row, = ia._IbGateway(ib, "U1").fills()
+    assert row["commission"] == expected and row["fee_status"] == status
+
+
+def test_gateway_does_not_localize_naive_execution_time(monkeypatch):
+    ib = FakeIB()
+    original = ib.fills()[0]
+    original.execution.time = datetime(2026, 10, 15, 22, 1, 2)
+    monkeypatch.setattr(ib, "fills", lambda: [original])
+    row, = ia._IbGateway(ib, "U1").fills()
+    assert row["date"] == "2026-10-15" and row["execution_time_precision"] == "day"
+    assert "execution_time" not in row
+    assert row["reported_execution_time"] == "2026-10-15T22:01:02" and row["execution_timezone"] == "unknown"
+
+
+@pytest.mark.parametrize("account", ["U1", "U-OTHER"])
+def test_gateway_domain_declaration_must_bind_the_execution_account(account):
+    declaration = {"account": account, "mode": "paper", "source_reference": "fixture-login-mode-confirmation"}
+    row = ia._IbGateway(FakeIB(), "U1", account_mode_evidence=declaration).fills()[0]
+    assert row["account_mode"] == ("paper" if account == "U1" else "unknown")
+
+
+@pytest.mark.parametrize("value, expected", [(None, None), ("", None), ("bad", None), (True, None),
+                                           (float("inf"), None), (float("nan"), None), (UNSET, None), (0, 0), (0.35, 0.35)])
+def test_broker_numeric_parser_keeps_missing_distinct_from_zero(value, expected):
+    assert ia._finite(value) == expected
 
 
 def test_gateway_orders_whatif_and_rejection():
@@ -687,6 +1104,8 @@ def test_gateway_orders_whatif_and_rejection():
     assert contract.symbol == "QQQM"
     assert (o.action, o.totalQuantity, o.orderType, o.lmtPrice, o.tif, o.account, o.orderRef, o.outsideRth) == \
         ("BUY", 0.495, "LMT", 202.0, "DAY", "U1", "oi:r", False)
+    ib.whatif_state = OrderState(commission=0.0, warningText="")
+    assert g.whatif(cid, "BUY", 0.495, 202.0, "oi:r")["commission"] == 0.0
     ib.whatif_state = OrderState()                            # 网关没回结果（被拒）
     assert g.whatif(cid, "BUY", 0.495, 202.0, "oi:r")["error"]
     ib.whatif_state = OrderState(minCommission=1.0, maxCommission=1.2)   # 只给 min / max 佣金：也算成功

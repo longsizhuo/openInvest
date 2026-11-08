@@ -238,6 +238,13 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     """
     pm = pm or PortfolioManager()
     base = (base or base_currency()).upper()
+    from openinvest.services.ledger_evidence import account_source_status
+    ledger_evidence=account_source_status(pm)
+    paper_scope=ledger_evidence.get('ledger_domain') in {'paper_simulation','broker_paper'}
+    if not (ledger_evidence['historical_execution_eligible'] or ledger_evidence.get('paper_performance_eligible')):
+        return {'status':'unverified_execution_history','reason':'unobserved_or_unavailable_execution_sources',
+                'base_currency':base,'ledger_evidence':ledger_evidence,'financial_performance_eligible':False,
+                'message':'记录包含未核对的自动估算，不能据此报告实际TWR/XIRR。原始记录和跟踪投影保留。'}
     today = today or date.today().strftime("%Y-%m-%d")
     store = MarketStore()
 
@@ -384,6 +391,9 @@ def build_account_performance(pm: Optional[PortfolioManager] = None, *, today: O
     elif cfg_symbol and out.get("benchmark") is None:
         bench_missing = {"symbol": cfg_symbol, "reason": "starts_after_inception"}
     out["status"] = "ok"
+    out['performance_scope']=ledger_evidence.get('ledger_domain','client_recorded')
+    out['financial_performance_eligible']=not paper_scope
+    out['source_authority']='paper_simulation_not_actual_account' if paper_scope else 'client_recorded_not_independently_verified'
     if out.get("xirr") is None:   # null 不是故障：说明原因（<30 天不报，或现金流求不出根）
         span = (date.fromisoformat(rows[-1][0]) - date.fromisoformat(rows[0][0])).days
         out["xirr_note"] = (f"历史不足 {XIRR_MIN_SPAN_DAYS} 天不报" if span < XIRR_MIN_SPAN_DAYS
@@ -441,6 +451,8 @@ def _pct(v: Optional[float]) -> str:
 
 def render_performance_md(perf: Dict[str, Any]) -> str:
     """日报"账户业绩"段（markdown，邮件 HTML 与 chat 变体同一文本）。不可用时一行说明。"""
+    if perf.get('status')=='unverified_execution_history':
+        return '- 账户业绩：成交来源待核对，暂不报告实际 TWR/XIRR；估算与原始记录仍保留。'
     if perf.get("status") != "ok":
         return f"- 账户业绩：历史不足（{perf.get('reason', perf.get('status'))}），记满 2 个交易日后出现"
     dq = perf.get("data_quality") or {}
@@ -455,6 +467,8 @@ def render_performance_md(perf: Dict[str, Any]) -> str:
         + (f"（{mdd.get('peak')} → {mdd.get('trough')}）" if mdd.get("pct") else "")
         + f" ｜ 年化波动：{_pct(perf.get('volatility_annual'))}",
     ]
+    if perf.get('performance_scope') in {'paper_simulation','broker_paper'}:
+        lines.insert(0,'- 以下为纸面/模拟账户计算，不代表真实资金账户收益。')
     if b:
         lines.append(f"- vs 基准 {b['symbol']}（同窗口）：基准 {_pct(b.get('return_same_window'))}"
                      f"，超额 {_pct(b.get('excess'))}，跑赢天数 {b.get('beat_days_pct', 0):.0f}%")

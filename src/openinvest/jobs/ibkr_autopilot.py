@@ -33,13 +33,14 @@ import math
 import re
 import shlex
 import subprocess
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from openinvest.core.config import load_config
 from openinvest.core.decision_ledger import parse_committee_file
-from openinvest.core.memory_store import MemoryStore
+from openinvest.core.evidence_eligibility import digest
+from openinvest.core.memory_store import MemoryStore, _file_lock
 from openinvest.core.portfolio_manager import PortfolioManager, _guess_kind_from_symbol
 from openinvest.jobs.paper_autopilot import _holding_for, round_down_units
 from openinvest.paths import INVEST_ROOT
@@ -122,16 +123,48 @@ _SEND_POLLS = 20        # 下单后最多等 20 × 0.5s 网关回执
 
 
 def _finite(v: Any) -> Optional[float]:
-    f = _num(v)
-    return f if 0 <= abs(f) < _UNSET else None
+    # Unlike _num, missing/invalid broker fields are not an observed zero.
+    if v is None or isinstance(v, bool) or v == "":
+        return None
+    try:
+        f = float(str(v).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) and abs(f) < _UNSET else None
+
+
+def _account_mode(evidence: Any, account: str) -> str:
+    """Only an explicit, account-bound declaration identifies the execution domain.
+
+    Ports, account name prefixes and dry_run describe neither the actual login
+    nor a historical execution. Without a verifiable declaration keep unknown.
+    """
+    if (isinstance(evidence, dict) and evidence.get("account") == account
+            and evidence.get("mode") in ("paper", "live") and evidence.get("source_reference")):
+        return evidence["mode"]
+    return "unknown"
+
+
+def _fill_time(value: Any) -> Dict[str, Any]:
+    """Preserve the supplied clock precision; never localize a naive timestamp."""
+    if isinstance(value, datetime):
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            return {"date": value.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat(),
+                    "execution_time": value.isoformat(), "execution_time_precision": "instant"}
+        return {"date": value.date().isoformat(), "execution_time_precision": "day",
+                "reported_execution_time": value.isoformat(), "execution_timezone": "unknown"}
+    if isinstance(value, date):
+        return {"date": value.isoformat(), "execution_time_precision": "day"}
+    raise ValueError("IBKR execution has no usable trade date")
 
 
 class _IbGateway:
     """本机 IB Gateway（ib_async / TWS API）的最小适配层——本模块只用这几个调用，字段映射集中在这里。
     测试用同名方法的 Fake 替换；首次连上先 dry_run（whatIfOrder）核对。"""
 
-    def __init__(self, ib, acct: str):
+    def __init__(self, ib, acct: str, *, account_mode_evidence: Optional[Dict[str, Any]] = None):
         self.ib, self.acct = ib, acct
+        self.account_mode_evidence = account_mode_evidence
         self._contracts: Dict[int, Any] = {}
         self._providers: Optional[str] = None
 
@@ -200,13 +233,22 @@ class _IbGateway:
             e, c, cr = f.execution, f.contract, f.commissionReport
             if e.acctNumber != self.acct:
                 continue
+            # ib_async creates an empty CommissionReport(commission=0) before
+            # receiving the report. Only its matching execId proves a report.
+            commission = (_finite(getattr(cr, "commission", None))
+                          if getattr(cr, "execId", None) == e.execId else None)
+            commission_ccy = str(getattr(cr, "currency", "") or "").upper() or None
+            fee_status = ("unknown" if commission is None or (commission != 0 and not commission_ccy)
+                          else "reported_zero" if commission == 0 else "reported")
+            timing = _fill_time(e.time)
             out.append({"exec_id": e.execId, "sec_type": c.secType,
                         "symbol": c.localSymbol if c.secType == "CASH" else c.symbol,   # 换汇：AUD.USD
                         "side": "BOT" if e.side == "BOT" else "SLD", "qty": float(e.shares), "price": float(e.price),
-                        "commission": _finite(getattr(cr, "commission", 0)) or 0.0,
-                        "commission_ccy": str(getattr(cr, "currency", "") or "USD").upper(),   # 换汇佣金是 AUD（实测）
-                        "ref": str(e.orderRef or ""),
-                        "date": e.time.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")})
+                        "commission": commission, "commission_ccy": commission_ccy, "fee_status": fee_status,
+                        "ref": str(e.orderRef or ""), "account": e.acctNumber,
+                        "order_id": e.orderId, "perm_id": e.permId, "client_id": e.clientId,
+                        "account_mode": _account_mode(self.account_mode_evidence, e.acctNumber),
+                        "account_mode_evidence": self.account_mode_evidence, **timing})
         return out
 
     def conid(self, symbol: str) -> Optional[int]:
@@ -231,7 +273,8 @@ class _IbGateway:
                                              or str(getattr(st, "initMarginChange", "") or "") not in ("", str(1.7976931348623157e308)))
         if not got:
             return {"error": "whatIfOrder 没有回结果（权限 / 合约 / 碎股 / 价位被拒，看网关日志）"}
-        return {"commission": _finite(st.commission) or _finite(st.maxCommission), "warning": st.warningText or None,
+        commission = _finite(st.commission)
+        return {"commission": commission if commission is not None else _finite(st.maxCommission), "warning": st.warningText or None,
                 "error": None}
 
     def whatif(self, conid: int, side: str, qty: float, lmt: float, ref: str) -> Dict[str, Any]:
@@ -800,39 +843,219 @@ def reconcile(*, broker=None) -> Dict[str, Any]:
             b.close()
 
 
+def _fill_evidence(f: Dict[str, Any], account: str) -> Dict[str, Any]:
+    """Evidence shared by the fill, both FX legs and any separate fee receipt."""
+    exec_id = str(f.get("exec_id") or "").strip()
+    if not exec_id:
+        raise ValueError("IBKR execution is missing exec_id")
+    fill_account = str(f.get("account") or account)
+    if fill_account != account:
+        raise ValueError("IBKR execution account does not match configured account")
+    mode_evidence = f.get("account_mode_evidence")
+    mode = _account_mode(mode_evidence, fill_account)
+    trade_date = str(f.get("date") or "")
+    # A bad date must fail before the quantity or cash is mutated.
+    if date.fromisoformat(trade_date).isoformat() != trade_date:
+        raise ValueError("IBKR execution trade date must be YYYY-MM-DD")
+    reported_fee = _finite(f.get("commission"))
+    fee_ccy = str(f.get("commission_ccy") or "").strip().upper() or None
+    fee_status = ("unknown" if reported_fee is None or f.get("fee_status") == "unknown"
+                  or (reported_fee != 0 and not fee_ccy)
+                  else "reported_zero" if reported_fee == 0 else "reported")
+    reference = {"broker": "ibkr", "account": fill_account, "exec_id": exec_id, "account_mode": mode,
+                 "sec_type": f["sec_type"], "side": f["side"], "quantity": f["qty"], "price": f["price"],
+                 "commission": reported_fee, "commission_currency": fee_ccy,
+                 "fee_cash_application": "not_applied"}
+    for name in ("order_id", "perm_id", "client_id", "account_mode_evidence",
+                 "reported_execution_time", "execution_timezone"):
+        if f.get(name) is not None:
+            reference[name] = f[name]
+    if f.get("ref"):
+        reference["order_ref"] = f["ref"]
+    evidence = {"evidence_basis": "broker_observed_fill", "execution_domain": f"broker_{mode}",
+                "source_reference": reference, "trade_date": trade_date, "fee_status": fee_status,
+                "execution_time_precision": "day"}
+    if f.get("execution_time"):
+        timestamp = datetime.fromisoformat(str(f["execution_time"]))
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            # Keep the reported text as evidence, without manufacturing a timezone.
+            reference.update(reported_execution_time=str(f["execution_time"]), execution_timezone="unknown")
+        else:
+            evidence.update(execution_time=timestamp.isoformat(), execution_time_precision="instant")
+    return evidence
+
+
+def _fee_receipt(path):
+    envelope = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(envelope, dict) or envelope.get("schema") != 1 or not isinstance(envelope.get("payload"), dict)
+            or envelope.get("sha256") != digest(envelope["payload"])):
+        raise ValueError("broker_fee_receipt_integrity_failure")
+    return envelope
+
+
+def _fee_execution(reference, domain):
+    return {"account": reference.get("account"), "exec_id": reference.get("exec_id"), "execution_domain": domain}
+
+
+def _same_fee_execution(row, identity):
+    ref = row.get("source_reference") or {}
+    return _fee_execution(ref, row.get("execution_domain")) == identity
+
+
+def _record_commission_report(pm, f, evidence):
+    """Every distinct observed report has immutable content and a zero-effect journal receipt.
+
+    Capturing a report is not evidence that cash was debited. A missing journal
+    copy can be restored from this immutable receipt without repeating money.
+    """
+    reference = evidence["source_reference"]
+    report = {**_fee_execution(reference, evidence["execution_domain"]), "broker": "ibkr",
+              "reported_commission": reference["commission"], "currency": reference["commission_currency"],
+              "fee_status": evidence["fee_status"]}
+    report_hash = digest(report)
+    directory = pm.store.root / ".evidence/broker_fee_reports"
+    path = directory / (report_hash + ".json")
+    with _file_lock(pm.store.root / ".state/ibkr_fee_report_journal"):
+        history = pm.store.read_history()
+        previous = [row for row in history if row.get("action") == "broker_fee_report"
+                    and (row.get("source_reference") or {}).get("fee_report_hash") == report_hash]
+        if path.exists():
+            envelope = _fee_receipt(path)
+            if envelope["payload"].get("report") != report or envelope["payload"].get("report_hash") != report_hash:
+                raise ValueError("broker_fee_report_binding_failure")
+        else:
+            if previous:
+                raise ValueError("broker_fee_report_receipt_missing_requires_reconciliation")
+            from openinvest.core.decision_evidence import _write_once
+            envelope = _write_once(path, {"report": report, "report_hash": report_hash, "symbol": f["symbol"],
+                "captured_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+                "fill_source_reference": reference, "cash_applied": False,
+                "purpose": "broker_commission_report_not_cash_application"})
+        updated = {**evidence, "source_reference": {**reference, "fee_report_hash": report_hash,
+            "fee_report_sha256": envelope["sha256"], "fee_report_captured_at": envelope["payload"]["captured_at"]}}
+        if previous:
+            if (len(previous) != 1 or previous[0].get("cash_effect") != 0 or previous[0].get("units_effect") != 0
+                    or previous[0].get("amount") != report["reported_commission"]
+                    or previous[0].get("currency") != report["currency"]
+                    or not _same_fee_execution(previous[0], _fee_execution(reference, evidence["execution_domain"]))
+                    or previous[0].get("captured_at") != envelope["payload"]["captured_at"]
+                    or (previous[0].get("source_reference") or {}).get("fee_report_sha256") != envelope["sha256"]):
+                raise ValueError("broker_fee_report_journal_binding_failure")
+        else:
+            with pm.recording_scope(**updated):
+                pm.store.append_history({"schema_version": 2, "action": "broker_fee_report", "source": _SRC,
+                    "symbol": f["symbol"], "amount": report["reported_commission"], "currency": report["currency"],
+                    "cash_effect": 0.0, "units_effect": 0.0, "external": False, "cash_applied": False,
+                    "captured_at": envelope["payload"]["captured_at"],
+                    "idempotency_key": "ibkr-fee-report-" + report_hash,
+                    "note": "Broker reported total commission; cash application is recorded separately"})
+        return updated
+
+
+def _apply_commission(pm, f, evidence):
+    """Apply only the first unambiguous report; revisions require explicit reconciliation.
+
+    An immutable application intent prevents an interrupted or lost fee journal
+    from being treated as permission to debit the same cash again.
+    """
+    reference = evidence["source_reference"]
+    identity = _fee_execution(reference, evidence["execution_domain"])
+    amount, currency = reference["commission"], reference["commission_currency"]
+    application = pm.store.root / ".evidence/broker_fee_applications" / (digest(identity) + ".json")
+    with _file_lock(application):
+        if application.exists():
+            intent = _fee_receipt(application)["payload"]
+            if intent.get("execution") != identity or intent.get("purpose") != "cash_application_intent_not_proof_of_applied_fee":
+                raise ValueError("commission_application_receipt_binding_failure")
+        history = pm.store.read_history()
+        known_reports = []
+        for path in (pm.store.root / ".evidence/broker_fee_reports").glob("*.json"):
+            payload = _fee_receipt(path)["payload"]
+            report = payload.get("report") or {}
+            if payload.get("report_hash") != digest(report) or path.stem != payload.get("report_hash"):
+                raise ValueError("broker_fee_report_version_binding_failure")
+            if (_fee_execution(report, report.get("execution_domain")) == identity
+                    and report.get("fee_status") in ("reported", "reported_zero")):
+                known_reports.append((report["reported_commission"], report.get("currency")))
+        # Legacy zero receipts remain evidence, even before versioned reports existed.
+        for row in history:
+            if (row.get("action") == "broker_fee_report" and _same_fee_execution(row, identity)
+                    and row.get("fee_status") in ("reported", "reported_zero")):
+                known_reports.append((row.get("amount"), row.get("currency")))
+        if any(total != amount or ccy != currency for total, ccy in known_reports):
+            raise ValueError("commission_report_revision_requires_reconciliation")
+        fees = [row for row in history if row.get("action") == "fee" and _same_fee_execution(row, identity)]
+        if fees:
+            if (len(fees) != 1 or fees[0].get("amount") != amount or fees[0].get("currency") != currency
+                    or fees[0].get("cash_effect") != -amount):
+                raise ValueError("commission_cash_application_mismatch_requires_reconciliation")
+            return
+        if amount == 0:
+            if application.exists():
+                raise ValueError("commission_application_requires_reconciliation")
+            return  # Explicit zero is a report, never a synthetic cash debit.
+        if not (0 < amount < 1e6) or not currency:
+            raise ValueError("commission_amount_or_currency_requires_reconciliation")
+        key = f"ibkr-fee-{f['exec_id']}"
+        pm._reload()
+        if application.exists():
+            _fee_receipt(application)
+            raise ValueError("commission_application_requires_reconciliation")
+        if key in (pm.portfolio.get("ledger_idempotency_keys") or []):
+            raise ValueError("commission_cash_claim_without_journal_requires_reconciliation")
+        from openinvest.core.decision_evidence import _write_once
+        _write_once(application, {"execution": identity, "fee_report_hash": reference["fee_report_hash"],
+            "target_total": amount, "currency": currency, "idempotency_key": key,
+            "attempted_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+            "purpose": "cash_application_intent_not_proof_of_applied_fee"})
+        applied_evidence = {**evidence, "source_reference": {**reference, "fee_cash_application": "applied"}}
+        with pm.recording_scope(**applied_evidence):
+            pm.record_fee(amount, currency, f["symbol"], trade_date=f["date"], source=_SRC,
+                          note="IBKR commission", idempotency_key=key, allow_negative=True)
+        # A duplicate claim or a mocked/failed append cannot claim cash application.
+        actual = [row for row in pm.store.read_history() if row.get("action") == "fee" and _same_fee_execution(row, identity)]
+        if (len(actual) != 1 or actual[0].get("amount") != amount or actual[0].get("currency") != currency
+                or actual[0].get("cash_effect") != -amount):
+            raise ValueError("commission_cash_application_unverified_requires_reconciliation")
+
+
 def _reconcile(b) -> Dict[str, Any]:
     pm = PortfolioManager()
     booked: List[Dict[str, Any]] = []
     problems: List[str] = []
+    account = load_config().ibkr.account
     for f in b.fills(days=7):   # 近 7 天：哪天对账没跑，下次补上（幂等键挡重复）
         sym, qty, px = f["symbol"], f["qty"], f["price"]
-        key = f"ibkr-{f['exec_id']}"
         try:
-            if f["sec_type"] == "CASH":
-                row = _book_fx(pm, f)
-                if row:
-                    booked.append(row)
-            elif f["sec_type"] == "STK":
-                if f["side"] == "BOT":
-                    h = pm.find_holding(sym) or {}
-                    res = pm.buy(sym, qty, px, currency="USD", kind=h.get("kind") or _guess_kind_from_symbol(sym),
-                                 unit_label="股", source=_SRC, idempotency_key=key, allow_negative=True)
+            evidence = _fill_evidence(f, account)
+            if _finite(f.get("commission")) is not None:
+                evidence = _record_commission_report(pm, f, evidence)
+            key = f"ibkr-{f['exec_id']}"
+            with pm.recording_scope(**evidence):
+                if f["sec_type"] == "CASH":
+                    row = _book_fx(pm, f)
+                    if row:
+                        booked.append(row)
+                elif f["sec_type"] == "STK":
+                    if f["side"] == "BOT":
+                        h = pm.find_holding(sym) or {}
+                        res = pm.buy(sym, qty, px, currency="USD", kind=h.get("kind") or _guess_kind_from_symbol(sym),
+                                     unit_label="股", source=_SRC, idempotency_key=key, allow_negative=True)
+                    else:
+                        res = pm.sell(sym, qty, px, source=_SRC, idempotency_key=key)
+                    if res.get("status") != "duplicate":
+                        booked.append({"symbol": sym, "side": f["side"], "qty": qty, "price": px, "exec_id": f["exec_id"]})
                 else:
-                    res = pm.sell(sym, qty, px, source=_SRC, idempotency_key=key)
-                if res.get("status") != "duplicate":
-                    booked.append({"symbol": sym, "side": f["side"], "qty": qty, "price": px, "exec_id": f["exec_id"]})
-            else:
-                continue
-        except ValueError as ex:
+                    continue
+        except (ValueError, OSError) as ex:
             problems.append(f"{sym} {f['side']} {qty:g} 记账失败: {ex}")
             continue
-        fee = f["commission"]
-        if 0 < fee < 1e6:
-            try:
-                pm.record_fee(round(fee, 4), f.get("commission_ccy") or "USD", sym, trade_date=f["date"], source=_SRC,
-                              note="IBKR commission", idempotency_key=f"ibkr-fee-{f['exec_id']}", allow_negative=True)
-            except Exception as ex:  # noqa: BLE001
-                problems.append(f"{sym} 佣金记账失败: {ex}")
+        if evidence["fee_status"] == "unknown":
+            continue   # No zero-fee assertion and no fee claim: a later report can complete this execId.
+        try:
+            _apply_commission(pm, f, evidence)
+        except Exception as ex:  # noqa: BLE001
+            problems.append(f"{sym} 佣金记账失败: {ex}")
 
     broker_pos = b.positions()
     ledger = {h["symbol"]: float(h["units"]) for h in pm.holdings if float(h.get("units") or 0)}

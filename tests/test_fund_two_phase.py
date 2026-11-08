@@ -1,9 +1,10 @@
-"""ADR-027 PR3：场外基金两段式（下单扣现金记在途 → 定价日净值公布后按净值确认）。临时 memory + 假净值，不联网。
+"""ADR-027 PR3：场外基金两段式。公开净值只投影；实际 NAV 和费用经手工确认后才入账。
+临时 memory + 假净值/手工成交参数，不联网。
 
 守的契约：
 - place：现金 −amount、订单 placed 进 holding.extra.pending_orders、流水 fund_order_placed；总资产在这一步前后不变（在途按面值计入）
-- confirm：units += (amount−fee)/nav、avg_cost 加权；CAS——并发两次只有一个生效，另一个 already_confirmed；
-  净值未公布 → pending_nav，账本一个字节都不动；休市日顺延用之后第一个净值日
+- 实际确认：units += (amount−fee)/nav、avg_cost 加权；CAS——并发两次只有一个生效，另一个 already_confirmed
+- 净值未公布 → pending_nav；公开净值/未知费用/自动 job → 独立投影并 pending_execution_confirmation，正式账本逐字节不动
 - cancel：只有 placed 能撤，已确认拒绝；幂等键重放 duplicate；删有在途单的持仓被拒
 - 估值：fx.total_portfolio_value / account_performance 回放 / rebalance_plan / portfolio_summary / status 都经唯一读口
 - job fund_confirm：只碰 nav_date ≤ 今天的单，净值没出就跳过，单笔失败不挡其余、批末抛
@@ -11,7 +12,9 @@
 """
 from __future__ import annotations
 
+import json
 import threading
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,6 +82,16 @@ def _rows(pm, action=None):
 
 def _total(pm, prices=None) -> float:
     return fx.total_portfolio_value_cny(pm, prices or {}, base="CNY")[0]
+
+
+def _ledger_bytes(pm):
+    return {name: (pm.store.root / name).read_bytes() if (pm.store.root / name).exists() else None
+            for name in ("portfolio.md", "portfolio_history.jsonl")}
+
+
+def _estimates(pm):
+    return [json.loads(path.read_text())["payload"]
+            for path in (pm.store.root / ".evidence/tracking_estimates").glob("*.json")]
 
 
 # ============ calc 层规则在 place 里的落地 ============
@@ -168,7 +181,12 @@ def test_place_into_existing_fund_row_and_tracking_only_flip(tmp_path, net):
     legacy.place_fund_order("FUND:123456", 100, order_ts=ORDER_MON_AM)
     assert [h["symbol"] for h in legacy.holdings] == ["123456.SZ"]
     assert _rows(legacy)[0]["symbol"] == "123456.SZ" and legacy.pending_fund_orders()[0]["symbol"] == "123456.SZ"
-    legacy.confirm_fund_order(legacy.pending_fund_orders()[0]["order_id"])             # 确认时按基金代码取净值，不管行上写的后缀
+    legacy_oid = legacy.pending_fund_orders()[0]["order_id"]
+    before = _ledger_bytes(legacy)
+    assert legacy.confirm_fund_order(legacy_oid)["status"] == "pending_execution_confirmation"
+    assert net.nav_calls[-1] == "123456.SZ" and _ledger_bytes(legacy) == before
+    # 手工提供平台实际 NAV 和真实零费，旧持仓写法仍不能造成第二行。
+    legacy.confirm_fund_order(legacy_oid, nav=2.0, fee=0)
     assert legacy.holdings.find("123456.SZ")["units"] == 55.0
 
 
@@ -208,7 +226,7 @@ def test_total_assets_unchanged_across_place_confirm_and_cancel(tmp_path, net):
     total, status = fx.total_portfolio_value_cny(pm, prices, base="CNY")
     assert total == before and status["pending_fund:CNY"] == "ok" and fx.unvalued(status) == []
 
-    pm.confirm_fund_order(placed["order_id"], nav=2.0, confirm_date=MON)           # 5000/2.0 = 2500 份 × 2.0 = 5000
+    pm.confirm_fund_order(placed["order_id"], nav=2.0, fee=0, confirm_date=MON)    # 手工实际成交：5000/2.0=2500份
     assert _total(pm, prices) == before
 
     again = pm.place_fund_order(FUND, 1000, order_ts=f"{TUE}T10:00:00")
@@ -245,8 +263,8 @@ def test_confirm_computes_units_weighted_cost_and_ledger_row(tmp_path, net):
     pm = _pm(tmp_path, holdings=[held])
     o = pm.place_fund_order(FUND, 5000, order_ts=ORDER_MON_AM)
     net.navs[FUND] = [(MON, 2.0), (TUE, 2.5)]
-    out = pm.confirm_fund_order(o["order_id"], confirm_date=TUE)
-    assert out["status"] == "ok" and out["nav"] == 2.0 and out["nav_date"] == MON       # 用定价日 T 的净值，不是最新净值
+    out = pm.confirm_fund_order(o["order_id"], nav=2.0, fee=0, confirm_date=TUE)
+    assert out["status"] == "ok" and out["nav"] == 2.0 and out["nav_date"] == MON       # 手工实际成交参数，不借公开净值确认
     assert out["units"] == 2500.0 and out["total_units"] == 2600.0
     h = _fund(pm)
     assert h["units"] == 2600.0
@@ -267,11 +285,29 @@ def test_confirm_with_explicit_nav_skips_the_network(tmp_path, net):
     pm = _pm(tmp_path)
     o = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)
     net.nav_calls.clear()
-    out = pm.confirm_fund_order(o["order_id"], nav=2.5)
+    out = pm.confirm_fund_order(o["order_id"], nav=2.5, fee=0)
     assert out["units"] == 400.0 and net.nav_calls == []
     for bad in (0, -1, float("nan")):
         with pytest.raises(ValueError):
             pm.confirm_fund_order(o["order_id"], nav=bad)
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"nav": 2.0}, {"fee": 0},
+                                    {"nav": 2.0, "fee": 0, "source": "fund_auto_confirm"}])
+def test_missing_actual_nav_or_fee_and_auto_source_only_write_a_projection(tmp_path, net, kwargs):
+    pm = _pm(tmp_path)
+    oid = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)["order_id"]
+    before = _ledger_bytes(pm)
+    first = pm.confirm_fund_order(oid, **kwargs)
+    again = pm.confirm_fund_order(oid, **kwargs)
+    assert first["status"] == again["status"] == "pending_execution_confirmation"
+    assert first["estimate_id"] == again["estimate_id"]
+    assert first["actual_quantity"] is None and first["actual_fee"] is None
+    assert _ledger_bytes(pm) == before
+    assert _fund(pm)["units"] == 0 and _orders(pm)[0]["status"] == "placed"
+    estimate, = _estimates(pm)
+    assert estimate["execution_observed"] is False and estimate["cash_flow_recorded"] is False
+    assert estimate["quote"]["fee_observed"] is ("fee" in kwargs)
 
 
 def test_confirm_validates_fee_and_unknown_order(tmp_path, net):
@@ -299,26 +335,35 @@ def test_confirm_nav_not_published_leaves_every_byte_untouched(tmp_path, net):
     net.navs.pop(FUND)                                                                # 接口取不到（None）≠ 没公布
     assert pm.confirm_fund_order(o["order_id"])["reason"] == "nav_fetch_failed"
     assert path.read_text(encoding="utf-8") == snapshot
-    net.navs[FUND] = [(MON, 2.0), (TUE, 2.2)]                                         # 公布了 → 下一次就确认
-    assert pm.confirm_fund_order(o["order_id"])["status"] == "ok"
+    net.navs[FUND] = [(MON, 2.0), (TUE, 2.2)]                                         # 公布了 → 只能保存投影
+    out = pm.confirm_fund_order(o["order_id"])
+    assert out["status"] == "pending_execution_confirmation" and out["nav"] == 2.2
+    assert path.read_text(encoding="utf-8") == snapshot
+    assert (pm.store.root / "portfolio_history.jsonl").read_text() == history
+    assert _orders(pm)[0]["status"] == "placed" and _fund(pm)["units"] == 0
 
 
-def test_confirm_shifts_to_next_nav_day_when_pricing_day_is_a_holiday(tmp_path, net):
-    """交易日历只有周末：国庆这种休市日的 T 没有净值，但之后的净值已公布 → 顺延，并如实标出。"""
+def test_nav_projection_shifts_to_next_published_day_without_confirming_the_order(tmp_path, net):
+    """休市日顺延仅确定投影用的净值日，不能改写正式订单或确认份额。"""
     pm = _pm(tmp_path)
     o = pm.place_fund_order(FUND, 1000, order_ts="2026-10-01T10:00:00")             # 周四，A 股休市
     assert o["nav_date"] == "2026-10-01"
     net.navs[FUND] = [("2026-09-30", 2.0), ("2026-10-08", 2.5)]
+    before = _ledger_bytes(pm)
     out = pm.confirm_fund_order(o["order_id"])
-    assert (out["nav_date"], out["nav_date_planned"], out["nav"], out["units"]) == ("2026-10-08", "2026-10-01", 2.5, 400.0)
-    assert "休市" in out["note"] and _orders(pm)[0]["nav_date_planned"] == "2026-10-01"
-    assert _rows(pm, "fund_order_confirmed")[0]["nav_date"] == "2026-10-08"
+    assert out["status"] == "pending_execution_confirmation"
+    assert (out["nav_date"], out["nav_date_planned"], out["nav"]) == ("2026-10-08", "2026-10-01", 2.5)
+    estimate, = _estimates(pm)
+    assert estimate["quote"]["projected_quantity_if_fee_zero"] == 400
+    assert estimate["quote"]["nav_date"] == "2026-10-08" and estimate["actual_quantity"] is None
+    assert _orders(pm)[0]["nav_date"] == "2026-10-01" and _orders(pm)[0]["status"] == "placed"
+    assert _rows(pm, "fund_order_confirmed") == [] and _ledger_bytes(pm) == before
 
 
 def test_confirm_cas_sequential_second_call_is_already_confirmed(tmp_path, net):
     pm = _pm(tmp_path)
     o = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)
-    first = pm.confirm_fund_order(o["order_id"])
+    first = pm.confirm_fund_order(o["order_id"], nav=2.0, fee=0)
     path = pm.store.root / "portfolio.md"
     snapshot = path.read_text(encoding="utf-8")
     second = pm.confirm_fund_order(o["order_id"])
@@ -328,24 +373,23 @@ def test_confirm_cas_sequential_second_call_is_already_confirmed(tmp_path, net):
     assert _fund(pm)["units"] == 500.0
 
 
-def test_confirm_cas_inside_the_lock_when_another_process_wins_the_race(tmp_path, net):
-    """A 先读到 placed、去取净值（锁外）；这期间 B 把单子确认了；A 进锁后读到 confirmed → already_confirmed，不二次入账。"""
+def test_confirm_cas_inside_the_lock_when_another_process_wins_the_race(tmp_path, net, monkeypatch):
+    """A读取placed并准备真实成交参数；B先确认；A进锁后必须看到confirmed，不能重复入账。"""
     a = _pm(tmp_path)
     o = a.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)
     b = PortfolioManager(MemoryStore(tmp_path))
-    real = emf.fetch_fund_nav_history
+    real = a.with_portfolio_tx
     raced = []
 
-    def history_then_b_confirms(symbol, **kw):
+    @contextmanager
+    def transaction_after_b_confirms():
         if not raced:
-            raced.append(b.confirm_fund_order(o["order_id"], nav=2.0, source="B"))
-        return real(symbol, **kw)
+            raced.append(b.confirm_fund_order(o["order_id"], nav=2.0, fee=0, source="B"))
+        with real() as portfolio:
+            yield portfolio
 
-    emf.fetch_fund_nav_history = history_then_b_confirms
-    try:
-        out = a.confirm_fund_order(o["order_id"])
-    finally:
-        emf.fetch_fund_nav_history = real
+    monkeypatch.setattr(a, "with_portfolio_tx", transaction_after_b_confirms)
+    out = a.confirm_fund_order(o["order_id"], nav=2.0, fee=0)
     assert raced[0]["status"] == "ok" and out["status"] == "already_confirmed"
     fresh = PortfolioManager(MemoryStore(tmp_path))
     assert _fund(fresh)["units"] == 500.0 and len(_rows(fresh, "fund_order_confirmed")) == 1
@@ -359,7 +403,7 @@ def test_confirm_concurrent_threads_exactly_one_wins(tmp_path, net):
     def go(_):
         mine = PortfolioManager(MemoryStore(tmp_path))
         barrier.wait()
-        return mine.confirm_fund_order(oid)["status"]
+        return mine.confirm_fund_order(oid, nav=2.0, fee=0)["status"]
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         got = list(ex.map(go, range(8)))
@@ -385,7 +429,7 @@ def test_cancel_only_placed_orders(tmp_path, net):
     assert state.cash == {"CNY": 0.0} and state.pending == {"CNY": 0.0}
 
     done = pm.place_fund_order(FUND, 500, order_ts=ORDER_MON_AM)
-    pm.confirm_fund_order(done["order_id"])
+    pm.confirm_fund_order(done["order_id"], nav=2.0, fee=0)
     with pytest.raises(ValueError, match="已确认"):
         pm.cancel_fund_order(done["order_id"])
     assert pm.cash_amount("CNY") == 9500.0 and _fund(pm)["units"] == 250.0
@@ -408,7 +452,7 @@ def test_finished_orders_are_pruned_but_in_transit_ones_never(tmp_path, net):
     pm = _pm(tmp_path, cash={"CNY": 1_000_000.0})
     live = pm.place_fund_order(FUND, 10, order_ts=ORDER_MON_AM)["order_id"]
     for _ in range(25):
-        pm.confirm_fund_order(pm.place_fund_order(FUND, 10, order_ts=ORDER_MON_AM)["order_id"], nav=2.0)
+        pm.confirm_fund_order(pm.place_fund_order(FUND, 10, order_ts=ORDER_MON_AM)["order_id"], nav=2.0, fee=0)
     orders = _orders(pm)
     assert sum(o["status"] == "placed" for o in orders) == 1 and orders[0]["order_id"] == live
     assert sum(o["status"] == "confirmed" for o in orders) == 20
@@ -444,15 +488,19 @@ def test_replay_derives_effects_when_a_row_lacks_them():
     assert state.units == {FUND: 50.0} and state.avg_cost[FUND] == pytest.approx(2.0) and state.unknown == 0
 
 
-def test_history_as_trades_counts_placed_orders_but_not_cancelled_ones(tmp_path, net):
+def test_history_as_trades_keeps_placed_plans_separate_from_actual_confirmation(tmp_path, net):
     pm = _pm(tmp_path)
     kept = pm.place_fund_order(FUND, 100, order_ts=ORDER_MON_AM)
     dropped = pm.place_fund_order(FUND, 200, order_ts=ORDER_MON_AM)
     pm.cancel_fund_order(dropped["order_id"])
-    pm.confirm_fund_order(kept["order_id"])
+    before_confirmation = history_as_trades(pm.store.read_history())
+    assert [(t["symbol"], t["status"]) for t in before_confirmation] == [(FUND, "planned")]
+    pm.confirm_fund_order(kept["order_id"], nav=2.0, fee=0)
     trades = history_as_trades(pm.store.read_history())
-    assert [(t["symbol"], t["direction"]) for t in trades] == [(FUND, "BUY")]          # 下单那一刻算执行；确认 / 取消不另算
-    assert trades[0]["id"] == "history:0"
+    assert [(t["symbol"], t["direction"], t["status"]) for t in trades] == [
+        (FUND, "BUY", "planned"), (FUND, "BUY", "executed")]
+    assert [t["id"] for t in trades] == ["history:0", "history:3"]
+    assert [t["units"] for t in trades] == [None, 50.0]
 
 
 # ============ 账户业绩回放：placed 当日 NAV 不变，confirmed 当日用份额 × 净值替换在途面值 ============
@@ -492,7 +540,7 @@ def test_nav_replay_placed_day_unchanged_and_confirm_swaps_face_for_units(tmp_pa
     got = _capture_rows(monkeypatch, [2.0, 2.0, 2.2, 2.2, 2.2])
     pm = _replay_pm(tmp_path)
     o = pm.place_fund_order(FUND, 5000, order_ts=f"{TUE}T10:00:00")
-    pm.confirm_fund_order(o["order_id"], nav=2.0, confirm_date=WED)
+    pm.confirm_fund_order(o["order_id"], nav=2.0, fee=0, confirm_date=WED)
     perf = ap.build_account_performance(pm, today="2026-01-09")
     nav = {d: n for d, n, *_ in got["rows"]}
     flows = {d: (i, o_) for d, _, i, o_ in got["rows"]}
@@ -555,7 +603,7 @@ def test_status_view_shows_in_transit_orders_and_total_does_not_dip(tmp_path, ne
     assert o["symbol"] == FUND and o["amount"] == 5000.0 and o["status"] == "placed" and o["expected_confirm_date"] == TUE
     assert after["pending_fund_orders_line"].startswith("在途待确认 1 笔（¥5,000.00），预计 2026-01-06")
     assert "total_assets_excludes" not in after
-    pm.confirm_fund_order(o["order_id"], nav=2.0)
+    pm.confirm_fund_order(o["order_id"], nav=2.0, fee=0)
     done = skill_views.build_status_view()
     assert "pending_fund_orders" not in done and done["total_assets_cny"] == 10000.0
     assert {h["symbol"]: h["market_value"] for h in done["all_holdings"]} == {FUND: 5000.0}
@@ -589,31 +637,35 @@ def test_job_only_touches_due_orders_and_skips_unpublished_nav(tmp_path, net):
     due = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)["order_id"]
     later = pm.place_fund_order(FUND, 500, order_ts="2026-01-09T16:00:00")["order_id"]       # T = 下周一 01-12
 
-    out = fund_confirm.run(today=MON, pm=pm)                                                 # 周一晚：只有第一笔到期，净值已公布
-    assert (out["status"], out["confirmed"], out["not_due"], out["pending_nav"]) == ("success", 1, 1, 0)
-    assert out["confirmed_orders"][0]["order_id"] == due and out["confirmed_orders"][0]["units"] == 500.0
-    assert {o["order_id"] for o in pm.pending_fund_orders()} == {later}
+    before = _ledger_bytes(pm)
+    out = fund_confirm.run(today=MON, pm=pm)                                                 # 已公布净值只支持投影
+    assert (out["status"], out["confirmed"], out["not_due"], out["pending_nav"],
+            out["pending_execution_confirmation"]) == ("success", 0, 1, 0, 1)
+    assert "confirmed_orders" not in out and len(_estimates(pm)) == 1
+    assert {o["order_id"] for o in pm.pending_fund_orders()} == {due, later}
     assert net.nav_calls == [FUND]                                                           # 没到期的那笔没去联网
 
     net.nav_calls.clear()
     out = fund_confirm.run(today="2026-01-09", pm=pm)                                        # 周五：第二笔还没到 T
-    assert (out["confirmed"], out["not_due"]) == (0, 1) and net.nav_calls == []
+    assert (out["confirmed"], out["not_due"], out["pending_execution_confirmation"]) == (0, 1, 1)
+    assert net.nav_calls == [FUND]                                                          # 已投影的单仍在途；同日重试不重复投影
     out = fund_confirm.run(today="2026-01-12", pm=pm)                                        # 到 T 了，但净值还没出 → 跳过，不是失败
-    assert (out["confirmed"], out["pending_nav"]) == (0, 1) and len(pm.pending_fund_orders()) == 1
+    assert (out["confirmed"], out["pending_nav"], out["pending_execution_confirmation"]) == (0, 1, 1)
+    assert len(pm.pending_fund_orders()) == 2
     net.navs[FUND] = [(MON, 2.0), ("2026-01-12", 2.5)]
     out = fund_confirm.run(today="2026-01-12", pm=pm)
-    assert out["confirmed"] == 1 and pm.pending_fund_orders() == []
-    assert _fund(pm)["units"] == 500.0 + 200.0
-    rows = _rows(pm, "fund_order_confirmed")
-    assert [r["source"] for r in rows] == ["fund_auto_confirm"] * 2
-    assert fund_confirm.run(today="2026-01-12", pm=pm)["confirmed"] == 0                     # 重跑：没有在途单了，幂等
+    assert out["confirmed"] == 0 and out["pending_execution_confirmation"] == 2
+    assert len(pm.pending_fund_orders()) == 2 and _fund(pm)["units"] == 0
+    assert _rows(pm, "fund_order_confirmed") == [] and len(_estimates(pm)) == 2
+    assert fund_confirm.run(today="2026-01-12", pm=pm)["confirmed"] == 0
+    assert len(_estimates(pm)) == 2 and _ledger_bytes(pm) == before
 
 
 def test_job_rerun_and_manual_confirm_race_has_one_winner(tmp_path, net):
     pm = _pm(tmp_path)
     oid = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)["order_id"]
     stale = PortfolioManager(MemoryStore(tmp_path))                                          # job 拿着一份旧视图
-    assert pm.confirm_fund_order(oid)["status"] == "ok"
+    assert pm.confirm_fund_order(oid, nav=2.0, fee=0)["status"] == "ok"
     out = fund_confirm.run(today=MON, pm=stale)
     assert out["confirmed"] == 0 and out["already"] == 1 and _fund(pm)["units"] == 500.0
 
@@ -623,6 +675,7 @@ def test_job_failure_does_not_block_other_orders_and_raises_at_the_end(tmp_path,
     bad = pm.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM)["order_id"]
     ok = pm.place_fund_order(FUND, 500, order_ts=ORDER_MON_AM)["order_id"]
     real = pm.confirm_fund_order
+    before = _ledger_bytes(pm)
 
     def flaky(order_id, **kw):
         if order_id == bad:
@@ -633,8 +686,12 @@ def test_job_failure_does_not_block_other_orders_and_raises_at_the_end(tmp_path,
     with pytest.raises(RuntimeError, match="1 笔在途单确认失败") as exc:
         fund_confirm.run(today=MON, pm=pm)
     assert bad in str(exc.value) and "账本坏了" in str(exc.value)
-    assert _orders(pm)[0]["status"] == "placed" and [o["order_id"] for o in pm.pending_fund_orders()] == [bad]
-    assert _orders(pm)[1]["order_id"] == ok and _orders(pm)[1]["status"] == "confirmed"      # 另一笔照常确认了
+    assert _orders(pm)[0]["status"] == "placed"
+    assert {o["order_id"] for o in pm.pending_fund_orders()} == {bad, ok}
+    assert _orders(pm)[1]["order_id"] == ok and _orders(pm)[1]["status"] == "placed"
+    estimate, = _estimates(pm)
+    assert estimate["identity"]["plan"]["order_id"] == ok                               # 另一笔照常处理为投影
+    assert _ledger_bytes(pm) == before
 
 
 def test_job_no_orders_and_uninitialised_memory_are_not_failures(tmp_path, net):
@@ -733,7 +790,11 @@ def test_mcp_tools_round_trip(tmp_path, net, monkeypatch):
     assert placed["status"] == "ok" and _rows(pm)[0]["source"] == "mcp"
     assert m.place_fund_order(FUND, 1000, order_ts=ORDER_MON_AM, idempotency_key="mcp-1")["status"] == "duplicate"
     oid = placed["order_id"]
-    ok = m.confirm_fund_order(oid, fee=2.0)
+    before = _ledger_bytes(pm)
+    assert m.confirm_fund_order(oid, fee=2.0)["status"] == "pending_execution_confirmation"
+    assert m.confirm_fund_order(oid)["status"] == "pending_execution_confirmation"
+    assert _ledger_bytes(pm) == before
+    ok = m.confirm_fund_order(oid, nav=2.0, fee=2.0)
     assert ok["status"] == "ok" and ok["units"] == 499.0
     assert m.confirm_fund_order(oid)["status"] == "already_confirmed"
     assert m.cancel_fund_order(oid)["status"] == "error"                                    # 已确认的撤销被拒（error dict，不抛）
@@ -751,6 +812,7 @@ def test_cli_subcommands_parse_and_dispatch(tmp_path, net, monkeypatch, capsys):
                               "--idempotency-key", "cli-1"])
     assert (args.symbol, args.amount, args.currency, args.order_ts, args.idempotency_key) == (FUND, 800.0, "CNY", ORDER_MON_AM, "cli-1")
     assert parser.parse_args(["confirm_fund_order", "--order-id", "x", "--nav", "2", "--fee", "1"]).fee == 1.0
+    assert parser.parse_args(["confirm_fund_order", "--order-id", "x"]).fee is None
     assert parser.parse_args(["cancel_fund_order", "--order-id", "x"]).order_id == "x"
 
     pm = _pm(tmp_path)
@@ -760,7 +822,10 @@ def test_cli_subcommands_parse_and_dispatch(tmp_path, net, monkeypatch, capsys):
     portfolio_cmds.cmd_place_fund_order(args)
     oid = printed[-1]["order_id"]
     assert printed[-1]["status"] == "ok" and _rows(pm)[0]["source"] == "skill_cli"
+    before = _ledger_bytes(pm)
     portfolio_cmds.cmd_confirm_fund_order(parser.parse_args(["confirm_fund_order", "--order-id", oid]))
+    assert printed[-1]["status"] == "pending_execution_confirmation" and _ledger_bytes(pm) == before
+    portfolio_cmds.cmd_confirm_fund_order(parser.parse_args(["confirm_fund_order", "--order-id", oid, "--nav", "2", "--fee", "0"]))
     assert printed[-1]["status"] == "ok" and printed[-1]["units"] == 400.0
     with pytest.raises(SystemExit):                                                          # 出错：JSON error + exit 1，同 record_*
         portfolio_cmds.cmd_cancel_fund_order(parser.parse_args(["cancel_fund_order", "--order-id", oid]))

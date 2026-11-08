@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import FileResponse
 
 from openinvest.core.memory_store import MemoryStore
 from openinvest.core.portfolio_manager import PortfolioManager
+from openinvest.services.financial_publication import derived_publication_block, frozen_render_bytes, historical_performance_publication_block
 from openinvest.utils.exchange_fee import get_history_data
 from openinvest.utils.gold_price import get_gold_snapshot
 from openinvest.utils.quotes import get_quote
@@ -400,13 +400,18 @@ PNL_CHART_PATH = INVEST_ROOT / "docs" / "pnl_chart.svg"
 
 
 @router.get("/api/pnl_chart.svg", tags=["read"])
-def get_pnl_chart() -> FileResponse:
+def get_pnl_chart() -> Response:
     """jobs/pnl_snapshot 每 2h 工作日自动生成的 PnL 趋势图（vs 8 个基准）。
     SVG 只含百分比，不暴露绝对金额"""
-    if not PNL_CHART_PATH.exists():
-        raise HTTPException(status_code=404, detail="pnl_chart.svg 不存在；jobs/pnl_snapshot 还没跑过")
-    return FileResponse(
-        PNL_CHART_PATH,
+    if blocked := historical_performance_publication_block():
+        raise HTTPException(status_code=409, detail=blocked)
+    store = MemoryStore()
+    try:
+        content = frozen_render_bytes(store, PNL_CHART_PATH, store.root / ".state/pnl_history.jsonl")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        raise HTTPException(status_code=409, detail=derived_publication_block("unverified_render_manifest"))
+    return Response(
+        content,
         media_type="image/svg+xml",
         headers={"Cache-Control": "no-cache"},  # 让前端能拿到最新版本
     )

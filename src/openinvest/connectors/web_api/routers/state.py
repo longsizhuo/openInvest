@@ -10,9 +10,15 @@ import logging
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from openinvest.core.memory_store import MemoryStore
+from openinvest.services.financial_publication import (
+    derived_publication_block,
+    historical_performance_publication_block,
+    qualified_history,
+    qualified_outperform_events,
+)
 
 from openinvest.paths import INVEST_ROOT
 from openinvest.connectors.web_api.models import (
@@ -70,23 +76,16 @@ def get_pnl_history(
 ) -> PnLHistoryResponse:
     """原始 PnL 历史数据点（jobs/pnl_snapshot 工作日每 2h 写一条）"""
     store = MemoryStore()
+    if blocked := historical_performance_publication_block(store=store):
+        raise HTTPException(status_code=409, detail=blocked)
     path = store.root / ".state" / "pnl_history.jsonl"
-    points: List[PnLHistoryPoint] = []
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                lines = f.readlines()
-            for line in lines[-since:]:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    points.append(PnLHistoryPoint(**obj))
-                except Exception:
-                    continue
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"读 pnl_history 失败: {e}")
+    try:
+        qualified = qualified_history(store, path)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=409, detail=derived_publication_block("unverified_point_receipt"))
+    if len(qualified) < 2:
+        raise HTTPException(status_code=409, detail=derived_publication_block("insufficient_qualified_history", points=len(qualified)))
+    points = [PnLHistoryPoint(**row) for row in qualified[-since:]]
     return PnLHistoryResponse(count=len(points), points=points)
 
 
@@ -99,21 +98,19 @@ def get_outperform_events(
     PM-3 增长杠杆：每次 pnl_snapshot 检测到 user_pct > bench_pct 都会落一条到
     docs/outperform_events.jsonl。GUI 可以把最近一条做成 toast / 截图分享卡。
     """
+    store = MemoryStore()
+    if blocked := historical_performance_publication_block(store=store):
+        raise HTTPException(status_code=409, detail=blocked)
     docs_path = INVEST_ROOT / "docs" / "outperform_events.jsonl"
-    events: List[OutperformEvent] = []
-    if docs_path.exists():
-        try:
-            with open(docs_path, encoding="utf-8") as f:
-                lines = f.readlines()
-            for line in reversed(lines[-since:]):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    events.append(OutperformEvent(**obj))
-                except Exception:
-                    continue
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"读 outperform_events 失败: {e}")
+    history_path = store.root / ".state/pnl_history.jsonl"
+    try:
+        qualified = qualified_history(store, history_path)
+        if len(qualified) < 2:
+            raise HTTPException(status_code=409, detail=derived_publication_block("insufficient_qualified_history", points=len(qualified)))
+        approved_events = qualified_outperform_events(store, docs_path, history_path)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=409, detail=derived_publication_block("unverified_outperform_manifest"))
+    if docs_path.exists() and docs_path.read_text().strip() and not approved_events:
+        raise HTTPException(status_code=409, detail=derived_publication_block("unverified_outperform_manifest"))
+    events = [OutperformEvent(**row) for row in reversed(approved_events[-since:])]
     return OutperformEventsResponse(count=len(events), events=events)

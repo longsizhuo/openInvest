@@ -88,6 +88,30 @@ def test_redact_handles_multiple_tokens():
 _SECRET_TOKEN = "ghp_SUPERSECRET_should_never_leak"
 
 
+@pytest.fixture
+def qualified_pnl_ledger(tmp_path, monkeypatch):
+    """Git transport tests still require a qualified synthetic client book."""
+    from openinvest.core.memory_store import MemoryStore
+    store = MemoryStore(tmp_path / "memory")
+    monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", store.root)
+    store.write("user", "user", {"display_name": "Synthetic"}, "")
+    store.write("strategy", "strategy", {"target_assets": []}, "")
+    store.write("portfolio", "state", {"schema_version": 2, "cash": {"CNY": 1000}, "holdings": [
+        {"symbol": "SYNTHETIC", "units": 1, "avg_cost": 5, "cost_currency": "CNY"}]}, "")
+    store.append_history({"ts": "2020-01-01T00:00:00+00:00", "action": "buy", "symbol": "SYNTHETIC",
+                          "units": 1, "price": 5, "currency": "CNY", "source": "skill_cli"})
+    monkeypatch.setattr(pnl_snapshot, "ROOT", tmp_path)
+    monkeypatch.setattr(pnl_snapshot, "HISTORY_PATH", store.root / ".state/pnl_history.jsonl")
+    monkeypatch.setattr(pnl_snapshot, "SVG_PATH", tmp_path / "docs/pnl_chart.svg")
+    from tests.test_pnl_snapshot_evidence import _calculate_points
+    from openinvest.services.financial_publication import SOURCE_STATEMENT, seal_render_manifest
+    points = _calculate_points(store, monkeypatch)
+    pnl_snapshot.SVG_PATH.parent.mkdir()
+    pnl_snapshot.SVG_PATH.write_text(f"<svg><text>new</text><text>{SOURCE_STATEMENT}</text></svg>")
+    seal_render_manifest(store, pnl_snapshot.SVG_PATH, pnl_snapshot.HISTORY_PATH, points, window_days=pnl_snapshot.WINDOW_DAYS)
+    return store
+
+
 def _fake_git_run_factory(push_stderr: str):
     """构造一个假的 subprocess.run，模拟 main 分支 push 失败时 git 的行为。
 
@@ -98,6 +122,9 @@ def _fake_git_run_factory(push_stderr: str):
         check = kwargs.get("check", False)
 
         def _done(returncode=0, stdout="", stderr=""):
+            if kwargs.get("text") is False:
+                stdout = stdout.encode() if isinstance(stdout, str) else stdout
+                stderr = stderr.encode() if isinstance(stderr, str) else stderr
             cp = subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
             if check and returncode != 0:
                 raise subprocess.CalledProcessError(returncode, cmd, stdout, stderr)
@@ -105,6 +132,10 @@ def _fake_git_run_factory(push_stderr: str):
 
         if args[:2] == ["config", "--get"]:
             return _done(stdout="https://github.com/owner/repo.git\n")
+        if args[:1] == ["show"]:
+            return _done(stdout=pnl_snapshot.SVG_PATH.read_bytes())
+        if args[:1] in (["hash-object"], ["rev-parse"], ["write-tree"]) or "commit-tree" in args:
+            return _done(stdout="1" * 40 + "\n")
         if args[:1] == ["diff"]:
             # diff --cached --quiet：returncode!=0 表示有改动（不早退）
             return _done(returncode=1)
@@ -116,7 +147,7 @@ def _fake_git_run_factory(push_stderr: str):
     return _fake_run
 
 
-def test_auto_push_main_path_redacts_token_on_failure(monkeypatch):
+def test_auto_push_main_path_redacts_token_on_failure(monkeypatch, qualified_pnl_ledger):
     """main 分支 push 失败时，返回的 reason 不得含明文 GITHUB_TOKEN。"""
     monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
     monkeypatch.setenv("GITHUB_TOKEN", _SECRET_TOKEN)
@@ -136,7 +167,7 @@ def test_auto_push_main_path_redacts_token_on_failure(monkeypatch):
     assert "x-access-token:***@" in result["reason"]
 
 
-def test_auto_push_generic_except_redacts_token(monkeypatch):
+def test_auto_push_generic_except_redacts_token(monkeypatch, qualified_pnl_ledger):
     """兜底 `except Exception` 分支：非 CalledProcessError（OSError/TimeoutExpired
     等）的异常 message 里若带 authed_remote 的 token，返回的 reason 必须脱敏。
 
@@ -170,7 +201,7 @@ def test_auto_push_generic_except_redacts_token(monkeypatch):
     assert "OSError" in result["reason"]
 
 
-def test_auto_push_called_process_error_redacts_token(monkeypatch):
+def test_auto_push_called_process_error_redacts_token(monkeypatch, qualified_pnl_ledger):
     """`except subprocess.CalledProcessError` 兜底分支：git 调用以 check=True 抛
     CalledProcessError 且 stderr 带 token 时，返回的 reason 必须脱敏。"""
     monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
@@ -374,7 +405,7 @@ def test_ensure_benchmarks_fresh_swallows_errors(monkeypatch):
 
 
 
-def test_render_svg_no_holding_symbols(monkeypatch):
+def test_render_svg_no_holding_symbols(monkeypatch, qualified_pnl_ledger):
     """红线 #1 回归（issue #179 P1-C①）：公开 pnl-data 分支的 SVG 不得含
     可反推持仓的 symbol / 资产名（NDQ.AX、GC=F、Gold 等）。图例用泛化标签。"""
     import openinvest.jobs.pnl_snapshot as ps
@@ -384,14 +415,12 @@ def test_render_svg_no_holding_symbols(monkeypatch):
     monkeypatch.setattr(ps, "get_all_series", lambda start_date: [])
     monkeypatch.setattr(ps, "_ensure_benchmarks_fresh", lambda s, e: None)
 
-    history = [
-        {"ts": f"2026-06-{d:02d}T10:00:00+00:00", "equity_idx": 100.0 + d}
-        for d in range(1, 6)
-    ]
+    history = ps._read_history()
     svg = render_svg(history)
     for forbidden in ("NDQ", "GC=F", "GC_F", "Gold", "gold_cny", "资产 A", "资产 B"):
         assert forbidden not in svg, f"公开 SVG 含违禁词 {forbidden!r}（红线 #1）"
-    assert "口径：★ 实盘" in svg, "口径脚注缺失（issue #179 P1-A③）"
+    assert "口径：★ 客户账本计算" in svg
+    assert "客户账本计算，未经券商独立核验；不代表预测能力" in svg
     assert "<polyline" in svg and "总权益曲线" in svg
 
 
@@ -403,7 +432,7 @@ def _g(*args, cwd):
 
 
 @pytest.fixture
-def pnl_clone(tmp_path, monkeypatch):
+def pnl_clone(tmp_path, monkeypatch, qualified_pnl_ledger):
     """bare 远端带 pnl-data 分支 + **单分支 clone main**（refs/remotes/origin/pnl-data 不存在）。
 
     remote.origin.url 设成 GitHub https 形（_auto_push_svg 只认这种），再用 insteadOf
@@ -433,9 +462,13 @@ def pnl_clone(tmp_path, monkeypatch):
     assert _g("for-each-ref", "refs/remotes/origin/pnl-data", cwd=clone) == ""  # 前置：ref 缺失
 
     (clone / "docs").mkdir()
-    (clone / "docs" / "pnl_chart.svg").write_text("<svg>new</svg>")
+    new_chart = pnl_snapshot.SVG_PATH.read_text()
+    (clone / "docs" / "pnl_chart.svg").write_text(new_chart)
     monkeypatch.setattr(pnl_snapshot, "ROOT", clone)
     monkeypatch.setattr(pnl_snapshot, "SVG_PATH", clone / "docs" / "pnl_chart.svg")
+    from openinvest.services.financial_publication import seal_render_manifest
+    seal_render_manifest(qualified_pnl_ledger, pnl_snapshot.SVG_PATH, pnl_snapshot.HISTORY_PATH,
+                         pnl_snapshot._read_history(), window_days=pnl_snapshot.WINDOW_DAYS)
     monkeypatch.setenv("INVEST_PNL_AUTOPUSH", "1")
     monkeypatch.setenv("GITHUB_TOKEN", "tok")
     monkeypatch.setenv("INVEST_PNL_PUSH_BRANCH", "pnl-data")
@@ -448,7 +481,7 @@ def test_orphan_push_works_on_single_branch_clone(pnl_clone):
     bare, clone = pnl_clone
     result = _auto_push_svg()
     assert result == {"pushed": True, "branch": "pnl-data", "mode": "orphan"}
-    assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) == "<svg>new</svg>"
+    assert _g("show", "pnl-data:docs/pnl_chart.svg", cwd=bare) == (clone / "docs/pnl_chart.svg").read_text()
     # 每次推一个无父 commit：公开仓库的 pnl-data 历史不随推送增长
     assert _g("rev-list", "--count", "pnl-data", cwd=bare) == "1"
     assert len(_g("worktree", "list", cwd=clone).splitlines()) == 1  # 临时 worktree 已清
@@ -470,16 +503,9 @@ def test_orphan_worktree_registration_self_heals(pnl_clone, tmp_path):
 
 def test_run_status_surfaces_push_failure(monkeypatch, tmp_path):
     """job 顶层 status 反映 push 失败；自动推送关闭 / 无变化仍是 ok。"""
-    from types import SimpleNamespace
     ps = pnl_snapshot
-    monkeypatch.setattr(ps, "_is_trading_window", lambda: True)
-    monkeypatch.setattr(ps, "MemoryStore", lambda: None)
-    monkeypatch.setattr(ps, "_compute_snapshot", lambda store: SimpleNamespace(ts="t", equity_idx=101.0))
-    monkeypatch.setattr(ps, "_append_history", lambda snap: None)
-    monkeypatch.setattr(ps, "_read_history", lambda: [])
-    monkeypatch.setattr(ps, "SVG_PATH", tmp_path / "docs" / "pnl_chart.svg")
-    monkeypatch.setattr(ps, "render_svg", lambda history: "<svg/>")
-    monkeypatch.setattr(ps, "_outperform_events", lambda snap: [])
+    _fork_world(monkeypatch, tmp_path)
+    assert ps.run()["status"] == "insufficient_history"
     for push, status in [
         ({"pushed": False, "reason": "git failure: fatal: x"}, "push_failed"),
         ({"pushed": False, "reason": "GITHUB_TOKEN env 缺失"}, "push_failed"),
@@ -491,7 +517,7 @@ def test_run_status_surfaces_push_failure(monkeypatch, tmp_path):
         assert ps.run()["status"] == status, push
 
 
-def test_called_process_error_with_bytes_stderr_is_reported(monkeypatch):
+def test_called_process_error_with_bytes_stderr_is_reported(monkeypatch, qualified_pnl_ledger):
     """orphan 路径的裸 subprocess.run 不带 text=True → CalledProcessError.stderr 是 bytes。
     旧代码把 bytes 喂 _redact_token_in → TypeError 炸穿 job（生产 2026-08-12 17:00 实证），
     真正的 git 错误丢失。现在解码后照常脱敏上报。"""
@@ -516,8 +542,11 @@ def test_persist_outperform_never_touches_readme(monkeypatch, tmp_path):
     """事件只落 jsonl。曾经同步改 README marker → 生产 checkout 变脏、invest-deploy 拒绝 pull。"""
     readme = tmp_path / "README.md"
     readme.write_text("<!-- OUTPERFORM_FEED_START -->\n<!-- OUTPERFORM_FEED_END -->\n", encoding="utf-8")
-    monkeypatch.setattr(pnl_snapshot, "SVG_PATH", tmp_path / "docs" / "pnl_chart.svg")
-    pnl_snapshot._persist_outperform([{"ts": "2026-10-10T10:00:00", "label": "x", "benchmark": "b"}])
+    _fork_world(monkeypatch, tmp_path)
+    pnl_snapshot.run()
+    pnl_snapshot.run()
+    pnl_snapshot._persist_outperform([{"ts": pnl_snapshot._read_history()[-1]["ts"], "label": "x", "benchmark": "b",
+                                     "user_pct": 0, "bench_pct": 0, "diff_pct": 0}])
     assert readme.read_text(encoding="utf-8") == "<!-- OUTPERFORM_FEED_START -->\n<!-- OUTPERFORM_FEED_END -->\n"
     assert len((tmp_path / "docs" / "outperform_events.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
@@ -567,6 +596,7 @@ class _FakeMarket:
 
 def _fork_world(monkeypatch, tmp_path, *, extra_holdings=(), ledger=True):
     """虚构 fork 用户 + 假行情；返回可变价格表（测试里改它模拟盘中价格变化）。"""
+    monkeypatch.setattr("openinvest.core.memory_store.MEMORY_ROOT", tmp_path / "memory")
     table = {
         "510300.SS": dict(zip(_DAYS, [4.0, 4.1, 4.2, 4.1, 4.3])),
         "FUND:110020": dict(zip(_DAYS, [1.5, 1.5, 1.52, 1.53, 1.55])),
@@ -615,7 +645,7 @@ def test_run_draws_total_equity_for_any_holdings_and_leaks_nothing(monkeypatch, 
     for aapl_close in (210.0, 216.0, 205.0):   # 盘中价变化 → 三个不同的点
         table["AAPL"]["2026-10-09"] = aapl_close
         results.append(pnl_snapshot.run())
-    assert [r["status"] for r in results] == ["ok", "ok", "ok"]
+    assert [r["status"] for r in results] == ["insufficient_history", "ok", "ok"]
     assert [r["history_points"] for r in results] == [1, 2, 3]
 
     svg = (tmp_path / "docs" / "pnl_chart.svg").read_text(encoding="utf-8")
@@ -623,7 +653,7 @@ def test_run_draws_total_equity_for_any_holdings_and_leaks_nothing(monkeypatch, 
 
     hist_lines = (tmp_path / "state" / "pnl_history.jsonl").read_text(encoding="utf-8").splitlines()
     points = [json.loads(line) for line in hist_lines]
-    assert all(set(p) == {"ts", "equity_idx", "total_pnl_pct"} for p in points)
+    assert all(set(p) == {"ts", "equity_idx", "total_pnl_pct", "calculation_receipt"} for p in points)
     idx = [p["equity_idx"] for p in points]
     assert len(set(idx)) == 3 and idx[1] > idx[0] > idx[2]   # 跟着 AAPL 收盘价走（先涨后跌）
 
@@ -655,7 +685,7 @@ def test_run_skips_without_ledger_history(monkeypatch, tmp_path):
     assert out["status"] == "skipped" and out["reason"] == "insufficient_history"
 
 
-def test_read_history_ignores_legacy_two_asset_points(monkeypatch, tmp_path):
+def test_read_history_keeps_unreceipted_legacy_points_for_audit_only(monkeypatch, tmp_path, qualified_pnl_ledger):
     """旧版点（total_pnl_pct = 两个固定资产的成本收益率，无 equity_idx）口径不同：不混画、不当窗口起点。"""
     path = tmp_path / "pnl_history.jsonl"
     now = datetime.now().astimezone()
@@ -666,7 +696,9 @@ def test_read_history_ignores_legacy_two_asset_points(monkeypatch, tmp_path):
     ]
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     monkeypatch.setattr(pnl_snapshot, "HISTORY_PATH", path)
-    assert [e["equity_idx"] for e in pnl_snapshot._read_history()] == [101.0, 102.0]
+    before = path.read_bytes()
+    assert pnl_snapshot._read_history() == []
+    assert path.read_bytes() == before
 
 
 def test_equity_curve_is_rebased_to_window_start():
