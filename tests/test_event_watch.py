@@ -183,6 +183,10 @@ def test_holdings_snapshot_pnl_uses_quote_currency(monkeypatch):
 
     fake_pm = MagicMock()
     fake_pm.holdings.find.side_effect = lambda s: gold if s == "GC=F" else None
+    monkeypatch.setattr('openinvest.services.ledger_evidence.account_source_status',lambda pm:{
+        'content_sha256':'confirmed-fixture','holdings':{'GC=F':{
+            'current_quantity':'client_recorded','cost_basis':'client_recorded',
+            'valuation_unit_mapping':{'qualified':True}}}})
     monkeypatch.setattr(
         "openinvest.core.portfolio_manager.PortfolioManager", lambda *a, **kw: fake_pm,
     )

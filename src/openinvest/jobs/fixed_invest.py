@@ -28,6 +28,8 @@ def _daily_delivery(store, key, receipt, *, reused=True):
     result=receipt['result'];report=result.get('full_report')
     if not report:return {**result,'status':'degraded','failure_reasons':['daily_report_body_missing'],'new_model_calls':0}
     box=NotificationOutbox(store)
+    from openinvest.services.email_budget import summary as delivery_summary
+    report += delivery_summary(store)
     summary=[f"投资委员会日报 {result.get('date','')}（摘要）",f"报告状态：{result['status']}"]
     refs=[]
     for symbol,verdict in result.get('verdicts',{}).items():
@@ -36,6 +38,7 @@ def _daily_delivery(store, key, receipt, *, reused=True):
             refs.append({'symbol':symbol,'decision_id':verdict.get('decision_id')})
     summary.append('完整正文的邮件投递另有独立回执；未通过核验的提案仅供审计。')
     ident=box.enqueue(key,{'subject':f"openInvest 投资委员会日报 {result.get('date','')}",
+        'report_date':result.get('date'),
         'plain':report,'html':render_markdown_email(report,footer_label='Investment Committee'),
         'discord':'\n'.join(summary),'decision_refs':refs},category='daily_report',policy='decision')
     box.flush(only_id=ident)
@@ -43,10 +46,12 @@ def _daily_delivery(store, key, receipt, *, reused=True):
     store.state_update(key,lambda old:({**old,'delivery':delivery},None))
     status=result['status']
     reasons=[]
-    if (delivery['channels'].get('email') or {}).get('status')!='accepted':
+    email_state=(delivery['channels'].get('email') or {}).get('status')
+    if email_state not in ('accepted','deferred'):
         status='degraded';reasons.append('daily_report_email_body_not_accepted')
     answer={**{k:v for k,v in result.items() if k!='full_report'},'status':status,
             'delivery':delivery,'failure_reasons':reasons,'model_work_reused':reused}
+    answer['email_deferred_to_user_policy'] = email_state == 'deferred'
     if reused:answer['new_model_calls']=0
     return answer
 

@@ -136,7 +136,7 @@ def test_contract_list_reaches_email_but_no_llm_input(events_db, monkeypatch):
     monkeypatch.setattr(dr, "_portfolio_summary", lambda *a: "PS")
     monkeypatch.setattr(dr, "get_macro_data", lambda: "MD")
     monkeypatch.setattr(dr, "_run_gemini_cli_review", lambda p: captured["llm"].append(p) or "G")
-    monkeypatch.setattr(dr, "send_gmail_notification", lambda c: captured["email"].append(c) or "me@x")
+    monkeypatch.setattr(dr, "send_gmail_notification", lambda c, **kwargs: captured["email"].append(c) or "me@x")
     monkeypatch.setattr(cr, "run_committee_session", session)
     monkeypatch.setattr(sdk, "SDKAgent", Translator)
     monkeypatch.setattr(disc, "render_discipline_md", lambda: "")

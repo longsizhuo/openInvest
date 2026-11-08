@@ -66,6 +66,8 @@ def run(*, store=None, now=None):
         return {"status": "blocked", "reason": "restore_pending"}
     outbox = NotificationOutbox(store)
     now = now or datetime.now(timezone.utc)
+    from openinvest.services.email_budget import queue_daily_fallback
+    queue_daily_fallback(outbox, now=now)
     try:
         queued = reconcile_decisions(store, outbox, now=now)
     finally:

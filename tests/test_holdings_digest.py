@@ -450,7 +450,7 @@ def _run_daily_report(monkeypatch, digest_fn, send_email=False):
     monkeypatch.setattr(dr, "_portfolio_summary", lambda pm_, total, prices, **kw: "PS")
     monkeypatch.setattr(dr, "get_macro_data", lambda: "MD")
     monkeypatch.setattr(dr, "_run_gemini_cli_review", lambda p: "G")
-    monkeypatch.setattr(dr, "send_gmail_notification", lambda c: "me@x")
+    monkeypatch.setattr(dr, "send_gmail_notification", lambda c, **kwargs: "me@x")
     monkeypatch.setattr(cr, "run_committee_session", session)
     monkeypatch.setattr(sdk, "SDKAgent", Translator)
     monkeypatch.setattr(disc, "render_discipline_md", lambda: "")

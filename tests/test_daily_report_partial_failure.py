@@ -34,7 +34,7 @@ def test_one_failed_asset_keeps_the_report(monkeypatch):
     monkeypatch.setattr(dr, "_run_gemini_cli_review", lambda p: "G")
     monkeypatch.setattr(dr, "_load_asset_events", lambda targets: {})
     sent = []
-    monkeypatch.setattr(dr, "send_gmail_notification", lambda c: sent.append(c) or "me@x")
+    monkeypatch.setattr(dr, "send_gmail_notification", lambda c, **kwargs: sent.append(c) or "me@x")
     monkeypatch.setattr(sdk, "SDKAgent", lambda **kw: SimpleNamespace(run=lambda p: ""))
     monkeypatch.setattr(disc, "render_discipline_md", lambda: "")
 

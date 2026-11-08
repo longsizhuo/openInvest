@@ -172,14 +172,21 @@ def _holdings_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         return {}
 
     snap: Dict[str, Dict[str, Any]] = {}
+    from openinvest.services.ledger_evidence import account_source_status
+    source = account_source_status(pm)
+    valid = {'client_recorded', 'client_observed_balance'}
     for sym in symbols:
         h = pm.holdings.find(sym)
         if not h:
             continue
+        grade = source.get('holdings', {}).get(sym, {})
+        if grade.get('current_quantity') not in valid:
+            snap[sym] = {'units':None, 'source_status':'requires_reconciliation'}
+            continue
         units = float(h.get("units", 0) or 0)
         avg_cost = float(h.get("avg_cost", 0) or 0)
         try:
-            quote = get_quote(h)
+            quote = get_quote(h) if grade.get('valuation_unit_mapping',{}).get('qualified') else None
         except Exception:
             quote = None
         entry: Dict[str, Any] = {"units": units}
@@ -190,9 +197,11 @@ def _holdings_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             # 追踪仓 / 无成本不算 P&L，只报现价（对齐 web_api._build_holding_v2）
             if not h.get("is_tracking_only") and units > 0:
                 entry["mv"] = quote.price * units
-                if avg_cost > 0:
+                if avg_cost > 0 and grade.get('cost_basis') in valid:
                     entry["pnl_pct"] = (quote.price / avg_cost) - 1.0
         snap[sym] = entry
+    if account_source_status(pm).get('content_sha256') != source.get('content_sha256'):
+        return {}
     return snap
 
 
@@ -310,14 +319,12 @@ def trigger_for_new_events(
     from openinvest.services.analysis_dispatch import dispatch_followups
     ms=MemoryStore();now=datetime.now(timezone.utc)
     risk=any(e.get("stance")=="risk" or (e.get("revision_previous") or {}).get("stance")=="risk" for e in triggerable)
-    alerts_on=os.getenv("INVEST_EVENT_ALERT","0")=="1" or (risk and cfg.risk_alerts_enabled)
     # Persist every cause before analysis or network delivery. A consumed cost
     # budget leaves a durable pending request, rather than discarding the event.
     spec={"symbols":runnable,"event_ids":[e["event_id"] for e in triggerable],
           "severity_by_symbol":sev_by_sym,"revisions":sorted(revisions),
           "event_symbols":{e["event_id"]:sorted({c for s in e["affected_symbols"] for c in canonical.get(s.lower(),set())}) for e in triggerable}}
     receipt=send_event_alert_receipt(triggerable,risk_alert=risk,store=ms,now=now,
-                                     holdings_snapshot=_holdings_snapshot(affected) if alerts_on else {},
                                      followup=spec if runnable else None)
     out["notification_id"]=receipt["notification_id"]
     results=dispatch_followups(NotificationOutbox(ms),now=now,only_id=receipt["notification_id"],event_store=store)

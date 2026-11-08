@@ -707,7 +707,7 @@ def run(send_email: bool = True, include_report: bool = False, *, max_debate_rou
     email_status: Dict[str, Any] = {"sent": False, "receiver": "", "error": None, "skipped": True}
     if send_email:
         try:
-            receiver = send_gmail_notification(full_report)
+            receiver = send_gmail_notification(full_report, report_date=today)
             email_status = {
                 "sent": bool(receiver),
                 "receiver": receiver,
@@ -715,13 +715,17 @@ def run(send_email: bool = True, include_report: bool = False, *, max_debate_rou
                 "skipped": not receiver,  # 凭据缺失等于故意 skip
             }
         except EmailDeliveryError as e:
-            email_status = {"sent": False, "receiver": "", "error": str(e), "skipped": False}
-            log.error("Email delivery failed (committee 已落盘，job 仍标 success): %s", e)
-            store.dream_event({
-                "phase": "email_delivery_failed",
-                "date": today,
-                "error": str(e),
-            })
+            if getattr(e, 'delivery_deferred', False):
+                email_status = {'sent':False, 'receiver':'', 'error':None, 'skipped':False,
+                                'deferred':True, 'reason':str(e)}
+            else:
+                email_status = {"sent": False, "receiver": "", "error": str(e), "skipped": False}
+                log.error("Email delivery failed (committee 已落盘，job 仍标 success): %s", e)
+                store.dream_event({
+                    "phase": "email_delivery_failed",
+                    "date": today,
+                    "error": str(e),
+                })
 
     result: Dict[str, Any] = {
         "status": "degraded" if skipped_assets or missing_verdicts or review_blocked else "success",
