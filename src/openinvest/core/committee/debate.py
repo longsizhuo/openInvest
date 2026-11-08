@@ -84,19 +84,20 @@ class CommitteeReport:
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
         if self.valuation_brief:
             lines.append(
-                f"\n=== VALUATION (确定性事实，必须纳入'贵不贵'判断) ===\n{self.valuation_brief}"
+                f"\n=== VALUATION (来源、时点及适用范围须核对) ===\n{self.valuation_brief}"
             )
         if self.sentiment_brief:
             lines.append(
-                f"\n=== MARKET SENTIMENT 表盘 (确定性事实，必须纳入) ===\n{self.sentiment_brief}"
+                f"\n=== MARKET SENTIMENT 表盘 (区分当前观测、历史参考与未知) ===\n{self.sentiment_brief}"
             )
         lines.extend([
             "\n=== ROUND 1 (独立陈述) ===",
             f"\n--- QUANT ---\n{self.quant_view}",
             f"\n--- RISK OFFICER ---\n{self.risk_view}",
-            "\n=== ROUND 2 (cross-challenge 后的调整) ===",
-            f"\n--- QUANT 调整 ---\n{self.quant_adjusted}",
-            f"\n--- RISK 调整 ---\n{self.risk_adjusted}",
+            *( ["\n=== ROUND 2 (cross-challenge 后的调整) ===",
+                f"\n--- QUANT 调整 ---\n{self.quant_adjusted}",
+                f"\n--- RISK 调整 ---\n{self.risk_adjusted}"] if self.quant_adjusted or self.risk_adjusted else
+               ["\n=== ROUND COVERAGE ===\n本次未提供自然第二轮输出；不能当成两轮已经一致。"] ),
             f"\n=== USER PORTFOLIO CONTEXT ===\n{self.portfolio_summary}",
         ])
         if self.prior_insights:
@@ -234,11 +235,11 @@ def run_committee(
     emit("round_1_start", round=1, mode="independent")
 
     valuation_section = (
-        f"# 估值 (确定性事实，必须纳入'贵不贵'判断):\n{valuation_brief}\n\n"
+        f"# 估值输入 (核对来源、时点与适用范围):\n{valuation_brief}\n\n"
         if valuation_brief else ""
     )
     sentiment_section = (
-        f"# 市场情绪表盘 (确定性事实，必须纳入):\n{sentiment_brief}\n\n"
+        f"# 市场情绪输入 (可能含历史参考或未知状态):\n{sentiment_brief}\n\n"
         if sentiment_brief else ""
     )
     quant_input_r1 = (
@@ -249,16 +250,11 @@ def run_committee(
         f"{sentiment_section}"
         f"请按 Quant Analyst 格式输出技术信号。"
     )
-    risk_input_r1 = (
-        f"# 资产: {asset.get('display_name', sym)} ({sym})\n"
-        f"# 用户当前持仓:\n{portfolio_summary}\n\n"
-        f"# 市场风险输入（原始数据，不是额外方向投票）:\n{market_data}\n\n{regime_section}{sentiment_section}"
-        f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n"
-        f"请按 Risk Officer 格式输出风险评估。"
-    )
-    from openinvest.core.committee.evidence import execution_constraints_context
+    from openinvest.core.committee.evidence import execution_constraints_context, risk_opening_context, risk_rebuttal_context
     constraint_context=execution_constraints_context(single_invest_cap,execution_constraint_facts)
-    risk_input_r1+="\n\n"+constraint_context
+    risk_input_r1=risk_opening_context(asset,market_data,portfolio_summary,prior_insights=prior_insights,
+        regime_brief=regime_brief,sentiment_brief=sentiment_brief,historical_qualification=historical_qualification,
+        single_invest_cap=single_invest_cap,execution_constraint_facts=execution_constraint_facts)
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,
         role="quant", asset=sym, round_label="opening",
@@ -308,14 +304,8 @@ def run_committee(
             + "先核对上方原始输入。改判须说明新增证据、纠错或分析期限变化；历史分组统计不能单独消除当前风险。"
             + "如果你认为意见已经稳定，重申当前判断即可。"
         )
-        risk_input_rN = (
-            risk_input_r1 + "\n\n"
-            + f"# 现在是第 {round_idx} 轮 cross-challenge（最多 {max_debate_rounds} 轮）\n\n"
-            + debate_block
-            + "\n\n# 任务\n"
-            + "请基于 Quant 的最新技术信号调整或维持你的止损建议和风险评级。"
-            + "如果你认为意见已经稳定，重申当前判断即可。"
-        )
+        risk_input_rN = risk_rebuttal_context(risk_input_r1,quant_history,risk_history,
+            round_idx=round_idx,max_rounds=max_debate_rounds)
 
         quant_agent_rN = _create_agent(
             build_quant_prompt(asset, "rebuttal"), search_enabled=False,
@@ -399,8 +389,9 @@ def run_committee(
     aborted=provider_abort()
     if aborted:return aborted
 
-    # P1 优雅回退：JSON 模式下试解析；provider 没真支持 / 没吐合法 JSON（含 _ask 失败返回
-    # 的 [WORKER_UNAVAILABLE] 哨兵）→ 退回文本模式重问一次，走 regex。DeepSeek 正常一次过。
+    # Compatibility fallback applies only to an available provider reply.
+    # A billed truncated, empty or failed output must not trigger another paid
+    # synthesis under the disguise of a JSON-format fallback.
     cio_fields: Optional[Dict[str, Any]] = None
     if _want_json:
         try:
@@ -409,7 +400,7 @@ def run_committee(
                 cio_fields = None
         except (ValueError, TypeError):
             cio_fields = None
-        if cio_fields is None:
+        if cio_fields is None and (not worker_output_status(report.cio_memo)["unavailable"] or cio_call.get("reason")=="response_format_rejected"):
             log.warning("CIO JSON Output 未拿到合法 JSON（provider 不支持？）→ 优雅回退文本模式重问")
             cio_agent = _create_agent(
                 build_cio_prompt(asset, json_mode=False), search_enabled=False, temperature=0.1,
@@ -422,7 +413,7 @@ def run_committee(
             record_worker("cio","cio_text_fallback",report.cio_memo)
             aborted=provider_abort()
             if aborted:return aborted
-        else:
+        elif cio_fields is not None:
             # prose 保住：GUI/transcript 展示 memo 字段（缺失则留原始 JSON 文本）
             _memo = cio_fields.get("memo")
             if isinstance(_memo, str) and _memo.strip():
@@ -482,8 +473,14 @@ def run_committee(
         "worker_calls":worker_calls,
         "worker_outputs":worker_outputs,
     }
+    # Qualification is independent of persistence. Advisory/no-memory calls
+    # must not skip input-health enforcement merely because they do not write.
+    from openinvest.core.committee.persist import build_input_health
+    from openinvest.core.decision_evidence import enforce_input_health
+    final_health = build_input_health(report, cio_parsed, debate_meta, input_health)
+    enforce_input_health(cio_parsed, final_health)
     if persist_to_memory:
-        _persist(report, cio_parsed, debate_meta=debate_meta, input_health=input_health)
+        _persist(report, cio_parsed, debate_meta=debate_meta, input_health=final_health)
 
     return {
         "asset": sym,

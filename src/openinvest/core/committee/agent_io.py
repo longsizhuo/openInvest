@@ -99,6 +99,14 @@ def _is_transient(exc: BaseException) -> bool:
     return True
 
 
+def response_format_rejected(exc):
+    if provider_http_status(exc) not in {400,422}:return False
+    body=getattr(exc,'body',None)
+    if not isinstance(body,dict):return False
+    error=body.get('error',body)
+    return isinstance(error,dict) and error.get('param')=='response_format'
+
+
 def provider_http_status(exc):
     status=getattr(exc,"status_code",None)
     if status is None:status=getattr(getattr(exc,"response",None),"status_code",None)
@@ -176,7 +184,7 @@ def _ask(agent: Optional[SDKAgent], context: str) -> str:
     return WorkerReply(
         f"{AGENT_UNAVAILABLE_MARKER} "
         f"reason=retry_exhausted exc_type={type(last_exc).__name__} "
-        f"exc_msg=provider_call_failed",transport="failed",reason="retry_exhausted",http_status=provider_http_status(last_exc)
+        f"exc_msg=provider_call_failed",transport="failed",reason="response_format_rejected" if response_format_rejected(last_exc) else "retry_exhausted",http_status=provider_http_status(last_exc)
     )
 
 

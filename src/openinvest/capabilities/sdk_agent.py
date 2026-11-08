@@ -149,6 +149,14 @@ class SDKAgent:
             # 这一轮里 assistant 主动要调多少 tool（next-step）
             msg = response.choices[0].message
             tool_calls_planned = len(getattr(msg, "tool_calls", None) or [])
+            finish = getattr(response.choices[0], 'finish_reason', None)
+            content = getattr(msg, 'content', None) or ''
+            state = ('truncated' if finish == 'length' else 'refused' if finish == 'content_filter'
+                     or getattr(msg, 'refusal', None) else 'tools' if tool_calls_planned
+                     else 'text' if isinstance(content, str) and content.strip() else 'empty')
+            status = {'response_id':getattr(response,'id',None), 'response_model':getattr(response,'model',None),
+                'finish_reason':finish,'output_state':state, 'content_characters':len(content),
+                'reasoning_tokens':getattr(getattr(usage,'completion_tokens_details',None),'reasoning_tokens',None)}
 
             record_llm_call(
                 self.telemetry_meta,
@@ -157,8 +165,10 @@ class SDKAgent:
                 latency_ms=latency_ms,
                 tool_calls=tool_calls_planned,
                 iteration=iteration,
-                ok=True,
+                ok=state in {'text','tools'},
+                error=None if state in {'text','tools'} else 'model_output_'+state,
                 cache_hit_tokens=cache_hit_tokens,
+                response_status=status,
             )
             return response
         except Exception as e:
@@ -172,6 +182,15 @@ class SDKAgent:
                 error=f"{type(e).__name__}: {e}",
             )
             raise
+
+    @staticmethod
+    def _output_failure(response):
+        message=response.choices[0].message
+        finish=getattr(response.choices[0],'finish_reason',None)
+        if finish in {'length','content_filter'} or getattr(message,'refusal',None):
+            reason='truncated_model_response' if finish=='length' else 'refused_model_response'
+            return '[WORKER_UNAVAILABLE] reason='+reason
+        return None
 
     def run(self, user_prompt: str) -> str:
         """跑一次 LLM 推理。如果 enable_tools=True 且 LLM 主动调 tool，自动 loop。
@@ -203,6 +222,12 @@ class SDKAgent:
         for iteration in range(self.max_tool_iterations + 1):
             response = self._call_llm_with_telemetry(kwargs, iteration)
             msg = response.choices[0].message
+
+            # A billed incomplete response is unavailable, not a new transient
+            # request. Return the existing failure envelope without a retry.
+            failure = self._output_failure(response)
+            if failure:
+                return failure
 
             # LLM 决定调 tool
             tool_calls = getattr(msg, "tool_calls", None) or []
@@ -282,7 +307,7 @@ class SDKAgent:
         final = self._call_llm_with_telemetry(
             kwargs, iteration=self.max_tool_iterations + 1,
         )
-        return final.choices[0].message.content or ""
+        return self._output_failure(final) or final.choices[0].message.content or ""
 
     def tool_call_summary(self) -> str:
         """给 transcript 加一段'本次 LLM 主动调了哪些 tool'摘要"""

@@ -842,7 +842,7 @@ def _make_hold_cio_agent_factory(captured: dict):
     return lambda _p, **kw: FakeAgent(kw.get("role"))
 
 
-def test_run_committee_applies_aggressive_risk_profile(monkeypatch):
+def test_run_committee_risk_preference_does_not_replace_market_hold(monkeypatch):
     """aggressive + uptrend regime_brief → 最终 verdict 升级 ACCUMULATE（端到端）"""
     from openinvest.core import committee as cmt
     from openinvest.core.config import reset_config, set_config_override
@@ -862,12 +862,9 @@ def test_run_committee_applies_aggressive_risk_profile(monkeypatch):
             regime_brief="REGIME: uptrend\nREASON: x\nSTRATEGY_HINT: x",
             max_debate_rounds=1,
         )
-        assert result["verdict"]["verdict"] == "ACCUMULATE", (
-            "aggressive 档下 uptrend+HOLD 没升级 — regime 标签没接进 parse_cio_memo？"
-        )
-        assert result["verdict"]["_risk_profile_applied"] == (
-            "aggressive_uptrend_hold_to_accumulate"
-        )
+        assert result["verdict"]["verdict"] == "HOLD"
+        assert result["verdict"]["_legacy_risk_profile_shadow"]["applied"] is False
+        assert result["verdict"]["_legacy_risk_profile_shadow"]["would_verdict"] == "ACCUMULATE"
     finally:
         reset_config()
 
