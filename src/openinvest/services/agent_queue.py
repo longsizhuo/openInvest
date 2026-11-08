@@ -249,6 +249,98 @@ def acknowledge_news_source(snapshot_id,event_id,status):
 
 # ---------- committees ----------
 
+def committee_dispositions(*, memory_root=None) -> List[Dict[str, Any]]:
+    """Verified historical dispositions, separate from analysis completions."""
+    from openinvest.core.evidence_eligibility import digest
+    root = Path(memory_root) if memory_root is not None else MemoryStore().root
+    path = root / '.agent_queue/committee_dispositions.jsonl'
+    if not path.exists():
+        return []
+    requests = _read('committees.jsonl', root)
+    result, previous, known = [], None, set()
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if not line.strip():
+            continue
+        try:
+            envelope = json.loads(line)
+            value = envelope['payload']
+            key = (value['request_id'], value['symbol'])
+            original = value['request']
+            matching = [row for row in requests if row.get('id') == value['request_id']]
+            valid = (envelope['sha256'] == digest(value)
+                     and value['previous_sha256'] == previous and key not in known
+                     and value['kind'] == 'legacy_committee_disposition' and type(value['schema_version']) is int and value['schema_version'] == 1
+                     and value['disposition'] == 'historical_missed' and value['completed'] is False
+                     and value['request_sha256'] == digest(original)
+                     and original.get('id') == value['request_id'] and value['symbol'] in original.get('symbols', [])
+                     and 'event_versions' not in original
+                     and matching and all(digest(row) == value['request_sha256'] for row in matching)
+                     and isinstance(value['operator'], str) and bool(value['operator'].strip())
+                     and isinstance(value['reason'], str) and bool(value['reason'].strip())
+                     and datetime.fromisoformat(value['recorded_at']) - datetime.fromisoformat(original['queued_at']) > COMMITTEE_TTL)
+            if not valid:
+                raise ValueError('invalid disposition')
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError('committee_disposition_integrity_failure') from exc
+        result.append(envelope)
+        known.add(key)
+        previous = envelope['sha256']
+    return result
+
+
+def record_legacy_committee_disposition(request_id, symbol, *, operator, reason, request_sha256,
+                                        disposition='historical_missed', followup_reference=None,
+                                        memory_root=None, now=None):
+    """Explicit operator closure of a missed legacy request; never completion.
+
+    A hash from a reviewed original request is required. Modern version-bound
+    requests and requests still inside their TTL cannot use this operation.
+    """
+    from openinvest.core.evidence_eligibility import digest
+    if (disposition != 'historical_missed' or not isinstance(operator, str) or not operator.strip()
+            or not isinstance(reason, str) or not reason.strip()):
+        raise ValueError('explicit_operator_disposition_required')
+    root = Path(memory_root) if memory_root is not None else MemoryStore().root
+    path = _dir(root) / 'committee_dispositions.jsonl'
+    now = now or _now()
+    if now.tzinfo is None:
+        raise ValueError('disposition_timestamp_requires_timezone')
+    with _file_lock(path):
+        originals = [row for row in _read('committees.jsonl', root) if row.get('id') == request_id]
+        if not originals or any(digest(row) != request_sha256 for row in originals):
+            raise ValueError('legacy_request_hash_mismatch')
+        record = originals[0]
+        if ('event_versions' in record or symbol not in record.get('symbols', [])
+                or datetime.fromisoformat(record['queued_at']).tzinfo is None
+                or _age(record, now) <= COMMITTEE_TTL):
+            raise ValueError('only_expired_legacy_requests_can_be_disposed')
+        if any(row.get('request_id') == request_id and row.get('symbol') == symbol
+               for row in _read('committee_completions.jsonl', root)):
+            raise ValueError('completed_request_cannot_be_relabelled_missed')
+        existing = committee_dispositions(memory_root=root)
+        fields = {'request_id': request_id, 'symbol': symbol, 'operator': operator,
+                  'reason': reason, 'request_sha256': request_sha256, 'disposition': disposition,
+                  'followup_reference': followup_reference}
+        for envelope in existing:
+            value = envelope['payload']
+            if (value['request_id'], value['symbol']) == (request_id, symbol):
+                if all(value.get(key) == value2 for key, value2 in fields.items()):
+                    return envelope
+                raise ValueError('committee_disposition_already_recorded')
+        payload = {**fields, 'kind': 'legacy_committee_disposition', 'schema_version': 1,
+                   'request': record, 'completed': False, 'recorded_at': now.isoformat(),
+                   'previous_sha256': existing[-1]['sha256'] if existing else None}
+        envelope = {'payload': payload, 'sha256': digest(payload)}
+        import os
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        with os.fdopen(descriptor, 'a', encoding='utf-8', newline='\n') as file:
+            path.chmod(0o600)
+            file.write(json.dumps(envelope, ensure_ascii=False) + '\n')
+            file.flush()
+            os.fsync(file.fileno())
+        return envelope
+
+
 def enqueue_committee(symbols: List[str], event_ids: List[str], reason: str = "", *, request_key: str | None = None, memory_root=None) -> str:
     """event_trigger 在 agent 模式下用它代替 POST /api/committee/run。返回 "queued:<id>"。"""
     import hashlib
@@ -283,6 +375,8 @@ def pending_committee_items(now: Optional[datetime] = None, *, include_expired=F
     owner=root.parent if root.name=="memory" else root
     denied=Eligibility(owner).excluded_ids()
     completed={(r.get("request_id"),r.get("symbol")) for r in _read("committee_completions.jsonl",memory_root)}
+    disposed={(row['payload']['request_id'], row['payload']['symbol'])
+              for row in committee_dispositions(memory_root=root)}
     waiting={(r.get("request_id"),r.get("symbol")):r for r in _read("committee_reviews_pending.jsonl",memory_root)}
     grouped={}
     for record in _read("committees.jsonl",memory_root):
@@ -294,7 +388,7 @@ def pending_committee_items(now: Optional[datetime] = None, *, include_expired=F
         expired=_age(record,now)>COMMITTEE_TTL
         if expired and not include_expired:continue
         for symbol in record.get("symbols") or []:
-            if (record.get("id"),symbol) in completed:continue
+            if (record.get("id"),symbol) in completed or (record.get("id"),symbol) in disposed:continue
             group=grouped.setdefault(symbol,{"symbol":symbol,"reason":"","event_ids":[],"request_ids":[],
                                              "queued_at":record["queued_at"],"requests":[],"status":"expired" if expired else "pending"})
             group["requests"].append(record);group["request_ids"].append(record["id"])
@@ -307,9 +401,10 @@ def pending_committee_items(now: Optional[datetime] = None, *, include_expired=F
         if reviews and all(reviews):
             group["expired"] = group["status"] == "expired"
             if not group["expired"]:
-                group["status"]="awaiting_reasoning_review"
+                group["status"]="reasoning_rejected" if all(r.get('review_status')=='failed' for r in reviews) else "awaiting_reasoning_review"
             group["review_requests"]=list({row["request_sha256"]:row for row in reviews}.values())
-            group["next_step"]="核验已有草稿；不要为了通过而重复生成同一套委员会。若输入变化，请准备覆盖全部原因的新上下文。"
+            group["next_step"]=("原提案已经核验并否决，不再对定稿失败草稿重复核验；新合格输入到达后准备覆盖原因的新上下文，原失败继续保留。"
+                if group['status']=='reasoning_rejected' else "核验已有草稿；不要为了通过而重复生成同一套委员会。若输入变化，请准备覆盖全部原因的新上下文。")
     return sorted(grouped.values(),key=lambda r:r["queued_at"])
 
 
@@ -367,4 +462,6 @@ def pending_committees() -> Dict[str, Any]:
     mark_drained()
     items = pending_committee_items()
     expired=[r for r in pending_committee_items(include_expired=True) if r["status"]=="expired"]
-    return {"pending": len(items), "items": items, "expired":len(expired), "expired_items":expired[:20]}
+    historical=committee_dispositions()
+    return {"pending": len(items), "items": items, "expired":len(expired), "expired_items":expired[:20],
+            "historical_missed":len(historical), "historical_dispositions":historical[:20]}

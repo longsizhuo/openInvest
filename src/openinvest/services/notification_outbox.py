@@ -35,6 +35,12 @@ class NotificationOutbox:
                     notification_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
                     task_id TEXT, error TEXT, changed REAL, submitted TEXT NOT NULL DEFAULT '{}',
                     reserved TEXT NOT NULL DEFAULT '[]',closed TEXT NOT NULL DEFAULT '{}',attempts INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS analysis_causes (
+                    symbol TEXT NOT NULL, cause_id TEXT NOT NULL, cause_version TEXT NOT NULL,
+                    source_event_id TEXT NOT NULL, source_event_version TEXT NOT NULL,
+                    notification_id TEXT NOT NULL, status TEXT NOT NULL,
+                    task_id TEXT, changed REAL NOT NULL,
+                    PRIMARY KEY(symbol,cause_id,cause_version));
             """)
             columns={r[1] for r in db.execute("PRAGMA table_info(followups)").fetchall()}
             if "submitted" not in columns:
@@ -47,6 +53,16 @@ class NotificationOutbox:
                 db.execute("ALTER TABLE followups ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
             if "submitted_causes" not in columns:
                 db.execute("ALTER TABLE followups ADD COLUMN submitted_causes TEXT NOT NULL DEFAULT '{}'")
+            if "next_eligible_at" not in columns:
+                db.execute("ALTER TABLE followups ADD COLUMN next_eligible_at REAL")
+            if "defer_reason" not in columns:
+                db.execute("ALTER TABLE followups ADD COLUMN defer_reason TEXT")
+            if "defer_inputs_sha256" not in columns:
+                db.execute("ALTER TABLE followups ADD COLUMN defer_inputs_sha256 TEXT")
+            if "shared_causes" not in columns:
+                db.execute("ALTER TABLE followups ADD COLUMN shared_causes TEXT NOT NULL DEFAULT '{}'")
+            if "preparation_token" not in columns:
+                db.execute("ALTER TABLE followups ADD COLUMN preparation_token TEXT")
             db.execute("INSERT OR IGNORE INTO notification_meta VALUES('scope',?)",(uuid.uuid4().hex,))
             self.scope=db.execute("SELECT value FROM notification_meta WHERE key='scope'").fetchone()[0]
         self.path.chmod(0o600)

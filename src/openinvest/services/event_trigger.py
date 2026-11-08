@@ -129,6 +129,30 @@ def reserve_analysis(store, candidates, *, now, revisions=(),reservation_key=Non
     return store.state_update(_STATE_NAME,reserve)
 
 
+def analysis_budget_status(store, candidates, *, now, revisions=()):
+    """Read when the existing budget permits a cause; never reserve or spend it."""
+    from openinvest.core.config import load_config
+    cfg = load_config(_force_reload=True).event
+    current = store.state_get(_STATE_NAME, {}) or {}
+    runs = sorted(moment for value in current.get('runs', [])
+                  if (moment := _parse(value, now)) is not None and now - moment < _CAP_WINDOW)
+    cap = cfg.committee_daily_cap
+    if cap <= 0:
+        return {'defer_reason': 'cost_budget_disabled', 'next_eligible_at': None}
+    budget_until = runs[len(runs) - cap] + _CAP_WINDOW if len(runs) >= cap else now
+    last = current.get('last', {})
+    moments = []
+    for symbol, severity in candidates:
+        previous, previous_severity = _last(last.get(symbol), now)
+        cooling = (previous is not None and symbol not in revisions
+                   and not (cfg.committee_escalation_bypass and severity > previous_severity))
+        cooldown_until = previous + timedelta(hours=cfg.committee_cooldown_hours) if cooling else now
+        moments.append(max(now, budget_until, cooldown_until))
+    due = min(moments) if moments else now
+    return {'defer_reason': 'cost_budget' if budget_until > now else 'cooldown' if due > now else None,
+            'next_eligible_at': due.timestamp()}
+
+
 # ---------- IO（monkeypatch 点） ----------
 
 def _watched_symbols() -> List[str]:

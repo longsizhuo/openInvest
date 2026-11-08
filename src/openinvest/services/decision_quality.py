@@ -72,13 +72,30 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
             with closing(sqlite3.connect(notification_db.resolve().as_uri()+"?mode=ro",uri=True)) as connection:
                 uncertain=connection.execute("""SELECT DISTINCT n.id,n.category,n.created FROM notifications n JOIN deliveries d ON d.notification_id=n.id
                     WHERE d.status IN ('unknown','expired') AND n.category!='job_watchdog' LIMIT 20""").fetchall()
-                pending=connection.execute("""SELECT n.id,n.category,n.created FROM notifications n JOIN followups f ON f.notification_id=n.id
-                    WHERE f.status IN ('unknown','expired','verification_required') OR (f.status IN ('pending','dispatching') AND n.created<? AND f.error IS NOT NULL) LIMIT 20""",
-                    (datetime.now(timezone.utc).timestamp()-900,)).fetchall()
+                columns={row[1] for row in connection.execute('PRAGMA table_info(followups)')}
+                due_fields=',f.next_eligible_at,f.defer_reason' if {'next_eligible_at','defer_reason'}<=columns else ',NULL,NULL'
+                ordinary_deferral=''
+                if {'next_eligible_at','defer_reason'}<=columns:
+                    from openinvest.core.config import load_config
+                    disabled=load_config(_force_reload=True).event.committee_daily_cap<=0
+                    ordinary_deferral=""" AND NOT COALESCE((f.status='pending' AND (
+                        (f.error='cooldown_or_cost_budget_deferred' AND (
+                            (f.defer_reason IN ('cost_budget','cooldown','cost_budget_disabled') AND f.next_eligible_at>?)
+                            OR (f.defer_reason='cost_budget_disabled' AND f.next_eligible_at IS NULL AND ?)))
+                        OR (f.error='shared_dispatch_in_progress' AND f.next_eligible_at>?))),0)"""
+                    query_args=(datetime.now(timezone.utc).timestamp()-900,
+                        datetime.now(timezone.utc).timestamp()-900,int(disabled),datetime.now(timezone.utc).timestamp()-900)
+                else:query_args=(datetime.now(timezone.utc).timestamp()-900,)
+                pending=connection.execute("""SELECT n.id,n.category,n.created,f.status,f.error"""+due_fields+""" FROM notifications n JOIN followups f ON f.notification_id=n.id
+                    WHERE (f.status IN ('unknown','expired','verification_required') OR (f.status IN ('pending','dispatching') AND n.created<? AND f.error IS NOT NULL))"""+ordinary_deferral+' LIMIT 20',query_args).fetchall()
             for ident,category,created in uncertain:
                 out.append({"key":f"quality:notification_uncertain:{ident}","since":datetime.fromtimestamp(created,timezone.utc),"one_shot":True,
                             "text":f"[QUALITY_ALERT] {category} 通知存在未确认送达或已过期通道，请核对回执；系统没有把它计为已送达。"})
-            for ident,category,created in pending:
+            for ident,category,created,status,error,due,reason in pending:
+                if (status=='pending' and error=='cooldown_or_cost_budget_deferred'
+                        and reason in {'cost_budget','cooldown','cost_budget_disabled'}
+                        and isinstance(due,(int,float)) and due>datetime.now(timezone.utc).timestamp()-900):
+                    continue  # A documented scheduled deferral is not a failed analysis.
                 out.append({"key":f"quality:followup_uncertain:{ident}","since":datetime.fromtimestamp(created,timezone.utc),"one_shot":True,
                             "text":f"[QUALITY_ALERT] {category} 风险已记录，但后续分析尚未确认排队或持续受阻；需要复核，不能当作已经完成。"})
         except sqlite3.Error:
@@ -107,17 +124,22 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
         elif health.get("decision_status")=="REVIEW_REQUIRED":
             review=health.get("reasoning_review") or {}
             ident=review.get("request_sha256") or rows[-1][0].date().isoformat()
+            failed=review.get('status')=='failed'
             out.append({"key":f"quality:reasoning_review:{symbol}:{ident}","since":rows[-1][0],"one_shot":True,
-                        "text":f"[QUALITY_ALERT] {symbol} 原提案仍待核验（{review.get('status','execution_or_reasoning_review_required')}）。原始判断已保留，当前不具备执行资格；这不是普通 HOLD，也不是已证实的预测错误。"})
+                        'resolution_state':'rejected_proposal' if failed else 'verification_pending',
+                        "text":f"[QUALITY_ALERT] {symbol} 原提案已核验并被否决，原始判断与失败原因保留为负样本；没有形成可执行建议。" if failed else
+                               f"[QUALITY_ALERT] {symbol} 原提案仍待核验（{review.get('status','execution_or_reasoning_review_required')}）。原始判断已保留，当前不具备执行资格；这不是普通 HOLD，也不是已证实的预测错误。"})
     plan_audit={'memo':{},'nodes':0,'code_version':None}
     for path in (root / ".state").glob("review_plan_*.json"):
         try:
             p = json.loads(path.read_text())
+            if p == {}:
+                continue  # Historical no-plan placeholders are not corrupt records.
             from openinvest.services.review_plans import plan_qualification
             from openinvest.core.memory_store import MemoryStore
             plan_audit['nodes']=0
             qualification=plan_qualification(MemoryStore(root),p.get('symbol',''),p,purpose=p.get('purpose','review'),_audit=plan_audit)
-            if not qualification['allowed']:
+            if not qualification['allowed'] and p.get('state')!='retired_audit_only':
                 out.append({'key':f"quality:plan_parent:{p.get('plan_id',path.stem)}",'since':datetime.fromisoformat(p['changed_at']),
                             'one_shot':True,'text':f"[QUALITY_ALERT] {p.get('symbol',path.stem)} 旧生成计划的父决策、来源或条件绑定尚未通过核对，旧目标仅供审计，不能当作用户限制或继续等待的依据。"})
             if p.get("state") == "active" and datetime.fromisoformat(p["spec"]["expires_at"]) <= datetime.now(timezone.utc):
