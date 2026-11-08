@@ -122,6 +122,8 @@ def update_plan(store: MemoryStore, symbol: str, plan: Any = None, *,
                 observations: dict | None = None, evidence_id: str = "", now=None, purpose="review") -> dict:
     now = _now(now)
     key = _key(symbol, purpose)
+    if plan is None and not store.state_get(key):
+        return {}  # Absence is not a plan; do not manufacture empty state files.
     events = []
 
     def change(old):
@@ -276,8 +278,9 @@ def plan_qualification(store: MemoryStore, symbol: str, record: dict, *, purpose
                 'artifact_sha256':sealed_plan['sha256']}
         _audit['memo'][memo_key]=result
         return result
-    except (OSError,ValueError,KeyError,TypeError,AttributeError,sqlite3.Error):
-        result={'allowed':False,'reason':'plan_parent_or_source_qualification_unverified'}
+    except (OSError,ValueError,KeyError,TypeError,AttributeError,sqlite3.Error) as exc:
+        detail=str(exc) if isinstance(exc,ValueError) and re.fullmatch(r'[a-z][a-z0-9_]+',str(exc)) else type(exc).__name__
+        result={'allowed':False,'reason':'plan_parent_or_source_qualification_unverified','detail':detail}
         return result
 
 
@@ -368,7 +371,8 @@ def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, qu
 
 def queue_plan_reviews(store,symbol,records,*,now=None):
     """Generated plans stay out of news RAG; notify and review, never trade."""
-    records=[r for r in records if r and r.get("state") in ("triggered","expired")]
+    records=[r for r in records if r and r.get("state") in ("triggered","expired")
+             and plan_qualification(store,symbol,r,purpose=r.get('purpose','review'))['allowed']]
     if not records:return None
     from openinvest.services.notification_outbox import NotificationOutbox
     from openinvest.services.notifier import render_markdown_email

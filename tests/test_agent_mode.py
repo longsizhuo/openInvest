@@ -29,6 +29,9 @@ class _Store:
     def source_unchanged(self,url,title,snippet="",*,published_at=None,raw_text=""):
         return url in _Store.seen
 
+    def normalization_input(self,item):
+        return {'status':'normalize','event':None}
+
     def write_news_observation(self,event,raw_item=None,*,embedding=None):
         new,eid=self.upsert_event(event,embedding)
         if raw_item:self.add_source(eid,url=raw_item.url)

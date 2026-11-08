@@ -189,8 +189,11 @@ def test_news_and_price_share_budget_and_deferred_causes_survive(pipeline):
         assert db.execute("SELECT status FROM followups").fetchone()[0]=="queued"
 
 
-def test_review_and_risk_plans_queue_one_notice_before_analysis(pipeline):
+def test_review_and_risk_plans_queue_one_notice_before_analysis(pipeline,monkeypatch):
     from openinvest.services.review_plans import update_plan
+    # This test exercises notice batching for already-qualified plans. Separate
+    # lineage regressions ensure an unqualified plan cannot request analysis.
+    monkeypatch.setattr('openinvest.services.review_plans.plan_qualification',lambda *a,**k:{'allowed':True})
     pipeline.frames["closes"]=[100,100,100];pipeline.frames["price"]=100
     spec={"conditions":[{"metric":"quote_price","op":"<=","value":101,"unit":"USD/oz"}],
           "expires_at":(pipeline.now+timedelta(days=1)).isoformat()}

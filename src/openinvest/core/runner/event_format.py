@@ -164,6 +164,8 @@ def format_event_brief(
             f"[{ts}] [{stance}/{severity}] [{affected}]{agent_part}{src_part}\n"
             f"[归一化摘要与分析标签，不等于原文或交易指令] {e.get('one_line_claim', '')}{corroboration}"
         )
+        if any(name in ('ddgs','searxng') for name in _source_names):
+            lines.append('时间限定：检索服务报告的日期未经发布者核实，不能视为精确发生/发布时间；抓取时间也不是事件发生时间。')
         for source in (e.get("sources") or [])[:4]:
             original=source.get("raw_text") or source.get("snippet") or source.get("title") or ""
             if original:
@@ -175,7 +177,7 @@ def format_event_brief(
         if e.get("supersedes"):
             lines.append(f" ↳ supersedes event {e['supersedes']}")
         if e.get("revision_observed_at"):
-            lines.append(f"观察/修订获取时间: {e['revision_observed_at']}；事件发生时间仍以上方时间为准")
+            lines.append(f"观察/修订获取时间: {e['revision_observed_at']}；上方为来源报告时间，实际发生时点需另行核对")
         lines.append("")
     return EventBrief("\n".join(lines).strip(),versions)
 

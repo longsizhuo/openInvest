@@ -176,11 +176,12 @@ def test_withdrawn_reservation_cannot_permanently_starve_another_asset(context):
 
 @pytest.mark.parametrize("failure",["unqualified","unavailable","read_error","advisory"])
 def test_explicit_event_id_failure_cannot_turn_into_empty_news_and_a_normal_committee(source_context,monkeypatch,failure):
+    # Prepare this synthetic ledger before imports that initialize its storage.
+    (source_context/"memory").mkdir(exist_ok=True)
     from tests.test_committee_contract import _seed_minimal_memory
     from openinvest.core.runner import session
     from openinvest.core.evidence_eligibility import EvidenceIntegrityError
     import sqlite3
-    (source_context/"memory").mkdir()
     _seed_minimal_memory(source_context/"memory")
     reader=EventStore(str(source_context/"db/events.db"))
     _,eid=reader.upsert_event({"one_line_claim":"Unknown source","severity":"high","stance":"risk","affected_symbols":["TEST.AX"]})

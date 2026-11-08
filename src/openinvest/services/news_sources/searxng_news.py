@@ -81,6 +81,7 @@ def fetch_searxng_news(
                     "query": query,
                     "domain": domain,
                     "engine": r.get("engine"),
+                    'publication_time_basis':'search_result_reported_unverified',
                 },
             )
         )

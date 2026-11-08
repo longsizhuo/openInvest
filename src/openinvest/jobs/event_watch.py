@@ -202,10 +202,27 @@ def run(
 
     # 入库前先按 url 跳过 sources 已见的（省 LLM token）
     store = EventStore(embedding_dim=DEFAULT_DIM)
-    unseen_items = [it for it in raw_items if not store.source_unchanged(it.url,it.title,it.snippet,published_at=it.published_at,raw_text=it.text)]
+    from openinvest.services.news_identity import content_id,item_text
+    groups={}
+    for item in raw_items:groups.setdefault(content_id(item_text(item)),[]).append(item)
+    unseen_items=[];reused=[];verification_pending=0
+    for group in groups.values():
+        selected=[(item,store.normalization_input(item)) for item in group]
+        available=[(item,plan) for item,plan in selected if plan['status']!='source_verification_required']
+        verification_pending+=len(selected)-len(available)
+        existing=next((plan['event'] for _,plan in available if plan['status']=='reuse'),None)
+        if existing is not None:
+            reused.extend((item,existing) for item,_ in available)
+        elif available:
+            unseen_items.append(available[0][0])
     log.info(f"[event_watch] unseen={len(unseen_items)} / total={len(raw_items)}")
+    for item,event in reused:
+        observation=store.write_news_observation(event,item,reuse_extraction=True)
+        acknowledge_news_source((item.raw_meta or {}).get('source_snapshot_id'),
+            (observation.get('event') or {}).get('event_id'), 'stored_or_duplicate')
     if not unseen_items:
-        return {"status": "ok", "fetched": len(raw_items), "new_events": 0, "triggered": 0}
+        return {"status": "ok", "fetched": len(raw_items), "new_events": 0, "triggered": 0,
+                'normalization_reused':len(reused),'source_verification_pending':verification_pending}
 
     # agent 模式：后端不调模型，新闻排队等宿主 Agent 结构化后经 ingest_event 交回
     # （交回时才入库、才过触发闸）。这一轮到此为止，不计 normalize_failed。
@@ -230,6 +247,14 @@ def run(
             "audit_only" if observation.get("audit_only") else "stored_or_duplicate")
         if observation["changed"]:
             new_events.append({**observation["event"],"revision_previous":observation["previous"] if not observation["inserted"] else None})
+        if ne.raw_item is not None:
+            for duplicate in groups.get(content_id(item_text(ne.raw_item)),[]):
+                if duplicate is ne.raw_item:continue
+                planned=store.normalization_input(duplicate)
+                if planned['status']=='reuse':
+                    duplicate_result=store.write_news_observation(planned['event'],duplicate,reuse_extraction=True)
+                    acknowledge_news_source((duplicate.raw_meta or {}).get('source_snapshot_id'),
+                        (duplicate_result.get('event') or {}).get('event_id'),'stored_or_duplicate')
 
     # 闸 + 冷却/日上限 + 触发 + 报警：与 agent 投喂门共用（services/event_trigger）。
     # 事件已入库，触发环节出错只记日志，不能让 job 失败把入库成果一起算成失败
@@ -248,6 +273,7 @@ def run(
         "status": "ok",
         "fetched": len(raw_items),
         "new_events": len(normalized),
+        'normalization_reused':len(reused),'source_verification_pending':verification_pending,
         # 看门狗读这个：归一化失败批数（缺 key / 额度 / 解析失败），job 本身仍算 success
         "normalize_failed": norm_stats.get("failed_batches", 0),
         **trig,

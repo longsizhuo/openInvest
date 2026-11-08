@@ -13,6 +13,7 @@
 | Command | Path | Use for | Returns |
 |------|------|------|------|
 | `quality_status` | Read only | Inspect evidence eligibility, prolonged HOLD, failed inputs and review-plan alerts | JSON health and alerts |
+| `operational_reconcile --plan-file FILE [--apply --operator NAME] [--bootstrap-dispatches]` | Owner maintenance | Preview or apply hash-bound historical incident dispositions; never grant source, learning or trade eligibility | JSON actions and evidence |
 | `collect_news` | Source capture only | Capture immutable original responses, resume per-source coverage and enqueue versioned raw news; `--since` with timezone required on first use; `--inspect-pending` lists unresolved source locators without fetching | Source coverage, unresolved inputs and handoff state; no model calls |
 | `event_history` | Read only | Query this instance's qualified current events and original sources without raw SQL; never treat last ingestion or keyword matches as coverage or a duplicate veto | Current source versions, truncation flag and no claimed scan watermark |
 | `source_snapshot SNAPSHOT_ID` | Read only | Verify an exact captured source version and its application-issued locator in this instance | Original input, acquisition proof and processing state; no learning approval |

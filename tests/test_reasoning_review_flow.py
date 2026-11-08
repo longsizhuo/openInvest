@@ -111,7 +111,7 @@ def test_direct_failed_review_marks_bound_risk_cause_waiting(tmp_path,monkeypatc
     report=CommitteeReport(asset={"symbol":"SYNTHETIC"},reasoning_review=review)
     _persist(report,verdict,input_health={"context_id":context["context_id"]})
     pending=queue.pending_committee_items(memory_root=store.root)
-    assert pending[0]["status"]=="awaiting_reasoning_review"
+    assert pending[0]["status"]=="reasoning_rejected"
     assert pending[0]["review_requests"][0]["request_sha256"]=="synthetic-review"
     from openinvest.services.decision_quality import findings
-    assert any("不是普通 HOLD" in row["text"] for row in findings(store.root))
+    assert any(row.get('resolution_state')=='rejected_proposal' and '被否决' in row['text'] for row in findings(store.root))

@@ -255,6 +255,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_daily_report)
     from openinvest.skill_cmds.committee_cmds import cmd_quality_status
     sub.add_parser("quality_status", help="查看独立质量告警、洞察资格和学习发布门禁").set_defaults(func=cmd_quality_status)
+    p=sub.add_parser('operational_reconcile',help='核对有原件哈希绑定的运维处置；默认只预览，不授予来源或学习资格')
+    p.add_argument('--plan-file',required=True)
+    p.add_argument('--apply',action='store_true')
+    p.add_argument('--operator')
+    p.add_argument('--bootstrap-dispatches',action='store_true',help='核对旧确认派发的精确输入版本，绑定相同原文原因，绝不宣称分析已完成')
+    p.set_defaults(func=cmd_operational_reconcile)
 
     sub.add_parser(
         "autopilot_daily",

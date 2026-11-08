@@ -459,7 +459,26 @@ class EventStore:
             return reporting_use(self.data_root,dict(row))["allowed"] and self.get_event(row["event_id"]) is not None
         return same
 
-    def write_news_observation(self, event: dict, raw_item=None, *, embedding=None) -> dict:
+    def normalization_input(self, item):
+        """Reuse only an already qualified interpretation of identical observed text.
+
+        A new acquisition remains separately recorded. An unverified legacy
+        interpretation is never promoted by copying its generated claim.
+        """
+        from openinvest.services.news_identity import reported_text,item_text
+        from openinvest.services.source_reporting import reporting_use,from_item
+        incoming=reporting_use(self.data_root,from_item(item))
+        if not incoming['allowed']:
+            return {'status':'source_verification_required','event':None}
+        row=self.conn.execute('SELECT * FROM sources WHERE url=? ORDER BY fetched_at DESC,id DESC LIMIT 1',
+            (item.url,)).fetchone()
+        if row is not None and reported_text(dict(row))==item_text(item):
+            previous=self.get_event(row['event_id'])
+            if previous is not None and reporting_use(self.data_root,dict(row))['allowed']:
+                return {'status':'reuse','event':previous}
+        return {'status':'normalize','event':None}
+
+    def write_news_observation(self, event: dict, raw_item=None, *, embedding=None, reuse_extraction=False) -> dict:
         """Keep source revisions and distinguish material changes from retries."""
         if raw_item:
             from urllib.parse import urlsplit
@@ -485,6 +504,13 @@ class EventStore:
             previous_source=self.conn.execute("SELECT * FROM sources WHERE url=? ORDER BY fetched_at DESC,id DESC LIMIT 1",
                                               (raw_item.url,)).fetchone() if raw_item else None
             previous=self.get_event(previous_source["event_id"],purpose="audit") if previous_source else None
+            from openinvest.services.news_identity import reported_text,item_text
+            same_text=bool(previous_source and raw_item and reported_text(dict(previous_source))==item_text(raw_item))
+            if reuse_extraction:
+                planned=self.normalization_input(raw_item) if raw_item else {}
+                if not same_text or planned.get('status')!='reuse':
+                    raise ValueError('normalization_reuse_requires_qualified_identical_input')
+                value=dict(planned['event'])
             if previous_source and raw_item:
                 def acquired(ts):
                     parsed=datetime.fromisoformat(str(ts).replace("Z","+00:00"))
@@ -498,7 +524,7 @@ class EventStore:
             # A changed article stays attached to its story when its subjects overlap.
             old_subjects=set(previous.get("affected_symbols",[])+previous.get("entities",[])) if previous else set()
             new_subjects=set(value.get("affected_symbols",[])+value.get("entities",[]))
-            related=previous and (not old_subjects or not new_subjects or old_subjects & new_subjects)
+            related=previous and (same_text or not old_subjects or not new_subjects or old_subjects & new_subjects)
             if related:
                 value["event_id"]=previous["event_id"]
             eid=value.get("event_id") or claim_to_event_id(value["one_line_claim"])
@@ -526,7 +552,7 @@ class EventStore:
                                   (fingerprint,eid,datetime.now(timezone.utc).isoformat(),encoded))
                 return {"event":None,"inserted":False,"changed":False,"audit_only":True,"source_verification_required":True,
                         "blocked_event_id":eid,"previous":old}
-            if old and raw_item and (getattr(raw_item,"raw_meta",{}) or {}).get("source_regression"):
+            if old and raw_item and not same_text and (getattr(raw_item,"raw_meta",{}) or {}).get("source_regression"):
                 record={"event":value,"source":vars(raw_item),"reason":"source_returned_to_previously_seen_content_requires_verification"}
                 encoded=json.dumps(record,sort_keys=True,ensure_ascii=False,default=str)
                 fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
@@ -588,7 +614,7 @@ class EventStore:
                 self.conn.rollback()
                 raise
             current=self.get_event(eid,purpose="audit")
-            material=inserted or signature(current)!=signature(old or {}) or bool(previous_source and source_changed)
+            material=inserted or signature(current)!=signature(old or {}) or bool(previous_source and source_changed and not same_text)
             return qualify({"event":current,"inserted":inserted,"changed":material,"source_added":bool(not previous_source and source_changed),"previous":old})
 
     def mark_committee_task(self, event_id: str, task_id: str) -> None:
@@ -662,6 +688,9 @@ class EventStore:
         event = _row_to_event(row)
         event["_version_id"] = row["source_version"] or 0
         if purpose!="audit" and not self._reporting_allowed(event):return None
+        from openinvest.services.news_identity import analysis_identity
+        sources=self.get_sources(event_id,purpose='audit' if purpose=='audit' else 'advice')
+        event['_analysis_cause_id'],event['_analysis_version_id']=analysis_identity(event,sources)
         return event
 
     def _source_excluded(self,event_id,excluded,*,sources=None):
