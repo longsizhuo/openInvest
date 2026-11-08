@@ -527,3 +527,57 @@ def test_two_aliases_in_one_followup_commit_one_canonical_claim(context):
         rows = db.execute("SELECT status,task_id FROM analysis_causes").fetchall()
     assert [tuple(row) for row in rows] == [("queued","task-1")]
     assert len(store.state_get("event_committee_triggers")["runs"]) == 1
+
+
+def test_slow_legacy_receipt_preparation_does_not_block_unrelated_notification_writer(context, monkeypatch):
+    import sqlite3
+    store, box, database, calls = context
+    old = enqueue(box, 'legacy-other-symbol', ('b',), symbol='SYNTH_B')
+    version = database.get_event('b')['_version_id']
+    with box.connection() as db:
+        db.execute("UPDATE followups SET status='queued',submitted=?,submitted_causes=? WHERE notification_id=?",
+            (json.dumps({'SYNTH_B':'historical-task'}),json.dumps({'SYNTH_B':{'b':version}}),old))
+    current = enqueue(box, 'fresh-current-input')
+    entered, release = Event(), Event()
+    original = EventStore.get_event
+    def slow_history(self, event_id, *args, **kwargs):
+        if event_id == 'b':
+            entered.set()
+            assert release.wait(5)
+        return original(self, event_id, *args, **kwargs)
+    monkeypatch.setattr(EventStore, 'get_event', slow_history)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker = pool.submit(dispatch.dispatch_followups, box, now=NOW, only_id=current)
+        assert entered.wait(5)
+        try:
+            writer = sqlite3.connect(store.data_root/'db/notification_outbox.sqlite', timeout=0)
+            try:
+                writer.execute("INSERT OR IGNORE INTO notification_meta(key,value) VALUES('independent-delivery','synthetic')")
+                writer.commit()
+            finally:
+                writer.close()
+        finally:
+            release.set()
+        worker.result(timeout=10)
+    assert len(calls) == 1 and state(box, current)['status'] == 'queued'
+
+
+def test_revocation_between_legacy_preparation_and_claim_still_blocks_reuse(context, monkeypatch):
+    store, box, database, calls = context
+    same_article(database)
+    old = enqueue(box, 'original')
+    dispatch.dispatch_followups(box, now=NOW, only_id=old, event_store=database)
+    with box.connection() as db:
+        db.execute('DELETE FROM analysis_causes')  # Pre-upgrade confirmed receipt, not a completion.
+    follower = enqueue(box, 'alias-follower', ('b',))
+    original = dispatch._prepare_confirmed_causes
+    def prepare_then_revoke(*args, **kwargs):
+        candidates = original(*args, **kwargs)
+        assert candidates
+        Eligibility(store.data_root).revoke('event:a', 'withdrawn during read-only legacy preparation')
+        return candidates
+    monkeypatch.setattr(dispatch, '_prepare_confirmed_causes', prepare_then_revoke)
+    dispatch.dispatch_followups(box, now=NOW+timedelta(minutes=1), only_id=follower, event_store=database)
+    assert len(calls) == 1
+    assert state(box, follower)['status'] == 'verification_required'
+    assert state(box, follower)['error'] == 'shared_dispatch_source_unqualified'
