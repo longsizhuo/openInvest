@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.34.5](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.34.4...invest-skill-v0.34.5) (2026-11-08)
+
+
+### Bug Fixes
+
+* close repeated analysis and misleading operational incidents ([7c16684](https://github.com/longsizhuo/openInvest/commit/7c16684645a5715388d80a9d1f4ab54861d071e1))
+* close repeated analysis and misleading operational incidents ([#607](https://github.com/longsizhuo/openInvest/issues/607)) ([7c16684](https://github.com/longsizhuo/openInvest/commit/7c16684645a5715388d80a9d1f4ab54861d071e1))
+* **recovery:** reconcile historical incidents against preserved evidence ([2408ea6](https://github.com/longsizhuo/openInvest/commit/2408ea620df0119cd5386b3eb51b277e8584dcb3))
+
 ## [0.34.4](https://github.com/longsizhuo/openInvest/compare/invest-skill-v0.34.3...invest-skill-v0.34.4) (2026-11-08)
 
 
