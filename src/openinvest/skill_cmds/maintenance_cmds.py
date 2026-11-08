@@ -12,7 +12,19 @@ import argparse
 
 from openinvest.skill_cmds._helpers import _print_json
 
-__all__ = ["cmd_maintenance", "cmd_backfill_raw_close"]
+__all__ = ["cmd_maintenance", "cmd_backfill_raw_close",'cmd_operational_reconcile']
+
+
+def cmd_operational_reconcile(args):
+    import json
+    from pathlib import Path
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.services.operational_recovery import reconcile
+    result=reconcile(MemoryStore(),json.loads(Path(args.plan_file).read_text()),apply=args.apply,operator=args.operator or '')
+    if args.bootstrap_dispatches:
+        from openinvest.services.operational_recovery import bind_confirmed_content_dispatches
+        result['confirmed_content_dispatches']=bind_confirmed_content_dispatches(MemoryStore(),apply=args.apply)
+    _print_json(result)
 
 
 def cmd_maintenance(args: argparse.Namespace) -> None:
