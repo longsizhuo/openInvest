@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.6](https://github.com/longsizhuo/openInvest/compare/v0.68.5...v0.68.6) (2026-11-08)
+
+
+### Bug Fixes
+
+* **ledger:** separate estimates from confirmed execution evidence ([#601](https://github.com/longsizhuo/openInvest/issues/601)) ([34604ce](https://github.com/longsizhuo/openInvest/commit/34604ce0eeb8ea31552c34854b39cc92a1f566ee))
+
 ## [0.68.5](https://github.com/longsizhuo/openInvest/compare/v0.68.4...v0.68.5) (2026-11-08)
 
 
