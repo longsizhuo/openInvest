@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.68.9](https://github.com/longsizhuo/openInvest/compare/v0.68.8...v0.68.9) (2026-11-08)
+
+
+### Bug Fixes
+
+* **dispatch:** prepare legacy receipts before taking the outbox write lock ([82d0e74](https://github.com/longsizhuo/openInvest/commit/82d0e742b1a5f37da9e64988019064dd3ae52647))
+* keep historical receipt checks outside the notification writer lock ([#611](https://github.com/longsizhuo/openInvest/issues/611)) ([fcd08be](https://github.com/longsizhuo/openInvest/commit/fcd08be2a3bd5df5b436b9cb455cc7f2f877a880))
+* keep legacy receipt verification outside the notification writer lock ([fcd08be](https://github.com/longsizhuo/openInvest/commit/fcd08be2a3bd5df5b436b9cb455cc7f2f877a880))
+
 ## [0.68.8](https://github.com/longsizhuo/openInvest/compare/v0.68.7...v0.68.8) (2026-11-08)
 
 
