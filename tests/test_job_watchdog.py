@@ -479,7 +479,8 @@ def test_run_failure_alert_send_failure_unclaims_so_next_run_retries(wired_flagg
         job_watchdog.run(now=_t("2026-01-05T22:07:00"))
     monkeypatch.setattr(job_watchdog, "_send", lambda f: sent.append(f) or {"notification_id":"synthetic","accepted":True})
     out=job_watchdog.run(now=_t("2026-01-05T23:07:00"))
-    assert len(out["alerted"])==len(sent)==2  # failure + the separately persisted stale-job finding
+    assert len(out["alerted"]) == 2  # Both findings retained in the single summary.
+    assert len(sent) == 1 and len(sent[0]) == 2
 
 
 def test_shipped_ymls_flag_exactly_the_jobs_that_should_alert_on_failure():

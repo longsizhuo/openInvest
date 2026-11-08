@@ -69,12 +69,15 @@ def send_event_alert_receipt(
     import json
     from openinvest.services.notification_outbox import NotificationOutbox
     api_base_url = api_base_url or os.getenv("INVEST_API_BASE_URL", "http://localhost:8765")
+    # Market notices carry market facts. Account figures belong in a current,
+    # source-qualified portfolio view, never in a delayed pre-rendered email.
     md = _build_markdown(events, committee_task_id=committee_task_id,
-                         api_base_url=api_base_url, holdings_snapshot=holdings_snapshot or {})
+                         api_base_url=api_base_url, holdings_snapshot={})
     payload = {"subject": _build_subject(events), "plain": md,
                "html": render_markdown_email(md, footer_label="Invest Event Watch", link_hosts=_link_hosts(events, api_base_url)),
                "discord": _build_discord_text(events, committee_task_id=committee_task_id, api_base_url=api_base_url),
-               "events": events, "followup": followup, "cooldown": cooldown}
+               "events": events, "followup": followup, "cooldown": cooldown,
+               "account_snapshot_included":False}
     fingerprint = json.dumps([{k: e.get(k) for k in ("event_id", "_version_id", "one_line_claim", "stance", "severity", "ts")} for e in events], sort_keys=True, ensure_ascii=False)
     key = notification_key or "event:" + hashlib.sha256(fingerprint.encode()).hexdigest()
     outbox = NotificationOutbox(store)
@@ -185,23 +188,22 @@ def _build_markdown(
             snap = holdings_snapshot.get(sym)
             if not snap:
                 continue
-            units = snap.get("units", 0)
+            units = snap.get("units")
             price = snap.get("price")
             mv = snap.get("mv")
             pnl_pct = snap.get("pnl_pct")
-            bits = [f"units={units}"]
+            bits = [f"units={units}" if units is not None else "数量尚待核对"]
             if price is not None:
                 bits.append(f"price={price}")
             if mv is not None:
                 bits.append(f"mv={mv:.0f}")
             if pnl_pct is not None:
                 bits.append(f"pnl={pnl_pct*100:+.2f}%")
-            lines.append(f"- **My {sym}**: " + ", ".join(bits))
+            lines.append(f"- **My {sym}（记录时）**: " + ", ".join(bits))
 
     lines.append("\n---")
     lines.append(
-        "_Event Watch 是 openInvest 第一层（盘中实时）。如果你希望调阈值或关掉，"
-        "改 `jobs/event_watch.yml`。_"
+        "_新闻记录不等于新的交易信号；通知频率可直接向助手调整。_"
     )
     return "\n".join(lines)
 

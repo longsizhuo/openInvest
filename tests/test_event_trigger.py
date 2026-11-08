@@ -152,11 +152,11 @@ def test_ingest_door_triggers_committee_and_marks_event(env, monkeypatch):
     snapshot.assert_not_called()      # 报警静默时不为它拉行情
 
 
-def test_holdings_snapshot_only_when_alerts_enabled(env, monkeypatch):
+def test_news_alerts_do_not_fetch_or_freeze_private_account_numbers(env, monkeypatch):
     _, _, snapshot = env
     monkeypatch.setenv("INVEST_EVENT_ALERT", "1")
     _feed(monkeypatch, "alerts-on", ["AAPL"])
-    snapshot.assert_called_once_with(["AAPL"])
+    snapshot.assert_not_called()
 
 
 def test_ingest_door_gate_rejects_neutral_low_unwatched(env, monkeypatch):

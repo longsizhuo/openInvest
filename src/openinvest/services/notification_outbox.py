@@ -127,7 +127,7 @@ class NotificationOutbox:
         clock = now.timestamp()
         if (self.store.data_root / "integrity/restore_pending.json").exists():
             return []
-        enabled_policies = [p for p in ("events", "risk", "decision") if policy_enabled(p)]
+        enabled_policies = [p for p in ("events", "risk", "decision", "operations") if policy_enabled(p)]
         with self.connection() as db:
             db.execute("""UPDATE deliveries SET status='unknown',last_error='interrupted_delivery_acceptance_unknown'
                 WHERE status='sending' AND lease_until<=?""", (clock,))
@@ -167,16 +167,25 @@ class NotificationOutbox:
                     if not enabled:
                         db.execute("UPDATE deliveries SET status='disabled',last_error='notification_policy_disabled' WHERE notification_id=? AND channel=? AND status!='accepted' AND COALESCE(lease_until,0)<=?", (ident, channel, clock))
                         continue
+                    if payload.get('account_snapshot_downgraded') and payload.get('supersedes_notification'):
+                        parent = db.execute('SELECT status,lease_until FROM deliveries WHERE notification_id=? AND channel=?',
+                            (payload['supersedes_notification'],channel)).fetchone()
+                        if parent is None or parent['status'] in ('accepted','unknown') or (
+                                parent['status']=='sending' and (parent['lease_until'] or 0)<=clock):
+                            db.execute("UPDATE deliveries SET status='suppressed',last_error='original_channel_already_sent_or_uncertain' WHERE notification_id=? AND channel=? AND status!='accepted'",
+                                (ident,channel))
+                            continue
+                        if parent['status']=='sending':
+                            continue  # Wait for its receipt; never race an in-flight original.
                     if cooldown.get("domain"):
                         other = db.execute("""SELECT d.status,d.accepted_at,d.lease_until FROM deliveries d
-                            JOIN notifications n ON n.id=d.notification_id WHERE n.id!=?
+                            JOIN notifications n ON n.id=d.notification_id WHERE n.id!=? AND d.channel=?
                             AND json_extract(n.payload,'$.cooldown.domain')=?
                             AND (? IS NULL OR json_extract(n.payload,'$.cooldown.bar')=?)
-                            AND n.expires>?""", (ident,cooldown["domain"],cooldown.get("bar"),cooldown.get("bar"),clock)).fetchall()
+                            AND n.expires>?""", (ident,channel,cooldown["domain"],cooldown.get("bar"),cooldown.get("bar"),clock)).fetchall()
                         delivered = any(r["status"]=="accepted" and (cooldown.get("bar") or clock-r["accepted_at"] < cooldown.get("seconds",0)) for r in other)
                         if delivered:
-                            db.execute("UPDATE deliveries SET status='suppressed',last_error='same_condition_already_accepted' WHERE notification_id=? AND status!='accepted'", (ident,))
-                            db.execute("UPDATE followups SET status='suppressed',changed=? WHERE notification_id=? AND status='pending'", (clock,ident))
+                            db.execute("UPDATE deliveries SET status='suppressed',last_error='same_condition_already_accepted' WHERE notification_id=? AND channel=? AND status!='accepted'", (ident,channel))
                             continue
                         if any(r["status"]=="unknown" or (r["status"]=="sending" and (r["lease_until"] or 0)>clock) for r in other):
                             continue
@@ -189,21 +198,29 @@ class NotificationOutbox:
                 status, error = "failed", None
                 delivery_payload = validated_delivery_payload(self.store,payload)
                 if delivery_payload!=payload:
-                    child={key:value for key,value in delivery_payload.items() if key not in ("notification_id","cooldown","followup","events","decision_id","context_id","decision_refs")}
-                    child.update(supersedes_notification=ident,decision_quality=True)
-                    child_key="supersede:"+ident+":"+hashlib.sha256(json.dumps(child,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-                    replacement=self.enqueue(child_key,child,category="decision_quality",policy="decision",now=now)
+                    account_only = bool(delivery_payload.get('account_snapshot_downgraded')) and not delivery_payload.get('decision_quality')
+                    excluded = {'notification_id','followup','decision_id','context_id','decision_refs'}
+                    if not account_only:excluded.update({'cooldown','events'})
+                    child={key:value for key,value in delivery_payload.items() if key not in excluded}
+                    child.update(supersedes_notification=ident)
+                    if not account_only:child['decision_quality']=True
+                    semantic={key:value for key,value in child.items() if key!='html'}
+                    child_key="supersede:"+ident+":"+hashlib.sha256(json.dumps(semantic,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+                    replacement=self.enqueue(child_key,child,category=item['category'] if account_only else 'decision_quality',
+                        policy=item['policy'] if account_only else 'decision',now=now,
+                        lifetime_seconds=max(0,item['expires']-now.timestamp()))
                     with self.connection() as db:
                         db.execute("""UPDATE deliveries SET status='suppressed',last_error=?,lease_token=NULL,lease_until=NULL
                             WHERE notification_id=? AND status NOT IN ('accepted','unknown') AND (lease_token=? OR COALESCE(lease_until,0)<=?)""",
                             ("superseded_by:"+replacement,ident,token,clock))
                     break
                 serialized = json.dumps(delivery_payload,ensure_ascii=False,sort_keys=True)
+                deferred_until = 0
                 with self.connection() as db:
                     db.execute("UPDATE deliveries SET payload_sha256=?,payload_json=? WHERE notification_id=? AND channel=? AND lease_token=?",
                                (hashlib.sha256(serialized.encode()).hexdigest(),serialized,ident,channel,token))
                 try:
-                    result = (sender or send_channel)(channel, delivery_payload)
+                    result = (sender or send_channel)(channel, {**delivery_payload, '_notification_category':item['category']})
                     if isinstance(result,dict):
                         accepted=result.get("accepted") is True and result.get("status")=="accepted"
                         status="accepted" if accepted else result.get("status","unknown")
@@ -222,13 +239,17 @@ class NotificationOutbox:
                     error = type(exc).__name__  # never persist credentials or SMTP response bodies
                     if getattr(exc,"delivery_uncertain",False) or isinstance(exc,TimeoutError):
                         status = "unknown"
+                    elif getattr(exc, 'delivery_deferred', False):
+                        status = 'deferred'
+                        deferred_until = getattr(exc, 'retry_at', 0)
                 with self.connection() as db:
                     finished = now.timestamp() + time.monotonic() - started
                     db.execute("""UPDATE deliveries SET status=?,accepted_at=?,target=?,payload_sha256=?,payload_json=?,lease_token=NULL,lease_until=NULL,
                         retry_at=?,last_error=? WHERE notification_id=? AND channel=? AND lease_token=?""",
                         (status, finished if status == "accepted" else None, target,
                          hashlib.sha256(serialized.encode()).hexdigest(),serialized,
-                         finished+300, error, ident, channel, token))
+                         max(finished+300, deferred_until) if status=='deferred' else finished+300,
+                         error, ident, channel, token))
             results.append(self.receipt(ident))
         return results
 
@@ -264,18 +285,31 @@ def validated_delivery_payload(store, payload):
             message="此前待发送的事件已更正、撤销或无法核验，原通知内容已停止使用。请复核最新来源；这里没有新的买卖建议。"
             return {**payload,"subject":"openInvest 事件状态需要复核","plain":message,"discord":message,
                     "html":render_markdown_email(message,footer_label="Evidence quality"),"decision_quality":True}
-    if not payload.get("decision_id") or payload.get("decision_quality"):
-        return payload
-    from openinvest.core.decision_evidence import current_decision
-    if current_decision(store.root,{"decision_id":payload["decision_id"]},payload.get("symbol","")):
-        return payload
-    from openinvest.services.notifier import render_markdown_email
-    message=f"{payload.get('symbol','')} 此前的委员会记录已失效或未通过当前输入核验，请重新复核。这里没有新的可执行买卖建议。"
-    return {**payload,"subject":"openInvest 建议状态需要复核","plain":message,"discord":message,
-            "html":render_markdown_email(message,footer_label="Investment Committee"),"decision_quality":True}
+    if payload.get('decision_id'):
+        from openinvest.core.decision_evidence import current_decision
+        if not current_decision(store.root,{'decision_id':payload['decision_id']},payload.get('symbol','')):
+            from openinvest.services.notifier import render_markdown_email
+            message=f"{payload.get('symbol','')} 此前的委员会记录已失效或未通过当前输入核验，请重新复核。这里没有新的可执行买卖建议。"
+            return {**payload,'subject':'openInvest 建议状态需要复核','plain':message,'discord':message,
+                'html':render_markdown_email(message,footer_label='Investment Committee'),'decision_quality':True}
+    if payload.get('events'):
+        if payload.get('account_snapshot_included') is not False:
+            # Upgrade old queued emails too. No raw holding block survives a
+            # budget delay, account revocation or a change of source basis.
+            from openinvest.services.event_notifier import _build_markdown, _build_discord_text, _build_subject
+            from openinvest.services.notifier import render_markdown_email
+            base=os.getenv('INVEST_API_BASE_URL','http://localhost:8765')
+            md=_build_markdown(payload['events'],committee_task_id=None,api_base_url=base,holdings_snapshot={})
+            return {**payload,'subject':_build_subject(payload['events']),'plain':md,'html':render_markdown_email(md),
+                'discord':_build_discord_text(payload['events'],committee_task_id=None,api_base_url=base),
+                'account_snapshot_included':False,'account_snapshot_downgraded':True}
+    return payload
 
 
 def policy_enabled(policy: str) -> bool:
+    if policy == 'operations':
+        from openinvest.core.config import load_config
+        return bool(load_config(_force_reload=True).event.operational_alerts_enabled)
     if policy == "events":
         return os.getenv("INVEST_EVENT_ALERT", "0") == "1"
     if policy == "risk":
@@ -292,5 +326,9 @@ def send_channel(channel: str, payload: dict) -> bool | str:
         return send_discord_alert_receipt(payload["discord"],notification_id=payload.get("notification_id"))
     if channel == "email":
         from openinvest.services.notifier import send_email_html
-        return send_email_html(subject=payload["subject"], html_body=payload["html"], plain_body=payload["plain"], max_retries=1)
+        from openinvest.services.email_budget import urgent_identity
+        return send_email_html(subject=payload["subject"], html_body=payload["html"], plain_body=payload["plain"], max_retries=1,
+            notification_category=payload.get('_notification_category','direct'),
+            notification_id=payload.get('notification_id'), urgency_key=urgent_identity(payload),
+            report_date=payload.get('report_date'))
     raise ValueError("unsupported notification channel")

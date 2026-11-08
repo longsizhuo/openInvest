@@ -200,6 +200,10 @@ def send_email_html(
     plain_body: str,
     receiver: Optional[str] = None,
     max_retries: int = 5,
+    notification_category: str = "direct",
+    notification_id: str | None = None,
+    urgency_key: str | None = None,
+    report_date: str | None = None,
 ) -> str:
     """SMTP 退避发邮件 —— event_notifier 和 daily_report 共用。
 
@@ -219,6 +223,21 @@ def send_email_html(
     msg['To'] = receiver
     msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+
+    from openinvest.services.email_budget import reserve, finish
+    budget_store, admission = reserve(receiver=receiver, subject=subject, plain_body=plain_body, html_body=html_body,
+        category=notification_category, notification_id=notification_id, urgency_key=urgency_key,
+        report_date=report_date)
+    if admission['already_accepted']:
+        return receiver
+
+    def record(phase):
+        # Admission is durable before SMTP. If this audit update fails after
+        # DATA, the reserved attempt remains uncertain and is never resent.
+        try:
+            finish(budget_store, admission, phase)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
 
     retry_interval = 5  # 5s → 10s → 20s → 40s → 80s
     last_exc: Exception | None = None
@@ -240,15 +259,18 @@ def send_email_html(
                 server.sendmail(sender, [receiver], msg.as_string())
                 server_accepted = True
             print(f"✅ Email successfully sent to {receiver}")
+            record('accepted')
             return receiver
         except (socket.timeout, smtplib.SMTPException, ConnectionError, OSError) as e:
             if server_accepted:
                 # QUIT/connection cleanup can fail after the SMTP server accepted DATA.
                 # Retrying would send the same email again.
+                record('accepted')
                 return receiver
             if data_started and not isinstance(e, (smtplib.SMTPDataError, smtplib.SMTPRecipientsRefused)):
                 error = EmailDeliveryError("SMTP acceptance unknown after DATA; do not blindly resend")
                 error.delivery_uncertain = True
+                record('unknown')
                 raise error from e
             last_exc = e
             print(f"❌ [Attempt {attempt}/{max_retries}] 发送失败: {e}")
@@ -258,13 +280,14 @@ def send_email_html(
                 retry_interval *= 2
 
     print("⛔️ 已达到最大重试次数，放弃发送。")
+    record('failed')
     raise EmailDeliveryError(
         f"send_email_html 重试 {max_retries} 次后仍失败: "
         f"{type(last_exc).__name__}: {last_exc}"
     ) from last_exc
 
 
-def send_gmail_notification(content: str) -> str:
+def send_gmail_notification(content: str, *, report_date: str | None = None) -> str:
     """通过 Gmail SMTP 发邮件（markdown 内容版本，给 daily_report 用）。
 
     成功：返回收件人地址。
@@ -276,12 +299,14 @@ def send_gmail_notification(content: str) -> str:
     2. .env 的 DIGEST_EMAIL_TO
     3. 发件人本身
     """
-    subject = f"Invest Agent Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
+    report_date = report_date or datetime.now().date().isoformat()
+    subject = f"Invest Agent Analysis Report - {report_date}"
     html_body = render_markdown_email(content, footer_label="Gemini Invest Agent")
     return send_email_html(
         subject=subject,
         html_body=html_body,
         plain_body=content,
+        notification_category='daily_report', report_date=report_date,
     )
 
 

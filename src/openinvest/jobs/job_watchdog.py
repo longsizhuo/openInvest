@@ -285,20 +285,24 @@ def find_silent_sources(health: Dict[str, Dict[str, Optional[str]]]) -> List[Dic
 
 
 def _send(findings: List[Dict[str, Any]]) -> dict:
-    subject = f"⚠️ openInvest 调度看门狗：{len(findings)} 项异常"
-    md = (
-        "## ⚠️ 调度看门狗告警\n\n"
-        + "\n".join(f"- {f['text']}" for f in findings)
-        + "\n\n_排查：`db/jobs.sqlite` 的 job_runs 表 + `logs/invest.log`；"
-          "同一异常 24h 内只提醒一次。_"
-    )
+    subject = "openInvest 监控状态汇总"
+    counts = {}
+    for finding in findings:
+        key = finding['key']
+        label = ('历史计划需要核对' if key.startswith('quality:plan') else
+                 '账户数据需要核对' if key.startswith('quality:ledger') else
+                 '新闻来源需要核对' if key.startswith(('quality:source', 'news_source:')) else
+                 '分析或监控记录需要核对')
+        counts[label] = counts.get(label, 0) + 1
+    md = ('## 监控状态汇总\n\n' + '\n'.join(f'- {label}：{count} 项' for label,count in counts.items()) +
+          '\n\n这些是需要核对的状态，不是新的买卖信号。详细诊断已保留，可向助手查询。')
     from openinvest.services.notification_outbox import NotificationOutbox
     from openinvest.core.evidence_eligibility import digest
     outbox=NotificationOutbox(MemoryStore())
     key="watchdog:"+digest([f["notification_claim"] for f in findings])
     ident=outbox.enqueue(key,{"subject":subject,"plain":md,"discord":f"**{subject}**\n{md}",
                              "html":render_markdown_email(md,footer_label="Invest Job Watchdog")},
-                         category="job_watchdog",policy="decision")
+                         category="job_watchdog",policy="operations")
     # The watchdog also attempts its own delivery when the delivery job is down.
     outbox.flush(only_id=ident)
     return outbox.receipt(ident)
@@ -329,23 +333,32 @@ def run(now: Optional[datetime] = None) -> Dict[str, Any]:
     for f in findings:
         log.warning(f"[job_watchdog] {f['text']}")
 
-    fresh: List[Tuple[str, Dict[str, Any]]] = []
-    known=set(store.state_get(_STATE,{}) or {})
-    for f in findings:
-        suffix = "once" if f.get("one_shot") else str(int((now - f["since"]).total_seconds() // 86400))
-        claim = f"{f['key']}#{suffix}"
-        if claim not in known:
-            fresh.append((claim, f))
-        if len(fresh) >= 20:  # bounded delivery; remaining alerts stay unclaimed for the next run
-            break
-    accepted=[];queued=[]
-    for claim,f in fresh:
-        receipt=_send([{**f,"notification_claim":claim}])
-        if not isinstance(receipt,dict) or not receipt.get("notification_id"):
-            raise RuntimeError("watchdog alert was not durably queued")
-        store.state_claim(_STATE,claim)  # Queue receipt, not a claim of delivery.
-        queued.append(claim)
-        if receipt.get("accepted"):accepted.append(claim)
+    from openinvest.core.memory_store import _file_lock
+    with _file_lock(store.root/'.state/job_watchdog_notification_cycle'):
+        # One operational summary per rolling day, regardless of how many
+        # individual records or changing source fingerprints are discovered.
+        last = store.state_get('job_watchdog_summary_delivery', {}) or {}
+        queued_at = last.get('queued_at')
+        throttled = queued_at and now.timestamp() - queued_at < 86400
+        fresh = []
+        known=set(store.state_get(_STATE,{}) or {})
+        if not throttled:
+            for f in findings:
+                suffix = "once" if f.get("one_shot") else str(int((now - f["since"]).total_seconds() // 86400))
+                claim = f"{f['key']}#{suffix}"
+                if claim not in known:
+                    fresh.append((claim, f))
+        accepted=[];queued=[]
+        if fresh:
+            receipt=_send([{**f,'notification_claim':claim} for claim,f in fresh])
+            if not isinstance(receipt,dict) or not receipt.get('notification_id'):
+                raise RuntimeError('watchdog summary was not durably queued')
+            for claim,_ in fresh:
+                store.state_claim(_STATE,claim)  # Queue receipt, never a delivery claim.
+                queued.append(claim)
+                if receipt.get('accepted'):accepted.append(claim)
+            store.state_update('job_watchdog_summary_delivery',lambda old: (
+                {'queued_at':now.timestamp(),'notification_id':receipt['notification_id']}, None))
     return {
         "status": "ok",
         "jobs_checked": len(jobs),

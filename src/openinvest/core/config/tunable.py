@@ -307,6 +307,10 @@ class EventConfig:
     # ---- 价格异动哨兵（ADR-025，jobs/price_sentinel.py）----
     sentinel_enabled: bool = True               # 垂直线哨兵总开关
     risk_alerts_enabled: bool = False            # 用户选择的独立风险提醒；不受泛新闻静默/HOLD影响
+    email_enabled: bool = True                  # 邮件通道开关，不停止监控或改写判断
+    email_mode: str = "all"                     # all / daily_and_risk / daily / off；兼容既有用户
+    email_daily_cap: int = 5                    # 滚动24小时发送预算，不是市场判断阈值
+    operational_alerts_enabled: bool = True      # 独立维护通知策略；检测与详细审计持续保留
     risk_tail_probability: float = 0.05         # 监测敏感度；不是后续涨跌概率
     risk_reference_sessions: int = 252          # 只用当前交易日前的历史窗口
     risk_min_reference_samples: int = 60        # 数据充分性要求；不足时明确未知
