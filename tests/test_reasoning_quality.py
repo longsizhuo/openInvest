@@ -76,7 +76,7 @@ def test_verifier_receives_the_same_config_policy_without_claiming_user_intent()
     text=sources["constraints"]["text"]
     assert '"concentration_lens_enabled": false' in text
     assert '"authority": "effective_configuration_not_verified_user_intent"' in text
-    assert '"scope": "tactical_reentry_only_not_risk_or_needs_exits"' in text
+    assert '"legacy_tactical_pnl_filter": "unvalidated_policy_excluded_from_market_judgment"' in text
 
 
 def test_review_cache_key_changes_with_prompt_or_effective_model_config(monkeypatch):

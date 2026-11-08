@@ -242,7 +242,7 @@ def parse_cio_memo(
         out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
     # Structured review conditions are retained rather than discarded with prose.
-    for name in ("review_plan", "risk_review_plan", "alternatives"):
+    for name in ("review_plan", "risk_review_plan", "alternatives", "market_assessment"):
         value = (fields or {}).get(name)
         if fields is None:
             match = re.search(rf"^{name.upper()}_JSON:\s*(.+)$", text, re.MULTILINE)
@@ -286,22 +286,20 @@ def parse_cio_memo(
         except ValueError:
             pass
 
-    # Sanity check 1: 防 prompt injection / LLM 过度自信
+    # Legacy comparison only: self-confidence is not a validated directional rule
     # 从 config 读取（set_config_override() 实时生效）
     from openinvest.core.config import load_config
     _verdict_cfg = load_config().verdict
     confidence_threshold = _verdict_cfg.buy_confidence_overdrive
     confidence_downgrade = _verdict_cfg.buy_confidence_downgrade_to
     if out["verdict"] == "BUY" and out["confidence"] >= confidence_threshold:
-        out["_original_verdict"] = "BUY"
-        out["_original_confidence"] = out["confidence"]
-        out["verdict"] = "ACCUMULATE"
-        out["confidence"] = confidence_downgrade
-        out.update(decision_status="CONSTRAINED",constraint_reason="configured_buy_overdrive")
-        log.warning(
-            "parse_cio_memo: 降级 BUY(%s) → ACCUMULATE(%s) — 防 LLM 过度自信 / prompt injection",
-            out["_original_confidence"], confidence_downgrade,
-        )
+        # Self-reported confidence is not a calibrated event probability or a
+        # prompt-injection detector. Preserve the legacy comparison for audit;
+        # actual source, reasoning, budget and execution guards still apply.
+        out["_legacy_confidence_rule_shadow"] = {
+            "rule": "configured_buy_overdrive", "threshold": confidence_threshold,
+            "would_verdict": "ACCUMULATE", "would_confidence": confidence_downgrade,
+            "applied": False, "authority": "unvalidated_self_confidence_policy"}
 
     # Sanity check 2: alloc_cny 合理性 clamp
     # INVEST_ALLOC_AGGRESSIVENESS（Optuna 训练参数，0.05~0.30）会按 baseline ¥100k
@@ -468,13 +466,10 @@ def parse_cio_memo(
             and out["_raw_proposal"]["verdict"]=="HOLD"
             and out["decision_status"]=="READY"
             and out["verdict"] == "HOLD"):
-        out.setdefault("_original_verdict", "HOLD")
-        out["_risk_profile_applied"] = "aggressive_uptrend_hold_to_accumulate"
-        out["verdict"] = "ACCUMULATE"
-        log.warning(
-            "parse_cio_memo: risk_profile=aggressive + uptrend → HOLD 升级 ACCUMULATE"
-            "（显式杠杆档，消融口径 +CR −Sharpe）",
-        )
+        out["_legacy_risk_profile_shadow"] = {
+            "rule":"aggressive_uptrend_hold_to_accumulate", "would_verdict":"ACCUMULATE",
+            "applied":False, "authority":"risk_preference_is_not_market_opportunity"}
+
 
     # Sanity check 6（必须是最后一道）: 用户单次入场上限（strategy.md max_single_invest_cny）。
     # 此前只在 prompt 里"建议 ≤ cap"（portfolio_summary 一行），解析层不执行——LLM 超了就原样

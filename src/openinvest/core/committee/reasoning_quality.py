@@ -6,7 +6,7 @@ from typing import Any
 
 from openinvest.core.evidence_eligibility import digest
 
-POLICY="cio_reasoning_quality_v1"
+POLICY="cio_reasoning_quality_v2"
 CHECKS={"source_attribution","time_and_units","arithmetic","internal_consistency",
         "constraint_authority","exit_purpose","probability_event_definition"}
 CODES={"source_misquotation","unsupported_case_fact","arithmetic_or_unit_error","internal_contradiction",
@@ -19,6 +19,11 @@ Correct HOLD may pass. Unknown loss tolerance only forbids claiming it is known;
 Unknown first-touch probability permits an explicitly conditional tactical plan. Risk reduction need not promise a lower repurchase.
 Model-proposed levels are not existing user stop rules. Missing a stop does not establish that holding is safe.
 Separate market/account observations from analyst interpretations and generated review plans. Quote existence does not prove truth.
+Separate market direction/evidence from account suitability, execution readiness and the chosen action. A valid positive market assessment may coexist with zero executable allocation.
+No qualified historical forecast or first-touch probability is not itself evidence against ADD or in favor of HOLD. Unknown user loss tolerance forbids inventing tolerance; it does not determine market risk or direction.
+Applicability is different from preference. Assess the supplied support and counterevidence, not whether the selected action meets a trading quota.
+Market risk needs a stated baseline and horizon. Normal asset volatility and a distant historical drawdown alone do not prove a current risk increase; cash alone does not prove ordinary market risk.
+A TIP ETF price change is not an observed real-yield change, including when an inverse relationship is asserted. Only supplied actual yield data can establish that fact.
 Check only material source, arithmetic, unit, temporal and logical errors. Subjective risk/return weighting is not a defect by itself.
 Do not reject an unprofitable judgment just because later prices are known to you; use only the supplied sources and as-of context.
 Terminal-return and first-touch events differ. Valid event inclusion bounds are allowed, but cannot imply an execution guarantee.

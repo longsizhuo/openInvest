@@ -67,7 +67,7 @@ def test_aud_prompts_use_aud_fields_and_converted_thresholds(lens):
     assert "|SUGGESTED_ALLOC_AUD| > 21000" in p["cio"]
     assert "DRY_POWDER_AUD < 1100" not in p["cio"]
     assert "DRY_POWDER_AUD < 210" not in p["risk"]
-    assert "WORST_CASE_LOSS_AUD_AT_-20" in p["risk"] and "未提供写 N/A" in p["risk"]
+    assert "WORST_CASE_LOSS_AUD_AT_-20" in p["risk"] and "未提供 N/A" in p["risk"]
     assert "如 430 AUD" not in p["risk"]
     json_cio = _prompts(json_mode=True)["cio"]
     assert '"suggested_alloc_aud"' in json_cio and "suggested_alloc_cny" not in json_cio

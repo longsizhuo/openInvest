@@ -11,6 +11,9 @@ import re
 # These are auditable rule families, not new trading thresholds. A missing
 # rationale never authorizes an automatic production deletion or relaxation.
 FAMILIES = [
+    ("cio.risk_profile_direction", "unqualified_market_override", "core/committee/cio_parse.py", "shadow_only", "A risk preference is not evidence to turn HOLD into a buy"),
+    ("cio.tactical_pnl_bands", "unqualified_market_override", "capabilities/committee/cio/cio.py", "audit_only_not_injected", "Legacy P&L percentages do not establish forward risk/reward or user authority"),
+    ("cio.self_confidence_direction", "unqualified_market_override", "core/committee/cio_parse.py", "shadow_only", "Uncalibrated self-reported confidence is not a directional veto or an injection detector"),
     ("quant.entry_bands", "market_judgment", "capabilities/committee/quant/quant.md", "removed_from_primary_direction", "Legacy quantile/RSI conjunction is not a necessary condition for market direction; retained configuration is diagnostic only"),
     ("quant.crash_direction_lock", "semantic_defect", "capabilities/committee/quant/quant.md", "repaired", "Execution risk must be separate from market direction"),
     ("quant.cash_direction_lock", "semantic_defect", "capabilities/committee/quant/quant_rebuttal.md", "repaired", "Available cash is not evidence of price direction"),
