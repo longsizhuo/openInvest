@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.68.8](https://github.com/longsizhuo/openInvest/compare/v0.68.7...v0.68.8) (2026-11-08)
+
+
+### Bug Fixes
+
+* close repeated analysis and misleading operational incidents ([7c16684](https://github.com/longsizhuo/openInvest/commit/7c16684645a5715388d80a9d1f4ab54861d071e1))
+* close repeated analysis and misleading operational incidents ([#607](https://github.com/longsizhuo/openInvest/issues/607)) ([7c16684](https://github.com/longsizhuo/openInvest/commit/7c16684645a5715388d80a9d1f4ab54861d071e1))
+* **dispatch:** share qualified causes and preserve honest task outcomes ([29a1b8e](https://github.com/longsizhuo/openInvest/commit/29a1b8ef8b7e5f689369b682ff9f2e8fbc9efadc))
+* **news:** reuse qualified retained input across metadata revisions ([58615b1](https://github.com/longsizhuo/openInvest/commit/58615b155c22d7d50cc6f63d38cecf450c29a1a2))
+* **recovery:** reconcile historical incidents against preserved evidence ([2408ea6](https://github.com/longsizhuo/openInvest/commit/2408ea620df0119cd5386b3eb51b277e8584dcb3))
+
 ## [0.68.7](https://github.com/longsizhuo/openInvest/compare/v0.68.6...v0.68.7) (2026-11-08)
 
 
