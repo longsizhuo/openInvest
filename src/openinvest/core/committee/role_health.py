@@ -15,11 +15,12 @@ def risk_output_health(text, round_label):
     raw=str(text or '')
     output_sha=hashlib.sha256(raw.encode()).hexdigest()
     fields={};missing=[];invalid=[]
+    presentation=raw.replace("**", "")
     for name,values in ENUMS.items():
         source_name='ADJUSTED_SIGNAL' if name=='SIGNAL' and round_label!='RISK_R1' else name
         # Match complete fields, including ordinary Markdown emphasis. Quoted
         # prose mentioning a label is not a structured output field.
-        matches=re.findall(r'^\s*(?:\*\*)?'+source_name+r'(?:\*\*)?:\s*(?:\*\*)?([A-Za-z_]+)',raw,re.M)
+        matches=re.findall(r'^\s*'+source_name+r':\s*([A-Za-z_]+)',presentation,re.M)
         if not matches:missing.append(source_name)
         elif len(matches)!=1 or matches[0].lower() not in values:invalid.append(source_name)
         else:fields[name]=matches[0].lower()

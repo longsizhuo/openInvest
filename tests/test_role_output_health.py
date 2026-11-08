@@ -81,3 +81,13 @@ def test_coordinator_persisted_incomplete_role_cannot_enter_current_cache_or_act
     assert health['model_output_errors'][0]['reason']=='model_output_incomplete' and not health['worker_unavailable']
     assert load_submitted_committee('TEST',result['decision_date']) is None
     assert not (MemoryStore().root/'.state/review_plan_TEST.json').exists()
+
+
+def test_markdown_field_emphasis_is_presentation_not_an_output_defect():
+    for round_label,prefix in [('RISK_R1','SIGNAL'),('RISK_R2','ADJUSTED_SIGNAL')]:
+        plain=f'{prefix}: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: insufficient'
+        for text in [f'**{prefix}:** unknown\n**MARKET_RISK:** ordinary\n**LIQUIDITY:** insufficient',
+                     f'**{prefix}**: **unknown**\n**MARKET_RISK**: **ordinary**\n**LIQUIDITY**: **insufficient**']:
+            row=risk_output_health(text,round_label)
+            assert row['structure']=='complete' and row['fields']==risk_output_health(plain,round_label)['fields']
+            assert row['output_sha256']!=risk_output_health(plain,round_label)['output_sha256']
