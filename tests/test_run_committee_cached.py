@@ -42,7 +42,7 @@ VERDICT: ACCUMULATE
 ---
 这是 memo 里自带的分隔线，不该截断。
 
-⚠️ 金额已按单次上限 ¥1,000 钳制
+⚠️ 金额已按单次上限钳制
 
 
 ---
@@ -111,8 +111,8 @@ def mem_root(tmp_path, monkeypatch):
 
 # 含内部分隔线 / 空行 / 小标题 / 钳制句——贴近真实 CIO memo，且不能被分节正则截断
 _MEMO = ("VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 800\n\n"
-         "首笔 ¥800，分三批。\n\n---\n\n### 分批计划\n- 第一批\n- 第二批\n\n"
-         "⚠️ 金额已按单次上限 ¥1,000 钳制")
+         "首笔金额见结构化字段，按条件分批。\n\n---\n\n### 分批计划\n- 第一批\n- 第二批\n\n"
+         "⚠️ 金额已按单次上限钳制")
 
 
 def test_persist_roundtrip_cio_memo_verbatim(mem_root):
@@ -267,7 +267,7 @@ def test_mcp_degraded_transcript_is_retried_after_source_recovery(monkeypatch, t
     calls=[]
     def recovered(**kw):
         calls.append(kw);path.write_text(PERSIST_MD)
-        return {"asset_committees":{"AAPL":{"verdict":{"verdict":"ACCUMULATE","confidence":.7}}}}
+        return {"asset_committees":{"AAPL":{"verdict":{"verdict":"ACCUMULATE","confidence":.7,"alloc_cny":0,"reasoning_review":{"status":"passed","origin":"synthetic_fixture"}}}}}
     monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session",recovered)
     res=_call_mcp({"symbol":"AAPL"})
     out=res.structuredContent;out=out.get("result",out)
@@ -326,7 +326,7 @@ def test_cli_degraded_cache_is_retried_after_source_recovery(monkeypatch, capfd,
     calls=[]
     def recovered(**kw):
         calls.append(kw);md.write_text(PERSIST_MD)
-        return {"asset_committees":{"AAPL":{"verdict":{"verdict":"ACCUMULATE","confidence":.7}}}}
+        return {"asset_committees":{"AAPL":{"verdict":{"verdict":"ACCUMULATE","confidence":.7,"alloc_cny":0,"reasoning_review":{"status":"passed","origin":"synthetic_fixture"}}}}}
     monkeypatch.setattr("openinvest.core.committee_runner.run_committee_session",recovered)
     cc.cmd_run_committee(argparse.Namespace(symbol="AAPL",force=False,max_rounds=1))
     out=json.loads(capfd.readouterr().out)
@@ -339,3 +339,14 @@ def _synthetic_review_for_non_review_contract(monkeypatch):
     # tests exercise actual verification, unavailable capability and failures.
     monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
         lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})
+
+
+def test_unqualified_fresh_market_buy_never_instructs_the_user_to_place_an_order(monkeypatch,capfd,tmp_path):
+    cc,md=_cli_env(monkeypatch,tmp_path,PERSIST_MD)
+    monkeypatch.setattr('openinvest.core.committee_runner.run_committee_session',lambda **kw:{'asset_committees':{'AAPL':{
+        'verdict':{'verdict':'BUY','confidence':.6,'alloc_cny':0,'decision_status':'REVIEW_REQUIRED','reasoning_review':{'status':'passed'}}}}})
+    cc.cmd_run_committee(argparse.Namespace(symbol='AAPL',force=True,max_rounds=1))
+    out=json.loads(capfd.readouterr().out)
+    assert out['status']=='review_required' and out['current_advice_valid'] is False
+    assert out['trade_authorized'] is False and not out['has_qualified_execution_amount']
+    assert '按 verdict 的 alloc_cny' not in out['next_step'] and '待复核' in out['next_step']

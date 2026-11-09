@@ -31,7 +31,7 @@ def test_cmd_run_committee_english_next_step(monkeypatch, capfd, tmp_path):
         }
 
     class FakeReport:
-        cio_memo = "VERDICT: HOLD\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\nSUGGESTED_ALLOC_CNY: 0"
+        cio_memo = "VERDICT: BUY\nCONFIDENCE: 0.5\nDOMINANT_VIEW: macro\nSUGGESTED_ALLOC_CNY: 100"
 
     monkeypatch.setattr("openinvest.core.portfolio_manager.PortfolioManager", lambda: FakePM())
     monkeypatch.setattr(
@@ -39,7 +39,7 @@ def test_cmd_run_committee_english_next_step(monkeypatch, capfd, tmp_path):
         lambda **_: {
             "asset_committees": {
                 "AAPL": {
-                    "verdict": {"verdict": "HOLD", "confidence": 0.5, "alloc_cny": 0, "dominant_view": "macro"},
+                    "verdict": {"verdict": "BUY", "confidence": 0.5, "alloc_cny": 100, "dominant_view": "macro", "reasoning_review":{"status":"passed","origin":"synthetic_fixture"}},
                     "report": FakeReport(),
                 }
             }
