@@ -602,7 +602,9 @@ class EventStore:
                                     raw_text=getattr(raw_item,"text",""),provenance=getattr(raw_item,"raw_meta",{}),_commit=False,_version=False)
                     from openinvest.core.evidence_eligibility import Eligibility,source_artifact_ids
                     parents=source_artifact_ids(getattr(raw_item,"raw_meta",{}) or {})
-                    if parents:Eligibility(self.data_root).record_audit_lineage("event:"+eid,value,parents)
+                    if parents:
+                        stored_event=_row_to_event(self.conn.execute("SELECT * FROM events WHERE event_id=?",(eid,)).fetchone())
+                        Eligibility(self.data_root).record_audit_lineage("event:"+eid,event_payload(stored_event),parents)
                     if incoming_allowed:
                         current_row=_row_to_event(self.conn.execute("SELECT * FROM events WHERE event_id=?",(eid,)).fetchone())
                         stored_source=dict(self.conn.execute("SELECT * FROM sources WHERE event_id=? AND url=?",(eid,raw_item.url)).fetchone())
