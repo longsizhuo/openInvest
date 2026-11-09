@@ -95,7 +95,8 @@ def _brief_text(invest_home):
 
 def _make_pre_llm_call(invest_home, local_selected=True):
     def pre_llm_call(session_id=None, platform=None, **_):
-        if not local_selected or platform in SKIP_PLATFORMS:
+        selected = local_selected() if callable(local_selected) else local_selected
+        if not selected or platform in SKIP_PLATFORMS:
             return None
         text = _brief_text(invest_home)
         if not text:
@@ -120,26 +121,30 @@ def register(ctx):
             log.info(f"[openinvest] registered skill: {child.name}")
 
     # Older Hermes builds lack these APIs; skills + MCP keep working without them.
-    invest_home, inject_digest, local_selected = None, True, False
+    def selected_local():
+        if not hasattr(ctx, "get_config"):
+            return False
+        try:
+            mode = ctx.get_config("connection_mode")
+            return mode == "local" or (not mode and bool(ctx.get_config("invest_home")))
+        except Exception:  # A settings read failure must not expose a local ledger.
+            return False
+
+    invest_home, inject_digest = None, True
     if hasattr(ctx, "get_config"):
         try:
             invest_home = ctx.get_config("invest_home")
-            mode = ctx.get_config("connection_mode")
-            # A hosted connection must never launch the local digest command.
-            # An explicitly configured legacy local directory remains a local selection.
-            local_selected = mode == "local" or (not mode and bool(invest_home))
             # `hermes config set ... false` may store the string "false"
             inject_digest = str(ctx.get_config("inject_digest", True)).strip().lower() not in ("false", "0", "no", "off")
         except Exception:  # noqa: BLE001  config read must never break plugin load
             invest_home = None
-            local_selected = False
     if hasattr(ctx, "register_system_prompt_section"):
         try:
             ctx.register_system_prompt_section("openinvest.routing", ROUTING_RULE)
         except (TypeError, ValueError) as e:
             log.info("[openinvest] system prompt section not registered: %s", e)
     if hasattr(ctx, "register_hook") and inject_digest:
-        ctx.register_hook("pre_llm_call", _make_pre_llm_call(invest_home, local_selected))
+        ctx.register_hook("pre_llm_call", _make_pre_llm_call(invest_home, selected_local))
 
     # MCP 走本插件自带的 run.sh：它把后端钉在 release-please 盖章的版本（不跑 PyPI 上最新的），
     # 插件更新后 run.sh 跟着更新，这段配置不用改。拆两条：Hermes 的 untrusted 按 server 生效、每次都问、
@@ -150,7 +155,7 @@ def register(ctx):
         "https://openinvest.involutionhell.com/mcp; see https://openinvest.involutionhell.com/connect/. "
         "Choose local deployment explicitly before using the local snippet below."
     )
-    if not local_selected:
+    if not selected_local():
         return
     log.info(
         "[openinvest] MCP tools: add to ~/.hermes/config.yaml (after-install.md has the commands)\n"

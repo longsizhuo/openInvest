@@ -178,3 +178,15 @@ def test_remote_or_unselected_connection_never_reads_local_digest(plugin, monkey
     ctx = _Ctx(config)
     plugin.register(ctx)
     assert ctx.hooks["pre_llm_call"](session_id="s", platform="cli") is None
+
+
+def test_switching_from_local_to_remote_does_not_serve_cached_local_digest(plugin, monkeypatch):
+    calls = []
+    monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: TEST."], calls))
+    ctx = _Ctx({"connection_mode": "local"})
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(session_id="s", platform="cli")
+    ctx.config["connection_mode"] = "remote"
+    assert hook(session_id="new-remote-session", platform="cli") is None
+    assert len(calls) == 1
