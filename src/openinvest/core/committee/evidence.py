@@ -79,15 +79,19 @@ def cio_source_context(market_data: str, regime_brief: str, analysis_as_of: str 
 
 def risk_opening_context(asset, market_data, portfolio_summary, *, prior_insights='',
                          regime_brief='', sentiment_brief='', historical_qualification=None,
-                         single_invest_cap=None, execution_constraint_facts=None):
+                         single_invest_cap=None, execution_constraint_facts=None, position_facts=None):
     """One input contract for runtime and bounded saved-input validation."""
     regime = (f"# 市场 Regime (规则分类结果，不代表风险正常):\n{historical_reference_context(regime_brief,qualification=historical_qualification,kind='regime')}\n\n" if regime_brief else '')
     sentiment = f"# 市场情绪输入 (可能含历史参考或未知状态):\n{sentiment_brief}\n\n" if sentiment_brief else ''
-    return (f"# 资产: {asset.get('display_name',asset['symbol'])} ({asset['symbol']})\n"
+    opening = (f"# 资产: {asset.get('display_name',asset['symbol'])} ({asset['symbol']})\n"
         f"# 用户当前持仓:\n{portfolio_summary}\n\n"
         f"# 市场风险输入（原始数据，不是额外方向投票）:\n{market_data}\n\n{regime}{sentiment}"
         f"# 长期行为模式 (Dreaming):\n{prior_insights or '(暂无)'}\n\n请按 Risk Officer 格式输出风险评估。\n\n"
         + execution_constraints_context(single_invest_cap,execution_constraint_facts))
+    if position_facts:
+        from openinvest.services.position_facts import position_facts_context
+        opening+='\n\n'+position_facts_context(position_facts)
+    return opening
 
 
 def risk_rebuttal_context(opening,quant_history,risk_history,*,round_idx=2,max_rounds=2):

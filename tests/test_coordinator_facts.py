@@ -17,7 +17,7 @@ from openinvest.core.decision_ledger import parse_committee_text
 from openinvest.core.runner import coordinator as co
 from tests.integrity_helpers import context_id
 
-CIO = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 800\n首笔 ¥800。"
+CIO = "VERDICT: ACCUMULATE\nCONFIDENCE: 0.7\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 800\n首笔金额见结构化字段。"
 RAW = (f"=== MACRO ===\n宏观中性\n\n=== QUANT_R1 ===\nSIGNAL: bullish\n\n"
        f"=== RISK_R1 ===\nSIGNAL: ok\nMARKET_RISK: ordinary\nLIQUIDITY: available\n\n=== CIO ===\n{CIO}\n")   # 故意不抄任何确定性行
 REGIME_BRIEF = "REGIME: downtrend\nINPUTS: atr_spike_ratio=1.0"

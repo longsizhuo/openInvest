@@ -34,7 +34,7 @@ def test_invalid_plan_surfaces_and_changed_context_is_not_current_cache():
     raw='=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n=== CIO ===\nVERDICT: HOLD\nCONFIDENCE: 0.7\nREVIEW_PLAN_JSON: {bad'
     out=save_committee_transcript("SYNTHETIC",raw,context_id=cid)
     assert any("计划" in r["text"] for r in findings(MemoryStore().root))
-    assert load_submitted_committee("SYNTHETIC",out["decision_date"])
+    assert load_submitted_committee("SYNTHETIC",out["decision_date"]) is None
     set_config_override({"market_rules":{"quantile_low":25}})
     assert load_submitted_committee("SYNTHETIC",out["decision_date"]) is None
     receipt=save_committee_transcript("SYNTHETIC",raw,context_id=cid)

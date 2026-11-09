@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 from openinvest.core.runner.event_brief import resolve_event_brief_multi
 from openinvest.core.runner.loaders import (
-    append_event_stance_line, load_prior_insights, load_sentiment_brief, load_valuation_brief,
+    append_event_stance_line, load_position_facts, load_prior_insights, load_sentiment_brief, load_valuation_brief,
 )
 
 # ============================================================================
@@ -259,6 +259,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     }
     from openinvest.services.ledger_evidence import account_source_status
     facts['ledger_evidence']=account_source_status(pm)
+    facts['position_facts']=load_position_facts(symbol, pm, facts['ledger_evidence'], df_target, facts['current_price'])
     from openinvest.core.runner.intervention import gold_defense_dca_plan
     from openinvest.core.decision_evidence import prepare_context
     facts["defense_dca"] = gold_defense_dca_plan(symbol, target, df_target.index)
@@ -269,13 +270,15 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     facts["single_invest_cap"]=facts["execution_constraint_facts"]["effective_amount"]
     from openinvest.core.committee.evidence import execution_constraints_context
     constraints=execution_constraints_context(facts["single_invest_cap"],facts["execution_constraint_facts"])
+    from openinvest.services.position_facts import position_facts_context
+    position_context=position_facts_context(facts['position_facts'])
     prompts = {
         "macro_strategist": build_macro_strategist_prompt()+f"\n\nANALYSIS_AS_OF: {analysis_as_of}",
         "quant_round1": build_quant_prompt(target, "opening"),
-        "risk_round1": build_risk_officer_prompt(target, "opening")+"\n\n"+constraints,
+        "risk_round1": build_risk_officer_prompt(target, "opening")+"\n\n"+constraints+"\n\n"+position_context,
         "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),
-        "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal")+"\n\n"+constraints,
-        "cio": build_cio_prompt(target) + "\n\n" + source_context+"\n\n"+constraints,
+        "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal")+"\n\n"+constraints+"\n\n"+position_context,
+        "cio": build_cio_prompt(target) + "\n\n" + source_context+"\n\n"+constraints+"\n\n"+position_context,
     }
     context = prepare_context(pm.store.root, symbol, {**facts, "prompts": prompts, "provider": provider},
                               model=model or "unknown", expected_state=prepared_state)
@@ -289,6 +292,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "model_requirement": "Declare the actual model/composition in prepare and submit. Unknown identity cannot inherit another model's learned insights.",
         "asset": target,
         "portfolio_summary": portfolio_summary,
+        "position_facts": facts['position_facts'],
         "macro_data": macro_data,
         # 事件层 RAG 召回（Macro 专用，与 Direct run_macro_view(event_brief=) 同口径）
         "event_brief": event_brief,
@@ -442,6 +446,10 @@ def _save_committee_transcript_once(
             "CIO 段解析不出裁决（UNCLEAR）：`=== CIO ===` 分节里需要 VERDICT: / CONFIDENCE: 等行，"
             "格式见 prompts.cio。本次未存档，修正后重新提交。")
     verdict["alloc_currency"] = base_currency()
+    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios
+    scenario_check=validate_scenarios(facts.get('position_facts'),proposed_scenarios(verdict),memo=cio_text,context_id=context_id,fields=verdict.get('_raw_proposal'))
+    apply_scenario_validation(verdict,scenario_check)
+
     from openinvest.core.committee.reasoning_quality import apply_review
     apply_review(verdict,reasoning_review or {"status":"unavailable","reason":"verification_not_supplied"})
     if not (reasoning_review or {}).get("status")=="passed":
@@ -490,6 +498,9 @@ def _save_committee_transcript_once(
     )
     from openinvest.core.decision_evidence import enforce_input_health, advice_qualified
     enforce_input_health(verdict, health)
+    from openinvest.core.committee.scenarios import decision_display_memo
+    cio_text=decision_display_memo(verdict,cio_text,scenario_check)
+    if 'CIO' in sections:sections['CIO']=cio_text
     evidence = record_decision(store.root, symbol, {"transcript": raw}, verdict, health,
                                context_id=context_id)
     health.update(evidence)
@@ -646,7 +657,7 @@ def save_committee_transcript(symbol: str, raw: str, *, provider: str = "claude"
     from openinvest.core.committee.agent_io import _create_agent,_ask
     from openinvest.utils.llm import get_llm_config_safe,reasoning_by_agent
     backend_allowed=not reasoning_by_agent()
-    request=make_request(sources=proposal_sources(context["inputs"],sections),
+    request=make_request(sources=proposal_sources({**context["inputs"],"context_id":context_id},sections),
         proposal={"fields":parse_cio_memo(cio).get("_raw_proposal") or {},"memo":cio,"wire":cio},
         model=get_llm_config_safe()[2] if backend_allowed else "host_reported:"+provider+":"+(model or "unknown"))
     signature = digest({"symbol": symbol, "transcript": raw, "provider": provider, "model": model})

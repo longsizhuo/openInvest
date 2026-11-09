@@ -62,7 +62,7 @@ def test_aud_prompts_use_aud_fields_and_converted_thresholds(lens):
         assert "{{" not in text
         assert not re.search(r"(SUGGESTED_ALLOC|DRY_POWDER|WORST_CASE_LOSS)_CNY|[a-z]_cny\b", text)
     assert "SUGGESTED_ALLOC_AUD: <" in p["cio"]
-    assert "first_tranche_aud:" in p["cio"] and "stress_scenario_loss_aud:" in p["cio"]
+    assert "first_tranche_ref:" in p["cio"] and "SCENARIO_ANALYSIS_JSON:" in p["cio"]
     assert "人民币" not in p["cio"]
     assert "|SUGGESTED_ALLOC_AUD| > 21000" in p["cio"]
     assert "DRY_POWDER_AUD < 1100" not in p["cio"]

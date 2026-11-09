@@ -145,6 +145,23 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
             out["hold_reason"] = "deterministic_rule"
 
 
+STRUCTURED_CIO_FIELDS=("review_plan","risk_review_plan","alternatives","market_assessment","scenario_analysis")
+
+
+class DuplicateCioJSONField(ValueError):
+    pass
+
+
+def strict_cio_json(text):
+    def unique(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:raise DuplicateCioJSONField('duplicate_cio_json_key')
+            result[key]=value
+        return result
+    return json.loads(text,object_pairs_hook=unique,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('nonfinite_cio_json_value')))
+
+
 def _fields_to_out(out: Dict[str, Any], fields: Dict[str, Any]) -> None:
     """从结构化 JSON fields（DeepSeek JSON Output）填 out 基础字段，与 regex 路径同口径
     （verdict&dominant_view&trim_reason 限定集 / confidence float / alloc int）。
@@ -241,14 +258,31 @@ def parse_cio_memo(
         ep = m.group(1).strip() if m else None
         out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
+    if fields is not None:
+        known={'verdict','confidence','dominant_view','trim_reason','exit_intent','hold_reason',
+               'review_plan','risk_review_plan','alternatives','market_assessment','scenario_analysis',
+               'reentry_price','reentry_condition','expected_path','memo'}
+        extra={str(key):value for key,value in fields.items() if key not in known and not _ALLOC_KEY_RE.fullmatch(str(key))}
+        if extra:out['_unrecognized_json_fields']=extra
+    if fields is None:
+        headers=re.findall(r'^\s*(?:\*\*)?([A-Z][A-Z0-9_]+)(?:\*\*)?\s*:',text,re.MULTILINE|re.IGNORECASE)
+        headers=[name.upper() for name in headers]
+        names={'VERDICT','CONFIDENCE','DOMINANT_VIEW','TRIM_REASON','EXIT_INTENT','HOLD_REASON',
+               'REENTRY_PRICE','REENTRY_CONDITION','EXPECTED_PATH','REVIEW_PLAN_JSON','RISK_REVIEW_PLAN_JSON',
+               'MARKET_ASSESSMENT_JSON','ALTERNATIVES_JSON','SCENARIO_ANALYSIS_JSON'}
+        selected=[name for name in headers if name in names or name.startswith('SUGGESTED_ALLOC_')]
+        repeated=sorted({name for name in selected if selected.count(name)>1})
+        allocations=[name for name in selected if name.startswith('SUGGESTED_ALLOC_')]
+        if len(allocations)>1 and not repeated:repeated=allocations
+        if repeated:out['_duplicate_protocol_fields']=repeated
     # Structured review conditions are retained rather than discarded with prose.
-    for name in ("review_plan", "risk_review_plan", "alternatives", "market_assessment"):
+    for name in STRUCTURED_CIO_FIELDS:
         value = (fields or {}).get(name)
         if fields is None:
-            match = re.search(rf"^{name.upper()}_JSON:\s*(.+)$", text, re.MULTILINE)
+            match = re.search(rf"^\s*(?:\*\*)?{name.upper()}_JSON(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$", text, re.MULTILINE|re.IGNORECASE)
             if match:
                 try:
-                    value = json.loads(match.group(1))
+                    value = strict_cio_json(match.group(1).removesuffix("**").strip())
                 except ValueError:
                     out[f"_{name}_error"] = "invalid_json"
                     if name.endswith("review_plan"):

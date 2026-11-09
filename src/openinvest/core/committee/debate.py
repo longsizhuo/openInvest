@@ -70,6 +70,8 @@ class CommitteeReport:
     source_macro_data: str = ""
     source_event_brief: str = ""
     historical_qualification: Dict[str,Any] = field(default_factory=dict)
+    position_facts: Dict[str,Any] = field(default_factory=dict)
+    cio_model_memo: str = ""
 
     def to_cio_brief(self) -> str:
         """组装给 CIO 看的输入 - 含 cross-challenge round 后的调整"""
@@ -81,6 +83,9 @@ class CommitteeReport:
                                historical_qualification=self.historical_qualification),
             f"\n=== MACRO STRATEGIST (跨资产共享) ===\n{self.macro_view}",
         ]
+        if self.position_facts:
+            from openinvest.services.position_facts import position_facts_context
+            lines.append(position_facts_context(self.position_facts))
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
         if self.valuation_brief:
             lines.append(
@@ -137,6 +142,7 @@ def run_committee(
     verification_memory_root=None,
     execution_constraint_facts=None,
     historical_qualification=None,
+    position_facts=None,
 ) -> Dict[str, Any]:
     """对单个资产跑 Macro + Quant/Risk 多轮辩论 + CIO
 
@@ -190,6 +196,7 @@ def run_committee(
         source_macro_data=source_macro_data,
         source_event_brief=source_event_brief,
         historical_qualification=historical_qualification or {},
+        position_facts=position_facts or {},
     )
     from openinvest.core.committee.agent_io import worker_output_status
     worker_calls=[];worker_outputs=[]
@@ -254,7 +261,7 @@ def run_committee(
     constraint_context=execution_constraints_context(single_invest_cap,execution_constraint_facts)
     risk_input_r1=risk_opening_context(asset,market_data,portfolio_summary,prior_insights=prior_insights,
         regime_brief=regime_brief,sentiment_brief=sentiment_brief,historical_qualification=historical_qualification,
-        single_invest_cap=single_invest_cap,execution_constraint_facts=execution_constraint_facts)
+        single_invest_cap=single_invest_cap,execution_constraint_facts=execution_constraint_facts,position_facts=position_facts)
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,
         role="quant", asset=sym, round_label="opening",
@@ -393,14 +400,20 @@ def run_committee(
     # A billed truncated, empty or failed output must not trigger another paid
     # synthesis under the disguise of a JSON-format fallback.
     cio_fields: Optional[Dict[str, Any]] = None
+    duplicate_cio_json=False
+    from openinvest.core.committee.cio_parse import strict_cio_json,DuplicateCioJSONField
     if _want_json:
         try:
-            cio_fields = json.loads(report.cio_memo)
+            cio_fields = strict_cio_json(report.cio_memo)
             if not isinstance(cio_fields, dict):
                 cio_fields = None
+        except DuplicateCioJSONField:
+            duplicate_cio_json=True
+            cio_fields=None
+            report.cio_memo=""
         except (ValueError, TypeError):
             cio_fields = None
-        if cio_fields is None and (not worker_output_status(report.cio_memo)["unavailable"] or cio_call.get("reason")=="response_format_rejected"):
+        if cio_fields is None and not duplicate_cio_json and (not worker_output_status(report.cio_memo)["unavailable"] or cio_call.get("reason")=="response_format_rejected"):
             log.warning("CIO JSON Output 未拿到合法 JSON（provider 不支持？）→ 优雅回退文本模式重问")
             cio_agent = _create_agent(
                 build_cio_prompt(asset, json_mode=False), search_enabled=False, temperature=0.1,
@@ -418,9 +431,13 @@ def run_committee(
             _memo = cio_fields.get("memo")
             if isinstance(_memo, str) and _memo.strip():
                 report.cio_memo = _memo
+            else:
+                # The original wire is audit evidence, not a qualitative report.
+                report.cio_memo = "已生成结构化市场意见；原始 JSON 已封存供审计。"
     emit("cio_done",
          memo_preview=report.cio_memo[:240])
 
+    report.cio_model_memo=report.cio_memo
     cio_parsed = parse_cio_memo(
         report.cio_memo,
         fields=cio_fields,
@@ -439,15 +456,27 @@ def run_committee(
         single_invest_cap=single_invest_cap,
     )
     cio_parsed["alloc_currency"] = base_currency()
+    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios
+    scenario_check=validate_scenarios(position_facts,proposed_scenarios(cio_parsed),memo=report.cio_memo,
+        context_id=(input_health or {}).get('context_id'),fields=cio_parsed.get('_raw_proposal'))
+    if duplicate_cio_json:
+        scenario_check['errors'].append({'code':'duplicate_cio_json_key'})
+        scenario_check['status']='invalid'
+    apply_scenario_validation(cio_parsed,scenario_check)
+
     from openinvest.core.committee.reasoning_quality import make_request,proposal_sources,apply_review
     from openinvest.services.reasoning_review import review_once
     from openinvest.utils.llm import get_llm_config_safe
+    analyst_sections={"MACRO":macro_view,"QUANT_R1":quant_history[0],"RISK_R1":risk_history[0]}
+    if len(quant_history)>1:analyst_sections['QUANT_R2']=quant_history[-1]
+    if len(risk_history)>1:analyst_sections['RISK_R2']=risk_history[-1]
     request=make_request(sources=proposal_sources({"market_data":market_data,"macro_data":source_macro_data,
         "event_brief":source_event_brief,"regime_brief":regime_brief,"portfolio_summary":portfolio_summary,
         "path_reference":reentry_reference,"valuation_brief":valuation_brief,"sentiment_brief":sentiment_brief,
         "single_invest_cap":single_invest_cap,"execution_constraint_facts":execution_constraint_facts,"analysis_as_of":report.analysis_as_of,
-        "historical_qualification":historical_qualification},
-        {"MACRO":macro_view,"QUANT_R1":quant_history[0],"QUANT_R2":quant_history[-1],"RISK_R1":risk_history[0],"RISK_R2":risk_history[-1]}),
+        "historical_qualification":historical_qualification,"position_facts":position_facts,
+        "context_id":(input_health or {}).get("context_id")},
+        analyst_sections),
         proposal={"fields":cio_parsed.get("_raw_proposal") or {},"memo":report.cio_memo,"wire":report.cio_raw_response},
         model=get_llm_config_safe()[2])
     report.reasoning_review=review_once(request,memory_root=verification_memory_root,agent_factory=_create_agent,
@@ -479,6 +508,8 @@ def run_committee(
     from openinvest.core.decision_evidence import enforce_input_health
     final_health = build_input_health(report, cio_parsed, debate_meta, input_health)
     enforce_input_health(cio_parsed, final_health)
+    from openinvest.core.committee.scenarios import decision_display_memo
+    report.cio_memo=decision_display_memo(cio_parsed,report.cio_memo,scenario_check)
     if persist_to_memory:
         _persist(report, cio_parsed, debate_meta=debate_meta, input_health=final_health)
 

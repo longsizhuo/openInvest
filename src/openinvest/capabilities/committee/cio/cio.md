@@ -89,8 +89,9 @@ TRIM_REASON: <VERDICT=TRIM 时必填：concentration | stop_loss | bearish；非
 EXIT_INTENT: <退出目的：risk_reduction | thesis_invalidated | liquidity_need | tactical_reentry；非退出写 N/A>
 HOLD_REASON: <maintain_position | wait_for_edge | user_constraint | data_untrusted；非 HOLD 写 N/A>
 MARKET_ASSESSMENT_JSON: <单行JSON：direction=bullish|bearish|uncertain|unknown、horizon、support、counterevidence、execution_data_gaps；市场判断不构成执行资格，字段未知明确写未知>
-ALTERNATIVES_JSON: <单行 JSON 数组：分别列 kind=HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY；每项含 applicability、market_evaluation（favorable|unfavorable|mixed|unknown）、exit_intent、support、counterevidence、constraint_refs、assumptions、data_gaps；风险退出与择时买回不得混成一个项，缺数据可为 unknown>
+ALTERNATIVES_JSON: <单行 JSON 数组：分别列 kind=HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY；每项含 applicability、market_evaluation（favorable|unfavorable|mixed|unknown）、exit_intent、support、counterevidence、constraint_refs（仅ASCII来源ID/字段路径，不写金额、比较式或解释）、assumptions、data_gaps；风险退出与择时买回不得混成一个项，缺数据可为 unknown>
 REVIEW_PLAN_JSON: <等待具体条件时填单行 JSON；否则 null。结构见下文，禁止每次静默重置等待价位>
+SCENARIO_ANALYSIS_JSON: <单行数组或[]；每项scenario_id、position_ref、target_price、currency、unit、assumption=no_trade、reason。只提出价格假设，不填金额计算；未知数量/成本不能改填0，不决定市场方向>
 RISK_REVIEW_PLAN_JSON: <下行风险的独立复核条件，同 REVIEW_PLAN_JSON 结构；有可监测风险条件必须登记，不能只写在 RISK_PLAN 正文；没有则 null>
 REENTRY_PRICE: <择时买回型 TRIM 填买回目标价，纯数字，**用资产的报价币种**（与路径参考同币种同单位），低于现价；止损或集中度退出无需承诺买回，可写 N/A>
 REENTRY_CONDITION: <择时买回型 TRIM 填基于当前证据的买回触发条件；止损或集中度退出可写 N/A，不得为满足格式虚构买回计划>
@@ -98,24 +99,26 @@ EXPECTED_PATH: <仅择时买回型 TRIM 写预期路径及依据；风险、投�
 
 EXECUTION_PLAN:
   mode: lump-sum | pyramid | grid | none
-  first_tranche_{{base}}: <第一笔金额>
+  first_tranche_ref: <引用SUGGESTED_ALLOC字段；不在memo复写金额>
   add_levels:
-    - <根据本次证据给出条件、价格单位、有效期和待复核金额；不是自动下单授权>
+    - <引用review_plan或scenario ID；具体价位、单位、有效期和金额只写结构化字段>
     - <第二档>
 
 RISK_PLAN:
-  stop_loss_trigger: <根据本次风险证据写出具体条件及单位，不套用固定示例数值>
+  stop_loss_ref: <引用独立risk_review_plan的条件；具体价位和单位只在结构化计划中登记>
   what_if_wrong:
-    stress_scenario_loss_{{base}}: <明确情景与损失金额；有限跌幅压力测试不是最坏损失界限，缺数据写未知>
+    scenario_refs: <引用SCENARIO_ANALYSIS_JSON中的场景ID，解释风险；金额由后端复算，不在自由文中计算资金损失/浮盈/已实现盈亏>
     recovery_estimate: <没有可核验的恢复模型时写未知；组内中位收益不能保证现有成本何时恢复>
 
 PERSONAL_NOTE:
   - <一句话评估用户当前持仓状态>
-  - <一句话本次建议在子弹中占比>
+  - <定性说明资金约束及来源；不在memo另算金额或比例>
   - <一句话心理 / 操作纪律建议>
 ```
 
 **额外要求**：
+- memo和各项支持/反证只用定性描述；不要在自由文中写货币数额、持仓数量、成本、账面盈亏或压力损失数字（包括零）。预算/交易金额、价位、数量只放各自的结构化字段与来源引用；后端负责显示准确数值。市场指标可引用，但不能伪装成账户损益。
+- 金额计算只引用后端场景结果；当前市值变化、相对成本的未实现盈亏、不交易的已实现盈亏增量是不同指标。不要输出旧的stress_scenario_loss字段或在memo另算压力损失。单个价位场景不是最大回撤、损失上限或发生概率。
 - 加仓金额须核对用户实际预算、可用资金和执行上限，不能用一条统一现金金额门槛替代。
 - 是否继续承担敞口要比较未来风险、反证与执行成本；历史盈亏不构成退出门槛。Macro 未标 risk_off、Risk 未标 high_risk，不能单独否决风险减仓或投资依据失效后的退出。不要等到亏得更多才重新评估，也不要把分析员建议的资金比例冒充用户硬约束。
 - range_bound 是既有阈值产生的分类，不能证明当前风险正常。按 regime 汇总的历史收益未必适用于本次放量破位、波动突变或新闻冲击；不能只凭该组历史反弹概率排除当前风险。

@@ -112,10 +112,10 @@ def _run_direct(monkeypatch, memo, sentiment):
         sentiment_brief=sentiment, valuation_brief_override="",
     )
     assert "verdict" in res, res
-    return res["verdict"]
+    return res["verdict"], res["report"].position_facts
 
 
-def _run_coordinator(memo, sentiment, regime_brief):
+def _run_coordinator(memo, sentiment, regime_brief, position_facts):
     from openinvest.core.runner.coordinator import save_committee_transcript
     raw = (
         "=== MACRO ===\nMOCK_MACRO\n\n"
@@ -131,7 +131,7 @@ def _run_coordinator(memo, sentiment, regime_brief):
     from openinvest.utils.base_currency import alloc_ceiling, single_invest_cap
     pm = PortfolioManager(); target = pm.strategy.get("target_assets")[0]
     df = get_history_data(SYM, "2y")
-    cid = context_id(SYM, regime_brief=regime_brief, sentiment_brief=sentiment,
+    cid = context_id(SYM, regime_brief=regime_brief, sentiment_brief=sentiment, position_facts=position_facts,
                      current_price=compute_metrics(df)["current_price"],
                      defense_dca=gold_defense_dca_plan(SYM, target, df.index),
                      alloc_ceiling=alloc_ceiling(), single_invest_cap=single_invest_cap(target, pm.strategy))
@@ -145,9 +145,9 @@ def _run_coordinator(memo, sentiment, regime_brief):
 ], ids=["gold_defense_dca", "trim_sanity5", "single_invest_cap"])
 def test_coordinator_matches_direct_postprocess(world, monkeypatch, memo, sentiment, expect_rule):
     mem, regime_brief = world
-    v_direct = _run_direct(monkeypatch, memo, sentiment)
+    v_direct, position_facts = _run_direct(monkeypatch, memo, sentiment)
     rows_direct = _ledger(mem)
-    v_coord = _run_coordinator(memo, sentiment, regime_brief)
+    v_coord = _run_coordinator(memo, sentiment, regime_brief, position_facts)
     rows_coord = _ledger(mem)
 
     assert [r["rule"] for r in rows_direct] == [expect_rule]   # 场景确实触发了干预
