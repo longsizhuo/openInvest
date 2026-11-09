@@ -139,6 +139,13 @@ def test_account_value_relationship_across_support_items_stays_visible():
     assert any(e['code']=='market_citation_account_reference_forbidden' for e in result['errors'])
 
 
+def test_overlapping_value_words_are_scanned_without_exponential_backtracking():
+    from openinvest.core.committee.scenarios import _value_link
+    assert _value_link('约为'*2000) is True
+    assert _value_link('约为'*2000+'市场风险来自') is False
+    assert _value_link('equal '*2000+'because') is False
+
+
 def test_text_protocol_citation_id_has_the_same_account_scope_boundary():
     memo='MARKET_CITATIONS_JSON: '+json.dumps([citation()],ensure_ascii=False)+'\n账户现金为[oil_report]。'
     result=validate_scenarios(None,[],memo=memo,market_sources=catalog())

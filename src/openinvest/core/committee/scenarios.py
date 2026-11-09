@@ -32,10 +32,10 @@ _CITATION_ACCOUNT_SCOPE=re.compile(r'账户|帐户|余额|你的|我的|个人|�
 _REFERENCE_FINANCIAL_LABEL=re.compile(_ACCOUNT_METRIC.pattern+'|'+_PNL_METRIC.pattern+
     r'|账户|帐户|余额|持仓|仓位|组合|资金|成本|数量|份额|股数|手数|损益|亏损|盈利|'
     r'\b(?:account|balance|portfolio|position|holdings?|quantity|cost|profit|loss)\b',re.I)
-_VALUE_LINK=re.compile(r'^(?:[\s,，:：=;；.。\[\]()（）"\'“”‘’*_`<>-]|'
+_VALUE_TOKEN=re.compile(r'(?:[\s,，:：=;；.。\[\]()（）"\'“”‘’*_`<>-]|'
     r'等于|不等于|约为|低于|高于|小于|大于|不少于|不超过|不为|不是|为|是|约|值|的|见|参考|'
     r'金额|数额|余额|数量|成本|市值|损失|亏损|盈亏|'
-    r'\b(?:is|are|equals?|equal|to|not|about|approximately|value|amount|total|balance|loss|pnl|of|at|see|reference|above|below)\b)*$',re.I)
+    r'\b(?:is|are|equals?|equal|to|not|about|approximately|value|amount|total|balance|loss|pnl|of|at|see|reference|above|below)\b)',re.I)
 
 
 def market_citation_catalog(facts):
@@ -176,8 +176,18 @@ def _account_citation_value(text, identifiers):
                 if label.end()<=reference.start():between=text[label.end():reference.start()]
                 elif reference.end()<=label.start():between=text[reference.end():label.start()]
                 else:continue  # A financial word inside the ID is not an account assertion.
-                if _VALUE_LINK.fullmatch(between):return True
+                if _value_link(between):return True
     return False
+
+
+def _value_link(text):
+    """Consume one token at a time; overlapping words must not backtrack exponentially."""
+    offset=0
+    while offset<len(text):
+        token=_VALUE_TOKEN.match(text,offset)
+        if token is None:return False
+        offset=token.end()
+    return True
 
 
 def _market_price_reference_text(text, reference):
