@@ -1,7 +1,7 @@
 {
   "id": "openinvest",
   "name": "openInvest",
-  "description": "Self-hosted multi-asset AI investment committee — 4 LLM roles debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict. Never places real orders.",
+  "description": "Portfolio ledger, market data and Agent-run investment research. Use the selected MCP connection; official remote connection is recommended, with local deployment optional.",
   "version": "0.34.4",
   "icon": "https://raw.githubusercontent.com/longsizhuo/openInvest/main/plugin/assets/logo.png",
   "skills": [

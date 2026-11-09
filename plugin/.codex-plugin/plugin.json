@@ -1,7 +1,7 @@
 {
   "name": "invest",
   "version": "0.34.4",
-  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. Ships an MCP server (incl. decision accounting: decisions / explain_decision / record_execution) + the committee-workflow skills. Backend installs from PyPI via uvx on first call — no clone, no venv. Never places real orders.",
+  "description": "Portfolio ledger, market data and Agent-run investment research. Use the selected MCP connection; official remote connection is recommended, with local deployment optional.",
   "skills": "./skills/",
   "author": {
     "name": "longsizhuo",
@@ -20,15 +20,15 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "openInvest",
-    "shortDescription": "AI investment committee & portfolio runtime",
-    "longDescription": "Four LLM roles (Macro Strategist, Quant, Risk Officer, CIO) debate any yfinance symbol and return a calibrated BUY/HOLD/SELL verdict with a written memo. Multi-currency portfolio ledger, decision accounting (which advice you followed, and the PnL of what the rules blocked), MCP tools with destructive-action hints. Backend installs from PyPI via uvx — no clone, no daemon. Never places real orders; not investment advice.",
+    "shortDescription": "Portfolio ledger and research",
+    "longDescription": "Review a multi-currency ledger, query market data, and prepare and record investment research with your Agent. Use the existing connection; choose official hosting or optional local deployment. Bookkeeping records reported activity and does not execute payments or brokerage orders.",
     "developerName": "longsizhuo",
-    "category": "Productivity",
+    "category": "Finance",
     "capabilities": [
       "Interactive",
       "Write"
     ],
-    "websiteURL": "https://github.com/longsizhuo/openInvest",
+    "websiteURL": "https://openinvest.involutionhell.com",
     "brandColor": "#4f8ef7",
     "logo": "./assets/logo.png"
   }
