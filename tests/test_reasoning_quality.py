@@ -12,10 +12,44 @@ def request():
 
 
 def response(req,issues=None):
-    issues=issues or []
+    import copy
+    issues=copy.deepcopy(issues or [])
+    for issue in issues:
+        issue.setdefault('assertion_scope','formal_event_relation' if issue['code']=='terminal_as_first_touch' else 'observed_case_fact')
+        ref=issue.get('basis_refs',[{}])[0]
+        issue.setdefault('factual_delta',{'asserted_fact_quote':issue.get('claim_quote',''),
+            'source_id':ref.get('source_id'),'source_fact_quote':ref.get('quote',''),
+            'contradiction':issue.get('explanation','Synthetic factual discrepancy')})
     checks={name:"passed" for name in CHECKS}
     if any(issue["blocking"] for issue in issues):checks["internal_consistency"]="failed"
     return {"request_sha256":req["request_sha256"],"checks":checks,"issues":issues}
+
+
+def test_current_hard_issue_requires_bound_factual_witness_not_an_investment_opinion():
+    req=request();issue={'code':'source_misquotation','blocking':True,'claim_quote':'volume increased.',
+        'basis_refs':[{'source_id':'market','quote':'RVOL 0.71'}],'explanation':'Synthetic observed-input mismatch'}
+    value=response(req,[issue])
+    assert parse_review(json.dumps(value),req)['status']=='failed'
+    for change in ('missing_scope','judgment_scope','missing_delta','wrong_claim','wrong_source','wrong_basis'):
+        import copy
+        bad=copy.deepcopy(value);row=bad['issues'][0]
+        if change=='missing_scope':row.pop('assertion_scope')
+        elif change=='judgment_scope':row['assertion_scope']='market_judgment'
+        elif change=='missing_delta':row.pop('factual_delta')
+        elif change=='wrong_claim':row['factual_delta']['asserted_fact_quote']='invented measurement'
+        elif change=='wrong_source':row['factual_delta']['source_id']='absent'
+        else:row['factual_delta']['source_fact_quote']='RVOL 1.9'
+        assert parse_review(json.dumps(bad),req)['status']=='invalid_response',change
+
+
+def test_statement_scopes_do_not_turn_opinion_or_legacy_records_into_factual_authority():
+    req=request()
+    assert 'model_market_judgment' in req['proposal_statement_scopes']['market_assessment']
+    assert 'market_judgment' not in req['factual_assertion_scopes']
+    old={**req,'policy':'cio_reasoning_quality_v5'}
+    value=response(old);parsed=parse_review(json.dumps(value),old)
+    assert parsed['status']=='passed' and parsed['policy']=='cio_reasoning_quality_v5'
+    assert parsed['trade_authorized'] is False and parsed['source_qualification_granted'] is False
 
 
 def test_correct_hold_with_unknown_budget_can_pass_without_permission_to_trade_or_learn():

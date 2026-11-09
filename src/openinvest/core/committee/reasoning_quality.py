@@ -6,12 +6,14 @@ from typing import Any
 
 from openinvest.core.evidence_eligibility import digest
 
-POLICY="cio_reasoning_quality_v5"
+POLICY="cio_reasoning_quality_v6"
 CHECKS={"source_attribution","time_and_units","arithmetic","internal_consistency",
         "constraint_authority","exit_purpose","probability_event_definition"}
 CODES={"source_misquotation","unsupported_case_fact","arithmetic_or_unit_error","internal_contradiction",
        "invented_user_constraint","risk_exit_mixed_with_tactical","terminal_as_first_touch","analysis_contract_missing"}
 REQUIRED_ALTERNATIVES={"HOLD_EXISTING","ADD","REDUCE_RISK","TACTICAL_REENTRY"}
+ASSERTION_SCOPES={'observed_case_fact','account_measurement','constraint_authority',
+                  'evidence_independence','formal_event_relation','protocol_structure'}
 
 SYSTEM_PROMPT="""You check the supplied proposal for bounded reasoning defects. You do not select an investment action,
 rewrite the proposal, predict returns, infer the user's loss tolerance from cash, or treat model agreement as independent evidence.
@@ -29,10 +31,12 @@ A no-trade realized increment of zero does not mean a zero change in current mar
 A single target price cannot establish maximum drawdown, a worst-loss bound or a forecast probability.
 Use supplied typed position qualification and backend scenario calculations; unknown quantity, mark or cost is not zero.
 Legacy freeform stress-loss amounts are not verified financial facts. The backend scenario contract is independently enforced even if your review passes.
-Check only material source, arithmetic, unit, temporal and logical errors. Subjective risk/return weighting is not a defect by itself.
+You are a factual verifier, not a second investment voter. Check falsifiable supplied facts, arithmetic, units/times, authority, evidence independence and formal event relations. You cannot veto a market opinion because its forecast, payoff preference, evidence weighting or position-sizing preference lacks empirical proof.
+Market direction, qualitative upside/downside or odds, 'small/significant' assessments without a supplied measurement standard, and uncertainty-based confidence/sizing are judgments. Record their uncertainty or unclear scope in judgment_uncertainty notes. Missing a qualified historical forecast can limit subjective confidence without being an adverse observed market fact. A disagreement about that weighting is not a factual contradiction.
+An opinion can contain a hard factual defect, but identify the distinct falsifiable premise: a fabricated measured value or calibrated probability, an actual quoted-input mismatch, wrong financial formula/unit/time, invented user authority or falsely independent evidence. Mere absence of proof for a forward market opinion is not such a premise. Do not invent a significance threshold or denominator to turn a judgment into an arithmetic error.
 Do not reject an unprofitable judgment just because later prices are known to you; use only the supplied sources and as-of context.
 Terminal-return and first-touch events differ. Valid event inclusion bounds are allowed, but cannot imply an execution guarantee.
-Separate defects from notes. An issue changes an asserted fact, measurement type/value/unit/time, evidence independence, user authority, or a necessary logical premise. A concrete financial arithmetic or authority defect remains an issue even when the selected action happens to be reasonable.
+Separate defects from notes. A hard issue needs a concrete, falsifiable factual discrepancy, authority mismatch or formal event/calculation error. A concrete financial arithmetic or authority defect remains an issue even when the selected action happens to be reasonable. A contestable premise about future market attractiveness is not a formal event or factual error.
 Editorial attribution precision or judgment uncertainty that introduces no new asserted fact, independence or authority belongs in notes, not in a defect code. Missing forecast probabilities are unknown, not evidence of unfavorable odds; a categorical contrary assertion is still a defect.
 Qualitative market-regime labels such as risk_on and risk_off are interpretations, not measured indices. When the label is correctly present in the supplied analyst opinion, the underlying observations are unchanged, and no independent confirmation is claimed, loose attribution that groups that label with observations is an editorial note. Apply this equally to positive and negative labels. This does not excuse misquoting the analyst's actual label, inventing a measured index or yield, changing measured values/units/times, converting TIP returns into observed yields, or counting the opinion as another independent observation.
 Validated market citations only establish that a quotation occurs in the supplied market/macro/reported-event text. Preserve its source kind: a normalized report is not verified truth. Such citations cannot establish an account balance, native position quotation, PnL, user permission or independent evidence. Compare assertions to the source and backend citation binding; do not treat a copied monetary market quotation as personal account arithmetic.
@@ -41,6 +45,7 @@ Return one JSON object with exactly request_sha256, checks, issues, notes. Echo 
 checks is an object containing every supplied check name once, with passed, warning, not_applicable or failed as value.
 issues is an array. Each issue has code, blocking (boolean), claim_quote (exact nonempty quote from the proposal),
 basis_refs (array of {source_id, quote}, with exact source quotes), and explanation. Use only the supplied issue codes.
+Every issue also requires assertion_scope from the supplied factual_assertion_scopes and factual_delta with exactly asserted_fact_quote, source_id, source_fact_quote, contradiction. asserted_fact_quote must be an exact nonempty subquote of claim_quote; source_fact_quote must occur exactly in the named supplied source and one basis_refs quote. contradiction must identify the concrete factual difference or formal rule/authority mismatch, not simply a debatable judgment or insufficient forecast evidence. If no such delta exists, use a note. These scope labels are not self-certification: all quoted bindings and backend contracts remain independently checked.
 An absent source can instead reference a supplied structured not_provided source; never invent an absence quote.
 No issue may recommend BUY/SELL or criticize insufficient trading activity. A blocking issue needs an actual material defect.
 No blocking issues means the limited checks found no blocking issue; this does not approve sources, trading or learning eligibility.
@@ -72,7 +77,14 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
                 "schema_version":2,**verifier_generation_limits(),"provider":provider,"runtime_model":runtime_model,
                 "endpoint_sha256":hashlib.sha256(str(endpoint).encode()).hexdigest(),
                 "temperature":0.0,"thinking":committee_role_thinking("reasoning_verifier"),"response_format":{"type":"json_object"}},
-            "required_checks":sorted(CHECKS),"issue_codes":sorted(CODES)}
+            "required_checks":sorted(CHECKS),"issue_codes":sorted(CODES),
+            "factual_assertion_scopes":sorted(ASSERTION_SCOPES),
+            "proposal_statement_scopes":{
+                "market_assessment":"model_market_judgment_with_separately_checkable_factual_premises",
+                "alternatives":"model_option_evaluation_not_measured_payoff_or_user_authority",
+                "memo":"model_analysis_not_a_source_of_observed_facts",
+                "scenario_analysis":"conditional_hypotheses_with_backend_financial_arithmetic",
+                "market_citations":"quotation_existence_not_truth_or_account_authority"}}
     return {**packet,"request_sha256":digest(packet)}
 
 
@@ -113,6 +125,7 @@ def proposal_sources(facts:dict,sections:dict) -> dict:
 
 
 def parse_review(raw:str,request:dict) -> dict:
+    policy=request.get('policy',POLICY)
     try:
         def unique_pairs(pairs):
             result={}
@@ -144,6 +157,18 @@ def parse_review(raw:str,request:dict) -> dict:
                 quote=ref.get("quote")
                 if not source or not isinstance(quote,str) or not quote or quote not in source["text"]:
                     raise ValueError("review_basis_reference")
+            if request.get('policy')==POLICY:
+                delta=issue.get('factual_delta')
+                if issue.get('assertion_scope') not in ASSERTION_SCOPES or not isinstance(delta,dict) or set(delta)!={
+                    'asserted_fact_quote','source_id','source_fact_quote','contradiction'}:
+                    raise ValueError('review_factual_scope_or_delta')
+                asserted=delta.get('asserted_fact_quote');supported=delta.get('source_fact_quote')
+                source=request['sources'].get(delta.get('source_id'))
+                if (not isinstance(asserted,str) or not asserted or asserted not in issue['claim_quote']
+                        or not source or not isinstance(supported,str) or not supported or supported not in source['text']
+                        or not any(ref.get('source_id')==delta['source_id'] and supported in ref['quote'] for ref in refs)
+                        or not isinstance(delta.get('contradiction'),str) or not delta['contradiction'].strip()):
+                    raise ValueError('review_factual_delta_binding')
         notes=value.get('notes',[])
         if not isinstance(notes,list):raise ValueError('review_notes')
         for note in notes:
@@ -159,10 +184,10 @@ def parse_review(raw:str,request:dict) -> dict:
                 if not source or not isinstance(quote,str) or not quote or quote not in source['text']:raise ValueError('review_note_basis')
         blocked=any(issue["blocking"] for issue in issues)
         if ("failed" in checks.values())!=blocked:raise ValueError("review_check_issue_mismatch")
-        return {"status":"failed" if blocked else "needs_review" if issues else "passed","policy":POLICY,"request_sha256":request["request_sha256"],
+        return {"status":"failed" if blocked else "needs_review" if issues else "passed","policy":policy,"request_sha256":request["request_sha256"],
                 "checks":checks,"issues":issues,"notes":notes,"source_qualification_granted":False,"trade_authorized":False}
     except (ValueError,TypeError,KeyError,AttributeError) as exc:
-        return {"status":"invalid_response","policy":POLICY,"request_sha256":request["request_sha256"],
+        return {"status":"invalid_response","policy":policy,"request_sha256":request["request_sha256"],
                 "error":str(exc),"source_qualification_granted":False,"trade_authorized":False}
 
 

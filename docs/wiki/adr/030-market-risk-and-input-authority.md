@@ -66,6 +66,15 @@ policies are separate execution protections and remain disclosed.
   observations is an editorial note when it adds no independent evidence or
   authority. Misquoted labels, fabricated measurements, changed units/times
   and unsupported claims of independent confirmation remain defects.
+* The verifier has no investment vote. Direction, qualitative payoff views,
+  evidence weighting, unspecified significance and uncertainty-based sizing
+  remain model judgments. Hard issues require a factual assertion scope and a
+  bound `factual_delta`: exact asserted/source quotations and the concrete
+  discrepancy, authority mismatch or formal event/calculation error. Source
+  and quote binding is machine-checked; it does not certify that the model's
+  semantic classification is correct. Independently test factual negatives
+  separately from judgment diagnostics, and preserve prior misclassifications
+  and invalid control assumptions rather than relabeling them as successes.
 * Event audit hashes bind the canonical stored event in the writer's
   transaction. Older audit-only hashes may describe incoming projections;
   their content binding remains unverified. Preserve those original records,
