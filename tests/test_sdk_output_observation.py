@@ -40,3 +40,19 @@ def test_tool_budget_final_response_uses_the_same_output_guard(monkeypatch,finis
     monkeypatch.setattr(sdk_agent,'execute_tool_call',lambda *a,**k:'{}')
     result=_ask(agent,'test')
     assert create.call_count==2 and worker_output_status(result)['unavailable']
+
+
+def test_disabled_tools_are_a_contract_not_just_an_omitted_request_parameter(monkeypatch):
+    from openinvest.capabilities import sdk_agent
+    agent=object.__new__(SDKAgent)
+    agent.system_prompt='test';agent.model='test-model';agent.temperature=.2
+    agent.enable_thinking=False;agent.enable_tools=False;agent.response_format=None;agent.max_tool_iterations=0
+    agent.telemetry_meta=TelemetryMeta()
+    tool=NS(id='tool-1',function=NS(name='synthetic',arguments='{}'))
+    response=NS(id='r',model='test-model',usage=None,choices=[NS(finish_reason='tool_calls',message=NS(content='',tool_calls=[tool]))])
+    agent.client=NS(chat=NS(completions=NS(create=Mock(return_value=response))))
+    monkeypatch.setattr(sdk_agent,'record_llm_call',lambda *a,**k:None)
+    execute=Mock();monkeypatch.setattr(sdk_agent,'execute_tool_call',execute)
+    result=_ask(agent,'synthetic')
+    assert worker_output_status(result)['unavailable'] and agent.client.chat.completions.create.call_count==1
+    execute.assert_not_called()

@@ -58,6 +58,9 @@ class VerdictConfig:
     buy_confidence_overdrive: float = 0.95  # legacy audit comparison only; no directional veto
     buy_confidence_downgrade_to: float = 0.6  # legacy audit comparison only
     alloc_cny_ceiling: float = 100_000
+    # Explicit resource budget, matching the provider's documented thinking
+    # default; this is not a market threshold or a permission to trade.
+    reasoning_verifier_max_tokens: int = 65536
     worker_unavailable_confidence_floor: float = 0.4
     # force-HOLD 时统一的 confidence 上限（Sanity 4：集中度 lens 关闭覆盖集中度减仓用）。
     # 与 worker_unavailable_confidence_floor 同默认但语义独立，便于分别 tune。

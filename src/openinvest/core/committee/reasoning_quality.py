@@ -6,7 +6,7 @@ from typing import Any
 
 from openinvest.core.evidence_eligibility import digest
 
-POLICY="cio_reasoning_quality_v2"
+POLICY="cio_reasoning_quality_v3"
 CHECKS={"source_attribution","time_and_units","arithmetic","internal_consistency",
         "constraint_authority","exit_purpose","probability_event_definition"}
 CODES={"source_misquotation","unsupported_case_fact","arithmetic_or_unit_error","internal_contradiction",
@@ -24,6 +24,11 @@ No qualified historical forecast or first-touch probability is not itself eviden
 Applicability is different from preference. Assess the supplied support and counterevidence, not whether the selected action meets a trading quota.
 Market risk needs a stated baseline and horizon. Normal asset volatility and a distant historical drawdown alone do not prove a current risk increase; cash alone does not prove ordinary market risk.
 A TIP ETF price change is not an observed real-yield change, including when an inverse relationship is asserted. Only supplied actual yield data can establish that fact.
+For financial scenarios, current-mark-to-scenario value change, cost-based unrealized PnL and realized-PnL increments have different baselines.
+A no-trade realized increment of zero does not mean a zero change in current market value. Historical realized totals require execution history.
+A single target price cannot establish maximum drawdown, a worst-loss bound or a forecast probability.
+Use supplied typed position qualification and backend scenario calculations; unknown quantity, mark or cost is not zero.
+Legacy freeform stress-loss amounts are not verified financial facts. The backend scenario contract is independently enforced even if your review passes.
 Check only material source, arithmetic, unit, temporal and logical errors. Subjective risk/return weighting is not a defect by itself.
 Do not reject an unprofitable judgment just because later prices are known to you; use only the supplied sources and as-of context.
 Terminal-return and first-touch events differ. Valid event inclusion bounds are allowed, but cannot imply an execution guarantee.
@@ -41,13 +46,24 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
     from openinvest.core.decision_evidence import _plain
     from pathlib import Path
     import hashlib
-    from openinvest.utils.llm import get_llm_config_safe,committee_role_thinking
+    from openinvest.utils.llm import get_llm_config_safe,committee_role_thinking,verifier_generation_limits
     proposal=_plain(proposal)
+    sources=dict(sources)
+    position=(sources.get('position') or {}).get('value')
+    if 'position' in sources:
+        from openinvest.core.committee.scenarios import validate_scenarios
+        fields=proposal.get('fields') or {}
+        scenarios=fields.get('scenario_analysis')
+        if fields.get('_scenario_analysis_error'):scenarios={'parse_error':fields['_scenario_analysis_error']}
+        calculation=validate_scenarios(position,scenarios,memo=proposal.get('memo',''),
+            context_id=(sources.get('analysis_context') or {}).get('value'),fields=fields)
+        sources['scenario_math']={'kind':'conditional_backend_arithmetic_not_forecast_or_permission',
+            'value':calculation,'text':json.dumps(calculation,ensure_ascii=False,sort_keys=True)}
     _,endpoint,runtime_model,provider=get_llm_config_safe()
     packet={"policy":POLICY,"sources":sources,"proposal":proposal,"verifier_model":model,
             "verifier_contract":{"system_prompt_sha256":hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
                 "implementation_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                "schema_version":1,"provider":provider,"runtime_model":runtime_model,
+                "schema_version":2,**verifier_generation_limits(),"provider":provider,"runtime_model":runtime_model,
                 "endpoint_sha256":hashlib.sha256(str(endpoint).encode()).hexdigest(),
                 "temperature":0.0,"thinking":committee_role_thinking("reasoning_verifier"),"response_format":{"type":"json_object"}},
             "required_checks":sorted(CHECKS),"issue_codes":sorted(CODES)}
@@ -69,6 +85,11 @@ def proposal_sources(facts:dict,sections:dict) -> dict:
             value=historical_reference_context(value,qualification=facts.get("historical_qualification"),
                 kind="regime" if name=="regime" else "path")
         sources[name]={"kind":kind,"text":value or "not_provided"}
+    position=facts.get('position_facts')
+    sources['position']={'kind':'typed_field_qualification_not_account_authority',
+        'value':position,'text':json.dumps(position,ensure_ascii=False,sort_keys=True) if position else 'not_provided'}
+    sources['analysis_context']={'kind':'context_identity','value':facts.get('context_id'),
+        'text':str(facts.get('context_id') or 'not_provided')}
     portfolio=str(facts.get("portfolio_summary") or "")
     user,marker,plans=portfolio.partition("=== EXISTING REVIEW PLAN ===")
     sources["account"]={"kind":"supplied_account_context_not_assumed_loss_tolerance","text":user or "not_provided"}
@@ -115,7 +136,7 @@ def parse_review(raw:str,request:dict) -> dict:
                     raise ValueError("review_basis_reference")
         blocked=any(issue["blocking"] for issue in issues)
         if ("failed" in checks.values())!=blocked:raise ValueError("review_check_issue_mismatch")
-        return {"status":"failed" if blocked else "passed","policy":POLICY,"request_sha256":request["request_sha256"],
+        return {"status":"failed" if blocked else "needs_review" if issues else "passed","policy":POLICY,"request_sha256":request["request_sha256"],
                 "checks":checks,"issues":issues,"source_qualification_granted":False,"trade_authorized":False}
     except (ValueError,TypeError,KeyError,AttributeError) as exc:
         return {"status":"invalid_response","policy":POLICY,"request_sha256":request["request_sha256"],
@@ -143,6 +164,12 @@ def alternative_contract(proposal:dict) -> dict:
 def apply_review(verdict:dict,review:dict) -> None:
     """Qualification never overwrites the market proposal or source validity."""
     verdict["reasoning_review"]=review
+    if review.get('status')=='passed' and review.get('issues'):
+        # A reported factual/logic defect cannot qualify merely because the
+        # checker assigns its own warning/non-blocking severity.
+        review={**review,'review_status_before_qualification':'passed','status':'needs_review',
+                'qualification_reason':'reported_factual_or_logic_defect'}
+        verdict['reasoning_review']=review
     if review.get("status")=="passed":return
     verdict.setdefault("_original_alloc",verdict.get("alloc_cny"))
     verdict["alloc_cny"]=0
@@ -152,11 +179,27 @@ def apply_review(verdict:dict,review:dict) -> None:
 
 def call_review(request,*,agent_factory,ask,asset):
     from openinvest.utils.llm import committee_role_thinking
+    contract=request.get('verifier_contract') or {}
+    if contract:
+        import hashlib
+        from pathlib import Path
+        from openinvest.utils.llm import get_llm_config_safe
+        _,endpoint,runtime_model,provider=get_llm_config_safe()
+        expected={'system_prompt_sha256':hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
+            'implementation_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'runtime_model':runtime_model,'provider':provider,
+            'endpoint_sha256':hashlib.sha256(str(endpoint).encode()).hexdigest()}
+        if any(contract.get(key)!=value for key,value in expected.items()):
+            return {'status':'unavailable','policy':POLICY,'request_sha256':request['request_sha256'],
+                    'reason':'verifier_runtime_contract_changed'}
     agent=agent_factory(SYSTEM_PROMPT,search_enabled=False,temperature=0.0,role="reasoning_verifier",asset=asset,
-                        round_label="cio_quality",enable_thinking=committee_role_thinking("reasoning_verifier"),response_format={"type":"json_object"})
+                        round_label="cio_quality",enable_thinking=contract.get("thinking",committee_role_thinking("reasoning_verifier")),response_format={"type":"json_object"},
+                        max_output_tokens=contract.get("max_output_tokens"),reasoning_effort=contract.get("reasoning_effort"))
     if agent is None:
         return {"status":"unavailable","policy":POLICY,"request_sha256":request["request_sha256"],"reason":"verifier_capability_unavailable"}
     raw=ask(agent,json.dumps(request,ensure_ascii=False,sort_keys=True))
     if not raw or raw.startswith("[WORKER_UNAVAILABLE] reason="):
-        return {"status":"unavailable","policy":POLICY,"request_sha256":request["request_sha256"],"reason":"verifier_call_unavailable"}
-    return {**parse_review(raw,request),"raw_response":raw}
+        return {"status":"unavailable","policy":POLICY,"request_sha256":request["request_sha256"],"reason":"verifier_call_unavailable","retryable":False}
+    result={**parse_review(raw,request),"raw_response":raw}
+    if result.get('status')=='invalid_response':result['retryable']=False
+    return result

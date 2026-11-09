@@ -96,3 +96,12 @@ def test_malformed_extra_alternative_is_a_contract_failure():
         for kind in ["HOLD_EXISTING","ADD","REDUCE_RISK","TACTICAL_REENTRY"]]
     for extra in [{"applicability":"unknown"},{"kind":[]},{"kind":"UNKNOWN"},None]:
         assert alternative_contract({"alternatives":[*valid,extra]})=={"valid":False,"reason":"alternative_kind"}
+
+
+def test_reported_quantitative_error_cannot_be_laundered_by_nonblocking_severity():
+    verdict={'verdict':'ACCUMULATE','alloc_cny':1000,'decision_status':'READY'}
+    original={'status':'passed','issues':[{'code':'arithmetic_or_unit_error','blocking':False,'claim_quote':'synthetic mathematical defect'}]}
+    apply_review(verdict,original)
+    assert original['status']=='passed'
+    assert verdict['verdict']=='ACCUMULATE' and verdict['alloc_cny']==0 and verdict['decision_status']=='REVIEW_REQUIRED'
+    assert verdict['reasoning_review']['status']=='needs_review' and verdict['reasoning_review']['review_status_before_qualification']=='passed'

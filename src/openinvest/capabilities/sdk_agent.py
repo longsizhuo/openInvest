@@ -60,11 +60,19 @@ class SDKAgent:
         telemetry_meta: Optional[TelemetryMeta] = None,
         enable_thinking: bool = False,
         response_format: Optional[Dict[str, Any]] = None,
+        max_output_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
     ):
         # caller 不传 model → 走 utils.llm.get_llm_config（按 LLM_MODEL 决定，兜底 deepseek-v4-flash）
         if model is None:
             from openinvest.utils.llm import get_llm_config_safe
             _api_key, _base, model, _provider = get_llm_config_safe()
+        if max_output_tokens is not None and (not isinstance(max_output_tokens,int) or isinstance(max_output_tokens,bool) or max_output_tokens<=0):
+            raise ValueError('max_output_tokens_requires_positive_integer')
+        if reasoning_effort not in (None,'low','high','max'):
+            raise ValueError('unsupported_reasoning_effort')
+        self.max_output_tokens=max_output_tokens
+        self.reasoning_effort=reasoning_effort
         self.system_prompt = system_prompt
         self.model = model
         self.temperature = temperature
@@ -119,7 +127,7 @@ class SDKAgent:
                     "（Claude Code）或 references/committee-protocol-hermes.md"
                     "（Hermes / 其他支持子任务委派的 agent）。"
                 )
-            self.client = OpenAI(api_key=api_key, base_url=base_url)
+            self.client = OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
         else:
             raise ValueError(f"未支持的 provider: {provider}（目前 openai / deepseek，均走 OpenAI 兼容协议）")
 
@@ -151,12 +159,14 @@ class SDKAgent:
             tool_calls_planned = len(getattr(msg, "tool_calls", None) or [])
             finish = getattr(response.choices[0], 'finish_reason', None)
             content = getattr(msg, 'content', None) or ''
-            state = ('truncated' if finish == 'length' else 'refused' if finish == 'content_filter'
+            state = ('unexpected_tools' if tool_calls_planned and not self.enable_tools else 'truncated' if finish == 'length' else 'refused' if finish == 'content_filter'
                      or getattr(msg, 'refusal', None) else 'tools' if tool_calls_planned
                      else 'text' if isinstance(content, str) and content.strip() else 'empty')
             status = {'response_id':getattr(response,'id',None), 'response_model':getattr(response,'model',None),
                 'finish_reason':finish,'output_state':state, 'content_characters':len(content),
-                'reasoning_tokens':getattr(getattr(usage,'completion_tokens_details',None),'reasoning_tokens',None)}
+                'reasoning_tokens':getattr(getattr(usage,'completion_tokens_details',None),'reasoning_tokens',None),
+                'requested_max_tokens':kwargs.get('max_tokens'),'requested_reasoning_effort':kwargs.get('reasoning_effort'),
+                'requested_thinking':(kwargs.get('extra_body') or {}).get('thinking'),'response_format':kwargs.get('response_format')}
 
             record_llm_call(
                 self.telemetry_meta,
@@ -205,6 +215,10 @@ class SDKAgent:
             "messages": messages,
             **sampling_kwargs(self.model, self.temperature),
         }
+        if getattr(self,'max_output_tokens',None) is not None:
+            kwargs['max_tokens']=self.max_output_tokens
+        if getattr(self,'reasoning_effort',None) is not None:
+            kwargs['reasoning_effort']=self.reasoning_effort
         # DeepSeek v4 / MiMo v2.5 系列默认 thinking 模式 → committee 场景 disable 走 fast 路径
         # （MiMo CIO long prompt 下 thinking 会吃完 max_tokens 导致 content 为空）。
         # 不同 provider 的 extra_body 格式不同（DeepSeek 用 dict，MiMo 用 string），helper 统一处理。
@@ -231,6 +245,8 @@ class SDKAgent:
 
             # LLM 决定调 tool
             tool_calls = getattr(msg, "tool_calls", None) or []
+            if tool_calls and not self.enable_tools:
+                return '[WORKER_UNAVAILABLE] reason=unexpected_tool_response'
             if not tool_calls:
                 # 没调 tool，直接返回文本
                 return msg.content or ""

@@ -115,3 +115,18 @@ def test_direct_failed_review_marks_bound_risk_cause_waiting(tmp_path,monkeypatc
     assert pending[0]["review_requests"][0]["request_sha256"]=="synthetic-review"
     from openinvest.services.decision_quality import findings
     assert any(row.get('resolution_state')=='rejected_proposal' and '被否决' in row['text'] for row in findings(store.root))
+
+
+def test_billed_empty_verifier_does_not_automatically_charge_same_request_again(tmp_path,monkeypatch):
+    from openinvest.core.committee.reasoning_quality import make_request
+    from openinvest.services.reasoning_review import review_once
+    monkeypatch.setattr('openinvest.paths.INVEST_ROOT',tmp_path)
+    alternatives=[{'kind':kind,'applicability':'unknown','exit_intent':{'REDUCE_RISK':'risk_reduction','TACTICAL_REENTRY':'tactical_reentry'}.get(kind)}
+        for kind in ('HOLD_EXISTING','ADD','REDUCE_RISK','TACTICAL_REENTRY')]
+    req=make_request(sources={},proposal={'fields':{'alternatives':alternatives},'memo':'synthetic qualitative judgment'})
+    called=[]
+    def ask(*args):called.append(1);return ''
+    first=review_once(req,memory_root=tmp_path/'memory',agent_factory=lambda *a,**kw:object(),ask=ask,asset='TEST')
+    second=review_once(req,memory_root=tmp_path/'memory',agent_factory=lambda *a,**kw:object(),ask=ask,asset='TEST')
+    assert first['status']=='unavailable' and first['retryable'] is False
+    assert second['replayed'] and called==[1]
