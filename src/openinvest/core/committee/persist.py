@@ -170,7 +170,7 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     original_model_memo=getattr(report,'cio_model_memo','') or report.cio_memo
     if 'scenario_validation' not in verdict:
         apply_scenario_validation(verdict,validate_scenarios(getattr(report,'position_facts',None),proposed_scenarios(verdict),
-            memo=original_model_memo,context_id=(input_health or {}).get('context_id'),fields=verdict.get('_raw_proposal')))
+            memo=original_model_memo,context_id=(input_health or {}).get('context_id'),fields=verdict.get('_raw_proposal'),market_reference=getattr(report,'market_reference',None)))
     health = build_input_health(report, verdict, debate_meta, input_health)
     from openinvest.core.decision_evidence import enforce_input_health, advice_qualified
     enforce_input_health(verdict, health)

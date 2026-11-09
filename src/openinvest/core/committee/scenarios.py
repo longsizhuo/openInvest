@@ -68,7 +68,39 @@ def _string_leaves(value,path):
         for i,item in enumerate(value):yield from _string_leaves(item,path+'.'+str(i))
 
 
-def untyped_financial_statements(memo, fields=None, *, currencies=()):
+def _market_price_reference_text(text, reference):
+    """Recognize a supplied market mark, never a coincident account amount."""
+    reference=reference or {}
+    if (reference.get('status')!='qualified' or not number(reference.get('price')) or reference['price']<=0 or not reference.get('source_ref')
+            or not reference.get('asof') or reference.get('scope')!='market_snapshot_not_position_quote'):
+        return text
+    if _ACCOUNT_METRIC.search(text) or _PNL_METRIC.search(text) or re.search(r'银行|账户|你的|我的|bank|account',text,re.I):
+        return text
+    aliases={'CNY':('CNY','人民币','元'),'USD':('USD','美元'),'AUD':('AUD','澳元'),
+             'HKD':('HKD','港元'),'JPY':('JPY','日元'),'EUR':('EUR','欧元'),'GBP':('GBP','英镑')}
+    currency=reference.get('currency');names=aliases.get(currency,(currency,))
+    names=[re.escape(name) for name in names if isinstance(name,str)]
+    if not names:return text
+    marker=re.compile(r'(?:现价|市场价格|行情快照价格|current[ -]price|market[ -]price)\s*(?:约|为|是|about|=|:|：)?\s*$',re.I)
+    pattern=re.compile(r'(?P<value>'+_NUMBER+r')\s*(?P<currency>'+('|'.join(names))+
+        r')(?:(?:/|每)\s*(?P<unit>[A-Za-z_\u4e00-\u9fff]+))?(?!\s*(?:/|每))')
+    def replace(match):
+        if not marker.search(text[:match.start()]):return match.group(0)
+        try:value=float(match['value'].replace(',',''))
+        except ValueError:return match.group(0)
+        # Only the original mark or its sealed, shared source display can
+        # round-trip. This is not an arbitrary price-rounding tolerance.
+        from openinvest.calc.timeframe_analysis import display_market_price
+        literal=reference.get('display_price_literal')
+        display_matches=(isinstance(literal,str) and literal==display_market_price(reference['price'])
+                         and value==float(literal))
+        if value<=0 or (value!=reference['price'] and not display_matches):return match.group(0)
+        if match['unit'] and canonical_unit(match['unit'])!=canonical_unit(reference.get('unit')):return match.group(0)
+        return 'MARKET_QUOTE_REFERENCE'
+    return pattern.sub(replace,text)
+
+
+def untyped_financial_statements(memo, fields=None, *, currencies=(), market_reference=None):
     """Check every retained prose leaf; only schema-shaped slots are exempt.
 
     This is an output-format contract, not a claim that a natural-language
@@ -99,6 +131,7 @@ def untyped_financial_statements(memo, fields=None, *, currencies=()):
         fragments.append(('memo',line))
     clauses=[(path,part.strip()) for path,text in fragments
              for part in re.split(r'[，；。！？;!?\n]|(?<!\d),(?!\d)|(?<!\d)\.(?!\d)',text) if part.strip()]
+    clauses=[(path,_market_price_reference_text(text,market_reference)) for path,text in clauses]
     native=[re.escape(c) for c in currencies if isinstance(c,str) and re.fullmatch('[A-Z]{3}',c)]
     native_money=(re.compile(r'(?:'+('|'.join(native))+r')\s*'+_NUMBER+r'|'+_NUMBER+r'\s*(?:'+('|'.join(native))+r')') if native else None)
     return structure+[{'code':'untyped_financial_narrative','path':path,'claim_sha256':hashlib.sha256(text.encode()).hexdigest(),
@@ -114,10 +147,10 @@ BASES={'current_market_value':'quantity_times_current_mark','scenario_market_val
        'realized_pnl_total':'execution_history_required','maximum_drawdown':'price_path_required'}
 
 
-def validate_scenarios(position, requests, *, memo='', context_id=None, fields=None):
+def validate_scenarios(position, requests, *, memo='', context_id=None, fields=None, market_reference=None):
     supplied=position if isinstance(position,dict) else {}
     currencies=[(supplied.get('quote') or {}).get('currency'),(supplied.get('cost') or {}).get('currency')]
-    errors=untyped_financial_statements(memo,{**(fields or {}),'scenario_analysis':requests},currencies=currencies);results=[]
+    errors=untyped_financial_statements(memo,{**(fields or {}),'scenario_analysis':requests},currencies=currencies,market_reference=market_reference);results=[]
     if (fields or {}).get('_duplicate_protocol_fields'):
         errors.append({'code':'duplicate_protocol_fields','fields':fields['_duplicate_protocol_fields']})
     if (fields or {}).get('_unrecognized_json_fields'):
@@ -147,6 +180,10 @@ def validate_scenarios(position, requests, *, memo='', context_id=None, fields=N
         if request.get('context_ref') is not None and request['context_ref']!=context_id:row_errors.append('scenario_context_binding_invalid')
         if request.get('assumption')!='no_trade':row_errors.append('unsupported_scenario_assumption')
         target=request.get('target_price');currency=request.get('currency');unit=request.get('unit')
+        if isinstance(unit,str) and '/' in unit:
+            prefix,denominator=unit.split('/',1)
+            if prefix!=currency:row_errors.append('scenario_unit_currency_prefix_mismatch')
+            unit=denominator
         if not number(target) or target<0:row_errors.append('scenario_target_price_invalid')
         quote=position.get('quote') or {};quantity=position.get('quantity') or {}
         if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):row_errors.append('scenario_currency_invalid')

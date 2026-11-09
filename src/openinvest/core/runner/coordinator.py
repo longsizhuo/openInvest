@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 from openinvest.core.runner.event_brief import resolve_event_brief_multi
 from openinvest.core.runner.loaders import (
-    append_event_stance_line, load_position_facts, load_prior_insights, load_sentiment_brief, load_valuation_brief,
+    append_event_stance_line, load_market_reference, load_position_facts, load_prior_insights, load_sentiment_brief, load_valuation_brief,
 )
 
 # ============================================================================
@@ -260,6 +260,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     from openinvest.services.ledger_evidence import account_source_status
     facts['ledger_evidence']=account_source_status(pm)
     facts['position_facts']=load_position_facts(symbol, pm, facts['ledger_evidence'], df_target, facts['current_price'])
+    facts['market_reference']=load_market_reference(symbol, df_target, facts['current_price'])
     from openinvest.core.runner.intervention import gold_defense_dca_plan
     from openinvest.core.decision_evidence import prepare_context
     facts["defense_dca"] = gold_defense_dca_plan(symbol, target, df_target.index)
@@ -270,8 +271,8 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     facts["single_invest_cap"]=facts["execution_constraint_facts"]["effective_amount"]
     from openinvest.core.committee.evidence import execution_constraints_context
     constraints=execution_constraints_context(facts["single_invest_cap"],facts["execution_constraint_facts"])
-    from openinvest.services.position_facts import position_facts_context
-    position_context=position_facts_context(facts['position_facts'])
+    from openinvest.services.position_facts import position_facts_context, market_reference_context
+    position_context=position_facts_context(facts['position_facts'])+'\n\n'+market_reference_context(facts['market_reference'])
     prompts = {
         "macro_strategist": build_macro_strategist_prompt()+f"\n\nANALYSIS_AS_OF: {analysis_as_of}",
         "quant_round1": build_quant_prompt(target, "opening"),
@@ -293,6 +294,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "asset": target,
         "portfolio_summary": portfolio_summary,
         "position_facts": facts['position_facts'],
+        "market_reference": facts['market_reference'],
         "macro_data": macro_data,
         # 事件层 RAG 召回（Macro 专用，与 Direct run_macro_view(event_brief=) 同口径）
         "event_brief": event_brief,
@@ -447,7 +449,7 @@ def _save_committee_transcript_once(
             "格式见 prompts.cio。本次未存档，修正后重新提交。")
     verdict["alloc_currency"] = base_currency()
     from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios
-    scenario_check=validate_scenarios(facts.get('position_facts'),proposed_scenarios(verdict),memo=cio_text,context_id=context_id,fields=verdict.get('_raw_proposal'))
+    scenario_check=validate_scenarios(facts.get('position_facts'),proposed_scenarios(verdict),memo=cio_text,context_id=context_id,fields=verdict.get('_raw_proposal'),market_reference=facts.get('market_reference'))
     apply_scenario_validation(verdict,scenario_check)
 
     from openinvest.core.committee.reasoning_quality import apply_review

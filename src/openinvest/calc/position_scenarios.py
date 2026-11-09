@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import re
 
-UNIT_ALIASES={'share':'share','shares':'share','股':'share','份':'share','unit':'share','units':'share',
+UNIT_ALIASES={'share':'share','shares':'share','per_share':'share','股':'share','份':'share','unit':'share','units':'share',
               'g':'g','gram':'g','grams':'g','克':'g',
               'oz':'oz','troy_oz':'oz','盎司':'oz'}
 

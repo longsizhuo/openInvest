@@ -6,7 +6,7 @@ from typing import Any
 
 from openinvest.core.evidence_eligibility import digest
 
-POLICY="cio_reasoning_quality_v3"
+POLICY="cio_reasoning_quality_v4"
 CHECKS={"source_attribution","time_and_units","arithmetic","internal_consistency",
         "constraint_authority","exit_purpose","probability_event_definition"}
 CODES={"source_misquotation","unsupported_case_fact","arithmetic_or_unit_error","internal_contradiction",
@@ -32,7 +32,10 @@ Legacy freeform stress-loss amounts are not verified financial facts. The backen
 Check only material source, arithmetic, unit, temporal and logical errors. Subjective risk/return weighting is not a defect by itself.
 Do not reject an unprofitable judgment just because later prices are known to you; use only the supplied sources and as-of context.
 Terminal-return and first-touch events differ. Valid event inclusion bounds are allowed, but cannot imply an execution guarantee.
-Return one JSON object with exactly request_sha256, checks, issues. Echo the supplied request_sha256.
+Separate defects from notes. An issue changes an asserted fact, measurement type/value/unit/time, evidence independence, user authority, or a necessary logical premise. A concrete financial arithmetic or authority defect remains an issue even when the selected action happens to be reasonable.
+Editorial attribution precision or judgment uncertainty that introduces no new asserted fact, independence or authority belongs in notes, not in a defect code. Missing forecast probabilities are unknown, not evidence of unfavorable odds; a categorical contrary assertion is still a defect.
+notes is an array (possibly empty) of {kind, claim_quote, basis_refs, explanation, changes_asserted_fact, changes_evidence_independence, changes_user_authority}. kind is editorial_attribution or judgment_uncertainty; all three changes flags must be false. Quotes/references must be exact as for issues. Do not use notes to downgrade an actual error.
+Return one JSON object with exactly request_sha256, checks, issues, notes. Echo the supplied request_sha256.
 checks is an object containing every supplied check name once, with passed, warning, not_applicable or failed as value.
 issues is an array. Each issue has code, blocking (boolean), claim_quote (exact nonempty quote from the proposal),
 basis_refs (array of {source_id, quote}, with exact source quotes), and explanation. Use only the supplied issue codes.
@@ -56,7 +59,8 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
         scenarios=fields.get('scenario_analysis')
         if fields.get('_scenario_analysis_error'):scenarios={'parse_error':fields['_scenario_analysis_error']}
         calculation=validate_scenarios(position,scenarios,memo=proposal.get('memo',''),
-            context_id=(sources.get('analysis_context') or {}).get('value'),fields=fields)
+            context_id=(sources.get('analysis_context') or {}).get('value'),fields=fields,
+            market_reference=(sources.get('market_reference') or {}).get('value'))
         sources['scenario_math']={'kind':'conditional_backend_arithmetic_not_forecast_or_permission',
             'value':calculation,'text':json.dumps(calculation,ensure_ascii=False,sort_keys=True)}
     _,endpoint,runtime_model,provider=get_llm_config_safe()
@@ -85,6 +89,9 @@ def proposal_sources(facts:dict,sections:dict) -> dict:
             value=historical_reference_context(value,qualification=facts.get("historical_qualification"),
                 kind="regime" if name=="regime" else "path")
         sources[name]={"kind":kind,"text":value or "not_provided"}
+    reference=facts.get('market_reference')
+    sources['market_reference']={'kind':'market_snapshot_not_native_position_quote','value':reference,
+        'text':json.dumps(reference,ensure_ascii=False,sort_keys=True) if reference else 'not_provided'}
     position=facts.get('position_facts')
     sources['position']={'kind':'typed_field_qualification_not_account_authority',
         'value':position,'text':json.dumps(position,ensure_ascii=False,sort_keys=True) if position else 'not_provided'}
@@ -111,7 +118,7 @@ def parse_review(raw:str,request:dict) -> dict:
                 result[key]=value
             return result
         value=json.loads(raw,object_pairs_hook=unique_pairs,parse_constant=lambda value:(_ for _ in ()).throw(ValueError("nonfinite_json")))
-        if not isinstance(value,dict) or set(value)!={"request_sha256","checks","issues"}:raise ValueError("review_schema")
+        if not isinstance(value,dict) or not {"request_sha256","checks","issues"}<=set(value) or set(value)-{"request_sha256","checks","issues","notes"}:raise ValueError("review_schema")
         if value["request_sha256"]!=request["request_sha256"]:raise ValueError("review_binding")
         checks=value["checks"]
         if not isinstance(checks,dict) or set(checks)!=CHECKS or any(status not in ("passed","warning","not_applicable","failed") for status in checks.values()):
@@ -134,10 +141,23 @@ def parse_review(raw:str,request:dict) -> dict:
                 quote=ref.get("quote")
                 if not source or not isinstance(quote,str) or not quote or quote not in source["text"]:
                     raise ValueError("review_basis_reference")
+        notes=value.get('notes',[])
+        if not isinstance(notes,list):raise ValueError('review_notes')
+        for note in notes:
+            if (not isinstance(note,dict) or note.get('kind') not in {'editorial_attribution','judgment_uncertainty'}
+                    or any(note.get(key) is not False for key in ('changes_asserted_fact','changes_evidence_independence','changes_user_authority'))
+                    or not isinstance(note.get('claim_quote'),str) or not note['claim_quote']
+                    or not any(note['claim_quote'] in text for text in [proposal,*texts])
+                    or not isinstance(note.get('explanation'),str) or not note['explanation']):
+                raise ValueError('review_note_scope')
+            if not isinstance(note.get('basis_refs'),list) or not note['basis_refs']:raise ValueError('review_note_basis')
+            for ref in note['basis_refs']:
+                source=request['sources'].get(ref.get('source_id'));quote=ref.get('quote')
+                if not source or not isinstance(quote,str) or not quote or quote not in source['text']:raise ValueError('review_note_basis')
         blocked=any(issue["blocking"] for issue in issues)
         if ("failed" in checks.values())!=blocked:raise ValueError("review_check_issue_mismatch")
         return {"status":"failed" if blocked else "needs_review" if issues else "passed","policy":POLICY,"request_sha256":request["request_sha256"],
-                "checks":checks,"issues":issues,"source_qualification_granted":False,"trade_authorized":False}
+                "checks":checks,"issues":issues,"notes":notes,"source_qualification_granted":False,"trade_authorized":False}
     except (ValueError,TypeError,KeyError,AttributeError) as exc:
         return {"status":"invalid_response","policy":POLICY,"request_sha256":request["request_sha256"],
                 "error":str(exc),"source_qualification_granted":False,"trade_authorized":False}

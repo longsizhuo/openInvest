@@ -104,3 +104,36 @@ def test_every_retained_text_leaf_and_wrong_json_shape_are_checked():
     assert validate_scenarios(p,[s],memo='MARKET_ASSESSMENT_JSON: "'+wrong+'"')['errors']
     s['claimed_metrics']=[{'metric':'mark_to_market_change','value':-95.13,'basis':'scenario_mark_minus_current_mark','currency':'CNY','statement':wrong}]
     assert validate_scenarios(p,[s])['errors']
+
+
+def test_combined_price_unit_is_a_lexical_alias_only_when_currency_agrees():
+    p=position();s=scenario(p);s['unit']='CNY/unit'
+    result=validate_scenarios(p,[s])
+    assert not result['errors'] and result['results'][0]['metrics']['mark_to_market_change']['value']==pytest.approx(-95.13)
+    s['unit']='USD/unit'
+    assert any(e['code']=='scenario_unit_currency_prefix_mismatch' for e in validate_scenarios(p,[s])['errors'])
+
+
+def test_only_same_market_price_and_unit_may_reference_the_supplied_mark():
+    ref={'price':3954.5,'currency':'USD','unit':'oz','status':'qualified','source_ref':'sealed-market-source','scope':'market_snapshot_not_position_quote','asof':'2026-10-30T13:15:55Z'}
+    assert not validate_scenarios(None,[],memo='市场判断：现价约3954.50美元/盎司',market_reference=ref)['errors']
+    for text in ['市场判断：现价约3954.50人民币/克','市场判断：现价约3954.50美元/克',
+                 '账户账面亏损为3954.50美元','市场判断：现价约3955美元/盎司',
+                 '市场现价约3954.50美元/盎司，但账户亏损0 CNY']:
+        assert validate_scenarios(None,[],memo=text,market_reference=ref)['errors']
+
+
+def test_per_share_is_an_explicit_same_unit_alias_not_a_currency_conversion():
+    p=position();s=scenario(p);s['unit']='per_share'
+    assert not validate_scenarios(p,[s])['errors']
+
+
+def test_market_reference_consumes_unknown_units_and_requires_the_same_positive_price():
+    ref={'status':'qualified','price':3954.5,'currency':'USD','unit':'oz','asof':'2026-10-30',
+         'scope':'market_snapshot_not_position_quote','source_ref':'source:supplied'}
+    for text in ('现价3954.50美元/公斤','现价3954.50美元/100g','现价3954.50美元/oz/kg',
+                 '现价3954.5049美元/盎司'):
+        assert validate_scenarios(None,[],memo=text,market_reference=ref)['errors'],text
+    ref.update(price=.004,unit='share')
+    assert validate_scenarios(None,[],memo='现价0 USD/share',market_reference=ref)['errors']
+    assert not validate_scenarios(None,[],memo='现价0.004 USD/share',market_reference=ref)['errors']

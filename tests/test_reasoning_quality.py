@@ -105,3 +105,22 @@ def test_reported_quantitative_error_cannot_be_laundered_by_nonblocking_severity
     assert original['status']=='passed'
     assert verdict['verdict']=='ACCUMULATE' and verdict['alloc_cny']==0 and verdict['decision_status']=='REVIEW_REQUIRED'
     assert verdict['reasoning_review']['status']=='needs_review' and verdict['reasoning_review']['review_status_before_qualification']=='passed'
+
+
+def test_source_bound_editorial_note_does_not_become_a_new_directional_veto():
+    req=request();raw=response(req)
+    raw['notes']=[{'kind':'editorial_attribution','claim_quote':'HOLD, volume increased.',
+        'basis_refs':[{'source_id':'market','quote':'RVOL 0.71'}],'explanation':'Synthetic note fixture, not a factual-defect assertion.',
+        'changes_asserted_fact':False,'changes_evidence_independence':False,'changes_user_authority':False}]
+    review=parse_review(json.dumps(raw),req)
+    assert review['status']=='passed' and review['notes'] and not review['issues']
+    verdict={'verdict':'HOLD','alloc_cny':0};apply_review(verdict,review)
+    assert verdict['reasoning_review']['status']=='passed' and verdict['verdict']=='HOLD'
+
+
+def test_note_channel_cannot_declare_a_changed_fact_or_authority_as_harmless():
+    req=request();raw=response(req)
+    raw['notes']=[{'kind':'judgment_uncertainty','claim_quote':'HOLD, volume increased.',
+        'basis_refs':[{'source_id':'market','quote':'RVOL 0.71'}],'explanation':'Synthetic invalid note.',
+        'changes_asserted_fact':True,'changes_evidence_independence':False,'changes_user_authority':False}]
+    assert parse_review(json.dumps(raw),req)['status']=='invalid_response'

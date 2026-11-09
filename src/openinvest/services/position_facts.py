@@ -133,6 +133,100 @@ def build_position_facts(symbol, *, holding=None, ledger_evidence=None, frame=No
     return {**snapshot, 'position_ref': digest(snapshot)}
 
 
+def build_market_reference(symbol, *, frame=None, current_price=None):
+    """Describe a supplied native market snapshot, independently of a wallet.
+
+    A completed close is a dated reference, not a fresh executable quotation.
+    No holdings, costs, account currency, source grants or network IO enter this
+    snapshot. It is deliberately outside the position content-address.
+    """
+    from openinvest.services.symbol_map import canonical_symbol
+    from openinvest.utils.market_observation import frame_observation, observation_now, utc_time
+    from openinvest.utils.quotes import _native_contract, _fx_contract
+    unknown = {'price': None, 'currency': None, 'unit': None, 'asof': None,
+               'status': 'unknown', 'source_ref': None,
+               'scope': 'market_snapshot_not_position_quote', 'price_basis': None,
+               'freshness': 'unknown', 'market_state': 'unknown', 'is_fresh': False}
+    symbol = str(symbol)
+    if frame is None or frame.empty or 'Close' not in frame:
+        return unknown
+    price = _number(frame['Close'].iloc[-1], positive=True)
+    if price is None or _number(current_price, positive=True) != price:
+        return unknown
+    source = frame_observation(frame)
+    if (source.get('contract') != 'openinvest.market_observation.v1'
+            or not isinstance(source.get('fetch_status'), str) or source['fetch_status'] not in {'ok', 'cached'}
+            or source.get('latest_price_observed') is not True
+            or source.get('history_basis_qualified') is not True
+            or not isinstance(source.get('price_basis'), str) or source['price_basis'] not in {'adjusted_close', 'raw_close', 'fx_rate'}
+            or not source.get('symbol') or canonical_symbol(source['symbol']) != canonical_symbol(symbol)):
+        return unknown
+    try:
+        import pandas as pd
+        if not source.get('bar_asof') or pd.Timestamp(source['bar_asof']) != pd.Timestamp(frame.index[-1]):
+            return unknown
+    except (TypeError, ValueError):
+        return unknown
+    contract = _native_contract(source, symbol)
+    fx = _fx_contract(symbol)
+    if fx is not None:
+        base, currency = fx
+        if _currency(source.get('currency')) != currency:
+            return unknown
+        if any(source.get(key) and canonical_symbol(source[key]) != canonical_symbol(symbol)
+               for key in ('symbol', 'provider_symbol')):
+            return unknown
+        contract = (currency, base, {base})
+    if contract is None:
+        return unknown
+    currency, unit, _ = contract
+    unit = _unit(unit)
+    if _currency(currency) is None or unit is None:
+        return unknown
+    now, received = utc_time(observation_now()), utc_time(source.get('received_at'))
+    if now is None or received is None or received > now:
+        return unknown
+    state = source.get('market_state')
+    state = state if isinstance(state, str) and state in {'open', 'closed', 'unknown'} else 'unknown'
+    fresh = source.get('quote_fresh') is True and state == 'open'
+    stamp = utc_time(source.get('quote_asof')) if fresh else None
+    if not fresh:
+        label = frame.index[-1].date().isoformat()
+        dates = source.get('completed_session_dates')
+        ends = source.get('completion_ends')
+        if (source.get('interval') != '1d' or source.get('latest_bar_completed') is not True
+                or source.get('session_date') != label or not isinstance(dates, list) or label not in dates
+                or not isinstance(ends, Mapping)):
+            return unknown
+        stamp = utc_time(ends.get(label))
+    if stamp is None or not stamp <= received:
+        return unknown
+    from openinvest.calc.timeframe_analysis import display_market_price
+    literal=display_market_price(price)
+    try:
+        reference = 'market_reference:' + digest({'symbol': symbol, 'price': price,
+            'display_price_literal':literal,
+            'currency': currency, 'unit': unit, 'asof': stamp.isoformat(),
+            'scope': unknown['scope'], 'bar': str(frame.index[-1]), 'source_observation': source})
+    except (TypeError, ValueError):
+        return unknown
+    return {**unknown, 'price': price, 'display_price_literal':literal, 'currency': currency, 'unit': unit,
+            'asof': stamp.isoformat(), 'status': 'qualified', 'source_ref': reference,
+            'price_basis': source['price_basis'], 'is_fresh': fresh,
+            'freshness': 'observed_quote' if fresh else 'completed_session_reference',
+            'market_state': state}
+
+
+def market_reference_context(reference):
+    """Keep a dated market-price reference separate from position money."""
+    import json
+    return ('=== TYPED MARKET REFERENCE ===\n' + json.dumps(reference, ensure_ascii=False, sort_keys=True)
+            + '\nThis is only an asof market snapshot, not a position/bank quotation, PnL, '
+              'loss budget or trade permission. is_fresh=false never means a current executable price; '
+              'retain the stated asof when describing a completed-session reference. '
+              'Do not infer wallet quantity, cost, currency conversion or realized loss from this price.')
+
+
 def position_facts_context(facts):
     """Render sealed facts and computed baselines without granting authority."""
     import json

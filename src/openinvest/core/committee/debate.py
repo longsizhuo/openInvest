@@ -71,6 +71,7 @@ class CommitteeReport:
     source_event_brief: str = ""
     historical_qualification: Dict[str,Any] = field(default_factory=dict)
     position_facts: Dict[str,Any] = field(default_factory=dict)
+    market_reference: Dict[str,Any] = field(default_factory=dict)
     cio_model_memo: str = ""
 
     def to_cio_brief(self) -> str:
@@ -86,6 +87,9 @@ class CommitteeReport:
         if self.position_facts:
             from openinvest.services.position_facts import position_facts_context
             lines.append(position_facts_context(self.position_facts))
+        if self.market_reference:
+            from openinvest.services.position_facts import market_reference_context
+            lines.append(market_reference_context(self.market_reference))
         # 确定性事实块（必须纳入推理，非投票）：估值 + 情绪表盘
         if self.valuation_brief:
             lines.append(
@@ -143,6 +147,7 @@ def run_committee(
     execution_constraint_facts=None,
     historical_qualification=None,
     position_facts=None,
+    market_reference=None,
 ) -> Dict[str, Any]:
     """对单个资产跑 Macro + Quant/Risk 多轮辩论 + CIO
 
@@ -197,6 +202,7 @@ def run_committee(
         source_event_brief=source_event_brief,
         historical_qualification=historical_qualification or {},
         position_facts=position_facts or {},
+        market_reference=market_reference or {},
     )
     from openinvest.core.committee.agent_io import worker_output_status
     worker_calls=[];worker_outputs=[]
@@ -262,6 +268,9 @@ def run_committee(
     risk_input_r1=risk_opening_context(asset,market_data,portfolio_summary,prior_insights=prior_insights,
         regime_brief=regime_brief,sentiment_brief=sentiment_brief,historical_qualification=historical_qualification,
         single_invest_cap=single_invest_cap,execution_constraint_facts=execution_constraint_facts,position_facts=position_facts)
+    if market_reference:
+        from openinvest.services.position_facts import market_reference_context
+        risk_input_r1 += '\n\n' + market_reference_context(market_reference)
     quant_agent_r1 = _create_agent(
         build_quant_prompt(asset, "opening"), search_enabled=False,
         role="quant", asset=sym, round_label="opening",
@@ -458,7 +467,7 @@ def run_committee(
     cio_parsed["alloc_currency"] = base_currency()
     from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios
     scenario_check=validate_scenarios(position_facts,proposed_scenarios(cio_parsed),memo=report.cio_memo,
-        context_id=(input_health or {}).get('context_id'),fields=cio_parsed.get('_raw_proposal'))
+        context_id=(input_health or {}).get('context_id'),fields=cio_parsed.get('_raw_proposal'),market_reference=market_reference)
     if duplicate_cio_json:
         scenario_check['errors'].append({'code':'duplicate_cio_json_key'})
         scenario_check['status']='invalid'
@@ -474,7 +483,7 @@ def run_committee(
         "event_brief":source_event_brief,"regime_brief":regime_brief,"portfolio_summary":portfolio_summary,
         "path_reference":reentry_reference,"valuation_brief":valuation_brief,"sentiment_brief":sentiment_brief,
         "single_invest_cap":single_invest_cap,"execution_constraint_facts":execution_constraint_facts,"analysis_as_of":report.analysis_as_of,
-        "historical_qualification":historical_qualification,"position_facts":position_facts,
+        "historical_qualification":historical_qualification,"position_facts":position_facts,"market_reference":market_reference,
         "context_id":(input_health or {}).get("context_id")},
         analyst_sections),
         proposal={"fields":cio_parsed.get("_raw_proposal") or {},"memo":report.cio_memo,"wire":report.cio_raw_response},

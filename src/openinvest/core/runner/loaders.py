@@ -20,6 +20,11 @@ def load_position_facts(symbol, pm, ledger_evidence, frame, current_price, *, ad
     return build_position_facts(symbol, holding=holding,
         ledger_evidence=None if advisory else ledger_evidence, frame=frame, current_price=current_price)
 
+def load_market_reference(symbol, frame, current_price):
+    """Use the supplied market frame only; never inspect a position or fetch."""
+    from openinvest.services.position_facts import build_market_reference
+    return build_market_reference(symbol, frame=frame, current_price=current_price)
+
 def load_prior_insights(asset: Dict[str, Any], pm: Optional[PortfolioManager] = None) -> str:
     """读 memory/insights/*.md → Dreaming 长期行为模式
 
@@ -209,6 +214,7 @@ def _build_default_portfolio_summary(pm: PortfolioManager) -> str:
         )
 
 __all__ = [
+    "load_market_reference",
     "load_position_facts",
     "append_event_stance_line",
     "load_prior_insights",

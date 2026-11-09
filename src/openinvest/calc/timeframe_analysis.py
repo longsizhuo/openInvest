@@ -7,9 +7,16 @@
 from __future__ import annotations
 
 from typing import Optional
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
+
+
+def display_market_price(value):
+    """The exact source display, preserving a positive sub-tick price."""
+    text=f'{value:.4f}'
+    return format(Decimal(str(value)),'f') if value>0 and float(text)==0 else text
 
 
 def _apply_cutoff(df: pd.DataFrame, as_of_date: Optional[str]) -> pd.DataFrame:
@@ -146,7 +153,7 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str, *, include_source_ti
     report_lines = [
         f"--- {title} ANALYSIS ---",
         # RSI(14) 为 Wilder 平滑（与 TradingView/券商口径一致）
-        f"Current Price: {current_price:.4f} | RSI(14, Wilder): {rsi_str}",
+        f"Current Price: {display_market_price(current_price)} | RSI(14, Wilder): {rsi_str}",
     ]
 
     if pos is not None:
