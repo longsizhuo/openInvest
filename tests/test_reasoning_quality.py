@@ -12,10 +12,44 @@ def request():
 
 
 def response(req,issues=None):
-    issues=issues or []
+    import copy
+    issues=copy.deepcopy(issues or [])
+    for issue in issues:
+        issue.setdefault('assertion_scope','formal_event_relation' if issue['code']=='terminal_as_first_touch' else 'observed_case_fact')
+        ref=issue.get('basis_refs',[{}])[0]
+        issue.setdefault('factual_delta',{'asserted_fact_quote':issue.get('claim_quote',''),
+            'source_id':ref.get('source_id'),'source_fact_quote':ref.get('quote',''),
+            'contradiction':issue.get('explanation','Synthetic factual discrepancy')})
     checks={name:"passed" for name in CHECKS}
     if any(issue["blocking"] for issue in issues):checks["internal_consistency"]="failed"
     return {"request_sha256":req["request_sha256"],"checks":checks,"issues":issues}
+
+
+def test_current_hard_issue_requires_bound_factual_witness_not_an_investment_opinion():
+    req=request();issue={'code':'source_misquotation','blocking':True,'claim_quote':'volume increased.',
+        'basis_refs':[{'source_id':'market','quote':'RVOL 0.71'}],'explanation':'Synthetic observed-input mismatch'}
+    value=response(req,[issue])
+    assert parse_review(json.dumps(value),req)['status']=='failed'
+    for change in ('missing_scope','judgment_scope','missing_delta','wrong_claim','wrong_source','wrong_basis'):
+        import copy
+        bad=copy.deepcopy(value);row=bad['issues'][0]
+        if change=='missing_scope':row.pop('assertion_scope')
+        elif change=='judgment_scope':row['assertion_scope']='market_judgment'
+        elif change=='missing_delta':row.pop('factual_delta')
+        elif change=='wrong_claim':row['factual_delta']['asserted_fact_quote']='invented measurement'
+        elif change=='wrong_source':row['factual_delta']['source_id']='absent'
+        else:row['factual_delta']['source_fact_quote']='RVOL 1.9'
+        assert parse_review(json.dumps(bad),req)['status']=='invalid_response',change
+
+
+def test_statement_scopes_do_not_turn_opinion_or_legacy_records_into_factual_authority():
+    req=request()
+    assert 'model_market_judgment' in req['proposal_statement_scopes']['market_assessment']
+    assert 'market_judgment' not in req['factual_assertion_scopes']
+    old={**req,'policy':'cio_reasoning_quality_v5'}
+    value=response(old);parsed=parse_review(json.dumps(value),old)
+    assert parsed['status']=='passed' and parsed['policy']=='cio_reasoning_quality_v5'
+    assert parsed['trade_authorized'] is False and parsed['source_qualification_granted'] is False
 
 
 def test_correct_hold_with_unknown_budget_can_pass_without_permission_to_trade_or_learn():
@@ -76,7 +110,7 @@ def test_verifier_receives_the_same_config_policy_without_claiming_user_intent()
     text=sources["constraints"]["text"]
     assert '"concentration_lens_enabled": false' in text
     assert '"authority": "effective_configuration_not_verified_user_intent"' in text
-    assert '"scope": "tactical_reentry_only_not_risk_or_needs_exits"' in text
+    assert '"legacy_tactical_pnl_filter": "unvalidated_policy_excluded_from_market_judgment"' in text
 
 
 def test_review_cache_key_changes_with_prompt_or_effective_model_config(monkeypatch):
@@ -96,3 +130,31 @@ def test_malformed_extra_alternative_is_a_contract_failure():
         for kind in ["HOLD_EXISTING","ADD","REDUCE_RISK","TACTICAL_REENTRY"]]
     for extra in [{"applicability":"unknown"},{"kind":[]},{"kind":"UNKNOWN"},None]:
         assert alternative_contract({"alternatives":[*valid,extra]})=={"valid":False,"reason":"alternative_kind"}
+
+
+def test_reported_quantitative_error_cannot_be_laundered_by_nonblocking_severity():
+    verdict={'verdict':'ACCUMULATE','alloc_cny':1000,'decision_status':'READY'}
+    original={'status':'passed','issues':[{'code':'arithmetic_or_unit_error','blocking':False,'claim_quote':'synthetic mathematical defect'}]}
+    apply_review(verdict,original)
+    assert original['status']=='passed'
+    assert verdict['verdict']=='ACCUMULATE' and verdict['alloc_cny']==0 and verdict['decision_status']=='REVIEW_REQUIRED'
+    assert verdict['reasoning_review']['status']=='needs_review' and verdict['reasoning_review']['review_status_before_qualification']=='passed'
+
+
+def test_source_bound_editorial_note_does_not_become_a_new_directional_veto():
+    req=request();raw=response(req)
+    raw['notes']=[{'kind':'editorial_attribution','claim_quote':'HOLD, volume increased.',
+        'basis_refs':[{'source_id':'market','quote':'RVOL 0.71'}],'explanation':'Synthetic note fixture, not a factual-defect assertion.',
+        'changes_asserted_fact':False,'changes_evidence_independence':False,'changes_user_authority':False}]
+    review=parse_review(json.dumps(raw),req)
+    assert review['status']=='passed' and review['notes'] and not review['issues']
+    verdict={'verdict':'HOLD','alloc_cny':0};apply_review(verdict,review)
+    assert verdict['reasoning_review']['status']=='passed' and verdict['verdict']=='HOLD'
+
+
+def test_note_channel_cannot_declare_a_changed_fact_or_authority_as_harmless():
+    req=request();raw=response(req)
+    raw['notes']=[{'kind':'judgment_uncertainty','claim_quote':'HOLD, volume increased.',
+        'basis_refs':[{'source_id':'market','quote':'RVOL 0.71'}],'explanation':'Synthetic invalid note.',
+        'changes_asserted_fact':True,'changes_evidence_independence':False,'changes_user_authority':False}]
+    assert parse_review(json.dumps(raw),req)['status']=='invalid_response'

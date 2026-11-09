@@ -55,13 +55,13 @@ def test_publication_check_and_copy_use_the_same_event_snapshot(tmp_path,monkeyp
     writer,eid=seed_public(source,claim="PRIVATE OLD SUMMARY")
     read=EventStore.get_event_with_sources
     updated=False
-    def update_before_qualified_snapshot(reader,event_id):
+    def update_before_qualified_snapshot(reader,event_id,**kwargs):
         nonlocal updated
         if reader.data_root==source and not updated:
             updated=True
             writer.upsert_event({**writer.get_event(eid,purpose="audit"),"one_line_claim":"APPROVED PUBLIC SUMMARY"},revision=True)
             approve_event_reporting(writer,eid);approve_public_event(writer,eid)
-        return read(reader,event_id)
+        return read(reader,event_id,**kwargs)
     monkeypatch.setattr(EventStore,"get_event_with_sources",update_before_qualified_snapshot)
     sync_public_events(source,target,{"reuters.com"})
     replica=EventStore(str(target/"db/events.db"))

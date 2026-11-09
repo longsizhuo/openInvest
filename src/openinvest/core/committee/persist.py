@@ -9,6 +9,8 @@ inner import（utils.exchange_fee.get_history_data）保持函数内，测试 pa
 """
 from __future__ import annotations
 
+from openinvest.core.evidence_eligibility import digest
+
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -83,6 +85,21 @@ def build_input_health(report: "CommitteeReport", verdict: Dict[str, Any],
         unavailable=sorted({call["role"] for call in calls if call.get("used",True) and call["unavailable"]})
         health["worker_calls"]=calls
     health["worker_unavailable"] = unavailable
+    from openinvest.core.committee.role_health import risk_output_health
+    risk_history=(debate_meta or {}).get('risk_history')
+    if risk_history is None:
+        risk_history=[report.risk_view]
+        if getattr(report,'risk_adjusted',''):risk_history.append(report.risk_adjusted)
+    health['role_health']=[risk_output_health(text,'RISK_R'+str(i+1)) for i,text in enumerate(risk_history)]
+    health['model_output_errors']=[{'role':row['role'],'round':row['round'],
+        'output_sha256':row['output_sha256'],'contract_version':row['contract_version'],
+        'reason':'model_output_'+row['structure'],'issue_refs':row['issue_refs']}
+        for row in health['role_health'] if row['structure'] in {'incomplete','invalid'}]
+    scenario=verdict.get('scenario_validation') or {}
+    health['scenario_validation']={key:scenario[key] for key in ('status','position_ref','errors','memo_sha256') if key in scenario}
+    health['model_output_errors'].extend({'role':'cio','round':'CIO','reason':item['code'],
+        'output_sha256':scenario.get('memo_sha256'),'issue_refs':[digest(item)]}
+        for item in scenario.get('errors',[]))
     if debate_meta:
         if debate_meta.get("model") is not None:
             health["model"] = debate_meta["model"]
@@ -149,6 +166,13 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     # verdict_review 事后归因会用错时间窗口的 VIX 值算 macro_shock。
     macro_ctx = _capture_macro_context(as_of_date=date_override)
     run_at = date_override or datetime.now().isoformat(timespec="seconds")
+    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,decision_display_memo,market_citation_catalog
+    original_model_memo=getattr(report,'cio_model_memo','') or report.cio_memo
+    if 'scenario_validation' not in verdict:
+        apply_scenario_validation(verdict,validate_scenarios(getattr(report,'position_facts',None),proposed_scenarios(verdict),
+            memo=original_model_memo,context_id=(input_health or {}).get('context_id'),fields=verdict.get('_raw_proposal'),market_reference=getattr(report,'market_reference',None),
+            market_sources=market_citation_catalog({'market_data':report.market_data,'macro_data':report.source_macro_data,
+                                                   'event_brief':report.source_event_brief})))
     health = build_input_health(report, verdict, debate_meta, input_health)
     from openinvest.core.decision_evidence import enforce_input_health, advice_qualified
     enforce_input_health(verdict, health)
@@ -160,14 +184,16 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
         except (OSError, ValueError, KeyError, TypeError) as e:
             verdict.setdefault("_original_verdict", verdict.get("verdict"))
             verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
-            verdict.update(verdict="UNCLEAR" if verdict.get("proposal_available") is False else "HOLD", alloc_cny=0, confidence=0.0,
+            verdict.update(verdict="UNCLEAR", alloc_cny=0, confidence=0.0,
                            decision_status="DATA_UNTRUSTED", hold_reason="context_changed")
             health.update(decision_status="DATA_UNTRUSTED", context_error=str(e))
             report.cio_memo = "[QUALITY_ALERT] DATA_UNTRUSTED：输入或规则在分析期间变化，请重新分析。\n\n" + report.cio_memo
+    report.cio_memo=("[AUDIT_ONLY] 历史研究原文；不授予当前建议、交易或学习资格。\n\n"+original_model_memo
+                     if output_dir is not None else decision_display_memo(verdict,original_model_memo,verdict['scenario_validation']))
     from openinvest.core.decision_evidence import record_decision
     evidence = record_decision(store.root, report.asset.get("symbol", ""),
                                {"cio_memo": report.cio_memo,"cio_raw_response":getattr(report,"cio_raw_response",""),
-                                "cio_attempts":getattr(report,"cio_attempts",[]),"fields": verdict.get("_raw_proposal"),
+                                "cio_attempts":getattr(report,"cio_attempts",[]),"original_model_memo":original_model_memo,"fields": verdict.get("_raw_proposal"),
                                 "macro": report.macro_view, "quant": report.quant_view,
                                 "risk": report.risk_view,"worker_outputs":(debate_meta or {}).get("worker_outputs",[]),
                                 "quant_history":(debate_meta or {}).get("quant_history",[]),"risk_history":(debate_meta or {}).get("risk_history",[])}, verdict, health,

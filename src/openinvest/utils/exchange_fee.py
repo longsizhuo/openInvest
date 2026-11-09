@@ -1,9 +1,14 @@
 import os
 import math
 import time
+import weakref
+import hashlib
+import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
+from datetime import timezone
 
 import numpy as np
 import pandas as pd
@@ -32,6 +37,144 @@ from openinvest.calc.transaction_costs import (  # noqa: F401
 )
 
 _STORE = MarketStore()
+_SOURCE_METADATA = weakref.WeakKeyDictionary()
+
+
+def _source_cache(symbol):
+    return _SOURCE_METADATA.setdefault(_STORE, {}).setdefault(symbol, {})
+
+
+def _clock_age(key):
+    try:
+        value = _STORE.seconds_since_fetch(key)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float('inf')
+    except (AttributeError, TypeError, ValueError):
+        return float('inf')
+
+
+def _clock_stamp(key):
+    age = _clock_age(key)
+    return datetime.fromtimestamp(time.time()-age, timezone.utc).isoformat() if math.isfinite(age) and age >= 0 else None
+
+
+def _frame_signature(frame):
+    return hashlib.sha256(frame.to_json(date_format='iso').encode()).hexdigest()
+
+
+def _source_json(value):
+    if hasattr(value,'isoformat'):
+        return value.isoformat()
+    if isinstance(value,np.generic):
+        return value.item()
+    if isinstance(value,pd.DataFrame):
+        return value.to_dict('records')
+    raise TypeError('unsupported source metadata value')
+
+
+def _persist_source(symbol, saved):
+    """Share the original acquisition witness, never a refreshed cache clock."""
+    try:
+        value = {key:saved[key] for key in ('provider','metadata','basis','signature','received_at','failed','observed_prices')}
+        payload = json.dumps({'schema':1,'symbol':symbol,**value},sort_keys=True,separators=(',',':'),default=_source_json)
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        with _STORE._lock, _STORE.conn:
+            _STORE.conn.execute('CREATE TABLE IF NOT EXISTS source_observation_cache '
+                                '(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,sha256 TEXT NOT NULL)')
+            _STORE.conn.execute('INSERT INTO source_observation_cache VALUES(?,?,?) '
+                'ON CONFLICT(symbol) DO UPDATE SET payload=excluded.payload,sha256=excluded.sha256',
+                (symbol,payload,digest))
+    except (sqlite3.Error,AttributeError,TypeError):
+        pass  # An unavailable cache never creates source qualification.
+
+
+def _restore_source(symbol, signature):
+    from openinvest.utils.market_observation import utc_time
+    try:
+        with _STORE._lock:
+            if not _STORE.conn.execute("SELECT 1 FROM sqlite_master WHERE name='source_observation_cache'").fetchone():
+                return None
+            row = _STORE.conn.execute('SELECT payload,sha256 FROM source_observation_cache WHERE symbol=?',(symbol,)).fetchone()
+        if row is None or hashlib.sha256(row[0].encode()).hexdigest() != row[1]:
+            return None
+        value = json.loads(row[0])
+        if (type(value.get('schema')) is not int or value['schema'] != 1
+                or value.get('symbol') != symbol or value.get('signature') != signature
+                or value.get('provider') not in {'yfinance','equibles','betashares'}
+                or not isinstance(value.get('metadata'),dict) or not isinstance(value.get('observed_prices'),dict)
+                or not isinstance(value.get('failed'),bool) or not isinstance(value.get('basis'),str)
+                or utc_time(value.get('received_at')) is None):
+            return None
+        if any(not isinstance(day,str) or isinstance(price,bool) or not isinstance(price,(int,float))
+               or not math.isfinite(price) for day,price in value['observed_prices'].items()):
+            return None
+        return value
+    except (sqlite3.Error,AttributeError,TypeError,ValueError):
+        return None
+
+
+def _history_basis(store, symbol, frame):
+    """An issuer NAV cannot silently become an exchange-traded close series."""
+    try:
+        with store._lock:
+            rows = store.conn.execute('SELECT date,source FROM daily_prices WHERE symbol=?',(symbol,)).fetchall()
+            store.conn.rollback()
+        sources = {str(row[0]):str(row[1] or '') for row in rows}
+        selected = [sources.get(index.date().isoformat(),'unknown') for index in frame.index]
+        # A successful alternative quote does not attest that its scale can be
+        # spliced into the provider-adjusted historical series.
+        compatible = all(value.startswith('yfinance') for value in selected)
+        return {'history_basis_qualified':bool(selected) and compatible,
+                'history_basis':'compatible_adjusted_closes' if compatible else 'mixed_or_unverified_reference',
+                'last_row_source':selected[-1] if selected else None}
+    except (AttributeError,TypeError,ValueError):
+        return {'history_basis_qualified':False,'history_basis':'unverified_reference'}
+
+
+def _history_source(frame, symbol, *, provider=None, metadata=None, basis='adjusted_close', failed=False, received_at=None,
+                    observed_prices=None):
+    from openinvest.utils.market_observation import history_observation,utc_time
+    saved = _source_cache(symbol)
+    signature = _frame_signature(frame)
+    if provider is not None:
+        saved.update(provider=provider, metadata=metadata or {}, basis=basis, signature=signature,
+                     received_at=received_at or datetime.now(timezone.utc).isoformat(), failed=failed,
+                     observed_prices=dict(observed_prices or {}))
+        _persist_source(symbol,saved)
+    else:
+        restored = _restore_source(symbol,signature)
+        if (restored and (saved.get('signature') != signature or utc_time(saved.get('received_at')) is None
+                          or utc_time(restored['received_at']) >= utc_time(saved['received_at']))):
+            saved.update(restored)
+    aligned = saved.get('signature') == signature
+    selected = saved.get('provider', 'cache_unverified') if aligned else 'cache_unverified'
+    source_failed = failed or saved.get('failed', False)
+    if aligned and selected == 'yfinance':
+        source_failed = source_failed or _clock_age('ATTEMPT:yfinance:'+symbol) < _clock_age('SUCCESS:yfinance:'+symbol)
+    state = 'failed' if source_failed else 'ok' if provider is not None else 'cached' if aligned else 'unverified'
+    result = history_observation(frame, provider=selected, metadata=saved.get('metadata', {}) if aligned else {},
+        price_basis=saved.get('basis', 'unverified') if aligned else 'unverified', fetch_status=state,
+        received_at=saved.get('received_at') if aligned else None)
+    latest_date = frame.index[-1].date().isoformat() if not frame.empty else None
+    latest_observed = (aligned and latest_date in saved.get('observed_prices',{})
+        and saved['observed_prices'][latest_date] == float(frame['Close'].iloc[-1]))
+    result['latest_price_observed'] = bool(latest_observed)
+    if not latest_observed:
+        # Metadata from a successful historical row cannot date a retained,
+        # unrefreshed latest price. Keep the old value solely as a reference.
+        result.update(quote_fresh=False,quote_asof=None,daily_alert_eligible=False,
+                      latest_bar_completed=False,freshness='reference_only',
+                      latest_price_reason='latest_cache_row_not_in_selected_response')
+        result['completed_session_dates'] = [day for day in result['completed_session_dates'] if day != latest_date]
+        result['completion_ends'].pop(latest_date,None)
+    result.update(last_attempt_at=_clock_stamp('ATTEMPT:'+selected+':'+symbol),
+                  last_successful_fetch_at=_clock_stamp('SUCCESS:'+selected+':'+symbol),
+                  received_at=result.get('received_at') if aligned else None)
+    result['symbol'] = symbol
+    frame.attrs['source_observation'] = result
+    # Legacy name retained: it describes a failure of the selected source,
+    # never a successful alternative provider's Yahoo predecessor.
+    frame.attrs['yf_fetch_failed'] = bool(source_failed)
+    return frame
 
 # BetaShares 官网可兜底现价的 symbol（yfinance 被墙/抓空时的最后一道）。
 # 目前 scraper 只实现 NDQ；扩品种时加 symbol + 给 scraper 加对应 fund 页。
@@ -47,12 +190,17 @@ def _betashares_fallback(symbol: str) -> bool:
     if symbol not in _BETASHARES_SYMBOLS:
         return False
     try:
+        _STORE.mark_fetched('ATTEMPT:betashares:'+symbol)
         from openinvest.utils.betashares_scraper import scrape_full_ndq_data
         snap = scrape_full_ndq_data()
-        if snap and snap.get("nav") and snap.get("date"):
+        _source_cache(symbol)['alternative_received_at'] = datetime.now(timezone.utc).isoformat()
+        if (snap and snap.get("nav") and snap.get("date")
+                and math.isfinite(float(snap['nav'])) and float(snap['nav']) > 0):
             _STORE.save_generic_price(
                 symbol, snap["date"], snap["nav"], source="betashares_fallback"
             )
+            _STORE.mark_fetched('SUCCESS:betashares:'+symbol)
+            _source_cache(symbol)['alternative_observed_prices'] = {str(snap['date']):float(snap['nav'])}
             print(
                 f"🛟 [betashares_fallback] {symbol} NAV {snap['nav']} @ {snap['date']}"
                 " (yfinance unavailable, scraped betashares.com.au)"
@@ -81,22 +229,30 @@ def _equibles_fallback(symbol: str, df_db: pd.DataFrame, today_str: str) -> bool
     if not to_mic(symbol) or not os.getenv("EQUIBLES_API_KEY", "").strip():
         return False
     log_key = f"EQUIBLES:{symbol}"
-    if _STORE.seconds_since_fetch(log_key) < _EQUIBLES_RETRY_S:
+    if min(_clock_age('ATTEMPT:equibles:'+symbol), _clock_age(log_key)) < _EQUIBLES_RETRY_S:
         return False
-    _STORE.mark_fetched(log_key)  # 先记：没覆盖 / 调用失败也不会每次都烧一次额度
+    _STORE.mark_fetched('ATTEMPT:equibles:'+symbol)
 
     two_years_ago = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
     deep = len(df_db) >= _MIN_HISTORY_ROWS
     start = (df_db.index[-1] - timedelta(days=7)).strftime("%Y-%m-%d") if deep else two_years_ago
-    df = adjusted_with_raw(fetch_daily_prices(symbol, start))
+    raw = fetch_daily_prices(symbol, start)
+    basis = 'adjusted_close' if raw is not None and 'Adj Close' in raw.columns else 'raw_close'
+    df = adjusted_with_raw(raw)
+    received_at = datetime.now(timezone.utc).isoformat()
     if deep and df is not None and len(_splice_mismatch_days(df, df_db, today_str)) >= 2:
         print(f"⚠️ [equibles_fallback] {symbol} 重叠日复权基准变化，改拉 2 年重写")
-        df = adjusted_with_raw(fetch_daily_prices(symbol, two_years_ago))
+        raw = fetch_daily_prices(symbol, two_years_ago)
+        basis = 'adjusted_close' if raw is not None and 'Adj Close' in raw.columns else 'raw_close'
+        df = adjusted_with_raw(raw)
+        received_at = datetime.now(timezone.utc).isoformat()
     if df is None or df.empty:
         return False
+    valid_rows = 0
+    observed_prices = {}
     for idx, row in df.iterrows():
         close = _nan_to_none(row.get("Close"))
-        if close is None:
+        if close is None or not math.isfinite(close) or close <= 0:
             continue
         _STORE.save_generic_price(
             symbol, idx.strftime("%Y-%m-%d"), close, source="equibles",
@@ -105,6 +261,15 @@ def _equibles_fallback(symbol: str, df_db: pd.DataFrame, today_str: str) -> bool
             volume=_nan_to_none(row.get("Volume")),
             close_raw=_nan_to_none(row.get("CloseRaw")),
         )
+        valid_rows += 1
+        observed_prices[idx.strftime('%Y-%m-%d')] = close
+    if not valid_rows:
+        return False
+    _STORE.mark_fetched('SUCCESS:equibles:'+symbol)
+    _source_cache(symbol)['alternative_basis'] = basis
+    _source_cache(symbol)['alternative_observed_prices'] = observed_prices
+    _source_cache(symbol)['alternative_metadata'] = dict(df.attrs.get('history_metadata') or {})
+    _source_cache(symbol)['alternative_received_at'] = received_at
     print(f"🛟 [equibles_fallback] {symbol} {len(df)} 根日线（yfinance unavailable，Data: Equibles）")
     return True
 
@@ -160,7 +325,7 @@ def _nan_to_none(v):
     return None if np.isnan(fv) else fv
 
 
-def _rebuild_days_from_intraday(ticker, symbol: str, days: dict) -> None:
+def _rebuild_days_from_intraday(ticker, symbol: str, days: dict) -> dict:
     """日线 Close 为 NaN 的日子用同日 60m bar 重建。days: {日期: 日线自带的成交量或 None}。
 
     Yahoo 有时把日线 Close 给成 NaN（A 股 ETF 已收盘的日子也会，成交量却是全天的）。
@@ -172,25 +337,34 @@ def _rebuild_days_from_intraday(ticker, symbol: str, days: dict) -> None:
     """
     try:
         df60 = history_with_raw(ticker, period="5d", interval="60m")
+        received_at = datetime.now(timezone.utc).isoformat()
+        from openinvest.utils.market_observation import provider_metadata
+        metadata = provider_metadata(ticker)
     except Exception as e:  # noqa: BLE001  重建是尽力而为，失败不挡主刷新
         print(f"⚠️ [intraday-rebuild] {symbol} 60m 拉取失败，NaN 日保持原样：{e}")
-        return
+        return {}
     if df60 is None or df60.empty:
-        return
+        return {}
+    observed_prices = {}
     for day, g in df60.groupby(df60.index.strftime("%Y-%m-%d")):
         last = g["Close"].last_valid_index()
         if day not in days or last is None:
+            continue
+        close = float(g.at[last,'Close'])
+        if not math.isfinite(close) or close <= 0:
             continue
         volume = days[day]
         if volume is None:
             volume = _nan_to_none(g["Volume"].sum(min_count=1))
         _STORE.save_generic_price(
-            symbol, day, float(g.at[last, "Close"]), source="yfinance_60m",
+            symbol, day, close, source="yfinance_60m",
             high=_nan_to_none(g["High"].max()),
             low=_nan_to_none(g["Low"].min()),
             volume=volume,
             close_raw=_nan_to_none(g.at[last, "CloseRaw"]),  # ADR-027：与日线路径同口径
         )
+        observed_prices[day] = close
+    return {'prices':observed_prices,'metadata':metadata,'received_at':received_at}
 
 
 def adjusted_with_raw(df: pd.DataFrame) -> pd.DataFrame:
@@ -275,7 +449,7 @@ def get_history_data(
     # ponytail: 固定 TTL，收盘后也照刷；要按交易所收盘时间停刷时再加。
     today_bar_stale = (
         not needs_update and not ohlcv_gap and as_of_date is None
-        and _STORE.seconds_since_fetch(symbol) > _TODAY_BAR_TTL_S
+        and min(_clock_age('ATTEMPT:yfinance:'+symbol), _clock_age(symbol)) > _TODAY_BAR_TTL_S
     )
 
     # backtest 模式 yfinance 策略：
@@ -304,13 +478,22 @@ def get_history_data(
             except ValueError:
                 pass  # 日期格式错误就不拉
 
+    if as_of_date is None and _clock_age('ATTEMPT:yfinance:'+symbol) < _TODAY_BAR_TTL_S:
+        should_fetch_yf = False
     yf_fetch_failed = False
+    selected_provider = None
+    selected_metadata = None
+    selected_received_at = None
+    observed_prices = {}
+    selected_basis = 'adjusted_close'
     if should_fetch_yf:
         yf_got_data = False
+        _STORE.mark_fetched('ATTEMPT:yfinance:'+symbol)
         try:
             print(f"🔄 [yfinance] Refreshing {symbol} (period={fetch_period})...")
             ticker = yf.Ticker(symbol)
             df_yf = history_with_raw(ticker, period=fetch_period)
+            selected_received_at = datetime.now(timezone.utc).isoformat()
             # 复权拼接哨兵（见 _splice_mismatch_days）：≥2 个重叠日差 >1% 才判定复权基准
             # 变化，升级 2y 全量重取（单日偏移多半是 BetaShares 兜底混写，本轮落库自愈）。
             if fetch_period == "5d" and not df_yf.empty and not df_db.empty:
@@ -321,15 +504,18 @@ def get_history_data(
                         f"整体偏移 >1%，疑似分红/拆股复权基准变化，改 2y 全量重取自愈"
                     )
                     df_yf = history_with_raw(ticker, period="2y")
+                    selected_received_at = datetime.now(timezone.utc).isoformat()
             if not df_yf.empty:
-                yf_got_data = True
+                from openinvest.utils.market_observation import provider_metadata
+                selected_metadata = provider_metadata(ticker)
                 nan_days = {}
+                rebuilt = {}
                 for idx, row in df_yf.iterrows():
                     # 数据源闸：close=NaN（yfinance 收盘前半成型 bar）不落库。
                     # 否则它以 NULL 入 daily_prices，下游读价 float(NULL)→NaN，穿过
                     # 全链路 is-None 守卫污染总资产（2026-06-23 根因）。
                     close = _nan_to_none(row.get('Close'))
-                    if close is None:
+                    if close is None or not math.isfinite(close):
                         nan_days[idx.strftime('%Y-%m-%d')] = _nan_to_none(row.get('Volume'))
                         continue
                     # 一并落 OHLCV：High/Low 给真 TR/ATR，Volume 给 RVOL。
@@ -341,34 +527,66 @@ def get_history_data(
                         volume=_nan_to_none(row.get('Volume')),
                         close_raw=_nan_to_none(row.get('CloseRaw')),
                     )
+                    observed_prices[idx.strftime('%Y-%m-%d')] = close
                 if nan_days and as_of_date is None:
-                    _rebuild_days_from_intraday(ticker, symbol, nan_days)
-                _STORE.mark_fetched(symbol)
+                    rebuilt = _rebuild_days_from_intraday(ticker, symbol, nan_days)
+                    observed_prices.update(rebuilt.get('prices',{}))
+                yf_got_data = bool(observed_prices)
+                if yf_got_data:
+                    _STORE.mark_fetched(symbol)
+                    _STORE.mark_fetched('SUCCESS:yfinance:'+symbol)
+                    selected_provider = 'yfinance'
                 df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
+                if (not df_db.empty and rebuilt.get('prices',{}).get(df_db.index[-1].date().isoformat())
+                        == float(df_db['Close'].iloc[-1])):
+                    # Only a selected latest row from this reconstruction can
+                    # use its metadata and receipt; an older repaired hole
+                    # cannot move the asof of an untouched daily response.
+                    selected_received_at = rebuilt['received_at']
+                    selected_metadata = rebuilt['metadata']
         except Exception as e:
             print(f"❌ yfinance sync failed for {symbol}: {e}")
-        # 今天这根的 TTL 刷新失败/拉空也记时：库里今天已有 bar，下次重试遵守 TTL（否则行情源挂着时
-        # 同一 symbol 每次调用都发一次 5d）。needs_update 那条路径不记：拿到数据才记，下次照样重试。
-        if today_bar_stale and not yf_got_data:
-            _STORE.mark_fetched(symbol)
-
         # yfinance 失败/返回空（被墙/被限流）→ BetaShares 官网兜底当前 NAV。
         # 只在实盘路径（as_of_date=None）触发：scraper 只有"现在"这一个点，
-        # 对历史 cutoff 无意义。只补 H/L 那次刷失败：库里今天的 close 本就是新的
-        # → 不兜底、不标 stale。
+        # 对历史 cutoff 无意义。失败只保留 ATTEMPT 时刻，不更新 SUCCESS；
+        # 缓存价格不能证明本次数据源正常。
         # A 股 / 港股个股再走 Equibles 日线（配了 EQUIBLES_API_KEY 才有）。
-        if not yf_got_data and needs_update and as_of_date is None and (
-            _betashares_fallback(symbol) or _equibles_fallback(symbol, df_db, today_str)
-        ):
+        if not yf_got_data and as_of_date is None:
+            if _betashares_fallback(symbol):
+                selected_provider, selected_basis, selected_metadata = 'betashares', 'published_nav_reference', {}
+            elif _equibles_fallback(symbol, df_db, today_str):
+                selected_provider, selected_metadata = 'equibles', _source_cache(symbol).get('alternative_metadata', {})
+                selected_basis = _source_cache(symbol).get('alternative_basis','raw_close')
+        if selected_provider is not None and selected_provider != 'yfinance':
             df_db = _STORE.get_history_df(symbol, days=_ALL_ROWS)
-        yf_fetch_failed = needs_update and not yf_got_data
+            selected_received_at = _source_cache(symbol).get('alternative_received_at')
+            observed_prices = _source_cache(symbol).get('alternative_observed_prices',{})
+        yf_fetch_failed = selected_provider is None
+        if yf_fetch_failed:
+            _source_cache(symbol)['failed'] = True
 
     if not df_db.empty:
+        _history_source(df_db, symbol, provider=selected_provider, metadata=selected_metadata,
+                        basis=selected_basis, failed=yf_fetch_failed, received_at=selected_received_at,
+                        observed_prices=observed_prices)
         out = _apply_period(_apply_cutoff(df_db, as_of_date), period)
+        basis = _history_basis(_STORE,symbol,out)
+        out.attrs['source_observation'] = {**out.attrs.get('source_observation',{}),**basis}
+        if basis.get('last_row_source') == 'betashares_fallback':
+            out.attrs['source_observation'].update(price_basis='published_nav_reference',quote_fresh=False,
+                                                  freshness='reference_only',daily_alert_eligible=False)
+        elif not str(basis.get('last_row_source') or '').startswith('yfinance') and basis.get('last_row_source') != 'equibles':
+            out.attrs['source_observation'].update(price_basis='unverified',quote_fresh=False,
+                                                  freshness='reference_only',daily_alert_eligible=False)
         # 本次该刷没刷到（yfinance 挂/空）→ 返回的是库里旧数据。挂在 attrs 上不改返回类型
         # （调用方零改）；utils.quotes 据此标 is_stale，dca_daily 区分「行情源挂了」
         # 与「休市没有新 bar」（2026-10）。
-        out.attrs["yf_fetch_failed"] = yf_fetch_failed
+        if as_of_date is not None:
+            out.attrs['source_observation'] = {**out.attrs.get('source_observation', {}),
+                'freshness':'historical_reference', 'quote_fresh':False, 'daily_alert_eligible':False,
+                'quote_asof':None,'completed_session_dates':[],'completion_ends':{},
+                'bar_asof':str(out.index[-1]) if not out.empty else None,
+                'historical_availability':'unverified_historical_vintage'}
         return out
 
     return pd.DataFrame()
@@ -413,7 +631,9 @@ def _safe_last_change(symbol: str) -> tuple[Optional[float], Optional[float]]:
     if df is None or df.empty or "Close" not in df:
         return None, None
     last = float(df["Close"].iloc[-1])
-    change = _calc_change(float(df["Close"].iloc[0]), last)
+    from openinvest.utils.market_observation import frame_observation
+    change = (_calc_change(float(df["Close"].iloc[0]), last)
+              if frame_observation(df).get('history_basis_qualified') is not False else None)
     return last, change
 
 
@@ -439,6 +659,7 @@ def get_macro_data() -> str:
 
         from openinvest.core.config import load_config
         from datetime import datetime, timezone
+        from openinvest.utils.market_observation import frame_observation
         max_age = load_config().staleness.price_stale_days
         sources = {}
         for name, frame in (("TNX", tnx), ("VIX", vix)):
@@ -446,22 +667,26 @@ def get_macro_data() -> str:
             if valid:
                 valid = (math.isfinite(float(frame["Close"].iloc[-1])) and
                          0 <= (datetime.now(timezone.utc).date() - frame.index[-1].date()).days <= max_age)
-            sources[name] = {"valid": bool(valid), "last_bar": str(frame.index[-1]) if not frame.empty else None}
+            sources[name] = {"valid": bool(valid), "last_bar": str(frame.index[-1]) if not frame.empty else None,
+                             'source_observation':frame_observation(frame)}
         if not all(item["valid"] for item in sources.values()):
             return MacroReport("[MACRO_INPUT_UNAVAILABLE] Required macro observations unavailable/stale; values are unknown.", {"valid": False, "sources": sources})
         tnx_last = tnx['Close'].iloc[-1]
-        tnx_change = _calc_change(tnx['Close'].iloc[0], tnx_last)
+        tnx_change = (_calc_change(tnx['Close'].iloc[0], tnx_last)
+                      if frame_observation(tnx).get('history_basis_qualified') is not False else None)
         vix_last = vix['Close'].iloc[-1]
-        vix_change = _calc_change(vix['Close'].iloc[0], vix_last)
+        vix_change = (_calc_change(vix['Close'].iloc[0], vix_last)
+                      if frame_observation(vix).get('history_basis_qualified') is not False else None)
+        change_label = lambda value: f'{value:+.2%}' if value is not None else 'unknown (history scale unverified)'
 
         # CONTAMINATION CHANNEL (ADR-022): 绝对价位/宏观点位逐字进 prompt → 记忆过历史的 LLM 可反推年代;归一化能压低但杀纪律规则(VIX>20=fear 吃绝对值),不可消除。
         report = f"""
 --- MACRO INDICATORS (Reference) ---
-1. US 10Y Treasury Yield (^TNX): {tnx_last:.2f}% (MoM: {tnx_change:+.2%})
+1. US 10Y Treasury Yield (^TNX): {tnx_last:.2f}% (MoM: {change_label(tnx_change)})
    *Note: Rising yields often hurt tech stock valuations.*
 
-2. CBOE Volatility Index (^VIX): {vix_last:.2f} (MoM: {vix_change:+.2%})
-   *Note: VIX > 20 indicates fear; VIX < 15 indicates complacency.*
+2. CBOE Volatility Index (^VIX): {vix_last:.2f} (MoM: {change_label(vix_change)})
+   *Note: This is the observed index level, not a calibrated forecast or a universal fear/complacency cutoff.*
 """
 
         # 货币因素（黄金/商品类资产的"基本面"）—— 逐项 graceful，缺一项不影响其余。
@@ -469,17 +694,16 @@ def get_macro_data() -> str:
         dxy_last, dxy_change = _safe_last_change("DX-Y.NYB")
         if dxy_last is not None:
             report += (
-                f"\n3. US Dollar Index (DXY, DX-Y.NYB): {dxy_last:.2f} (MoM: {dxy_change:+.2%})\n"
+                f"\n3. US Dollar Index (DXY, DX-Y.NYB): {dxy_last:.2f} (MoM: {change_label(dxy_change)})\n"
                 f"   *Note: Strong/rising USD pressures gold & commodities; weak USD is a tailwind.*\n"
             )
-        # 实际利率代理：TIP = iShares TIPS Bond ETF。TIP 价涨 = 实际利率走低 = 利好黄金；
-        # TIP 价跌 = 实际利率走高 = 利空黄金。yahoo 内可达，绕开 FRED DFII10 的网络不稳。
+        # TIP is an ETF price observation, not a measurement of real yields.
         _tip_last, tip_change = _safe_last_change("TIP")
-        if tip_change is not None:
-            _dir = "falling (gold tailwind)" if tip_change > 0 else "rising (gold headwind)"
+        if _tip_last is not None:
             report += (
-                f"\n4. Real-rate proxy (TIPS ETF TIP, MoM): {tip_change:+.2%} → real yields {_dir}\n"
-                f"   *Note: TIP up = real yields down = bullish gold; TIP down = real yields up = bearish gold.*\n"
+                f"\n4. TIPS bond ETF price (TIP, MoM): {change_label(tip_change)}\n"
+                f"   *Note: This ETF price change also reflects duration, inflation indexation and distributions. "
+                f"It does not establish the level or direction of real yields, or a gold trading signal.*\n"
             )
 
         return MacroReport(report, {"valid": True, "sources": sources})

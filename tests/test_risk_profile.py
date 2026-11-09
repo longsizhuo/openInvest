@@ -2,7 +2,7 @@
 
 消融已证：uptrend 方向锁 = 纯杠杆（+CR −Sharpe 深 MaxDD），不是 alpha。
 拆锁后杠杆效应保留为 config 开关：steady（默认，无杠杆）| aggressive
-（uptrend ∧ HOLD → ACCUMULATE 确定性升级）。
+（仅保留旧规则审计对照，不自动替换方向）。
 """
 from __future__ import annotations
 
@@ -38,13 +38,13 @@ def test_steady_default_uptrend_hold_untouched():
 
 # ---------- aggressive：uptrend 顺势杠杆 ----------
 
-def test_aggressive_uptrend_hold_upgraded_to_accumulate():
-    """aggressive + uptrend + HOLD → ACCUMULATE，留审计字段"""
+def test_aggressive_uptrend_keeps_market_hold_and_records_legacy_shadow():
+    """风险偏好不制造市场机会；旧升级结果仅保留审计。"""
     _aggressive()
     r = parse_cio_memo(HOLD_MEMO, regime="uptrend")
-    assert r["verdict"] == "ACCUMULATE"
-    assert r["_original_verdict"] == "HOLD"
-    assert r["_risk_profile_applied"] == "aggressive_uptrend_hold_to_accumulate"
+    assert r["verdict"] == "HOLD"
+    assert r["_legacy_risk_profile_shadow"]["applied"] is False
+    assert r["_legacy_risk_profile_shadow"]["would_verdict"] == "ACCUMULATE"
 
 
 def test_aggressive_only_in_uptrend():
@@ -85,8 +85,9 @@ def test_aggressive_preserves_earlier_original_verdict():
     )
     r = parse_cio_memo(memo, regime="uptrend")
     # Sanity 1: BUY(0.99) → ACCUMULATE，aggressive 不再介入（verdict 已非 HOLD）
-    assert r["verdict"] == "ACCUMULATE"
-    assert r["_original_verdict"] == "BUY"
+    assert r["verdict"] == "BUY"
+    assert r["_raw_proposal"]["verdict"] == "BUY"
+    assert r["_legacy_confidence_rule_shadow"]["applied"] is False
 
 
 # ---------- regime_label_from_text ----------

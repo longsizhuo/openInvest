@@ -174,6 +174,18 @@ def committee_role_thinking(role: str, model: Optional[str] = None) -> bool:
     return role in ("cio","reasoning_verifier") and "deepseek" in (model or get_llm_config_safe()[2]).lower()
 
 
+def verifier_generation_limits(model: Optional[str] = None) -> dict:
+    """Bind the actual verifier resource controls instead of provider defaults."""
+    selected=(model or get_llm_config_safe()[2]).lower()
+    if 'deepseek' not in selected:
+        return {'max_output_tokens':None,'reasoning_effort':None}
+    from openinvest.core.config import load_config
+    value=load_config().verdict.reasoning_verifier_max_tokens
+    if not isinstance(value,int) or isinstance(value,bool) or not 1<=value<=393216:
+        raise ValueError('reasoning_verifier_max_tokens_out_of_provider_range')
+    return {'max_output_tokens':value,'reasoning_effort':'high'}
+
+
 def get_thinking_enable_kwargs(model: Optional[str] = None) -> dict:
     model=(model or get_llm_config_safe()[2]).lower()
     return {"extra_body":{"thinking":{"type":"enabled"}}} if "deepseek" in model else {}

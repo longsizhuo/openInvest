@@ -50,11 +50,11 @@ def build_risk_officer_prompt(asset: Dict[str, Any], round_label: str = "opening
         directive = bilingual(
             "**🚫 集中度 lens 已关闭（默认；用户录入的可能只是部分资产）**：用户上下文【不含】集中度数字。"
             "**不要输出 CONCENTRATION_PCT 字段，也不要提及、估算或换算该资产占总资产的比例**（压力测试同样只用金额："
-            f"WORST_CASE_LOSS_{base}_AT_-20 照抄 portfolio_summary 的损失金额；ONE_LINER 的建仓上限按子弹 DRY_POWDER_{base} 表述，不按占总资产比例）。"
+            f"WORST_CASE_LOSS_{base}_AT_-20 仅照抄已给的情景损失，否则 N/A）。不得从 DRY_POWDER_{base} 推出未授权的新建仓上限。"
             "其余风险维度（波动 / 回撤 / 止损 / 现金流动性 / 追涨）照常评估。\n\n",
             "**🚫 The concentration lens is disabled (default; the user may have recorded only part of their assets)**: the user context contains no concentration figures. "
             "**Do not output the CONCENTRATION_PCT field, and do not mention, estimate, or convert this asset's share of total assets** (stress tests use amounts only: "
-            f"copy the loss amount from portfolio_summary into WORST_CASE_LOSS_{base}_AT_-20; state the ONE_LINER position cap against DRY_POWDER_{base}, not as a share of total assets). "
+            f"copy only a supplied scenario loss into WORST_CASE_LOSS_{base}_AT_-20, otherwise N/A). Do not derive an unauthorized position cap from DRY_POWDER_{base}. "
             "Evaluate the other risk dimensions (volatility / drawdown / stop-loss / cash liquidity / chasing rallies) as usual.\n\n",
         )
         prompt = directive + prompt

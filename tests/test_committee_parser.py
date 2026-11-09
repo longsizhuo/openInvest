@@ -32,14 +32,14 @@ SUGGESTED_ALLOC_CNY: 0
     assert r["alloc_cny"] == 0
 
 
-def test_overconfident_buy_downgraded():
-    """audit security M3: confidence>=0.95 + BUY 必降级到 ACCUMULATE"""
+def test_self_confidence_does_not_rewrite_buy():
+    """Uncalibrated confidence is a diagnostic, not market or funding evidence."""
     text = "VERDICT: BUY\nCONFIDENCE: 0.99\nDOMINANT_VIEW: quant\nSUGGESTED_ALLOC_CNY: 5000"
     r = parse_cio_memo(text)
-    assert r["verdict"] == "ACCUMULATE"
-    assert r["confidence"] == 0.6
-    assert r["_original_verdict"] == "BUY"
-    assert r["_original_confidence"] == 0.99
+    assert r["verdict"] == "BUY"
+    assert r["confidence"] == 0.99
+    assert r["_legacy_confidence_rule_shadow"]["applied"] is False
+    assert r["alloc_cny"] == 5000
 
 
 def test_high_confidence_hold_not_downgraded():
@@ -135,18 +135,20 @@ def test_unclear_verdict_when_missing():
 
 # ---------- config override 实时生效 ----------
 
-def test_config_override_changes_overdrive_threshold():
-    """set_config_override() 改变 buy_confidence_overdrive 阈值"""
+def test_config_override_changes_only_the_legacy_audit_comparison():
+    """Old configuration remains readable without regaining directional authority."""
     # 默认阈值 0.95，confidence=0.93 不触发降级
     text = "VERDICT: BUY\nCONFIDENCE: 0.93\nSUGGESTED_ALLOC_CNY: 5000"
     r1 = parse_cio_memo(text)
     assert r1["verdict"] == "BUY"
 
-    # 把阈值降到 0.90，0.93 现在触发降级
+    # 改变旧比较阈值只能改变诊断，不改变方向
     set_config_override({"verdict": {"buy_confidence_overdrive": 0.90}})
     r2 = parse_cio_memo(text)
-    assert r2["verdict"] == "ACCUMULATE"
-    assert r2["confidence"] == 0.6
+    assert r2["verdict"] == "BUY"
+    assert r2["confidence"] == 0.93
+    assert r2["_legacy_confidence_rule_shadow"]["threshold"] == .90
+    assert r2["_legacy_confidence_rule_shadow"]["applied"] is False
 
 
 def test_config_override_changes_alloc_ceiling():
@@ -180,12 +182,11 @@ def test_cio_prompt_trim_constraint_enabled_via_override():
     }})
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
-    assert "当前配置的旧择时减仓过滤" in prompt
-    assert "不是已核验的用户授权" in prompt
-    assert "风险减仓、投资依据失效、流动性需求不受此过滤影响" in prompt
+    assert "当前配置的旧择时减仓过滤" not in prompt
+    assert "浮亏 < 5.0% 时不建议择时" not in prompt
     assert "卖出坐实亏损" not in prompt
-    assert "5.0%" in prompt
-    assert "10.0%" in prompt
+    assert "5.0%" not in prompt
+    assert "10.0%" not in prompt
 
 
 # ---------- EVENT_STANCE 是构成计数、不是方向信号（#210 下游）----------
@@ -214,14 +215,15 @@ def test_cio_prompt_cash_opp_cost_directive_when_off_by_default():
     assert "现金仓位机会成本规则已被用户关闭" not in prompt
 
 
-def test_cio_prompt_no_cash_opp_cost_directive_when_enabled():
-    """显式开启 → directive 不出现，原硬编码规则照常生效"""
+def test_cash_preference_does_not_create_a_universal_buy_obligation():
+    """An opt-in preference does not turn a generic ratio into user authority."""
     set_config_override({"verdict": {"cash_opportunity_cost_rule_enabled": True}})
     from openinvest.capabilities.committee.cio import build_cio_prompt
     prompt = build_cio_prompt({"symbol": "GC=F", "display_name": "黄金"})
     assert "现金仓位机会成本规则已被用户关闭" not in prompt
     # 原规则文本仍在（占位符为空串，规则段保留）
-    assert "现金仓位机会成本规则" in prompt
+    assert "现金运用偏好当前启用" in prompt
+    assert "不允许给 HOLD" not in prompt
 
 
 # ---------- Sanity check 4: 集中度 lens 关 → concentration-TRIM 强制 HOLD ----------
@@ -354,9 +356,9 @@ def test_concentration_rules_removed_from_templates_when_lens_off():
         r2 = build_risk_officer_prompt(asset, round_label="rebuttal")
         cio = build_cio_prompt(asset)
         assert ("CONCENTRATION_PCT: <" in r1) == lens
-        assert ("PWM 行业标准" in r1) == lens and ("CONCENTRATION_PCT > 60%" in r1) == lens
-        assert ("集中度计算修正" in r2) == lens and ("重新评估集中度分母" in r2) == lens
-        assert ("CONCENTRATION_PCT > 60%**: 任何加仓" in cio) == lens
+        assert "PWM 行业标准" not in r1 and "CONCENTRATION_PCT > 60%" not in r1
+        assert ("集中度仅引用账户已给数据与真实用户约束" in r2) == lens
+        assert ("集中度仅按完整账户数据与明确用户上限评估" in cio) == lens
         assert "<!-- lens:" not in r1 + r2 + cio  # 标记本身从不进 prompt
 
 
@@ -422,7 +424,8 @@ def test_rebuttal_char_limit_survives_language_localization():
     assert "RISK_EVIDENCE:" in quant_rebuttal
 
     assert "必须中文回复" not in risk_rebuttal
-    assert "严格按下列格式" in risk_rebuttal
+    assert "CHANGE_BASIS:" in risk_rebuttal
+    assert "MARKET_RISK_BASELINE:" in risk_rebuttal
     assert "ADJUSTED_STRENGTH:" in risk_rebuttal
 
 

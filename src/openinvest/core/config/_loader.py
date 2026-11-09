@@ -479,7 +479,7 @@ API_SETTABLE: Dict[str, Dict[str, Any]] = {
     "event.watch_schedule": {
         "type": "cron",
         "label": "event_watch 扫描窗口",
-        "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认 */30 0-2,8-23 * * * = 北京 8:00-次日 2:30 每半小时；scheduler 每 10 分钟自动拾取改动，无需重启",
+        "help": "5 字段 crontab，按 Asia/Shanghai 解释。默认 */30 * * * * = 全天每半小时；scheduler 每 10 分钟自动拾取改动，无需重启",
     },
     "event.sentinel_enabled": {
         "type": "bool",

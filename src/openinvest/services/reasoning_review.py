@@ -116,6 +116,8 @@ def review_once(request,*,memory_root,agent_factory,ask,asset,external_raw=None,
             attempts=payload.get("attempts",0)
             if payload["state"]=="started":
                 return {"status":"unavailable","policy":POLICY,"request_sha256":key,"reason":"previous_verification_outcome_unknown"}
+            if external_raw is None and payload.get('review',{}).get('retryable') is False:
+                return {**payload['review'],'replayed':True,'retry_requires_changed_contract_or_explicit_recovery':True}
             if external_raw is None and not backend_allowed:return {**payload["review"],"replayed":True}
             if external_raw is None and attempts>=2:return {**payload["review"],"replayed":True,"retry_limit_reached":True}
         elif external_raw is not None:
@@ -131,6 +133,11 @@ def review_once(request,*,memory_root,agent_factory,ask,asset,external_raw=None,
 
 
 def _review(request,*,agent_factory,ask,asset,external_raw,backend_allowed):
+    math_contract=(request.get('sources',{}).get('scenario_math') or {}).get('value') or {}
+    if math_contract.get('errors'):
+        return {'status':'failed','policy':POLICY,'request_sha256':request['request_sha256'],
+                'contract_error':'financial_scenario_invalid','financial_errors':math_contract['errors'],
+                'source_qualification_granted':False,'trade_authorized':False}
     contract=alternative_contract(request["proposal"].get("fields") or {})
     if not contract["valid"]:
         return {"status":"failed","policy":POLICY,"request_sha256":request["request_sha256"],

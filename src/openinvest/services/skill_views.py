@@ -133,6 +133,8 @@ def build_status_view() -> Dict[str, Any]:
             quote_meta[sym] = {
                 "last_updated": quote.last_updated,
                 "is_stale": quote.is_stale,
+                "currency":quote.currency,"is_reference":getattr(quote,'is_reference',True),
+                "source_observation":getattr(quote,'source_observation',{}) or {},
                 "source": (quote.extra or {}).get("source", "yfinance"),
                 "extra": quote.extra or {},
             }
@@ -169,7 +171,12 @@ def build_status_view() -> Dict[str, Any]:
                 q = fetch_quote(sym, h)
                 if q is not None and math.isfinite(q.price) and q.price > 0:
                     price, extra, updated = q.price, q.extra, q.last_updated
-            return evaluate_symbol(sym, alert_cfg[sym], h, price=price, extra=extra, last_updated=updated), price
+                    meta={'currency':q.currency,'is_stale':q.is_stale,'is_reference':getattr(q,'is_reference',True),
+                          'source_observation':getattr(q,'source_observation',{}) or {}}
+            return evaluate_symbol(sym, alert_cfg[sym], h, price=price, extra=extra, last_updated=updated,
+                cost_qualification=(ledger_evidence.get('holdings') or {}).get(sym,{}),quote_currency=meta.get('currency'),
+                native_quote_qualified=(not meta.get('is_stale',True) and not meta.get('is_reference',True)
+                    and (meta.get('source_observation') or {}).get('quote_fresh') is True)), price
         except Exception as e:  # noqa: BLE001  报警线只是附加信息，不拖垮 status
             log.warning("status alerts(%s) 求值失败: %s", sym, e)
             return [], None

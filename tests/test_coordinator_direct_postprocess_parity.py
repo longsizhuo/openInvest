@@ -98,7 +98,7 @@ def _run_direct(monkeypatch, memo, sentiment):
         def run(self, ctx):
             if self.role == "cio":
                 return memo
-            return "SIGNAL: neutral\nSTRENGTH: 3\nONE_LINER: stub\n"
+            return "SIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\nSTRENGTH: 3\nONE_LINER: stub\n"
 
         def tool_call_summary(self):
             return ""
@@ -112,15 +112,15 @@ def _run_direct(monkeypatch, memo, sentiment):
         sentiment_brief=sentiment, valuation_brief_override="",
     )
     assert "verdict" in res, res
-    return res["verdict"]
+    return res["verdict"], res["report"].position_facts
 
 
-def _run_coordinator(memo, sentiment, regime_brief):
+def _run_coordinator(memo, sentiment, regime_brief, position_facts):
     from openinvest.core.runner.coordinator import save_committee_transcript
     raw = (
         "=== MACRO ===\nMOCK_MACRO\n\n"
         f"=== QUANT_R1 ===\n{regime_brief}\n\n{sentiment}\nSIGNAL: neutral\n\n"
-        "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
+        "=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n\n"
         f"=== CIO ===\n{memo}\n"
     )
     from tests.integrity_helpers import context_id
@@ -131,7 +131,7 @@ def _run_coordinator(memo, sentiment, regime_brief):
     from openinvest.utils.base_currency import alloc_ceiling, single_invest_cap
     pm = PortfolioManager(); target = pm.strategy.get("target_assets")[0]
     df = get_history_data(SYM, "2y")
-    cid = context_id(SYM, regime_brief=regime_brief, sentiment_brief=sentiment,
+    cid = context_id(SYM, regime_brief=regime_brief, sentiment_brief=sentiment, position_facts=position_facts,
                      current_price=compute_metrics(df)["current_price"],
                      defense_dca=gold_defense_dca_plan(SYM, target, df.index),
                      alloc_ceiling=alloc_ceiling(), single_invest_cap=single_invest_cap(target, pm.strategy))
@@ -145,14 +145,23 @@ def _run_coordinator(memo, sentiment, regime_brief):
 ], ids=["gold_defense_dca", "trim_sanity5", "single_invest_cap"])
 def test_coordinator_matches_direct_postprocess(world, monkeypatch, memo, sentiment, expect_rule):
     mem, regime_brief = world
-    v_direct = _run_direct(monkeypatch, memo, sentiment)
+    v_direct, position_facts = _run_direct(monkeypatch, memo, sentiment)
     rows_direct = _ledger(mem)
-    v_coord = _run_coordinator(memo, sentiment, regime_brief)
+    v_coord = _run_coordinator(memo, sentiment, regime_brief, position_facts)
     rows_coord = _ledger(mem)
 
     assert [r["rule"] for r in rows_direct] == [expect_rule]   # 场景确实触发了干预
     receipt_fields = {"decision_id", "context_id", "code_version", "evidence_sha256"}
-    assert {k:v for k,v in v_coord.items() if k not in receipt_fields} == {k:v for k,v in v_direct.items() if k not in receipt_fields}
+    def without_receipt_metadata(value):
+        import copy
+        result=copy.deepcopy({k:v for k,v in value.items() if k not in receipt_fields})
+        citations=result['scenario_validation']['market_citation_validation']
+        assert citations['status']=='not_requested' and not citations['citations']
+        context_ref=citations.pop('context_ref')
+        assert isinstance(context_ref,str) and len(context_ref)==32
+        if 'context_id' in value:assert context_ref==value['context_id']
+        return result
+    assert without_receipt_metadata(v_coord) == without_receipt_metadata(v_direct)
     assert rows_coord == rows_direct
 
 
@@ -166,13 +175,13 @@ def test_coordinator_catches_worker_failure_outside_cio_section(world):
     raw = (
         "=== MACRO ===\nMOCK_MACRO\n\n"
         f"=== QUANT_R1 ===\n{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted\n\n"
-        "=== RISK_R1 ===\nSIGNAL: neutral\n\n"
+        "=== RISK_R1 ===\nSIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available\n\n"
         f"=== CIO ===\n{memo}\n"
     )
     from tests.integrity_helpers import context_id
     cid = context_id(SYM)
     v = save_committee_transcript(SYM, raw, context_id=cid)["verdict"]
-    assert v["verdict"] == "HOLD" and v["confidence"] <= 0.4 and v["alloc_cny"] == 0
+    assert v["verdict"] == "UNCLEAR" and v["decision_status"] == "DATA_UNTRUSTED" and v["alloc_cny"] == 0
 
     ok = save_committee_transcript(SYM, raw.replace(
         f"{AGENT_UNAVAILABLE_MARKER} reason=retry_exhausted",

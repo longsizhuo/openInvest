@@ -87,10 +87,11 @@ def test_unfillable_gap_does_not_loop(store):
     assert df.attrs["yf_fetch_failed"] is False
 
 
-def test_gap_refresh_failure_not_flagged_stale(store):
+def test_gap_refresh_failure_retains_reference_without_refresh_success(store):
     s, today = store
     _FakeTicker.bars = pd.DataFrame()
     df = ef.get_history_data(SYM, "5d")
     assert _FakeTicker.calls == 1
     assert df["Close"].iloc[-1] == 7.2
-    assert df.attrs["yf_fetch_failed"] is False
+    assert df.attrs["yf_fetch_failed"] is True
+    assert df.attrs['source_observation']['quote_fresh'] is False

@@ -192,13 +192,19 @@ def fetch_all(
         # wait=False：不等卡死的 worker；cancel_futures=True：还没起跑的直接取消
         pool.shutdown(wait=False, cancel_futures=True)
 
-    # 同 url 去重（保留先到的）
-    seen_urls = set()
+    # A URL can carry a correction or a different retained excerpt. Keep those
+    # inputs, and keep independent acquisition parents for permission checks.
+    from openinvest.services.news_identity import content_id, item_text
+    from openinvest.core.evidence_eligibility import source_artifact_ids
+    seen_inputs = set()
     dedup: List[RawNewsItem] = []
     for it in all_items:
-        if it.url in seen_urls:
+        meta = getattr(it,'raw_meta',{}) or {}
+        key = (content_id(item_text(it)), str(it.published_at or ''),
+               tuple(sorted(source_artifact_ids(meta))))
+        if key in seen_inputs:
             continue
-        seen_urls.add(it.url)
+        seen_inputs.add(key)
         dedup.append(it)
     log.info(f"[news_sources] 总计 {len(all_items)} 条 → 去重后 {len(dedup)} 条")
     return dedup

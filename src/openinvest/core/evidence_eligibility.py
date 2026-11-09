@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import deque
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -93,6 +94,7 @@ class Eligibility:
             if not isinstance(registry,dict) or registry.get("schema") != 1 or not isinstance(registry.get("artifacts"),dict):
                 raise ValueError("invalid eligibility registry structure")
             artifacts = registry["artifacts"]
+            children = {}
             for key, value in artifacts.items():
                 if (not isinstance(key,str) or not key or not isinstance(value,dict)
                         or not isinstance(value.get("parents",[]),list)
@@ -100,12 +102,14 @@ class Eligibility:
                     raise ValueError("invalid parent lineage structure")
                 if value.get("deleted") is True or value.get("research_participation")=="revoked":
                     excluded.add(key)
-            changed = True
-            while changed:
-                additions = {key for key, value in artifacts.items()
-                             if key not in excluded and any(p in excluded for p in value.get("parents", []))}
-                changed = bool(additions)
-                excluded |= additions
+                for parent in value.get('parents',[]):
+                    children.setdefault(parent,[]).append(key)
+            pending = deque(excluded)
+            while pending:
+                for child in children.get(pending.popleft(),()):
+                    if child not in excluded:
+                        excluded.add(child)
+                        pending.append(child)
             return excluded
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
             raise EvidenceIntegrityError("DATA_UNTRUSTED: exclusion ledger unavailable") from e
@@ -242,3 +246,36 @@ class Eligibility:
             if scopes and scopes[0] and all(scope == scopes[0] for scope in scopes):
                 artifacts[artifact_id]["scope"] = scopes[0]
             _atomic_write_text(path, json.dumps({"schema": 1, "artifacts": artifacts}, ensure_ascii=False, indent=2))
+
+
+_AUTO_AUDIT_PREFIXES = ('event:', 'source_snapshot:', 'backend_observation:')
+_AUTO_AUDIT_KEYS = {'sha256', 'parents', 'origin', 'source_validity', 'allowed_uses'}
+
+
+def _inert_auto_audit(key, record):
+    return (key.startswith(_AUTO_AUDIT_PREFIXES) and set(record) == _AUTO_AUDIT_KEYS
+            and record.get('origin') == 'unverified' and record.get('source_validity') == 'pending_review'
+            and record.get('allowed_uses') == ['audit']
+            and isinstance(record.get('sha256'), str) and len(record['sha256']) == 64
+            and all(c in '0123456789abcdef' for c in record['sha256']))
+
+
+def context_authority_snapshot(root: Path) -> dict:
+    """Version effective rights, not routine acquisition/audit activity.
+
+    Compute the negative closure on the complete graph before omitting inert
+    auto-audit records. Other artifact schemas and all permission-bearing or
+    withdrawn records remain fully versioned. Learning publication continues
+    to use its separate, unchanged consent/version contract.
+    """
+    from openinvest.core.memory_store import _file_lock
+    root = Path(root); gate = Eligibility(root)
+    registry = gate.directory / 'eligibility.json'; exclusions = gate.directory / 'exclusions.jsonl'
+    if not registry.exists() and not exclusions.exists():
+        return {'schema': 'context_authority_v1', 'artifacts': {}, 'denied': []}
+    with _file_lock(gate.directory / 'governance'):
+        denied = gate.excluded_ids()  # validates the complete graph, including audit parents
+        state = json.loads(registry.read_text()) if registry.exists() else {'artifacts': {}}
+        artifacts = {key: value for key, value in state['artifacts'].items()
+                     if key in denied or not _inert_auto_audit(key, value)}
+    return {'schema': 'context_authority_v1', 'artifacts': artifacts, 'denied': sorted(denied)}

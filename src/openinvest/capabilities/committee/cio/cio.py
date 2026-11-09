@@ -40,15 +40,19 @@ def _json_output_addendum() -> str:
   "trim_reason": "concentration|stop_loss|bearish"（非 TRIM 用 null）,
   "exit_intent": "risk_reduction|thesis_invalidated|liquidity_need|tactical_reentry" 或 null,
   "hold_reason": "maintain_position|wait_for_edge|user_constraint|data_untrusted" 或 null,
-  "alternatives": 数组；必须分别列 HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY，可增加 THESIS_EXIT、LIQUIDITY_EXIT；每项含 kind、applicability（applicable|not_applicable|unknown）、exit_intent、support、counterevidence、constraint_refs、assumptions、data_gaps；不能合并风险退出与择时买回,
+  "market_assessment": {"direction": "bullish|bearish|uncertain|unknown", "horizon": "判断期限或未知", "support": "本次市场支持证据", "counterevidence": "实质反证及局限", "execution_data_gaps": "只列执行资料缺口，不作为市场看空证据"},
+  "alternatives": 数组；必须分别列 HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY，可增加 THESIS_EXIT、LIQUIDITY_EXIT；每项含 kind、applicability（applicable|not_applicable|unknown，不偏好不等于不适用）、market_evaluation（favorable|unfavorable|mixed|unknown）、exit_intent、support、counterevidence、constraint_refs、assumptions、data_gaps；不能合并风险退出与择时买回,
   "review_plan": 按上述结构给出条件、单位、带时区有效期和变更理由的对象，或 null,
+  "scenario_analysis": 数组或空数组；每项只给 scenario_id、position_ref（逐字引用 typed position facts）、target_price、currency、unit、assumption="no_trade"、reason。金额由后端复算，不自填损失、未实现或已实现盈亏；缺数据保持未知，不以缺少场景为方向门槛,
+  "market_citations": 数组或[]；每项仅含citation_id（ASCII字母开头，仅字母/数字/下划线/连字符，最长64字符）、source_id（market|macro|events）、source_quote（逐字引用本次原始市场来源，不得含账户/资金/数量/成本/损益内容）；context_ref可省略或null，有值必须逐字等于本次context_id。backend派生hash与context binding，不自填资格字段,
   "risk_review_plan": 独立的下行风险复核计划，同 review_plan 结构，或 null；不得只在 memo 中承诺监控,
   "reentry_price": 择时买回型 TRIM 用低于现价的数字，资产报价币种、与现价同单位；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
   "reentry_condition": 择时买回条件；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
   "expected_path": 择时买回型 TRIM 的路径依据；风险/需求退出或非 TRIM 可用 null,
-  "memo": "你完整的投行级中文分析备忘，多段，与平时文本 memo 同等详尽"
+  "memo": "多段定性市场分析；个人资金金额、持仓数量、成本及损益数字只放对应结构化字段/后端表，不写自由财务计算。市场百分比、RSI等可描述；含货币数值的市场报道只放market_citations的逐字source_quote，memo/support/counterevidence用[citation_id]引用，不在其中重复货币数值"
 }
-上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 看到完整 [WORKER_UNAVAILABLE] reason= 失败标记则 verdict=HOLD 且 confidence≤0.4），只是承载在 JSON 字段里。""",
+市场引用只证明原文存在，不证明来源真实、时效或独立性；不能成为持仓原生报价、账户算术、用户授权或交易/学习许可。不得引用账户上下文、分析员模型意见或生成计划。没有来源catalog时用[]；不可凭空编造来源或把引用数字变成个人资金金额。
+上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 输入失败保留未知，由后端处理资格，不把输入失败当成市场HOLD），只是承载在 JSON 字段里。""",
         """=== Output format override (this is the only format for this call) ===
 Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSON object only** (no markdown code fences, no extra text), with the following fields:
 {
@@ -59,15 +63,19 @@ Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSO
   "trim_reason": "concentration|stop_loss|bearish" (null when not TRIM),
   "exit_intent": "risk_reduction|thesis_invalidated|liquidity_need|tactical_reentry" or null,
   "hold_reason": "maintain_position|wait_for_edge|user_constraint|data_untrusted" or null,
-  "alternatives": an array with separate HOLD_EXISTING, ADD, REDUCE_RISK and TACTICAL_REENTRY entries; optional THESIS_EXIT and LIQUIDITY_EXIT. Each includes kind, applicability (applicable|not_applicable|unknown), exit_intent, support, counterevidence, constraint_refs, assumptions and data_gaps. Risk reduction and tactical reentry must not be merged,
+  "market_assessment": {"direction": "bullish|bearish|uncertain|unknown", "horizon": "horizon or unknown", "support": "market support", "counterevidence": "material counterevidence and limitations", "execution_data_gaps": "execution gaps, not bearish market evidence"},
+  "alternatives": an array with separate HOLD_EXISTING, ADD, REDUCE_RISK and TACTICAL_REENTRY entries; optional THESIS_EXIT and LIQUIDITY_EXIT. Each includes kind, applicability (applicable|not_applicable|unknown; not preferred is not inapplicable), market_evaluation (favorable|unfavorable|mixed|unknown), exit_intent, support, counterevidence, constraint_refs, assumptions and data_gaps. Risk reduction and tactical reentry must not be merged,
   "review_plan": conditions, units, timezone-aware expiry and explicit replacement reason using the structure above, or null,
+  "scenario_analysis": array or []; each entry contains scenario_id, position_ref (exact sealed typed position ref), target_price, currency, unit, assumption="no_trade", reason. The backend calculates amounts; do not supply loss/unrealized/realized PnL. Missing scenario data does not select an action,
+  "market_citations": array or []; each entry contains only citation_id (ASCII letter first, letters/digits/underscore/hyphen, maximum 64 characters), source_id (market|macro|events), source_quote (verbatim original market input, excluding account/funds/quantity/cost/PnL content); context_ref may be omitted or null, otherwise it must exactly match the current context_id. Backend hashes and context binding must not be supplied as authority fields,
   "risk_review_plan": a separate downside-risk review plan using the same structure, or null; monitoring promised in prose must have structured conditions,
   "reentry_price": number below the current price only for a tactical round-trip TRIM, in the asset's quote currency and unit; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
   "reentry_condition": tactical reentry condition; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
   "expected_path": path evidence for tactical reentry; null is allowed for risk/needs exits and non-TRIM,
-  "memo": "your full investment-bank-grade analysis memo, multi-paragraph, matching the depth of the plain-text memo"
+  "memo": "multi-paragraph qualitative analysis; personal funds, position quantities, cost and PnL belong only in their typed fields/backend tables, never free prose. Market percentages and RSI may be described. Currency-valued market reports belong only in verbatim market_citations.source_quote; memo/support/counterevidence refer to [citation_id] without repeating those monetary figures"
 }
-All rules above still apply (sanity checks / TRIM constraints / concentration / verdict=HOLD with confidence<=0.4 when the complete [WORKER_UNAVAILABLE] reason= failure marker appears) -- they are just carried in the JSON fields.""",
+Market citations prove quotation existence only, not truth, freshness or evidence independence. They cannot become native position quotes, account arithmetic, user authority or trade/learning permission. Do not cite account context, analyst model opinions or generated plans. Use [] without a source catalog; never invent a source or turn a cited number into a personal financial amount.
+All rules above still apply (sanity checks / TRIM constraints / concentration / input failure remains unknown and is qualified separately, not evidence for a market HOLD) -- they are just carried in the JSON fields.""",
     )).replace("suggested_alloc_cny", f"suggested_alloc_{base_currency().lower()}")
 
 
@@ -80,22 +88,9 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
     asset_name = asset.get("display_name", asset.get("symbol"))
     verdict_cfg = load_config().verdict
 
-    # TRIM 约束：阈值 > 0 时注入（sweep 出 OOS 验证结果后才启用，遵守 ADR-010 rule 4）
-    # A configured legacy tactical filter is not evidence of user authorization.
+    # Historical P&L bands are retained in configuration/audit snapshots, not
+    # injected as investment rules. A configured number is not user authority.
     trim_constraint = ""
-    if verdict_cfg.trim_no_trim_loss_pct > 0 and verdict_cfg.trim_caution_loss_pct > 0:
-        trim_constraint = bilingual(
-            f"**当前配置的旧择时减仓过滤（不是已核验的用户授权）**：\n"
-            f"- 只适用于 tactical_reentry：浮亏 < {verdict_cfg.trim_no_trim_loss_pct}% 时不建议择时卖出后买回；"
-            f"浮亏 {verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% 是该配置的谨慎区间。\n"
-            "- 风险减仓、投资依据失效、流动性需求不受此过滤影响；不要求先亏得更多或多个风险标签同时命中。\n"
-            "- 这些数字是配置策略，不是市场定律。账面损失已存在，不能把卖出本身说成产生了这笔损失。",
-            f"**Configured legacy tactical reduction filter (not verified user authorization)**:\n"
-            f"- Only tactical_reentry: below {verdict_cfg.trim_no_trim_loss_pct}% unrealized loss, do not recommend tactical sale/rebuy; "
-            f"{verdict_cfg.trim_no_trim_loss_pct}-{verdict_cfg.trim_caution_loss_pct}% is its caution interval.\n"
-            "- Risk reduction, thesis invalidation and liquidity exits are unaffected. Do not require larger losses or joint risk labels.\n"
-            "- These numbers are a configured policy, not market law. Existing mark-to-market loss is not created by selling.",
-        )
 
     # 集中度 lens 关闭时（单资产/刻意集中策略）压掉 CIO 的超配规则。空串=开启时零改动
     # （str.replace 空串为 no-op）。这是 prompt 软层；硬兜底在 cio_parse.py Sanity 4。
@@ -130,9 +125,9 @@ def build_cio_prompt(asset: Dict[str, Any], json_mode: bool = False) -> str:
         TRIM_CONSTRAINT=trim_constraint,
         CONCENTRATION_DIRECTIVE=concentration_directive,
         CASH_OPP_COST_DIRECTIVE=cash_opp_cost_directive,
-        ACCUMULATE_DEFINITION=("分批建仓 / 加仓（按当前已配置的现金比例策略，不将配置冒充用户授权）"
+        ACCUMULATE_DEFINITION=("分批建仓 / 加仓，比较已配置的现金运用偏好，仍须本次证据和真实预算"
                                if verdict_cfg.cash_opportunity_cost_rule_enabled else "分批建仓 / 加仓，须有本次证据和预算依据"),
-        HOLD_DEFINITION=("维持现状，核对当前配置的现金比例策略及其适用范围" if verdict_cfg.cash_opportunity_cost_rule_enabled
+        HOLD_DEFINITION=("维持现状，说明本次证据与现金运用偏好的权衡；配置不构成强制买入" if verdict_cfg.cash_opportunity_cost_rule_enabled
                          else "维持现状，可在任意仓位选择，但须说明为何优于买入或退出"),
     )
     prompt = apply_lens_blocks(prompt, "concentration", verdict_cfg.concentration_lens_enabled)

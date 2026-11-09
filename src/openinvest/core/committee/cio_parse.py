@@ -145,6 +145,23 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
             out["hold_reason"] = "deterministic_rule"
 
 
+STRUCTURED_CIO_FIELDS=("review_plan","risk_review_plan","alternatives","market_assessment","scenario_analysis","market_citations")
+
+
+class DuplicateCioJSONField(ValueError):
+    pass
+
+
+def strict_cio_json(text):
+    def unique(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:raise DuplicateCioJSONField('duplicate_cio_json_key')
+            result[key]=value
+        return result
+    return json.loads(text,object_pairs_hook=unique,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('nonfinite_cio_json_value')))
+
+
 def _fields_to_out(out: Dict[str, Any], fields: Dict[str, Any]) -> None:
     """从结构化 JSON fields（DeepSeek JSON Output）填 out 基础字段，与 regex 路径同口径
     （verdict&dominant_view&trim_reason 限定集 / confidence float / alloc int）。
@@ -241,19 +258,39 @@ def parse_cio_memo(
         ep = m.group(1).strip() if m else None
         out["expected_path"] = ep if (ep and ep.upper() != "N/A") else None
 
+    if fields is not None:
+        known={'verdict','confidence','dominant_view','trim_reason','exit_intent','hold_reason',
+               'review_plan','risk_review_plan','alternatives','market_assessment','scenario_analysis','market_citations',
+               'reentry_price','reentry_condition','expected_path','memo'}
+        extra={str(key):value for key,value in fields.items() if key not in known and not _ALLOC_KEY_RE.fullmatch(str(key))}
+        if extra:out['_unrecognized_json_fields']=extra
+    if fields is None:
+        headers=re.findall(r'^\s*(?:\*\*)?([A-Z][A-Z0-9_]+)(?:\*\*)?\s*:',text,re.MULTILINE|re.IGNORECASE)
+        headers=[name.upper() for name in headers]
+        names={'VERDICT','CONFIDENCE','DOMINANT_VIEW','TRIM_REASON','EXIT_INTENT','HOLD_REASON',
+               'REENTRY_PRICE','REENTRY_CONDITION','EXPECTED_PATH','REVIEW_PLAN_JSON','RISK_REVIEW_PLAN_JSON',
+               'MARKET_ASSESSMENT_JSON','ALTERNATIVES_JSON','SCENARIO_ANALYSIS_JSON','MARKET_CITATIONS_JSON'}
+        selected=[name for name in headers if name in names or name.startswith('SUGGESTED_ALLOC_')]
+        repeated=sorted({name for name in selected if selected.count(name)>1})
+        allocations=[name for name in selected if name.startswith('SUGGESTED_ALLOC_')]
+        if len(allocations)>1 and not repeated:repeated=allocations
+        if repeated:out['_duplicate_protocol_fields']=repeated
     # Structured review conditions are retained rather than discarded with prose.
-    for name in ("review_plan", "risk_review_plan", "alternatives"):
+    for name in STRUCTURED_CIO_FIELDS:
         value = (fields or {}).get(name)
+        present = fields is not None and name in fields
         if fields is None:
-            match = re.search(rf"^{name.upper()}_JSON:\s*(.+)$", text, re.MULTILINE)
+            match = re.search(rf"^\s*(?:\*\*)?{name.upper()}_JSON(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$", text, re.MULTILINE|re.IGNORECASE)
             if match:
+                present = True
                 try:
-                    value = json.loads(match.group(1))
+                    value = strict_cio_json(match.group(1).removesuffix("**").strip())
                 except ValueError:
                     out[f"_{name}_error"] = "invalid_json"
                     if name.endswith("review_plan"):
                         value = {"parse_error": "invalid_json"}
-        out[name] = value
+        if name!='market_citations' or present:
+            out[name] = value
     exit_intent = str((fields or {}).get("exit_intent") or "").strip().lower()
     if fields is None:
         match = re.search(r"^EXIT_INTENT:\s*(\w+)", text, re.MULTILINE | re.I)
@@ -286,22 +323,20 @@ def parse_cio_memo(
         except ValueError:
             pass
 
-    # Sanity check 1: 防 prompt injection / LLM 过度自信
+    # Legacy comparison only: self-confidence is not a validated directional rule
     # 从 config 读取（set_config_override() 实时生效）
     from openinvest.core.config import load_config
     _verdict_cfg = load_config().verdict
     confidence_threshold = _verdict_cfg.buy_confidence_overdrive
     confidence_downgrade = _verdict_cfg.buy_confidence_downgrade_to
     if out["verdict"] == "BUY" and out["confidence"] >= confidence_threshold:
-        out["_original_verdict"] = "BUY"
-        out["_original_confidence"] = out["confidence"]
-        out["verdict"] = "ACCUMULATE"
-        out["confidence"] = confidence_downgrade
-        out.update(decision_status="CONSTRAINED",constraint_reason="configured_buy_overdrive")
-        log.warning(
-            "parse_cio_memo: 降级 BUY(%s) → ACCUMULATE(%s) — 防 LLM 过度自信 / prompt injection",
-            out["_original_confidence"], confidence_downgrade,
-        )
+        # Self-reported confidence is not a calibrated event probability or a
+        # prompt-injection detector. Preserve the legacy comparison for audit;
+        # actual source, reasoning, budget and execution guards still apply.
+        out["_legacy_confidence_rule_shadow"] = {
+            "rule": "configured_buy_overdrive", "threshold": confidence_threshold,
+            "would_verdict": "ACCUMULATE", "would_confidence": confidence_downgrade,
+            "applied": False, "authority": "unvalidated_self_confidence_policy"}
 
     # Sanity check 2: alloc_cny 合理性 clamp
     # INVEST_ALLOC_AGGRESSIVENESS（Optuna 训练参数，0.05~0.30）会按 baseline ¥100k
@@ -468,13 +503,10 @@ def parse_cio_memo(
             and out["_raw_proposal"]["verdict"]=="HOLD"
             and out["decision_status"]=="READY"
             and out["verdict"] == "HOLD"):
-        out.setdefault("_original_verdict", "HOLD")
-        out["_risk_profile_applied"] = "aggressive_uptrend_hold_to_accumulate"
-        out["verdict"] = "ACCUMULATE"
-        log.warning(
-            "parse_cio_memo: risk_profile=aggressive + uptrend → HOLD 升级 ACCUMULATE"
-            "（显式杠杆档，消融口径 +CR −Sharpe）",
-        )
+        out["_legacy_risk_profile_shadow"] = {
+            "rule":"aggressive_uptrend_hold_to_accumulate", "would_verdict":"ACCUMULATE",
+            "applied":False, "authority":"risk_preference_is_not_market_opportunity"}
+
 
     # Sanity check 6（必须是最后一道）: 用户单次入场上限（strategy.md max_single_invest_cny）。
     # 此前只在 prompt 里"建议 ≤ cap"（portfolio_summary 一行），解析层不执行——LLM 超了就原样

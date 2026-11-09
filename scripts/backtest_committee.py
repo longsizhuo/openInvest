@@ -297,7 +297,12 @@ def _patch_tools_to_date(decision_date: str):
 
     stack.enter_context(patch.object(ef, "get_history_data", patched_get_history))
 
-    # === 2. analyze_multi_timeframe 内部用 get_history_data，已自动截断 ===
+    # === 2. Preserve baseline comparisons without literal historical dates.
+    # This closes only the calendar fingerprint channel, not model-memory bias.
+    real_analysis = ef.analyze_multi_timeframe
+    def historical_analysis(frame, title):
+        return real_analysis(frame, title, include_source_timestamps=False)
+    stack.enter_context(patch.object(ef, "analyze_multi_timeframe", historical_analysis))
 
     # === 3. get_macro_snapshot 内部用 get_history_data，已自动截断 ===
 

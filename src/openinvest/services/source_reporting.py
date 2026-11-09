@@ -6,6 +6,7 @@ from datetime import datetime,timezone
 import hashlib
 import importlib
 import json
+import sys
 from pathlib import Path
 import sqlite3
 
@@ -32,6 +33,44 @@ class ReportingPolicy(Eligibility):
     def _state(self):
         if self.snapshot is None:raise ValueError("no reviewed source registry")
         return self.snapshot
+
+
+class GovernanceReads:
+    """A batch's parsed views; file identity invalidates them without a TTL.
+
+    This caches administrative inputs, never an authorization result. Callers
+    recheck the identity before acting on a successful qualification.
+    """
+    def __init__(self):self.views={}
+
+    @staticmethod
+    def identity(root):
+        result=[]
+        for name in ('eligibility.json','exclusions.jsonl'):
+            path=Path(root)/'integrity'/name
+            try:
+                stat=path.stat()
+                identity=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns)
+                if sys.platform=='win32':identity+=(hashlib.sha256(path.read_bytes()).digest(),)
+                result.append(identity)
+            except FileNotFoundError:result.append(None)
+        return tuple(result)
+
+    def get(self,root):
+        root=Path(root).resolve();before=self.identity(root);cached=self.views.get(root)
+        if cached is not None and cached[0]==before:return cached[1]
+        policy=ReportingPolicy(root)
+        if self.identity(root)!=before:raise EvidenceIntegrityError('DATA_UNTRUSTED: governance changed during source read')
+        self.views[root]=(before,policy)
+        return policy
+
+    def is_current(self,policy):
+        cached=self.views.get(policy.root)
+        return cached is not None and cached[1] is policy and self.identity(policy.root)==cached[0]
+
+    def require_current(self,*policies):
+        if any(not self.is_current(policy) for policy in policies):
+            raise EvidenceIntegrityError('DATA_UNTRUSTED: governance changed before source use')
 
 
 def source_payload(source):
@@ -253,6 +292,14 @@ def backend_observation_use(data_root,event,ident,*,as_of=None,policy=None):
     if row is None:return False
     packet=json.loads(row[1])
     if row[0]!=digest(packet):raise EvidenceIntegrityError("DATA_UNTRUSTED: backend observation digest mismatch")
+    witness=(packet.get('inputs') or {}).get('market_witness')
+    if packet.get('event',{}).get('event_type')=='price_alert':
+        # Older native-price alerts could be based on a failed refresh or a
+        # converted futures/FX reference with no quote timestamp. Ownership of
+        # that old packet does not establish a real current/native bank quote.
+        if not isinstance(witness,dict) or not _native_quote_witness_allowed(witness,packet['acquired_at']):
+            return False
+    if witness is not None and not _market_witness_temporal(witness,packet['acquired_at']):return False
     return (packet.get("producer")=="openinvest.jobs.price_sentinel" and packet.get("event")==event_payload(event)
             and _moment(event["ts"])<=_moment(packet["acquired_at"])
             and "collector_version:"+packet["code_sha256"] not in gate.excluded_ids()
@@ -272,3 +319,66 @@ def event_reporting_use(data_root,event,sources,support,*,as_of=None,policy=None
         return backend_observation_use(data_root,event,support["observation_id"],as_of=as_of,policy=gate)
     return any(source_fingerprint(source)==support.get("source_id") and
         reporting_use(data_root,source,as_of=as_of,policy=gate)["allowed"] for source in sources)
+
+
+def event_version_binding(index, event_id, version):
+    """Validate the original quoted version and its still-qualified current view.
+
+    Acquisition metadata may advance, but a changed normalized fact, retained
+    source content or source permission cannot silently inherit the old input.
+    """
+    from openinvest.services.news_identity import analysis_identity
+    if type(version) is not int or version <= 0:
+        return {'allowed': False, 'reason': 'invalid_event_version'}
+    row = index.conn.execute('SELECT payload_json FROM event_versions WHERE event_id=? AND id=?',
+                             (event_id, version)).fetchone()
+    current = index.get_event(event_id)
+    if row is None or current is None:
+        return {'allowed': False, 'reason': 'source_missing_or_unqualified'}
+    original = json.loads(row[0]); original['_version_id'] = version
+    sources = original.get('sources', [])
+    if (original.get('event_id') != event_id
+            or index._source_excluded(event_id, Eligibility(index.data_root).excluded_ids(), sources=sources)
+            or not index._reporting_allowed(original, sources=sources, support=original.get('reporting_support'))):
+        return {'allowed': False, 'reason': 'original_source_unqualified'}
+    if event_payload(original) != event_payload(current):
+        return {'allowed': False, 'reason': 'referenced_event_fact_changed'}
+    if sources:
+        qualified = [s for s in sources if reporting_use(index.data_root, s, policy=index._policy())['allowed']]
+        identity = analysis_identity(original, qualified)
+        if identity != (current.get('_analysis_cause_id'), current.get('_analysis_version_id')):
+            return {'allowed': False, 'reason': 'referenced_source_content_changed'}
+    elif current.get('_version_id') != version:
+        return {'allowed': False, 'reason': 'backend_observation_version_changed'}
+    return {'allowed': True, 'reason': 'original_and_current_input_qualified', 'original': original}
+
+
+def _market_witness_temporal(witness, acquired_at):
+    try:
+        if not isinstance(witness,dict) or witness.get('schema')!='openinvest.market_witness.v1':return False
+        observed=_moment(witness['observation_asof']);captured=_moment(acquired_at)
+        if observed>captured:return False
+        source=witness.get('source_observation') or {}
+        received=source.get('received_at')
+        if received and _moment(received)>captured:return False
+        if witness.get('kind')=='completed_session_return':
+            reference=witness.get('return_reference') or {}
+            daily = reference.get('source_observation') or source
+            if daily.get('daily_alert_eligible') is not True or not daily.get('received_at'):
+                return False
+            received = _moment(daily['received_at'])
+            ends = daily.get('completion_ends') or {}
+            return (received <= captured and any(
+                _moment(end) == observed and observed <= received for end in ends.values()))
+        return witness.get('kind') in {'native_quote_alert','intraday_price_observation'}
+    except (ValueError,TypeError,KeyError):return False
+
+
+def _native_quote_witness_allowed(witness, acquired_at):
+    if (witness.get('kind')!='native_quote_alert' or witness.get('quote_fresh') is not True
+            or witness.get('is_reference') is not False or not _market_witness_temporal(witness,acquired_at)):
+        return False
+    try:
+        age=(_moment(acquired_at)-_moment(witness['quote_asof'])).total_seconds()
+        return 0<=age<=25*60 and (witness.get('source_observation') or {}).get('quote_fresh') is True
+    except (ValueError,TypeError,KeyError):return False

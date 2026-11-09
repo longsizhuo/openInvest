@@ -106,6 +106,7 @@ def record_llm_call(
     ok: bool = True,
     error: Optional[str] = None,
     cache_hit_tokens: int = 0,
+    response_status: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """记录一次 LLM 调用。线程/进程安全（memory_store.append_jsonl 的 sidecar flock）
 
@@ -132,6 +133,8 @@ def record_llm_call(
         "ok": ok,
         "error": error,
     }
+    if response_status is not None:
+        record['response_status'] = response_status
     if meta.extra:
         record["extra"] = meta.extra
 

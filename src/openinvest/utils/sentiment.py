@@ -2,14 +2,13 @@
 
 对齐 TradingAgents「情绪分析师」维度。设计红线（用户 2026-06-09 确认）：
 
-1. **VIX 历史分位是主信号** —— 纯确定性算（^VIX 已在抓），零外部依赖，永远可用。
-   这是 sentiment_brief 的底座，CNN 挂了它照常工作。
+1. **VIX 历史分位是描述性参考** —— ^VIX 有合格数据时确定性计算；
+   旧数据可保留作历史参考，不能据此宣称当前恐慌或平静。
 2. **CNN Fear&Greed 是附加信息** —— 能抓到就加进 brief，抓不到（DNS / 断供 / 超时）
    就 graceful 跳过，**绝不让 CNN 成为单点故障**。env INVEST_SENTIMENT_CNN_ENABLED
    可硬关（默认开，但失败即静默降级，等价"prod 不可达时自动只用 VIX"）。
-3. **INDEP_DEFENSE_FLAG** —— VIX 分位 ≥ 阈值 → on。这是**独立于 MA regime 的快速崩盘
-   哨兵**：MA120 追不上 COVID 类崩盘（全程被分类 uptrend），而 VIX 实时反映恐慌。
-   给 CIO 一个不挂 regime 锁的防御触发线索。
+3. **INDEP_DEFENSE_FLAG** —— 仅当前来源合格时披露旧配置分位分档，
+   时间未知、失败或陈旧时为 unknown。这些分档未经市场预测能力校准。
 
 这些进决策的方式 = 确定性背景事实（像 regime_brief），agent/CIO 必须纳入并说明，
 不是新增投票 agent 改方向。最终方向仍由概率表路径锚定 + CIO 否决权。
@@ -47,6 +46,21 @@ CNN_FNG_URL = "https://production.dataviz.cnn.com/index/fearandgreed/graphdata"
 CNN_TIMEOUT_S = float(os.getenv("INVEST_SENTIMENT_CNN_TIMEOUT_S", "4"))
 
 
+class VixObservation(tuple):
+    def __new__(cls, price, percentile, source):
+        value = super().__new__(cls, (price, percentile))
+        value.source_observation = source
+        return value
+
+
+class SentimentBrief(str):
+    def __new__(cls, text, source):
+        value = super().__new__(cls, text)
+        value.input_health = {'valid':source.get('quote_fresh') is True and source.get('history_basis_qualified') is not False,
+                              'source_observation':source}
+        return value
+
+
 def _vix_percentile() -> Optional[Tuple[float, float]]:
     """返回 (vix_last, 近2年百分位 0-1)；无数据返回 None（graceful）。
 
@@ -70,7 +84,8 @@ def _vix_percentile() -> Optional[Tuple[float, float]]:
         return None
     last = float(closes.iloc[-1])
     pct = float((closes <= last).mean())  # 真百分位排名（近2年内 ≤ 当前的比例）
-    return last, pct
+    from openinvest.utils.market_observation import frame_observation
+    return VixObservation(last, pct, frame_observation(df))
 
 
 def fetch_cnn_fear_greed(timeout: float = CNN_TIMEOUT_S) -> Optional[Tuple[int, str]]:
@@ -207,6 +222,8 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
         return ""
     from openinvest.capabilities.committee.i18n import bilingual
     vix_last, pct = vix
+    source = getattr(vix, 'source_observation', {}) or {}
+    qualified = source.get('quote_fresh') is True and source.get('history_basis_qualified') is not False
     label = _vix_label(pct)
     lines = [
         bilingual(
@@ -214,6 +231,12 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
             f"FEAR_GREED_GAUGE: VIX={vix_last:.1f} (2-year percentile {pct * 100:.0f}%) -> {label}",
         ),
     ]
+    if not qualified:
+        lines[0] = lines[0].replace('FEAR_GREED_GAUGE:', 'FEAR_GREED_REFERENCE:')
+    lines.append('VIX_OBSERVATION_STATUS: ' + ('observed_quote' if qualified else 'reference_only')
+        + '; asof=' + str(source.get('quote_asof') or source.get('bar_asof') or 'unknown')
+        + '; fetch=' + str(source.get('fetch_status','unverified')))
+    lines.append('VIX_CLASSIFICATION_BASIS: legacy configured relative bands; not a calibrated probability of a market decline.')
 
     use_cnn = _cnn_enabled() if cnn_enabled is None else cnn_enabled
     if use_cnn:
@@ -226,19 +249,21 @@ def build_sentiment_brief(event_brief: str = "", *, cnn_enabled: Optional[bool] 
         lines.append(stance)
 
     from openinvest.core.config import load_config
-    if pct >= load_config().sentiment.vix_defense_quantile:
+    if not qualified:
+        lines.append('INDEP_DEFENSE_FLAG: unknown  # VIX freshness is unverified; this neither establishes nor clears current risk.')
+    elif pct >= load_config().sentiment.vix_defense_quantile:
         lines.append(bilingual(
             "INDEP_DEFENSE_FLAG: on  "
-            "# VIX 处近2年高位=市场恐慌，独立于 MA regime 的快速崩盘哨兵；"
-            "加仓需谨慎，优先考虑防御（regime 可能仍滞后显示 uptrend）",
+            "# 当前VIX历史分位达到已配置的旧描述档位；不是崩盘预测或独立投票，"
+            "市场判断仍须核对原始风险证据、反证与期限",
             "INDEP_DEFENSE_FLAG: on  "
-            "# VIX is near its 2-year highs = market fear; this is a fast crash sentinel independent of the MA regime. "
-            "Be cautious with adding risk and prefer defense first (the regime may still lag and show uptrend)",
+            "# The observed VIX percentile reached the configured legacy band. "
+            "This is not a crash forecast or an independent vote; assess raw evidence, counterevidence and horizon.",
         ))
     else:
         lines.append("INDEP_DEFENSE_FLAG: off")
 
-    return "\n".join(lines)
+    return SentimentBrief("\n".join(lines), source)
 
 
 __all__ = [
