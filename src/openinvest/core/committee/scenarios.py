@@ -28,6 +28,13 @@ _MARKET_SOURCES={'market':('market_data','market_input'),'macro':('macro_data','
 # surrounding text discusses an account, funds, quantities, costs or PnL.
 _CITATION_ACCOUNT_SCOPE=re.compile(r'账户|帐户|余额|你的|我的|个人|持仓|仓位|组合|资金|成本|止损|交易金额|数量|份额|股数|手数|损益|亏损|盈利|'
     r'\b(?:account|balance|your|my|personal|portfolio|position|holdings?|quantity|cost|profit|loss|stop[ -]loss)\b',re.I)
+_REFERENCE_FINANCIAL_LABEL=re.compile(_ACCOUNT_METRIC.pattern+'|'+_PNL_METRIC.pattern+
+    r'|账户|帐户|余额|持仓|仓位|组合|资金|成本|数量|份额|股数|手数|损益|亏损|盈利|'
+    r'\b(?:account|balance|portfolio|position|holdings?|quantity|cost|profit|loss)\b',re.I)
+_VALUE_LINK=re.compile(r'^(?:[\s,，:：=;；.。\[\]()（）"\'“”‘’*_`<>-]|'
+    r'等于|不等于|约为|低于|高于|小于|大于|不少于|不超过|不为|不是|为|是|约|值|的|见|参考|'
+    r'金额|数额|余额|数量|成本|市值|损失|亏损|盈亏|'
+    r'\b(?:is|are|equals?|equal|to|not|about|approximately|value|amount|total|balance|loss|pnl|of|at|see|reference|above|below)\b)*$',re.I)
 
 
 def market_citation_catalog(facts):
@@ -150,6 +157,28 @@ def _string_leaves(value,path):
         for i,item in enumerate(value):yield from _string_leaves(item,path+'.'+str(i))
 
 
+def _reference_groups(value,path):
+    """Keep multiline/list value relationships together, before clause splitting."""
+    if isinstance(value,str):yield path,value
+    elif isinstance(value,list) and all(isinstance(item,str) for item in value):yield path,'\n'.join(value)
+    elif isinstance(value,dict):
+        for key,item in value.items():yield from _reference_groups(item,path+'.'+str(key))
+    elif isinstance(value,list):
+        for index,item in enumerate(value):yield from _reference_groups(item,path+'.'+str(index))
+
+
+def _account_citation_value(text, identifiers):
+    labels=list(_REFERENCE_FINANCIAL_LABEL.finditer(text))
+    for ident in identifiers:
+        for reference in re.finditer(r'(?<![A-Za-z0-9_-])'+re.escape(ident)+r'(?![A-Za-z0-9_-])',text,re.I):
+            for label in labels:
+                if label.end()<=reference.start():between=text[label.end():reference.start()]
+                elif reference.end()<=label.start():between=text[reference.end():label.start()]
+                else:continue  # A financial word inside the ID is not an account assertion.
+                if _VALUE_LINK.fullmatch(between):return True
+    return False
+
+
 def _market_price_reference_text(text, reference):
     """Recognize a supplied market mark, never a coincident account amount."""
     reference=reference or {}
@@ -226,9 +255,9 @@ def untyped_financial_statements(memo, fields=None, *, currencies=(), market_ref
     clauses=[(path,part.strip()) for path,text in fragments if exempt.get(path)!=text
              for part in re.split(r'[，；。！？;!?\n]|(?<!\d),(?!\d)|(?<!\d)\.(?!\d)',text) if part.strip()]
     clauses=[(path,_market_price_reference_text(text,market_reference)) for path,text in clauses]
-    for path,text in clauses:
-        if ((_ACCOUNT_METRIC.search(text) or _PNL_METRIC.search(text) or _CITATION_ACCOUNT_SCOPE.search(text))
-                and any(re.search(r'(?<![A-Za-z0-9_-])'+re.escape(ident)+r'(?![A-Za-z0-9_-])',text,re.I) for ident in bound_citation_ids)):
+    groups=[('memo',str(memo or '')),*_reference_groups(fields,'fields')]
+    for path,text in groups:
+        if path not in exempt and _account_citation_value(text,bound_citation_ids):
             structure.append({'code':'market_citation_account_reference_forbidden','path':path,
                               'claim_quote':text,'reason':'market_report_reference_cannot_supply_an_account_value'})
     native=[re.escape(c) for c in currencies if isinstance(c,str) and re.fullmatch('[A-Z]{3}',c)]

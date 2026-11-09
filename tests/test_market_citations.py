@@ -112,11 +112,31 @@ def test_duplicate_ids_grant_no_exemptions_or_display():
     '我的持仓账面损失为[oil_report]。',
     'Account cash is oil_report.',
     'My unrealized loss: [OIL_REPORT].',
+    '账户现金：\n[oil_report]',
+    '我的持仓账面损失，等于[oil_report]。',
+    'Cash balance:\n[oil_report]',
+    '[oil_report] equals account cash.',
 ])
 def test_market_citation_id_cannot_substitute_for_a_personal_amount(memo):
     result=validate(memo=memo)
     assert any(e['code']=='market_citation_account_reference_forbidden' for e in result['errors'])
     assert not validate(memo='市场能源报道见[oil_report]。')['errors']
+
+
+@pytest.mark.parametrize('memo',[
+    '当前持仓的市场风险来自[oil_report]所述能源冲击。',
+    'Current holdings face market risk from [oil_report].',
+    '账面波动受到[oil_report]所述市场冲击影响。',
+    'Account cash is not reported; market risk comes from [oil_report].',
+])
+def test_qualitative_market_causality_does_not_assign_a_report_price_to_the_account(memo):
+    assert not validate(memo=memo)['errors']
+
+
+def test_account_value_relationship_across_support_items_stays_visible():
+    fields={'market_citations':[citation()], 'market_assessment':{'support':['账户现金：','[oil_report]']}}
+    result=validate_scenarios(None,[],fields=fields,market_sources=catalog())
+    assert any(e['code']=='market_citation_account_reference_forbidden' for e in result['errors'])
 
 
 def test_text_protocol_citation_id_has_the_same_account_scope_boundary():
