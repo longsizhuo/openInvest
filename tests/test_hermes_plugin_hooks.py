@@ -98,7 +98,7 @@ def test_stale_digest_is_served_while_refreshing_in_background(plugin, monkeypat
     monkeypatch.setattr(plugin, "_spawn", spawned.append)
     clock = [1000.0]
     monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
     assert hook(session_id="s1", platform="discord")["context"].endswith("NVDA.")
@@ -117,7 +117,7 @@ def test_failed_brief_backs_off_instead_of_retrying_every_ttl(plugin, monkeypatc
     monkeypatch.setattr(plugin.subprocess, "run", run)
     clock = [1000.0]
     monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
     assert hook(session_id="s", platform="cli") is None
@@ -130,7 +130,7 @@ def test_failed_brief_backs_off_instead_of_retrying_every_ttl(plugin, monkeypatc
 
 def test_without_session_id_injects_every_turn(plugin, monkeypatch):
     monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: NVDA."], []))
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
     assert hook(platform="discord") and hook(platform="discord")          # 没法去重：不能只给第一个会话
@@ -162,7 +162,7 @@ def test_brief_failure_injects_nothing(plugin, monkeypatch, result):
         return subprocess.CompletedProcess(cmd, 2, result, "")
 
     monkeypatch.setattr(plugin.subprocess, "run", run)
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     assert ctx.hooks["pre_llm_call"](session_id="s", platform="cli") is None
 
@@ -170,3 +170,23 @@ def test_brief_failure_injects_nothing(plugin, monkeypatch, result):
 def test_claude_code_session_start_hook_runs_brief():
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
     assert hooks["type"] == "command" and hooks["command"].endswith("run.sh\" brief --text")
+
+
+@pytest.mark.parametrize("config", [{}, {"connection_mode": "remote"}, {"connection_mode": "remote", "invest_home": "/private/local-ledger"}])
+def test_remote_or_unselected_connection_never_reads_local_digest(plugin, monkeypatch, config):
+    monkeypatch.setattr(plugin.subprocess, "run", lambda *a, **k: pytest.fail("remote connection launched local ledger"))
+    ctx = _Ctx(config)
+    plugin.register(ctx)
+    assert ctx.hooks["pre_llm_call"](session_id="s", platform="cli") is None
+
+
+def test_switching_from_local_to_remote_does_not_serve_cached_local_digest(plugin, monkeypatch):
+    calls = []
+    monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: TEST."], calls))
+    ctx = _Ctx({"connection_mode": "local"})
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(session_id="s", platform="cli")
+    ctx.config["connection_mode"] = "remote"
+    assert hook(session_id="new-remote-session", platform="cli") is None
+    assert len(calls) == 1
