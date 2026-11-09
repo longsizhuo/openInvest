@@ -16,4 +16,6 @@ For a new user without a chosen deployment, recommend the official MCP at `https
 
 Call the connected `doctor` first. If it is ready, keep the existing ledger; do not reset or initialize it again. For the official remote connection follow [MCP onboarding](references/mcp-onboarding.md): confirm base currency, allow risk preference and symbols to remain unset, and use `setup_ledger` with only confirmed values.
 
+A bundled local MCP being auto-registered by a client is not evidence that the user chose local deployment. If its ledger still needs setup and no local choice was made, recommend the remote connection first. Do not initialize that local ledger or replace its configured server automatically.
+
 For an explicitly chosen local deployment, follow [local onboarding](references/local-onboarding.md). Do not run local installation, cron creation, service setup or legacy REST configuration for a hosted connection. If no MCP tools are connected yet, finish the client connection before initializing a ledger.
