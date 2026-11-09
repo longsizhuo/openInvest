@@ -228,6 +228,43 @@ def _calc_return_30d(close: pd.Series, lookback: int = LOOKBACK_30D) -> Optional
     return float(cur / prev - 1)
 
 
+def _calc_trend_spread_norm_delta(
+    df: pd.DataFrame,
+    lookback: int = 20,
+) -> Optional[float]:
+    """趋势强度的变化：MA20/MA120 距离（按 ATR 归一）相对 lookback 日前的差值。
+
+    负值 = 趋势在走弱，正值 = 在加强。
+
+    **为什么用「绝对价差 / ATR(价格单位)」而不是「百分比价差 / ATR%」**：
+    百分比价差 (ma20-ma120)/ma120 的分母随价格一起上涨，**健康的加速上涨也会
+    让百分比价差机械收窄**——实测纯线性上涨（斜率 +0.1 ~ +2.0 元/日）用百分比
+    口径会得到 −0.03 ~ −0.87，与「趋势真的转弱」的量级重叠，无法区分；改用绝对
+    距离后同一组用例全部为 0.000，而真实转弱（涨到顶后横盘）为 −2.91。
+
+    存在的理由：`regime_brief` 的 uptrend 衰竭检查要求 worker 判「MA20/MA120 的
+    spread 是否在收窄」，但计算层此前只给当前值，worker 拿不到斜率只能猜
+    （实测一轮把「价差仍宽」当成「未收窄」，而实际 20 日在明显收窄）。
+    """
+    if df is None or df.empty or len(df) < 120 + lookback:
+        return None
+    atr_pct_series = _atr_pct_series(df, period=14)
+    if atr_pct_series is None:
+        return None
+    # ATR% → ATR 的价格单位
+    atr_abs = (atr_pct_series / 100.0 * df["Close"]).iloc[-1]
+    if pd.isna(atr_abs) or atr_abs <= 0:
+        return None
+    ma20 = df["Close"].rolling(window=20).mean()
+    ma120 = df["Close"].rolling(window=120).mean()
+    gap = (ma20 - ma120) / atr_abs
+    now = gap.iloc[-1]
+    prev = gap.iloc[-1 - lookback]
+    if pd.isna(now) or pd.isna(prev):
+        return None
+    return float(now - prev)
+
+
 def _calc_rebound_off_low(close: pd.Series, window: int = LOOKBACK_30D) -> Optional[float]:
     """当前价相对近 window 个交易日最低收盘价的反弹幅度 (cur/low - 1, 正数=已反弹)。
 
@@ -304,6 +341,7 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
             "atr_pct": None,
             "atr_spike_ratio": None,
             "atr_pct_median_1y": None,
+            "trend_spread_norm_delta_20d": None,
             "volatility_annualized": None,
             "max_drawdown": None,
             "return_30d": None,
@@ -323,6 +361,7 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Any]:
         "atr_pct": _calc_atr_pct(df, period=14),
         "atr_spike_ratio": _calc_atr_spike_ratio(df, period=14),
         "atr_pct_median_1y": _calc_atr_pct_median_1y(df, period=14),
+        "trend_spread_norm_delta_20d": _calc_trend_spread_norm_delta(df),
         "volatility_annualized": _calc_volatility_annualized(close),
         "max_drawdown": _calc_max_drawdown(close),
         "return_30d": _calc_return_30d(close),
