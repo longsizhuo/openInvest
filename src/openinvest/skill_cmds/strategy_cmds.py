@@ -4,7 +4,7 @@
 - set_allocations   改股票/现金目标配比（和必须 ≈1）和/或按标的的 target_pct / alerts（报警线）
 - track_asset       跟踪标的（upsert：不存在则新建，已存在只更新传入字段——
                     "track AAPL" 重复调用幂等不报错）
-- untrack_asset     移除跟踪标的（schema 保证至少剩 1 个）
+- untrack_asset     移除跟踪标的（允许删到空列表）
 
 另有只读的 rebalance_plan（目标配置 → 该买 / 卖多少的清单，只出清单不下单），
 实现在 services/rebalance_plan.py，归在这里因为它消费的就是 strategy.md。

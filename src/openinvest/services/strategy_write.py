@@ -258,7 +258,7 @@ def replace_target_assets(
     assets: List[Dict[str, Any]], *, store: Optional[MemoryStore] = None
 ) -> Dict[str, Any]:
     """整表替换 target_assets（一个 transaction，schema 校验不过整体回滚）。
-    给 jobs/ibkr_autopilot 的每周选股用：逐个 add/remove 会在中途撞「至少剩 1 个」。"""
+    给 jobs/ibkr_autopilot 的每周选股批量更新使用。"""
     if not assets:
         raise ValueError("target_assets 不能为空")
     with _store(store).transaction("strategy") as tx:
