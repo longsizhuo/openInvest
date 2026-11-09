@@ -18,6 +18,7 @@ _CURRENCY=r'(?:CNY|CNH|USD|AUD|EUR|GBP|JPY|HKD|CAD|CHF|NZD|SGD|INR|KRW|TWD|THB|I
 _NUMBER=r'[-+−]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)'
 _MONEY=re.compile(r'(?:[$¥￥€£]\s*'+_NUMBER+r'|(?<![A-Za-z_])'+_CURRENCY+r'\s*'+_NUMBER+r'|'+_NUMBER+r'\s*'+_CURRENCY+r'(?![A-Za-z_])|'+_NUMBER+r'\s*[$¥￥€£])')
 _NUMERIC=re.compile(r'(?<![A-Za-z0-9_])'+_NUMBER+r'|(?:归|为|等于|约为)\s*[零〇]|[零〇]\s*(?:元|损失|回撤|盈亏)|\bzero\b',re.I)
+_NEGATED_WORD_ZERO=re.compile(r'(?:不(?:为|等于|是)|并非|不是|非)\s*[零〇]|\b(?:not|never)(?:\s+equal\s+to)?\s+zero\b',re.I)
 _ACCOUNT_METRIC=re.compile(r'账面|浮盈|浮亏|已实现|未实现|持仓成本|平均成本|均价|成本基准|持仓数量|持仓市值|现金|预算|金额|限额|市值变化|盈亏|压力测试|情景损失|损失金额|\b(?:pnl|p&l|realized|unrealized|cash|budget|cost[ -]basis|position[ -](?:value|size|quantity)|portfolio[ -]value|mark[ -]to[ -]market|scenario[ -]loss|stress[ -]test)\b',re.I)
 _PNL_METRIC=re.compile(r'账面|浮盈|浮亏|已实现|未实现|盈亏|\b(?:pnl|p&l|realized|unrealized|book[ -]drawdown|mark[ -]to[ -]market)\b',re.I)
 _PROTOCOL=re.compile(r'^\s*(?:\*\*)?(?:VERDICT|CONFIDENCE|DOMINANT_VIEW|SUGGESTED_ALLOC_[A-Z]{3}|TRIM_REASON|EXIT_INTENT|HOLD_REASON|(?:REVIEW_PLAN|RISK_REVIEW_PLAN|SCENARIO_ANALYSIS|MARKET_ASSESSMENT|ALTERNATIVES)_JSON|REENTRY_PRICE)(?:\*\*)?\s*:',re.I)
@@ -25,6 +26,13 @@ _PROTOCOL=re.compile(r'^\s*(?:\*\*)?(?:VERDICT|CONFIDENCE|DOMINANT_VIEW|SUGGESTE
 
 def _text_shape(value):
     return value is None or isinstance(value,str) or (isinstance(value,list) and all(isinstance(item,str) for item in value))
+
+
+def _has_numeric_value(text):
+    # "Opportunity cost is not zero" is qualitative; it does not assert a
+    # zero account value. Keep digits, money and positive zero assertions.
+    presentation=_NEGATED_WORD_ZERO.sub(lambda m:' '*len(m.group(0)),text)
+    return _NUMERIC.search(presentation) is not None
 
 
 def narrative_schema_errors(fields):
@@ -137,8 +145,8 @@ def untyped_financial_statements(memo, fields=None, *, currencies=(), market_ref
     return structure+[{'code':'untyped_financial_narrative','path':path,'claim_sha256':hashlib.sha256(text.encode()).hexdigest(),
              'claim_quote':text,'reason':'financial_quantities_require_typed_source_or_backend_calculation'}
             for path,text in clauses if _MONEY.search(text) or (native_money is not None and native_money.search(text))
-            or any(_NUMERIC.search(text[m.end():]) for m in _ACCOUNT_METRIC.finditer(text))
-            or (_PNL_METRIC.search(text) and _NUMERIC.search(text))]
+            or any(_has_numeric_value(text[m.end():]) for m in _ACCOUNT_METRIC.finditer(text))
+            or (_PNL_METRIC.search(text) and _has_numeric_value(text))]
 
 
 BASES={'current_market_value':'quantity_times_current_mark','scenario_market_value':'quantity_times_scenario_mark',

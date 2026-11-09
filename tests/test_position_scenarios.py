@@ -137,3 +137,22 @@ def test_market_reference_consumes_unknown_units_and_requires_the_same_positive_
     ref.update(price=.004,unit='share')
     assert validate_scenarios(None,[],memo='现价0 USD/share',market_reference=ref)['errors']
     assert not validate_scenarios(None,[],memo='现价0.004 USD/share',market_reference=ref)['errors']
+
+
+@pytest.mark.parametrize('text',[
+    'HOLD 在本情境中完全适用且成本不为零：账面市值变化不会因为不卖而消失',
+    'Waiting cost is not zero: mark-to-market losses persist without selling',
+])
+def test_qualitative_nonzero_cost_is_not_a_zero_pnl_amount(text):
+    assert not validate_scenarios(position(),[],memo=text)['errors']
+
+
+@pytest.mark.parametrize('text',[
+    '没有卖出，所以账面损失为零',
+    '成本不为零：账户亏损为0 CNY',
+    '成本不为零：账面损失为零',
+    'Waiting cost is not zero: mark-to-market loss is zero',
+    'Not zero: position value 100 CNY',
+])
+def test_negated_cost_does_not_exempt_a_separate_numeric_account_claim(text):
+    assert validate_scenarios(position(),[],memo=text)['errors']
