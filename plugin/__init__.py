@@ -30,7 +30,8 @@ ROUTING_RULE = (
     "openInvest is installed: the owner's own investment ledger, live prices and a 4-role committee. "
     "For any question about stocks, funds, ETFs, gold, crypto, markets, macro, buying or selling, or the "
     "owner's money, call the openinvest tools first (status / live_prices; the symbol may already be a holding) "
-    "and only then add web search. Load the openinvest:invest skill before running a committee."
+    "and only then add web search. Use the already configured connection; do not switch ledgers. "
+    "Load the openinvest:invest skill before running a committee."
 )
 BRIEF_TTL_SECONDS = 300
 BRIEF_TIMEOUT_SECONDS = 15
@@ -92,9 +93,9 @@ def _brief_text(invest_home):
     return _brief_cache["text"]
 
 
-def _make_pre_llm_call(invest_home):
+def _make_pre_llm_call(invest_home, local_selected=True):
     def pre_llm_call(session_id=None, platform=None, **_):
-        if platform in SKIP_PLATFORMS:
+        if not local_selected or platform in SKIP_PLATFORMS:
             return None
         text = _brief_text(invest_home)
         if not text:
@@ -119,26 +120,38 @@ def register(ctx):
             log.info(f"[openinvest] registered skill: {child.name}")
 
     # Older Hermes builds lack these APIs; skills + MCP keep working without them.
-    invest_home, inject_digest = None, True
+    invest_home, inject_digest, local_selected = None, True, False
     if hasattr(ctx, "get_config"):
         try:
             invest_home = ctx.get_config("invest_home")
+            mode = ctx.get_config("connection_mode")
+            # A hosted connection must never launch the local digest command.
+            # An explicitly configured legacy local directory remains a local selection.
+            local_selected = mode == "local" or (not mode and bool(invest_home))
             # `hermes config set ... false` may store the string "false"
             inject_digest = str(ctx.get_config("inject_digest", True)).strip().lower() not in ("false", "0", "no", "off")
         except Exception:  # noqa: BLE001  config read must never break plugin load
             invest_home = None
+            local_selected = False
     if hasattr(ctx, "register_system_prompt_section"):
         try:
             ctx.register_system_prompt_section("openinvest.routing", ROUTING_RULE)
         except (TypeError, ValueError) as e:
             log.info("[openinvest] system prompt section not registered: %s", e)
     if hasattr(ctx, "register_hook") and inject_digest:
-        ctx.register_hook("pre_llm_call", _make_pre_llm_call(invest_home))
+        ctx.register_hook("pre_llm_call", _make_pre_llm_call(invest_home, local_selected))
 
     # MCP 走本插件自带的 run.sh：它把后端钉在 release-please 盖章的版本（不跑 PyPI 上最新的），
     # 插件更新后 run.sh 跟着更新，这段配置不用改。拆两条：Hermes 的 untrusted 按 server 生效、每次都问、
     # 没有"永久允许"，只有动钱那条（ledger）留 untrusted，cron 要用的 agent 那条给 full trust。
     # 不写 INVEST_HOME：Hermes 不经 shell 起进程，~ 不会展开；run.sh 自己默认 INVEST_HOME=$HOME/openInvest
+    log.info(
+        "[openinvest] Keep an existing MCP connection. New users: connect with OAuth at "
+        "https://openinvest.involutionhell.com/mcp; see https://openinvest.involutionhell.com/connect/. "
+        "Choose local deployment explicitly before using the local snippet below."
+    )
+    if not local_selected:
+        return
     log.info(
         "[openinvest] MCP tools: add to ~/.hermes/config.yaml (after-install.md has the commands)\n"
         "mcp_servers:\n"
