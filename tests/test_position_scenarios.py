@@ -156,3 +156,17 @@ def test_qualitative_nonzero_cost_is_not_a_zero_pnl_amount(text):
 ])
 def test_negated_cost_does_not_exempt_a_separate_numeric_account_claim(text):
     assert validate_scenarios(position(),[],memo=text)['errors']
+
+
+@pytest.mark.parametrize('text',[
+    '半导体与设备板块 10 月以来下跌，市场预期 12 月再加息。',
+    '油价上行推高通胀预期、市场预期 12 月再加息、半导体与设备板块 10 月以来两位数下跌并引发 AI 投资可持续性质疑',
+    '按研究单元 12 的市场指标继续复核。',
+])
+def test_compound_nouns_before_dates_are_not_currency_prefixes(text):
+    assert not validate_scenarios(position(),[],memo=text)['errors']
+
+
+@pytest.mark.parametrize('text',['亏了10块','亏了 1000 元','USD 1000','美元1000','1000 CNY','预算为1000块'])
+def test_currency_suffixes_symbols_and_unambiguous_prefixes_stay_financial(text):
+    assert validate_scenarios(position(),[],memo=text)['errors']

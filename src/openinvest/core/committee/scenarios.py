@@ -15,8 +15,9 @@ LEGACY_STRESS=re.compile(r'(?im)^\s*(?:[-*]\s*)?(?:\*\*)?stress_scenario_loss_[a
 # Narrative is qualitative. Prices/amounts/quantities belong in their typed
 # fields; the backend owns financial arithmetic and the official scenario block.
 _CURRENCY=r'(?:CNY|CNH|USD|AUD|EUR|GBP|JPY|HKD|CAD|CHF|NZD|SGD|INR|KRW|TWD|THB|IDR|MYR|PHP|VND|ZAR|BRL|MXN|RUB|TRY|AED|SAR|ILS|SEK|NOK|DKK|PLN|CZK|HUF|ISK|人民币|澳元|美元|港元|日元|欧元|元|块|円)'
+_CURRENCY_PREFIX=r'(?:CNY|CNH|USD|AUD|EUR|GBP|JPY|HKD|CAD|CHF|NZD|SGD|INR|KRW|TWD|THB|IDR|MYR|PHP|VND|ZAR|BRL|MXN|RUB|TRY|AED|SAR|ILS|SEK|NOK|DKK|PLN|CZK|HUF|ISK|人民币|澳元|美元|港元|日元|欧元|円)'
 _NUMBER=r'[-+−]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)'
-_MONEY=re.compile(r'(?:[$¥￥€£]\s*'+_NUMBER+r'|(?<![A-Za-z_])'+_CURRENCY+r'\s*'+_NUMBER+r'|'+_NUMBER+r'\s*'+_CURRENCY+r'(?![A-Za-z_])|'+_NUMBER+r'\s*[$¥￥€£])')
+_MONEY=re.compile(r'(?:[$¥￥€£]\s*'+_NUMBER+r'|(?<![A-Za-z_])'+_CURRENCY_PREFIX+r'\s*'+_NUMBER+r'|'+_NUMBER+r'\s*'+_CURRENCY+r'(?![A-Za-z_])|'+_NUMBER+r'\s*[$¥￥€£])')
 _NUMERIC=re.compile(r'(?<![A-Za-z0-9_])'+_NUMBER+r'|(?:归|为|等于|约为)\s*[零〇]|[零〇]\s*(?:元|损失|回撤|盈亏)|\bzero\b',re.I)
 _NEGATED_WORD_ZERO=re.compile(r'(?:不(?:为|等于|是)|并非|不是|非)\s*[零〇]|\b(?:not|never)(?:\s+equal\s+to)?\s+zero\b',re.I)
 _ACCOUNT_METRIC=re.compile(r'账面|浮盈|浮亏|已实现|未实现|持仓成本|平均成本|均价|成本基准|持仓数量|持仓市值|现金|预算|金额|限额|市值变化|盈亏|压力测试|情景损失|损失金额|\b(?:pnl|p&l|realized|unrealized|cash|budget|cost[ -]basis|position[ -](?:value|size|quantity)|portfolio[ -]value|mark[ -]to[ -]market|scenario[ -]loss|stress[ -]test)\b',re.I)
