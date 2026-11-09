@@ -44,12 +44,14 @@ def _json_output_addendum() -> str:
   "alternatives": 数组；必须分别列 HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY，可增加 THESIS_EXIT、LIQUIDITY_EXIT；每项含 kind、applicability（applicable|not_applicable|unknown，不偏好不等于不适用）、market_evaluation（favorable|unfavorable|mixed|unknown）、exit_intent、support、counterevidence、constraint_refs、assumptions、data_gaps；不能合并风险退出与择时买回,
   "review_plan": 按上述结构给出条件、单位、带时区有效期和变更理由的对象，或 null,
   "scenario_analysis": 数组或空数组；每项只给 scenario_id、position_ref（逐字引用 typed position facts）、target_price、currency、unit、assumption="no_trade"、reason。金额由后端复算，不自填损失、未实现或已实现盈亏；缺数据保持未知，不以缺少场景为方向门槛,
+  "market_citations": 数组或[]；每项仅含citation_id（ASCII字母开头，仅字母/数字/下划线/连字符，最长64字符）、source_id（market|macro|events）、source_quote（逐字引用本次原始市场来源，不得含账户/资金/数量/成本/损益内容）；context_ref可省略或null，有值必须逐字等于本次context_id。backend派生hash与context binding，不自填资格字段,
   "risk_review_plan": 独立的下行风险复核计划，同 review_plan 结构，或 null；不得只在 memo 中承诺监控,
   "reentry_price": 择时买回型 TRIM 用低于现价的数字，资产报价币种、与现价同单位；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
   "reentry_condition": 择时买回条件；stop_loss / concentration 或 risk_reduction / thesis_invalidated / liquidity_need 退出或非 TRIM 可用 null,
   "expected_path": 择时买回型 TRIM 的路径依据；风险/需求退出或非 TRIM 可用 null,
-  "memo": "多段定性市场分析；资金金额、持仓数量、成本及损益数字只放结构化字段/后端表，不写自由财务计算。市场指标可引用"
+  "memo": "多段定性市场分析；个人资金金额、持仓数量、成本及损益数字只放对应结构化字段/后端表，不写自由财务计算。市场百分比、RSI等可描述；含货币数值的市场报道只放market_citations的逐字source_quote，memo/support/counterevidence用[citation_id]引用，不在其中重复货币数值"
 }
+市场引用只证明原文存在，不证明来源真实、时效或独立性；不能成为持仓原生报价、账户算术、用户授权或交易/学习许可。不得引用账户上下文、分析员模型意见或生成计划。没有来源catalog时用[]；不可凭空编造来源或把引用数字变成个人资金金额。
 上方所有规则照旧（sanity / TRIM 约束 / 集中度 / 输入失败保留未知，由后端处理资格，不把输入失败当成市场HOLD），只是承载在 JSON 字段里。""",
         """=== Output format override (this is the only format for this call) ===
 Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSON object only** (no markdown code fences, no extra text), with the following fields:
@@ -65,12 +67,14 @@ Ignore the `VERDICT: / CONFIDENCE: ...` text format above. Output **a single JSO
   "alternatives": an array with separate HOLD_EXISTING, ADD, REDUCE_RISK and TACTICAL_REENTRY entries; optional THESIS_EXIT and LIQUIDITY_EXIT. Each includes kind, applicability (applicable|not_applicable|unknown; not preferred is not inapplicable), market_evaluation (favorable|unfavorable|mixed|unknown), exit_intent, support, counterevidence, constraint_refs, assumptions and data_gaps. Risk reduction and tactical reentry must not be merged,
   "review_plan": conditions, units, timezone-aware expiry and explicit replacement reason using the structure above, or null,
   "scenario_analysis": array or []; each entry contains scenario_id, position_ref (exact sealed typed position ref), target_price, currency, unit, assumption="no_trade", reason. The backend calculates amounts; do not supply loss/unrealized/realized PnL. Missing scenario data does not select an action,
+  "market_citations": array or []; each entry contains only citation_id (ASCII letter first, letters/digits/underscore/hyphen, maximum 64 characters), source_id (market|macro|events), source_quote (verbatim original market input, excluding account/funds/quantity/cost/PnL content); context_ref may be omitted or null, otherwise it must exactly match the current context_id. Backend hashes and context binding must not be supplied as authority fields,
   "risk_review_plan": a separate downside-risk review plan using the same structure, or null; monitoring promised in prose must have structured conditions,
   "reentry_price": number below the current price only for a tactical round-trip TRIM, in the asset's quote currency and unit; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
   "reentry_condition": tactical reentry condition; null is allowed for stop_loss / concentration or risk_reduction / thesis_invalidated / liquidity_need exits and non-TRIM verdicts,
   "expected_path": path evidence for tactical reentry; null is allowed for risk/needs exits and non-TRIM,
-  "memo": "multi-paragraph qualitative analysis; monetary amounts, quantities, cost and PnL belong only in typed fields/backend tables, never free prose. Market statistics may be cited"
+  "memo": "multi-paragraph qualitative analysis; personal funds, position quantities, cost and PnL belong only in their typed fields/backend tables, never free prose. Market percentages and RSI may be described. Currency-valued market reports belong only in verbatim market_citations.source_quote; memo/support/counterevidence refer to [citation_id] without repeating those monetary figures"
 }
+Market citations prove quotation existence only, not truth, freshness or evidence independence. They cannot become native position quotes, account arithmetic, user authority or trade/learning permission. Do not cite account context, analyst model opinions or generated plans. Use [] without a source catalog; never invent a source or turn a cited number into a personal financial amount.
 All rules above still apply (sanity checks / TRIM constraints / concentration / input failure remains unknown and is qualified separately, not evidence for a market HOLD) -- they are just carried in the JSON fields.""",
     )).replace("suggested_alloc_cny", f"suggested_alloc_{base_currency().lower()}")
 

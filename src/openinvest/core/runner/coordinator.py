@@ -273,13 +273,16 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
     constraints=execution_constraints_context(facts["single_invest_cap"],facts["execution_constraint_facts"])
     from openinvest.services.position_facts import position_facts_context, market_reference_context
     position_context=position_facts_context(facts['position_facts'])+'\n\n'+market_reference_context(facts['market_reference'])
+    from openinvest.core.committee.scenarios import market_citation_catalog
+    citation_sources=market_citation_catalog(facts)
+    citation_context='\n\n=== MARKET CITATION CATALOG ===\n'+json.dumps({'sources':citation_sources},ensure_ascii=False,sort_keys=True)
     prompts = {
         "macro_strategist": build_macro_strategist_prompt()+f"\n\nANALYSIS_AS_OF: {analysis_as_of}",
         "quant_round1": build_quant_prompt(target, "opening"),
         "risk_round1": build_risk_officer_prompt(target, "opening")+"\n\n"+constraints+"\n\n"+position_context,
         "quant_round2_after_risk": build_quant_prompt(target, "rebuttal"),
         "risk_round2_after_quant": build_risk_officer_prompt(target, "rebuttal")+"\n\n"+constraints+"\n\n"+position_context,
-        "cio": build_cio_prompt(target) + "\n\n" + source_context+"\n\n"+constraints+"\n\n"+position_context,
+        "cio": build_cio_prompt(target) + "\n\n" + source_context+"\n\n"+constraints+"\n\n"+position_context+citation_context,
     }
     context = prepare_context(pm.store.root, symbol, {**facts, "prompts": prompts, "provider": provider},
                               model=model or "unknown", expected_state=prepared_state)
@@ -295,6 +298,7 @@ def prepare_committee_brief(symbol: str, *, provider: str = "agent", model: str 
         "portfolio_summary": portfolio_summary,
         "position_facts": facts['position_facts'],
         "market_reference": facts['market_reference'],
+        "market_citation_sources": citation_sources,
         "macro_data": macro_data,
         # 事件层 RAG 召回（Macro 专用，与 Direct run_macro_view(event_brief=) 同口径）
         "event_brief": event_brief,
@@ -448,8 +452,9 @@ def _save_committee_transcript_once(
             "CIO 段解析不出裁决（UNCLEAR）：`=== CIO ===` 分节里需要 VERDICT: / CONFIDENCE: 等行，"
             "格式见 prompts.cio。本次未存档，修正后重新提交。")
     verdict["alloc_currency"] = base_currency()
-    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios
-    scenario_check=validate_scenarios(facts.get('position_facts'),proposed_scenarios(verdict),memo=cio_text,context_id=context_id,fields=verdict.get('_raw_proposal'),market_reference=facts.get('market_reference'))
+    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios,market_citation_catalog
+    scenario_check=validate_scenarios(facts.get('position_facts'),proposed_scenarios(verdict),memo=cio_text,context_id=context_id,
+        fields=verdict.get('_raw_proposal'),market_reference=facts.get('market_reference'),market_sources=market_citation_catalog(facts))
     apply_scenario_validation(verdict,scenario_check)
 
     from openinvest.core.committee.reasoning_quality import apply_review

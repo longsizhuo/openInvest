@@ -21,7 +21,81 @@ _NUMERIC=re.compile(r'(?<![A-Za-z0-9_])'+_NUMBER+r'|(?:归|为|等于|约为)\s*
 _NEGATED_WORD_ZERO=re.compile(r'(?:不(?:为|等于|是)|并非|不是|非)\s*[零〇]|\b(?:not|never)(?:\s+equal\s+to)?\s+zero\b',re.I)
 _ACCOUNT_METRIC=re.compile(r'账面|浮盈|浮亏|已实现|未实现|持仓成本|平均成本|均价|成本基准|持仓数量|持仓市值|现金|预算|金额|限额|市值变化|盈亏|压力测试|情景损失|损失金额|\b(?:pnl|p&l|realized|unrealized|cash|budget|cost[ -]basis|position[ -](?:value|size|quantity)|portfolio[ -]value|mark[ -]to[ -]market|scenario[ -]loss|stress[ -]test)\b',re.I)
 _PNL_METRIC=re.compile(r'账面|浮盈|浮亏|已实现|未实现|盈亏|\b(?:pnl|p&l|realized|unrealized|book[ -]drawdown|mark[ -]to[ -]market)\b',re.I)
-_PROTOCOL=re.compile(r'^\s*(?:\*\*)?(?:VERDICT|CONFIDENCE|DOMINANT_VIEW|SUGGESTED_ALLOC_[A-Z]{3}|TRIM_REASON|EXIT_INTENT|HOLD_REASON|(?:REVIEW_PLAN|RISK_REVIEW_PLAN|SCENARIO_ANALYSIS|MARKET_ASSESSMENT|ALTERNATIVES)_JSON|REENTRY_PRICE)(?:\*\*)?\s*:',re.I)
+_PROTOCOL=re.compile(r'^\s*(?:\*\*)?(?:VERDICT|CONFIDENCE|DOMINANT_VIEW|SUGGESTED_ALLOC_[A-Z]{3}|TRIM_REASON|EXIT_INTENT|HOLD_REASON|(?:REVIEW_PLAN|RISK_REVIEW_PLAN|SCENARIO_ANALYSIS|MARKET_ASSESSMENT|ALTERNATIVES|MARKET_CITATIONS)_JSON|REENTRY_PRICE)(?:\*\*)?\s*:',re.I)
+_MARKET_SOURCES={'market':('market_data','market_input'),'macro':('macro_data','macro_input'),
+                 'events':('event_brief','normalized_reports_not_verified_truth')}
+# Quotes are a narrow market-report channel. Select a shorter source span if
+# surrounding text discusses an account, funds, quantities, costs or PnL.
+_CITATION_ACCOUNT_SCOPE=re.compile(r'账户|帐户|余额|你的|我的|个人|持仓|仓位|组合|资金|成本|止损|交易金额|数量|份额|股数|手数|损益|亏损|盈利|'
+    r'\b(?:account|balance|your|my|personal|portfolio|position|holdings?|quantity|cost|profit|loss|stop[ -]loss)\b',re.I)
+
+
+def market_citation_catalog(facts):
+    """Project only original market inputs; hashes bind bytes, never truth."""
+    facts=facts if isinstance(facts,dict) else {}
+    result={}
+    for source_id,(key,kind) in _MARKET_SOURCES.items():
+        text=facts.get(key)
+        if isinstance(text,str) and text.strip() and text.strip()!='not_provided':
+            result[source_id]={'kind':kind,'text':text,'source_sha256':hashlib.sha256(text.encode()).hexdigest()}
+    return result
+
+
+def validate_market_citations(citations, *, market_sources=None, context_id=None):
+    """Bind exact report quotations without granting any financial authority."""
+    errors=[];rows=[]
+    def fail(code,index=None):
+        errors.append({'code':code,'path':'market_citations'+('' if index is None else f'.{index}')})
+    if not isinstance(citations,list):
+        fail('market_citations_schema_invalid');citations=[]
+    sources=market_sources if isinstance(market_sources,dict) else {}
+    ids=[item.get('citation_id') for item in citations if isinstance(item,dict) and isinstance(item.get('citation_id'),str)]
+    for index,item in enumerate(citations):
+        before=len(errors)
+        if not isinstance(item,dict):fail('market_citation_schema_invalid',index);continue
+        if (not {'citation_id','source_id','source_quote'}<=set(item)
+                or set(item)-{'citation_id','source_id','source_quote','context_ref'}):
+            fail('market_citation_schema_invalid',index)
+        ident=item.get('citation_id');source_id=item.get('source_id');quote=item.get('source_quote')
+        if not isinstance(ident,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}',ident):
+            fail('market_citation_id_invalid',index)
+        elif ids.count(ident)!=1:fail('market_citation_id_duplicate',index)
+        if (item.get('context_ref') is not None
+                and (not isinstance(item['context_ref'],str) or not context_id or item['context_ref']!=context_id)):
+            fail('market_citation_context_binding_invalid',index)
+        source=sources.get(source_id) if isinstance(source_id,str) and source_id in _MARKET_SOURCES else None
+        if (not isinstance(source,dict) or source.get('kind')!=_MARKET_SOURCES.get(source_id,('',None))[1]
+                or not isinstance(source.get('text'),str) or not source['text'].strip()):
+            fail('market_citation_source_invalid',index);source=None
+        if source is not None:
+            source_hash=hashlib.sha256(source['text'].encode()).hexdigest()
+            if source.get('source_sha256')!=source_hash:fail('market_citation_source_binding_invalid',index)
+        if not isinstance(quote,str) or not quote.strip():fail('market_citation_quote_invalid',index)
+        elif source is not None and quote not in source['text']:fail('market_citation_quote_not_in_source',index)
+        if isinstance(quote,str) and (_ACCOUNT_METRIC.search(quote) or _PNL_METRIC.search(quote) or _CITATION_ACCOUNT_SCOPE.search(quote)):
+            fail('market_citation_account_scope_forbidden',index)
+        if len(errors)==before:
+            rows.append({'citation_id':ident,'source_id':source_id,'source_quote':quote,'source_kind':source['kind'],
+                         'source_sha256':source_hash,'quote_sha256':hashlib.sha256(quote.encode()).hexdigest(),
+                         'context_ref':context_id,'scope':'quoted_market_report_not_verified_truth'})
+    return {'schema':'openinvest.market_citation_validation.v1','status':'invalid' if errors else 'bound' if rows else 'not_requested',
+            'context_ref':context_id,'citations':rows,'errors':errors,'source_validity_changed':False,
+            'native_position_quote_qualification_granted':False,'trading_or_learning_permission_granted':False}
+
+
+def render_market_citations(validation):
+    """Display only bound reports, separately from advice and account math."""
+    receipt=validation.get('market_citation_validation') or {}
+    if receipt.get('status')!='bound':return ''
+    from openinvest.capabilities.committee.i18n import bilingual
+    lines=['\n\n### '+bilingual('来源报道（仅核对原文存在）','Source reports (quotation existence only)'),
+           bilingual('以下为输入来源的逐字报道，不证明其真实、时效或独立性；不是持仓原生报价、账户计算、交易或学习许可。',
+                     'These are verbatim input reports, not verified truth, freshness or independent evidence. They are not native position quotes, account calculations, trade authority or learning permission.')]
+    def escape(text):return re.sub(r'([\\`*_{}\[\]<>~|$])',r'\\\1',text)
+    for row in receipt.get('citations') or []:
+        lines.append(f"- [{row['citation_id']}] {row['source_id']} ({row['source_kind']})")
+        lines.extend('  > '+escape(line) for line in row['source_quote'].splitlines())
+    return '\n'.join(lines)
 
 
 def _text_shape(value):
@@ -108,7 +182,7 @@ def _market_price_reference_text(text, reference):
     return pattern.sub(replace,text)
 
 
-def untyped_financial_statements(memo, fields=None, *, currencies=(), market_reference=None):
+def untyped_financial_statements(memo, fields=None, *, currencies=(), market_reference=None, market_sources=None, context_id=None):
     """Check every retained prose leaf; only schema-shaped slots are exempt.
 
     This is an output-format contract, not a claim that a natural-language
@@ -120,6 +194,16 @@ def untyped_financial_statements(memo, fields=None, *, currencies=(), market_ref
     structure=narrative_schema_errors(fields)
     structure.extend({'code':'invalid_protocol_json','path':name}
         for name in STRUCTURED_CIO_FIELDS if fields.get('_'+name+'_error'))
+    exempt={};bound_citation_ids=set()
+    def bind_citations(value,path):
+        receipt=validate_market_citations(value,market_sources=market_sources,context_id=context_id)
+        structure.extend(receipt['errors'])
+        # A malformed collection grants no exemptions, including duplicate IDs.
+        if not receipt['errors']:
+            for i,item in enumerate(value):
+                exempt[f'{path}.{i}.source_quote']=item['source_quote']
+                bound_citation_ids.add(item['citation_id'])
+    if 'market_citations' in fields:bind_citations(fields['market_citations'],'fields.market_citations')
     fragments=list(_string_leaves(fields,'fields'))
     for line in str(memo or '').splitlines():
         matched=_PROTOCOL.match(line)
@@ -127,19 +211,26 @@ def untyped_financial_statements(memo, fields=None, *, currencies=(), market_ref
             value=line[matched.end():].strip().removesuffix('**').strip()
             header=line[:matched.end()].replace('**','').strip().rstrip(':').upper()
             if header.endswith('_JSON'):
+                name=header[:-5].lower()
                 try:
                     parsed=strict_cio_json(value)
-                    name=header[:-5].lower()
                     structure.extend(narrative_schema_errors({name:parsed}))
+                    if name=='market_citations':bind_citations(parsed,'protocol.market_citations')
                     fragments.extend(_string_leaves(parsed,'protocol.'+name))
                     continue
-                except (ValueError,TypeError):pass
+                except (ValueError,TypeError):
+                    if name=='market_citations':structure.append({'code':'invalid_protocol_json','path':name})
             elif re.fullmatch(r'[A-Za-z_]+|N/A|null|[-+]?\d+(?:\.\d+)?',value):
                 continue
         fragments.append(('memo',line))
-    clauses=[(path,part.strip()) for path,text in fragments
+    clauses=[(path,part.strip()) for path,text in fragments if exempt.get(path)!=text
              for part in re.split(r'[，；。！？;!?\n]|(?<!\d),(?!\d)|(?<!\d)\.(?!\d)',text) if part.strip()]
     clauses=[(path,_market_price_reference_text(text,market_reference)) for path,text in clauses]
+    for path,text in clauses:
+        if ((_ACCOUNT_METRIC.search(text) or _PNL_METRIC.search(text) or _CITATION_ACCOUNT_SCOPE.search(text))
+                and any(re.search(r'(?<![A-Za-z0-9_-])'+re.escape(ident)+r'(?![A-Za-z0-9_-])',text,re.I) for ident in bound_citation_ids)):
+            structure.append({'code':'market_citation_account_reference_forbidden','path':path,
+                              'claim_quote':text,'reason':'market_report_reference_cannot_supply_an_account_value'})
     native=[re.escape(c) for c in currencies if isinstance(c,str) and re.fullmatch('[A-Z]{3}',c)]
     native_money=(re.compile(r'(?:'+('|'.join(native))+r')\s*'+_NUMBER+r'|'+_NUMBER+r'\s*(?:'+('|'.join(native))+r')') if native else None)
     return structure+[{'code':'untyped_financial_narrative','path':path,'claim_sha256':hashlib.sha256(text.encode()).hexdigest(),
@@ -155,10 +246,24 @@ BASES={'current_market_value':'quantity_times_current_mark','scenario_market_val
        'realized_pnl_total':'execution_history_required','maximum_drawdown':'price_path_required'}
 
 
-def validate_scenarios(position, requests, *, memo='', context_id=None, fields=None, market_reference=None):
+def validate_scenarios(position, requests, *, memo='', context_id=None, fields=None, market_reference=None, market_sources=None):
     supplied=position if isinstance(position,dict) else {}
     currencies=[(supplied.get('quote') or {}).get('currency'),(supplied.get('cost') or {}).get('currency')]
-    errors=untyped_financial_statements(memo,{**(fields or {}),'scenario_analysis':requests},currencies=currencies,market_reference=market_reference);results=[]
+    errors=untyped_financial_statements(memo,{**(fields or {}),'scenario_analysis':requests},currencies=currencies,
+        market_reference=market_reference,market_sources=market_sources,context_id=context_id);results=[]
+    citations=(fields or {}).get('market_citations',[])
+    if 'market_citations' not in (fields or {}):
+        # Primitive callers can provide the same text protocol as Coordinator.
+        # Never make an unparsed/duplicate collection displayable.
+        lines=re.findall(r'^\s*(?:\*\*)?MARKET_CITATIONS_JSON(?:\*\*)?\s*:\s*(.+)$',str(memo),re.M|re.I)
+        if len(lines)>1:citations={'duplicate_protocol':True}
+        elif lines:
+            from openinvest.core.committee.cio_parse import strict_cio_json
+            try:citations=strict_cio_json(lines[0].removesuffix('**').strip())
+            except ValueError:citations={'parse_error':True}
+    citation_validation=validate_market_citations(citations,market_sources=market_sources,context_id=context_id)
+    for error in citation_validation['errors']:
+        if error not in errors:errors.append(error)
     if (fields or {}).get('_duplicate_protocol_fields'):
         errors.append({'code':'duplicate_protocol_fields','fields':fields['_duplicate_protocol_fields']})
     if (fields or {}).get('_unrecognized_json_fields'):
@@ -224,7 +329,7 @@ def validate_scenarios(position, requests, *, memo='', context_id=None, fields=N
             if reason:errors.append({'code':reason,'scenario_id':ident,'metric':metric})
         results.append(result)
     return {'schema':'openinvest.scenario_validation.v1','status':'invalid' if errors else 'not_requested' if not requests else 'evaluated',
-            'position_ref':expected_ref,'results':results,'errors':errors,
+            'position_ref':expected_ref,'results':results,'errors':errors,'market_citation_validation':citation_validation,
             'memo_sha256':hashlib.sha256(str(memo).encode()).hexdigest(),
             'source_validity_changed':False,'trading_or_learning_permission_granted':False}
 
@@ -269,7 +374,7 @@ def decision_display_memo(verdict, original, validation):
         from openinvest.core.committee.cio_parse import single_invest_cap_note
         note=single_invest_cap_note(verdict)
         if note and note not in original:original+='\n\n⚠️ '+note
-        return original+render_scenarios(validation)
+        return original+render_scenarios(validation)+render_market_citations(validation)
     status=verdict.get('decision_status','REVIEW_REQUIRED')
     raw=(verdict.get('_raw_proposal') or {}).get('verdict') or verdict.get('raw_market_verdict')
     if raw not in {'BUY','ACCUMULATE','HOLD','TRIM','SELL'}:raw='UNCLEAR'
@@ -278,4 +383,4 @@ def decision_display_memo(verdict, original, validation):
         "执行金额为零；未核验的财务数字不进入正式报告，完整原文已封存供审计。",
         f"[QUALITY_ALERT] {status}: no qualified executable advice. Original market proposal: {raw} (unqualified).\n"
         "Executable allocation is zero. Unchecked financial prose is withheld from the report; original bytes remain in audit evidence.")
-    return text+(render_scenarios(validation) if status!='DATA_UNTRUSTED' else '')
+    return text+(render_scenarios(validation)+render_market_citations(validation) if status!='DATA_UNTRUSTED' else '')

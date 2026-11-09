@@ -386,6 +386,10 @@ def run_committee(
     # CIO 看完整辩论历史（不只是最后一轮），让它能识别 agent 是否在讨论中漂移
     cio_brief = report.to_cio_brief()
     cio_brief+="\n\n"+constraint_context
+    from openinvest.core.committee.scenarios import market_citation_catalog
+    citation_sources=market_citation_catalog({'market_data':market_data,'macro_data':source_macro_data,'event_brief':source_event_brief})
+    cio_brief+='\n\n=== MARKET CITATION CATALOG ===\n'+json.dumps({
+        'context_ref':(input_health or {}).get('context_id'),'sources':citation_sources},ensure_ascii=False,sort_keys=True)
     if len(quant_history) > 1:
         cio_brief += (
             "\n\n=== 完整辩论历史（含所有 cross-challenge 轮）===\n"
@@ -467,7 +471,8 @@ def run_committee(
     cio_parsed["alloc_currency"] = base_currency()
     from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,render_scenarios
     scenario_check=validate_scenarios(position_facts,proposed_scenarios(cio_parsed),memo=report.cio_memo,
-        context_id=(input_health or {}).get('context_id'),fields=cio_parsed.get('_raw_proposal'),market_reference=market_reference)
+        context_id=(input_health or {}).get('context_id'),fields=cio_parsed.get('_raw_proposal'),market_reference=market_reference,
+        market_sources=citation_sources)
     if duplicate_cio_json:
         scenario_check['errors'].append({'code':'duplicate_cio_json_key'})
         scenario_check['status']='invalid'

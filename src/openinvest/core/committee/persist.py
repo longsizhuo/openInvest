@@ -166,11 +166,13 @@ def _persist(report: "CommitteeReport", verdict: Dict[str, Any],
     # verdict_review 事后归因会用错时间窗口的 VIX 值算 macro_shock。
     macro_ctx = _capture_macro_context(as_of_date=date_override)
     run_at = date_override or datetime.now().isoformat(timespec="seconds")
-    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,decision_display_memo
+    from openinvest.core.committee.scenarios import validate_scenarios,apply_scenario_validation,proposed_scenarios,decision_display_memo,market_citation_catalog
     original_model_memo=getattr(report,'cio_model_memo','') or report.cio_memo
     if 'scenario_validation' not in verdict:
         apply_scenario_validation(verdict,validate_scenarios(getattr(report,'position_facts',None),proposed_scenarios(verdict),
-            memo=original_model_memo,context_id=(input_health or {}).get('context_id'),fields=verdict.get('_raw_proposal'),market_reference=getattr(report,'market_reference',None)))
+            memo=original_model_memo,context_id=(input_health or {}).get('context_id'),fields=verdict.get('_raw_proposal'),market_reference=getattr(report,'market_reference',None),
+            market_sources=market_citation_catalog({'market_data':report.market_data,'macro_data':report.source_macro_data,
+                                                   'event_brief':report.source_event_brief})))
     health = build_input_health(report, verdict, debate_meta, input_health)
     from openinvest.core.decision_evidence import enforce_input_health, advice_qualified
     enforce_input_health(verdict, health)

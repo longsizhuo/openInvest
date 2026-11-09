@@ -92,6 +92,7 @@ MARKET_ASSESSMENT_JSON: <单行JSON：direction=bullish|bearish|uncertain|unknow
 ALTERNATIVES_JSON: <单行 JSON 数组：分别列 kind=HOLD_EXISTING、ADD、REDUCE_RISK、TACTICAL_REENTRY；每项含 applicability、market_evaluation（favorable|unfavorable|mixed|unknown）、exit_intent、support、counterevidence、constraint_refs（仅ASCII来源ID/字段路径，不写金额、比较式或解释）、assumptions、data_gaps；风险退出与择时买回不得混成一个项，缺数据可为 unknown>
 REVIEW_PLAN_JSON: <等待具体条件时填单行 JSON；否则 null。结构见下文，禁止每次静默重置等待价位>
 SCENARIO_ANALYSIS_JSON: <单行数组或[]；每项scenario_id、position_ref、target_price、currency、unit、assumption=no_trade、reason。只提出价格假设，不填金额计算；未知数量/成本不能改填0，不决定市场方向>
+MARKET_CITATIONS_JSON: <单行数组或[]；每项仅citation_id（ASCII字母开头，仅字母/数字/下划线/连字符，最长64字符）、source_id=market|macro|events、source_quote（本次来源catalog中的逐字原文）；context_ref可省略或null，有值必须等于本次context_id；不得引用账户上下文、模型意见或生成计划>
 RISK_REVIEW_PLAN_JSON: <下行风险的独立复核条件，同 REVIEW_PLAN_JSON 结构；有可监测风险条件必须登记，不能只写在 RISK_PLAN 正文；没有则 null>
 REENTRY_PRICE: <择时买回型 TRIM 填买回目标价，纯数字，**用资产的报价币种**（与路径参考同币种同单位），低于现价；止损或集中度退出无需承诺买回，可写 N/A>
 REENTRY_CONDITION: <择时买回型 TRIM 填基于当前证据的买回触发条件；止损或集中度退出可写 N/A，不得为满足格式虚构买回计划>
@@ -117,7 +118,9 @@ PERSONAL_NOTE:
 ```
 
 **额外要求**：
-- memo和各项支持/反证只用定性描述；不要在自由文中写货币数额、持仓数量、成本、账面盈亏或压力损失数字（包括零）。预算/交易金额、价位、数量只放各自的结构化字段与来源引用；后端负责显示准确数值。市场指标可引用，但不能伪装成账户损益。
+- memo和各项支持/反证只用定性描述；不要在自由文中写货币数额、持仓数量、成本、账面盈亏或压力损失数字（包括零）。个人预算/交易金额、价位、数量只放各自的结构化字段；后端负责显示准确数值。市场百分比、RSI等可以描述；带货币数值的市场报道只放market_citations的逐字source_quote，memo/support/counterevidence用[citation_id]提及，不在其中重复货币数值。
+- 市场引用只证明本次原文存在，不证明真实、时效或独立性，不是持仓原生报价、账户算术、用户授权或交易/学习许可。source_quote不能夹带账户、资金、数量、成本或损益内容；选择更短且不含这些内容的原文，不能自行改写。不得自填来源hash/资格字段；无catalog时用[]。
+- Market percentages and RSI may be described. Currency-valued market reports belong only in verbatim market_citations.source_quote; memo/support/counterevidence use [citation_id] without repeating monetary figures. Cite only the supplied market/macro/events source catalog, never account context, analyst opinions or generated plans. Omit context_ref or use null unless the exact current context_id is supplied. Quotations grant no source truth, native position quote, account arithmetic, trade or learning authority; exclude account, funds, quantity, cost and PnL content.
 - 金额计算只引用后端场景结果；当前市值变化、相对成本的未实现盈亏、不交易的已实现盈亏增量是不同指标。不要输出旧的stress_scenario_loss字段或在memo另算压力损失。单个价位场景不是最大回撤、损失上限或发生概率。
 - 加仓金额须核对用户实际预算、可用资金和执行上限，不能用一条统一现金金额门槛替代。
 - 是否继续承担敞口要比较未来风险、反证与执行成本；历史盈亏不构成退出门槛。Macro 未标 risk_off、Risk 未标 high_risk，不能单独否决风险减仓或投资依据失效后的退出。不要等到亏得更多才重新评估，也不要把分析员建议的资金比例冒充用户硬约束。

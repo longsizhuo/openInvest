@@ -145,7 +145,7 @@ def _force_hold(out: Dict[str, Any], *, confidence_ceiling: float) -> None:
             out["hold_reason"] = "deterministic_rule"
 
 
-STRUCTURED_CIO_FIELDS=("review_plan","risk_review_plan","alternatives","market_assessment","scenario_analysis")
+STRUCTURED_CIO_FIELDS=("review_plan","risk_review_plan","alternatives","market_assessment","scenario_analysis","market_citations")
 
 
 class DuplicateCioJSONField(ValueError):
@@ -260,7 +260,7 @@ def parse_cio_memo(
 
     if fields is not None:
         known={'verdict','confidence','dominant_view','trim_reason','exit_intent','hold_reason',
-               'review_plan','risk_review_plan','alternatives','market_assessment','scenario_analysis',
+               'review_plan','risk_review_plan','alternatives','market_assessment','scenario_analysis','market_citations',
                'reentry_price','reentry_condition','expected_path','memo'}
         extra={str(key):value for key,value in fields.items() if key not in known and not _ALLOC_KEY_RE.fullmatch(str(key))}
         if extra:out['_unrecognized_json_fields']=extra
@@ -269,7 +269,7 @@ def parse_cio_memo(
         headers=[name.upper() for name in headers]
         names={'VERDICT','CONFIDENCE','DOMINANT_VIEW','TRIM_REASON','EXIT_INTENT','HOLD_REASON',
                'REENTRY_PRICE','REENTRY_CONDITION','EXPECTED_PATH','REVIEW_PLAN_JSON','RISK_REVIEW_PLAN_JSON',
-               'MARKET_ASSESSMENT_JSON','ALTERNATIVES_JSON','SCENARIO_ANALYSIS_JSON'}
+               'MARKET_ASSESSMENT_JSON','ALTERNATIVES_JSON','SCENARIO_ANALYSIS_JSON','MARKET_CITATIONS_JSON'}
         selected=[name for name in headers if name in names or name.startswith('SUGGESTED_ALLOC_')]
         repeated=sorted({name for name in selected if selected.count(name)>1})
         allocations=[name for name in selected if name.startswith('SUGGESTED_ALLOC_')]
@@ -278,16 +278,19 @@ def parse_cio_memo(
     # Structured review conditions are retained rather than discarded with prose.
     for name in STRUCTURED_CIO_FIELDS:
         value = (fields or {}).get(name)
+        present = fields is not None and name in fields
         if fields is None:
             match = re.search(rf"^\s*(?:\*\*)?{name.upper()}_JSON(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$", text, re.MULTILINE|re.IGNORECASE)
             if match:
+                present = True
                 try:
                     value = strict_cio_json(match.group(1).removesuffix("**").strip())
                 except ValueError:
                     out[f"_{name}_error"] = "invalid_json"
                     if name.endswith("review_plan"):
                         value = {"parse_error": "invalid_json"}
-        out[name] = value
+        if name!='market_citations' or present:
+            out[name] = value
     exit_intent = str((fields or {}).get("exit_intent") or "").strip().lower()
     if fields is None:
         match = re.search(r"^EXIT_INTENT:\s*(\w+)", text, re.MULTILINE | re.I)

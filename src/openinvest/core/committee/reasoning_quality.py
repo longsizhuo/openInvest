@@ -6,7 +6,7 @@ from typing import Any
 
 from openinvest.core.evidence_eligibility import digest
 
-POLICY="cio_reasoning_quality_v4"
+POLICY="cio_reasoning_quality_v5"
 CHECKS={"source_attribution","time_and_units","arithmetic","internal_consistency",
         "constraint_authority","exit_purpose","probability_event_definition"}
 CODES={"source_misquotation","unsupported_case_fact","arithmetic_or_unit_error","internal_contradiction",
@@ -34,6 +34,8 @@ Do not reject an unprofitable judgment just because later prices are known to yo
 Terminal-return and first-touch events differ. Valid event inclusion bounds are allowed, but cannot imply an execution guarantee.
 Separate defects from notes. An issue changes an asserted fact, measurement type/value/unit/time, evidence independence, user authority, or a necessary logical premise. A concrete financial arithmetic or authority defect remains an issue even when the selected action happens to be reasonable.
 Editorial attribution precision or judgment uncertainty that introduces no new asserted fact, independence or authority belongs in notes, not in a defect code. Missing forecast probabilities are unknown, not evidence of unfavorable odds; a categorical contrary assertion is still a defect.
+Qualitative market-regime labels such as risk_on and risk_off are interpretations, not measured indices. When the label is correctly present in the supplied analyst opinion, the underlying observations are unchanged, and no independent confirmation is claimed, loose attribution that groups that label with observations is an editorial note. Apply this equally to positive and negative labels. This does not excuse misquoting the analyst's actual label, inventing a measured index or yield, changing measured values/units/times, converting TIP returns into observed yields, or counting the opinion as another independent observation.
+Validated market citations only establish that a quotation occurs in the supplied market/macro/reported-event text. Preserve its source kind: a normalized report is not verified truth. Such citations cannot establish an account balance, native position quotation, PnL, user permission or independent evidence. Compare assertions to the source and backend citation binding; do not treat a copied monetary market quotation as personal account arithmetic.
 notes is an array (possibly empty) of {kind, claim_quote, basis_refs, explanation, changes_asserted_fact, changes_evidence_independence, changes_user_authority}. kind is editorial_attribution or judgment_uncertainty; all three changes flags must be false. Quotes/references must be exact as for issues. Do not use notes to downgrade an actual error.
 Return one JSON object with exactly request_sha256, checks, issues, notes. Echo the supplied request_sha256.
 checks is an object containing every supplied check name once, with passed, warning, not_applicable or failed as value.
@@ -60,7 +62,7 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
         if fields.get('_scenario_analysis_error'):scenarios={'parse_error':fields['_scenario_analysis_error']}
         calculation=validate_scenarios(position,scenarios,memo=proposal.get('memo',''),
             context_id=(sources.get('analysis_context') or {}).get('value'),fields=fields,
-            market_reference=(sources.get('market_reference') or {}).get('value'))
+            market_reference=(sources.get('market_reference') or {}).get('value'),market_sources=sources)
         sources['scenario_math']={'kind':'conditional_backend_arithmetic_not_forecast_or_permission',
             'value':calculation,'text':json.dumps(calculation,ensure_ascii=False,sort_keys=True)}
     _,endpoint,runtime_model,provider=get_llm_config_safe()
@@ -77,10 +79,11 @@ def make_request(*,sources:dict,proposal:dict,model:str="unknown") -> dict:
 def proposal_sources(facts:dict,sections:dict) -> dict:
     """Keep generated plans and analyst judgments out of user/market authority."""
     from openinvest.core.committee.evidence import execution_constraints_context
-    sources={}
-    for name,key,kind in [("market","market_data","market_input"),("macro","macro_data","macro_input"),
-                          ("events","event_brief","normalized_reports_not_verified_truth"),
-                          ("regime","regime_brief","rule_classification_and_historical_reference"),
+    from openinvest.core.committee.scenarios import market_citation_catalog
+    sources={name:{'kind':kind,'text':'not_provided'} for name,kind in (
+        ('market','market_input'),('macro','macro_input'),('events','normalized_reports_not_verified_truth'))}
+    sources.update(market_citation_catalog(facts))
+    for name,key,kind in [("regime","regime_brief","rule_classification_and_historical_reference"),
                           ("terminal","path_reference","terminal_statistics_not_first_touch"),
                           ("valuation","valuation_brief","valuation_input"),("sentiment","sentiment_brief","sentiment_input")]:
         value=str(facts.get(key) or "")

@@ -74,6 +74,60 @@ def test_shared_gate_controls_qualification_cache_and_plans(environment,monkeypa
                 assert originals and fields['memo'] in originals[0].read_text()
 
 
+@pytest.mark.parametrize('entry',['direct_advisory','coordinator'])
+@pytest.mark.parametrize('variant',['correct','wrong_price','wrong_unit','wrong_source','account_outside_quote'])
+def test_market_citation_source_binding_is_shared_and_cannot_wash_account_figures(environment,monkeypatch,entry,variant):
+    from openinvest.core.committee.reasoning_quality import make_request,proposal_sources
+    source='高盛称布伦特原油报价117美元/桶。'
+    p,fields=inputs('correct')
+    fields['market_citations']=[{'citation_id':'energy_report','source_id':'macro','source_quote':source}]
+    fields['memo']='市场证据支持有限新增，同时保留宏观反证，参考[energy_report]。'
+    if variant=='wrong_price':fields['market_citations'][0]['source_quote']=source.replace('117','118')
+    if variant=='wrong_unit':fields['market_citations'][0]['source_quote']=source.replace('/桶','/克')
+    if variant=='wrong_source':fields['market_citations'][0]['source_id']='analyst_MACRO'
+    if variant=='account_outside_quote':fields['memo']+='账户账面损失为0 CNY。'
+    fields['market_assessment']={'direction':'bullish','support':['市场信号有支持'],'counterevidence':['见[energy_report]']}
+    if entry=='direct_advisory':
+        from openinvest.core.committee import debate
+        seen=[]
+        class Agent:
+            last_tool_calls=[]
+            def __init__(self,role):self.role=role
+            def run(self,prompt):
+                if self.role=='cio':seen.append(prompt);return json.dumps(fields,ensure_ascii=False)
+                return RISK if self.role=='risk' else 'SIGNAL: neutral\nSTRENGTH: 4'
+            def tool_call_summary(self):return ''
+        monkeypatch.setattr(debate,'_create_agent',lambda prompt,role='unknown',**kw:Agent(role))
+        result=debate.run_committee(asset={'symbol':SYM},market_data='synthetic market',macro_view='synthetic opinion',
+            source_macro_data=source,portfolio_summary='synthetic account',position_facts=p,current_price=99.7565,
+            persist_to_memory=False,max_debate_rounds=1)
+        assert 'MARKET CITATION CATALOG' in seen[0] and 'macro_input' in seen[0]
+        verdict=result['verdict'];display=result['report'].cio_memo;context_ref=None
+    else:
+        from openinvest.core.runner.coordinator import save_committee_transcript
+        raw='=== MACRO ===\nSynthetic opinion\n=== QUANT_R1 ===\nSIGNAL: neutral\n=== RISK_R1 ===\n'+RISK+'\n=== CIO ===\n'
+        raw+='VERDICT: BUY\nCONFIDENCE: 0.6\nSUGGESTED_ALLOC_CNY: 1000\nSCENARIO_ANALYSIS_JSON: '+json.dumps(fields['scenario_analysis'])
+        raw+='\nMARKET_CITATIONS_JSON: '+json.dumps(fields['market_citations'],ensure_ascii=False)+'\n'+fields['memo']
+        context_ref=context_id(SYM,position_facts=p,current_price=99.7565,macro_data=source)
+        result=save_committee_transcript(SYM,raw,context_id=context_ref);verdict=result['verdict']
+        from openinvest.core.decision_ledger import parse_committee_text
+        display=parse_committee_text(Path(result['saved']).read_text())['cio_memo']
+        original=json.loads((environment/'memory/.evidence/submissions'/(context_ref+'.json')).read_text())['payload']['transcript']
+        assert original==raw
+    validation=verdict['scenario_validation'];citation=validation['market_citation_validation']
+    request=make_request(sources=proposal_sources({'position_facts':p,'context_id':context_ref,'macro_data':source},{}),
+                         proposal={'fields':fields,'memo':fields['memo']},model='synthetic-model')
+    recomputed=request['sources']['scenario_math']['value']
+    assert recomputed['market_citation_validation']==citation
+    if variant=='correct':
+        assert advice_qualified(verdict) and not validation['errors']
+        assert '来源报道' in display and '117美元/桶' in display and '不是持仓原生报价' in display
+        assert citation['native_position_quote_qualification_granted'] is False
+    else:
+        assert not advice_qualified(verdict) and verdict['alloc_cny']==0 and validation['errors']
+        assert '账户账面损失为0 CNY' not in display
+
+
 def test_json_wire_without_memo_does_not_publish_unknown_financial_fields(environment,monkeypatch):
     from openinvest.core.committee import debate
     p,fields=inputs('correct');fields.pop('memo');fields['stress_scenario_loss_cny']=0

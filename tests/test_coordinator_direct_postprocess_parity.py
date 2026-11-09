@@ -152,7 +152,16 @@ def test_coordinator_matches_direct_postprocess(world, monkeypatch, memo, sentim
 
     assert [r["rule"] for r in rows_direct] == [expect_rule]   # 场景确实触发了干预
     receipt_fields = {"decision_id", "context_id", "code_version", "evidence_sha256"}
-    assert {k:v for k,v in v_coord.items() if k not in receipt_fields} == {k:v for k,v in v_direct.items() if k not in receipt_fields}
+    def without_receipt_metadata(value):
+        import copy
+        result=copy.deepcopy({k:v for k,v in value.items() if k not in receipt_fields})
+        citations=result['scenario_validation']['market_citation_validation']
+        assert citations['status']=='not_requested' and not citations['citations']
+        context_ref=citations.pop('context_ref')
+        assert isinstance(context_ref,str) and len(context_ref)==32
+        if 'context_id' in value:assert context_ref==value['context_id']
+        return result
+    assert without_receipt_metadata(v_coord) == without_receipt_metadata(v_direct)
     assert rows_coord == rows_direct
 
 
