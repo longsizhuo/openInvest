@@ -12,8 +12,9 @@ server's `instructions` into the prompt, so the agent only reached for openInves
 - a fixed routing rule in the system prompt (cache-safe, survives compression), and
 - a `pre_llm_call` hook that injects `run.sh brief --text` (offline ledger digest: holdings, today's
   verdicts, pending queues) on a session's first turn and again only when the digest changes.
-The digest goes into every session, group chats included (owner's choice); set the plugin setting
-`inject_digest: false` to keep only the routing rule.
+The digest is available only after local mode is selected (or a legacy local data directory
+is explicitly configured). Remote/unselected mode never runs the local launcher. In local mode,
+group chats can receive the digest too; `inject_digest: false` keeps only the routing rule.
 """
 import logging
 import os
