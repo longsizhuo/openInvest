@@ -4,59 +4,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from openinvest.core.evidence_eligibility import Eligibility,EvidenceIntegrityError
 from openinvest.db.event_store import EventStore
-from openinvest.services.source_reporting import ReportingPolicy,event_payload,source_payload
+from openinvest.services.source_reporting import ReportingPolicy,event_payload,source_payload,GovernanceReads as _GovernanceReads
 from openinvest.utils import oslock
 
 _SYNC_LOCK_NAME='.public-events-sync.lock'
-
-
-class _GovernanceReads:
-    """One sync's parsed views, invalidated by original-file identity, never TTL."""
-    def __init__(self):
-        self.views={}
-
-    @staticmethod
-    def identity(root):
-        result=[]
-        for name in ('eligibility.json','exclusions.jsonl'):
-            path=root/'integrity'/name
-            try:
-                stat=path.stat()
-                identity=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns)
-                # Windows ctime denotes creation, not the POSIX change clock.
-                # Keep content checks there rather than trusting restored mtime.
-                if sys.platform=='win32':identity+= (hashlib.sha256(path.read_bytes()).digest(),)
-                result.append(identity)
-            except FileNotFoundError:
-                result.append(None)
-        return tuple(result)
-
-    def get(self,root):
-        root=Path(root).resolve()
-        before=self.identity(root)
-        cached=self.views.get(root)
-        if cached is not None and cached[0]==before:
-            return cached[1]
-        policy=ReportingPolicy(root)
-        if self.identity(root)!=before:
-            raise EvidenceIntegrityError('DATA_UNTRUSTED: governance changed during replication read')
-        self.views[root]=(before,policy)
-        return policy
-
-    def require_current(self,*policies):
-        for policy in policies:
-            if not self.is_current(policy):
-                raise EvidenceIntegrityError('DATA_UNTRUSTED: governance changed before public replication')
-
-    def is_current(self,policy):
-        cached=self.views.get(policy.root)
-        return cached is not None and cached[1] is policy and self.identity(policy.root)==cached[0]
 
 
 def publication_payload(event,sources):

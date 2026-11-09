@@ -65,7 +65,7 @@ def test_sentinel_does_not_pay_to_normalize_unqualified_or_out_of_window_data(ow
     items=[row('unknown',now),row('old',now-timedelta(days=60)),row('current',now)]
     monkeypatch.setattr('openinvest.services.news_collection.collect',lambda **kwargs:{'status':'ok','model_calls':0})
     monkeypatch.setattr('openinvest.services.agent_queue.pending_news_items',lambda **kwargs:items)
-    monkeypatch.setattr('openinvest.services.source_reporting.reporting_use',lambda root,item:{'allowed':item['title']!='unknown'})
+    monkeypatch.setattr('openinvest.services.source_reporting.reporting_use',lambda root,item,**kwargs:{'allowed':item['title']!='unknown'})
     sent=[]
     monkeypatch.setattr('openinvest.services.event_ingest.ingest_events',lambda data,**kwargs:sent.extend(data) or {'status':'ok','ingested':len(data)})
     monkeypatch.setattr('openinvest.jobs.event_watch.run',lambda:pytest.fail('RSS/search producer must not run twice'))
@@ -160,6 +160,42 @@ def test_sentinel_real_canonical_queue_contract_without_permissive_stub(owner,mo
     monkeypatch.setattr('openinvest.services.news_collection.collect',lambda **kwargs:{'status':'ok','model_calls':0})
     monkeypatch.setattr('openinvest.services.event_ingest.ingest_events',lambda *args,**kwargs:pytest.fail('empty queue must not invoke normalization'))
     assert jobs.sentinel()['status']=='ok'
+
+
+@pytest.mark.parametrize('withdraw_during_read',[False,True])
+def test_sentinel_backlog_shares_governance_parses_but_withdrawal_still_precedes_paid_claim(owner,monkeypatch,withdraw_during_read):
+    import json
+    from openinvest.core.evidence_eligibility import Eligibility,EvidenceIntegrityError
+    from openinvest.services import news_collection as collection,source_reporting
+    monkeypatch.setattr(collection,'SOURCES',('sina:152',))
+    now=datetime.now(timezone.utc)
+    stamp=lambda minutes:(now-timedelta(minutes=minutes)).astimezone(collection.CST).strftime('%Y-%m-%d %H:%M:%S')
+    rows=[{'id':str(i),'create_time':stamp(5),'rich_text':f'Synthetic retained source {i}'} for i in range(30)]
+    rows.append({'id':'boundary','create_time':stamp(120),'rich_text':'Outside interval'})
+    body=json.dumps({'result':{'data':{'feed':{'list':rows}}}}).encode()
+    collection.collect(since=(now-timedelta(hours=1)).isoformat(),now=now,
+                       fetcher=lambda *args:('https://source.invalid/feed',body))
+    monkeypatch.setattr(collection,'collect',lambda **kwargs:{'status':'ok'})
+    constructor=source_reporting.ReportingPolicy.__init__;parses=[]
+    def counted(self,root):parses.append(root);constructor(self,root)
+    monkeypatch.setattr(source_reporting.ReportingPolicy,'__init__',counted)
+    report=source_reporting.reporting_use;checks=[]
+    def checked(root,source,**kwargs):
+        answer=report(root,source,**kwargs);checks.append(source)
+        if withdraw_during_read and len(checks)==2:
+            Eligibility(root).revoke('source_snapshot:'+json.loads(source['provenance_json'])['source_snapshot_id'],
+                                     'withdrawn during the source selection read')
+        return answer
+    monkeypatch.setattr(source_reporting,'reporting_use',checked)
+    calls=[]
+    monkeypatch.setattr('openinvest.services.event_ingest.ingest_events',lambda items,**kwargs:calls.append(items) or {'status':'ok','ingested':0})
+    if withdraw_during_read:
+        with pytest.raises(EvidenceIntegrityError,match='governance changed'):jobs.sentinel()
+        assert not calls and not list((owner/'memory/.state').glob('fixed_invest_source_*.json'))
+    else:
+        result=jobs.sentinel()
+        assert len(parses)==1 and len(calls)==1 and len(calls[0])==20
+        assert result['unresolved_sources_not_regenerated']==20
 
 
 def test_source_failure_exits_nonzero_for_native_failure_delivery(owner,monkeypatch,capsys):

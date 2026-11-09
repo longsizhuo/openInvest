@@ -6,6 +6,7 @@ from datetime import datetime,timezone
 import hashlib
 import importlib
 import json
+import sys
 from pathlib import Path
 import sqlite3
 
@@ -32,6 +33,44 @@ class ReportingPolicy(Eligibility):
     def _state(self):
         if self.snapshot is None:raise ValueError("no reviewed source registry")
         return self.snapshot
+
+
+class GovernanceReads:
+    """A batch's parsed views; file identity invalidates them without a TTL.
+
+    This caches administrative inputs, never an authorization result. Callers
+    recheck the identity before acting on a successful qualification.
+    """
+    def __init__(self):self.views={}
+
+    @staticmethod
+    def identity(root):
+        result=[]
+        for name in ('eligibility.json','exclusions.jsonl'):
+            path=Path(root)/'integrity'/name
+            try:
+                stat=path.stat()
+                identity=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns)
+                if sys.platform=='win32':identity+=(hashlib.sha256(path.read_bytes()).digest(),)
+                result.append(identity)
+            except FileNotFoundError:result.append(None)
+        return tuple(result)
+
+    def get(self,root):
+        root=Path(root).resolve();before=self.identity(root);cached=self.views.get(root)
+        if cached is not None and cached[0]==before:return cached[1]
+        policy=ReportingPolicy(root)
+        if self.identity(root)!=before:raise EvidenceIntegrityError('DATA_UNTRUSTED: governance changed during source read')
+        self.views[root]=(before,policy)
+        return policy
+
+    def is_current(self,policy):
+        cached=self.views.get(policy.root)
+        return cached is not None and cached[1] is policy and self.identity(policy.root)==cached[0]
+
+    def require_current(self,*policies):
+        if any(not self.is_current(policy) for policy in policies):
+            raise EvidenceIntegrityError('DATA_UNTRUSTED: governance changed before source use')
 
 
 def source_payload(source):
