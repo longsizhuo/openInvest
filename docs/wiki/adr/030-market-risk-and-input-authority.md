@@ -55,6 +55,22 @@ policies are separate execution protections and remain disclosed.
   A generic CIO review cannot clear an uncovered role-output defect.
 * Billed empty, truncated or refused model output is observable and unavailable,
   with actual token usage retained. It is not an automatic paid retry.
+* Monetary market reports use `market_citations`: exact quotations from the
+  sealed market, macro or reported-event input, with backend-derived content
+  hashes and context binding. Narrative refers to the citation ID; the backend
+  displays the report separately. Only a validated quotation leaf is exempt
+  from the financial prose check. Neither a quotation nor its ID supplies an
+  account amount, native position quote, calculation input or learning right.
+* A qualitative market label already present in an analyst opinion is not a
+  measured index. Imprecise grouping of that interpretation with unchanged
+  observations is an editorial note when it adds no independent evidence or
+  authority. Misquoted labels, fabricated measurements, changed units/times
+  and unsupported claims of independent confirmation remain defects.
+* Event audit hashes bind the canonical stored event in the writer's
+  transaction. Older audit-only hashes may describe incoming projections;
+  their content binding remains unverified. Preserve those original records,
+  all negative parent links and exclusions rather than rewriting old hashes
+  or treating the mismatch as a wrong prediction or a new permission.
 
 ## Validation and limits
 
