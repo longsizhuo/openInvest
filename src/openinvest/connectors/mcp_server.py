@@ -1267,8 +1267,8 @@ def untrack_asset(
     symbol: Annotated[str, Field(description="yfinance ticker currently in the tracked list.")],
 ) -> Dict[str, Any]:
     """Remove a symbol from the tracked-asset list — the committee and DCA
-    jobs stop covering it. Holdings and trade history are untouched; schema
-    validation guarantees at least one tracked asset remains.
+    jobs stop covering it. Holdings and trade history are untouched; allows
+    empty tracked asset list if all assets are untracked.
 
     Args:
         symbol: yfinance ticker currently in the tracked list.

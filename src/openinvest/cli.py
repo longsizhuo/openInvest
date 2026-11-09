@@ -451,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "报警只有服务端设了 INVEST_EVENT_ALERT=1 才会真发出去")
     p.set_defaults(func=cmd_track_asset)
 
-    p = sub.add_parser("untrack_asset", help="移除跟踪标的（schema 保证至少剩 1 个）")
+    p = sub.add_parser("untrack_asset", help="移除跟踪标的（允许删到空列表）")
     p.add_argument("--symbol", required=True)
     p.set_defaults(func=cmd_untrack_asset)
 

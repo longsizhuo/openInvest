@@ -81,5 +81,5 @@ def update_target_asset(
     tags=["strategy_write"],
 )
 def delete_target_asset(symbol: str) -> StrategyWriteResponse:
-    """删除 target_asset。schema 要求至少剩 1 个，否则 400"""
+    """删除 target_asset（允许删到空列表，方便全清仓或重构配置）"""
     return _to_http(svc.remove_target_asset, symbol)
