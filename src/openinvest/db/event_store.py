@@ -677,8 +677,7 @@ class EventStore:
     @_locked_read
     def get_event(self, event_id: str, *, purpose: str = "advice") -> Optional[Dict[str, Any]]:
         if purpose != "audit":
-            from openinvest.core.evidence_eligibility import Eligibility
-            if self._source_excluded(event_id,Eligibility(self.data_root).excluded_ids()):
+            if self._source_excluded(event_id,self._policy().excluded_ids()):
                 return None
         cur = self.conn.cursor()
         cur.execute("SELECT *, (SELECT MAX(v.id) FROM event_versions v WHERE v.event_id=events.event_id) AS source_version FROM events WHERE event_id = ?", (event_id,))
@@ -716,7 +715,12 @@ class EventStore:
         return allowed
 
     @_locked_read
-    def get_event_with_sources(self,event_id):
+    def get_event_with_sources(self,event_id,*,policy=None):
+        if policy is not None:
+            from openinvest.services.source_reporting import ReportingPolicy
+            if not isinstance(policy,ReportingPolicy) or policy.root.resolve()!=self.data_root.resolve():
+                raise ValueError('reporting policy belongs to another data root')
+            self._reporting_policy=policy
         event=self.get_event(event_id)
         return {**event,"sources":self.get_sources(event_id)} if event is not None else None
 

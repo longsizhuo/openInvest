@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import deque
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -93,6 +94,7 @@ class Eligibility:
             if not isinstance(registry,dict) or registry.get("schema") != 1 or not isinstance(registry.get("artifacts"),dict):
                 raise ValueError("invalid eligibility registry structure")
             artifacts = registry["artifacts"]
+            children = {}
             for key, value in artifacts.items():
                 if (not isinstance(key,str) or not key or not isinstance(value,dict)
                         or not isinstance(value.get("parents",[]),list)
@@ -100,12 +102,14 @@ class Eligibility:
                     raise ValueError("invalid parent lineage structure")
                 if value.get("deleted") is True or value.get("research_participation")=="revoked":
                     excluded.add(key)
-            changed = True
-            while changed:
-                additions = {key for key, value in artifacts.items()
-                             if key not in excluded and any(p in excluded for p in value.get("parents", []))}
-                changed = bool(additions)
-                excluded |= additions
+                for parent in value.get('parents',[]):
+                    children.setdefault(parent,[]).append(key)
+            pending = deque(excluded)
+            while pending:
+                for child in children.get(pending.popleft(),()):
+                    if child not in excluded:
+                        excluded.add(child)
+                        pending.append(child)
             return excluded
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
             raise EvidenceIntegrityError("DATA_UNTRUSTED: exclusion ledger unavailable") from e
