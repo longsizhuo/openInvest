@@ -808,16 +808,16 @@ def test_delete_asset(client, tmp_store):
     assert "NDQ.AX" in syms  # 另一个还在
 
 
-def test_delete_last_asset_blocked(client, tmp_store):
-    """schema 要求至少 1 个 asset；删到最后一个应被拒绝 + rollback"""
+def test_delete_last_asset_allowed(client, tmp_store):
+    """schema 允许删到空列表；删到最后一个 asset 应成功且返回空列表"""
     # 先删一个
     client.delete("/api/strategy/asset/GC=F")
-    # 再删最后一个 → 应该被 schema 挡住
+    # 再删最后一个 → 应该允许删空 (200 OK)
     r = client.delete("/api/strategy/asset/NDQ.AX")
-    assert r.status_code == 400
+    assert r.status_code == 200
     s = tmp_store.read("strategy")
-    syms = [a.get("symbol") for a in s.get("target_assets")]
-    assert "NDQ.AX" in syms, "删失败必须 rollback，最后一个 asset 还在"
+    syms = [a.get("symbol") for a in s.get("target_assets", [])]
+    assert syms == [], "删空后 target_assets 应该为空列表"
 
 
 def test_strategy_writes_dont_break_body(client, tmp_store):
