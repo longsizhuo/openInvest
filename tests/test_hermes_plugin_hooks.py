@@ -190,3 +190,70 @@ def test_switching_from_local_to_remote_does_not_serve_cached_local_digest(plugi
     ctx.config["connection_mode"] = "remote"
     assert hook(session_id="new-remote-session", platform="cli") is None
     assert len(calls) == 1
+
+
+
+def test_brief_subprocess_receives_only_allowed_environment(plugin, monkeypatch, tmp_path):
+    parent_home = str(tmp_path / "home")
+    ambient_ledger = str(tmp_path / "ambient")
+    selected_ledger = str(tmp_path / "selected")
+    allowed = {
+        "PATH": "test-path",
+        "HOME": parent_home,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "TMPDIR": str(tmp_path),
+        "UV_CACHE_DIR": str(tmp_path / "uv"),
+        "UV_TOOL_DIR": str(tmp_path / "uv-tools"),
+        "UV_PYTHON_INSTALL_DIR": str(tmp_path / "uv-python"),
+        "XDG_CACHE_HOME": str(tmp_path / "xdg-cache"),
+        "XDG_DATA_HOME": str(tmp_path / "xdg-data"),
+        "INVEST_HOME": ambient_ledger,
+        "OPENINVEST_SPEC": "openinvest==0.68.9",
+    }
+    for key, value in allowed.items():
+        monkeypatch.setenv(key, value)
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY",
+        "EMAIL_PASSWORD", "HERMES_HOME", "UV_INDEX_URL", "UV_DEFAULT_INDEX",
+        "UV_INDEX_TEST_PASSWORD", "UV_CONFIG_FILE", "XDG_CONFIG_HOME", "XDG_TOKEN",
+        "OPENINVEST_DEV_MODE", "PYTHONPATH", "BASH_ENV",
+    ):
+        monkeypatch.setenv(key, "must-not-reach-child")
+
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(kw["env"])
+        assert cmd == ["bash", str(plugin.RUN_SH), "brief", "--text"]
+        return subprocess.CompletedProcess(cmd, 0, "[openInvest] fixture", "")
+
+    monkeypatch.setattr(plugin.subprocess, "run", run)
+    ctx = _Ctx({"connection_mode": "local", "invest_home": selected_ledger})
+    plugin.register(ctx)
+    assert ctx.hooks["pre_llm_call"](session_id="local", platform="cli") == {
+        "context": "[openInvest] fixture",
+    }
+    assert calls[0]["INVEST_HOME"] == selected_ledger
+    assert plugin._fetch_brief(None) == "[openInvest] fixture"
+    for actual, home in zip(calls, [selected_ledger, ambient_ledger], strict=True):
+        # Some hosts set additional locale variables; no other parent keys may leak.
+        assert {k: v for k, v in actual.items() if k in allowed} == {**allowed, "INVEST_HOME": home}
+        assert all(k in allowed or k.startswith("LC_") for k in actual)
+
+
+def test_hermes_cron_is_explicit_opt_in():
+    setup = PLUGIN / "skills" / "invest-setup" / "references"
+    onboarding = (setup / "local-onboarding.md").read_text(encoding="utf-8")
+    cron = (setup / "hermes-cron.md").read_text(encoding="utf-8")
+    install = (PLUGIN / "after-install.md").read_text(encoding="utf-8")
+
+    for text in (onboarding, cron, install):
+        assert "openinvest-daily" in text and "openinvest-sentinel" in text
+        assert "schedule" in text and "cost" in text
+        assert "explicit" in text
+    assert "Wait for explicit consent" in onboarding
+    assert "Installing or setting up the plugin is not consent" in onboarding
+    assert "Do not create either until" in cron
+    assert "mcp_servers.openinvest.trust full" not in onboarding
+    assert "without asking for confirmation" not in onboarding

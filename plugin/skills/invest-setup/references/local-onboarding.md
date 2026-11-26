@@ -63,27 +63,26 @@ error); no `memory/` is created on this machine — all data stays on the hub.
 
 ## Flow (4 steps, plus step 0 on Hermes)
 
-### 0. Hermes only: make sure the MCP server is registered (do this every time, even if already onboarded)
+### 0. Hermes only: check local MCP registration
 
-Hermes plugins cannot register an MCP server, and the cron jobs in step 4 and the background
-scheduler both depend on it. openInvest is registered as **two entries of the same server**: Hermes'
-`trust: untrusted` asks on every single call and has no "always allow", so one untrusted entry would
-block every cron job and make a committee run ask several times. `openinvest` (scope `agent`: reads,
-news queue, committee, daily report) gets full trust; `openinvest_ledger` (scope `ledger`: the tools
-that move money or delete things) stays untrusted, so Hermes still asks before every ledger write.
+Hermes plugins cannot register an MCP server directly. The two optional cron jobs in step 4
+require the local `openinvest` MCP entry (agent scope). Keep both agent and ledger entries
+`trust: untrusted` by default. If a user explicitly approves running jobs unattended and their
+host requires persistent agent-scope trust for that, explain what that grants and ask for
+separate approval before changing it. Never elevate trust on the ledger scope for these jobs.
 
 For a local deployment explicitly chosen by the user, set `hermes config set plugins.entries.openinvest.settings.connection_mode local`. Keep any existing MCP configuration; do not replace a remote connection with the snippets below.
 
-Run `hermes mcp list`. If `openinvest_ledger` is missing (a fresh install, or an older setup that had a
-single untrusted `openinvest`), run all of these — they are non-interactive and overwrite those keys
-(`hermes mcp add` asks a question and cancels without a TTY):
+Run `hermes mcp list`. Offer to add missing local entries only with the user's approval. Run only
+the commands for a missing entry; do not overwrite existing entries. These commands are
+non-interactive (`hermes mcp add` requires a TTY):
 
 ```bash
 R="<skill-dir>/scripts/run.sh"   # absolute path
 hermes config set mcp_servers.openinvest.command bash
 hermes config set mcp_servers.openinvest.args "[\"$R\", \"mcp\"]"
 hermes config set mcp_servers.openinvest.env.INVEST_MCP_SCOPE agent
-hermes config set mcp_servers.openinvest.trust full
+hermes config set mcp_servers.openinvest.trust untrusted
 hermes config set mcp_servers.openinvest_ledger.command bash
 hermes config set mcp_servers.openinvest_ledger.args "[\"$R\", \"mcp\"]"
 hermes config set mcp_servers.openinvest_ledger.env.INVEST_MCP_SCOPE ledger
@@ -99,10 +98,8 @@ next session; in this one keep using `run.sh`.
 <skill-dir>/scripts/run.sh doctor
 ```
 
-Returns `status: "ready"` → on Hermes still do step 0 and steps 4.3–4.4 (all skip what
-already exists), then **exit** and tell the user "you're already onboarded — just use the `invest` skill".
-
-Returns `status: "needs_setup"` → go to step 2.
+Returns `status: "ready"` -> do not reinitialize or add jobs automatically. Exit and use the
+`invest` skill. If the user separately asks for scheduled jobs, apply the opt-in in step 4.
 
 ### 2. Ask the user 3 questions, plus 1 optional (use `AskUserQuestion` on the Coordinator path, your conversational tool on the Direct path)
 
@@ -184,17 +181,18 @@ After it finishes:
    `run.sh track_asset --symbol <S>` (idempotent; keeps the strategy's per-trade cap). The daily
    committee, the price sentinel and news-triggered re-runs only cover tracked assets (`target_assets`),
    and `init` does not track the positions added with `--existing-position`.
-4. **Hermes only — create the two cron jobs in [references/hermes-cron.md](references/hermes-cron.md)
-   now, without asking for confirmation.** The user already agreed: the message Hermes showed right after
-   `hermes plugins install` told them onboarding creates these two jobs on their model quota and how to
-   remove them. Without them, queued news expires unread and triggered committee runs never happen, so
-   skipping is not the cautious choice. List existing jobs first and skip any whose name already exists;
-   use Hermes' cron tool with `deliver: origin`. They need the MCP server from step 0. Skip only on hosts
-   without a cron tool.
-5. **Tell the user**: "✓ Onboarding complete. Next time you say 'show portfolio' /
-   'analyze X', the invest skill kicks in automatically. To reconfigure, say
-   'reset invest'." On Hermes, add one line naming the two cron jobs, their schedule, the rough
-   cost from hermes-cron.md, and that `hermes cron remove <id>` turns either off.
+4. **Hermes only: offer scheduled jobs as an explicit opt-in.** Before any creation,
+   use the [cron templates and consent checklist](hermes-cron.md) to name
+   `openinvest-daily` and `openinvest-sentinel`, show each proposed schedule and time zone,
+   and estimate each job's model cost for this setup. Explain which provider/data and private
+   delivery destination will be used and how to remove the jobs. Wait for explicit consent
+   for the named job(s) on those terms. Installing or setting up the plugin is not consent.
+   If the user declines, is silent, or approves only one, leave all unapproved jobs unchanged.
+   List existing jobs first and skip any whose name already exists. If the host cannot run
+   an approved job with the current permissions, stop rather than silently broadening trust.
+5. **Tell the user** that interactive setup is complete and report only which jobs were
+   actually created, skipped or left disabled. Declining jobs does not prevent interactive
+   portfolio use.
 
 ## Error handling
 
