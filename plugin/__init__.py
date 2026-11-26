@@ -19,6 +19,7 @@ group chats can receive the digest too; `inject_digest: false` keeps only the ro
 import logging
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -65,7 +66,12 @@ def _fetch_brief(invest_home):
     """`run.sh brief --text`; None on any failure (older backend, timeout)."""
     env = {key: value for key, value in os.environ.items()
            if key in _BRIEF_ENV or key.startswith("LC_")}
-    env.setdefault("HOME", str(Path.home()))
+    if not env.get("HOME"):
+        env["HOME"] = str(Path.home())
+    if os.name == "nt" and not env.get("TMPDIR"):
+        # Git Bash may otherwise fall back to a non-writable /tmp without TEMP/TMP.
+        # Forward one resolved directory, not the caller's Windows environment.
+        env["TMPDIR"] = Path(tempfile.gettempdir()).as_posix()
     if invest_home:
         env["INVEST_HOME"] = os.path.expanduser(str(invest_home))
     try:

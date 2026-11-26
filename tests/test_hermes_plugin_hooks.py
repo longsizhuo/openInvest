@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -240,6 +241,21 @@ def test_brief_subprocess_receives_only_allowed_environment(plugin, monkeypatch,
         # Some hosts set additional locale variables; no other parent keys may leak.
         assert {k: v for k, v in actual.items() if k in allowed} == {**allowed, "INVEST_HOME": home}
         assert all(k in allowed or k.startswith("LC_") for k in actual)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git Bash temp directory fallback")
+def test_windows_brief_supplies_tmpdir_without_inheriting_windows_env(plugin, monkeypatch, tmp_path):
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(plugin.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    def run(cmd, **kw):
+        assert kw["env"]["TMPDIR"] == tmp_path.as_posix()
+        assert "TEMP" not in kw["env"]
+        return subprocess.CompletedProcess(cmd, 0, "[openInvest] fixture", "")
+
+    monkeypatch.setattr(plugin.subprocess, "run", run)
+    assert plugin._fetch_brief(None) == "[openInvest] fixture"
 
 
 def test_hermes_cron_is_explicit_opt_in():
