@@ -34,8 +34,10 @@ def _defer_inputs(store):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def _prepare_confirmed_causes(db, now, live_events, index):
+def _prepare_confirmed_causes(db, now, live_events, index, *, views=None):
     """Read and qualify legacy receipts before taking the outbox writer lock."""
+    from openinvest.services.source_reporting import GovernanceReads
+    views=views or GovernanceReads()
     prepared, seen = [], set()
     rows = db.execute("SELECT notification_id,submitted,submitted_causes FROM followups "
                       "WHERE submitted!='{}' AND submitted_causes!='{}'").fetchall()
@@ -52,27 +54,27 @@ def _prepare_confirmed_causes(db, now, live_events, index):
                 if reference in seen:
                     continue
                 seen.add(reference)
-                current = live_events.get(eid) or index.get_event(eid)
+                current = live_events.get(eid) or index.get_event_with_sources(eid,policy=views.get(index.data_root))
                 if current is None:
                     continue
                 candidate = {'source_event_id':eid, 'source_event_version':str(version),
                     'cause_id':_cause_id(eid, current), 'cause_version':str(_cause_version(current))}
-                if not _receipt_source_qualified(index, candidate):
+                if not _receipt_source_qualified(index, candidate,views=views):
                     continue  # Both the exact saved input and current permission must still qualify.
                 prepared.append((symbol, _cause_id(eid, current), str(_cause_version(current)),
                     eid, str(version), row["notification_id"], task, now.timestamp()))
     return prepared
 
 
-def _receipt_source_qualified(index, receipt):
+def _receipt_source_qualified(index, receipt, *, views=None):
     """A dispatch receipt cannot outlive its original source's permission to use it."""
     import sqlite3
-    from openinvest.core.evidence_eligibility import Eligibility
     from openinvest.services.news_identity import analysis_identity
-    from openinvest.services.source_reporting import reporting_use
+    from openinvest.services.source_reporting import reporting_use,event_reporting_use,GovernanceReads
     try:
+        views=views or GovernanceReads();policy=views.get(index.data_root)
         eid, version = receipt['source_event_id'], int(receipt['source_event_version'])
-        current = index.get_event(eid)
+        current = index.get_event_with_sources(eid,policy=policy)
         expected = (receipt['cause_id'], receipt['cause_version'])
         if current is None or (_cause_id(eid, current), str(_cause_version(current))) != expected:
             return False
@@ -83,35 +85,39 @@ def _receipt_source_qualified(index, receipt):
         original = json.loads(row[0])
         original['_version_id'] = version
         sources = original.get('sources', [])
-        denied = Eligibility(index.data_root).excluded_ids()
+        denied = policy.excluded_ids()
         if (original.get('event_id') != eid or index._source_excluded(eid, denied, sources=sources)
-                or not index._reporting_allowed(original, sources=sources, support=original.get('reporting_support'))):
+                or not event_reporting_use(index.data_root,original,sources,original.get('reporting_support'),policy=policy)):
             return False
         qualified = [source for source in sources
-                     if reporting_use(index.data_root, source, policy=index._policy())['allowed']]
+                     if reporting_use(index.data_root, source, policy=policy)['allowed']]
         cause_id, cause_version = analysis_identity(original, qualified)
+        views.require_current(policy)
         return (cause_id, str(cause_version)) == expected
     except (OSError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
         return False
 
 
-def _claim_causes(outbox, ident, causes, now, live_events, *, event_store=None):
+def _claim_causes(outbox, ident, causes, now, live_events, *, event_store=None,views=None):
     from openinvest.db.event_store import EventStore
     if not any(causes.values()):
         return {}, {}, {}
     index = event_store or EventStore(str(outbox.store.data_root / 'db/events.db'))
     try:
-        return _claim_causes_from_index(outbox, ident, causes, now, live_events, index)
+        return _claim_causes_from_index(outbox, ident, causes, now, live_events, index,views=views)
     finally:
         if event_store is None:
             index.conn.close()
 
 
-def _claim_causes_from_index(outbox, ident, causes, now, live_events, index):
+def _claim_causes_from_index(outbox, ident, causes, now, live_events, index, *, views=None):
     """Claim exact causes before spending; another row cannot dispatch them concurrently."""
+    from openinvest.services.source_reporting import GovernanceReads
+    views=views or GovernanceReads()
+    policy=views.get(index.data_root)
     shared, blocked, owned = {}, {}, {}
     with outbox.connection() as reader:
-        prepared = _prepare_confirmed_causes(reader, now, live_events, index)
+        prepared = _prepare_confirmed_causes(reader, now, live_events, index,views=views)
     with outbox.connection() as db:
         db.execute("BEGIN IMMEDIATE")
         db.executemany("""INSERT OR IGNORE INTO analysis_causes
@@ -141,7 +147,7 @@ def _claim_causes_from_index(outbox, ident, causes, now, live_events, index):
                     VALUES(?,?,?,?,?,?,'preparing',?)""", (*key, eid, str(live_events[eid].get('_version_id', 0)), ident, now.timestamp()))
                 row = db.execute("SELECT * FROM analysis_causes WHERE symbol=? AND cause_id=? AND cause_version=?",
                                  key).fetchone()
-                if row['status'] == 'queued' and not _receipt_source_qualified(index, row):
+                if row['status'] == 'queued' and not _receipt_source_qualified(index, row,views=views):
                     db.execute("UPDATE analysis_causes SET status='verification_required',changed=? "
                                'WHERE symbol=? AND cause_id=? AND cause_version=?', (now.timestamp(), *key))
                     db.execute("UPDATE followups SET status='verification_required',error='shared_dispatch_source_unqualified',"
@@ -170,6 +176,8 @@ def _claim_causes_from_index(outbox, ident, causes, now, live_events, index):
                         'reason':'shared_dispatch_source_unqualified' if row['status'] == 'verification_required' else None,
                         'next_eligible_at':holder['next_eligible_at'] if holder else None,
                         'defer_reason':holder['defer_reason'] if holder else None}
+        # A rebind during the batch cannot validate earlier prepared rows.
+        views.require_current(policy)
     return shared, blocked, owned
 
 
@@ -236,7 +244,9 @@ def dispatch_followups(outbox, *, now, only_id=None, event_store=None, max_secon
     from openinvest.utils.llm import reasoning_by_agent
     from openinvest.services.agent_queue import enqueue_committee
     from openinvest.services.event_trigger import _trigger_committee, reserve_analysis
-    from openinvest.core.evidence_eligibility import digest
+    from openinvest.core.evidence_eligibility import digest,EvidenceIntegrityError
+    from openinvest.services.source_reporting import GovernanceReads
+    views=GovernanceReads()
     results = []
     started = time.monotonic()
     fingerprint = _defer_inputs(outbox.store)
@@ -281,13 +291,14 @@ def dispatch_followups(outbox, *, now, only_id=None, event_store=None, max_secon
             for event in payload.get("events", []):
                 if index.get_event(event["event_id"], purpose="audit") is None:
                     index.upsert_event(event)
-            live_events = {eid: index.get_event(eid) for eid in spec["event_ids"]}
+            policy=views.get(index.data_root)
+            live_events = {eid: index.get_event_with_sources(eid,policy=policy) for eid in spec["event_ids"]}
             live_ids = [eid for eid, event in live_events.items() if event is not None]
-            from openinvest.core.evidence_eligibility import Eligibility
-            denied = Eligibility(outbox.store.data_root).excluded_ids()
+            denied = policy.excluded_ids()
             pending_sources = [eid for eid, event in live_events.items()
                                if event is None and not index._source_excluded(eid, denied)]
             targets = current_targets(outbox.store)
+            views.require_current(policy)
         except Exception as exc:
             with outbox.connection() as db:
                 _update_followup(db, ident, token, "status='pending',error=?,changed=?,next_eligible_at=NULL,defer_inputs_sha256=NULL",
@@ -343,7 +354,15 @@ def dispatch_followups(outbox, *, now, only_id=None, event_store=None, max_secon
                 if required(symbol) and not ready_causes[symbol] and symbol not in waiting_symbols:
                     closed[symbol] = "sources_revoked"
         causes = {symbol: {eid: _cause_version(live_events[eid]) for eid in ids} for symbol, ids in ready_causes.items()}
-        shared, blocked, owned = _claim_causes(outbox, ident, causes, now, live_events, event_store=event_store)
+        try:
+            shared, blocked, owned = _claim_causes(outbox, ident, causes, now, live_events, event_store=event_store,views=views)
+        except EvidenceIntegrityError:
+            # The outbox claim transaction has rolled back. Do not reuse a
+            # partially prepared legacy receipt or spend on this stale view.
+            with outbox.connection() as db:
+                _update_followup(db,ident,token,"status='verification_required',error='shared_dispatch_source_unqualified',changed=?",
+                                 (now.timestamp(),))
+            continue
         for symbol, events in shared.items():
             for eid, reference in events.items():
                 covered.setdefault(symbol, {})[eid] = live_events[eid].get('_version_id', 0)

@@ -25,24 +25,38 @@ def market_snapshot(frame) -> dict:
     return {"columns": columns, "index": [str(value) for value in frame.index],
             "values": _plain(frame[columns].values.tolist()),
             "observed_by_analysis_at": utc_now().isoformat(),
-            "fetch_failed": bool(frame.attrs.get("yf_fetch_failed", False))}
+            "fetch_failed": bool(frame.attrs.get("yf_fetch_failed", False)),
+            "source_observation": _plain(frame.attrs.get("source_observation"))}
 
 
 def enforce_input_health(verdict: dict, health: dict) -> None:
     reasons = []
     if health.get("price_fetch_failed") is True or health.get("has_df") is False:
         reasons.append("market_input_unavailable")
+    if (health.get('market_source_observation') or {}).get('history_basis_qualified') is False:
+        reasons.append('market_history_basis_unqualified')
     if health.get("macro_data_empty") is True:
         reasons.append("macro_input_unavailable")
     if "portfolio_summary" in health.get("empty_inputs", []):
         reasons.append("portfolio_input_unavailable")
+    if health.get('worker_unavailable') and 'worker_input_unavailable' not in reasons:
+        reasons.append('worker_input_unavailable')
+    if verdict.get('decision_status') == 'DATA_UNTRUSTED' and not reasons:
+        reasons.append(verdict.get('hold_reason') or 'unqualified_input_or_output')
     if reasons:
         verdict.setdefault("_original_verdict", verdict.get("verdict"))
         verdict.setdefault("_original_alloc", verdict.get("alloc_cny"))
         no_proposal=verdict.get("proposal_available") is False
-        verdict.update(verdict="UNCLEAR" if no_proposal else "HOLD", alloc_cny=0, confidence=0.0,
+        if not no_proposal:
+            verdict.setdefault('raw_market_verdict', (verdict.get('_raw_proposal') or {}).get('verdict', verdict.get('_original_verdict')))
+        verdict.update(verdict="UNCLEAR", alloc_cny=0, confidence=0.0,
                        decision_status="DATA_UNTRUSTED", hold_reason=verdict.get("hold_reason") if no_proposal else "incomplete_required_inputs")
         health.update(decision_status="DATA_UNTRUSTED", input_errors=reasons)
+    if not reasons and health.get('model_output_errors'):
+        verdict.setdefault('raw_market_verdict',(verdict.get('_raw_proposal') or {}).get('verdict',verdict.get('verdict')))
+        verdict.setdefault('_original_alloc',verdict.get('alloc_cny'))
+        verdict.update(alloc_cny=0,decision_status='REVIEW_REQUIRED',qualification_reason='model_output_incomplete_or_invalid')
+        health['decision_status']='REVIEW_REQUIRED'
     account=health.get('ledger_evidence') or {}
     target=(account.get('holdings') or {}).get(health.get('target_symbol'),{})
     quantity=target.get('current_quantity','client_recorded')
@@ -100,9 +114,17 @@ def preparation_state(memory_root: Path) -> dict:
         path = memory_root / relative.removeprefix("memory/") if relative.startswith("memory/") else owner / relative
         if path.exists():
             st = path.stat()
-            files[relative] = (st.st_ino, st.st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
+            if relative in {'integrity/eligibility.json', 'integrity/exclusions.jsonl'}:
+                from openinvest.core.evidence_eligibility import context_authority_snapshot
+                files[relative] = {'context_authority_sha256': digest(context_authority_snapshot(owner))}
+            else:
+                files[relative] = (st.st_ino, st.st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
         else:
-            files[relative] = None
+            if relative in {'integrity/eligibility.json', 'integrity/exclusions.jsonl'}:
+                from openinvest.core.evidence_eligibility import context_authority_snapshot
+                files[relative] = {'context_authority_sha256': digest(context_authority_snapshot(owner))}
+            else:
+                files[relative] = None
     estimates=memory_root/'.evidence/tracking_estimates'
     files['tracking_estimate_receipts']={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(estimates.glob('*.json'))}
     for kind in ('broker_fee_reports','broker_fee_applications'):
@@ -145,6 +167,113 @@ def _plain(value):
     raise TypeError(f"unsupported evidence value: {type(value).__name__}")
 
 
+def _validate_context_references(memory_root: Path, payload: dict) -> None:
+    """Current decisions recheck the exact referenced sources and sealed plans."""
+    owner = memory_root.parent if memory_root.name == 'memory' else memory_root
+    if not payload.get('source_event_lineage_captured', True):
+        raise ValueError('source_event_lineage_missing')
+    if not payload.get('source_plan_lineage_captured', True):
+        raise ValueError('source_plan_lineage_missing')
+    versions = payload.get('source_event_versions', {})
+    if not isinstance(versions, dict):raise ValueError('invalid_source_event_versions')
+    if versions:
+        from openinvest.db.event_store import EventStore
+        from openinvest.services.source_reporting import event_version_binding
+        path = owner/'db/events.db'
+        if not path.exists():raise ValueError('referenced_source_database_missing')
+        index = EventStore(str(path), readonly=True)
+        try:
+            for eid, version in versions.items():
+                if not event_version_binding(index, eid, version)['allowed']:
+                    raise ValueError('referenced_source_changed_or_unqualified')
+        finally:index.conn.close()
+    expected_states = payload.get('source_plan_states')
+    if expected_states is not None and expected_states != _capture_plan_states(memory_root, payload):
+        raise ValueError('referenced_plan_changed_after_prepare')
+    refs = payload.get('inputs', {}).get('source_plan_refs', [])
+    if not isinstance(refs, list) or len(refs)>16:raise ValueError('invalid_source_plan_refs')
+    if refs:
+        from openinvest.core.memory_store import MemoryStore
+        from openinvest.services.review_plans import plan_qualification
+        store=MemoryStore(memory_root)
+        for ref in refs:
+            ident=ref.get('plan_id')
+            if not re.fullmatch(r'[a-f0-9]{32}', ident or ''):raise ValueError('invalid_source_plan_id')
+            record=json.loads((memory_root/'.evidence/review_plans'/f'{ident}.json').read_text())
+            if record.get('sha256')!=ref.get('artifact_sha256') or digest(record['payload'])!=record['sha256']:
+                raise ValueError('referenced_plan_seal_changed')
+            plan=record['payload']
+            if not plan_qualification(store,payload['symbol'],plan,purpose=plan['purpose'])['allowed']:
+                raise ValueError('referenced_plan_parent_unqualified')
+
+
+def _capture_plan_states(memory_root: Path, payload: dict) -> dict:
+    refs = payload.get('inputs', {}).get('source_plan_refs', [])
+    if not isinstance(refs,list) or len(refs)>16:raise ValueError('invalid_source_plan_refs')
+    if not refs:return {}
+    from openinvest.core.memory_store import MemoryStore
+    from openinvest.services.review_plans import _key, _plan_payload, canonical_spec
+    store=MemoryStore(memory_root);result={}
+    for ref in refs:
+        ident=ref.get('plan_id')
+        if not re.fullmatch(r'[a-f0-9]{32}', ident or ''):raise ValueError('invalid_source_plan_id')
+        envelope=json.loads((memory_root/'.evidence/review_plans'/f'{ident}.json').read_text())
+        if envelope.get('sha256')!=ref.get('artifact_sha256') or digest(envelope['payload'])!=envelope['sha256']:
+            raise ValueError('referenced_plan_seal_changed')
+        original=envelope['payload'];current=store.state_get(_key(payload['symbol'],original['purpose']))
+        if (not current or current.get('plan_id')!=ident or current.get('state')=='retired_audit_only'
+                or digest(canonical_spec(current['spec']))!=digest(canonical_spec(original['spec']))):
+            raise ValueError('referenced_plan_changed_during_preparation')
+        material={**_plan_payload(current),'spec':canonical_spec(current['spec']),'state':current.get('state')}
+        result[ident]=digest(material)
+    return result
+
+
+def _referenced_audit_records(owner: Path, payload: dict) -> dict:
+    """Preserve existence/negative lineage of used automatic audit records."""
+    from openinvest.core.evidence_eligibility import Eligibility, source_artifact_ids, _inert_auto_audit
+    gate=Eligibility(owner);gate.excluded_ids()
+    path=owner/'integrity/eligibility.json'
+    registry=json.loads(path.read_text()).get('artifacts',{}) if path.exists() else {}
+    versions=payload.get('source_event_versions', {}); ids=set()
+    if versions:
+        import sqlite3
+        database=owner/'db/events.db'
+        connection=sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True)
+        try:
+            for eid, version in versions.items():
+                ids.add('event:'+eid)
+                row=connection.execute('SELECT payload_json FROM event_versions WHERE event_id=? AND id=?',(eid,version)).fetchone()
+                if not row:raise ValueError('referenced_event_version_missing')
+                event=json.loads(row[0])
+                from openinvest.services.source_reporting import metadata
+                for source in event.get('sources',[]):
+                    ids.update(source_artifact_ids(metadata(source) if 'provenance_json' in source else source.get('raw_meta') or {}))
+                support=event.get('reporting_support') or {}
+                if support.get('observation_id'):ids.add('backend_observation:'+support['observation_id'])
+        finally:connection.close()
+    # Snapshot dependencies of the actually retained source, not all unrelated
+    # registry rows. Additional negative ancestry is checked by the full closure.
+    pending=list(ids);seen=set()
+    while pending:
+        ident=pending.pop()
+        if ident in seen:continue
+        seen.add(ident);value=registry.get(ident)
+        if value and not ident.startswith('event:'):pending.extend(value.get('parents',[]))
+    return {ident:registry[ident] for ident in seen if ident in registry and _inert_auto_audit(ident,registry[ident])}
+
+
+def _check_referenced_audits(owner: Path, expected: dict) -> None:
+    path=owner/'integrity/eligibility.json'
+    state=json.loads(path.read_text()).get('artifacts',{}) if path.exists() else {}
+    for ident, before in expected.items():
+        now=state.get(ident)
+        if not isinstance(now,dict) or not set(before.get('parents',[]))<=set(now.get('parents',[])):
+            raise ValueError('referenced_audit_lineage_removed')
+        if not ident.startswith('event:') and now.get('sha256')!=before.get('sha256'):
+            raise ValueError('referenced_source_snapshot_changed')
+
+
 def prepare_context(memory_root: Path, symbol: str, inputs: dict, *, model: str = "unknown", expected_state: dict | None = None) -> dict:
     owner = memory_root.parent if memory_root.name == "memory" else memory_root
     if (owner / "integrity/restore_pending.json").exists():
@@ -160,6 +289,7 @@ def prepare_context(memory_root: Path, symbol: str, inputs: dict, *, model: str 
     from openinvest.services.ledger_evidence import store_source_status
     from openinvest.core.memory_store import MemoryStore
     ledger_evidence=store_source_status(MemoryStore(Path(memory_root)))
+    from openinvest.core.evidence_eligibility import context_authority_snapshot
     payload = {
         "context_id": context_id, "symbol": symbol, "prepared_at": utc_now().isoformat(),
         "code_version": code_version(), "config": config, "config_sha256": digest(config),
@@ -170,11 +300,17 @@ def prepare_context(memory_root: Path, symbol: str, inputs: dict, *, model: str 
         "account_evidence_fingerprint":ledger_evidence.get('content_sha256'),
         "origin": "synthetic" if os.getenv("INVEST_TEST_ISOLATED") == "1" else "prospective", "availability_evidence": "captured_before_inference",
         "historical_vintage_reconstructed": False,
-        "eligibility_version": _eligibility_version(owner),
+        "eligibility_version": _eligibility_version(owner),  # raw forensic/legacy version; not the context authority test
+        "context_authority": context_authority_snapshot(owner),
         "documents": {name: (Path(memory_root) / f"{name}.md").read_text()
                       for name in ("user", "strategy", "portfolio")
                       if (Path(memory_root) / f"{name}.md").exists()},
     }
+    # Capture may include explicitly unbound reports for analysis/audit. It
+    # never grants current advice: load_context enforces all references before
+    # a decision can be persisted/reused as qualified.
+    payload['source_plan_states'] = _capture_plan_states(Path(memory_root), payload)
+    payload['referenced_audit_records'] = _referenced_audit_records(owner, payload)
     _write_once(Path(memory_root) / ".evidence/contexts" / f"{context_id}.json", payload)
     return payload
 
@@ -203,8 +339,14 @@ def load_context(memory_root: Path, context_id: str, symbol: str, *,
     if payload["code_version"] != code_version():
         raise ValueError("decision code changed after prepare; prepare again")
     owner = memory_root.parent if memory_root.name == "memory" else memory_root
-    if payload.get("eligibility_version") != _eligibility_version(owner):
+    if 'context_authority' in payload:
+        from openinvest.core.evidence_eligibility import context_authority_snapshot
+        if payload['context_authority'] != context_authority_snapshot(owner):
+            raise ValueError('evidence authority changed after prepare; prepare again')
+        _check_referenced_audits(owner, payload.get('referenced_audit_records', {}))
+    elif payload.get("eligibility_version") != _eligibility_version(owner):
         raise ValueError("evidence eligibility changed after prepare; prepare again")
+    _validate_context_references(Path(memory_root), payload)
     if (owner / "integrity/restore_pending.json").exists():
         raise ValueError("restored financial state requires reconciliation")
     for name, content in payload.get("documents", {}).items():

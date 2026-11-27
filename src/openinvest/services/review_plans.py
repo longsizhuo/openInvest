@@ -240,6 +240,11 @@ def plan_qualification(store: MemoryStore, symbol: str, record: dict, *, purpose
         context=context_envelope['payload']
         if (context_envelope['sha256']!=digest(context) or context['symbol']!=symbol
                 or context.get('context_id')!=context_id):raise ValueError('parent_context_changed')
+        from openinvest.core.decision_evidence import _check_referenced_audits
+        if 'referenced_audit_records' in context:
+            _check_referenced_audits(store.data_root,context['referenced_audit_records'])
+        elif context.get('source_event_versions') or context['inputs'].get('source_plan_refs'):
+            raise ValueError('legacy_parent_audit_lineage_requires_review')
         excluded=Eligibility(store.data_root).excluded_ids()
         if {'decision:'+ident,'context:'+context_id,'review_plan:'+str(record.get('plan_id'))}&excluded:
             raise ValueError('parent_evidence_revoked')
@@ -271,8 +276,9 @@ def plan_qualification(store: MemoryStore, symbol: str, record: dict, *, purpose
             database=EventStore(str(store.data_root/'db/events.db'),readonly=True)
             try:
                 for eid,version in versions.items():
-                    current=database.get_event(eid)
-                    if not current or current.get('_version_id')!=version:raise ValueError('parent_source_changed_or_revoked')
+                    from openinvest.services.source_reporting import event_version_binding
+                    if not event_version_binding(database,eid,version)['allowed']:
+                        raise ValueError('parent_source_changed_or_revoked')
             finally:database.conn.close()
         result={'allowed':True,'reason':'sealed_parent_plan_matches','historical_condition_only':True,
                 'artifact_sha256':sealed_plan['sha256']}
@@ -314,8 +320,9 @@ def observe_prepared_market(store: MemoryStore, symbol: str, frame) -> None:
     if not any(store.state_get(_key(symbol,p)) for p in ("review", "risk")):
         return
     from openinvest.core.config import load_config
+    observation = frame.attrs.get('source_observation') or {}
     if (not frame.empty and not frame.attrs.get("yf_fetch_failed")
-            and 0 <= (_now().date() - frame.index[-1].date()).days <= load_config().staleness.price_stale_days):
+            and observation.get('quote_fresh') is True):
         observe_quote(store, symbol, float(frame["Close"].iloc[-1]), queue=False)
 
 
@@ -339,7 +346,7 @@ def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, qu
     def fresh(frame):
         from openinvest.core.config import load_config
         return (not frame.empty and not frame.attrs.get("yf_fetch_failed")
-                and 0 <= (_now(now).date() - frame.index[-1].date()).days <= load_config().staleness.price_stale_days)
+                and (frame.attrs.get('source_observation') or {}).get('quote_fresh') is True)
     try:
         from openinvest.utils.exchange_fee import get_history_data
         from openinvest.utils.market_metrics import compute_metrics, METRICS_PERIOD
@@ -359,7 +366,7 @@ def observe_quote(store: MemoryStore, symbol: str, price: float, *, now=None, qu
         if "price_cny_per_gram" in needed and symbol == "GC=F":
             from openinvest.services.price_alerts import fetch_quote
             quote = fetch_quote(symbol, {"symbol": symbol, "proxy_kind": "gold_cny_per_gram", "cost_currency": "CNY"})
-            if quote is not None and not quote.is_stale:
+            if quote is not None and not quote.is_stale and not getattr(quote, 'is_reference', False):
                 observations["price_cny_per_gram"] = {"value": quote.price, "unit": "CNY/g"}
     except Exception:
         # Missing observations cannot satisfy a condition; do not invent them.

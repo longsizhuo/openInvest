@@ -56,7 +56,9 @@ def test_json_format_rejection_still_allows_one_text_fallback(monkeypatch,status
         def run(self,context):
             calls.append((self.role,bool(self.format)))
             if self.role!='cio':return 'SIGNAL: neutral\nSTRENGTH: 4'
-            if self.format:raise APIStatusError(status)
+            if self.format:
+                error=APIStatusError(status);error.body={'error':{'param':'response_format'}}
+                raise error
             return 'VERDICT: HOLD\nCONFIDENCE: 0.55\nDOMINANT_VIEW: risk\nSUGGESTED_ALLOC_CNY: 0'
     monkeypatch.setattr(debate,'_create_agent',lambda prompt,role='unknown',response_format=None,**kwargs:Agent(role,response_format))
     monkeypatch.setattr('openinvest.services.reasoning_review.review_once',lambda *args,**kwargs:{'status':'passed','origin':'synthetic_unit_fixture'})
@@ -128,3 +130,21 @@ def test_persisted_provider_abort_keeps_risk_cause_pending_without_phantom_revie
     assert len(pending)==1 and pending[0]['status']=='pending'
     assert not pending[0].get('review_requests')
     assert not list((store.root/'.evidence/reasoning/drafts').glob('*.json'))
+
+
+@pytest.mark.parametrize('status',[400,422])
+def test_unrelated_parameter_rejection_does_not_trigger_another_cio_call(monkeypatch,status):
+    calls=[]
+    class Agent:
+        last_tool_calls=[]
+        def __init__(self,role):self.role=role
+        def run(self,context):
+            calls.append(self.role)
+            if self.role=='cio':
+                error=APIStatusError(status);error.body={'error':{'param':'model'}};raise error
+            return 'SIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available'
+        def tool_call_summary(self):return ''
+    monkeypatch.setattr(debate,'_create_agent',lambda prompt,role='unknown',**kwargs:Agent(role))
+    monkeypatch.setenv('INVEST_FORCE_JSON_OUTPUT','1')
+    result=debate.run_committee(asset={'symbol':'TEST'},market_data='market',macro_view='macro',portfolio_summary='account',persist_to_memory=False,max_debate_rounds=1)
+    assert calls.count('cio')==1 and result['verdict']['verdict']=='UNCLEAR'

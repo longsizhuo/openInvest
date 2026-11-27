@@ -232,7 +232,7 @@ def test_status_shows_alerts_with_distance_for_held_and_tracked_only(monkeypatch
                         lambda pm=None, **kw: {"status": "insufficient_history"})
     _seed(
         [{"symbol": "GC=F", "kind": "metal", "units": 10.0, "avg_cost": 1000.0, "cost_currency": "CNY",
-          "proxy_kind": "gold_cny_per_gram"},
+          "proxy_kind": "gold_cny_per_gram","unit_label":"克"},
          {"symbol": "510300.SS", "kind": "etf", "units": 100.0, "avg_cost": 4.0, "cost_currency": "CNY"},
          {"symbol": "TSLA", "kind": "equity", "units": 0.0, "avg_cost": 0.0, "cost_currency": "USD",
           "is_tracking_only": True}],
@@ -246,14 +246,20 @@ def test_status_shows_alerts_with_distance_for_held_and_tracked_only(monkeypatch
     def fake_quote(h):
         seen.append((h["symbol"], h.get("proxy_kind")))
         price = {"GC=F": 930.0, "510300.SS": 4.5, "AAPL": 200.0, "TSLA": 120.0}[h["symbol"]]
-        return QuoteSnapshot(symbol=h["symbol"], price=price, currency="CNY", unit="u", extra={})
+        gold = h['symbol'] == 'GC=F'
+        return QuoteSnapshot(symbol=h["symbol"],price=price,
+            currency='CNY' if gold or h['symbol']=='510300.SS' else 'USD',unit='克' if gold else 'share',
+            is_reference=gold,source_observation={'quote_fresh':not gold},extra={})
     monkeypatch.setattr("openinvest.utils.quotes.get_quote", fake_quote)
 
     rows = {h["symbol"]: h for h in skill_views.build_status_view()["all_holdings"]}
 
     gold = {a["rule"]: a for a in rows["GC=F"]["alerts"]}
     assert gold["price_below"]["text"] == "距 price_below 还有 3.2%"          # 与 get_quote 的克价口径同价
-    assert gold["drawdown_from_cost_pct"]["distance_pct"] == pytest.approx(3.0)  # 930 vs 成本 1000 = -7%，线 -10%
+    # The futures/FX reference is useful for display, not a verified native
+    # bank quote that can qualify a cost-based exit line.
+    assert gold["drawdown_from_cost_pct"]["distance_pct"] is None
+    assert gold['drawdown_from_cost_pct']['qualification'] == 'native_cost_quantity_or_quote_unverified'
     assert ("GC=F", "gold_cny_per_gram") in seen
     assert rows["510300.SS"]["alerts"] == []                                   # 没设线的持仓：字段在、为空
     aapl = rows["AAPL"]                                                        # 只跟踪未持仓：作为追踪仓行出现

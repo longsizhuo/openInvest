@@ -581,3 +581,27 @@ def test_revocation_between_legacy_preparation_and_claim_still_blocks_reuse(cont
     assert len(calls) == 1
     assert state(box, follower)['status'] == 'verification_required'
     assert state(box, follower)['error'] == 'shared_dispatch_source_unqualified'
+
+
+def test_large_legacy_receipt_batch_parses_one_governance_view_and_preserves_single_dispatch(context,monkeypatch):
+    from openinvest.services.source_reporting import ReportingPolicy
+    store,box,database,calls=context
+    first=enqueue(box,'original-for-batch')
+    dispatch.dispatch_followups(box,now=NOW,only_id=first,event_store=database)
+    path=store.data_root/'integrity/eligibility.json'
+    value=json.loads(path.read_text())
+    value['artifacts'].update({f'audit-filler:{i}':{'parents':[],'allowed_uses':['audit'],'origin':'unverified'}
+                               for i in range(2000)})
+    path.write_text(json.dumps(value))
+    followers=[enqueue(box,f'legacy-copy-{i}') for i in range(12)]
+    count=[];original=ReportingPolicy.__init__
+    def counted(self,root):count.append(root);original(self,root)
+    monkeypatch.setattr(ReportingPolicy,'__init__',counted)
+    dispatch.dispatch_followups(box,now=NOW+timedelta(minutes=1),event_store=database)
+    assert len(count)==1
+    assert len(calls)==1 and all(state(box,ident)['status']=='queued' for ident in followers)
+    # The view is batch-local. A later real withdrawal must immediately apply.
+    Eligibility(store.data_root).revoke('event:a','withdrawn after the previous batch')
+    revoked=enqueue(box,'after-withdrawal')
+    dispatch.dispatch_followups(box,now=NOW+timedelta(minutes=2),only_id=revoked,event_store=database)
+    assert len(calls)==1 and state(box,revoked)['status']=='revoked'

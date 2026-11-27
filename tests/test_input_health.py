@@ -379,7 +379,7 @@ def test_coordinator_save_writes_health_block_and_archives(mem_root, monkeypatch
     assert h["worker_unavailable"] == ["risk"]
     # CIO 自己就说 HOLD，Sanity 3 只压了置信度/金额：有改写标记，但不算"被强制成 HOLD"
     assert "sanity3_worker_unavailable" in h["rewritten"] and h["forced_hold"] is False
-    assert parsed["verdict"] == "HOLD"
+    assert parsed["verdict"] == "UNCLEAR" and h["decision_status"] == "DATA_UNTRUSTED"
     # 同日重跑 → 归档
     time.sleep(0.01)
     save_committee_transcript("TESTSYM", _COORD_RAW, context_id=context_id("TESTSYM"))

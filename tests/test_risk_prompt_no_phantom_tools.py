@@ -51,5 +51,5 @@ def test_risk_agents_have_no_tools_and_prompts_name_none(monkeypatch):
     opening = risks[0][0]
     risk_r1_input = next(ctx for (role, ctx) in inputs if role == "risk")
     for heading in ("# 用户当前持仓", "# 长期行为模式 (Dreaming)"):
-        assert heading in opening and heading in risk_r1_input
-    assert "不得声称" in opening and "不得编造" in opening
+        assert heading in risk_r1_input
+    assert "不编造" in opening and "账户承受" in opening and "当前小幅反弹不能抹去" in opening

@@ -15,20 +15,22 @@ trading permissions. Explicit user price lines remain separate from news RAG.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from openinvest.paths import INVEST_ROOT
+from openinvest.utils.market_observation import DEFAULT_QUOTE_MAX_AGE
 
 log = logging.getLogger(__name__)
 
-# 10 分钟 = 2 根 5m bar；数据最后一根 bar 距今超过该分钟数视为闭市/停滞，跳过
+# Old bars cannot establish an immediate observation; closure is a separate provider fact.
 _WINDOW_BARS = 2
-_MAX_STALE_MIN = 25
+_MAX_STALE_MIN = DEFAULT_QUOTE_MAX_AGE.total_seconds()/60
 # 冷却状态在 memory/.state 里的名字
 _STATE_NAME = "price_sentinel_delivery_cooldowns"
 # 用户自设报警线：每标的每条规则的冷却（键 "SYM:rule"；价格线值 = 盖章时刻，日涨跌线值 = {"bar", "ts"}）
@@ -108,46 +110,82 @@ def _latest_verdict(symbol: str, committee_root: Optional[Path] = None) -> str:
 # ---------- 数据抓取（monkeypatch 点） ----------
 
 def _fetch_frames(symbol: str) -> Optional[Dict[str, Any]]:
-    """拉 5m 收盘序列 + 日 ATR%。返回 {closes, last_bar_utc, price, atr_pct} 或 None。"""
+    """Independent intraday and reported completed-session observations."""
+    import pandas as pd
+    import yfinance as yf
+    from openinvest.utils.market_observation import history_observation, provider_metadata, frame_observation, utc_time
+    from openinvest.utils.exchange_fee import get_history_data
+    from openinvest.utils.market_metrics import compute_metrics
+    from openinvest.calc.risk_observations import return_risk_observations
+    from openinvest.core.config import load_config
+    policy = load_config().event
+    empty_risk = {'status':'not_available','observations':[]}
+    intra = {'status':'unavailable','closes':[],'price':None,'last_bar_utc':None,'risk_observations':empty_risk}
     try:
-        import yfinance as yf
-        from openinvest.utils.market_metrics import compute_metrics
-
-        t = yf.Ticker(symbol)
-        intraday = t.history(period="1d", interval="5m", auto_adjust=True)
-        # 末根 Close=NaN（半成型 bar）会让涨跌幅变 NaN、比较全为 False → 这一轮静默不报
-        intraday = intraday.dropna(subset=["Close"]) if intraday is not None else None
-        if intraday is None or len(intraday) < 1:
-            return None
-        closes = [float(v) for v in intraday["Close"].tolist()]
-        last_bar_utc = intraday.index[-1].tz_convert("UTC").to_pydatetime()
-
-        daily = t.history(period="2y", interval="1d", auto_adjust=True)
-        daily = daily.dropna(subset=["Close"]) if daily is not None and len(daily) else daily  # 同上，否则 ATR% 变 None、退回绝对阈值
-        session_date = intraday.index[-1].date()
-        prior = daily[daily.index.date < session_date] if daily is not None and len(daily) else daily
-        atr_pct = compute_metrics(prior).get("atr_pct") if prior is not None and len(prior) else None
-        from openinvest.calc.risk_observations import return_risk_observations
-        from openinvest.core.config import load_config
-        policy=load_config().event
-        risk = return_risk_observations(prior["Close"].tolist() if prior is not None else [], closes[-1],
-                                       tail_probability=policy.risk_tail_probability,
-                                       minimum_samples=policy.risk_min_reference_samples,
-                                       lookback=policy.risk_reference_sessions)
-        # Do not call a discontinuous overnight or lunch-break interval "10 minutes".
-        if len(intraday) >= 3 and (intraday.index[-1]-intraday.index[-3]).total_seconds() > 600:
-            closes = closes[-1:]
-        return {
-            "closes": closes,
-            "last_bar_utc": last_bar_utc,
-            "price": closes[-1],
-            "atr_pct": atr_pct,
-            "session_date": str(session_date), "risk_observations": risk,
-            "reference_basis": "completed prior sessions; yfinance adjusted quote scale; contract-roll effects unverified",
-        }
-    except Exception as e:
-        log.warning(f"[{symbol}] 行情抓取失败: {e}")
-        return None
+        ticker = yf.Ticker(symbol)
+        bars = ticker.history(period='1d', interval='5m', auto_adjust=True)
+        bars = bars.dropna(subset=['Close']) if bars is not None else pd.DataFrame()
+        meta = provider_metadata(ticker)
+        captured = datetime.now(timezone.utc)
+        if not bars.empty:
+            stamps = [utc_time(value) for value in bars.index]
+            valid = [i for i,stamp in enumerate(stamps) if stamp is not None
+                     and stamp+timedelta(minutes=5) <= captured and math.isfinite(float(bars['Close'].iloc[i]))]
+            bars = bars.iloc[valid]
+        if not bars.empty:
+            source = history_observation(bars, metadata=meta, interval='5m', now=captured)
+            stamp = utc_time(bars.index[-1])+timedelta(minutes=5)
+            age = (captured-stamp).total_seconds()/60
+            closes = [float(value) for value in bars['Close']]
+            if len(bars) >= 3 and any((utc_time(bars.index[i])-utc_time(bars.index[i-1])).total_seconds()!=300
+                                     for i in range(len(bars)-2,len(bars))):
+                closes = closes[-1:]
+            intra = {'status':'observed' if 0 <= age <= _MAX_STALE_MIN else 'stale',
+                'closes':closes,'price':closes[-1],'last_bar_utc':stamp,'session_date':source['session_date'],
+                'source_observation':source,'risk_observations':empty_risk}
+            source['symbol'] = symbol
+            source.update(interval_completed=True,bar_start=utc_time(bars.index[-1]).isoformat(),bar_asof=stamp.isoformat())
+    except Exception as exc:
+        intra.update(status='failed',error=type(exc).__name__)
+    daily = pd.DataFrame()
+    daily_source = {}
+    day = {'status':'unavailable','risk_observations':empty_risk}
+    try:
+        daily = get_history_data(symbol,'2y')
+        daily = daily.dropna(subset=['Close']) if daily is not None else pd.DataFrame()
+        daily_source = frame_observation(daily)
+        complete = set(daily_source.get('completed_session_dates',[])) if daily_source.get('history_basis_qualified',True) else set()
+        known = daily[[index.date().isoformat() in complete for index in daily.index]]
+        if not daily.empty:
+            day = {'status':'reference_only','source_observation':daily_source,'risk_observations':empty_risk}
+        if not known.empty and daily_source.get('price_basis') in ('adjusted_close','raw_close'):
+            current_date = known.index[-1].date().isoformat()
+            risk = return_risk_observations(known['Close'].iloc[:-1].tolist(),float(known['Close'].iloc[-1]),
+                tail_probability=policy.risk_tail_probability,minimum_samples=policy.risk_min_reference_samples,
+                lookback=policy.risk_reference_sessions)
+            eligible = bool(daily_source.get('daily_alert_eligible')) and current_date == daily_source.get('session_date')
+            day.update(status='observed' if eligible else 'reference_only',price=float(known['Close'].iloc[-1]),
+                session_date=current_date,completed_at=(daily_source.get('completion_ends') or {}).get(current_date),
+                risk_observations=risk,return_reference={'source_observation':daily_source,
+                    'current_session_excluded':True,'prior_max_session_date':known.index[-2].date().isoformat() if len(known)>1 else None,
+                    'observations':risk.get('observations',[])})
+        if intra['status'] == 'observed':
+            session = intra['session_date']
+            prior = known[known.index.date < datetime.fromisoformat(session).date()] if not known.empty else known
+            intra['atr_pct'] = compute_metrics(prior).get('atr_pct') if not prior.empty else None
+            if not prior.empty and intra.get('source_observation',{}).get('session_label_basis') == 'provider_period':
+                intra['risk_observations'] = return_risk_observations(prior['Close'].tolist(),intra['price'],
+                    tail_probability=policy.risk_tail_probability,minimum_samples=policy.risk_min_reference_samples,
+                    lookback=policy.risk_reference_sessions)
+            intra['return_reference'] = {'source_observation':daily_source,'current_session_excluded':True,
+                'prior_max_session_date':prior.index[-1].date().isoformat() if not prior.empty else None,
+                'atr_pct':intra['atr_pct'],'observations':intra['risk_observations'].get('observations',[])}
+    except Exception as exc:
+        day.update(status='failed',error=type(exc).__name__)
+    return {'intraday':intra,'daily':day, 'closes':intra['closes'],'last_bar_utc':intra['last_bar_utc'],
+        'price':intra['price'],'atr_pct':intra.get('atr_pct'), 'session_date':intra.get('session_date'),
+        'risk_observations':intra['risk_observations'],
+        'reference_basis':'provider-reported completed sessions; adjusted scale; contract-roll effects unverified'}
 
 
 # ---------- 用户自设报警线（C8） ----------
@@ -158,8 +196,11 @@ def _alert_targets() -> List[Dict[str, Any]]:
         from openinvest.core.portfolio_manager import PortfolioManager
 
         pm = PortfolioManager()
+        from openinvest.services.ledger_evidence import account_source_status
+        source=account_source_status(pm)
         return [
-            {"symbol": a["symbol"], "alerts": a["alerts"], "holding": pm.holdings.find(a["symbol"])}
+            {"symbol": a["symbol"], "alerts": a["alerts"], "holding": pm.holdings.find(a["symbol"]),
+             "cost_qualification":(source.get('holdings') or {}).get(a['symbol'],{})}
             for a in (pm.strategy.get("target_assets") or []) if a.get("symbol") and a.get("alerts")
         ]
     except Exception as e:  # 没初始化 / 读失败：这条路径静默让位，不影响 ATR 哨兵
@@ -204,9 +245,11 @@ def _accepted_time(receipt, fallback):
 def _queue_event(ms, event, *, key, followup_symbols=(), risk_alert=False, cooldown=None, now=None):
     from openinvest.db.event_store import EventStore
     from openinvest.services.event_notifier import send_event_alert_receipt
+    from openinvest.services.notification_outbox import NotificationOutbox
     event = {**event, "event_id": hashlib.sha256(key.encode()).hexdigest()[:24]}
     from openinvest.services.source_reporting import record_backend_observation
-    witness=record_backend_observation(ms.data_root,event,producer="openinvest.jobs.price_sentinel",inputs={"notification_key":key,"observation":event})
+    witness=record_backend_observation(ms.data_root,event,producer="openinvest.jobs.price_sentinel",
+        inputs={"notification_key":key,"observation":event,"market_witness":event.get('_market_witness')})
     event={**event,"_backend_observation_id":witness}
     receipt = send_event_alert_receipt(
         [event], notification_key=key, risk_alert=risk_alert, dispatch=False, store=ms,
@@ -223,7 +266,14 @@ def _queue_event(ms, event, *, key, followup_symbols=(), risk_alert=False, coold
         if saved:
             event=json.loads(saved[0])["events"][0]
         database=EventStore(str(ms.data_root / "db/events.db"))
-        database.upsert_event(event,embedding=None)
+        from openinvest.services.source_reporting import event_payload
+        existing = database.get_event(event['event_id'],purpose='audit')
+        support = database._reporting_support(event['event_id'])
+        same = (existing is not None and support and support.get('kind') == 'backend_observation'
+                and support.get('observation_id') == event.get('_backend_observation_id')
+                and event_payload(existing) == event_payload(event))
+        if not same:
+            database.upsert_event(event,embedding=None)
         receipt["event_index_status"]="stored"
     except Exception as exc:
         receipt["event_index_status"]="pending"
@@ -237,15 +287,34 @@ def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
     """Persist explicit user-line detections; only accepted receipts consume cooldown."""
     import json
     from openinvest.services.price_alerts import evaluate_symbol, fetch_quote
-    detected = []
+    class Observations(list):
+        pass
+    detected = Observations()
+    detected.coverage = {}
     for target in _alert_targets():
         sym = target["symbol"]
         try:
             quote = fetch_quote(sym, target["holding"])
+            now = datetime.now(timezone.utc)  # Evaluate against the real post-retrieval clock.
             if quote is None or quote.is_stale or not quote.price > 0:
+                detected.coverage[sym] = {'status':'unavailable' if quote is None else 'reference_only',
+                    'source_observation':getattr(quote,'source_observation',{}) or {}}
                 continue
-            hits = [r for r in evaluate_symbol(sym, target["alerts"], target["holding"], price=quote.price,
-                    extra=quote.extra, last_updated=quote.last_updated) if r["breached"]]
+            source = getattr(quote,'source_observation',{}) or {}
+            from openinvest.utils.market_observation import utc_time
+            stamp = utc_time(getattr(quote,'observed_at',None) or source.get('quote_asof'))
+            if (source.get('quote_fresh') is not True or getattr(quote,'is_reference',True)
+                    or stamp is None or not 0 <= (now-stamp).total_seconds() <= DEFAULT_QUOTE_MAX_AGE.total_seconds()):
+                detected.coverage[sym] = {'status':'reference_only','source_observation':source}
+                continue
+            detected.coverage[sym] = {'status':'observed','source_observation':source}
+            evaluated = evaluate_symbol(sym, target["alerts"], target["holding"], price=quote.price,
+                    extra=quote.extra, last_updated=quote.last_updated,
+                    cost_qualification=target.get('cost_qualification'),native_quote_qualified=True,quote_currency=quote.currency)
+            unavailable=[r['rule'] for r in evaluated if r.get('current') is None]
+            if unavailable:
+                detected.coverage[sym].update(status='partial_observation',unavailable_rules=unavailable)
+            hits = [r for r in evaluated if r["breached"]]
             version = hashlib.sha256(json.dumps(target["alerts"], sort_keys=True).encode()).hexdigest()[:16]
             for hit in hits:
                 rule = hit["rule"]; slot = rule+":"+version; bar = hit.get("bar_date")
@@ -262,9 +331,16 @@ def _check_user_alerts(ms: Any, now: datetime, dry_run: bool) -> List[str]:
                 if dry_run:
                     continue
                 key = f"user-line:{sym}:{slot}:{bar or now.date().isoformat()}"
+                basis = '参考估值（非银行报价）' if getattr(quote,'is_reference',False) else '观察价'
                 event = {"one_line_claim": f"{sym} 触发用户报警线：{hit['text']}；现价 {quote.price:.2f} {quote.currency or ''}",
                          "event_type":"price_alert", "stance":"opportunity" if rule in _ALERT_UP_RULES else "risk",
                          "severity":"low", "affected_symbols":[sym], "entities":["user_price_alert",sym.lower()], "ts":now.isoformat()}
+                event['one_line_claim'] = event['one_line_claim'].replace('；现价 ', '；'+basis+' ')
+                event['one_line_claim'] += '; asof '+str(getattr(quote,'observed_at',None) or quote.last_updated or 'unknown')
+                event['_market_witness'] = {'schema':'openinvest.market_witness.v1','kind':'native_quote_alert',
+                    'price_basis':getattr(quote,'price_basis','unverified'),'source_symbol':sym,
+                    'quote_fresh':True,'is_reference':False,'observation_asof':stamp.isoformat(),'quote_asof':stamp.isoformat(),
+                    'source_observation':source,'return_reference':None}
                 receipt = _queue_event(ms,event,key=key,risk_alert=True,
                                        now=now,
                                        cooldown={"domain":domain,"bar":bar,"seconds":_ALERT_COOLDOWN_MIN*60})
@@ -291,6 +367,84 @@ def _reference_owners(symbols,store):
             owners.setdefault(reference,set()).add(symbol)
     return owners
 
+
+def _daily_baseline(store, symbol, now, *, day=None, dry_run=False):
+    """Only closes occurring after monitoring began can create a new alert."""
+    from openinvest.utils.market_observation import utc_time
+    def update(old):
+        old = old or {}
+        value = dict(old.get(symbol) or {'initialized_at':now.isoformat(),'last_completed_session':None})
+        allowed = False
+        if day and day.get('session_date'):
+            label = day['session_date']
+            previous = value.get('last_completed_session')
+            end, initial = utc_time(day.get('completed_at')), utc_time(value['initialized_at'])
+            allowed = (day.get('status') == 'observed' and end is not None and initial is not None
+                       and initial < end <= now and (previous is None or label >= previous))
+            if previous is None or label > previous:
+                value['last_completed_session'] = label
+        old[symbol] = value
+        return old, allowed
+    if dry_run:
+        return update(store.state_get('price_sentinel_daily_baseline',{}))[1]
+    return store.state_update('price_sentinel_daily_baseline',update)
+
+
+def _price_condition(hit):
+    return {'basis':hit['basis'],'direction':hit['direction'],'severity':hit['severity'],
+            'horizons':sorted({int(value['horizon_sessions']) for value in hit.get('observations',[])})}
+
+
+def _stored_price_condition(payload, hit):
+    value = (payload.get('cooldown') or {}).get('condition')
+    if isinstance(value,dict):
+        return value
+    if hit['basis'] == '10_minute':
+        return {**_price_condition(hit),'horizons':[]}
+    text = ' '.join(event.get('one_line_claim','') for event in payload.get('events',[]))
+    horizons = sorted({int(value) for value in re.findall(r'(\d+)交易日累计',text)})
+    return {**_price_condition(hit),'horizons':horizons} if horizons else None
+
+
+def _price_notice_identity(outbox, symbol, hit, period, now):
+    """Retain legacy notice IDs, while a new horizon is a different condition."""
+    import json
+    from openinvest.core.evidence_eligibility import digest
+    family = f"{hit['direction']}:{hit['basis']}:{hit['severity']}"
+    legacy = f'market-observation:{symbol}:{family}'
+    base_key = legacy+':'+str(period)
+    condition = _price_condition(hit)
+    fingerprint = digest(condition)
+    scope = legacy+':condition:'+fingerprint
+    with outbox.connection() as db:
+        recent = db.execute("""SELECT payload FROM notifications WHERE created>=?
+            AND (json_extract(payload,'$.cooldown.domain')=? OR json_extract(payload,'$.cooldown.family_domain')=?)
+            ORDER BY created DESC""", (now.timestamp()-86400,legacy,legacy)).fetchall()
+        for row in recent:
+            payload = json.loads(row['payload'])
+            if _stored_price_condition(payload,hit) == condition:
+                scope = (payload.get('cooldown') or {}).get('domain') or scope
+                break
+        ident = hashlib.sha256((outbox.scope+':'+base_key).encode()).hexdigest()
+        old = db.execute('SELECT payload FROM notifications WHERE id=?',(ident,)).fetchone()
+        if old:
+            previous = _stored_price_condition(json.loads(old['payload']),hit)
+            if previous is not None and previous != condition:
+                base_key += ':condition:'+fingerprint
+    return base_key, {'domain':scope,'family_domain':legacy,'condition':condition,'condition_id':fingerprint}
+
+
+def _record_price_observation(store, symbol, hit, event):
+    """Keep the observed fact even when delivery is cooling or unavailable."""
+    from openinvest.core.evidence_eligibility import digest
+    from openinvest.services.source_reporting import record_backend_observation
+    point = {'symbol':symbol,'basis':hit['basis'],'price':hit['price'],'asof':hit['source_asof'],
+             'condition':_price_condition(hit),'observations':hit.get('observations',[])}
+    audit_event = {**event,'event_id':digest(point)[:24],'ts':hit['source_asof']}
+    return record_backend_observation(store.data_root,audit_event,producer='openinvest.jobs.price_sentinel',
+        inputs={**point,'market_witness':event.get('_market_witness')})
+
+
 def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
     from openinvest.core.config import load_config
     from openinvest.core.memory_store import MemoryStore
@@ -306,11 +460,15 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
     coverage = {}; detected = []; accepted = []; queued = []
     try:
         user_lines = _check_user_alerts(ms,now,dry_run)
+        if getattr(user_lines,'coverage',{}):
+            coverage['user_alert_lines'] = {'status':'observed' if all(value['status']=='observed' for value in user_lines.coverage.values()) else 'coverage_unknown',
+                                            'assets':user_lines.coverage}
     except Exception as exc:
         user_lines = []
         coverage["user_alert_lines"] = {"status":"evaluation_failed", "error":type(exc).__name__}
     owners=_reference_owners(symbols,ms)
     for sym in owners:
+        _daily_baseline(ms,sym,now,dry_run=dry_run)
         if not dry_run and sym in symbols:
             try:
                 plans=[update_plan(ms,sym,now=now,purpose=purpose) for purpose in ("review","risk")]
@@ -321,60 +479,91 @@ def run(dry_run: Optional[bool] = None) -> Dict[str, Any]:
         frames = _fetch_frames(sym)
         if frames is None:
             coverage[sym] = {"status":"fetch_failed_or_unsupported"}; continue
-        age = (now-frames["last_bar_utc"]).total_seconds()/60
-        if age < 0 or age > _MAX_STALE_MIN:
-            coverage[sym] = {"status":"future_timestamp" if age<0 else "stale_session_unverified", "age_minutes":age}
-            continue
-        coverage[sym] = {"status":"observed", "last_bar":frames["last_bar_utc"].isoformat(),
-                         "return_reference":frames.get("risk_observations",{}).get("status","not_available")}
-        if not dry_run and sym in symbols:
+        now = datetime.now(timezone.utc)
+        intra = frames.get('intraday')
+        day = frames.get('daily') or {'status':'unavailable','risk_observations':{'observations':[]}}
+        if intra is None:
+            age = (now-frames["last_bar_utc"]).total_seconds()/60
+            intra = {**frames,'status':'observed' if 0 <= age <= _MAX_STALE_MIN else 'stale'}
+        elif intra.get('last_bar_utc') is not None and (now-intra['last_bar_utc']).total_seconds() > DEFAULT_QUOTE_MAX_AGE.total_seconds():
+            intra = {**intra,'status':'stale','source_observation':{**intra.get('source_observation',{}),'quote_fresh':False}}
+        observed = intra.get('status') == 'observed'
+        coverage[sym] = {'status':'observed' if observed else 'observed_reference' if day.get('status')=='observed'
+                         else 'stale_session_unverified' if intra.get('status')=='stale' else 'coverage_unknown',
+            'intraday':{'status':intra.get('status'),'last_bar':intra['last_bar_utc'].isoformat() if intra.get('last_bar_utc') else None,
+                        'source_observation':intra.get('source_observation',{})},
+            'daily':{'status':day.get('status'),'session_date':day.get('session_date'),
+                     'completed_at':day.get('completed_at'),'source_observation':day.get('source_observation',{})},
+            'return_reference':intra.get('risk_observations',{}).get('status','not_available')}
+        quote_eligible = intra.get('source_observation',{}).get('quote_fresh', 'intraday' not in frames)
+        if observed and quote_eligible and not dry_run and sym in symbols:
             try:
-                observed=observe_quote(ms,sym,frames["price"],now=now)
-                if observed and observed.get("notification_id"):queued.append(observed["notification_id"])
+                plan_observation=observe_quote(ms,sym,intra["price"],now=now)
+                if plan_observation and plan_observation.get("notification_id"):queued.append(plan_observation["notification_id"])
             except Exception as exc:
                 coverage[sym]["plan_error"]=type(exc).__name__
         hits = []
-        vertical = _detect_move(frames["closes"],frames["atr_pct"],cfg.event.sentinel_atr_mult)
+        vertical = _detect_move(intra.get("closes",[]),intra.get("atr_pct"),cfg.event.sentinel_atr_mult) if observed else None
         if vertical:
-            hits.append({**vertical,"basis":"10_minute","severity":"high" if vertical.get("ratio") is not None and vertical["ratio"]>=1.5 else "mid"})
-        tails = [x for x in frames.get("risk_observations",{}).get("observations",[]) if x.get("breached")]
+            hits.append({**vertical,"basis":"10_minute","severity":"high" if vertical.get("ratio") is not None and vertical["ratio"]>=1.5 else "mid",
+                'price':intra['price'],'source_asof':intra['last_bar_utc'].isoformat(),'session_date':intra.get('session_date')})
+        tails = [x for x in intra.get("risk_observations",{}).get("observations",[]) if x.get("breached")] if observed else []
         if tails:
-            hits.append({"direction":"down","basis":"prior_session_returns", "severity":"high" if any(x["historical_tail_rank"]<=.01 for x in tails) else "mid", "observations":tails})
+            hits.append({"direction":"down","basis":"prior_session_returns", "severity":"high" if any(x["historical_tail_rank"]<=.01 for x in tails) else "mid",
+                "observations":tails,'price':intra['price'],'source_asof':intra['last_bar_utc'].isoformat(),'session_date':intra.get('session_date')})
+        daily_new = _daily_baseline(ms,sym,now,day=day,dry_run=dry_run)
+        daily_tails = [value for value in day.get('risk_observations',{}).get('observations',[]) if value.get('breached')]
+        if daily_new and daily_tails:
+            hits.append({'direction':'down','basis':'completed_session_returns','severity':'high' if any(value['historical_tail_rank']<=.01 for value in daily_tails) else 'mid',
+                'observations':daily_tails,'price':day['price'],'source_asof':day['completed_at'],'session_date':day['session_date']})
         for hit in hits:
             direction=hit["direction"]; family=f"{direction}:{hit['basis']}:{hit['severity']}"
-            from openinvest.services.notification_outbox import NotificationOutbox
-            domain=f"market-observation:{sym}:{family}"
-            last=None if dry_run else NotificationOutbox(ms).last_accepted(domain)
-            if last is not None and now.timestamp()-last < cfg.event.sentinel_cooldown_min*60:
-                continue
-            state=ms.state_get(_STATE_NAME,{}) or {}
-            if not _cooldown_ok(state,sym,family,now,cfg.event.sentinel_cooldown_min):
-                continue
             detected.append(sym)
             if dry_run:
                 continue
-            session=frames.get("session_date") or frames["last_bar_utc"].date().isoformat()
-            period=session if hit["basis"]=="prior_session_returns" else str(int(now.timestamp()//max(1,cfg.event.sentinel_cooldown_min*60)))
-            key=f"market-observation:{sym}:{family}:{period}"
+            session=hit.get("session_date") or now.date().isoformat()
+            period=session if hit["basis"] in ("prior_session_returns","completed_session_returns") else str(int(now.timestamp()//max(1,cfg.event.sentinel_cooldown_min*60)))
             if hit["basis"]=="10_minute":
                 detail=f"10分钟变化 {hit['move_pct']:+.2f}%"
             else:
-                detail="；".join(f"{o['horizon_sessions']}交易日累计 {o['return_pct']:+.2f}%（此前历史下侧参考 {o['threshold_pct']:.2f}%，n={o['sample_count']}）" for o in tails)
-            event={"one_line_claim":f"{sym} {detail}；现价 {frames['price']:.4f} {quote_unit(sym) or 'unit_unverified'}。这是已观察变化，不是后续下跌预测或交易指令。",
+                detail="；".join(f"{o['horizon_sessions']}交易日累计 {o['return_pct']:+.2f}%（此前历史下侧参考 {o['threshold_pct']:.2f}%，n={o['sample_count']}）" for o in hit['observations'])
+            event={"one_line_claim":f"{sym} {detail}；观察价 {hit['price']:.4f} {quote_unit(sym) or 'unit_unverified'}；asof {hit['source_asof']}。这是已观察变化，不是后续下跌预测或交易指令。",
                    "event_type":"price_action", "stance":"risk" if direction=="down" else "opportunity", "severity":hit["severity"],
                    "affected_symbols":[sym],"entities":["price_observation",sym.lower()],"ts":now.isoformat()}
             affected=sorted(owners[sym])
             if any(target!=sym for target in affected):
                 event["one_line_claim"]+=f" 关联资产：{'、'.join(affected)}；这是跟踪参考的变化，不是这些资产的报价，也不保证同幅变动。"
             event["affected_symbols"]=list(dict.fromkeys([sym,*affected]))
+            if sym == 'GC=F':
+                event['one_line_claim'] += ' 连续期货是风险参考，不是银行积存金或伦敦现货报价；换月与渠道基差未核验。'
+            component = day if hit['basis'] == 'completed_session_returns' else intra
+            source = component.get('source_observation',{}) or {}
+            event['_market_witness'] = {'schema':'openinvest.market_witness.v1',
+                'kind':'completed_session_return' if hit['basis']=='completed_session_returns' else 'intraday_price_observation',
+                'source_symbol':sym,'price_basis':source.get('price_basis','unverified'),
+                'observation_asof':hit['source_asof'],'quote_asof':source.get('quote_asof'),
+                'quote_fresh':source.get('quote_fresh') is True,
+                'is_reference':source.get('quote_fresh') is not True,
+                'source_observation':source,'return_reference':component.get('return_reference')}
             try:
+                _record_price_observation(ms,sym,hit,event)
+                from openinvest.services.notification_outbox import NotificationOutbox
+                box = NotificationOutbox(ms)
+                key, cooldown = _price_notice_identity(box,sym,hit,period,now)
+                domain = cooldown['domain']
+                last = box.last_accepted(domain)
+                if last is not None and now.timestamp()-last < cfg.event.sentinel_cooldown_min*60:
+                    continue
+                state = ms.state_get(_STATE_NAME,{}) or {}
+                if not _cooldown_ok(state,sym,domain,now,cfg.event.sentinel_cooldown_min):
+                    continue
                 receipt=_queue_event(ms,event,key=key,followup_symbols=[target for target in affected if target in ctx["watching"]],risk_alert=direction=="down",
                                      now=now,
-                                     cooldown={"domain":domain,"seconds":cfg.event.sentinel_cooldown_min*60})
+                                     cooldown={**cooldown,"seconds":cfg.event.sentinel_cooldown_min*60})
                 queued.append(receipt["notification_id"])
                 if receipt["accepted"]:
                     accepted.append(sym);stamp=_accepted_time(receipt,now).isoformat()
-                    ms.state_update(_STATE_NAME,lambda current,k=f"{sym}:{family}",v=stamp: ({**(current or {}),k:v},None))
+                    ms.state_update(_STATE_NAME,lambda current,k=f"{sym}:{domain}",v=stamp: ({**(current or {}),k:v},None))
             except Exception as exc:
                 coverage[sym]["queue_error"]=type(exc).__name__
     if not dry_run:

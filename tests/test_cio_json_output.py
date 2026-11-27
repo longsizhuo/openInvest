@@ -31,12 +31,13 @@ def test_fields_preserve_negative_alloc():
     assert r["reentry_price"] == 950.0
 
 
-def test_fields_sanity_buy_overdrive_downgrade():
-    # Sanity 1 仍生效：高置信 BUY → 降级 ACCUMULATE
+def test_fields_confidence_shadow_does_not_rewrite_action():
+    # Confidence is not a calibrated event probability or a directional veto.
     r = parse_cio_memo("(json)", fields={"verdict": "BUY", "confidence": 0.99,
                                          "suggested_alloc_cny": 3000})
-    assert r["verdict"] == "ACCUMULATE"
-    assert r["_original_verdict"] == "BUY"
+    assert r["verdict"] == "BUY"
+    assert r["alloc_cny"] == 3000
+    assert r["_legacy_confidence_rule_shadow"]["applied"] is False
 
 
 def test_fields_worker_unavailable_backstop_via_brief():

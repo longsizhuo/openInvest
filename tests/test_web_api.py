@@ -1014,8 +1014,15 @@ def skill_client(client, monkeypatch):
 
     fake_df = pd.DataFrame(
         {"Close": [40.0, 41.0, 42.0, 41.5, 42.5]},
-        index=pd.date_range("2026-04-28", periods=5, freq="D"),
+        index=pd.date_range(end=pd.Timestamp.now().normalize(), periods=5, freq="D"),
     )
+    from datetime import datetime,timedelta,timezone
+    from openinvest.utils.market_observation import history_observation
+    current = datetime.now(timezone.utc)
+    fake_df.attrs['source_observation'] = history_observation(fake_df,provider='synthetic_status_fixture',now=current,
+        metadata={'symbol':'NDQ.AX','currency':'AUD','instrumentType':'ETF','exchangeTimezoneName':'UTC',
+            'regularMarketTime':current.timestamp(),'currentTradingPeriod':{'regular':{
+                'start':(current-timedelta(minutes=1)).timestamp(),'end':(current+timedelta(minutes=1)).timestamp()}}})
     monkeypatch.setattr(ef, "get_history_data", lambda symbol, period="5d": fake_df)
     monkeypatch.setattr(quotes, "get_history_data", lambda symbol, period="5d", **kw: fake_df)
     monkeypatch.setattr(fx, "get_history_data", lambda symbol, period="5d", **kw: fake_df)

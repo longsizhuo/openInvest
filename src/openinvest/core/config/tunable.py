@@ -55,9 +55,12 @@ class VerdictConfig:
 
     来源: core/committee.py:206-220 THRESHOLDS dict
     """
-    buy_confidence_overdrive: float = 0.95
-    buy_confidence_downgrade_to: float = 0.6
+    buy_confidence_overdrive: float = 0.95  # legacy audit comparison only; no directional veto
+    buy_confidence_downgrade_to: float = 0.6  # legacy audit comparison only
     alloc_cny_ceiling: float = 100_000
+    # Explicit resource budget, matching the provider's documented thinking
+    # default; this is not a market threshold or a permission to trade.
+    reasoning_verifier_max_tokens: int = 65536
     worker_unavailable_confidence_floor: float = 0.4
     # force-HOLD 时统一的 confidence 上限（Sanity 4：集中度 lens 关闭覆盖集中度减仓用）。
     # 与 worker_unavailable_confidence_floor 同默认但语义独立，便于分别 tune。
@@ -80,14 +83,14 @@ class VerdictConfig:
     cash_opportunity_cost_rule_enabled: bool = False
     # 零花钱账户 + 强破产兜底时的 TRIM 约束阈值
     # 默认 0 = 禁用（等 sweep ADR-011 出 OOS 验证后再设真实值，遵守 ADR-010 rule 4）
-    trim_no_trim_loss_pct: float = 0.0   # 浮亏 < 此值禁止 TRIM；0 = 不启用
-    trim_caution_loss_pct: float = 0.0   # 浮亏 < 此值倾向 HOLD；0 = 不启用
+    trim_no_trim_loss_pct: float = 0.0   # legacy audit only; not injected as a market veto
+    trim_caution_loss_pct: float = 0.0   # legacy audit only
     # 风险档（2026-06 regime 方向锁消融结论的显式化）：
     # - steady（默认）= 无方向锁（B 链）：Sharpe 最优、回撤最浅、熊市稳
     # - aggressive = uptrend 顺势加仓杠杆：HOLD→ACCUMULATE（消融证明 = 纯杠杆，
     #   牛市 +CR 但 −Sharpe + 深 MaxDD + 熊市更亏；是风险偏好，不是 alpha）
     # env: INVEST_VERDICT_RISK_PROFILE=aggressive
-    risk_profile: str = "steady"
+    risk_profile: str = "steady"  # preference only; no deterministic direction rewrite
     # 黄金 VIX/ATR 防御腿"分批 DCA"（2026-06-13 用户裁决，wiki 18 §5）：高 VIX 区不再
     # 全拦黄金买入，改"放行但强制分批"——尊重中位右偏(典型涨,不该禁)，用时间分散吃
     # 厚左尾(挤兑坑真实且 fit 期更深)。两条腿(VIX OR ATR)合成单一分批计划。
@@ -300,10 +303,10 @@ class EventConfig:
     # sev-2 前瞻开的 12h 冷却会吞掉随后的 sev-3 实锤（财报前瞻 → 财报结果）。
     committee_escalation_bypass: bool = True
     # event_watch 扫描窗口（5 字段 crontab，按 jobs/event_watch.yml 的 timezone=Asia/Shanghai 解释）。
-    # 默认北京 8:00-次日 2:30 每半小时——覆盖 A股/ASX 白天 + 美盘（含 ADP/非农/Fed 讲话时段）。
+    # 默认全天每半小时；市场价格扫描不能替代夜间新闻，来源内容复用和调用预算另行约束。
     # 2026-07-03 修正：旧 yml "*/30 0-7 * * 1-5" 实际跑在北京 0-7:30（注释误标成 UTC），
     # 错开美盘上半场 → 黄金 10 分钟垂直拉升无报警。scheduler 每 10 分钟自动拾取此值改动。
-    watch_schedule: str = "*/30 0-2,8-23 * * *"
+    watch_schedule: str = "*/30 * * * *"
     # ---- 价格异动哨兵（ADR-025，jobs/price_sentinel.py）----
     sentinel_enabled: bool = True               # 垂直线哨兵总开关
     risk_alerts_enabled: bool = False            # 用户选择的独立风险提醒；不受泛新闻静默/HOLD影响

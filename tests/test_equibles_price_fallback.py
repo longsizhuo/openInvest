@@ -99,7 +99,10 @@ def test_yfinance_down_a_share_falls_back_to_equibles(yf_down, key, monkeypatch)
     assert first["close"] == pytest.approx(1184.08) and first["close_raw"] == pytest.approx(1212.10)
     assert first["high"] == pytest.approx(1227.00 * 1184.08 / 1212.10)
     assert first["volume"] == 4844649
-    assert not df.empty and df.attrs["yf_fetch_failed"] is True   # Equibles 晚两天，照样标陈旧
+    assert not df.empty and df.attrs["yf_fetch_failed"] is False  # The selected alternative succeeded.
+    source = df.attrs['source_observation']
+    assert source['provider'] == 'equibles' and source['fetch_status'] == 'ok'
+    assert source['quote_fresh'] is False  # Date-only historical prices remain references.
 
 
 def test_fallback_throttled_across_calls(yf_down, key, monkeypatch):

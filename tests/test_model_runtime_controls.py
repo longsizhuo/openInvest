@@ -46,3 +46,44 @@ def test_sdk_sends_explicit_thinking_and_json_together_without_tools():
     assert captured[0]["thinking"]=={"type":"enabled"}
     assert captured[0]["response_format"]=={"type":"json_object"}
     assert "tools" not in captured[0]
+
+
+def test_verifier_limits_are_sent_and_sdk_has_no_hidden_retries(monkeypatch):
+    import json,httpx
+    from openinvest.capabilities.sdk_agent import SDKAgent
+    from openinvest.core.config import set_config_override,reset_config
+    from openinvest.utils.llm import verifier_generation_limits
+    set_config_override({'verdict':{'reasoning_verifier_max_tokens':32768}})
+    seen=[]
+    def respond(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200,json={'id':'synthetic','object':'chat.completion','created':1,'model':'deepseek-flash',
+           'choices':[{'index':0,'finish_reason':'stop','message':{'role':'assistant','content':'{}'}}]})
+    try:
+        limits=verifier_generation_limits('deepseek-flash')
+        agent=SDKAgent(system_prompt='json',model='deepseek-flash',api_key='synthetic',base_url='https://synthetic.invalid',
+            enable_tools=False,enable_thinking=True,response_format={'type':'json_object'},**limits)
+        assert agent.client.max_retries==0
+        original=agent.client;agent.client=original.with_options(http_client=httpx.Client(transport=httpx.MockTransport(respond)))
+        try:assert agent.run('synthetic')=='{}'
+        finally:agent.client.close();original.close()
+        assert len(seen)==1 and seen[0]['max_tokens']==32768 and seen[0]['reasoning_effort']=='high'
+        assert seen[0]['thinking']=={'type':'enabled'}
+        assert verifier_generation_limits('gpt-6')=={'max_output_tokens':None,'reasoning_effort':None}
+    finally:reset_config()
+
+
+def test_sdk_rate_limit_response_is_one_wire_not_nested_sdk_retries():
+    import httpx,openai
+    from openinvest.capabilities.sdk_agent import SDKAgent
+    seen=[]
+    def respond(request):
+        seen.append(1)
+        return httpx.Response(429,json={'error':{'message':'synthetic limit','type':'rate_limit_error'}})
+    agent=SDKAgent(system_prompt='synthetic',model='deepseek-flash',api_key='synthetic',base_url='https://synthetic.invalid',enable_tools=False)
+    original=agent.client;agent.client=original.with_options(http_client=httpx.Client(transport=httpx.MockTransport(respond)))
+    try:
+        import pytest
+        with pytest.raises(openai.RateLimitError):agent.run('synthetic')
+    finally:agent.client.close();original.close()
+    assert seen==[1]

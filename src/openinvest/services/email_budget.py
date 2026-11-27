@@ -31,14 +31,30 @@ def urgent_identity(payload):
     domain = (payload.get('cooldown') or {}).get('domain')
     if domain and risk:
         return 'price:' + str(domain)
-    important = [e for e in events if e.get('severity') == 'high' and (
-        e.get('stance') == 'risk' or (e.get('revision_previous') or {}).get('stance') == 'risk')]
-    sources = sorted({s.get('url') for e in important for s in e.get('sources', []) if s.get('url')})
-    if not sources:
+    identities = []
+    for event in events:
+        previous = event.get('revision_previous') or {}
+        active = event.get('stance') == 'risk' and event.get('severity') == 'high'
+        correction = previous.get('stance') == 'risk' and previous.get('severity') == 'high' and (
+            event.get('stance') != 'risk' or event.get('severity') != 'high')
+        if not (active or correction):
+            continue
+        sources = [source for source in event.get('sources',[]) if source.get('url')]
+        if not sources:
+            continue
+        material = (event.get('_analysis_cause_id'), event.get('_analysis_version_id'))
+        if not all(isinstance(value,(str,int)) and not isinstance(value,bool) for value in material):
+            from openinvest.services.news_identity import content_id
+            # Legacy URL-only records retain a conservative identity; model
+            # paraphrases and fetch timestamps cannot invent a new publication.
+            material = tuple(sorted({content_id(source) for source in sources}))
+        identities.append([material,event.get('stance','unknown'),event.get('severity','unknown'),
+                           'correction' if correction else 'risk'])
+    if not identities:
         return None
-    # A retraction is a different message; cosmetic rewrites of the same story aren't.
-    state = sorted({e.get('stance', 'unknown') for e in important})
-    return 'news:' + hashlib.sha256(json.dumps([sources, state], sort_keys=True).encode()).hexdigest()
+    # Aliases of one observed publication do not create a second risk identity.
+    canonical = sorted({json.dumps(value,sort_keys=True) for value in identities})
+    return 'news:' + hashlib.sha256(json.dumps(canonical).encode()).hexdigest()
 
 
 def reserve(*, receiver, subject, plain_body, html_body=None, category='direct', notification_id=None,

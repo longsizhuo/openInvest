@@ -236,6 +236,10 @@ def test_shared_plan_ancestors_are_memoized_and_budget_failure_is_not_cached(tmp
         brief=plan_brief(store,'SYNTHETIC')
         inputs={'event_brief':'','portfolio_summary':str(brief),'source_plan_refs':getattr(brief,'plan_refs',[])}
         for purpose in ('review','risk'):
+            # Each write changes the current plan. Capture the actual current
+            # references for the next request instead of reusing a stale brief.
+            brief=plan_brief(store,'SYNTHETIC')
+            inputs={'event_brief':'','portfolio_summary':str(brief),'source_plan_refs':getattr(brief,'plan_refs',[])}
             previous=store.state_get('review_plan_'+('risk_' if purpose=='risk' else '')+'SYNTHETIC')
             spec={**plan(),'expires_at':(NOW+timedelta(days=7,hours=generation)).isoformat()}
             if previous:spec.update(replaces_plan_id=previous['plan_id'],change_reason='Independent refreshed sources')

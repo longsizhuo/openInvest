@@ -211,6 +211,8 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
         parsed = cached_parsed
         _print_json({
             "status": "cached",
+            "current_advice_valid":True,
+            "trade_authorized":False,
             "reason": bilingual(
                 "今天已经跑过这个资产了；用 --force 重跑",
                 "This asset already ran today; pass --force to rerun.",
@@ -303,10 +305,23 @@ def cmd_run_committee(args: argparse.Namespace) -> None:
             "**不要直接写 memory/**——所有状态变更必须走带审计的入口。"
         )
 
+    from openinvest.core.decision_evidence import advice_qualified
+    qualified=advice_qualified(verdict)
+    amount=verdict.get('alloc_cny') or 0
+    actionable=(verdict.get('verdict') in {'BUY','ACCUMULATE'} and amount>0) or (verdict.get('verdict') in {'TRIM','SELL'} and amount<0)
+    if not qualified:
+        next_step=cio_render_hint+('\n\nThis proposal requires review. Do not place or record a trade from its raw direction; inspect the qualification errors and preserved evidence.' if lang=='en' else
+            '\n\n本提案待复核。不得按原始买卖方向下单、推算数量或登记执行；先查看资格错误及已封存证据。')
+    elif not actionable:
+        next_step=cio_render_hint+('\n\nNo executable amount was proposed. Continue the registered monitoring/review conditions; do not invent an order.' if lang=='en' else
+            '\n\n本次没有可执行金额。继续已登记的监控与复核条件，不自行补造订单。')
     from openinvest.jobs.review_calc import confidence_display
     from openinvest.jobs.verdict_review import load_confidence_lookup
     _print_json({
-        "status": "ok",
+        "status": "ok" if qualified else "review_required",
+        "current_advice_valid":qualified,
+        "has_qualified_execution_amount":bool(qualified and actionable),
+        "trade_authorized":False,
         "asset": target,
         "verdict": verdict,
         # 给用户看这个，不是 verdict.confidence（CIO 自报，只留档）——D10 P1

@@ -531,8 +531,8 @@ class TestApiConfig:
     # ---------- event.watch_schedule（cron 类型，2026-07-03 扫描窗口修正）----------
 
     def test_watch_schedule_default(self):
-        """默认窗口=北京 8:00-次日 2:30（修正旧值实跑北京 0-7:30 错开美盘的 bug）。"""
-        assert load_config().event.watch_schedule == "*/30 0-2,8-23 * * *"
+        """默认全天每30分钟收集新闻，避免留出市场观察盲区。"""
+        assert load_config().event.watch_schedule == "*/30 * * * *"
 
     def test_watch_schedule_roundtrip(self):
         cfg = set_persisted_override("event.watch_schedule", "*/15 8-23 * * 1-5")

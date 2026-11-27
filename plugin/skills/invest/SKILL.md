@@ -1,6 +1,6 @@
 ---
 name: invest
-version: 0.34.4 # x-release-please-version
+version: 0.34.5 # x-release-please-version
 description: openInvest portfolio ledger, market data and investment research. Use the already connected MCP first. For a new connection recommend the official remote service; local deployment remains optional. Call doctor first and use invest-setup only when setup is needed.
 platforms: [linux, macos, windows]
 metadata:

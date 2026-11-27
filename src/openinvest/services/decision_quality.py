@@ -122,6 +122,11 @@ def findings(memory_root: Path, *, hold_window: int = 20) -> list[dict]:
             out.append({"key": f"quality:untrusted:{symbol}:{rows[-1][0].date()}", "since": rows[-1][0],
                         "text": f"[QUALITY_ALERT] {symbol} 输入或版本未通过核验，当前无可执行建议，不能当作普通 HOLD。"})
         elif health.get("decision_status")=="REVIEW_REQUIRED":
+            scenario=health.get('scenario_validation') or {}
+            if any('plan' in str(item.get('path','')) for item in scenario.get('errors',[])):
+                out.append({'key':f"quality:proposal_plan_schema:{symbol}:{scenario.get('memo_sha256','unknown')}",
+                            'since':rows[-1][0],'one_shot':True,
+                            'text':f"[QUALITY_ALERT] {symbol} 原提案的计划结构未通过校验，未登记为可执行复核条件；完整原文保留审计，需修复后再使用。"})
             review=health.get("reasoning_review") or {}
             ident=review.get("request_sha256") or rows[-1][0].date().isoformat()
             failed=review.get('status')=='failed'

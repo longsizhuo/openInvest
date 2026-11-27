@@ -7,9 +7,16 @@
 from __future__ import annotations
 
 from typing import Optional
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
+
+
+def display_market_price(value):
+    """The exact source display, preserving a positive sub-tick price."""
+    text=f'{value:.4f}'
+    return format(Decimal(str(value)),'f') if value>0 and float(text)==0 else text
 
 
 def _apply_cutoff(df: pd.DataFrame, as_of_date: Optional[str]) -> pd.DataFrame:
@@ -100,7 +107,7 @@ def _analyze_slice(df_slice: pd.DataFrame, label: str, current_price: float) -> 
     return f"- **{label}**: Ret: {change:.2%}, MaxDD: {mdd:.2%}{vol_str}"
 
 
-def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
+def analyze_multi_timeframe(hist: pd.DataFrame, title: str, *, include_source_timestamps: bool = True) -> str:
     """格式化层 — 数值计算交给 calc.market_metrics.compute_metrics（SSOT 唯一来源）。
 
     本函数只负责：拿 metrics dict + 切窗口算阶段收益 + 拼成给 LLM 看的字符串。
@@ -111,6 +118,14 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
     if hist.empty:
         return f"数据缺失: {title}"
 
+    observation = hist.attrs.get('source_observation') or {}
+    if not include_source_timestamps:
+        observation = {key: observation[key] for key in ('provider','fetch_status','price_basis','market_state','freshness','quote_fresh','history_basis_qualified','history_basis') if key in observation}
+    if observation.get('history_basis_qualified') is False:
+        import json
+        return (f"数据口径未核对: {title}; mixed/unverified price history; "
+                "MA, RSI, ATR and historical returns are unavailable.\nSOURCE_OBSERVATION_JSON: "
+                + json.dumps(observation, ensure_ascii=False, sort_keys=True, default=str))
     metrics = compute_metrics(hist)
     current_price = metrics["current_price"]
     if current_price is None:
@@ -138,7 +153,7 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
     report_lines = [
         f"--- {title} ANALYSIS ---",
         # RSI(14) 为 Wilder 平滑（与 TradingView/券商口径一致）
-        f"Current Price: {current_price:.4f} | RSI(14, Wilder): {rsi_str}",
+        f"Current Price: {display_market_price(current_price)} | RSI(14, Wilder): {rsi_str}",
     ]
 
     if pos is not None:
@@ -162,6 +177,23 @@ def analyze_multi_timeframe(hist: pd.DataFrame, title: str) -> str:
         if ma_250 != 0:
             bias = (current_price / ma_250 - 1)
             report_lines.append(f"- MA250 Deviation: {bias:.2%}")
+
+    # Every entry uses this formatter. Relative observations must reach both
+    # Direct and Coordinator, rather than making Risk infer a baseline from
+    # the asset's absolute volatility or a distant maximum drawdown.
+    import json
+    from openinvest.calc.risk_context import comparative_risk_context
+    if observation:
+        safe = {key: observation[key] for key in ('provider','fetch_status','price_basis','received_at',
+            'bar_asof','quote_asof','market_state','freshness','quote_fresh','history_basis_qualified','history_basis') if key in observation}
+        report_lines.append('SOURCE_OBSERVATION_JSON: ' + json.dumps(safe, ensure_ascii=False, sort_keys=True, default=str))
+    relative_risk = comparative_risk_context(hist)
+    if not include_source_timestamps:
+        relative_risk = {key:value for key,value in relative_risk.items() if key not in ('observation_bar','reference_last_bar')}
+    report_lines.append("PRIOR_SESSION_RISK_REFERENCE_JSON: " + json.dumps(
+        relative_risk, ensure_ascii=False, sort_keys=True, allow_nan=False))
+    report_lines.append("Historical percentiles describe past observations, not forecast probabilities. "
+                        "Normal asset volatility, a new risk change and unknown account loss tolerance are separate questions.")
 
     return "\n".join(report_lines)
 

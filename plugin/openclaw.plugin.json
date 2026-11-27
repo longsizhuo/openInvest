@@ -2,7 +2,7 @@
   "id": "openinvest",
   "name": "openInvest",
   "description": "Portfolio ledger, market data and Agent-run investment research. Use the selected MCP connection; official remote connection is recommended, with local deployment optional.",
-  "version": "0.34.4",
+  "version": "0.34.5",
   "icon": "https://raw.githubusercontent.com/longsizhuo/openInvest/main/plugin/assets/logo.png",
   "skills": [
     "skills/invest",

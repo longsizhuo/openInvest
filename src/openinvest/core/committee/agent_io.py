@@ -38,6 +38,8 @@ def _create_agent(
     round_label: Optional[str] = None,
     enable_thinking: bool = False,
     response_format: Optional[dict] = None,
+    max_output_tokens: Optional[int] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> Optional[SDKAgent]:
     """从 LangChain SimpleAgent 迁移到 SDKAgent（OpenAI 兼容协议直连，模型由 LLM_MODEL 决定）。
 
@@ -79,6 +81,8 @@ def _create_agent(
         telemetry_meta=meta,
         enable_thinking=enable_thinking,
         response_format=response_format,
+        **({"max_output_tokens":max_output_tokens} if max_output_tokens is not None else {}),
+        **({"reasoning_effort":reasoning_effort} if reasoning_effort is not None else {}),
     )
 
 
@@ -97,6 +101,14 @@ def _is_transient(exc: BaseException) -> bool:
         return True
     # 默认重试——LLM SDK 错误类型多变，宁可重试 3 次也不要静默失败
     return True
+
+
+def response_format_rejected(exc):
+    if provider_http_status(exc) not in {400,422}:return False
+    body=getattr(exc,'body',None)
+    if not isinstance(body,dict):return False
+    error=body.get('error',body)
+    return isinstance(error,dict) and error.get('param')=='response_format'
 
 
 def provider_http_status(exc):
@@ -176,7 +188,7 @@ def _ask(agent: Optional[SDKAgent], context: str) -> str:
     return WorkerReply(
         f"{AGENT_UNAVAILABLE_MARKER} "
         f"reason=retry_exhausted exc_type={type(last_exc).__name__} "
-        f"exc_msg=provider_call_failed",transport="failed",reason="retry_exhausted",http_status=provider_http_status(last_exc)
+        f"exc_msg=provider_call_failed",transport="failed",reason="response_format_rejected" if response_format_rejected(last_exc) else "retry_exhausted",http_status=provider_http_status(last_exc)
     )
 
 

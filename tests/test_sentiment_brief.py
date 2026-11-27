@@ -13,15 +13,25 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from datetime import datetime,timedelta,timezone
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def _fake_vix_df(values):
-    return pd.DataFrame(
+    # Synthetic active provider session; missing/asof-unknown history is tested separately.
+    from openinvest.utils.market_observation import history_observation
+    now = datetime.now(timezone.utc)
+    frame = pd.DataFrame(
         {"Close": values},
-        index=pd.date_range("2024-01-01", periods=len(values)),
+        index=pd.date_range(end=now.date(), periods=len(values)),
     )
+    frame.attrs['source_observation'] = history_observation(frame,metadata={
+        'exchangeTimezoneName':'UTC','instrumentType':'INDEX','marketState':'REGULAR',
+        'regularMarketTime':int(now.timestamp()),
+        'currentTradingPeriod':{'regular':{'start':int((now-timedelta(hours=1)).timestamp()),
+                                         'end':int((now+timedelta(hours=1)).timestamp())}}},now=now)
+    return frame
 
 
 def test_vix_high_percentile_triggers_extreme_fear_and_defense_flag(monkeypatch):

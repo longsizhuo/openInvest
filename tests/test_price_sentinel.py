@@ -101,10 +101,24 @@ def pipeline(tmp_path,monkeypatch):
     class Clock:
         @staticmethod
         def now(tz=None):return env.now
+    class SourceClock(datetime):
+        @classmethod
+        def now(cls,tz=None):return env.now
+    monkeypatch.setattr("openinvest.services.source_reporting.datetime",SourceClock)
     monkeypatch.setattr(ps,"datetime",Clock)
     monkeypatch.setattr(ps,"_fetch_frames",lambda symbol:env.frames)
     monkeypatch.setattr(ps,"_alert_targets",lambda:env.lines)
-    monkeypatch.setattr("openinvest.services.price_alerts.fetch_quote",lambda *a,**kw:env.quote)
+    def native_quote_source(*args,**kwargs):
+        quote = env.quote
+        if quote is not None and quote.price_basis == 'synthetic_native_bank_quote':
+            # This fixture represents a separately supplied native bank quote,
+            # not the deployed futures/FX estimator.
+            quote.observed_at = env.now.isoformat()
+            quote.source_observation = {'provider':'synthetic_native_bank_feed','quote_fresh':not quote.is_stale,
+                'received_at':env.now.isoformat(),'quote_asof':quote.observed_at,'bar_asof':quote.observed_at,
+                'completed_session_dates':[]}
+        return quote
+    monkeypatch.setattr("openinvest.services.price_alerts.fetch_quote",native_quote_source)
     monkeypatch.setattr("openinvest.jobs.event_watch._load_user_context",lambda:{"holdings":env.symbols,"watching":env.targets})
     def sender(channel,payload):
         env.calls.append((channel,payload));return True
@@ -126,7 +140,7 @@ def test_scan_is_durable_and_nonblocking_then_delivery_precedes_analysis(pipelin
     assert delivered["accepted_notifications"]==1 and delivered["accepted_channels"]==2
     assert [c[0] for c in pipeline.calls]==["discord","email","analysis"]
     scan2=ps.run(dry_run=False)
-    assert scan2["detected"]==0
+    assert scan2["detected"]==1 and scan2["notifications_queued"]==0  # Facts remain observed during delivery cooldown.
     pipeline.deliver()
     assert len(pipeline.calls)==3
 
@@ -263,7 +277,8 @@ def test_channel_failure_keeps_pending_and_does_not_consume_success_cooldown(pip
     pipeline.sender=lambda channel,payload:pipeline.calls.append((channel,payload)) or True
     pipeline.now+=timedelta(minutes=6)
     assert pipeline.deliver()["accepted_notifications"]==1
-    assert ps.run(dry_run=False)["detected"]==0
+    after=ps.run(dry_run=False)
+    assert after["detected"]==1 and after["notifications_queued"]==0
 
 
 def test_stale_quotes_are_coverage_gaps_not_normal_risk(pipeline):
@@ -318,7 +333,8 @@ def _user_line(env,rule,value,price=880.0,day=None,change=None):
     from openinvest.utils.quotes import QuoteSnapshot
     env.frames=None
     env.lines=[{"symbol":"GC=F","alerts":{rule:value},"holding":None}]
-    env.quote=QuoteSnapshot(symbol="GC=F",price=price,currency="CNY",unit="克",extra={})
+    env.quote=QuoteSnapshot(symbol="GC=F",price=price,currency="CNY",unit="克",extra={},
+                           is_reference=False,price_basis='synthetic_native_bank_quote')
     if day:
         env.quote.last_updated=day;env.quote.extra={"day_change_pct":change}
 
@@ -382,7 +398,20 @@ def test_fetch_frames_uses_only_prior_sessions_for_reference_and_keeps_first_bar
     days=pd.date_range("2026-01-01",periods=len(prices),tz="UTC")
     daily=pd.DataFrame({"Close":prices,"High":[p+1 for p in prices],"Low":[p-1 for p in prices]},index=days)
     intraday=pd.DataFrame({"Close":[80.0,float("nan")]},index=pd.date_range(days[-1],periods=2,freq="5min"))
-    monkeypatch.setattr(yf,"Ticker",lambda symbol:SimpleNamespace(history=lambda **kw:intraday if kw["interval"]=="5m" else daily))
+    from openinvest.utils import market_observation
+    now = days[-1].to_pydatetime()+timedelta(minutes=10)
+    meta={'exchangeTimezoneName':'UTC','instrumentType':'INDEX','regularMarketTime':int(now.timestamp()),
+        'currentTradingPeriod':{'regular':{'start':int(days[-1].timestamp()),'end':int((days[-1]+timedelta(days=1)).timestamp())}}}
+    class Clock:
+        @staticmethod
+        def now(tz=None):return now
+        @staticmethod
+        def fromisoformat(value):return datetime.fromisoformat(value)
+    monkeypatch.setattr(ps,'datetime',Clock)
+    monkeypatch.setattr(market_observation,'observation_now',lambda:now)
+    daily.attrs['source_observation']=market_observation.history_observation(daily,metadata=meta,now=now)
+    monkeypatch.setattr('openinvest.utils.exchange_fee.get_history_data',lambda *args,**kwargs:daily)
+    monkeypatch.setattr(yf,"Ticker",lambda symbol:SimpleNamespace(history=lambda **kw:intraday,history_metadata=meta))
     frame=ps._fetch_frames("SYNTHETIC")
     assert frame["price"]==80.0 and len(frame["closes"])==1
     day=frame["risk_observations"]["observations"][0]

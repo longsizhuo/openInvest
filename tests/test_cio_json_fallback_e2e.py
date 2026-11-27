@@ -15,6 +15,8 @@ class _StubAgent:
         self.last_tool_calls = []
 
     def run(self, ctx):
+        if self.role == "risk":
+            return "SIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available"
         if self.role != "cio":
             return "SIGNAL: neutral\nONE_LINER: stub analyst\nSTRENGTH: weak"
         if self.response_format:
@@ -30,6 +32,8 @@ class _StubAgent:
 
 class _JsonOkAgent(_StubAgent):
     def run(self, ctx):
+        if self.role == "risk":
+            return "SIGNAL: unknown\nMARKET_RISK: ordinary\nLIQUIDITY: available"
         if self.role != "cio":
             return "SIGNAL: neutral\nONE_LINER: stub\nSTRENGTH: weak"
         return ('{"verdict":"ACCUMULATE","confidence":0.6,"dominant_view":"quant",'
@@ -91,3 +95,24 @@ def _synthetic_review_for_non_review_contract(monkeypatch):
     # tests exercise actual verification, unavailable capability and failures.
     monkeypatch.setattr("openinvest.services.reasoning_review.review_once",
         lambda *args,**kwargs:{"status":"passed","origin":"synthetic_unit_fixture"})
+
+
+@pytest.mark.parametrize('failure',['','[WORKER_UNAVAILABLE] reason=truncated_model_response','[WORKER_UNAVAILABLE] reason=refused_model_response'])
+def test_incomplete_cio_does_not_spend_on_text_fallback(monkeypatch,failure):
+    from openinvest.core.committee.agent_io import WorkerReply
+    created=[]
+    class Agent:
+        last_tool_calls=[]
+        def __init__(self,role):self.role=role
+        def run(self,context):
+            return failure if self.role=='cio' else 'SIGNAL: neutral\nSTRENGTH: weak'
+        def tool_call_summary(self):return ''
+    def factory(system_prompt,*,role='unknown',**kwargs):
+        created.append(role);return Agent(role)
+    monkeypatch.setattr(debate,'_create_agent',factory)
+    monkeypatch.setenv('INVEST_FORCE_JSON_OUTPUT','1')
+    result=debate.run_committee(asset={'symbol':'TEST','display_name':'Test'},market_data='synthetic',
+        macro_view='synthetic',portfolio_summary='synthetic',persist_to_memory=False,max_debate_rounds=1)
+    assert created.count('cio')==1
+    assert result['verdict']['verdict']=='UNCLEAR' and result['verdict']['alloc_cny']==0
+    assert len(result['report'].cio_attempts)==1

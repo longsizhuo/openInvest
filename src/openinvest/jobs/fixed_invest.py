@@ -87,15 +87,18 @@ def sentinel(*,since=None,max_news=20):
         from openinvest.services.news_collection import collect
         coverage=collect(store=store,since=since)
         from openinvest.services.agent_queue import pending_news_items
-        from openinvest.services.source_reporting import from_input,reporting_use
+        from openinvest.services.source_reporting import from_input,reporting_use,GovernanceReads
         from openinvest.core.config import load_config
         now=datetime.now(timezone.utc);cutoff=now-timedelta(days=load_config().event.rag_window_days)
         pending=pending_news_items(memory_root=store.root,include_expired=True)
+        views=GovernanceReads()
         eligible=[];unqualified=0;historical=0;time_unknown=0;unresolved=0
         for item in pending:
             if not (item.get('raw_meta') or {}).get('response_capture_id'):continue
             source={**from_input(item),'provenance_json':json.dumps({**item.get('raw_meta',{}),'source_snapshot_id':item['source_snapshot_id']})}
-            if not reporting_use(store.data_root,source)['allowed']:unqualified+=1;continue
+            policy=views.get(store.data_root)
+            if not reporting_use(store.data_root,source,policy=policy)['allowed']:unqualified+=1;continue
+            views.require_current(policy)
             acquired=datetime.fromisoformat(item['fetched_at'].replace('Z','+00:00'))
             if acquired.tzinfo is None:raise ValueError('Source acquisition timezone unavailable')
             if acquired<cutoff:historical+=1;continue
@@ -114,6 +117,16 @@ def sentinel(*,since=None,max_news=20):
         eligible.sort(key=lambda item:item['fetched_at'])
         selected=eligible[:max_news]
         outcome={'status':'ok','ingested':0}
+        if selected:
+            # The pending backlog may be large. Recheck the small selected
+            # batch against one current view before claiming a paid attempt.
+            policy=views.get(store.data_root)
+            selected_count=len(selected)
+            selected=[item for item in selected if reporting_use(store.data_root,
+                {**from_input(item),'provenance_json':json.dumps({**item.get('raw_meta',{}),'source_snapshot_id':item['source_snapshot_id']})},
+                policy=policy)['allowed']]
+            unqualified+=selected_count-len(selected)
+            views.require_current(policy)
         if selected:
             from openinvest.services.event_ingest import ingest_events
             for item in selected:

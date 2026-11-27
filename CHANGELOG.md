@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.68.10](https://github.com/longsizhuo/openInvest/compare/v0.68.9...v0.68.10) (2026-11-09)
+
+
+### Bug Fixes
+
+* **alerts:** preserve independent market observations and material risk notices ([38fb2ce](https://github.com/longsizhuo/openInvest/commit/38fb2cef37369a40f5dd192f0115634da2e31341))
+* **cli:** keep review-required proposals out of order guidance ([cfabce8](https://github.com/longsizhuo/openInvest/commit/cfabce80ef66b7445a596b84e58164b7cdc79fb5))
+* **committee:** accept emphasized risk fields without changing source text ([3823904](https://github.com/longsizhuo/openInvest/commit/38239042e8d3e396e954c631bd2cf0ce0142d81b))
+* **committee:** avoid reading compound noun dates as currency amounts ([f9b4533](https://github.com/longsizhuo/openInvest/commit/f9b4533687954ae3a182d20fe1fc52e04d754f34))
+* **committee:** bind market citations without granting account authority ([f7ec6fb](https://github.com/longsizhuo/openInvest/commit/f7ec6fb848c01eb05dff2856fc330483b1c48a6d))
+* **committee:** bind market references and distinguish non-defect review notes ([8f9adcb](https://github.com/longsizhuo/openInvest/commit/8f9adcbd5a4d942cf7eb8ee4c4b245911a31ed13))
+* **committee:** compute scenario amounts and reject ambiguous financial output ([79ecfd4](https://github.com/longsizhuo/openInvest/commit/79ecfd43fce0b6c79a946efe2a375547eda7eb86))
+* **committee:** distinguish qualitative nonzero costs from account amounts ([9f81619](https://github.com/longsizhuo/openInvest/commit/9f816191753bc0ae322703f8f1f4e174599f8b0a))
+* **committee:** preserve citation value relationships across narrative layouts ([75c7572](https://github.com/longsizhuo/openInvest/commit/75c7572e4083a004025ce933d665ffc38f00778b))
+* **committee:** scan citation value links without exponential backtracking ([78c1e78](https://github.com/longsizhuo/openInvest/commit/78c1e7836106a492e012d28f6a0285c88c627356))
+* **committee:** separate comparative market risk from account uncertainty ([0a99ca1](https://github.com/longsizhuo/openInvest/commit/0a99ca17dea1c933509767f73ef8733759fba434))
+* **data:** preserve macro tool measurement types and observation times ([034317c](https://github.com/longsizhuo/openInvest/commit/034317c9c0b3de83369a4f64441ee11ff0f37325))
+* **evidence:** bind future event audit hashes to canonical stored facts ([29b69e4](https://github.com/longsizhuo/openInvest/commit/29b69e4f3b769135ccaee57bdb2a4aa2039e73b8))
+* **evidence:** seal typed position facts before committee analysis ([cb614e9](https://github.com/longsizhuo/openInvest/commit/cb614e942bea8b148d7fb574f5b30c157b8e66ad))
+* **integrity:** bind advice to source authority and role output qualification ([b9b889f](https://github.com/longsizhuo/openInvest/commit/b9b889f2c30c8304645c5b7f0246e0cca6c0273f))
+* **llm:** bind verifier limits and stop paid output failures from retrying ([d269ba1](https://github.com/longsizhuo/openInvest/commit/d269ba18c7dc06a4c2640f4595b23743efbc0771))
+* **llm:** retain billed output failures without implicit synthesis retries ([439e322](https://github.com/longsizhuo/openInvest/commit/439e32294d27c2e842bbf7bd2e0a395a22584098))
+* **market-data:** bind native quotes to provider observations across processes ([2d3096c](https://github.com/longsizhuo/openInvest/commit/2d3096c22fd77f39a290b7148905cf1ddb3d35d4))
+* **performance:** reuse current permission snapshots and serialize public sync ([31100d7](https://github.com/longsizhuo/openInvest/commit/31100d7f32865208617bf13e736e197c814ec456))
+* **review:** require factual witnesses and separate investment judgments ([86a9e8a](https://github.com/longsizhuo/openInvest/commit/86a9e8ae69b1700e275d60a011efea9ea4d37b97))
+* **scheduler:** reuse current governance views across source batches ([d126d23](https://github.com/longsizhuo/openInvest/commit/d126d230e365907c7abc69cc8db0c1edb44d0298))
+* 分离市场风险与账户约束，修复报价及通知盲区 ([4a7f1b9](https://github.com/longsizhuo/openInvest/commit/4a7f1b93a68071409e3484d37d2f51ee17ad749f))
+
+
+### Docs
+
+* **integrity:** document report citations and legacy audit hash scope ([3f1dd15](https://github.com/longsizhuo/openInvest/commit/3f1dd15cfab1691d62ae4c44d2341961ea5e38bb))
+
 ## [0.68.9](https://github.com/longsizhuo/openInvest/compare/v0.68.8...v0.68.9) (2026-11-08)
 
 

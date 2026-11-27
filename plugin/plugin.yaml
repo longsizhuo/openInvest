@@ -2,7 +2,7 @@
 # Install: hermes plugins install openinvest --enable   (official catalog; newest main: longsizhuo/openInvest/plugin)
 # Registers the skills under ./skills. The MCP tools are a separate Hermes surface (config.yaml), see description.
 name: openinvest
-version: "0.34.4" # x-release-please-version
+version: "0.34.5" # x-release-please-version
 description: openInvest ledger and Agent-run research skills. Keep an existing MCP connection; new users can connect to the official remote service with OAuth. Local deployment, backup/restore and explicitly enabled local digest remain available.
 author: longsizhuo
 # The backend runs in its own uvx environment; keep Hermes from merging the repo's pyproject

@@ -27,7 +27,7 @@ from openinvest.utils.market_metrics import METRICS_PERIOD, compute_metrics
 log = logging.getLogger(__name__)
 
 from openinvest.core.runner.event_brief import _get_event_store, _resolve_event_brief, format_event_brief, resolve_event_brief_multi
-from openinvest.core.runner.loaders import _build_default_portfolio_summary, append_event_stance_line, load_prior_insights, load_sentiment_brief, load_valuation_brief
+from openinvest.core.runner.loaders import _build_default_portfolio_summary, append_event_stance_line, load_market_reference, load_position_facts, load_prior_insights, load_sentiment_brief, load_valuation_brief
 from openinvest.core.runner.intervention import _extract_regime_label, _save_path_snapshot, gold_defense_dca_plan, record_intervention
 
 PORTFOLIO_SUMMARY_STUB_MARKER = "portfolio_summary 完整版构建失败"  # loaders._build_default_portfolio_summary 兜底文案
@@ -49,6 +49,7 @@ def build_input_health_facts(
         facts["price_last_bar"] = None
     try:
         facts["price_fetch_failed"] = bool(getattr(df, "attrs", {}).get("yf_fetch_failed", False))
+        facts["market_source_observation"] = getattr(df, "attrs", {}).get("source_observation")
     except Exception:  # noqa: BLE001
         facts["price_fetch_failed"] = None
     empty = [name for name, val in (
@@ -316,9 +317,12 @@ def run_committee_for_symbol(
         reentry_reference=reentry_reference, prob_hint=_prob_hint,
         portfolio_summary=portfolio_summary,
     ))
+    market_reference = load_market_reference(symbol, df, current_price)
+    position_facts = None
     if not _advisory:
         from openinvest.services.ledger_evidence import account_source_status
         input_health.update(ledger_evidence=account_source_status(pm),target_symbol=symbol)
+        position_facts = load_position_facts(symbol, pm, input_health['ledger_evidence'], df, current_price)
         from openinvest.services.review_plans import plan_brief, observe_prepared_market
         observe_prepared_market(pm.store, symbol, df)
         existing_plans=plan_brief(pm.store, symbol)
@@ -337,11 +341,15 @@ def run_committee_for_symbol(
             "historical_qualification":historical_qualification,"historical_reference_audit":historical_audit,
             "source_plan_refs":getattr(existing_plans,'plan_refs',[]),
             "ledger_evidence":input_health['ledger_evidence'],
+            "position_facts":position_facts,
+            "market_reference":market_reference,
             "trigger_requests":bind_context_requests(pm.store.root,symbol,effective_event_brief,utc_now().isoformat()),
         }, model=get_llm_config_safe()[2] or "unknown", expected_state=prepared_state)
         input_health = {**input_health, "context_id": context["context_id"],
                         "prepared_at": context["prepared_at"], "code_version": context["code_version"],
                         "config_sha256": context["config_sha256"]}
+    else:
+        position_facts = load_position_facts(symbol, pm, None, df, current_price, advisory=True)
 
     # 6. 跑多轮辩论 + CIO
     # 顾问模式不落 transcript 到真实 memory——群聊问的资产多半不在用户 target_assets
@@ -364,6 +372,8 @@ def run_committee_for_symbol(
         # Sanity 6 输入：用户单次入场上限（顾问模式无真实策略 → 不设限，也不把主人的上限泄进群聊）
         single_invest_cap=0 if _advisory else cap_facts["effective_amount"],
         execution_constraint_facts=cap_facts,
+        position_facts=position_facts,
+        market_reference=market_reference,
         historical_qualification=historical_qualification,
         max_debate_rounds=max_debate_rounds,
         progress_callback=progress_callback,

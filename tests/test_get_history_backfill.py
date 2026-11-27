@@ -83,9 +83,9 @@ def test_fetch_failure_flagged_in_attrs(recording_yf, monkeypatch):
     assert ef.get_history_data("FRESH2.SS").attrs["yf_fetch_failed"] is False
     assert recording_yf.last_period is None  # 库已是今天且刚刷过，没拉取
 
-    # 今天这根超过 TTL 没刷 → 再刷 5d；拉空也不标失败（库里今天已有值，不是"行情源挂了"）
+    # 今天这根超过 TTL 没刷 → 再刷 5d；失败不能将缓存盘中bar冒充新鲜行情。
     monkeypatch.setattr(ef._STORE, "seconds_since_fetch", lambda s: float("inf"))
-    assert ef.get_history_data("FRESH3.SS").attrs["yf_fetch_failed"] is False
+    assert ef.get_history_data("FRESH3.SS").attrs["yf_fetch_failed"] is True
     assert recording_yf.last_period == "5d"
 
 

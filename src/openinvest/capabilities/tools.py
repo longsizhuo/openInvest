@@ -18,7 +18,8 @@ Hybrid 设计：调用方仍然在 user prompt 里塞 baseline brief（保 backu
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from openinvest.utils.symbols import safe_symbol
@@ -78,9 +79,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "name": "get_macro_snapshot",
             "description": (
                 "返回当前宏观指标快照：VIX (恐慌指数) / TNX (10 年期国债收益率) / "
-                "USDCNY / AUDCNY / DXY (美元指数) / TIP_1mo_pct (TIPS ETF 近月涨跌，"
-                "实际利率方向代理：TIP 涨=实际利率降=利好黄金)。Macro Strategist 的核心数据来源；"
-                "分析黄金/商品类资产时 DXY 与实际利率方向是关键货币因素。"
+                "USDCNY / AUDCNY / DXY (美元指数) / TIP_1mo_pct (TIPS 债券 ETF 近月价格涨跌)。"
+                "TIP 价格涨跌不能确定实际利率水平、方向或黄金交易信号；未提供真实收益率观测时其值为 unknown。"
+                "as_of 是快照采集时间，各指标原始时点及来源单独列示；缺失、过期或失败观测返回 null。"
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -91,7 +92,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "name": "query_dreaming_insights",
             "description": (
                 "查询 OpenClaw Dreaming 长期记忆里的相关 insight（近 90 天行为聚类）。"
-                "返回 top-k 条已通过阈值门 (score≥0.8 / count≥3) 的模式。"
+                "返回 top-k 条具有当前 advice 使用资格的模式；历史得分或重复次数不授予来源资格。"
                 "Risk Officer 用来引用'用户 6 个月前类似情境的过度集中持仓'等。"
             ),
             "parameters": {
@@ -163,22 +164,46 @@ def _impl_analyze_multi_timeframe(symbol: str, label: Optional[str] = None) -> s
 
 def _impl_get_macro_snapshot() -> Dict[str, Any]:
     from openinvest.utils.exchange_fee import get_history_data
-    out: Dict[str, Any] = {"as_of": datetime.now().isoformat(timespec="seconds")}
+    from openinvest.utils.market_observation import frame_observation
+    from openinvest.core.config import load_config
+    now = datetime.now(timezone.utc)
+    max_age = load_config().staleness.price_stale_days
+    out: Dict[str, Any] = {"as_of": now.isoformat(timespec="seconds"),
+        "as_of_kind": "snapshot_collected_at_not_market_observation", "observations": {},
+        "real_yield_level": None, "real_yield_direction": None,
+        "tip_interpretation": "ETF price return only; does not establish real yields or a gold trading signal."}
+    def observed(symbol, period, name):
+        try:
+            frame = get_history_data(symbol, period)
+            available = (frame is not None and not frame.empty and "Close" in frame
+                         and not frame.attrs.get("yf_fetch_failed"))
+            observation = frame_observation(frame)
+            available = available and observation.get("fetch_status") != "failed"
+            last_bar = str(frame.index[-1]) if frame is not None and not frame.empty else None
+            if available:
+                age = (now.date() - frame.index[-1].date()).days
+                available = 0 <= age <= max_age and math.isfinite(float(frame["Close"].iloc[-1]))
+            out["observations"][name] = {"symbol": symbol, "last_bar": last_bar,
+                "available": bool(available), "source_observation": observation}
+            return frame if available else None
+        except Exception as exc:
+            out["observations"][name] = {"symbol": symbol, "available": False, "reason": type(exc).__name__}
+            return None
     # DX-Y.NYB = ICE 美元指数（DX=F 已被 Yahoo 下架）
     for sym, label in [("^VIX", "vix"), ("^TNX", "tnx"),
                        ("USDCNY=X", "usdcny"), ("AUDCNY=X", "audcny"),
                        ("DX-Y.NYB", "dxy")]:
-        df = get_history_data(sym, "5d")
+        df = observed(sym, "5d", label)
         if df is not None and not df.empty:
             out[label] = round(float(df["Close"].iloc[-1]), 4)
         else:
             out[label] = None
-    # 实际利率方向代理：TIP（TIPS ETF）近 1 月涨跌。TIP 涨=实际利率降=利好黄金。
+    # ETF price returns retain their measurement type; they are not yield observations.
     try:
-        tip = get_history_data("TIP", "1mo")
-        if tip is not None and not tip.empty:
+        tip = observed("TIP", "1mo", "tip_1mo_pct")
+        if tip is not None and not tip.empty and frame_observation(tip).get("history_basis_qualified") is not False:
             first, last = float(tip["Close"].iloc[0]), float(tip["Close"].iloc[-1])
-            out["tip_1mo_pct"] = round((last / first - 1) * 100, 2) if first else None
+            out["tip_1mo_pct"] = round((last / first - 1) * 100, 2) if first and math.isfinite(first) else None
         else:
             out["tip_1mo_pct"] = None
     except Exception:
