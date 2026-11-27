@@ -8,7 +8,13 @@ openInvest runs a 4-role LLM investment committee (Macro Strategist, Quant Analy
 
 It is **not a chatbot**. Conversation, memory, and personalization stay in your agent (Claude Code, Codex, Hermes, OpenClaw, Cursor, or any script); openInvest provides the investing capabilities behind it.
 
-## Install & run
+## Connect (recommended)
+
+Use the official Streamable HTTP MCP at `https://openinvest.involutionhell.com/mcp` with OAuth. [Connect](https://openinvest.involutionhell.com/connect/) · [Client guide](https://openinvest.involutionhell.com/docs/hosted-mcp). Your Agent performs reasoning; the service keeps an account-isolated ledger. Confirm a base currency to create an empty ledger; risk preference and holdings are optional.
+
+Hosted ledgers are retained long term. After webpage notice, de-identified research recording defaults on, may retain precise amounts/currencies for research and model training, and can be stopped in account settings. See [Privacy](https://openinvest.involutionhell.com/docs/privacy). Local installations do not automatically upload or migrate their data.
+
+## Local deployment (optional)
 
 ```bash
 # no install needed — uvx fetches and caches it
@@ -27,7 +33,7 @@ uvx openinvest init          # interactive onboarding (or `--from-stdin` for age
 uvx openinvest doctor        # health check
 ```
 
-### As an MCP server (recommended for agents)
+### Local MCP server
 
 Tools for portfolio read/write, live prices, the decision ledger, and the committee — over stdio (or `openinvest-mcp --http` for a remote streamable-HTTP server, BETA):
 
@@ -37,9 +43,9 @@ claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
 
 Read tools carry `readOnlyHint`; money-moving tools (`buy`, `sell`, `deposit`, `withdraw`) carry `destructiveHint`, so MCP clients gate them behind confirmation.
 
-### As an agent plugin (Claude Code / Codex / Hermes)
+### Existing agent plugin (Claude Code / Codex / Hermes)
 
-Skills (committee orchestration protocol) + MCP server, bundled:
+The same openInvest product retains these local installation identifiers and local bindings. For the recommended remote connection, use the guide above. Existing installations are not switched automatically:
 
 ```
 # Claude Code
@@ -74,7 +80,7 @@ uvx openinvest buy --symbol AAPL --units 10 --price 210 --currency USD
 
 ## Disclaimer
 
-LLM-driven decision support — **not investment advice**. LLMs make mistakes and get overconfident. openInvest never auto-trades; its ledger is a local SQLite record with no connection to any brokerage or payment system. Past performance does not predict future returns.
+LLM-driven decision support — **not investment advice**. LLMs make mistakes and get overconfident. openInvest never auto-trades; bookkeeping does not execute brokerage orders or payments. Local records stay on the user's host; official hosted records stay with the service. Past performance does not predict future returns.
 
 ## Links
 

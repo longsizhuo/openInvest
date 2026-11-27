@@ -1,6 +1,6 @@
 {
   "name": "invest",
-  "description": "Self-hosted multi-asset AI investment committee. View portfolio + live prices, track any yfinance symbol (A-share / HK / US / ETF / crypto / commodity), and run a 4-role LLM committee for buy/sell verdicts. Ships an MCP server (incl. decision accounting: decisions / explain_decision / record_execution) + the committee-workflow skills. Backend installs from PyPI via uvx on first call — no clone, no venv. Never places real orders.",
+  "description": "Portfolio ledger, market data and Agent-run investment research. Use the selected MCP connection; official remote connection is recommended, with local deployment optional.",
   "author": {
     "name": "longsizhuo",
     "url": "https://github.com/longsizhuo"

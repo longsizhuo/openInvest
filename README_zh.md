@@ -104,8 +104,22 @@ OpenInvest 刻意避免“占有”用户。大多数 AI 产品都试图占有�
 
 ## 快速开始
 
-### 1. 接入你的 Agent（推荐）
-通过所用 Agent 的插件 Marketplace 动态加载轻量化 Skill，宿主 Agent 在首次运行时会自动拉取核心代码并完成 `uv sync` 环境依赖对齐：
+### 1. 连接 openInvest（推荐）
+
+打开[连接 MCP](https://openinvest.involutionhell.com/connect/)，在客户端添加以下 Streamable HTTP 地址，通过 OAuth 登录：
+
+```text
+https://openinvest.involutionhell.com/mcp
+```
+
+[接入教程](https://openinvest.involutionhell.com/docs/zh/hosted-mcp)涵盖 Codex、Claude Code、Hermes 和 ChatGPT。Agent 承担推理，服务保存个人账本和决策记录。通过 Agent 确认基准币种即可建立空账本，风险偏好和持仓可随后补充。
+
+托管账本长期保存。完成网页说明后，研究记录默认开启，可保留去标识化的精确金额和币种用于研究与模型训练；用户可在账户设置停止记录。详见[隐私政策](https://openinvest.involutionhell.com/docs/zh/privacy)。
+
+### 2. 本地部署（可选）
+
+需要数据自持时，使用现有插件或 CLI。原有安装标识保持不变：
+
 ```bash
 # Claude Code
 /plugin marketplace add longsizhuo/openInvest
@@ -115,32 +129,17 @@ OpenInvest 刻意避免“占有”用户。大多数 AI 产品都试图占有�
 codex plugin marketplace add longsizhuo/openInvest
 codex plugin add invest@openinvest
 
-# Hermes Agent（官方插件目录）
+# Hermes
 hermes plugins install openinvest --enable
-# 老版本 Hermes 没有插件目录时：hermes plugins install longsizhuo/openInvest/plugin --enable
 
 # OpenClaw
 openclaw plugins install clawhub:openinvest
-```
-其余任意 MCP client：按下方第 2 步注册 MCP server（完整教程见 [agent 使用教程](docs/wiki/20-agent-usage-tutorial.md)）。
 
-### 2. 独立使用 —— MCP server 或 CLI（无需 clone）
-后端已发布至 [PyPI](https://pypi.org/project/openinvest/)，`~/openInvest` 只存放你的数据：
-```bash
-# MCP（任意 MCP client；加 --http 可启动 remote streamable-HTTP server —— BETA）
+# 本地 MCP
 claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
-
-# 或直接用 CLI
-INVEST_HOME=~/openInvest uvx openinvest status
 ```
-在支持 Skill 的 AI 终端中发送 `帮我初始化 invest`（或 `set up invest`）。系统将触发交互式 Bootstrap 向导，指导完成以下初始化：
-1. 检测 `memory/` 状态存储路径及 `.env` 环境变量契约。
-2. 5 维度画像引导（合规法律名 / 风险容量 / 偿债结构 / 初始持仓资产 / 可选第三方密钥）。
-3. 运行静态数据迁移，即刻生成首份实时资产暴露 memo。
 
-> 💡 **零成本运行声明**：在内置 Skill 交互模式下，委员会的底层推理完全依托宿主 Agent（如 Claude Code）的推理管道，**无需消耗您个人的第三方 API Key 额度**。仅在配置 Cron 独立日报任务或运行外部服务调用时，才需声明底层 API 供应。
-
-自托管细节参阅 [docs/QUICK_START.md](docs/QUICK_START.md)。（内置 Web GUI 已于 2026-07-05 退役——全部能力经 CLI/MCP 暴露；独立前端后续可能回归。）
+Claude／Codex 插件原有的本地 MCP 绑定保持本地运行。使用托管账本时按上方远程教程接入，避免无意中同时连接两份账本。现有本地配置、账本及备份恢复能力保留，不自动上传或迁移数据。连接了多个账本时，先确认要使用哪一份。参见[自托管说明](docs/QUICK_START.md)；本地 Direct 推理使用自行配置的模型服务及其计费规则。
 
 ### 3. Serverless 自托管（GitHub Actions）
 每天由 GitHub Actions 自动跑委员会并把报告发到你邮箱。

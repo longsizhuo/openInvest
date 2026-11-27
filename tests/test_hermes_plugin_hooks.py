@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -98,7 +99,7 @@ def test_stale_digest_is_served_while_refreshing_in_background(plugin, monkeypat
     monkeypatch.setattr(plugin, "_spawn", spawned.append)
     clock = [1000.0]
     monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
     assert hook(session_id="s1", platform="discord")["context"].endswith("NVDA.")
@@ -117,7 +118,7 @@ def test_failed_brief_backs_off_instead_of_retrying_every_ttl(plugin, monkeypatc
     monkeypatch.setattr(plugin.subprocess, "run", run)
     clock = [1000.0]
     monkeypatch.setattr(plugin.time, "monotonic", lambda: clock[0])
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
     assert hook(session_id="s", platform="cli") is None
@@ -130,7 +131,7 @@ def test_failed_brief_backs_off_instead_of_retrying_every_ttl(plugin, monkeypatc
 
 def test_without_session_id_injects_every_turn(plugin, monkeypatch):
     monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: NVDA."], []))
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     hook = ctx.hooks["pre_llm_call"]
     assert hook(platform="discord") and hook(platform="discord")          # 没法去重：不能只给第一个会话
@@ -162,7 +163,7 @@ def test_brief_failure_injects_nothing(plugin, monkeypatch, result):
         return subprocess.CompletedProcess(cmd, 2, result, "")
 
     monkeypatch.setattr(plugin.subprocess, "run", run)
-    ctx = _Ctx()
+    ctx = _Ctx({"connection_mode": "local"})
     plugin.register(ctx)
     assert ctx.hooks["pre_llm_call"](session_id="s", platform="cli") is None
 
@@ -170,3 +171,105 @@ def test_brief_failure_injects_nothing(plugin, monkeypatch, result):
 def test_claude_code_session_start_hook_runs_brief():
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
     assert hooks["type"] == "command" and hooks["command"].endswith("run.sh\" brief --text")
+
+
+@pytest.mark.parametrize("config", [{}, {"connection_mode": "remote"}, {"connection_mode": "remote", "invest_home": "/private/local-ledger"}])
+def test_remote_or_unselected_connection_never_reads_local_digest(plugin, monkeypatch, config):
+    monkeypatch.setattr(plugin.subprocess, "run", lambda *a, **k: pytest.fail("remote connection launched local ledger"))
+    ctx = _Ctx(config)
+    plugin.register(ctx)
+    assert ctx.hooks["pre_llm_call"](session_id="s", platform="cli") is None
+
+
+def test_switching_from_local_to_remote_does_not_serve_cached_local_digest(plugin, monkeypatch):
+    calls = []
+    monkeypatch.setattr(plugin.subprocess, "run", _fake_run(["[openInvest] Holdings: TEST."], calls))
+    ctx = _Ctx({"connection_mode": "local"})
+    plugin.register(ctx)
+    hook = ctx.hooks["pre_llm_call"]
+    assert hook(session_id="s", platform="cli")
+    ctx.config["connection_mode"] = "remote"
+    assert hook(session_id="new-remote-session", platform="cli") is None
+    assert len(calls) == 1
+
+
+
+def test_brief_subprocess_receives_only_allowed_environment(plugin, monkeypatch, tmp_path):
+    parent_home = str(tmp_path / "home")
+    ambient_ledger = str(tmp_path / "ambient")
+    selected_ledger = str(tmp_path / "selected")
+    allowed = {
+        "PATH": "test-path",
+        "HOME": parent_home,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "TMPDIR": str(tmp_path),
+        "UV_CACHE_DIR": str(tmp_path / "uv"),
+        "UV_TOOL_DIR": str(tmp_path / "uv-tools"),
+        "UV_PYTHON_INSTALL_DIR": str(tmp_path / "uv-python"),
+        "XDG_CACHE_HOME": str(tmp_path / "xdg-cache"),
+        "XDG_DATA_HOME": str(tmp_path / "xdg-data"),
+        "INVEST_HOME": ambient_ledger,
+        "OPENINVEST_SPEC": "openinvest==0.68.9",
+    }
+    for key, value in allowed.items():
+        monkeypatch.setenv(key, value)
+    for key in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY",
+        "EMAIL_PASSWORD", "HERMES_HOME", "UV_INDEX_URL", "UV_DEFAULT_INDEX",
+        "UV_INDEX_TEST_PASSWORD", "UV_CONFIG_FILE", "XDG_CONFIG_HOME", "XDG_TOKEN",
+        "OPENINVEST_DEV_MODE", "PYTHONPATH", "BASH_ENV",
+    ):
+        monkeypatch.setenv(key, "must-not-reach-child")
+
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(kw["env"])
+        assert cmd == ["bash", str(plugin.RUN_SH), "brief", "--text"]
+        return subprocess.CompletedProcess(cmd, 0, "[openInvest] fixture", "")
+
+    monkeypatch.setattr(plugin.subprocess, "run", run)
+    ctx = _Ctx({"connection_mode": "local", "invest_home": selected_ledger})
+    plugin.register(ctx)
+    assert ctx.hooks["pre_llm_call"](session_id="local", platform="cli") == {
+        "context": "[openInvest] fixture",
+    }
+    assert calls[0]["INVEST_HOME"] == selected_ledger
+    assert plugin._fetch_brief(None) == "[openInvest] fixture"
+    for actual, home in zip(calls, [selected_ledger, ambient_ledger], strict=True):
+        # Some hosts set additional locale variables; no other parent keys may leak.
+        assert {k: v for k, v in actual.items() if k in allowed} == {**allowed, "INVEST_HOME": home}
+        assert all(k in allowed or k.startswith("LC_") for k in actual)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git Bash temp directory fallback")
+def test_windows_brief_supplies_tmpdir_without_inheriting_windows_env(plugin, monkeypatch, tmp_path):
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(plugin.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    def run(cmd, **kw):
+        assert kw["env"]["TMPDIR"] == tmp_path.as_posix()
+        assert "TEMP" not in kw["env"]
+        return subprocess.CompletedProcess(cmd, 0, "[openInvest] fixture", "")
+
+    monkeypatch.setattr(plugin.subprocess, "run", run)
+    assert plugin._fetch_brief(None) == "[openInvest] fixture"
+
+
+def test_hermes_cron_is_explicit_opt_in():
+    setup = PLUGIN / "skills" / "invest-setup" / "references"
+    onboarding = (setup / "local-onboarding.md").read_text(encoding="utf-8")
+    cron = (setup / "hermes-cron.md").read_text(encoding="utf-8")
+    install = (PLUGIN / "after-install.md").read_text(encoding="utf-8")
+
+    for text in (onboarding, cron, install):
+        assert "openinvest-daily" in text and "openinvest-sentinel" in text
+        assert "schedule" in text and "cost" in text
+        assert "explicit" in text
+    assert "Wait for explicit consent" in onboarding
+    assert "Installing or setting up the plugin is not consent" in onboarding
+    assert "Do not create either until" in cron
+    assert "mcp_servers.openinvest.trust full" not in onboarding
+    assert "without asking for confirmation" not in onboarding

@@ -104,8 +104,22 @@ OpenInvest intentionally avoids "owning" the user. Most AI products try to own e
 
 ## Quick Start
 
-### 1. Integrate with your agent (Recommended)
-Add the lightweight skill from your agent's plugin registry. The host agent will automatically pull the core code and align dependencies on first run:
+### 1. Connect openInvest (recommended)
+
+Use the official remote MCP from [Connect MCP](https://openinvest.involutionhell.com/connect/). Add this Streamable HTTP address to your client and sign in with OAuth:
+
+```text
+https://openinvest.involutionhell.com/mcp
+```
+
+See the [client guide](https://openinvest.involutionhell.com/docs/hosted-mcp) for Codex, Claude Code, Hermes and ChatGPT. Your Agent performs reasoning; the service stores your ledger and decision records. Confirm a base currency with your Agent; risk preference and holdings can be added later.
+
+Hosted ledgers are retained long term. After the webpage notice, research recording defaults on and may retain de-identified precise amounts and currencies for research/model training; it can be stopped in account settings. See the [privacy policy](https://openinvest.involutionhell.com/docs/privacy).
+
+### 2. Local deployment (optional)
+
+Keep data on your own host with the existing plugin or CLI. These install identifiers stay unchanged:
+
 ```bash
 # Claude Code
 /plugin marketplace add longsizhuo/openInvest
@@ -115,32 +129,17 @@ Add the lightweight skill from your agent's plugin registry. The host agent will
 codex plugin marketplace add longsizhuo/openInvest
 codex plugin add invest@openinvest
 
-# Hermes Agent (official plugin catalog)
+# Hermes
 hermes plugins install openinvest --enable
-# older Hermes without the catalog: hermes plugins install longsizhuo/openInvest/plugin --enable
 
 # OpenClaw
 openclaw plugins install clawhub:openinvest
-```
-Any other MCP client: register the MCP server from step 2 below (full walkthrough in the [agent tutorial](docs/wiki/20-agent-usage-tutorial.md)).
 
-### 2. Standalone — MCP server or CLI (no clone needed)
-The backend ships on [PyPI](https://pypi.org/project/openinvest/); `~/openInvest` holds only your data:
-```bash
-# MCP (any MCP client; add --http for a remote streamable-HTTP server — BETA)
+# Any local MCP client
 claude mcp add openinvest -e INVEST_HOME=~/openInvest -- uvx openinvest-mcp
-
-# or plain CLI
-INVEST_HOME=~/openInvest uvx openinvest status
 ```
-Send `set up invest` (or `帮我初始化 invest`) to any skill-enabled AI terminal. The system will trigger an interactive bootstrap wizard to guide you through:
-1. Detecting the `memory/` state storage path and `.env` configuration.
-2. 5-dimensional profiling (Legal name, Risk capacity, Debt structure, Initial holdings, and optional keys).
-3. Running static data migration to immediately generate your first asset exposure memo.
 
-> 💡 **Zero-Cost Execution**: In skill interactive mode, the committee's underlying reasoning relies entirely on the host agent's (e.g. Claude Code) reasoning pipeline. **No third-party API Key is consumed**. You only need to configure an API key when setting up automated crons or calling independent Web APIs.
-
-For self-hosting details, see [docs/QUICK_START.md](docs/QUICK_START.md). (The bundled Web GUI was retired on 2026-07-05 — all capabilities are exposed via CLI/MCP; a standalone frontend may return later.)
+The bundled Claude/Codex local MCP binding remains local. Use the remote connection instructions above for a hosted ledger; do not install both connections unintentionally. Existing configurations, local ledgers and backup/restore remain available and are not migrated automatically. If multiple ledgers are connected, select the intended one before accessing data. See [self-hosting](docs/QUICK_START.md) for local installation and configured Direct-model costs.
 
 ### 3. Serverless Self-Hosting (GitHub Actions)
 Run the committee automatically via GitHub Actions and receive daily digest emails.

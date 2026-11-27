@@ -9,7 +9,17 @@ written memo.
 > 中文完整文档见仓库根 [README.md](https://github.com/longsizhuo/openInvest#readme)
 > 与 [docs/wiki](https://github.com/longsizhuo/openInvest/tree/main/docs/wiki)。
 
-## Install
+## Connect (recommended)
+
+The recommended new connection is the official remote MCP at `https://openinvest.involutionhell.com/mcp`, using OAuth. [Connect](https://openinvest.involutionhell.com/connect/) · [Client guide](https://openinvest.involutionhell.com/docs/hosted-mcp).
+
+The same openInvest skills use the already selected MCP connection. No local ledger is uploaded automatically. Hosting retains personal ledger data; after the webpage notice, de-identified research recording defaults on and may retain precise amounts/currencies for research and model training. It can be stopped in account settings. See the [privacy policy](https://openinvest.involutionhell.com/docs/privacy). Model providers handle the context sent by your Agent under their own rules.
+
+## Local deployment (optional)
+
+The plugin installation commands below remain the local deployment option. Existing local configurations are not replaced by a remote URL. Choose the intended ledger if both are connected.
+
+### Install the local plugin
 
 **Claude Code:**
 ```
@@ -32,24 +42,25 @@ codex mcp add openinvest --env INVEST_HOME=$HOME/openInvest -- uvx openinvest-mc
 ```
 hermes plugins install openinvest --enable
 ```
-That installs the version listed in Hermes's official plugin catalog (a reviewed,
+That local option installs the version listed in Hermes's official plugin catalog (a reviewed,
 pinned commit), and the backend version that `run.sh` pins comes with it — so a
 catalog install can lag `main` in both skills and MCP tools. For the newest commit
 on `main` instead, install by repo path:
 `hermes plugins install longsizhuo/openInvest/plugin --enable`.
 For the MCP tools, add this to `~/.hermes/config.yaml` (or run the commands Hermes shows right after
-install; onboarding also adds it when missing). It runs the plugin's own `run.sh`, which pins the backend
+install; onboarding offers to add missing entries with approval). It runs the plugin's own `run.sh`, which pins the backend
 to the version this plugin release was built with (the plugin is installed in
 `$HERMES_HOME/plugins/openinvest`; replace `YOU`, and adjust the path if `HERMES_HOME` is not `~/.hermes`).
-The server is registered twice because Hermes' `trust: untrusted` asks on every call: the `agent` scope
-(reads, news queue, committee, daily report) runs with full trust so cron jobs work, and the `ledger`
-scope (tools that move money) stays untrusted, so Hermes asks before each ledger write.
+The two scopes are registered separately. Both default to `trust: untrusted`.
+Unattended jobs and any persistent change to agent-scope trust require separate explicit
+approval. Do not elevate ledger-scope trust for scheduler use.
 ```yaml
 mcp_servers:
   openinvest:
     command: bash
     args: ["/home/YOU/.hermes/plugins/openinvest/skills/invest/scripts/run.sh", "mcp"]
     env: {INVEST_MCP_SCOPE: agent}
+    trust: untrusted
   openinvest_ledger:
     command: bash
     args: ["/home/YOU/.hermes/plugins/openinvest/skills/invest/scripts/run.sh", "mcp"]
@@ -58,11 +69,13 @@ mcp_servers:
 ```
 
 Then in chat say **"set up invest" / 帮我初始化 invest** — a short
-onboarding (name, risk tolerance, current holdings) writes your config. On Hermes it also
-creates two cron jobs (`openinvest-daily` committee report, `openinvest-sentinel` news triage;
-they run on your model quota, `hermes cron remove <id>` turns them off), and the plugin injects a
+onboarding (name, risk tolerance, current holdings) writes your config. On Hermes, the
+two optional jobs (`openinvest-daily` and `openinvest-sentinel`) use your model quota.
+They are created only after you approve each job's schedule, time zone, estimated cost,
+provider/data and private destination. Use `hermes cron remove <id>` to turn either off.
+When `connection_mode: local` is explicitly selected, the plugin can inject a
 one-paragraph ledger digest at session start so questions about your tickers reach openInvest.
-The digest goes into group chats as well (anyone in the group can read your ticker list);
+A local digest goes into group chats as well (anyone in the group can read your ticker list);
 `plugins.entries.openinvest.settings.inject_digest: false` keeps only the routing rule.
 While the host runs, the MCP server keeps a background scheduler alive (news queue, price sentinel,
 NAV snapshots, daily backup); `run.sh service install` keeps it running when the host is closed.
